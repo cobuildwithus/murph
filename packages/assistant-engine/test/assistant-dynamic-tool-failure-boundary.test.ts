@@ -54,6 +54,22 @@ function expectPrivateClassification(result: Awaited<ReturnType<typeof executeMu
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('common dynamic-tool failure boundary', () => {
+  it('explains how to repair a missing automation version without calling the owner', async () => {
+    const request = vi.fn<NonNullable<HostedTools['automationTool']>['request']>()
+    const result = await executeMurphDynamicToolRequest(dispatchInput('automation', {
+      action: 'patch', lookup: 'automation_synthetic', instructions: 'A revised synthetic cue.',
+    }, { hostedToolContext: hostedTools({ automationTool: { request } }) }))
+    expect(request).not.toHaveBeenCalled()
+    expect(result.rpcResult.success).toBe(false)
+    const text = JSON.stringify(result.rpcResult.contentItems)
+    expect(text).toContain('expectedUpdatedAt')
+    expect(text).toContain('action=inspect')
+    expect(text).toContain('Copy automationId into lookup and updatedAt into expectedUpdatedAt')
+    expect(text).toContain('Never guess the version')
+    expect(result.failureDiagnostic).toEqual({ failureStage: 'validation', failureReason: 'invalid_input' })
+    expect(JSON.stringify(result.rpcResult)).not.toContain('failureDiagnostic')
+  })
+
   it.each([
     ['device', { action: 'list_accounts' }, 'device', 'unavailable', 'execution',
       'device management is unavailable for this turn'],

@@ -327,6 +327,7 @@ async function seedActivatedWorkspaceCheckpoint(): Promise<void> {
   await seedGeneratedDeliveryCleanupBlocker(vaultRoot);
 
   const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
     harness: requireScenario().harness,
     operatorHomeRoot,
     userId,

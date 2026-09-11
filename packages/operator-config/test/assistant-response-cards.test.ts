@@ -111,6 +111,25 @@ function decodeAppCardImageUrl(url: string): unknown {
 }
 
 describe('assistant response cards', () => {
+  it('gives every nutrition metric its complete named input contract', () => {
+    const fields = ['proteinGrams', 'carbsGrams', 'fatGrams', 'fiberGrams']
+    expect(assistantResponseCardJsonSchema).toMatchObject({ anyOf: [
+      { properties: {
+        totals: { properties: Object.fromEntries(fields.map((field) => [field, {
+          type: 'object', additionalProperties: false, required: ['total', 'mealCount'],
+          properties: {
+            total: { type: ['number', 'null'], minimum: 0, maximum: 2_000 },
+            mealCount: { type: 'integer', minimum: 0, maximum: 100 },
+          },
+        }])) },
+        goals: { properties: Object.fromEntries(fields.map((field) => [field, {
+          type: 'object', additionalProperties: false, required: ['target', 'status'],
+          properties: { target: { type: 'number', exclusiveMinimum: 0, maximum: 2_000 } },
+        }])) },
+      } }, expect.anything(), expect.anything(),
+    ] })
+  })
+
   it('authors only current cards while the runtime still accepts nutrition V1', () => {
     expect(assistantResponseCardJsonSchema).not.toHaveProperty('$schema')
     expect(assistantResponseCardJsonSchema).toMatchObject({
@@ -121,20 +140,6 @@ describe('assistant response cards', () => {
           properties: {
             goals: {
               additionalProperties: false,
-              patternProperties: {
-                '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': {
-                  additionalProperties: false,
-                  properties: {
-                    target: {
-                      exclusiveMinimum: 0,
-                      maximum: 2_000,
-                      type: 'number',
-                    },
-                  },
-                  required: ['target', 'status'],
-                  type: 'object',
-                },
-              },
               properties: {
                 calories: {
                   additionalProperties: false,
@@ -162,9 +167,9 @@ describe('assistant response cards', () => {
                   additionalProperties: false,
                   type: 'object',
                 },
-                carbsGrams: {},
-                fatGrams: {},
-                fiberGrams: {},
+                carbsGrams: { type: 'object', additionalProperties: false },
+                fatGrams: { type: 'object', additionalProperties: false },
+                fiberGrams: { type: 'object', additionalProperties: false },
               },
             },
             kind: { const: 'daily_nutrition' },
@@ -179,23 +184,6 @@ describe('assistant response cards', () => {
             },
             totals: {
               additionalProperties: false,
-              patternProperties: {
-                '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': {
-                  additionalProperties: false,
-                  properties: {
-                    mealCount: {
-                      maximum: 100,
-                      minimum: 0,
-                      type: 'integer',
-                    },
-                    total: {
-                      maximum: 2_000,
-                      minimum: 0,
-                      type: ['number', 'null'],
-                    },
-                  },
-                },
-              },
               properties: {
                 calories: {
                   additionalProperties: false,
@@ -222,9 +210,9 @@ describe('assistant response cards', () => {
                     },
                   },
                 },
-                carbsGrams: {},
-                fatGrams: {},
-                fiberGrams: {},
+                carbsGrams: { type: 'object', additionalProperties: false },
+                fatGrams: { type: 'object', additionalProperties: false },
+                fiberGrams: { type: 'object', additionalProperties: false },
               },
             },
             version: { const: 2 },

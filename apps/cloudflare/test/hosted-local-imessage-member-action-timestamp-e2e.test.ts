@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -9,31 +9,11 @@ import {
   workoutSessionSchema,
 } from "@murphai/contracts";
 import {
-  type HostedExecutionBundleRefState,
-} from "@murphai/hosted-execution";
-import {
-  HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
 import {
-  readHostedExecutionSnapshotBaseRef,
-  readHostedExecutionSnapshotDeltaRef,
-  readHostedExecutionSnapshotHotRef,
-} from "@murphai/hosted-execution/parsers";
-import type {
-  HostedRunnerStatusResponse,
-} from "@murphai/hosted-execution/runtime-control";
-import {
   deriveWorkoutActionBinding,
 } from "@murphai/operator-config/workout-action-binding";
-import {
-  createHostedPortableWorkspaceManifestFromBundle,
-  readHostedPortableWorkspaceManifestFromBundle,
-  restoreHostedBundleRoots,
-  restoreHostedExecutionContext,
-  restoreHostedWorkspaceWorkingDelta,
-  type HostedBundleArtifactRestoreInput,
-} from "@murphai/runtime-state/node";
 import {
   addLiveWorkoutExercise,
   setWorkoutUnitPreferences,
@@ -51,6 +31,7 @@ import {
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
 
+import { withHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot-restore.ts";
 import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.ts";
 import {
   startHostedLocalFullStackScenario,
@@ -159,28 +140,27 @@ describe("hosted local Messages member-action timestamp e2e", () => {
     const appliedStatus = await requireScenario().waitForHostedCompletion(memberId);
     await requireScenario().assertHealthyHostedRun(memberId);
 
-    const appliedWorkspace = await restoreSnapshotForStatus(
-      appliedStatus,
-      "applied",
-    );
-    try {
-      const shown = await createIntegratedVaultServices().query.show({
-        id: workout.id,
-        requestId: null,
-        vault: appliedWorkspace.vaultRoot,
-      });
-      const canonicalWorkout = workoutSessionSchema.parse(
-        readRecord(shown.entity.data)?.workout,
-      );
-      expect(canonicalWorkout.exercises[0]?.sets[0]).toMatchObject({ reps: 12 });
-      await expect(
-        showWorkoutUnitPreferences(appliedWorkspace.vaultRoot),
-      ).resolves.toMatchObject({
-        unitPreferences: { weight: "kg" },
-      });
-    } finally {
-      await rm(appliedWorkspace.workspaceRoot, { force: true, recursive: true });
-    }
+    await withHostedLocalWorkspaceSnapshot({
+      harness: requireScenario().harness,
+      status: appliedStatus,
+      userId: memberId,
+      read: async ({ vaultRoot }) => {
+        const shown = await createIntegratedVaultServices().query.show({
+          id: workout.id,
+          requestId: null,
+          vault: vaultRoot,
+        });
+        const canonicalWorkout = workoutSessionSchema.parse(
+          readRecord(shown.entity.data)?.workout,
+        );
+        expect(canonicalWorkout.exercises[0]?.sets[0]).toMatchObject({ reps: 12 });
+        await expect(
+          showWorkoutUnitPreferences(vaultRoot),
+        ).resolves.toMatchObject({
+          unitPreferences: { weight: "kg" },
+        });
+      },
+    });
 
     const staleActionId = randomUUID();
     const staleResponse = await fetch(
@@ -230,19 +210,18 @@ describe("hosted local Messages member-action timestamp e2e", () => {
     });
 
     const rejectedStatus = await requireScenario().waitForHostedCompletion(memberId);
-    const rejectedWorkspace = await restoreSnapshotForStatus(
-      rejectedStatus,
-      "rejected",
-    );
-    try {
-      await expect(
-        showWorkoutUnitPreferences(rejectedWorkspace.vaultRoot),
-      ).resolves.toMatchObject({
-        unitPreferences: { weight: "kg" },
-      });
-    } finally {
-      await rm(rejectedWorkspace.workspaceRoot, { force: true, recursive: true });
-    }
+    await withHostedLocalWorkspaceSnapshot({
+      harness: requireScenario().harness,
+      status: rejectedStatus,
+      userId: memberId,
+      read: async ({ vaultRoot }) => {
+        await expect(
+          showWorkoutUnitPreferences(vaultRoot),
+        ).resolves.toMatchObject({
+          unitPreferences: { weight: "kg" },
+        });
+      },
+    });
   }, 600_000);
 });
 
@@ -285,6 +264,7 @@ async function seedWorkoutCheckpoint(): Promise<{
   }
 
   const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
     harness: requireScenario().harness,
     operatorHomeRoot,
     userId: memberId,
@@ -375,98 +355,6 @@ async function waitForMemberActionOutcome(input: {
     "Timed out waiting for the Messages member-action receipt.",
     `member-action record failures: ${JSON.stringify(recordFailures)}`,
   ]));
-}
-
-async function restoreSnapshotForStatus(
-  status: HostedRunnerStatusResponse,
-  label: string,
-): Promise<{
-  vaultRoot: string;
-  workspaceRoot: string;
-}> {
-  const snapshotRef = status.workspace?.snapshotRef ?? null;
-  if (!snapshotRef) {
-    throw new Error(`Hosted status ${label} did not include a workspace snapshot.`);
-  }
-  const baseRef = readHostedExecutionSnapshotBaseRef(snapshotRef);
-  if (!baseRef) {
-    throw new Error(`Hosted status ${label} did not include a base snapshot bundle.`);
-  }
-
-  const workspaceRoot = await mkdtemp(path.join(
-    requireScenario().harness.persistDir,
-    `restored-member-action-${label}-`,
-  ));
-  const artifactResolver = async (
-    artifact: HostedBundleArtifactRestoreInput,
-  ): Promise<Uint8Array> => await fetchHostedArtifact(artifact.ref.sha256);
-  const baseBundle = await fetchHostedBundle(baseRef);
-  const restored = await restoreHostedExecutionContext({
-    artifactResolver,
-    bundle: baseBundle,
-    workspaceRoot,
-  });
-  const baseManifest = readHostedPortableWorkspaceManifestFromBundle(baseBundle)
-    ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
-  const deltaRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
-  if (deltaRef) {
-    await restoreHostedWorkspaceWorkingDelta({
-      artifactResolver,
-      baseManifest,
-      baseSnapshotHash: baseRef.hash,
-      bundle: await fetchHostedBundle(deltaRef),
-      roots: {
-        "operator-home": restored.operatorHomeRoot,
-        vault: restored.vaultRoot,
-      },
-      shouldRestoreArtifact: () => true,
-    });
-  }
-  const hotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
-  if (hotRef) {
-    await restoreHostedBundleRoots({
-      artifactResolver,
-      bytes: await fetchHostedBundle(hotRef),
-      expectedKind: "vault",
-      roots: {
-        "operator-home": restored.operatorHomeRoot,
-        vault: restored.vaultRoot,
-      },
-    });
-  }
-  return { vaultRoot: restored.vaultRoot, workspaceRoot };
-}
-
-async function fetchHostedBundle(
-  ref: HostedExecutionBundleRefState,
-): Promise<Uint8Array> {
-  if (!ref) {
-    throw new Error("Expected hosted bundle ref.");
-  }
-  const search = new URLSearchParams({
-    key: ref.key,
-    sha256: ref.hash,
-    size: String(ref.size),
-    userId: memberId,
-  });
-  return fetchHostedArtifact(search);
-}
-
-async function fetchHostedArtifact(
-  input: string | URLSearchParams,
-): Promise<Uint8Array> {
-  const search = typeof input === "string"
-    ? new URLSearchParams({ sha256: input, userId: memberId })
-    : input;
-  const response = await requireScenario().harness.request(
-    `/__test/artifacts?${search.toString()}`,
-    {
-      headers: { [HOSTED_EXECUTION_USER_ID_HEADER]: memberId },
-      method: "GET",
-    },
-  );
-  expect(response.status).toBe(200);
-  return new Uint8Array(await response.arrayBuffer());
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {

@@ -7951,7 +7951,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   }, 45_000);
 
-  test("system mailbox mode imports and runs a new device-sync row in the same invocation", async () => {
+  test.each(["mailbox", "timer"] as const)("system mailbox mode completes device work from a %s without a default-owner detour", async (source) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -8016,7 +8016,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             mailboxPort: createMailboxPort({
               events,
               fetchRequests,
-              items: [deviceItem],
+              items: source === "mailbox" ? [deviceItem] : [],
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -8024,6 +8024,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               workspace: createWorkspaceState({
                 snapshotRef: restoredWorkspace.snapshotRef,
                 version: "0",
+                ...(source === "timer" ? {
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "device-sync.reconcile",
+                } : {}),
               }),
             }),
           }),
@@ -8034,17 +8038,19 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         },
       );
 
-      assert.deepEqual(imported, ["system:device-sync.wake"]);
+      assert.deepEqual(imported, source === "mailbox" ? ["system:device-sync.wake"] : []);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemImportedSeq,
-        "1",
+        source === "mailbox" ? "1" : "0",
       );
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        "1",
+        source === "mailbox" ? "1" : "0",
       );
+      assert.equal(checkpointRequests.at(-1)?.nextDefaultProcessingWakeAt, null);
+      assert.equal(checkpointRequests.at(-1)?.nextDefaultProcessingWakeReason, null);
       assert.equal(checkpointRequests.at(-1)?.nextWakeAt, null);
       assert.equal(result.status, "idle");
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
@@ -8344,16 +8350,16 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const defaultAssistantWakeAt = dueAssistantWakePending
       ? TEST_NOW
       : "2026-04-27T00:08:00.000Z";
-    const projectedDefaultWakeAt = duePendingAssistantInput
-      ? TEST_NOW
-      : defaultOwnedSystemMailboxWakeAt ?? defaultAssistantWakeAt;
-    const defaultOwnerHandoffExpected =
-      dueAssistantWakePending
-      || duePendingAssistantInput
-      || (
-        defaultOwnedSystemMailboxWakeAt !== null
-        && Date.parse(defaultOwnedSystemMailboxWakeAt) <= Date.parse(TEST_NOW)
-      );
+    const assistantAdmissionExpected = dueAssistantWakePending
+      || defaultOwnedSystemMailboxWakeAt === TEST_NOW;
+    const projectedDefaultWakeAt = dueAssistantWakePending
+      ? null
+      : duePendingAssistantInput
+        ? TEST_NOW
+        : defaultOwnedSystemMailboxWakeAt === TEST_NOW
+          ? defaultAssistantWakeAt
+          : defaultOwnedSystemMailboxWakeAt ?? defaultAssistantWakeAt;
+    const defaultOwnerHandoffExpected = duePendingAssistantInput;
     const defaultOwnedItem = createMailboxItem({
       dedupeKey: "assistant.ask.requested:dirty-ack-follow-up",
       expiresAt: "2026-04-27T00:10:00.000Z",
@@ -8363,6 +8369,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       laneSeq: "2",
     });
     const baseDeviceSyncPort = createEmptyDeviceSyncPort();
+    let assistantPhaseCalls = 0;
     let dirtyAckCalls = 0;
     let browserPublishCalls = 0;
     let browserWriteCalls = 0;
@@ -8521,6 +8528,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                 return createBrowserVaultReplicaRef(replica);
               },
             },
+            assistantAskPort: {
+              async request(request) {
+                assert.equal(request.action, "prepare");
+                events.push(`ask.prepare:${request.requestId}`);
+                return {
+                  action: "prepare",
+                  status: "terminal",
+                  terminalReason: "unavailable",
+                };
+              },
+            },
             deviceSyncPort,
             mailboxPort: createMailboxPort({ events, items: [] }),
             vaultSharePort: {
@@ -8548,12 +8566,28 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             }),
           }),
           async runAssistantPhase() {
-            throw new Error("Successful dirty ack must not enter assistant phase.");
+            assert.equal(assistantAdmissionExpected, true);
+            assistantPhaseCalls += 1;
+            assert.equal(dirtyAckCalls, 0, "Due assistant work must not wait for the dirty acknowledgment.");
+            if (dueAssistantWakePending) {
+              await patchAutomation({
+                lookup: "automation_01JQ8PWXP5A68SQM1W0GYM41XZ",
+                now: new Date(TEST_NOW),
+                status: "archived",
+                vaultRoot,
+              });
+            }
+            // Default-owned mailbox work is handled by the real workspace
+            // owner; this stand-in only completes the scheduled occurrence.
+            return dueAssistantWakePending
+              ? { checkpointReason: "assistant_runtime_commit", progressed: true }
+              : { progressed: false };
           },
           vaultRoot,
         },
       );
 
+      assert.equal(assistantPhaseCalls, assistantAdmissionExpected ? 1 : 0);
       assert.equal(
         dirtyAckCalls,
         1,
@@ -8568,10 +8602,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(browserPublishCalls, 1);
       assert.ok(events.includes("vault-share.deliver"), JSON.stringify(events));
       assert.ok(
-        requireEventIndex(events, "browser-vault.publish")
-          < requireEventIndex(events, "device-sync.dirty-ack"),
+        requireEventIndex(events, "workspace.checkpoint")
+          < requireEventIndex(events, "browser-vault.publish"),
         JSON.stringify(events),
       );
+      if (!assistantAdmissionExpected) {
+        assert.ok(
+          requireEventIndex(events, "browser-vault.publish")
+            < requireEventIndex(events, "device-sync.dirty-ack"),
+          JSON.stringify(events),
+        );
+      }
       assert.ok(
         requireEventIndex(events, "workspace.checkpoint")
           < requireEventIndex(events, "vault-share.deliver"),
@@ -8593,15 +8634,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       assert.equal(
         result.immediateRecheckRequested,
-        defaultOwnerHandoffExpected ? true : undefined,
+        defaultOwnerHandoffExpected || assistantAdmissionExpected ? true : undefined,
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextWakeAt,
-        defaultOwnedSystemMailboxWakeAt === TEST_NOW ? TEST_NOW : followUpWakeAt,
+        followUpWakeAt,
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextWakeReason,
-        defaultOwnedSystemMailboxWakeAt === TEST_NOW ? "assistant" : "device-sync.reconcile",
+        "device-sync.reconcile",
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextDefaultProcessingWakeAt,
@@ -8609,21 +8650,21 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextDefaultProcessingWakeReason,
-        "assistant",
+        projectedDefaultWakeAt === null ? null : "assistant",
       );
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        "1",
+        defaultOwnedSystemMailboxWakeAt === TEST_NOW ? "2" : "1",
       );
       assert.deepEqual(
         (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.itemId),
-        defaultOwnedSystemMailboxWakeAt === null
+        (defaultOwnedSystemMailboxWakeAt === null || defaultOwnedSystemMailboxWakeAt === TEST_NOW)
           ? [deviceItem.id]
           : [deviceItem.id, defaultOwnedItem.id],
       );
       const followUpCheckpointIndex = checkpointRequests.findIndex((request) =>
-        request.nextWakeAt === (defaultOwnedSystemMailboxWakeAt === TEST_NOW ? TEST_NOW : followUpWakeAt)
-        && request.nextWakeReason === (defaultOwnedSystemMailboxWakeAt === TEST_NOW ? "assistant" : "device-sync.reconcile")
+        request.nextWakeAt === followUpWakeAt
+        && request.nextWakeReason === "device-sync.reconcile"
       );
       assert.ok(followUpCheckpointIndex >= 0);
       assert.equal(
@@ -8723,10 +8764,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
 
         const firstCheckpoint = checkpointRequests.at(-1);
         assert.ok(firstCheckpoint);
-        const defaultPass = await runFollowUpPass({
-          attemptId: "attempt_synthetic_default_owned_dirty_ack_follow_up",
-          workspace: createWorkspaceFromCheckpoint(firstCheckpoint),
-        });
+
 
         assert.equal(
           events.filter((event) =>
@@ -8738,13 +8776,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.itemId),
           [deviceItem.id],
         );
-        assert.equal(defaultPass.checkpoint.nextWakeAt, followUpWakeAt);
+        assert.equal(firstCheckpoint.nextWakeAt, followUpWakeAt);
         assert.equal(
-          defaultPass.checkpoint.nextWakeReason,
+          firstCheckpoint.nextWakeReason,
           "device-sync.reconcile",
         );
         assert.equal(
-          defaultPass.checkpoint.redactedStatus
+          firstCheckpoint.redactedStatus
             ?.hostedMailboxSystemHandledThroughSeq,
           "2",
         );
@@ -8755,7 +8793,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         await runFollowUpPass({
           attemptId: "attempt_synthetic_saved_device_deadline_follow_up",
           processingMode: "system_mailbox",
-          workspace: defaultPass.workspace,
+          workspace: createWorkspaceFromCheckpoint(firstCheckpoint),
         });
         assert.ok(
           baseDeviceSyncPort.fetchSnapshotCalls

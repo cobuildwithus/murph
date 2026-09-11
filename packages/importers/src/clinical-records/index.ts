@@ -1,3 +1,7 @@
+import { assertResolvedFhirPagination, type ClinicalPreviousImportBatch } from "./pagination.ts";
+export type { ClinicalPreviousImportBatch } from "./pagination.ts";
+import { readClinicalDocumentText, validateClinicalDocumentSnapshot, type ClinicalDocumentContext, type ClinicalImportSnapshotAttachment } from "./documents.ts";
+export { readClinicalAttachmentText, type ClinicalImportSnapshotAttachment } from "./documents.ts";
 import { buildFhirHistoryNote, buildFhirSourceNote, FHIR_HISTORY_RESOURCE_TYPES } from "./history.ts";
 import { createHash } from "node:crypto";
 
@@ -17,6 +21,7 @@ import type {
 } from "@medplum/fhirtypes";
 import {
   CLINICAL_IMPORT_PLAN_MAX_DECISIONS,
+  listClinicalFhirAttachments,
   CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
   fhirResourceTypeToSlug,
@@ -28,7 +33,7 @@ import {
   clinicalImportReviewDecisionSchema,
   clinicalImportUpsertDecisionSchema,
   clinicalRawManifestSchema,
-  clinicalRawManifestResourceFileRetrievalKey,
+  clinicalDocumentParentEligibility,
   externalRefForFhir,
   hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
@@ -58,11 +63,16 @@ export interface ClinicalImportSnapshotPage {
 export interface BuildClinicalImportPlanFromSnapshotInput {
   manifest: unknown;
   manifestPath: string;
+  /** Prior immutable evidence loaded by the vault owner after admitting that batch. */
+  previousBatch?: ClinicalPreviousImportBatch;
   pages: readonly ClinicalImportSnapshotPage[];
+  attachments?: readonly ClinicalImportSnapshotAttachment[];
 }
 
 type FhirResourceContext<TResource extends Resource = Resource> = {
   manifest: ClinicalRawManifest;
+  documents: ClinicalDocumentContext;
+  parentPageSha256: string;
   rawRef: string;
   resource: TResource;
 };
@@ -92,10 +102,7 @@ type VitalConceptDecision =
   | { status: "ambiguous" }
   | { status: "matched"; vital: VitalDefinition }
   | { status: "unmatched" };
-type DocumentReferenceTextDecision =
-  | { status: "ambiguous" }
-  | { status: "available"; text: string }
-  | { status: "unavailable" };
+
 
 const VITAL_LOINC_BY_CODE = new Map<string, VitalDefinition>([
   ["8480-6", { facet: "bp-systolic", metric: "systolic-blood-pressure", title: "Systolic blood pressure", unit: "mmHg" }],
@@ -111,8 +118,6 @@ const VITAL_LOINC_BY_CODE = new Map<string, VitalDefinition>([
   ["29463-7", { facet: "body-weight", metric: "body-weight", title: "Body weight", unit: "kg" }],
 ]);
 
-const CANONICAL_BASE64_TEXT = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
-const DOCUMENT_REFERENCE_TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 const NO_KNOWN_ALLERGY_CODES = new Set(["716186003"]);
 const ALLERGY_CONFLICT_RESOURCE_TYPES = new Set(["AllergyIntolerance", "Condition"]);
@@ -179,9 +184,6 @@ type BloodTestReferenceRangeDecision =
   | { referenceRange?: BloodTestReferenceRange; status: "supported" }
   | { status: "unsupported" };
 const IMPORTABLE_OBSERVATION_STATUSES = new Set(["amended", "corrected", "final"]);
-const IMPORTABLE_DIAGNOSTIC_REPORT_STATUSES = new Set(["amended", "appended", "corrected", "final"]);
-const IMPORTABLE_DOCUMENT_REFERENCE_STATUSES = new Set(["current"]);
-const IMPORTABLE_DOCUMENT_REFERENCE_DOC_STATUSES = new Set(["amended", "appended", "corrected", "final"]);
 const IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES = new Set(["active"]);
 const IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["confirmed"]);
 const RETRACTED_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["entered-in-error", "refuted"]);
@@ -216,11 +218,20 @@ export function buildClinicalImportPlanFromSnapshot(
     });
     resourcePages.push(page);
   }
-  assertResolvedFhirPagination({ manifest, resourcePages });
+  assertResolvedFhirPagination({
+    manifest, resourcePages, previousBatch: input.previousBatch, parsePage: parseClinicalResourcePage,
+  });
+  const documents = validateClinicalDocumentSnapshot({
+    manifest,
+    attachments: input.attachments ?? [],
+    parents: resourcePages.flatMap((page) => page.resources.map((resource) => ({ sha256: page.resourceFile.sha256, resource }))),
+  });
   const resourceContexts = resourcePages.flatMap((page) =>
     page.resources.map(
       (resource): FhirResourceContext => ({
         manifest,
+        documents,
+        parentPageSha256: page.resourceFile.sha256,
         rawRef: page.rawRef,
         resource,
       }),
@@ -286,6 +297,8 @@ export function buildClinicalImportPlanFromSnapshot(
 function indexClinicalImportSnapshotPages(input: {
   manifest: ClinicalRawManifest;
   pages: readonly ClinicalImportSnapshotPage[];
+  /** Prior immutable evidence loaded by the vault owner after admitting that batch. */
+  previousBatch?: ClinicalPreviousImportBatch;
 }): ReadonlyMap<string, string> {
   if (input.pages.length !== input.manifest.resourceFiles.length) {
     throw new Error("Clinical FHIR snapshot pages do not match the manifest resource files.");
@@ -359,7 +372,12 @@ export function clinicalPlanToEventImportDecisions(
   const plan = clinicalImportPlanSchema.parse(input);
   return plan.decisions.flatMap((decision): EventImportDecision[] => {
     if (decision.action !== "review") {
-      return [eventImportDecisionSchema.parse(decision)];
+      return [eventImportDecisionSchema.parse({ ...decision,
+        ...(decision.action === "retract" && isDocumentSourceRef(decision.externalRef)
+          ? { retractFacetPrefixes: ["document-extraction"] } : {}),
+        ...(decision.action === "upsert" && isDocumentSourceRef(decision.payload.externalRef)
+          ? { invalidateFacetPrefixes: ["document-extraction"] } : {}),
+      })];
     }
     if (decision.disposition !== "hold") return [];
     return [
@@ -368,9 +386,14 @@ export function clinicalPlanToEventImportDecisions(
         externalRef: decision.externalRef,
         reason: decision.reason,
         evidence: decision.evidence,
+        ...(isDocumentSourceRef(decision.externalRef) ? { retractFacetPrefixes: ["document-extraction"] } : {}),
       }),
     ];
   });
+}
+
+function isDocumentSourceRef(ref: { resourceType: string } | undefined): boolean {
+  return ref !== undefined && ["document-reference", "diagnostic-report"].includes(ref.resourceType);
 }
 
 function buildAllergySnapshotDecision(input: {
@@ -640,96 +663,6 @@ function readFhirNextPageUrlHash(input: {
   return rawNextPageUrlHash;
 }
 
-function assertResolvedFhirPagination(input: {
-  manifest: ClinicalRawManifest;
-  resourcePages: readonly FhirResourcePage[];
-}): void {
-  const pagesByRetrieval = new Map<string, FhirResourcePage[]>();
-  const pagesByRetrievalAndUrl = new Map<string, Map<string, FhirResourcePage>>();
-  for (const page of input.resourcePages) {
-    const retrievalKey = clinicalRawManifestResourceFileRetrievalKey(page.resourceFile);
-    const pages = pagesByRetrieval.get(retrievalKey) ?? [];
-    pages.push(page);
-    pagesByRetrieval.set(retrievalKey, pages);
-    const pageUrlHash = page.resourceFile.pageUrlHash;
-    if (!pageUrlHash) {
-      continue;
-    }
-    const pagesByUrl = pagesByRetrievalAndUrl.get(retrievalKey) ?? new Map();
-    if (pagesByUrl.has(pageUrlHash)) {
-      throw new Error(`Clinical FHIR raw manifest has duplicate page URL hashes for ${page.resourceFile.resourceType}.`);
-    }
-    pagesByUrl.set(pageUrlHash, page);
-    pagesByRetrievalAndUrl.set(retrievalKey, pagesByUrl);
-  }
-
-  const nextPageByRawRef = new Map<string, FhirResourcePage>();
-  for (const page of input.resourcePages) {
-    if (!page.nextPageUrlHash) {
-      continue;
-    }
-    const nextPage = pagesByRetrievalAndUrl
-      .get(clinicalRawManifestResourceFileRetrievalKey(page.resourceFile))
-      ?.get(page.nextPageUrlHash);
-    if (!nextPage) {
-      throw new Error(`Clinical FHIR raw manifest has unresolved pagination for ${page.rawRef}.`);
-    }
-    nextPageByRawRef.set(page.rawRef, nextPage);
-  }
-
-  for (const [retrievalKey, pages] of pagesByRetrieval) {
-    const resourceType = pages[0]?.resourceFile.resourceType ?? retrievalKey;
-    const hasPaginationMetadata = pages.some((page) =>
-      page.resourceFile.pageUrlHash !== undefined
-      || page.nextPageUrlHash !== undefined
-    );
-    const graphPages = hasPaginationMetadata
-      ? pages
-      : isWholeFamilyRetrieval(input.manifest, pages[0]?.resourceFile)
-        ? pages.filter((page) => page.isBundle)
-        : [];
-    if (graphPages.length === 0) {
-      continue;
-    }
-    const roots = graphPages.filter((page) => !page.resourceFile.pageUrlHash);
-    if (roots.length !== 1) {
-      throw new Error(`Clinical FHIR raw manifest must have exactly one pagination root for ${resourceType}.`);
-    }
-    const seenRawRefs = new Set<string>();
-    let currentPage: FhirResourcePage | undefined = roots[0];
-    while (currentPage) {
-      if (seenRawRefs.has(currentPage.rawRef)) {
-        throw new Error(`Clinical FHIR raw manifest has cyclic pagination for ${currentPage.rawRef}.`);
-      }
-      seenRawRefs.add(currentPage.rawRef);
-      currentPage = nextPageByRawRef.get(currentPage.rawRef);
-    }
-    if (seenRawRefs.size !== graphPages.length) {
-      const unreachable = graphPages.find((page) => !seenRawRefs.has(page.rawRef));
-      throw new Error(`Clinical FHIR raw manifest has unreachable pagination for ${unreachable?.rawRef ?? resourceType}.`);
-    }
-  }
-}
-
-function isWholeFamilyRetrieval(
-  manifest: ClinicalRawManifest,
-  resourceFile: ClinicalRawManifestResourceFile | undefined,
-): boolean {
-  if (!resourceFile) return false;
-  if (manifest.schemaVersion === "murph.clinical-raw-manifest.v2") {
-    return manifest.retrievalScopes.some((scope) =>
-      scope.resourceType === resourceFile.resourceType
-      && scope.coverage === "whole-family"
-    );
-  }
-  if (!("queryScopeId" in resourceFile)) return false;
-  return manifest.retrievalSlices.some((slice) =>
-    slice.queryScopeId === resourceFile.queryScopeId
-    && slice.sliceId === resourceFile.sliceId
-    && slice.coverage === "whole-family"
-  );
-}
-
 function assertRawResourceFileHash(input: {
   rawRef: string;
   resourceFile: ClinicalRawManifestResourceFile;
@@ -817,6 +750,8 @@ function resourceContext<TResource extends Resource>(
 ): FhirResourceContext<TResource> {
   return {
     manifest: context.manifest,
+    documents: context.documents,
+    parentPageSha256: context.parentPageSha256,
     rawRef: context.rawRef,
     resource,
   };
@@ -874,21 +809,15 @@ function authoritativeRetractionReason(resource: Resource): string | null {
       && coding.system === `http://terminology.hl7.org/CodeSystem/${resource.resourceType === "Condition" ? "condition" : "allergyintolerance"}-verification`
     )) return `FHIR ${resource.resourceType} entered-in-error`;
   }
-  if (isObservation(resource) || isDiagnosticReport(resource)) {
+  if (isObservation(resource)) {
     const status = readString(resource.status)?.toLowerCase();
     if (status === "cancelled" || status === "entered-in-error") {
       return `FHIR ${resource.resourceType} status ${status}`;
     }
   }
-  if (isDocumentReference(resource)) {
-    const status = readString(resource.status)?.toLowerCase();
-    const docStatus = readString(resource.docStatus)?.toLowerCase();
-    if (status === "entered-in-error" || status === "superseded") {
-      return `FHIR DocumentReference status ${status}`;
-    }
-    if (docStatus === "entered-in-error") {
-      return "FHIR DocumentReference docStatus entered-in-error";
-    }
+  if (isDocumentReference(resource) || isDiagnosticReport(resource)) {
+    const eligibility = clinicalDocumentParentEligibility(resource);
+    if (eligibility.action === "retract") return eligibility.reason;
   }
   return null;
 }
@@ -1111,22 +1040,27 @@ function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): Ma
     return reviewOnly(context, "FHIR resource id is missing");
   }
 
-  if (!hasImportableStatus(context.resource.status, IMPORTABLE_DIAGNOSTIC_REPORT_STATUSES)) {
-    return reviewOnly(context, "diagnostic report status is not importable");
-  }
+  const eligibility = clinicalDocumentParentEligibility(context.resource);
+  if (eligibility.action !== "eligible") return reviewOnly(context, eligibility.reason);
 
   const occurredAt = readClinicalOccurredAt(context.resource);
   const testName = textForCodeableConcept(context.resource.code) ?? "FHIR diagnostic report";
   const conclusion = readText(context.resource.conclusion);
   const narrativeText = textFromNarrative(context.resource.text);
 
+  if (listClinicalFhirAttachments(context.resource).some((attachment) => !attachment.isMedia)) {
+    const body = readClinicalDocumentText(context);
+    if (body.status !== "available") return mapClinicalDocumentReceipt(context);
+    return mapDiagnosticReportNote(context, [conclusion, narrativeText, body.text].filter(Boolean).join("\n\n"));
+  }
+
   if (conclusion || narrativeText) {
     if (!occurredAt) {
-      return reviewOnly(context, "clinical timestamp is missing");
+      return mapClinicalDocumentReceipt(context);
     }
     const summary = conclusion ?? narrativeText ?? "";
     if (summary.length > DIAGNOSTIC_SUMMARY_MAX_LENGTH) {
-      return reviewOnly(context, "diagnostic report summary exceeds supported import bounds");
+      return mapDiagnosticReportNote(context, [conclusion, narrativeText].filter(Boolean).join("\n\n"));
     }
     const resultInterpretation = resultInterpretationFromInterpretation(context.resource.conclusionCode);
     if (resultInterpretation.status === "ambiguous") {
@@ -1153,7 +1087,22 @@ function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): Ma
     );
   }
 
-  return reviewOnly(context, "diagnostic report summary is not available in raw FHIR page");
+  return mapClinicalDocumentReceipt(context);
+}
+
+function mapDiagnosticReportNote(context: FhirResourceContext<DiagnosticReport>, text: string): MappedFhirResource {
+  const resourceId = readResourceId(context.resource);
+  const occurredAt = readClinicalOccurredAt(context.resource);
+  if (!occurredAt) return mapClinicalDocumentReceipt(context);
+  const sourceNote = buildFhirSourceNote(text);
+  if (!resourceId || !occurredAt || !sourceNote) return reviewOnly(context, "diagnostic report content exceeds import bounds or lacks a clinical timestamp", "incomplete");
+  return upsertOrReview(context, {
+    kind: "note", occurredAt, source: "import",
+    title: textForCodeableConcept(context.resource.code) ?? "FHIR diagnostic report",
+    ...sourceNote, noteType: "fhir_diagnostic_report",
+    evidence: [evidenceForResource(context, resourceId)],
+    externalRef: externalRefForResource(context, "DiagnosticReport", resourceId),
+  }, "clinical upsert exceeds supported import bounds");
 }
 
 function mapDocumentReference(context: FhirResourceContext<DocumentReference>): MappedFhirResource {
@@ -1162,20 +1111,12 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
     return reviewOnly(context, "FHIR resource id is missing");
   }
 
-  if (!hasImportableStatus(context.resource.status, IMPORTABLE_DOCUMENT_REFERENCE_STATUSES)) {
-    return reviewOnly(context, "document reference status is not importable");
-  }
+  const eligibility = clinicalDocumentParentEligibility(context.resource);
+  if (eligibility.action !== "eligible") return reviewOnly(context, eligibility.reason);
 
-  if (!hasImportableOptionalStatus(context.resource.docStatus, IMPORTABLE_DOCUMENT_REFERENCE_DOC_STATUSES)) {
-    return reviewOnly(context, "document reference docStatus is not importable");
-  }
-
-  const noteDecision = decideDocumentReferenceText(context.resource);
-  if (noteDecision.status === "ambiguous") {
-    return reviewOnly(context, "document reference has multiple inline text attachments");
-  }
+  const noteDecision = readClinicalDocumentText(context);
   if (noteDecision.status === "unavailable") {
-    return reviewOnly(context, "document reference text is not available in raw FHIR page");
+    return mapClinicalDocumentReceipt(context);
   }
   const note = noteDecision.text;
   const sourceNote = buildFhirSourceNote(note);
@@ -1185,7 +1126,7 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
 
   const occurredAt = readClinicalOccurredAt(context.resource);
   if (!occurredAt) {
-    return reviewOnly(context, "clinical timestamp is missing");
+    return mapClinicalDocumentReceipt(context);
   }
 
   const title = readText(context.resource.description)
@@ -1207,6 +1148,32 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
     },
     "clinical upsert exceeds supported import bounds",
   );
+}
+
+function mapClinicalDocumentReceipt(
+  context: FhirResourceContext<DiagnosticReport | DocumentReference>,
+): MappedFhirResource {
+  const resource = context.resource;
+  const resourceId = readResourceId(resource);
+  const clinicalOccurredAt = readClinicalOccurredAt(resource);
+  const occurredAt = clinicalOccurredAt ?? readIsoDateTime(resource.meta?.lastUpdated);
+  if (!resourceId || !occurredAt) return reviewOnly(context, "clinical timestamp is missing");
+  const title = resource.resourceType === "DiagnosticReport"
+    ? textForCodeableConcept(resource.code) ?? "FHIR diagnostic report"
+    : readText(resource.description) ?? textForCodeableConcept(resource.type) ?? "FHIR document reference";
+  const note = [
+    `FHIR ${resource.resourceType} source document.`,
+    ...(!clinicalOccurredAt ? [`Record timestamp describes source-update metadata: ${occurredAt}.`] : []),
+    `Source status: ${resource.status}.`,
+    ...(resource.resourceType === "DocumentReference" && resource.docStatus ? [`Document status: ${resource.docStatus}.`] : []),
+    `Attachment count: ${listClinicalFhirAttachments(resource).length}.`,
+  ].join("\n");
+  return upsertOrReview(context, {
+    kind: "note", occurredAt, source: "import", title, note,
+    noteType: "clinical-document-receipt",
+    evidence: [evidenceForResource(context, resourceId)],
+    externalRef: externalRefForResource(context, resource.resourceType, resourceId),
+  }, "clinical document receipt exceeds supported import bounds");
 }
 
 function mapAllergyIntolerance(
@@ -1772,10 +1739,6 @@ function hasImportableStatus(value: unknown, importableStatuses: ReadonlySet<str
   return status !== undefined && importableStatuses.has(status);
 }
 
-function hasImportableOptionalStatus(value: unknown, importableStatuses: ReadonlySet<string>): boolean {
-  const status = readString(value)?.toLowerCase();
-  return status === undefined || importableStatuses.has(status);
-}
 
 function codeableConceptHasSystemCode(
   value: CodeableConcept | undefined,
@@ -1942,7 +1905,10 @@ function readIsoDateTime(value: unknown): string | undefined {
 
 function readResourceId(resource: Resource): string | undefined {
   const resourceId = readString(resource.id);
-  return resourceId && resourceId.length <= 64 ? resourceId : undefined;
+  // Epic document identifiers can exceed the base FHIR id length; preserve them
+  // within the existing canonical external-reference bound.
+  const maxLength = resource.resourceType === "DocumentReference" || resource.resourceType === "DiagnosticReport" ? 200 : 64;
+  return resourceId && resourceId.length <= maxLength ? resourceId : undefined;
 }
 
 function readResourceUpdatedAt(resource: Resource): string | undefined {
@@ -2026,43 +1992,6 @@ function codingsForCodeableConcept(value: CodeableConcept | undefined): Array<Pi
       display: readText(coding.display),
       system: readString(coding.system),
     }));
-}
-
-function decideDocumentReferenceText(resource: DocumentReference): DocumentReferenceTextDecision {
-  const textData: Array<string | undefined> = [];
-  for (const content of readUnknownArray(resource.content)) {
-    const attachment = isRecord(content) && isRecord(content.attachment) ? content.attachment : null;
-    const contentType = readText(attachment?.contentType)?.toLowerCase() ?? "";
-    if (contentType.startsWith("text/")) {
-      textData.push(readStrictString(attachment?.data));
-    }
-  }
-
-  if (textData.length > 1) {
-    return { status: "ambiguous" };
-  }
-
-  const data = textData[0];
-  const text = data ? decodeDocumentReferenceTextData(data)?.trim() : null;
-  return text ? { status: "available", text } : { status: "unavailable" };
-}
-
-function decodeDocumentReferenceTextData(value: string): string | null {
-  const normalized = value.replace(/\s+/gu, "");
-  if (normalized.length === 0 || !CANONICAL_BASE64_TEXT.test(normalized)) {
-    return null;
-  }
-
-  const bytes = Buffer.from(normalized, "base64");
-  if (bytes.toString("base64") !== normalized) {
-    return null;
-  }
-
-  try {
-    return DOCUMENT_REFERENCE_TEXT_DECODER.decode(bytes);
-  } catch {
-    return null;
-  }
 }
 
 function textFromNarrative(value: Narrative | undefined): string | null {

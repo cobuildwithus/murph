@@ -1,6 +1,7 @@
 ---
 title: 'Hosted Web test runner silently omits explicitly requested database tests'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3137'
 ---
 
 ## Expected Behavior

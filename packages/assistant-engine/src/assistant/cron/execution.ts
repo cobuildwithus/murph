@@ -3042,7 +3042,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     }
   }
 
-  if (input.target.channel === 'telegram' && route.threadIsDirect === false) {
+  if (input.target.channel === 'telegram') {
     const target = normalizeNullableString(
       route.deliveryTarget ?? route.bindingDelivery?.target,
     )
@@ -3057,23 +3057,24 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     if (!resolveScheduledExternalThreadRoute) {
       throw new VaultCliError(
         'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE',
-        'Hosted group delivery requires live thread route authority before provider work.',
+        'Hosted scheduled delivery requires live thread route authority before provider work.',
         { retryable: true },
       )
     }
-    const authority = await resolveScheduledExternalThreadRoute({
+    const { threadIsDirect, ...authority } = await resolveScheduledExternalThreadRoute({
       channel: 'telegram',
       signal: input.signal,
       target,
     })
     if (
       authority.channel !== 'telegram'
+      || typeof threadIsDirect !== 'boolean'
       || normalizeNullableString(authority.containerMemberId) === null
       || normalizeNullableString(authority.threadId) !== target
     ) {
       throw new VaultCliError(
         'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE',
-        'Hosted group delivery requires exact thread route authority before provider work.',
+        'Hosted scheduled delivery requires exact thread route authority before provider work.',
         { retryable: true },
       )
     }
@@ -3081,7 +3082,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
       conversationThreadId: null,
       deliveryPosture: null,
       externalThreadRouteAuthority: authority,
-      route,
+      route: { ...route, threadIsDirect },
     }
   }
 

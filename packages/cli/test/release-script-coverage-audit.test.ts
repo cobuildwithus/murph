@@ -1366,13 +1366,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.145')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.146')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.145'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.146'"])
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1],
@@ -1390,7 +1390,7 @@ describe('monorepo release flow coverage audit', () => {
       [
         "'@cloudflare/containers@0.3.7': patches/@cloudflare__containers@0.3.7.patch",
         "'@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch",
-        "'@cobuild/review-gpt@0.5.145': patches/@cobuild__review-gpt@0.5.145.patch",
+        "'@cobuild/review-gpt@0.5.146': patches/@cobuild__review-gpt@0.5.146.patch",
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'incur@0.5.1: patches/incur@0.5.1.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
@@ -1403,7 +1403,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(repoToolsPatch).toContain('add -u -- "${tracked_files[@]}"')
     expect(repoToolsPatch).toContain('add -A -- "${untracked_files[@]}"')
     expect(
-      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.145.patch')),
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.146.patch')),
     ).toBe(true)
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.142.patch')),
@@ -1674,7 +1674,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(tooFastGuardInvocationStart).toBeGreaterThan(tooFastGuardEnd)
     expect(tooFastGuardInvocationStart).toBeLessThan(completedArtifactWriteStart)
-    expect(reviewGptDriver).toContain('process.exit(1);')
+    expect(reviewGptDriver).toContain("process.exit(error?.code === 'REVIEW_GPT_RATE_LIMITED' ? 75 : 1);")
     expect(reviewGptDriver).toContain(
       [
         '  let ws = initialConnection.ws;',
@@ -2714,24 +2714,6 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true })
     }
-  })
-
-  it('keeps Product UX decisions parent-owned without a specialist audit', () => {
-    const frontendReview = readFileSync(
-      path.join(repoRoot, 'agent-docs', 'prompts', 'frontend-review.md'),
-      'utf8',
-    )
-
-    expect(frontendReview).toMatch(
-      /do not duplicate subjective product-taste findings or\s+decide the copy, state selection, action count, or whether an element exists/u,
-    )
-    expect(frontendReview).toContain(
-      'visual treatment that obscures or conflicts with the declared hierarchy',
-    )
-    expect(frontendReview).not.toContain('unrelated rendered elements')
-    expect(frontendReview).toContain(
-      'Meaning-preserving tiny static-copy corrections',
-    )
   })
 
   it('keeps delayed targets alive until discovery and closes only failed discoveries', async () => {
@@ -4119,18 +4101,8 @@ printf 'ZIP: %s (%s bytes)\n' \
       writeHarnessFile(harnessRoot, 'package.json', '{"name":"review-harness"}\n')
       writeHarnessFile(
         harnessRoot,
-        'agent-docs/prompts/prompt-review.md',
-        'prompt lens\n',
-      )
-      writeHarnessFile(
-        harnessRoot,
-        'agent-docs/prompts/frontend-review.md',
-        'frontend lens\n',
-      )
-      writeHarnessFile(
-        harnessRoot,
-        'agent-docs/prompts/coverage-review.md',
-        'coverage lens\n',
+        'agent-docs/prompts/seam-audits/README.md',
+        'on-demand seam audit guidance\n',
       )
       writeHarnessFile(harnessRoot, 'agent-docs/FRONTEND.md', 'frontend workflow\n')
       writeHarnessFile(
@@ -4743,7 +4715,7 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(leanEntries).toContain('docs/contracts/00-invariants.md')
       expect(leanEntries).not.toContain('agent-docs/generated/doc-inventory.md')
       expect(leanEntries).not.toContain('agent-docs/exec-plans/completed/README.md')
-      expect(leanEntries).not.toContain('agent-docs/prompts/coverage-review.md')
+      expect(leanEntries).not.toContain('agent-docs/prompts/seam-audits/README.md')
       expect(leanEntries).not.toContain('packages/cli/test/release-script-coverage-audit.test.ts')
       expect(leanEntries).not.toContain('apps/web/test/device-sync-http.test.ts')
       expect(leanEntries).not.toContain('docs/device-sync-hosted-control-plane.md')
@@ -4761,7 +4733,7 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(fullEntries).toContain('docs/device-sync-hosted-control-plane.md')
       expect(fullEntries).toContain('.github/workflows/release.yml')
       expect(fullEntries).toContain('agent-docs/exec-plans/completed/README.md')
-      expect(fullEntries).toContain('agent-docs/prompts/coverage-review.md')
+      expect(fullEntries).toContain('agent-docs/prompts/seam-audits/README.md')
       expect(fullEntries).toContain('agent-docs/references/hosted-runtime-protocol.md')
       expect(fullEntries).toContain('PRODUCT.md')
       expect(fullEntries).toContain('DESIGN.md')

@@ -24,15 +24,14 @@ import {
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_OWNER_RELEASED_PATH,
 } from "@murphai/hosted-execution/routes";
-import {
-  isHostedRuntimeFutureMailboxContinuation,
-  type HostedRuntimeLatencyPhaseBreakdown,
-  type HostedRuntimeLogRequest,
-  type HostedRuntimeWebStatusResponse,
-  type HostedWorkspaceInvocationProcessingMode,
-  type HostedWorkspaceInvocationResult,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceState,
+import type {
+  HostedRuntimeLatencyPhaseBreakdown,
+  HostedRuntimeLogRequest,
+  HostedRuntimeWebStatusResponse,
+  HostedWorkspaceInvocationProcessingMode,
+  HostedWorkspaceInvocationResult,
+  HostedWorkspaceReadResponse,
+  HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedExecutionEnvironment } from "../env.js";
@@ -125,24 +124,6 @@ const HOSTED_CUSTOM_INFERENCE_PROVIDER = "hosted-custom-inference";
 const HOSTED_CUSTOM_INFERENCE_API_KEY_ENV = "MURPH_CUSTOM_INFERENCE_API_KEY";
 const HOSTED_CUSTOM_INFERENCE_CONTEXT_WINDOW_ENV =
   "HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS";
-
-function shouldDeferHostedRuntimeOwnerReleaseCallback(
-  result: HostedWorkspaceInvocationResult,
-): boolean {
-  if (result.immediateRecheckRequested === true) {
-    return false;
-  }
-
-  try {
-    return isHostedRuntimeFutureMailboxContinuation({
-      nextWakeAt: result.nextWakeAt,
-      nextWakeReason: result.nextWakeReason,
-      redactedStatus: result.redactedStatus,
-    });
-  } catch {
-    return true;
-  }
-}
 
 type HostedRunnerNativeProviderCredentialEnvName =
   keyof typeof HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV;
@@ -794,9 +775,7 @@ export class RuntimeInvocationService {
     this.input.waitUntil(
       this.notifyRunnerContainerCompletionRecordedBestEffort(input),
     );
-    if (!shouldDeferHostedRuntimeOwnerReleaseCallback(input.result)) {
-      await this.notifyRuntimeOwnerReleasedBestEffort(input);
-    }
+    await this.notifyRuntimeOwnerReleasedBestEffort(input);
     return { completed: true };
   }
 
@@ -1304,6 +1283,58 @@ export class RuntimeInvocationService {
       phase: "failed",
       userId: input.prepared.input.userId,
     });
+  }
+
+  async recordRuntimeProcessingSummary(input: {
+    entry: HostedRuntimeLogRequest["entries"][number];
+    orchestrationAttemptId: string;
+    userId: string;
+  }): Promise<void> {
+    // The producer is not necessarily Web: even an opaque-looking caller id
+    // can be a member id. Fingerprint the whole value, only on this detached
+    // telemetry path. Never fall back to the original on hashing failure.
+    let orchestrationAttemptFingerprint: string | undefined;
+    try {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(
+        `murph.runtime-processing-attempt.v1\0${input.orchestrationAttemptId}`,
+      ));
+      orchestrationAttemptFingerprint = Array.from(new Uint8Array(digest), (byte) =>
+        byte.toString(16).padStart(2, "0")).join("");
+    } catch {
+      // Attempt/generation and command timing still identify this observation.
+    }
+    const entry = {
+      ...input.entry,
+      redactedJson: {
+        ...input.entry.redactedJson,
+        ...(orchestrationAttemptFingerprint ? { orchestrationAttemptFingerprint } : {}),
+      },
+    };
+    const response = await fetchHostedExecutionWebControlPlaneResponse({
+      ...(this.input.env.hostedWebAllowHttpHosts
+        ? { allowHttpHosts: this.input.env.hostedWebAllowHttpHosts }
+        : {}),
+      baseUrl: this.input.readHostedWebControlBaseUrl(),
+      body: JSON.stringify({ entries: [entry] } satisfies HostedRuntimeLogRequest),
+      boundUserId: input.userId,
+      callbackSigning: this.input.env.webCallbackSigning,
+      method: "POST",
+      path: HOSTED_RUNTIME_LOG_PATH,
+      timeoutMs: this.input.env.webControlTimeoutMs,
+    });
+    // Initiate release, but do not wait for the stream's underlying cancel to
+    // settle. Own both synchronous throws and rejected cancellation promises.
+    void Promise.resolve().then(() => response.body?.cancel()).catch(() => undefined);
+    if (!response.ok) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: { runtimeLogWriteStatus: response.status },
+        level: "warn",
+        message: "Hosted runner processing summary log write rejected.",
+        phase: "failed",
+        userId: input.userId,
+      });
+    }
   }
 
   private async recordAcceptedRuntimeAttemptFailureBestEffort(input: {

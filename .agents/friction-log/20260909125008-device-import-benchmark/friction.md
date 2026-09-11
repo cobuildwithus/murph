@@ -1,6 +1,7 @@
 ---
 title: 'Device import benchmark exceeds its admitted batch size'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3131'
 ---
 
 ## Expected Behavior

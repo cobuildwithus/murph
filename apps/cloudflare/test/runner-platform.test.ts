@@ -6249,7 +6249,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(rejectedFetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps hosted-local Linq URL rewrite and provider fetch allowlist in sync", async () => {
+  it("keeps canonical container Linq URL and provider fetch allowlist in sync", async () => {
     const runnerEnv = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
@@ -6258,11 +6258,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     expect(runnerEnv.LINQ_API_BASE_URL).toBe(
-      "http://host.docker.internal:4011/api/partner/v3",
+      "https://api.linqapp.com/api/partner/v3",
     );
     const providerFetchBaseUrls = readCloudflareHostedProviderFetchBaseUrls(runnerEnv);
     expect(providerFetchBaseUrls).toEqual([
-      "http://host.docker.internal:4011/api/partner/v3",
+      "https://api.linqapp.com/api/partner/v3",
     ]);
 
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
@@ -6281,7 +6281,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     );
 
-    const response = await hostedFetch("http://host.docker.internal:4011/api/partner/v3/chats", {
+    const response = await hostedFetch("https://api.linqapp.com/api/partner/v3/chats", {
       body: "{}",
       method: "POST",
     });
@@ -6289,7 +6289,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(response.status).toBe(204);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "configured Linq provider fetch");
-    expect(request.url).toBe("http://host.docker.internal:4011/api/partner/v3/chats");
+    expect(request.url).toBe("https://api.linqapp.com/api/partner/v3/chats");
     expect(request.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
@@ -7141,7 +7141,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
-  it("write-fences exact external thread route authority through direct web-control", async () => {
+  it.each([undefined, true, false, "invalid", null])("write-fences external route authority and validates audience %s", async (threadIsDirect) => {
     const authority = {
       channel: "telegram" as const,
       containerMemberId: "member_123",
@@ -7153,7 +7153,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
       );
       await expect(request.json()).resolves.toEqual(authority);
-      return new Response(JSON.stringify({ authorized: true }), {
+      return new Response(JSON.stringify({ authorized: true, threadIsDirect }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
       });
@@ -7173,9 +7173,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     if (!assertExternalThreadRouteAuthority) {
       throw new Error("Expected external thread route authority effect.");
     }
-    await expect(
-      assertExternalThreadRouteAuthority(authority),
-    ).resolves.toBeUndefined();
+    if (threadIsDirect !== undefined && typeof threadIsDirect !== "boolean") {
+      await expect(assertExternalThreadRouteAuthority(authority)).rejects.toThrow(
+        "Hosted external thread route authority response is invalid.",
+      );
+    } else {
+      await expect(assertExternalThreadRouteAuthority(authority)).resolves.toEqual(
+        threadIsDirect === undefined ? undefined : { threadIsDirect },
+      );
+    }
 
     const request = requireFetchRequest(
       fetchMock.mock.calls[0],
@@ -7474,10 +7480,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("does not synthesize a Linq route from legacy response fields", async () => {
+  it.each([undefined, { target: "chat_legacy", targetKind: "thread", threadIsDirect: true }, { conversationThreadId: null, directRecipientPhoneNumber: "+15550100001", fromPhoneNumber: null, target: "chat_group", targetKind: "thread", threadIsDirect: false }])("does not synthesize a Linq route from legacy or invalid response fields %#", async (resolvedRoute) => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
         ok: true,
+        resolvedRoute,
         targetOverride: {
           conversationThreadId: "hid_legacy_chat",
           target: "chat_legacy",

@@ -1,22 +1,22 @@
 import { expect, test, vi } from "vitest";
 
 import {
-  startHostedCodexMemoryWebSocketRelay,
-  type HostedCodexMemorySocketPort,
+  startHostedOpenAiResponsesWebSocketRelay,
+  type HostedOpenAiSocketPort,
   type HostedCodexMemoryWebSocketCompletion,
-  type HostedCodexMemoryWebSocketMessage,
-} from "../src/runner-egress-codex-memory-websocket.ts";
+  type HostedOpenAiWebSocketMessage,
+} from "../src/runner-egress-openai-responses-websocket.ts";
 
-class FakeSocket implements HostedCodexMemorySocketPort {
+class FakeSocket implements HostedOpenAiSocketPort {
   readonly closes: Array<{ code?: number; reason?: string }> = [];
-  readonly sent: HostedCodexMemoryWebSocketMessage[] = [];
+  readonly sent: HostedOpenAiWebSocketMessage[] = [];
   accepts = 0;
   private readonly closeListeners: Array<
     (event: { code: number; reason: string }) => void
   > = [];
   private readonly errorListeners: Array<() => void> = [];
   private readonly messageListeners: Array<
-    (data: HostedCodexMemoryWebSocketMessage) => void
+    (data: HostedOpenAiWebSocketMessage) => void
   > = [];
 
   accept(): void {
@@ -39,12 +39,12 @@ class FakeSocket implements HostedCodexMemorySocketPort {
   }
 
   onMessage(
-    listener: (data: HostedCodexMemoryWebSocketMessage) => void,
+    listener: (data: HostedOpenAiWebSocketMessage) => void,
   ): void {
     this.messageListeners.push(listener);
   }
 
-  send(data: HostedCodexMemoryWebSocketMessage): void {
+  send(data: HostedOpenAiWebSocketMessage): void {
     this.sent.push(data);
   }
 
@@ -60,7 +60,7 @@ class FakeSocket implements HostedCodexMemorySocketPort {
     }
   }
 
-  emitMessage(data: HostedCodexMemoryWebSocketMessage): void {
+  emitMessage(data: HostedOpenAiWebSocketMessage): void {
     for (const listener of this.messageListeners) {
       listener(data);
     }
@@ -68,6 +68,27 @@ class FakeSocket implements HostedCodexMemorySocketPort {
 }
 
 const createdAt = 1_775_000_000;
+
+test("bounds queued client bytes while image authorization is pending", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  let allow: ((result: null) => void) | undefined;
+  const access = new Promise<null>((resolve) => { allow = resolve; });
+  const controller = startHostedOpenAiResponsesWebSocketRelay({
+    authorizeClientFrame: async () => await access,
+    downstream,
+    upstream,
+  });
+  const frame = JSON.stringify({ type: "response.create", input: "x".repeat(17 * 1024 * 1024) });
+  downstream.emitMessage(frame);
+  await Promise.resolve();
+  downstream.emitMessage(frame);
+  expect(downstream.closes).toEqual([expect.objectContaining({ code: 1009 })]);
+  expect(upstream.closes).toEqual([expect.objectContaining({ code: 1009 })]);
+  allow?.(null);
+  await controller.drain();
+  expect(upstream.sent).toHaveLength(0);
+});
 
 function createFrame(input?: {
   generate?: boolean;
@@ -115,7 +136,7 @@ function completedFrame(input?: {
 
 function setup(input?: {
   persistUsage?: Parameters<
-    typeof startHostedCodexMemoryWebSocketRelay
+    typeof startHostedOpenAiResponsesWebSocketRelay
   >[0]["persistUsage"];
 }) {
   const downstream = new FakeSocket();
@@ -123,7 +144,7 @@ function setup(input?: {
   const persistUsage = input?.persistUsage ?? vi.fn(async () => undefined);
   const deferred: Promise<void>[] = [];
   const reportFailure = vi.fn();
-  const controller = startHostedCodexMemoryWebSocketRelay({
+  const controller = startHostedOpenAiResponsesWebSocketRelay({
     defer: (promise) => {
       deferred.push(promise);
     },
@@ -158,6 +179,19 @@ test("accepts both sockets and relays ordinary text and binary frames", async ()
   expect(upstream.sent).toEqual([clientText]);
   expect(downstream.sent).toEqual([serverText, binary]);
   expect(deferred).toHaveLength(0);
+});
+
+test("keeps memory accounting for a JSON request carried in a binary frame", async () => {
+  const { controller, downstream, persistUsage, upstream } = setup();
+  const request = new TextEncoder().encode(createFrame()).buffer;
+  downstream.emitMessage(request);
+  upstream.emitMessage(completedFrame());
+  await controller.drain();
+  expect(upstream.sent).toEqual([request]);
+  expect(persistUsage).toHaveBeenCalledTimes(1);
+  expect(persistUsage).toHaveBeenCalledWith(expect.objectContaining({
+    requestMetadata: expect.objectContaining({ requestedModel: "gpt-5.6-terra" }),
+  }));
 });
 
 test("persists exact usage before forwarding a billable completion", async () => {

@@ -81,6 +81,7 @@ export type HostedSystemMailboxRouteAction =
   | "run-assistant-ask"
   | "continue-assistant-ask"
   | "run-clinical-records-sync"
+  | "apply-clinical-enrichment"
   | "run-device-sync-wake"
   | "run-environment-interview"
   | "run-environment-voice"
@@ -660,11 +661,9 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
 function resolveHostedSystemMailboxItemExecutionClass(
   item: HostedSystemMailboxPendingItem,
 ): "default_owned" | "model_free" {
-  return (
-      item.mailboxLaneSeq !== null
-      || isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
-    )
-      && isHostedModelFreeSystemMailboxItem(item)
+  // Local timers have no Web lane sequence, but use the same execution owner
+  // as imported work. Sequence numbers track handling, not execution class.
+  return isHostedModelFreeSystemMailboxItem(item)
     ? "model_free"
     : "default_owned";
 }
@@ -1286,6 +1285,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "run-assistant-ask"
     || value === "continue-assistant-ask"
     || value === "run-clinical-records-sync"
+    || value === "apply-clinical-enrichment"
     || value === "run-device-sync-wake"
     || value === "run-environment-interview"
     || value === "run-environment-voice"

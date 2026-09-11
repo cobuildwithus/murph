@@ -1,6 +1,7 @@
 ---
 title: 'Browser vault overflow test exhausts microtask-only wait in CI'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3114'
 ---
 
 ## Expected Behavior

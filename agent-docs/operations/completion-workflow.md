@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-09-04
+Last verified: 2026-09-11
 
 Use `agent-workflow-routing.md` for task scope, checkout, and plan/commit choice.
 Use `verification-and-runtime.md` for checks. This document owns completion;
@@ -51,7 +51,8 @@ alone does not authorize a narrower product or another state owner.
    Include every public-safe Frog entry created or modified during the task in that same scoped commit.
    A behavior-changing final edit needs the applicable checks and next review;
    explanatory docs and isolated proof additions follow the review loop's exemptions.
-8. Fetch the current base and prove mergeability with
+8. Refresh and verify the remote-tracking base using the explicit-refspec
+   procedure in `verification-and-runtime.md`, then prove mergeability with
    `git merge-tree --write-tree HEAD origin/<base>`. Keep green required CI on
    the PR-authored head. Reconcile the base when the authorized merge path
    needs it, following the review loop's Base-Update-Only Exception.
@@ -62,8 +63,12 @@ alone does not authorize a narrower product or another state owner.
 
 ## Product and Rendered Evidence
 
-The parent owns these checks; there is no mandatory preliminary specialist,
-local subagent, or separate simplify/final-review pass.
+The parent owns these checks as part of candidate and final review. Specialist
+passes are retired, including preliminary ReviewGPT specialists, local audit
+subagents, and separate coverage, security/privacy, frontend, prompt, Product UX,
+simplify, or task-finish passes. Do not schedule them from older plans, skills,
+or handoffs. Apply the relevant domain guidance directly and use Final ReviewGPT
+Eligibility below for the external completion gate.
 
 | Changed behavior | Required evidence |
 | --- | --- |

@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   hostedMailboxItemUpdateMany: vi.fn(),
   logHostedOnboardingDiagnostic: vi.fn(),
   lockHostedMemberRoutingStateTx: vi.fn(),
+  lockHostedLinqMessageReceiptsTx: vi.fn(),
   markHostedLinqDeliveryAcceptedTx: vi.fn(),
   markHostedLinqDeliverySendFailedTx: vi.fn(),
   markHostedLinqDeliverySkippedTx: vi.fn(),
@@ -118,6 +119,10 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   markHostedLinqDeliverySendFailedTx:
     mocks.markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx: mocks.markHostedLinqDeliverySkippedTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-message-receipt-lock", () => ({
+  lockHostedLinqMessageReceiptsTx: mocks.lockHostedLinqMessageReceiptsTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
@@ -278,6 +283,7 @@ describe("hosted Linq instant first turn", () => {
       status: "skipped",
     });
     mocks.recordHostedAiUsageRecords.mockResolvedValue({ recordedIds: [] });
+    mocks.lockHostedLinqMessageReceiptsTx.mockResolvedValue(undefined);
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
       id: "delivery_123",
@@ -833,6 +839,21 @@ describe("hosted Linq instant first turn", () => {
       message: "Hey! What would you like help with?",
       replyToMessageId: "inbound_message_123",
     });
+    expect(mocks.lockHostedLinqMessageReceiptsTx).toHaveBeenCalledExactlyOnceWith({
+      messageIds: ["provider_message_123"],
+      prisma: expect.anything(),
+    });
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prisma: mocks.lockHostedLinqMessageReceiptsTx.mock.calls[0]?.[0].prisma,
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.lockHostedLinqMessageReceiptsTx.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.lockHostedLinqMessageReceiptsTx.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.markHostedLinqDeliveryAcceptedTx.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
     expect(mocks.recordHostedAiUsageRecords).toHaveBeenCalledWith(
       expect.objectContaining({

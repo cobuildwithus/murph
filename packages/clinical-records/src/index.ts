@@ -1,3 +1,7 @@
+import { clinicalDocumentAttachmentsSchema } from "./attachments.ts";
+export * from "./attachments.ts";
+export * from "./document-eligibility.ts";
+export * from "./enrichment.ts";
 import { createHash } from "node:crypto";
 
 import {
@@ -370,6 +374,7 @@ export const clinicalRawManifestV2Schema = z
     patientIdHash: sha256HexSchema,
     fetchedAt: clinicalIsoDateTimeSchema,
     resourceFiles: clinicalRawManifestResourceFilesSchema,
+    documentAttachments: clinicalDocumentAttachmentsSchema.optional(),
     retrievalScopes: clinicalFhirRetrievalScopesSchema,
     completedResourceTypes: clinicalRawManifestCompletedResourceTypesSchema,
     requestedScopes: z.array(z.string().min(1).max(200)).max(50),
@@ -483,6 +488,28 @@ const clinicalRawManifestV3ErrorSchema = z.union([
   }).strict(),
 ]);
 
+export const clinicalRawManifestBatchSchema = z.object({
+  runId: clinicalFhirPathIdSchema,
+  index: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  previous: z.object({
+    manifestPath: clinicalFhirManifestPathSchema,
+    sha256: sha256HexSchema,
+  }).strict().optional(),
+  continuesWith: z.object({
+    queryScopeId: clinicalFhirQueryScopeIdSchema,
+    sliceId: clinicalFhirSliceIdSchema,
+    pageUrlHash: sha256HexSchema,
+  }).strict().optional(),
+}).strict().superRefine((batch, context) => {
+  if ((batch.index === 0) !== (batch.previous === undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Only the first clinical retrieval batch may omit its predecessor.",
+      path: ["previous"],
+    });
+  }
+});
+
 export const clinicalRawManifestV3Schema = z
   .object({
     schemaVersion: z.literal("murph.clinical-raw-manifest.v3"),
@@ -495,6 +522,8 @@ export const clinicalRawManifestV3Schema = z
     patientIdHash: sha256HexSchema,
     fetchedAt: clinicalIsoDateTimeSchema,
     resourceFiles: clinicalRawManifestV3ResourceFilesSchema,
+    batch: clinicalRawManifestBatchSchema.optional(),
+    documentAttachments: clinicalDocumentAttachmentsSchema.optional(),
     retrievalSlices: clinicalFhirRetrievalSlicesSchema,
     completedRetrievalSlices: z.array(clinicalFhirRetrievalSliceRefSchema)
       .max(CLINICAL_FHIR_MAX_RETRIEVAL_SLICES),
@@ -504,6 +533,26 @@ export const clinicalRawManifestV3Schema = z
   })
   .strict()
   .superRefine((manifest, context) => {
+    if (manifest.batch) {
+      const batch = manifest.batch;
+      const slice = manifest.retrievalSlices[0];
+      if (
+        manifest.resourceFiles.length !== 1
+        || manifest.retrievalSlices.length !== 1
+        || manifest.completedRetrievalSlices.length !== 0
+        || manifest.retrievalJobId !== `${batch.runId}-batch-${batch.index}`
+        || (batch.continuesWith && (
+          batch.continuesWith.queryScopeId !== slice?.queryScopeId
+          || batch.continuesWith.sliceId !== slice?.sliceId
+        ))
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Clinical retrieval batches require one page and slice, no whole-slice completion, and matching batch identity.",
+          path: ["batch"],
+        });
+      }
+    }
     const slices = new Map(manifest.retrievalSlices.map((slice) => [
       retrievalSliceIdentityKey(slice),
       slice,

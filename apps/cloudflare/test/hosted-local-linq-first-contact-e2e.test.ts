@@ -1008,7 +1008,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       matchingSends
         .slice(outboundCountBeforeReply)
         .map((request) => request.authorizationStatus),
-    ).toEqual(["hosted-sentinel", "hosted-sentinel"]);
+    ).toEqual(["expected", "expected"]);
     expect(newSendTexts).toEqual([
       progressToolAttemptText,
       progressToolFinalReplyText,
@@ -2067,6 +2067,7 @@ async function seedEmptyHostedWorkspaceCheckpointForTest(
   });
 
   const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
     harness: requireScenario().harness,
     operatorHomeRoot,
     userId: memberId,

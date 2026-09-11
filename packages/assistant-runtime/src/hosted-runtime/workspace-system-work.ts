@@ -21,6 +21,7 @@ import {
 export const HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS = [
   "run-device-sync-wake",
   "run-clinical-records-sync",
+  "apply-clinical-enrichment",
   "run-environment-interview",
 ] as const satisfies readonly HostedSystemMailboxRouteAction[];
 
@@ -88,7 +89,6 @@ export function createHostedWorkspaceSystemWork(input: {
   const kick = (
     allowedRouteActions: readonly HostedSystemMailboxRouteAction[] =
       HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS,
-    shouldYield = input.runnerInput.shouldYieldBackgroundMaintenance,
   ): void => {
     if (paused || input.preparation.signal?.aborted
       || input.runnerInput.shouldYieldBackgroundMaintenance?.()) {
@@ -110,7 +110,7 @@ export function createHostedWorkspaceSystemWork(input: {
               pendingOnly: true,
               runtimeLogContext: input.runnerInput.runtimeLogContext,
               retainProcessedItemUntilRecorded: true,
-              shouldYieldBackgroundMaintenance: shouldYield,
+              shouldYieldBackgroundMaintenance: input.runnerInput.shouldYieldBackgroundMaintenance,
               signal,
             }),
           });
@@ -128,22 +128,36 @@ export function createHostedWorkspaceSystemWork(input: {
     async waitForCompletion(
       wakeSignal: RuntimeWakeSignal | null,
       onWake: (notification: RuntimeWakeNotification | null) => Promise<boolean>,
+      deadlineMs: number | null = null,
     ): Promise<boolean> {
       const completion = input.settleOwnedMutations();
-      const wakeController = new AbortController();
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+      let deadline = deadlineMs === null ? null : new Promise<"deadline">((resolve) => {
+        deadlineTimer = setTimeout(() => resolve("deadline"), Math.min(
+          2_147_483_647, Math.max(0, deadlineMs - Date.now()),
+        ));
+        deadlineTimer.unref?.();
+      });
       try {
-        while (wakeSignal && !input.preparation.signal?.aborted) {
-          const result = await Promise.race([
-            completion.then(() => null),
-            wakeSignal.wait(wakeController.signal),
-          ]);
-          if (result === null) break;
-          if (await onWake(result)) return true;
+        while ((wakeSignal || deadline) && !input.preparation.signal?.aborted) {
+          const wakeController = new AbortController();
+          try {
+            const result = await Promise.race([
+              completion.then(() => null),
+              ...(wakeSignal ? [wakeSignal.wait(wakeController.signal)] : []),
+              ...(deadline ? [deadline] : []),
+            ]);
+            if (result === null) break;
+            if (result === "deadline") deadline = null;
+            if (await onWake(result === "deadline" ? null : result)) return true;
+          } finally {
+            wakeController.abort();
+          }
         }
         await completion;
         return false;
       } finally {
-        wakeController.abort();
+        clearTimeout(deadlineTimer);
       }
     },
     async recover(

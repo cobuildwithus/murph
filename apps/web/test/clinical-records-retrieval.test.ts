@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   openClinicalConnectionSecret: vi.fn(),
   openClinicalPageCursor: vi.fn(),
   sealClinicalPageCursor: vi.fn(),
+  sealClinicalDocumentTicket: vi.fn(),
+  openClinicalDocumentTicket: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision }));
@@ -37,6 +39,8 @@ vi.mock("@/src/lib/clinical-records/secrets", () => ({
   openClinicalConnectionSecret: mocks.openClinicalConnectionSecret,
   openClinicalPageCursor: mocks.openClinicalPageCursor,
   sealClinicalPageCursor: mocks.sealClinicalPageCursor,
+  sealClinicalDocumentTicket: mocks.sealClinicalDocumentTicket,
+  openClinicalDocumentTicket: mocks.openClinicalDocumentTicket,
 }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
@@ -47,6 +51,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 
 import {
   fetchClinicalRetrievalPage,
+  fetchClinicalRetrievalDocument,
   readClinicalRetrievalRun,
   recordClinicalRetrievalOutcome,
 } from "@/src/lib/clinical-records/retrieval";
@@ -60,6 +65,116 @@ describe("Clinical Records retrieval control plane", () => {
     vi.clearAllMocks();
     vi.useRealTimers();
     mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
+  });
+
+  it("downloads linked Binary bytes with a run-bound ticket without altering raw pages or FHIR page counts", async () => {
+    const harness = createHarness(["DocumentReference"]);
+    harness.state.run.grantedScopesJson = ["patient/DocumentReference.read", "patient/Binary.read"];
+    harness.state.run.egressBytes = 40 * 1024 * 1024;
+    harness.state.run.providerRequestCount = 600;
+    const parent = { resourceType: "DocumentReference", id: "note-1", status: "current",
+      meta: { lastUpdated: "2026-09-10T12:00:00Z" }, subject: { reference: "Patient/patient-1" },
+      content: [{ attachment: { url: "Binary/document-1", contentType: "text/plain", size: 13 } }] };
+    const fetchImpl = vi.fn(async (url: URL | RequestInfo) => String(url).includes("/Binary/")
+      ? fhirResponse({ resourceType: "Binary", id: "document-1", contentType: "text/plain", data: Buffer.from("Clinical note").toString("base64") })
+      : fhirResponse({ resourceType: "Bundle", entry: [{ resource: parent }] }));
+    const slice = buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-07-10T12:00:00Z"), pageCount: EPIC_BETA_FHIR_PAGE_COUNT, resourceTypes: ["DocumentReference"] }).slices[0]!;
+    const page = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: {
+      cursor: null, generation: 1, requestId: "documents-page", resourceType: "DocumentReference", runId: RUN_ID,
+      retrievalProtocol: "query-slices-v2", queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint, sliceId: slice.sliceId,
+    } });
+    expect(page.status).toBe("page");
+    if (page.status !== "page") throw new Error("Expected document page.");
+    expect(JSON.parse(page.body).entry[0].resource).toEqual(parent);
+    const descriptor = page.documents?.[0];
+    expect(descriptor?.parentPageSha256).toBe(createHash("sha256").update(page.body).digest("hex"));
+    if (!descriptor?.ticket) throw new Error("Expected an opaque document ticket.");
+    const result = await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: descriptor.ticket } });
+    expect(result).toMatchObject({ status: "document", byteLength: 13, mediaType: "text/plain",
+      contentBase64: Buffer.from("Clinical note").toString("base64") });
+    expect(harness.state.run.pageCount).toBe(1);
+    expect(harness.state.run.providerRequestCount).toBe(602);
+    expect(fetchImpl).toHaveBeenLastCalledWith(new URL("https://fhir.example.test/FHIR/R4/Binary/document-1"),
+      expect.objectContaining({ redirect: "manual", headers: expect.objectContaining({ Authorization: "Bearer access-token" }) }));
+    const blocked = await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: "forged-ticket" } });
+    expect(blocked).toEqual({ status: "unavailable", retryable: false, errorCode: "document-ticket-invalid" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { label: "interrupted stream", subject: undefined, attachment: {}, binary: {}, valid: false, binaryFetched: false },
+    { label: "absent subject", subject: undefined, attachment: {}, binary: {}, valid: true, binaryFetched: true },
+    { label: "matching relative subject", subject: { reference: "Patient/patient-1" }, attachment: {}, binary: {}, valid: true, binaryFetched: true },
+    { label: "matching absolute subject", subject: { reference: "https://fhir.example.test/FHIR/R4/Patient/patient-1" }, attachment: {}, binary: {}, valid: true, binaryFetched: true },
+    { label: "wrong patient", subject: { reference: "Patient/other" }, attachment: {}, binary: {}, valid: false, binaryFetched: false },
+    { label: "foreign patient base", subject: { reference: "https://outside.example.test/FHIR/R4/Patient/patient-1" }, attachment: {}, binary: {}, valid: false, binaryFetched: false },
+    { label: "unresolved explicit subject", subject: { display: "unresolved patient" }, attachment: {}, binary: {}, valid: false, binaryFetched: false },
+    { label: "null subject", subject: null, attachment: {}, binary: {}, valid: false, binaryFetched: false },
+    { label: "changed MIME", subject: undefined, attachment: {}, binary: { contentType: "application/pdf" }, valid: false, binaryFetched: true },
+    { label: "changed size", subject: undefined, attachment: { size: 1 }, binary: {}, valid: false, binaryFetched: true },
+    { label: "changed hash", subject: undefined, attachment: { hash: createHash("sha1").update("other").digest("base64") }, binary: {}, valid: false, binaryFetched: true },
+    { label: "malformed size", subject: undefined, attachment: { size: "13" }, binary: {}, valid: false, binaryFetched: false },
+    { label: "oversized declaration", subject: undefined, attachment: { size: 21 * 1024 * 1024 }, binary: {}, valid: false, binaryFetched: false },
+  ])("validates Media patient and Binary integrity through the attested retrieval path: $label", async ({ label, subject, attachment, binary, valid, binaryFetched }) => {
+    const harness = createHarness(["DiagnosticReport"]);
+    harness.state.run.grantedScopesJson = ["patient/DiagnosticReport.read", "patient/Media.read", "patient/Binary.read"];
+    const bytes = Buffer.from("Clinical note");
+    const parent = { resourceType: "DiagnosticReport", id: "report-media", status: "final",
+      meta: { lastUpdated: "2026-09-10T12:00:00Z" }, subject: { reference: "Patient/patient-1" },
+      media: [{ link: { reference: "Media/study-1" } }] };
+    const fetchImpl = vi.fn(async (url: URL | RequestInfo) => {
+      if (String(url).includes("/Binary/")) return fhirResponse({ resourceType: "Binary", id: "document-1",
+        contentType: "text/plain", data: bytes.toString("base64"), ...binary });
+      if (String(url).includes("/Media/") && label === "interrupted stream") {
+        return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+          controller.error(new TypeError("connection interrupted"));
+        } }), { headers: { "Content-Type": "application/fhir+json" } });
+      }
+      if (String(url).includes("/Media/")) return fhirResponse({ resourceType: "Media", id: "study-1",
+        ...(subject === undefined ? {} : { subject }), content: { url: "Binary/document-1", contentType: "text/plain",
+          size: bytes.length, hash: createHash("sha1").update(bytes).digest("base64"), ...attachment } });
+      return fhirResponse({ resourceType: "Bundle", entry: [{ resource: parent }] });
+    });
+    const slice = buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-07-10T12:00:00Z"),
+      pageCount: EPIC_BETA_FHIR_PAGE_COUNT, resourceTypes: ["DiagnosticReport"] }).slices[0]!;
+    const page = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: {
+      cursor: null, generation: 1, requestId: "media-page", resourceType: "DiagnosticReport", runId: RUN_ID,
+      retrievalProtocol: "query-slices-v2", queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint, sliceId: slice.sliceId,
+    } });
+    if (page.status !== "page" || !page.documents?.[0]?.ticket) throw new Error("Expected an attested Media ticket.");
+    const result = await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: page.documents[0].ticket } });
+    expect(result).toEqual(valid
+      ? { status: "document", contentBase64: bytes.toString("base64"), mediaType: "text/plain", byteLength: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex") }
+      : { status: "unavailable", errorCode: label === "interrupted stream" ? "provider-temporarily-unavailable" : "document-response-invalid",
+        retryable: label === "interrupted stream" });
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).includes("/Binary/"))).toHaveLength(binaryFetched ? 1 : 0);
+    expect(harness.state.run.pageCount).toBe(1);
+  });
+
+  it("retains document recovery through a transient key service failure", async () => {
+    const harness = createHarness(["DocumentReference"]);
+    harness.state.run.grantedScopesJson = ["patient/DocumentReference.read", "patient/Binary.read"];
+    mocks.openClinicalDocumentTicket.mockRejectedValue(new Error("Temporary key service failure."));
+    const fetchImpl = vi.fn();
+    await expect(fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: "opaque-ticket" } })).resolves.toEqual({
+      status: "unavailable", retryable: true, errorCode: "document-ticket-temporarily-unavailable",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not request linked documents without the separate Binary grant", async () => {
+    createHarness(["DocumentReference"]);
+    const fetchImpl = vi.fn();
+    await expect(fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: "opaque-ticket" } })).resolves.toEqual({
+      status: "unavailable", retryable: false, errorCode: "document-scope-unavailable",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("imports real Web pagination through the transport and vault snapshot planner", async () => {
@@ -1466,6 +1581,19 @@ function createHarness(
     const cursor = `cursor-${cursorSequence}`;
     cursorPlaintexts.set(cursor, input.value);
     return cursor;
+  });
+  const tickets = new Map<string, { value: string; runId: string; generation: number; memberId: string }>();
+  mocks.sealClinicalDocumentTicket.mockImplementation(async (input: { value: string; runId: string; generation: number; memberId: string }) => {
+    const token = `document-${tickets.size}`;
+    tickets.set(token, input);
+    return token;
+  });
+  mocks.openClinicalDocumentTicket.mockImplementation(async (input: { value: string; runId: string; generation: number; memberId: string }) => {
+    const ticket = tickets.get(input.value);
+    if (!ticket || ticket.runId !== input.runId || ticket.generation !== input.generation || ticket.memberId !== input.memberId) {
+      throw new TypeError("Unknown test ticket.");
+    }
+    return ticket.value;
   });
   return { cursorPlaintexts, hooks, runUpdateCalls, state };
 }
