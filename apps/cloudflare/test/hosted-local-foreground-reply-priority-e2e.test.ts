@@ -1448,7 +1448,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
 // remain unchanged while this race reaches a real idle snapshot deterministically.
 describe.sequential("hosted local foreground checkpoint ordering e2e", () => {
   beforeAll(async () => {
-    orderingLinqStub = await startHostedLocalLinqStub();
+    orderingLinqStub = await startHostedLocalLinqStub({
+      expectedAuthorizationToken: "linq-local-ordering-token",
+    });
     orderingScenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,

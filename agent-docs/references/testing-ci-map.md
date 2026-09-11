@@ -34,6 +34,24 @@ withheld from generic preparation and unrelated scenario/runner processes.
 Setup, exact credential names and proof limits live in
 `agent-docs/operations/verification-and-runtime.md#hosted-browser-authentication-proof`.
 
+The shared hosted-local Linq HTTP boundary requires its synthetic upstream bearer
+token and validates every supported message part. It preserves Linq's optional
+nested idempotency key: replay without one can duplicate acceptance, including
+after a lost acknowledgement. The wire-contract Node suite invokes the production
+SDK client over real loopback HTTP, covers create-chat and message replay,
+rejects malformed mixed media and absent/wrong/sentinel credentials, and asserts
+the canonical response envelope. Run it with the shared helper suite through
+`pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/hosted-local-linq-wire-contract.test.ts apps/cloudflare/test/helpers/hosted-local-linq-support.test.ts`.
+`provider-egress-conformance.test.ts` additionally composes generated container
+env, the production response-card client, provider-fetch authority headers, and
+Worker interception with the strict HTTP server. Container Linq calls use the
+canonical HTTPS endpoint; local/custom upstream configuration stays Worker-owned
+because arbitrary local ports bypass Cloudflare outbound interception. The
+`provider-egress-token-bridge` hosted-local journey requires the synthetic upstream
+token, so a leaked runner sentinel can no longer count as successful delivery.
+This validates the locally supported protocol boundary; provider receipt delivery,
+media downloading/rendering, and live service behavior still require hosted proof.
+
 Better Auth SMS provider contracts are covered by `better-auth-twilio-verify.test.ts`.
 Run the real PostgreSQL `better-auth-adapter-postgres-concurrency.test.ts`,
 `better-auth-member-postgres-concurrency.test.ts`, and
