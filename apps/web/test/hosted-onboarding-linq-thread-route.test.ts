@@ -3553,7 +3553,16 @@ describe("Linq explicit external-thread routing", () => {
       });
   });
 
-  it("routes a bound Linq group thread into the container runtime", async () => {
+  it.each([
+    { mode: "normal", text: "How did we sleep?", attachmentId: "a".repeat(256), attachmentCount: 32 },
+    { mode: "compact", text: "\u0000".repeat(20_000), attachmentId: "a".repeat(256), attachmentCount: 16 },
+    { mode: "minimal", text: "\u0000".repeat(20_000), attachmentId: "\u0000".repeat(256), attachmentCount: 0 },
+  ])("preserves bound group routing through $mode mailbox staging", async ({
+    mode,
+    text,
+    attachmentId,
+    attachmentCount,
+  }) => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
     });
@@ -3602,10 +3611,44 @@ describe("Linq explicit external-thread routing", () => {
       }),
     });
 
+    const event = buildLinqMessageReceivedEvent({
+      parts: [
+        { type: "text", value: text },
+        ...Array.from({ length: 32 }, (_, index) => ({
+          attachment_id: attachmentId,
+          filename: "f".repeat(160),
+          mime_type: "m".repeat(120),
+          size: index,
+          type: "media" as const,
+          url: `https://example.test/signed-attachment/${index}?signature=synthetic`,
+        })),
+      ],
+    });
+    const originalEvent = structuredClone(event);
     const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
+      event,
       prisma: prisma as never,
     });
+
+    expect(event).toEqual(originalEvent);
+    const stagedMessage = readAppendedConversationMessage(0);
+    if (stagedMessage.channel !== "linq") {
+      throw new Error("Expected a staged Linq conversation message.");
+    }
+    expect(stagedMessage.linqMessage.parts.filter((part) => part.type === "media"))
+      .toHaveLength(attachmentCount);
+    const serializedEnvelope = JSON.stringify(
+      vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mock.calls[0]?.[0].envelope,
+    );
+    expect(new TextEncoder().encode(serializedEnvelope).byteLength).toBeLessThan(128 * 1024);
+    expect(serializedEnvelope).not.toContain("signed-attachment");
+    if (mode === "normal") {
+      expect(serializedEnvelope).not.toContain("Internal staging note:");
+    } else {
+      expect(serializedEnvelope).toContain(mode === "compact"
+        ? "payload was compacted"
+        : "exceeded hosted mailbox staging limits");
+    }
 
     expect(plan.response).toMatchObject({
       ignored: false,
@@ -8739,6 +8782,7 @@ describe("Linq group chat auto-provision", () => {
         userId: containerCreate.data.memberId,
       },
       mailboxItemId: "mailbox_group_123",
+      onSignalStarted: expect.any(Function),
     });
   });
 

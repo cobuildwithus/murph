@@ -24,9 +24,6 @@
     },
     {
       "path": "../operator-config"
-    },
-    {
-      "path": "../assistantd"
     }
   ],
   "include": [

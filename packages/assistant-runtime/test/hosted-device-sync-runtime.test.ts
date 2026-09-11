@@ -372,7 +372,6 @@ function buildRuntimeSnapshot(input: {
   };
   metadata?: Record<string, unknown>;
   provider?: string;
-  providerConfigs?: HostedExecutionDeviceSyncRuntimeSnapshotResponse["providerConfigs"];
   setupExpiresAt?: string | null;
   setupPhase?: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
   status?: HostedExecutionDeviceSyncRuntimeConnectionStatus;
@@ -445,7 +444,6 @@ function buildRuntimeSnapshot(input: {
       },
     ],
     generatedAt: input.generatedAt ?? "2026-04-04T09:10:00.000Z",
-    ...(input.providerConfigs === undefined ? {} : { providerConfigs: input.providerConfigs }),
     userId: "member_123",
   };
 }
@@ -14903,17 +14901,7 @@ describe("hosted device-sync runtime", () => {
         junctionHistoricalBackfillWindowEnd: "2026-04-01T00:00:00.000Z",
       },
       provider: "junction",
-      providerConfigs: {
-        junction: {
-          environment: "sandbox",
-          reconcileDays: 3,
-          reconcileIntervalMs: 60 * 60_000,
-          region: "us",
-          summaryBackfillDays: 3,
-          summaryResources: [],
-          timeseriesBackfillDays: 3,
-        },
-      },
+
       sources: [{
         displayName: "Garmin",
         firstSeenAt: "2026-04-01T00:00:00.000Z",
@@ -15162,17 +15150,7 @@ describe("hosted device-sync runtime", () => {
         junctionHistoricalBackfillWindowEnd: "2026-04-01T00:00:00.000Z",
       },
       provider: "junction",
-      providerConfigs: {
-        junction: {
-          environment: "sandbox",
-          reconcileDays: 3,
-          reconcileIntervalMs: 60 * 60_000,
-          region: "us",
-          summaryBackfillDays: 3,
-          summaryResources: [],
-          timeseriesBackfillDays: 3,
-        },
-      },
+
       sources: [{
         displayName: "Garmin",
         firstSeenAt: "2026-04-01T00:00:00.000Z",
@@ -15364,12 +15342,7 @@ describe("hosted device-sync runtime", () => {
       },
       externalAccountId: "junction-no-timezone-resolver",
       provider: "junction",
-      providerConfigs: {
-        junction: {
-          environment: "sandbox",
-          region: "us",
-        },
-      },
+
       sources: [],
     });
     const [configuredProvider] = createConfiguredDeviceSyncProvidersFromConfigs({
@@ -15484,17 +15457,7 @@ describe("hosted device-sync runtime", () => {
       localState: { nextReconcileAt: yieldedAt },
       metadata,
       provider: "junction",
-      providerConfigs: {
-        junction: {
-          environment: "sandbox",
-          reconcileDays: 1,
-          reconcileIntervalMs: 60 * 60_000,
-          region: "us",
-          summaryBackfillDays: 1,
-          summaryResources: ["activity"],
-          timeseriesBackfillDays: 1,
-        },
-      },
+
       sources: [{
         displayName: "Garmin",
         firstSeenAt: connectedAt,

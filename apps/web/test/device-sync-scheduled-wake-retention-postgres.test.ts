@@ -102,6 +102,7 @@ describe.skipIf(!runPostgresProof)(
       await client.deviceSyncDirtyPayload.create({ data: {
         id: `synthetic-payload-${connectionId}`, connectionId, userId: fixture.memberId,
         provider: "oura", dirtyRevision: 5n, resourceEncrypted: "encrypted-synthetic-fixture",
+        credentialIndependent: false,
       } });
       requestWake.mockClear();
       await runHostedDeviceSyncDueReconcileSweeper({ store, now, requestWake, logger: { info() {}, warn() {} } });

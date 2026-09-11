@@ -708,7 +708,7 @@ Required for live Labs discovery:
 
 This is the same canonical Junction credential used by hosted device sync.
 Labs discovery keeps the key server-only, targets the code-owned production US
-origin, and serves authenticated `POST /api/labs` plus signed
+origin, and serves signed
 `POST /api/internal/hosted-execution/labs/tool` through one stateless service.
 No catalog, query, or ZIP is persisted.
 
@@ -1940,6 +1940,72 @@ phone-call traffic, the additive schema remains safe for the prior build. The
 legacy columns remain nullable in this rollout; remove them only in a later
 contract migration after the zero-row proof and the prior Vercel function
 window has drained.
+
+### Hosted legacy phone-call deletion
+
+The authenticated synchronous Ops operation at
+`POST /api/ops/phone-calls/legacy-plaintext` is the reviewed hosted execution
+owner for explicitly retired legacy call records. It reuses the active Ops
+session allowlist, same-origin mutation check, Web database connection, and
+existing Retell deletion runtime. It has no approved local execution path
+against production and needs no crypto unwrap, new credentials, or Workflow.
+Adding this capability does not execute it or authorize a deployment.
+
+The selection is deliberately narrower than all plaintext storage: at least
+one non-null legacy JSON value, both ciphertext columns SQL-null, no originating
+session, and no scheduled-call request key. At most eight rows can be selected.
+Every selected row must have a terminal completed, needs-user, or failed status,
+no pending provider cleanup, no pending or ambiguous delivery state, and no
+unconsumed result or stop-settled mailbox item. Unknown Telegram delivery state
+blocks deletion. The service selects operational metadata only and never loads
+the private JSON or ciphertext. Usage records and billing ledgers are retained.
+
+Before the operation, the execution owner must deploy this capability and its
+notification-append existence checks, prove the exact production alias commit,
+and drain prior Vercel function invocations. Deployment-pinned phone-call
+Workflows are a separate obligation: prove no selected call has an active
+start, result, or notification/reconciliation execution on an older deployment;
+elapsed function lifetime alone is insufficient. Preserve the encrypted-only
+writer rollback floor and do not admit or replay pre-session call-start work
+during the operation. Current calls have originating-session authority and
+scheduled calls retain their request-key ownership.
+
+From an authenticated allowlisted Ops browser session on the production origin,
+send a same-origin POST with JSON body `{}` for the default dry run. The response
+contains mode, counts (`selectedRows`, `providerRows`, `deletedRows`,
+and `failedRows`), and a bounded `failureCode` enum. Review that bounded selection before sending a separate POST
+with `{"mode":"apply","expectedRows":<reviewed count>}`; never derive an apply
+count automatically from a fresh read. An omitted apply count, out-of-range
+count, unknown request field, changed selection count, or unresolved row blocks
+provider work. Both requests use the existing session cookie; no operator
+secret or production database URL is copied into a local command.
+
+Apply freezes the selected row identities and versions in memory, revalidates
+each before provider work, deletes the exact provider object through the
+existing Retell runtime, then rechecks eligibility and deletes by compare-and-set.
+Keep the configured Retell key in the same workspace as the retained provider
+references: a missing-object response proves absence only in that workspace.
+External work runs outside transactions under a 45-second operation deadline;
+the synchronous route has a 60-second budget. Notification append and final
+deletion acquire the member lock before phone-row work. This prevents a stale
+callback from creating mailbox work after the row is gone.
+
+Apply can complete earlier rows before a later provider failure or conflict.
+A nonzero `failedRows` or `deletedRows < selectedRows` is an incomplete result:
+stop, use `failureCode` to distinguish provider cleanup, row revalidation, or
+deadline failure, inspect the hosted drain boundary, and run a new dry run before
+choosing a new expected count. The failed row and provider reference remain
+retry ownership, including after provider success followed by a local conflict.
+Do not log identifiers, provider error bodies, or row contents.
+
+A final zero selection is necessary but is not proof that every legacy JSON
+value is gone: the selector intentionally excludes ciphertext-bearing,
+current-session, and scheduled rows. Before the dependent reader-removal PR,
+the hosted execution owner must separately prove zero non-null `brief_json`
+or `result_json` values across the entire phone table, excluding JSON null,
+and retain that check as a predeploy guard. Keep readers and nullable columns
+throughout this capability rollout. Remove columns only after the later
+encrypted-only reader deployment and its complete prior-function/Workflow drain.
 
 ## Production build memory guard
 

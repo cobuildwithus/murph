@@ -641,11 +641,9 @@ async function readHostedRuntimePendingConversationWake(input: {
 
   const payload = input.item.payloadRef
     ? await readHostedMailboxPayload({
-        dedupeKey: input.item.dedupeKey,
-        mailboxItemId: input.item.id,
+        item: input.item,
         payloadRef: input.item.payloadRef,
         prisma: input.prisma,
-        userId: input.item.userId,
       })
     : null;
   const decoded = await decodeHostedMailboxStoredPayload({

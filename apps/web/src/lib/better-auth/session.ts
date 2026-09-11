@@ -113,5 +113,4 @@ function createSessionAuth(input: { baseURL: string; secret: string; prisma: Pri
 
 const sessionOnlyDelivery = {
   email: async () => { throw new Error("Session operations cannot send codes."); },
-  sms: async () => { throw new Error("Session operations cannot send codes."); },
 };

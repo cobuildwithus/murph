@@ -123,7 +123,6 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
     name: "cli-schemas-smoke",
     includeRemaining: true,
     patterns: [
-      "assistant-chat-theme.test.ts",
       "automation.test.ts",
       "cli-entry.test.ts",
       "cli-test-helpers.test.ts",

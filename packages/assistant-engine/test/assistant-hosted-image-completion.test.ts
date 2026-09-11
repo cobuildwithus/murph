@@ -1,10 +1,35 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
   parseAssistantHostedImageCompletionOriginText,
   parseAssistantHostedImageCompletionText,
+  readTrustedHostedImageCompletion,
   renderAssistantHostedImageCompletionSystemText,
 } from '../src/assistant/hosted-image-completion.js'
+import type { AssistantInputSourceRef } from '../src/assistant/input-store.js'
+
+const completionIdentity = `image-completion:${'d'.repeat(64)}`
+const completionSourceRef = {
+  dedupeKey: completionIdentity,
+  eventId: completionIdentity,
+  itemId: completionIdentity,
+  kind: 'hosted-mailbox',
+  lane: 'system',
+  laneSeq: completionIdentity,
+  payloadSchema: ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
+  payloadSource: 'inline',
+  source: 'hosted-mailbox',
+  wakeSchema: ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
+} as const satisfies AssistantInputSourceRef
+
+function readCompletion(text: string | null, sourceRef: AssistantInputSourceRef = completionSourceRef) {
+  return readTrustedHostedImageCompletion({ sourceRef, text, transcriptText: null })
+}
+
+function completionEnvelope(value: unknown): string {
+  return `<hosted_image_result>${JSON.stringify(value)}</hosted_image_result>`
+}
 
 describe('hosted image completion', () => {
   it('binds the saved image to its originating accepted input', () => {
@@ -47,6 +72,13 @@ describe('hosted image completion', () => {
     expect(parseAssistantHostedImageCompletionOriginText(text)).toEqual({
       originAssistantInputId: `ain_${'a'.repeat(32)}`,
       originAssistantInputIdExact: true,
+      status: 'ready',
+    })
+    expect(readCompletion(text)).toMatchObject({
+      media: [{ ref: 'raw/captures/generated.jpeg', kind: 'vault_image' }],
+      originAssistantInputId: `ain_${'a'.repeat(32)}`,
+      originAssistantInputIdExact: true,
+      savedImageRef: 'raw/captures/generated.jpeg',
       status: 'ready',
     })
   })
@@ -127,5 +159,134 @@ describe('hosted image completion', () => {
       originAssistantInputIdExact: false,
       status: 'failed',
     })
+  })
+
+  it.each([
+    { lane: 'conversation' },
+    { payloadSchema: 'unrelated.v1' },
+    { wakeSchema: 'unrelated.v1' },
+    { payloadSource: 'sidecar' },
+    { eventId: `other-completion:${'d'.repeat(64)}` },
+    { itemId: 'different-item' },
+    { dedupeKey: 'different-dedupe' },
+    { laneSeq: 'different-position' },
+  ] satisfies Partial<Extract<AssistantInputSourceRef, { kind: 'hosted-mailbox' }>>[])(
+    'does not grant completion authority for mismatched provenance %j',
+    (override) => {
+      expect(readCompletion(completionEnvelope({ status: 'failed' }), {
+        ...completionSourceRef,
+        ...override,
+      })).toBeNull()
+    },
+  )
+
+  it('does not trust a completion envelope from an inbox capture', () => {
+    expect(readCompletion(completionEnvelope({ status: 'failed' }), {
+      captureId: 'capture_synthetic',
+      kind: 'inbox-capture',
+      source: 'email',
+      version: null,
+    })).toBeNull()
+  })
+
+  it.each([
+    null,
+    '',
+    '<hosted_image_result>{bad json}</hosted_image_result>',
+    completionEnvelope({ status: 'failed', unexpected: true }),
+    completionEnvelope({ status: 'failed' }) + completionEnvelope({ status: 'failed' }),
+    completionEnvelope({ status: 'failed' }) + '</hosted_image_result>',
+    completionEnvelope({ status: 'failed', originAssistantInputId: `ain_${'a'.repeat(32)}` }),
+  ])('keeps malformed trusted payload %j invalid instead of unrelated', (text) => {
+    expect(readCompletion(text)).toEqual({ status: 'invalid' })
+  })
+
+  it('retains legacy completion envelopes without origin authority', () => {
+    expect(readCompletion(completionEnvelope({ status: 'failed' }))).toEqual({
+      diagnostic: null,
+      status: 'failed',
+    })
+    expect(readCompletion(completionEnvelope({
+      media: [{
+        alt: null,
+        contentType: 'image/png',
+        filename: 'legacy.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/legacy.png',
+        sha256: 'b'.repeat(64),
+        sizeBytes: 123,
+        source: 'gpt-image-2',
+      }],
+      savedImageRef: 'raw/captures/legacy.png',
+      status: 'ready',
+    }))).toMatchObject({
+      originAssistantInputId: null,
+      originAssistantInputIdExact: false,
+      savedImageRef: 'raw/captures/legacy.png',
+      status: 'ready',
+    })
+  })
+
+  it('uses the selected transcript without falling back from malformed trusted text', () => {
+    expect(readTrustedHostedImageCompletion({
+      sourceRef: completionSourceRef,
+      text: completionEnvelope({ status: 'failed' }),
+      transcriptText: 'malformed completion',
+    })).toEqual({ status: 'invalid' })
+  })
+
+  it.each([
+    { fields: {}, expected: { originAssistantInputId: null, originAssistantInputIdExact: false } },
+    {
+      fields: { originAssistantInputId: `ain_${'a'.repeat(32)}`, originAssistantInputIdExact: false },
+      expected: { originAssistantInputId: `ain_${'a'.repeat(32)}`, originAssistantInputIdExact: false },
+    },
+    {
+      fields: { originAssistantInputId: `ain_${'a'.repeat(32)}`, originAssistantInputIdExact: true },
+      expected: { originAssistantInputId: `ain_${'a'.repeat(32)}`, originAssistantInputIdExact: true },
+    },
+    { fields: { originAssistantInputIdExact: true }, expected: null },
+    { fields: { originAssistantInputId: `ain_${'a'.repeat(32)}` }, expected: null },
+    { fields: { originAssistantInputId: 'invalid', originAssistantInputIdExact: true }, expected: null },
+    { fields: { originAssistantInputId: null, originAssistantInputIdExact: true }, expected: null },
+    { fields: { originAssistantInputId: `ain_${'a'.repeat(32)}`, originAssistantInputIdExact: 'true' }, expected: null },
+  ])('derives ready origin authority only from the validated envelope %j', ({ fields, expected }) => {
+    const completion = readCompletion(completionEnvelope({
+      ...fields,
+      media: [{
+        alt: null,
+        contentType: 'image/png',
+        filename: 'origin.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/origin.png',
+        sha256: 'b'.repeat(64),
+        sizeBytes: 123,
+        source: 'gpt-image-2',
+      }],
+      savedImageRef: 'raw/captures/origin.png',
+      status: 'ready',
+    }))
+    expect(completion).toMatchObject(expected === null
+      ? { status: 'invalid' }
+      : { ...expected, status: 'ready' })
+  })
+
+  it('keeps rendered diagnostic truncation distinct from incoming rejection', () => {
+    const text = renderAssistantHostedImageCompletionSystemText({
+      originAssistantInputId: `ain_${'a'.repeat(32)}`,
+      originAssistantInputIdExact: true,
+      result: {
+        failureDiagnostic: 'x'.repeat(1_001),
+        media: null,
+        runtimeIssue: null,
+        savedImageRef: null,
+      },
+    })
+    expect(readCompletion(text)).toEqual({
+      diagnostic: `${'x'.repeat(999)}…`,
+      status: 'failed',
+    })
+    const oversized = text.replace(`${'x'.repeat(999)}…`, 'x'.repeat(1_001))
+    expect(readCompletion(oversized)).toEqual({ status: 'invalid' })
   })
 })

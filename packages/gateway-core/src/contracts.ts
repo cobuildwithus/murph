@@ -40,13 +40,6 @@ export const gatewayDeliveryTargetKindValues = [
   'thread',
 ] as const
 
-export const gatewayEventKindValues = [
-  'message.created',
-  'conversation.updated',
-  'permission.requested',
-  'permission.resolved',
-] as const
-
 export const gatewayPermissionStatusValues = [
   'open',
   'approved',
@@ -129,19 +122,6 @@ export const gatewayMessageSchema = z
   })
   .strict()
 
-export const gatewayEventSchema = z
-  .object({
-    schema: z.literal('murph.gateway-event.v1'),
-    cursor: z.number().int().nonnegative(),
-    kind: z.enum(gatewayEventKindValues),
-    createdAt: isoTimestampSchema,
-    sessionKey: gatewayOptionalStringSchema,
-    messageId: gatewayOptionalStringSchema,
-    permissionRequestId: gatewayOptionalStringSchema,
-    summary: gatewayOptionalStringSchema,
-  })
-  .strict()
-
 export const gatewayPermissionRequestSchema = z
   .object({
     schema: z.literal('murph.gateway-permission-request.v1'),
@@ -153,16 +133,6 @@ export const gatewayPermissionRequestSchema = z
     requestedAt: isoTimestampSchema,
     resolvedAt: isoTimestampSchema.nullable().default(null),
     note: gatewayOptionalStringSchema,
-  })
-  .strict()
-
-export const gatewayProjectionSnapshotSchema = z
-  .object({
-    schema: z.literal('murph.gateway-projection-snapshot.v1'),
-    generatedAt: isoTimestampSchema,
-    conversations: z.array(gatewayConversationSchema).default([]),
-    messages: z.array(gatewayMessageSchema).default([]),
-    permissions: z.array(gatewayPermissionRequestSchema).default([]),
   })
   .strict()
 
@@ -212,27 +182,6 @@ export const gatewayFetchAttachmentsInputSchema = z
     sessionKey: gatewayOptionalStringSchema,
   })
   .strict()
-
-export const gatewayPollEventsInputSchema = z
-  .object({
-    cursor: z.number().int().nonnegative().optional().default(0),
-    kinds: z.array(z.enum(gatewayEventKindValues)).optional().default([]),
-    limit: z.number().int().positive().max(200).optional().default(50),
-    sessionKey: gatewayOptionalStringSchema,
-  })
-  .strict()
-
-export const gatewayPollEventsResultSchema = z
-  .object({
-    events: z.array(gatewayEventSchema).default([]),
-    nextCursor: z.number().int().nonnegative(),
-    live: z.boolean().default(true),
-  })
-  .strict()
-
-export const gatewayWaitForEventsInputSchema = gatewayPollEventsInputSchema.extend({
-  timeoutMs: z.number().int().positive().max(120_000).optional().default(30_000),
-})
 
 export const gatewaySendMessageInputSchema = z
   .object({
@@ -285,8 +234,6 @@ export type GatewayChannelDelivery = ZodInfer<typeof gatewaySendMessageResultSch
 export type GatewayConversationDirectness =
   (typeof gatewayConversationDirectnessValues)[number]
 export type GatewayConversationRoute = ZodInfer<typeof gatewayConversationRouteSchema>
-export type GatewayEvent = ZodInfer<typeof gatewayEventSchema>
-export type GatewayEventKind = (typeof gatewayEventKindValues)[number]
 export type GatewayFetchAttachmentsInput = ZodInput<typeof gatewayFetchAttachmentsInputSchema>
 export type GatewayGetConversationInput = ZodInfer<typeof gatewayGetConversationInputSchema>
 export type GatewayListConversationsInput = ZodInput<
@@ -303,10 +250,7 @@ export type GatewayMessageDirection = (typeof gatewayMessageDirectionValues)[num
 export type GatewayPermissionDecision =
   (typeof gatewayPermissionDecisionValues)[number]
 export type GatewayPermissionRequest = ZodInfer<typeof gatewayPermissionRequestSchema>
-export type GatewayProjectionSnapshot = ZodInfer<typeof gatewayProjectionSnapshotSchema>
 export type GatewayPermissionStatus = (typeof gatewayPermissionStatusValues)[number]
-export type GatewayPollEventsInput = ZodInput<typeof gatewayPollEventsInputSchema>
-export type GatewayPollEventsResult = ZodInfer<typeof gatewayPollEventsResultSchema>
 export type GatewayReadMessagesInput = ZodInput<typeof gatewayReadMessagesInputSchema>
 export type GatewayReadMessagesResult = ZodInfer<typeof gatewayReadMessagesResultSchema>
 export type GatewayDeliveryTargetKind = (typeof gatewayDeliveryTargetKindValues)[number]
@@ -317,4 +261,3 @@ export type GatewayRespondToPermissionInput = ZodInput<
 >
 export type GatewaySendMessageInput = ZodInput<typeof gatewaySendMessageInputSchema>
 export type GatewaySendMessageResult = ZodInfer<typeof gatewaySendMessageResultSchema>
-export type GatewayWaitForEventsInput = ZodInput<typeof gatewayWaitForEventsInputSchema>

@@ -6,7 +6,7 @@ import {
   createAssistantAskRequestedWake,
   createOperatorTaskAssistantAskRequestedWake,
   createAssistantProviderUsageDraft,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -51,6 +51,7 @@ import {
   initializeVault,
   patchAutomation,
   readHabitatAspect,
+  readIntegrationIngestEntries,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -152,9 +153,8 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/empty-system-mailbox.bundle.json",
                 size: 128,
               }),
             };
@@ -735,9 +735,8 @@ describe("hosted workspace runtime entrypoint", () => {
             snapshotStarted = true;
             events.push("snapshot");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "7".repeat(64),
-                key: "users/bundles/member-synthetic/codex-preinitialization-snapshot-join.bundle.json",
                 size: 512,
               }),
             };
@@ -909,9 +908,8 @@ describe("hosted workspace runtime entrypoint", () => {
           async createCheckpointSnapshot() {
             events.push("snapshot");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/codex-preinitialization-fallback.bundle.json",
                 size: 512,
               }),
             };
@@ -1059,9 +1057,8 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot() {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "5".repeat(64),
-                key: `users/bundles/member-synthetic/provider-start-timing-${scenario.outcome}.bundle.json`,
                 size: 512,
               }),
             };
@@ -1160,9 +1157,8 @@ describe("hosted workspace runtime entrypoint", () => {
           async createCheckpointSnapshot() {
             events.push("snapshot");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "6".repeat(64),
-                key: "users/bundles/member-synthetic/email-first-preinitialization-veto.bundle.json",
                 size: 512,
               }),
             };
@@ -1396,9 +1392,8 @@ describe("hosted workspace runtime entrypoint", () => {
             snapshotStarted = true;
             events.push("snapshot.started");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "9".repeat(64),
-                key: "users/bundles/member-synthetic/detached-ask-concurrency.bundle.json",
                 size: 512,
               }),
             };
@@ -1583,9 +1578,8 @@ describe("hosted workspace runtime entrypoint", () => {
             snapshotStarted = true;
             events.push("snapshot.started");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "9".repeat(64),
-                key: "users/bundles/member-synthetic/detached-ask-concurrency.bundle.json",
                 size: 512,
               }),
             };
@@ -1749,9 +1743,8 @@ describe("hosted workspace runtime entrypoint", () => {
           async createCheckpointSnapshot() {
             events.push("snapshot.started");
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "5".repeat(64),
-                key: "users/bundles/member-synthetic/approved-ask-foreground.bundle.json",
                 size: 512,
               }),
             };
@@ -1931,9 +1924,8 @@ describe("hosted workspace runtime entrypoint", () => {
           {
             async createCheckpointSnapshot() {
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "8".repeat(64),
-                  key: "users/bundles/member-synthetic/detached-share-regrant.bundle.json",
                   size: 512,
                 }),
               };
@@ -2114,11 +2106,8 @@ describe("hosted workspace runtime entrypoint", () => {
           {
             async createCheckpointSnapshot() {
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "7".repeat(64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + "detached-share-authority-unavailable.bundle.json",
                   size: 512,
                 }),
               };
@@ -2303,11 +2292,8 @@ describe("hosted workspace runtime entrypoint", () => {
               snapshotActive = false;
               events.push(`snapshot.${checkpointRequests.length + 1}.finished`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `detached-ask-after-checkpoint-${checkpointRequests.length + 1}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -2608,11 +2594,12 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("repairs an exact interrupted integration ingest archive before serving the restored vault", async () => {
+  test("reaches mailbox import before recovering an interrupted archive on its first canonical read", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const snapshotRef = createWorkspaceSnapshotV2Ref("snapshot-interrupted-ingest-archive");
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const logicalPath = "ledger/integration-ingests/2026/2026-03.jsonl";
+    let imported = false;
 
     try {
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
@@ -2633,10 +2620,15 @@ describe("hosted workspace runtime entrypoint", () => {
           };
         },
         async importItem() {
-          throw new Error("Interrupted archive recovery test should not import mailbox items.");
+          await access(path.join(vaultRoot, logicalPath));
+          await access(path.join(vaultRoot, `${logicalPath}.gz`));
+          const entries = await readIntegrationIngestEntries(vaultRoot);
+          assert.deepEqual(entries.map((entry) => entry.record.id), ["xfm_11111111111111111111111111"]);
+          imported = true;
+          return { status: "imported" };
         },
         platform: createPlatform({
-          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          mailboxPort: createMailboxPort({ events: [], items: [createMailboxItem()] }),
           workspacePort: createWorkspacePort({
             checkpointRequests,
             events: [],
@@ -2689,6 +2681,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await assert.rejects(access(path.join(vaultRoot, logicalPath)));
       await access(path.join(vaultRoot, `${logicalPath}.br`));
+      assert.equal(imported, true);
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
     } finally {
@@ -2729,9 +2722,8 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot(snapshotInput) {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: snapshotInput.reason === "import" ? "5".repeat(64) : "6".repeat(64),
-                key: `users/bundles/member-synthetic/${snapshotInput.reason}-member-action-outcome-port.bundle.json`,
                 size: 512,
               }),
             };
@@ -2811,9 +2803,8 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot(snapshotInput) {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: snapshotInput.reason === "import" ? "3".repeat(64) : "4".repeat(64),
-                key: `users/bundles/member-synthetic/${snapshotInput.reason}-ca-env.bundle.json`,
                 size: 512,
               }),
             };
@@ -2888,9 +2879,8 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot(snapshotInput) {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: snapshotInput.reason === "import" ? "5".repeat(64) : "6".repeat(64),
-                key: `users/bundles/member-synthetic/${snapshotInput.reason}-android-gate.bundle.json`,
                 size: 512,
               }),
             };
@@ -2968,9 +2958,8 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot(snapshotInput) {
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: snapshotInput.reason === "import" ? "5".repeat(64) : "6".repeat(64),
-                key: `users/bundles/member-synthetic/${snapshotInput.reason}-openai-ca-probe.bundle.json`,
                 size: 512,
               }),
             };

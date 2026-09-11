@@ -38,7 +38,6 @@ const BUILD_ARTIFACTS = {
   "packages/cli": ".tsbuildinfo",
   "packages/openclaw-plugin": ".tsbuildinfo",
   "packages/assistant-runtime": ".tsbuildinfo",
-  "packages/assistantd": ".tsbuildinfo",
 };
 
 const CLEAN_GROUPS = {
@@ -68,7 +67,6 @@ const CLEAN_GROUPS = {
     "packages/cli",
     "packages/openclaw-plugin",
     "packages/assistant-runtime",
-    "packages/assistantd",
   ],
   "test-runtime": [
     "packages/contracts",
@@ -94,7 +92,6 @@ const CLEAN_GROUPS = {
     "packages/inbox-services",
     "packages/vault-usecases",
     "packages/cli",
-    "packages/assistantd",
   ],
 };
 

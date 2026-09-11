@@ -268,38 +268,5 @@ describe("device-sync hosted runtime helpers", () => {
       userId: "user-123",
     });
 
-    expect(buildHostedPublicDeviceSyncAccount({
-      record: {
-        accessTokenExpiresAt: null,
-        credentialKind: "oauth_tokens",
-        credentialMetadata: {},
-        providerConfigKey: null,
-        providerApplicationId: null,
-        providerApplicationRevision: null,
-        setupExpiresAt: null,
-        setupPhase: null,
-        displayName: null,
-        externalAccountId: "oura_alice",
-        id: "dsc_123",
-        connectedAt: "2026-03-26T12:00:00.000Z",
-        createdAt: "2026-03-26T12:00:00.000Z",
-        lastWebhookAt: null,
-        lastSyncStartedAt: null,
-        lastSyncCompletedAt: null,
-        lastSyncErrorAt: "2026-03-26T12:00:00.000Z",
-        lastErrorCode: "refresh_token=db-secret",
-        lastErrorMessage: errorText,
-        metadata: {},
-        nextReconcileAt: null,
-        provider: "oura",
-        scopes: [],
-        status: "active",
-        updatedAt: "2026-03-26T12:00:00.000Z",
-        userId: "user-123",
-      },
-    })).toMatchObject({
-      lastErrorCode: "refresh_token=[redacted]",
-      lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
-    });
   });
 });

@@ -308,7 +308,7 @@ async function proveIndividualStartsFamilyThroughCheckout(): Promise<{
       projection.billingActive
       && projection.billingStatus === "active"
       && projection.currentBillingPlanCode === "launch_family_monthly"
-      && projection.billedSeatCount === 2
+      && projection.seats?.billed === 2
       && projection.stripeSubscriptionId === subscriptionId,
   });
   expect(family.seats?.billed).toBe(2);
@@ -341,7 +341,7 @@ async function provePaidIndividualConvertsToFamilyInPlace(): Promise<void> {
         && projection.billingStatus === "active"
         && projection.currentBillingPhase === "paid"
         && projection.currentBillingPlanCode === "launch_family_monthly"
-        && projection.billedSeatCount === 2
+        && projection.seats?.billed === 2
         && projection.stripeSubscriptionId === fixture.subscriptionId,
     });
     expect(family.seats?.billed).toBe(2);

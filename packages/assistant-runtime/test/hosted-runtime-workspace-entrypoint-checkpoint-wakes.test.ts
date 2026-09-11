@@ -1,7 +1,7 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -100,9 +100,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/durable-effect-success.bundle.json",
                 size: 512,
               }),
             };
@@ -147,6 +146,81 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
     }
   });
 
+  test.each(["caught-up", "incomplete", "unknown"] as const)("classifies %s empty projection wakes before completing checkpointed work", async (coverage) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-ready-completion-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let assistantPasses = 0;
+    let scopeReads = 0;
+    const mailboxPort = createMailboxPort({ events, items: [] });
+    const durableEffect = vi.fn(async () => {
+      events.push("completion");
+      return { requiresFollowUpCheckpoint: true };
+    });
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: { idleCheckpointDelayMs: 1 },
+      }), {
+        vaultRoot,
+        runtimeWakeSignal,
+        async importItem() { return { status: "imported" }; },
+        async createCheckpointSnapshot() {
+          assert.ok(checkpointRequests.length < 4, "Ready completion was starved by empty wake checkpoint churn.");
+          return { snapshotRef: createSnapshotFixtureRef({ hash: "a".repeat(64), size: 512 }) };
+        },
+        platform: createPlatform({
+          mailboxPort: {
+            ...mailboxPort,
+            async fetch(request) {
+              const response = await mailboxPort.fetch(request);
+              if (scopeReads === 1 && coverage !== "caught-up") {
+                return {
+                  ...response,
+                  maxSeqByLane: coverage === "unknown" ? [] : response.maxSeqByLane.map((entry) => ({
+                    ...entry, maxSeq: entry.lane === "conversation" ? "1" : entry.maxSeq,
+                  })),
+                };
+              }
+              return response;
+            },
+          },
+          workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState() }),
+          vaultSharePort: {
+            async listActiveProjectionScopes() {
+              scopeReads += 1;
+              if (coverage === "caught-up" || scopeReads === 1) runtimeWakeSignal.notify();
+              await new Promise((resolve) => setTimeout(resolve, 10));
+              return { projectionKinds: [], projectionScopes: [] };
+            },
+            async deliver() { return { status: "delivered" }; },
+          },
+        }),
+        async runAssistantPhase() {
+          assistantPasses += 1;
+          return {
+            progressed: true,
+            checkpointReason: "assistant_runtime_commit",
+            nextWakeAt: new Date().toISOString(),
+            nextWakeReason: "device-sync.reconcile",
+            ...(assistantPasses === 1 ? {
+              afterCheckpoint: async () => ({
+                checkpointReason: "system_mailbox_receipt",
+                afterDurableCheckpoint: durableEffect,
+              }),
+            } : {}),
+          };
+        },
+      });
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.equal(assistantPasses, coverage === "caught-up" ? 1 : 2);
+      assert.ok(events.indexOf("workspace.checkpoint") < events.indexOf("completion"));
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("checkpoint-gated due projected wakes wait for the idle delay before service", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -186,9 +260,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               firstCheckpointStartedAtMs ??= Date.now();
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "f".repeat(64),
-                  key: "users/bundles/member-synthetic/durable-effect-external-wake.bundle.json",
                   size: 512,
                 }),
               };
@@ -331,11 +404,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `round1-durable-wake-survives-reschedule-${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -473,11 +543,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               checkpointStartedAtMs.push(Date.now());
               events.push(`snapshot:${snapshotInput.reason}:${checkpointStartedAtMs.length}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointStartedAtMs.length}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `round3-hot-work-durable-reconcile-${checkpointStartedAtMs.length}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -664,9 +731,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             snapshotCount += 1;
             events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(snapshotCount).repeat(64),
-                key: `users/bundles/member-synthetic/effects-blocked-due-wake-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -857,11 +923,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key:
-                    `users/bundles/member-synthetic/effects-blocked-dirty-wake-`
-                    + `${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1029,11 +1092,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key:
-                    `users/bundles/member-synthetic/competing-effects-blocked-wake-`
-                    + `${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1182,11 +1242,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key:
-                    `users/bundles/member-synthetic/checkpoint-gated-dirty-wake-`
-                    + `${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1339,9 +1396,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             snapshotCount += 1;
             events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(snapshotCount).repeat(64),
-                key: `users/bundles/member-synthetic/durable-effect-follow-up-due-wake-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -1469,11 +1525,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key:
-                    `users/bundles/member-synthetic/follow-up-fresh-due-wake-`
-                    + `${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1631,9 +1684,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key: `users/bundles/member-synthetic/follow-up-preempted-replacement-wake-${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1761,9 +1813,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             snapshotCount += 1;
             events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(snapshotCount).repeat(64),
-                key: `users/bundles/member-synthetic/projected-follow-up-due-wake-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -1881,9 +1932,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             snapshotCount += 1;
             events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(snapshotCount).repeat(64),
-                key: `users/bundles/member-synthetic/checkpoint-blocked-due-wake-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -2006,9 +2056,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key: `users/bundles/member-synthetic/replaced-plain-due-wake-${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };

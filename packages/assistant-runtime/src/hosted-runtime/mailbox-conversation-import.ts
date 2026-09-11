@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 
+import type { HostedAssistantBootstrapResult } from "@murphai/operator-config/hosted-assistant-config";
+
 import type {
   HostedExecutionConversationMessageChannel,
   HostedExecutionConversationMessageWake,
@@ -259,6 +261,7 @@ export type HostedConversationMailboxImportOutcome =
     };
 
 export function createHostedConversationMailboxImportItem(input: {
+  assistantBootstrap?: HostedAssistantBootstrapResult | null;
   assistantTarget?: AssistantModelTarget | null;
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
@@ -293,6 +296,7 @@ export function createHostedConversationMailboxImportItem(input: {
 }
 
 export async function importHostedConversationMailboxItem(input: {
+  assistantBootstrap?: HostedAssistantBootstrapResult | null;
   assistantTarget?: AssistantModelTarget | null;
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
@@ -384,6 +388,7 @@ export async function importHostedConversationMailboxItem(input: {
         ...input.runtime.userEnv,
       },
       input.runtime.resolvedConfig,
+      { assistantBootstrap: input.assistantBootstrap },
     );
     autoReplyPreparedAtEpochMs = Date.now();
     pendingReplyEligible = isHostedConversationMailboxPendingReplyEligible({

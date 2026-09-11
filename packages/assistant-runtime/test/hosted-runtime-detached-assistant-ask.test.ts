@@ -926,7 +926,14 @@ describe("hosted detached assistant ask controller", () => {
     } finally { await removeVaultRoot(vaultRoot); }
   });
 
-  test("dispatches an operator diagnostic directly without consent review or delivery authority", async () => {
+  test.each([
+    ["hosted-openai", "hosted-openai"],
+    ["venice", "hosted-openai"],
+    ["hosted-custom-inference", "hosted-openai"],
+    ["hosted-chatgpt-openai", "hosted-chatgpt-openai"],
+    ["openai-local-test", "openai-local-test"],
+    ["venice-local-test", "openai-local-test"],
+  ])("dispatches an operator diagnostic with hosted authentication from %s without consent review or delivery authority", async (memberProvider, operatorProvider) => {
     const groupRuntimeRoot = await createVaultRoot();
     const records: AssistantUsageRecord[] = [];
     const deferred: HostedWorkspaceDurableCheckpointEffect[] = [];
@@ -968,7 +975,7 @@ describe("hosted detached assistant ask controller", () => {
         codexHome: "/hosted/codex-home",
         env: {},
         model: "gpt-5.6-luna",
-        modelProvider: "openai",
+        modelProvider: memberProvider,
         usageRecordPort: { async recordUsage(record) { records.push(record); return { recorded: true, usageId: record.usageId, platformAiUsageAllowedAfter: true }; } },
         deferUsageUntilAfterDurableCheckpoint(effect) { deferred.push(effect); },
         executeAsk,
@@ -998,7 +1005,7 @@ describe("hosted detached assistant ask controller", () => {
       assert.ok(operatorInput);
       assert.equal(operatorInput.feedbackDiagnostic, true);
       assert.equal(operatorInput.model, "gpt-5.6-sol");
-      assert.equal(operatorInput.modelProvider, "openai");
+      assert.equal(operatorInput.modelProvider, operatorProvider);
       assert.equal(operatorInput.codexHome, "/hosted/codex-home");
       assert.equal(operatorInput.question, "What is the synthetic status?");
       assert.equal(operatorInput.workspaceRoot, groupRuntimeRoot);
