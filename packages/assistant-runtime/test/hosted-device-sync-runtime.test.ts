@@ -14449,7 +14449,19 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("reconciliation sends a disconnected update when the local account disconnects after sync", async () => {
+  test.each([
+    { setupPhase: null, setupExpiresAt: null, expectedSetup: {} },
+    { setupPhase: "pending_link", setupExpiresAt: null, expectedSetup: { setupPhase: null } },
+    {
+      setupPhase: null,
+      setupExpiresAt: "2026-04-07T00:00:00.000Z",
+      expectedSetup: { setupExpiresAt: null },
+    },
+  ] as const)("reconciliation sends a disconnected update when the local account disconnects after sync ($setupPhase, $setupExpiresAt)", async ({
+    expectedSetup,
+    setupExpiresAt,
+    setupPhase,
+  }) => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -14459,14 +14471,17 @@ describe("hosted device-sync runtime", () => {
 
     try {
       const snapshot = buildRuntimeSnapshot({
+        capabilities: { connectionSourceApply: true },
         connectionId: "hosted_conn_disconnect_after_sync",
         externalAccountId: "demo-disconnect-after-sync",
+        setupExpiresAt,
+        setupPhase,
       });
-      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const appliedRequests: ApplyUpdatesRequest[] = [];
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
         ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
-          appliedRequest = input;
+          appliedRequests.push(input);
           return {
             appliedAt: "2026-04-06T10:10:01.000Z",
             updates: [],
@@ -14490,7 +14505,29 @@ describe("hosted device-sync runtime", () => {
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_disconnect_after_sync");
       assert.ok(localAccountId);
 
-      getStore(service).disconnectAccount(localAccountId, "2026-04-06T09:40:00.000Z");
+      const store = getStore(service);
+      store.markWebhookReceived(localAccountId, "2026-04-06T09:36:00.000Z");
+      store.markSyncStarted(localAccountId, "2026-04-06T09:37:00.000Z");
+      assert.equal(store.markSyncSucceeded(localAccountId, "2026-04-06T09:38:00.000Z"), true);
+      store.upsertConnectionSource({
+        connectionId: localAccountId,
+        sourceInstanceKey: "demo-source",
+        sourceProviderSlug: "demo",
+        displayName: "Local Source",
+        status: "connected",
+        resourceAvailabilitySummary: { activity: true },
+        firstSeenAt: "2026-04-06T09:36:00.000Z",
+        lastSeenAt: "2026-04-06T09:39:00.000Z",
+      });
+      store.disconnectAccount(localAccountId, "2026-04-06T09:40:00.000Z");
+      // Retained setup and differing active-only fields must not escape a disconnect.
+      store.patchAccount(localAccountId, {
+        displayName: "Local Disconnected",
+        metadata: { local: "not-published" },
+        scopes: ["read:data", "offline"],
+        setupExpiresAt: "2026-04-08T00:00:00.000Z",
+        setupPhase: "source_confirmed",
+      });
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -14500,19 +14537,23 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates[0], {
-        connection: {
-          status: "disconnected",
-        },
-        connectionId: "hosted_conn_disconnect_after_sync",
-        observedTokenVersion: 4,
-        observedConnectedAt: "2026-04-04T09:00:00.000Z",
-        observedUpdatedAt: "2026-04-04T09:05:00.000Z",
-        credential: {
-          clearTokens: true,
-          kind: "oauth_tokens",
-        },
-      });
+      assert.deepEqual(appliedRequests, [{
+        occurredAt: "2026-04-06T10:10:00.000Z",
+        updates: [{
+          connection: {
+            status: "disconnected",
+            ...expectedSetup,
+          },
+          connectionId: "hosted_conn_disconnect_after_sync",
+          observedTokenVersion: 4,
+          observedConnectedAt: "2026-04-04T09:00:00.000Z",
+          observedUpdatedAt: "2026-04-04T09:05:00.000Z",
+          credential: {
+            clearTokens: true,
+            kind: "oauth_tokens",
+          },
+        }],
+      }]);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -14531,15 +14572,17 @@ describe("hosted device-sync runtime", () => {
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_error_delta",
         externalAccountId: "demo-error-delta",
+        setupExpiresAt: "2026-04-07T00:00:00.000Z",
+        setupPhase: "pending_link",
         localState: {
           nextReconcileAt: "2026-04-06T11:00:00.000Z",
         },
       });
-      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const appliedRequests: ApplyUpdatesRequest[] = [];
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
         ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
-          appliedRequest = input;
+          appliedRequests.push(input);
           return {
             appliedAt: "2026-04-06T10:10:01.000Z",
             updates: [],
@@ -14563,6 +14606,24 @@ describe("hosted device-sync runtime", () => {
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_error_delta");
       assert.ok(localAccountId);
 
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:36:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+      assert.deepEqual(appliedRequests, [{
+        occurredAt: "2026-04-06T09:36:00.000Z",
+        updates: [],
+      }]);
+
+      getStore(service).patchAccount(localAccountId, {
+        displayName: null,
+        scopes: ["read:data", "offline"],
+        setupExpiresAt: null,
+        setupPhase: "failed",
+      });
       getStore(service).markSyncFailed(
         localAccountId,
         "2026-04-06T09:40:00.000Z",
@@ -14579,20 +14640,30 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates[0], {
-        connection: {
-          status: "reauthorization_required",
+      assert.deepEqual(appliedRequests, [
+        { occurredAt: "2026-04-06T09:36:00.000Z", updates: [] },
+        {
+          occurredAt: "2026-04-06T10:10:00.000Z",
+          updates: [{
+            connection: {
+              displayName: null,
+              scopes: ["read:data", "offline"],
+              setupExpiresAt: null,
+              setupPhase: "failed",
+              status: "reauthorization_required",
+            },
+            connectionId: "hosted_conn_error_delta",
+            localState: {
+              lastErrorCode: "LOCAL_ERR",
+              lastErrorMessage: "local error delta",
+              lastSyncErrorAt: "2026-04-06T09:40:00.000Z",
+              nextReconcileAt: null,
+            },
+            observedConnectedAt: "2026-04-04T09:00:00.000Z",
+            observedUpdatedAt: "2026-04-04T09:05:00.000Z",
+          }],
         },
-        connectionId: "hosted_conn_error_delta",
-        localState: {
-          lastErrorCode: "LOCAL_ERR",
-          lastErrorMessage: "local error delta",
-          lastSyncErrorAt: "2026-04-06T09:40:00.000Z",
-          nextReconcileAt: null,
-        },
-        observedConnectedAt: "2026-04-04T09:00:00.000Z",
-        observedUpdatedAt: "2026-04-04T09:05:00.000Z",
-      });
+      ]);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
