@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "A welcome by email and text",
     "summary": "Murph welcomes you by email and text when both are connected at signup.",
-    "details": "Connect your phone later and you can still receive the text welcome. Repeating setup does not send another welcome on either channel.",
+    "details": "Connect your phone later and you can still receive the text welcome. Repeating setup does not send another welcome on either channel. The app can also give you a number to text when Murph can't send the first message.",
     "relevanceTags": ["onboarding", "imessage"],
     "sourcePullRequests": []
   }

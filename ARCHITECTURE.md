@@ -2601,7 +2601,7 @@ services. When activation has both a verified email and an eligible direct Linq
 route, it queues the same welcome on both. Email uses the original welcome key
 and text uses the phone welcome key; both are appended in the activation
 transaction. The onboarding follow-up still has its existing single route.
-Authenticated completion and phone synchronization also request the
+Authenticated completion, active companion admission, and phone synchronization also request the
 ordinary text welcome when an active member connects a verified phone without
 an assigned text route. The email welcome remains intact. This notification
 uses `signup-welcome:<member>:linq`, independently of the original
@@ -2611,7 +2611,9 @@ not activate the member again or create a second onboarding follow-up. Deploy
 runtime welcome-key readers before the Web producer; original keys remain valid.
 Exhausted proactive capacity does not block activation: Web still
 assigns an eligible home line without a proactive text welcome, preserving the
-inbound-first messaging path. If no line is currently assignable, activation
+inbound-first messaging path. The assigned number remains available to native
+onboarding's Text Murph action and contact card; exhausting proactive capacity
+does not remove those entry points. If no line is currently assignable, activation
 still succeeds without assigning a line. A later provider-attested direct
 message from the exact active member may bind the contacted managed line when
 the existing reply-egress policy permits it, even when that line is in the

@@ -1392,7 +1392,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     );
   });
 
-  it("leaves companion activation route-less when every atomic claim loses", async () => {
+  it("keeps a companion contact line without a welcome when every atomic claim loses", async () => {
     const line = buildLine("+15550100001", {
       proactiveConversationCount: 49,
       proactiveConversationDayUtc: startOfUtcDay(new Date()),
@@ -1413,8 +1413,13 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     expect(
       mocks.claimHostedLinqProactiveConversationCapacityTx,
     ).toHaveBeenCalledTimes(2);
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx)
-      .not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      clearPending: true,
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: "+15550100001",
+    });
   });
 
   it("assigns a home line but suppresses the welcome when every line is at the hard cap", async () => {
@@ -1447,7 +1452,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
-  it("leaves companion activation route-less when every line is at the hard cap", async () => {
+  it("keeps a companion contact line without a welcome when every line is at the hard cap", async () => {
     const dayUtc = startOfUtcDay(new Date());
     const lines = [
       buildLine("+15550100001", {
@@ -1473,8 +1478,13 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
 
     expect(mocks.claimHostedLinqProactiveConversationCapacityTx)
       .not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx)
-      .not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      clearPending: true,
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: "+15550100001",
+    });
   });
 
   it("fails closed when activation has no usable pending thread and no configured home-line pool", async () => {
