@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   ensureHostedStarterUsageEnrollment: vi.fn(),
   ensureHostedMemberPhoneWelcome: vi.fn(),
+  ensureHostedMemberChannelWelcome: vi.fn(),
   getPrisma: vi.fn(),
   nativeAuth: vi.fn(),
   completion: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("@/src/lib/better-auth/native-auth", () => ({ readHostedNativeMemberAuth
 vi.mock("@/src/lib/better-auth/record-crypto", () => ({ openAuthRecord: mocks.openAuthRecord }));
 vi.mock("@/src/lib/hosted-onboarding/authentication-completion", () => ({ readHostedAuthenticationCompletion: mocks.completion }));
 
+vi.mock("@/src/lib/hosted-onboarding/channel-welcome", () => ({ ensureHostedMemberChannelWelcome: mocks.ensureHostedMemberChannelWelcome }));
 vi.mock("@/src/lib/hosted-onboarding/phone-welcome", () => ({
   ensureHostedMemberPhoneWelcome: mocks.ensureHostedMemberPhoneWelcome,
 }));

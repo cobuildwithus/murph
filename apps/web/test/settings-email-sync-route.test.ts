@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberEmailAuthorization: vi.fn(),
   requireFreshActivePrivyMemberAuthForHostedAppSession: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
-  sendHostedSignupWelcomeEmailForRecentMember: vi.fn(),
+  ensureHostedMemberChannelWelcome: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   syncHostedMemberVerifiedEmailAuthorization: vi.fn(),
   upsertHostedMemberEmailAuthorization: vi.fn(),
@@ -47,16 +47,7 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-onboarding/signup-welcome-email")
-  >("@/src/lib/hosted-onboarding/signup-welcome-email");
-
-  return {
-    ...actual,
-    sendHostedSignupWelcomeEmailForRecentMember: mocks.sendHostedSignupWelcomeEmailForRecentMember,
-  };
-});
+vi.mock("@/src/lib/hosted-onboarding/channel-welcome", () => ({ ensureHostedMemberChannelWelcome: mocks.ensureHostedMemberChannelWelcome }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/shared")>(
@@ -147,7 +138,7 @@ describe("settings email sync route", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     });
-    mocks.sendHostedSignupWelcomeEmailForRecentMember.mockResolvedValue({
+    mocks.ensureHostedMemberChannelWelcome.mockResolvedValue({
       providerMessageId: "resend_email_123",
       status: "sent",
     });
@@ -195,7 +186,8 @@ describe("settings email sync route", () => {
     expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.readHostedMemberEmailAuthorization.mock.invocationCallOrder[0],
     );
-    expect(mocks.sendHostedSignupWelcomeEmailForRecentMember).toHaveBeenCalledWith({
+    expect(mocks.ensureHostedMemberChannelWelcome).toHaveBeenCalledWith({
+      channel: "email",
       memberId: "member_123",
       prisma: mocks.prismaClient,
     });
@@ -285,31 +277,17 @@ describe("settings email sync route", () => {
     });
   });
 
-  it("does not fail settings email sync when the welcome email provider fails", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mocks.sendHostedSignupWelcomeEmailForRecentMember.mockRejectedValueOnce(
-      new Error("Resend unavailable"),
-    );
-
-    const response = await settingsEmailSyncRoute.POST(
-      new Request("https://join.example.test/api/settings/email/sync", {
-        headers: SAME_ORIGIN_HEADERS,
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_123",
-      mailboxItemId: "mailbox_item_channels_email_123",
+  it("surfaces a durable outreach enqueue failure so saving can safely retry", async () => {
+    mocks.ensureHostedMemberChannelWelcome.mockRejectedValueOnce(new Error("Synthetic mailbox unavailable"));
+    const request = () => new Request("https://join.example.test/api/settings/email/sync", {
+      headers: SAME_ORIGIN_HEADERS, method: "POST",
     });
-    expect(warnSpy).toHaveBeenCalledWith(
-      "Hosted signup welcome email send failed after settings email sync.",
-      {
-        errorName: "Error",
-      },
-    );
-    warnSpy.mockRestore();
+    const failed = await settingsEmailSyncRoute.POST(request());
+    expect(failed.status).toBe(500);
+    expect(mocks.syncHostedMemberVerifiedEmailAuthorization).toHaveBeenCalledTimes(1);
+    const retry = await settingsEmailSyncRoute.POST(request());
+    expect(retry.status).toBe(200);
+    expect(mocks.ensureHostedMemberChannelWelcome).toHaveBeenCalledTimes(2);
   });
 
   it("rejects sync attempts when the cookie-backed Privy session no longer maps to a hosted member", async () => {

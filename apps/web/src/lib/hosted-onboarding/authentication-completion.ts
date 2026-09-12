@@ -8,6 +8,7 @@ import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
 import { buildHostedInviteUrl, issueHostedInvite, type requireHostedInviteForAuthentication } from "./invite-service";
 import { readActiveHostedMemberAccess } from "./member-access";
 import { ensureHostedMemberPhoneWelcome } from "./phone-welcome";
+import { ensureHostedMemberChannelWelcome } from "./channel-welcome";
 
 // Product bootstrap is shared by every authenticated transport. It never
 // verifies a provider credential, creates a member, or grants access.
@@ -36,6 +37,9 @@ export async function readHostedAuthenticationCompletion(input: {
   });
   if (accessActive && messagingSetupState?.identity?.phoneLookupKey) {
     await ensureHostedMemberPhoneWelcome({ memberId: member.id, prisma });
+  }
+  if (accessActive && emailLinked) {
+    await ensureHostedMemberChannelWelcome({ channel: "email", memberId: member.id, prisma });
   }
   const activationPending = accessActive
     ? await isHostedMemberActivationPending({

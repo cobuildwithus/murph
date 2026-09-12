@@ -4,7 +4,7 @@ import {
 } from "@prisma/client";
 import {
   buildHostedExecutionMemberActivatedWake,
-  buildHostedMemberPhoneWelcomeDeliveryIdentity,
+  buildHostedMemberChannelWelcomeDeliveryIdentity,
   buildHostedMemberSignupWelcomeNotificationWake,
   type HostedExecutionMemberActivationSignupWelcome,
   type HostedExecutionMemberActivatedWake,
@@ -637,22 +637,25 @@ async function materializeHostedMemberActivationWakesTx(input: {
 
   const { signupWelcome } = input.activationWake;
   if (signupWelcome) {
-    await appendHostedMailboxEnvelopeTx({
-      envelope: buildHostedMemberSignupWelcomeNotificationWake({
-        eventId: buildHostedMemberSignupWelcomeNotificationEventId(input.activationWake),
-        memberId: input.activationWake.userId,
-        occurredAt: input.activationWake.occurredAt,
-        ...signupWelcome,
-      }),
-      tx: input.prisma,
-    });
-    if (input.phoneWelcomeRoute) {
+    const routes = [signupWelcome.route, input.phoneWelcomeRoute].filter(
+      (route): route is HostedExecutionAssistantNotificationRoute => route !== null,
+    );
+    for (const route of routes) {
+      const deliveryIdentity = route.identityId && (route.channel === "email" || route.channel === "linq")
+        ? buildHostedMemberChannelWelcomeDeliveryIdentity({
+            memberId: input.activationWake.userId,
+            channel: route.channel,
+            destinationLookupKey: route.identityId,
+          })
+        : undefined;
       await appendHostedMailboxEnvelopeTx({
         envelope: buildHostedMemberSignupWelcomeNotificationWake({
-          deliveryIdentity: buildHostedMemberPhoneWelcomeDeliveryIdentity(input.activationWake.userId),
+          ...(deliveryIdentity
+            ? { deliveryIdentity }
+            : { eventId: buildHostedMemberSignupWelcomeNotificationEventId(input.activationWake) }),
           memberId: input.activationWake.userId,
           occurredAt: input.activationWake.occurredAt,
-          route: input.phoneWelcomeRoute,
+          route,
           text: signupWelcome.text,
         }),
         tx: input.prisma,

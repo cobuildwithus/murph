@@ -869,7 +869,7 @@ describe("HostedEmailSettings", () => {
     expect(container.textContent).not.toContain("Email linked");
   });
 
-  it("sends an update-email code and verifies it from the inline code step", async () => {
+  it.each([false, true])("completes an email change without repeating OTP after a sync failure: %s", async (failFirstSync) => {
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
     const syncFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       emailAddress: "member@example.com",
@@ -882,11 +882,17 @@ describe("HostedEmailSettings", () => {
       },
       status: 200,
     }));
+    if (failFirstSync) {
+      syncFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { code: "HOSTED_SYNC_UNAVAILABLE", message: "Email sync is temporarily unavailable." },
+      }), { status: 503 }));
+    }
     vi.stubGlobal("fetch", syncFetch);
 
     const { cleanup, container, window } = await renderClientComponent(
       createElement(HostedEmailSettings, {
         authenticated: true,
+        changeFlow: true,
         initialEmail: {
           address: "old@example.com",
           verifiedAt: 1771891200,
@@ -947,6 +953,86 @@ describe("HostedEmailSettings", () => {
         method: "POST",
       }),
     );
+    if (failFirstSync) {
+      expect(container.textContent).toContain("Email sync is temporarily unavailable.");
+      const retryButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent === "Retry saving",
+      );
+      expect(retryButton).toBeTruthy();
+      expect(container.querySelector<HTMLInputElement>("#settings-email-address")?.disabled).toBe(true);
+      await act(async () => retryButton?.click());
+      expect(syncFetch).toHaveBeenCalledTimes(2);
+      for (const [, request] of syncFetch.mock.calls) {
+        expect(JSON.parse(String(request?.body))).toEqual({ expectedEmailAddress: "member@example.com" });
+      }
+    }
+    expect(container.textContent).toContain("Email verified and connected: member@example.com");
+    expect(container.textContent).not.toContain("Retry saving");
+    expect(mocks.sendCode).toHaveBeenCalledTimes(1);
+    expect(mocks.verifyCode).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { scenario: "changed email", initialEmail: { address: "old@example.com", verifiedAt: 1771891200 } },
+    { scenario: "first email", initialEmail: null },
+    { scenario: "billing email", initialEmail: { address: "new@example.com", verifiedAt: null } },
+  ])("recovers a reloaded $scenario from the verified provider email without another OTP", async ({ initialEmail }) => {
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        email: { address: "new@example.com" },
+        linkedAccounts: [{ address: "new@example.com", latest_verified_at: 1771977600, type: "email" }],
+      },
+    });
+    const syncFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      emailAddress: "new@example.com", ok: true, runTriggered: false,
+      verifiedAt: "2026-04-25T00:00:00.000Z",
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", syncFetch);
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const onSynced = vi.fn();
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true, changeFlow: Boolean(initialEmail), recoverEmailSync: true, onSynced,
+        initialEmail,
+      }),
+    );
+    cleanupRender = cleanup;
+    if (initialEmail) {
+      expect(container.querySelector<HTMLInputElement>("#settings-email-address")?.value).toBe("new@example.com");
+    }
+    const retryButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === "Retry saving",
+    );
+    expect(retryButton).toBeTruthy();
+    await act(async () => retryButton?.click());
+    expect(JSON.parse(String(syncFetch.mock.calls[0]?.[1]?.body))).toEqual({
+      expectedEmailAddress: "new@example.com",
+    });
+    expect(onSynced).toHaveBeenCalledWith(expect.objectContaining({ emailAddress: "new@example.com" }));
+    expect(mocks.sendCode).not.toHaveBeenCalled();
+    expect(mocks.verifyCode).not.toHaveBeenCalled();
+    expect(mocks.linkEmail).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Email verified and connected: new@example.com");
+    expect(container.textContent).not.toContain("shortly");
+  });
+
+  it("does not treat an unverified provider email as a recoverable connection", async () => {
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        email: { address: "unverified@example.com" },
+        linkedAccounts: [{ address: "unverified@example.com", type: "email" }],
+      },
+    });
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const markup = renderToStaticMarkup(createElement(HostedEmailSettings, {
+      authenticated: true, changeFlow: true, recoverEmailSync: true,
+      initialEmail: { address: "old@example.com", verifiedAt: 1771891200 },
+    }));
+    expect(markup).not.toContain("Retry saving");
+    expect(markup).not.toContain("unverified@example.com");
+    expect(markup).toContain("Send verification code");
   });
 
   it("does not open the verification prompt when Privy reports an update-email send error", async () => {

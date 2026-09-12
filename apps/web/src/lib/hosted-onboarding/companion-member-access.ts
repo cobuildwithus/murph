@@ -3,6 +3,7 @@ import { classifyHostedNativeCredential } from "../better-auth/transport";
 import { readHostedNativeMemberAuth } from "../better-auth/native-auth";
 import { readHostedAuthenticationCompletion } from "./authentication-completion";
 import { ensureHostedMemberPhoneWelcome } from "./phone-welcome";
+import { ensureHostedMemberChannelWelcome } from "./channel-welcome";
 import {
   HostedBillingStatus,
   type PrismaClient,
@@ -163,6 +164,7 @@ export async function ensureHostedCompanionMemberId(input: {
       // Repair missing phone routing on admission as well as initial linking.
       // Existing routes return immediately through the same idempotent owner.
       await ensureHostedMemberPhoneWelcome({ memberId: existingMember.id, prisma });
+      await ensureHostedMemberChannelWelcome({ channel: "email", memberId: existingMember.id, prisma });
       await requireHostedCompanionActivationRuntimeWake({
         memberId: existingMember.id,
         prisma,

@@ -16507,8 +16507,8 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
       const replay = await sendAssistantNotificationLocal(phoneInput)
       expect(phoneWelcome.response).toBe(welcomeText)
       expect(phoneWelcome.deliveryOutcome?.kind).toBe('queued')
-      expect(replay.decision.kind).toBe('skip')
-      expect(replay.response).toBeNull()
+      expect(replay.deliveryOutcome).toMatchObject({ kind: 'queued' })
+      expect(replay.response).toBe(welcomeText)
       const intents = await listAssistantOutboxIntents(workingDirectory)
       expect(intents).toHaveLength(2)
       expect(intents.map((intent) => intent.channel).sort()).toEqual(['email', 'linq'])
@@ -16535,6 +16535,79 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
         workingDirectory,
         ...config.temporaryPaths,
       ])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex connected channel greeting e2e', () => {
+  it.each(['email', 'linq'] as const)('greets a new channel contextually after private conversation on %s', async (originalChannel) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-connected-channel-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const welcomeText = 'Welcome to Murph. What would you like help with first?'
+      const common = {
+        deliveryDispatchMode: 'queue-only' as const,
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-member', userEnvKeys: [] } },
+        firstContactPolicy: { markSeenOnDeliveryAccepted: true },
+        instructions: buildHostedMemberSignupWelcomeInstructions(welcomeText),
+        responsePolicy: { kind: 'require_send_exact_text' as const, text: welcomeText },
+        threadId: null, threadIsDirect: true,
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver' as const, vault: workingDirectory, workingDirectory,
+      }
+      const emailInput = {
+        ...common, actorId: null, bindingDeliveryTarget: 'member@example.test', channel: 'email',
+        deliveryTarget: 'member@example.test', identityId: 'synthetic-email-identity',
+        deliveryDedupeToken: 'signup-welcome:synthetic-member',
+        deliveryIdempotencyKey: 'signup-welcome:synthetic-member',
+      }
+      const phoneKey = buildHostedMemberPhoneWelcomeDeliveryIdentity('synthetic-member')
+      const phoneInput = {
+        ...common, actorId: 'synthetic-phone-actor', bindingDeliveryTarget: '+12025550123', channel: 'linq',
+        deliveryKind: 'participant' as const, deliveryTarget: null,
+        deliverySource: { kind: 'linq' as const, fromPhoneNumber: '+12025550124' },
+        identityId: 'synthetic-phone-identity', deliveryDedupeToken: phoneKey, deliveryIdempotencyKey: phoneKey,
+      }
+      const originalInput = originalChannel === 'email' ? emailInput : phoneInput
+      const nextInput = originalChannel === 'email' ? phoneInput : emailInput
+      const original = await sendAssistantNotificationLocal(originalInput)
+      const at = new Date(Date.now() - 60_000).toISOString()
+      await appendAssistantTranscriptEntries(workingDirectory, original.session.sessionId, [
+        { kind: 'user', createdAt: at, text: 'I am planning an easy weekend walk by the lake. I already know how Murph works.' },
+        { kind: 'assistant', createdAt: at, text: 'That sounds like a lovely plan. Keep the route easy and enjoy the lake.' },
+      ])
+      const events: unknown[] = []
+      let providerRequests = 0
+      const contextualInput = {
+        ...nextInput, connectedChannelGreeting: true,
+        onProviderRequestStarted: () => { providerRequests += 1 },
+        onTraceEvent: (event: { rawEvent: unknown }) => { events.push(event.rawEvent) },
+      }
+      const greeting = await sendAssistantNotificationLocal(contextualInput)
+      const replay = await sendAssistantNotificationLocal(contextualInput)
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(providerRequests).toBe(1)
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      expect(intents).toHaveLength(2)
+      expect(intents.map((intent) => intent.channel).sort()).toEqual(['email', 'linq'])
+      expect(greeting.deliveryOutcome?.kind).toBe('queued')
+      expect(replay.response).toBe(greeting.response)
+      const reply = greeting.response ?? ''
+      process.stdout.write(`[real-codex connected channel greeting] ${JSON.stringify({ originalChannel, reply, providerRequests, intents: intents.length })}\n`)
+      expect(reply.length).toBeGreaterThan(5)
+      expect(reply.length).toBeLessThan(500)
+      expect(reply).not.toMatch(/welcome to murph|help with first|onboard|sign.?up|operator|queue|notification|this channel|i(?: am|'m) murph|saved|scheduled/iu)
+      expect(reply).not.toBe(welcomeText)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }
   }, 360_000)
 })

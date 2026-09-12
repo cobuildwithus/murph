@@ -813,6 +813,7 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   const existingRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
 
   const reservationResult = await reserveHostedLinqHomeLineFromAssignablePoolTx({
+    assignedRecipientPhone: existingRecipientPhone,
     excludedActiveMemberId: existingRecipientPhone ? input.member.core.id : null,
     preferredRecipientPhone:
       existingRecipientPhone
@@ -837,6 +838,7 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
 }
 
 async function reserveHostedLinqHomeLineFromAssignablePoolTx(input: {
+  assignedRecipientPhone?: string | null;
   excludedActiveMemberId?: string | null;
   now?: Date;
   preferredRecipientPhone: string | null;
@@ -844,11 +846,14 @@ async function reserveHostedLinqHomeLineFromAssignablePoolTx(input: {
   reservationKind: "inbound" | "signup_welcome";
 }): Promise<HostedLinqHomeLinePhoneReservationResult> {
   const lines = await listHostedLinqAssignableHomeLines({ prisma: input.prisma });
+  // A number already shown to the member remains their contact number while
+  // it remains eligible. A full proactive quota delays outreach, not that assignment.
+  const assignedLine = lines.find((line) => line.phoneNumber === input.assignedRecipientPhone);
   const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
     ...(input.excludedActiveMemberId
       ? { excludedActiveMemberId: input.excludedActiveMemberId }
       : {}),
-    lines,
+    lines: assignedLine ? [assignedLine] : lines,
     ...(input.now ? { now: input.now } : {}),
     preferredRecipientPhone: input.preferredRecipientPhone,
     prisma: input.prisma,

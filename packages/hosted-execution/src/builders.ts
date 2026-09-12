@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   MemberActionOutcomeV1,
   MemberActionRequestV1,
@@ -595,6 +596,17 @@ export function buildHostedMemberPhoneWelcomeDeliveryIdentity(memberId: string):
   return `signup-welcome:${memberId}:linq`;
 }
 
+export function buildHostedMemberChannelWelcomeDeliveryIdentity(input: {
+  memberId: string;
+  channel: "email" | "linq";
+  destinationLookupKey: string;
+}): string {
+  const destination = createHash("sha256")
+    .update(input.destinationLookupKey)
+    .digest("hex");
+  return `signup-welcome:${input.memberId}:${input.channel}:${destination}`;
+}
+
 export function buildHostedMemberSignupWelcomeNotificationWake(input: {
   memberId: string;
   occurredAt: string;
@@ -624,7 +636,7 @@ export function isHostedMemberSignupWelcomeDeliveryIdentity(
   value: string | null | undefined,
   memberId?: string,
 ): boolean {
-  const match = /^signup-welcome:([^:]+)(?::linq)?$/u.exec(value?.trim() ?? "");
+  const match = /^signup-welcome:([^:]+)(?::linq|:(?:email|linq):[a-f0-9]{64})?$/u.exec(value?.trim() ?? "");
   return match !== null && (memberId === undefined || match[1] === memberId);
 }
 

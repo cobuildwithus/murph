@@ -1223,12 +1223,33 @@ function hostedDirectEmailReplySupersedesSignupWelcome(
   reply: HostedAssistantDeliveryPayload,
   welcome: HostedAssistantDeliveryPayload,
 ): boolean {
-  // The vault is already scoped to one member. Direct email therefore identifies
-  // the same conversation even when a recovered welcome has no provider thread yet.
+  // Legacy welcomes predate destination identity. New welcomes must not be
+  // suppressed by a conversation held on a different, previously linked email.
   return reply.channel?.trim() === "email"
     && welcome.channel?.trim() === "email"
     && reply.threadIsDirect === true
-    && welcome.threadIsDirect === true;
+    && welcome.threadIsDirect === true
+    && hostedEmailWelcomeSharesRecipient(reply, welcome);
+}
+
+function isHostedDestinationEmailWelcome(payload: HostedAssistantDeliveryPayload): boolean {
+  return /^signup-welcome:[^:]+:email:[a-f0-9]{64}$/u.test(payload.idempotencyKey);
+}
+
+function hostedEmailWelcomeSharesRecipient(
+  reply: HostedAssistantDeliveryPayload,
+  welcome: HostedAssistantDeliveryPayload,
+): boolean {
+  if (!isHostedDestinationEmailWelcome(welcome)) return true;
+  const recipient = readHostedDirectEmailTargetRecipient(welcome);
+  return recipient !== null && recipient === readHostedDirectEmailTargetRecipient(reply);
+}
+
+function readHostedDirectEmailTargetRecipient(payload: HostedAssistantDeliveryPayload): string | null {
+  const target = payload.explicitTarget ?? payload.bindingDeliveryTarget;
+  const thread = parseHostedEmailThreadTarget(target);
+  const recipient = thread ? thread.to.length === 1 ? thread.to[0] : null : target;
+  return recipient?.trim().toLowerCase() || null;
 }
 
 function hostedAssistantReplyTargetsSignupWelcomeRecipient(
@@ -2933,6 +2954,13 @@ async function resolveHostedDirectEmailRecipientAtProviderEntry(input: {
       "Hosted direct email delivery requires current verified-email authority before provider work.",
       { retryable: true },
     ));
+  }
+  if (isHostedSignupWelcomeDeliveryPayload(payload)
+    && readHostedDirectEmailTargetRecipient(payload) !== recipient.toLowerCase()) {
+    throw markHostedDeliveryPreProvider(Object.assign(new VaultCliError(
+      "ASSISTANT_CHANNEL_WELCOME_DESTINATION_CHANGED",
+      "Channel welcome destination is no longer the current verified email.",
+    ), { retryable: false }));
   }
   if (input.targetKind === "explicit") {
     return recipient;

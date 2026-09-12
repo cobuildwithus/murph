@@ -1,4 +1,7 @@
 import {
+  buildHostedMemberChannelWelcomeDeliveryIdentity,
+} from "@murphai/hosted-execution";
+import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
@@ -108,6 +111,10 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
   const fromPhoneNumber = "+15550100099";
   const linqChatId = "chat_signup_welcome";
   const memberId = "member_123";
+  const destinationWelcomeKey = buildHostedMemberChannelWelcomeDeliveryIdentity({
+    memberId, channel: "linq", destinationLookupKey: "synthetic-phone-identity",
+  });
+  const welcomeKeys = [`signup-welcome:${memberId}`, `signup-welcome:${memberId}:linq`, destinationWelcomeKey];
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -117,13 +124,13 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
     mocks.readHostedMemberRoutingState.mockResolvedValue(buildMaterializationRouting());
   });
 
-  it.each(["", ":linq"])("materializes a provider-dispatched welcome chat onto the assigned home line: %s", async (suffix) => {
+  it.each(welcomeKeys)("materializes a provider-dispatched welcome chat onto the assigned home line: %s", async (welcomeKey) => {
     const prisma = buildMaterializationPrisma();
 
     await expect(materializeHostedSignupWelcomeHomeRouteTx({
       directRecipientPhoneNumber,
       fromPhoneNumber,
-      idempotencyKey: `signup-welcome:${memberId}${suffix}`,
+      idempotencyKey: welcomeKey,
       linqChatId,
       memberId,
       prisma: prisma as never,
@@ -165,7 +172,7 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
     );
   });
 
-  it("replays idempotently when the same chat is already the home route", async () => {
+  it.each(welcomeKeys)("replays idempotently when the same chat is already the home route: %s", async (welcomeKey) => {
     mocks.readHostedMemberRoutingState.mockResolvedValue(buildMaterializationRouting({
       linqChatId,
     }));
@@ -179,7 +186,7 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
     await expect(materializeHostedSignupWelcomeHomeRouteTx({
       directRecipientPhoneNumber,
       fromPhoneNumber,
-      idempotencyKey: `signup-welcome:${memberId}`,
+      idempotencyKey: welcomeKey,
       linqChatId,
       memberId,
       prisma: prisma as never,
@@ -236,7 +243,7 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
   });
 
-  it("preserves current authority when the member phone changed after provider entry", async () => {
+  it.each(welcomeKeys)("preserves current authority when the member phone changed after provider entry: %s", async (welcomeKey) => {
     const prisma = buildMaterializationPrisma({
       identityPhoneLookupKey: requireLookupKey(
         createHostedPhoneLookupKeyReadCandidates("+15550100002"),
@@ -246,7 +253,7 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
     await expect(materializeHostedSignupWelcomeHomeRouteTx({
       directRecipientPhoneNumber,
       fromPhoneNumber,
-      idempotencyKey: `signup-welcome:${memberId}`,
+      idempotencyKey: welcomeKey,
       linqChatId,
       memberId,
       prisma: prisma as never,
@@ -277,7 +284,7 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
     await expect(materializeHostedSignupWelcomeHomeRouteTx({
       directRecipientPhoneNumber,
       fromPhoneNumber,
-      idempotencyKey: `signup-welcome:${memberId}`,
+      idempotencyKey: destinationWelcomeKey,
       linqChatId,
       memberId,
       prisma: prisma as never,
@@ -286,6 +293,18 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
       httpStatus: 409,
     });
 
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects a destination welcome belonging to another member before routing reads", async () => {
+    const prisma = buildMaterializationPrisma();
+    await expect(materializeHostedSignupWelcomeHomeRouteTx({
+      directRecipientPhoneNumber, fromPhoneNumber, linqChatId, memberId, prisma: prisma as never,
+      idempotencyKey: buildHostedMemberChannelWelcomeDeliveryIdentity({
+        memberId: "another-member", channel: "linq", destinationLookupKey: "synthetic-phone-identity",
+      }),
+    })).rejects.toMatchObject({ code: "HOSTED_LINQ_SIGNUP_WELCOME_ROUTE_AUTHORITY_INVALID", httpStatus: 400 });
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
   });
 
@@ -426,7 +445,7 @@ describe("reserveHostedLinqHomeLineFromPoolTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
-    mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
+    mocks.claimHostedLinqProactiveConversationCapacityTx.mockReset().mockResolvedValue(true);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
     mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map());
   });
@@ -634,7 +653,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     vi.clearAllMocks();
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
-    mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
+    mocks.claimHostedLinqProactiveConversationCapacityTx.mockReset().mockResolvedValue(true);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
     mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map());
     mocks.readHostedLinqIncomingLineState.mockResolvedValue({ kind: "unmanaged" });
@@ -1211,7 +1230,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
   });
 
-  it("falls back to another line when the preferred line reaches 50 proactive conversations", async () => {
+  it("keeps the assigned line when its proactive quota is full and another line has space", async () => {
     const assignedAt = new Date("2026-07-15T12:00:00.000Z");
     const dayUtc = startOfUtcDay(new Date());
     const preferredLine = buildLine("+15550100001", {
@@ -1234,34 +1253,16 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
         }),
         prisma: {} as never,
       }),
-    ).resolves.toMatchObject({
-      welcomeRoute: {
-        delivery: {
-          source: {
-            fromPhoneNumber: fallbackLine.phoneNumber,
-            kind: "linq",
-          },
-        },
-      },
-    });
+    ).resolves.toEqual({ welcomeRoute: null });
 
-    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).toHaveBeenCalledWith({
-      dayUtc: expect.any(Date),
-      limit: 50,
-      phoneNumberLookupKey: fallbackLine.phoneNumberLookupKey,
-      prisma: {} as never,
-    });
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
       clearPending: true,
-      homeLineAssignedAt: expect.any(Date),
+      homeLineAssignedAt: assignedAt,
       memberId: "member_123",
       prisma: {} as never,
-      recipientPhone: fallbackLine.phoneNumber,
+      recipientPhone: preferredLine.phoneNumber,
     });
-    expect(
-      mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.calls[0]?.[0]
-        ?.homeLineAssignedAt,
-    ).not.toEqual(assignedAt);
   });
 
   it("retries the same line once when a rollover claim loses but capacity remains", async () => {
@@ -1294,7 +1295,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     ).toHaveBeenCalledTimes(2);
   });
 
-  it("tries another line when an atomic capacity claim loses twice", async () => {
+  it("tries another line for an unassigned member when the preferred candidate loses its capacity race", async () => {
     const fallbackLine = buildLine("+15550100002", {
       proactiveConversationCount: 4,
       proactiveConversationDayUtc: startOfUtcDay(new Date()),
@@ -1312,7 +1313,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     await expect(
       resolveHostedMemberActivationLinqRoute({
         member: buildMember({
-          linqRecipientPhone: line.phoneNumber,
+          pendingLinqRecipientPhone: line.phoneNumber,
         }),
         prisma: {} as never,
       }),
@@ -1578,7 +1579,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     vi.clearAllMocks();
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
-    mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
+    mocks.claimHostedLinqProactiveConversationCapacityTx.mockReset().mockResolvedValue(true);
     mocks.readHostedLinqRecentMessageEffectCountsTx.mockResolvedValue(new Map());
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
   });

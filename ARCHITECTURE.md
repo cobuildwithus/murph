@@ -2597,21 +2597,40 @@ non-identifying success response. A consented fresh companion activation with a
 verified phone may enter the canonical signup-welcome path. Exact-member
 binding, signup idempotency, home-line health, and proactive capacity remain
 owned by the existing starter enrollment, line reservation, and welcome
-services. When activation has both a verified email and an eligible direct Linq
-route, it queues the same welcome on both. Email uses the original welcome key
-and text uses the phone welcome key; both are appended in the activation
-transaction. The onboarding follow-up still has its existing single route.
-Authenticated completion, active companion admission, and phone synchronization also request the
-ordinary text welcome when an active member connects a verified phone without
-an assigned text route. The email welcome remains intact. This notification
-uses `signup-welcome:<member>:linq`, independently of the original
-`signup-welcome:<member>` delivery; the existing member lock, line reservation,
-mailbox, first-contact state, and outbox own deduplication and recovery. It does
-not activate the member again or create a second onboarding follow-up. Deploy
-runtime welcome-key readers before the Web producer; original keys remain valid.
+services. Activation and later verified phone/email connections share one
+channel-welcome producer contract: one mailbox and outbox key per member,
+channel, and destination identity. Activation queues both available channels
+in its transaction. Later connection, authenticated completion, and companion
+admission reuse those keys; ordinary authenticated Web entry also repairs
+missing phone routing before projecting contact actions. The member lock
+revalidates access and identity and prevents duplicate capacity claims.
+Ingress encryption roots are prepared before the short database transaction;
+line reservation and mailbox append commit together, then runtime is signaled.
+No connection creates a second activation or onboarding follow-up. The founder
+email remains a signup-only side effect, not a delayed email-link greeting.
+
+At execution, canonical direct channel welcomes inspect the existing imported
+conversation watermark. No prior conversation input preserves the exact signup
+welcome; prior input selects a brief contextual greeting through the existing
+output-only private continuation profile. Context contains at most sixteen
+direct sessions, each read through a 16 KiB transcript tail, then the latest
+eight excerpts capped at 800 characters. Group and unknown audiences and
+outgoing-only sessions cannot supply context. No tools, private-memory reads,
+resumable provider thread, or additional delivery authority are granted.
+Existing outbox intents are reused on retry, including legacy welcome keys
+only when their bound destination agrees. An email welcome, including a retained legacy welcome,
+never follows ordinary email retargeting to a different verified address, and
+replies to a previous email cannot suppress a greeting on the new destination.
+Deploy compatible runtime key readers
+before Web emits destination-scoped keys; old keys remain valid. Reverting the
+reader after new keys are emitted is not a safe standalone rollback.
+
 Exhausted proactive capacity does not block activation: Web still
 assigns an eligible home line without a proactive text welcome, preserving the
-inbound-first messaging path. The assigned number remains available to native
+inbound-first messaging path. An existing eligible assigned number stays fixed
+while proactive capacity is exhausted; verified phone changes clear old-phone
+chat authority while preserving that number and email-based iMessage bindings.
+The assigned number remains available to native
 onboarding's Text Murph action and contact card; exhausting proactive capacity
 does not remove those entry points. If no line is currently assignable, activation
 still succeeds without assigning a line. A later provider-attested direct

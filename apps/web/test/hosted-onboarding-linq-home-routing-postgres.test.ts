@@ -41,11 +41,13 @@ import {
   readHostedMemberRoutingState,
   resolveHostedMemberRoutingByTelegramUserId,
   upsertHostedMemberHomeLinqBindingTx,
+  upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,
   upsertHostedMemberPendingLinqParticipantContactTx,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
-import { updateHostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { readHostedMemberSnapshot, updateHostedMemberCoreState, upsertHostedMemberEmailAuthorization } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { resolveHostedMemberActivationLinqRoute, startOfUtcDay } from "@/src/lib/hosted-onboarding/linq-home-routing";
 import { encryptHostedLinqLinePhoneNumber } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 import { buildHostedMemberIdentityPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import {
@@ -68,8 +70,17 @@ import { runHostedLinqMessageEditPreparedTransaction } from "@/src/lib/hosted-on
 import { createPrismaClient } from "@/src/lib/prisma";
 import { readUnchangedHostedMemberHomeLinqBindingTx } from "@/src/lib/hosted-onboarding/hosted-member-routing-linq";
 import { acquireHostedLinqChatOwnershipLockTx } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
+import { ensureHostedMemberChannelWelcome } from "@/src/lib/hosted-onboarding/channel-welcome";
 
 const handlerPrismaClients = vi.hoisted(() => [] as PrismaClient[]);
+const channelWelcomeTestHooks = vi.hoisted(() => ({
+  signal: vi.fn(),
+  unwrap: vi.fn(async () => ({ rootKey: new Uint8Array(32) })),
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: channelWelcomeTestHooks.signal,
+}));
 
 vi.mock("@/src/lib/prisma", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/src/lib/prisma")>();
@@ -85,6 +96,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   >();
   return {
     ...actual,
+    unwrapHostedDomainRootForWeb: channelWelcomeTestHooks.unwrap,
     provisionActiveHostedDomainRootEnvelopeForUserOnly:
       vi.fn().mockResolvedValue(undefined),
   };
@@ -960,6 +972,244 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           });
         }
         await disconnectClients([prisma]);
+      }
+    });
+
+    it("queues one channel welcome and consumes one slot across concurrent duplicate connections", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const callers = Array.from({ length: 3 }, () => createPrismaClient({ databaseUrl, poolMax: 1 }));
+      const fixture = await createActivationContactFixture(observer, 0);
+      const allPrepared = createDeferred();
+      const preparationTimeout = setTimeout(() => allPrepared.resolve(), 5_000);
+      let prepared = 0;
+      channelWelcomeTestHooks.unwrap.mockImplementation(async () => {
+        prepared += 1;
+        if (prepared === callers.length) allPrepared.resolve();
+        await allPrepared.promise;
+        expect(prepared).toBe(callers.length);
+        return { rootKey: new Uint8Array(32) };
+      });
+      channelWelcomeTestHooks.signal.mockClear();
+      channelWelcomeTestHooks.signal.mockImplementation(async (input: { mailboxItemId: string }) => {
+        // A separate connection can only see the event after its transaction commits.
+        expect(await observer.hostedMailboxItem.count({ where: { id: input.mailboxItemId } })).toBe(1);
+      });
+      try {
+        await observer.hostedLinqLine.update({
+          data: { maxNewConversationsPerDay: 10 },
+          where: { phoneNumberLookupKey: fixture.lineKey },
+        });
+        await Promise.all(callers.map((prisma) => ensureHostedMemberChannelWelcome({
+          channel: "linq", memberId: fixture.memberId, prisma,
+        })));
+        await ensureHostedMemberChannelWelcome({ channel: "linq", memberId: fixture.memberId, prisma: observer });
+        expect(await observer.hostedMailboxItem.findMany({
+          select: { kind: true }, where: { userId: fixture.memberId },
+        })).toEqual([{ kind: "assistant.notification.requested" }]);
+        expect(await observer.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true },
+          where: { phoneNumberLookupKey: fixture.lineKey },
+        })).toEqual({ proactiveConversationCount: 1 });
+        expect(channelWelcomeTestHooks.signal).toHaveBeenCalledTimes(1);
+        expect((await readHostedMemberRoutingState({ memberId: fixture.memberId, prisma: observer }))?.linqRecipientPhone)
+          .toBe(fixture.linePhone);
+      } finally {
+        clearTimeout(preparationTimeout);
+        allPrepared.resolve();
+        channelWelcomeTestHooks.unwrap.mockImplementation(async () => ({ rootKey: new Uint8Array(32) }));
+        channelWelcomeTestHooks.signal.mockReset();
+        await cleanupActivationContactFixture(observer, fixture);
+        await disconnectClients([observer, ...callers]);
+      }
+    });
+
+    it("queues independent phone and email welcomes when both channels connect concurrently", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const email = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const phone = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await createActivationContactFixture(observer, 0);
+      try {
+        await observer.$transaction((tx) => upsertHostedMemberEmailAuthorization({
+          memberId: fixture.memberId, prisma: tx,
+          verifiedEmail: { address: `${fixture.memberId}@example.test`, verifiedAt: new Date() },
+        }), transactionOptions);
+        const connect = () => Promise.all([
+          ensureHostedMemberChannelWelcome({ channel: "email", memberId: fixture.memberId, prisma: email }),
+          ensureHostedMemberChannelWelcome({ channel: "linq", memberId: fixture.memberId, prisma: phone }),
+        ]);
+        await connect();
+        await connect();
+        const events = await observer.hostedMailboxItem.findMany({
+          select: { dedupeKey: true, kind: true }, where: { userId: fixture.memberId },
+        });
+        expect(events).toHaveLength(2);
+        expect(events.every((event) => event.kind === "assistant.notification.requested")).toBe(true);
+        expect(events.filter((event) => event.dedupeKey.includes(":email:"))).toHaveLength(1);
+        expect(events.filter((event) => event.dedupeKey.includes(":linq:"))).toHaveLength(1);
+        expect(await observer.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true },
+          where: { phoneNumberLookupKey: fixture.lineKey },
+        })).toEqual({ proactiveConversationCount: 1 });
+      } finally {
+        await cleanupActivationContactFixture(observer, fixture);
+        await disconnectClients([observer, email, phone]);
+      }
+    });
+
+    it("retains the healthy assigned contact line when another line has spare welcome quota", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const assigned = await createActivationContactFixture(prisma, 1);
+      const available = await createActivationContactFixture(prisma, 0);
+      try {
+        await prisma.$transaction((tx) => upsertHostedMemberHomeLinqRecipientPhoneTx({
+          clearPending: true, homeLineAssignedAt: new Date(),
+          memberId: assigned.memberId, prisma: tx, recipientPhone: assigned.linePhone,
+        }), transactionOptions);
+        const result = await prisma.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, assigned.memberId);
+          return resolveHostedMemberActivationLinqRoute({
+            member: assigned.member, prisma: tx,
+          });
+        }, transactionOptions);
+        expect(result.welcomeRoute).toBeNull();
+        expect((await readHostedMemberRoutingState({ memberId: assigned.memberId, prisma }))?.linqRecipientPhone)
+          .toBe(assigned.linePhone);
+        expect(await prisma.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true },
+          where: { phoneNumberLookupKey: available.lineKey },
+        })).toEqual({ proactiveConversationCount: 0 });
+        const firstConnection = await prisma.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, available.memberId);
+          return resolveHostedMemberActivationLinqRoute({ member: available.member, prisma: tx });
+        }, transactionOptions);
+        expect(firstConnection.welcomeRoute).toMatchObject({
+          delivery: { source: { fromPhoneNumber: available.linePhone } },
+        });
+      } finally {
+        await cleanupActivationContactFixture(prisma, assigned);
+        await cleanupActivationContactFixture(prisma, available);
+        await prisma.$disconnect();
+      }
+    });
+
+    it.each([0, 1])("persists the signup contact line with %s of 1 welcome slots consumed", async (consumed) => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await createActivationContactFixture(prisma, consumed);
+      try {
+        const result = await prisma.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, fixture.memberId);
+          return resolveHostedMemberActivationLinqRoute({
+            allowNoAssignableLine: true,
+            member: fixture.member,
+            prisma: tx,
+          });
+        }, transactionOptions);
+
+        const routing = await readHostedMemberRoutingState({ memberId: fixture.memberId, prisma });
+        expect(routing?.linqRecipientPhone).toBe(fixture.linePhone);
+        expect(routing?.linqHomeLineAssignedAt).toBeInstanceOf(Date);
+        expect(routing?.linqChatId).toBeNull();
+        if (consumed === 0) {
+          expect(result.welcomeRoute).toMatchObject({
+            channel: "linq",
+            delivery: {
+              kind: "participant",
+              source: { kind: "linq", fromPhoneNumber: fixture.linePhone },
+              target: fixture.memberPhone,
+            },
+          });
+        } else {
+          expect(result.welcomeRoute).toBeNull();
+        }
+        expect(await prisma.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true, totalOutboundCount: true },
+          where: { phoneNumberLookupKey: fixture.lineKey },
+        })).toEqual({ proactiveConversationCount: 1, totalOutboundCount: 0 });
+      } finally {
+        await cleanupActivationContactFixture(prisma, fixture);
+        await prisma.$disconnect();
+      }
+    });
+
+    it("keeps the contact line when a concurrent sender wins the last welcome slot", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const sender = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const signup = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await createActivationContactFixture(observer, 0);
+      const senderClaimed = createDeferred<boolean>();
+      const signupPid = createDeferred<number>();
+      const releaseSender = createDeferred();
+      let senderTransaction: Promise<boolean> | null = null;
+      let signupTransaction: Promise<Awaited<ReturnType<typeof resolveHostedMemberActivationLinqRoute>>> | null = null;
+      try {
+        senderTransaction = sender.$transaction(async (tx) => {
+          const claimed = await claimHostedLinqProactiveConversationCapacityTx({
+            dayUtc: startOfUtcDay(new Date()),
+            limit: 1,
+            phoneNumberLookupKey: fixture.lineKey,
+            prisma: tx,
+          });
+          senderClaimed.resolve(claimed);
+          await releaseSender.promise;
+          return claimed;
+        }, transactionOptions);
+        expect(await Promise.race([senderClaimed.promise, senderTransaction])).toBe(true);
+        signupTransaction = signup.$transaction(async (tx) => {
+          signupPid.resolve(await readBackendPid(tx));
+          await lockHostedMemberRow(tx, fixture.memberId);
+          return resolveHostedMemberActivationLinqRoute({
+            allowNoAssignableLine: true,
+            member: fixture.member,
+            prisma: tx,
+          });
+        }, transactionOptions);
+        await waitForBlockedBackend({ observer, pid: await signupPid.promise });
+        releaseSender.resolve();
+        await expect(senderTransaction).resolves.toBe(true);
+        await expect(signupTransaction).resolves.toEqual({ welcomeRoute: null });
+        expect((await readHostedMemberRoutingState({ memberId: fixture.memberId, prisma: observer }))?.linqRecipientPhone)
+          .toBe(fixture.linePhone);
+        expect(await observer.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true, totalOutboundCount: true },
+          where: { phoneNumberLookupKey: fixture.lineKey },
+        })).toEqual({ proactiveConversationCount: 1, totalOutboundCount: 0 });
+      } finally {
+        releaseSender.resolve();
+        await Promise.allSettled([senderTransaction, signupTransaction]);
+        await cleanupActivationContactFixture(observer, fixture);
+        await disconnectClients([observer, sender, signup]);
+      }
+    });
+
+    it("rolls back the contact assignment and welcome quota together when its transaction fails", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await createActivationContactFixture(prisma, 0);
+      try {
+        await expect(prisma.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, fixture.memberId);
+          const result = await resolveHostedMemberActivationLinqRoute({
+            member: fixture.member,
+            prisma: tx,
+          });
+          expect(result.welcomeRoute).not.toBeNull();
+          throw new Error("synthetic mailbox append failure");
+        }, transactionOptions)).rejects.toThrow("synthetic mailbox append failure");
+        expect(await readHostedMemberRoutingState({ memberId: fixture.memberId, prisma })).toBeNull();
+        expect(await prisma.hostedLinqLine.findUnique({
+          select: { proactiveConversationCount: true },
+          where: { phoneNumberLookupKey: fixture.lineKey },
+        })).toEqual({ proactiveConversationCount: 0 });
+
+        const retry = await prisma.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, fixture.memberId);
+          return resolveHostedMemberActivationLinqRoute({ member: fixture.member, prisma: tx });
+        }, transactionOptions);
+        expect(retry.welcomeRoute).not.toBeNull();
+        expect((await readHostedMemberRoutingState({ memberId: fixture.memberId, prisma }))?.linqRecipientPhone)
+          .toBe(fixture.linePhone);
+      } finally {
+        await cleanupActivationContactFixture(prisma, fixture);
+        await prisma.$disconnect();
       }
     });
 
@@ -2346,6 +2596,45 @@ describe.skipIf(!runPostgresConcurrencyProof)(
     );
   },
 );
+
+async function createActivationContactFixture(prisma: PrismaClient, consumed: number) {
+  const memberId = `member_contact_assignment_${randomUUID()}`;
+  const digits = String(Number.parseInt(randomUUID().replaceAll("-", "").slice(0, 7), 16) % 10_000_000).padStart(7, "0");
+  const memberPhone = `+1555${digits}`;
+  const linePhone = `+1556${digits}`;
+  const lineKey = requireString(createHostedPhoneLookupKey(linePhone));
+  await prisma.$transaction(async (tx) => {
+    await tx.hostedMember.create({ data: { id: memberId, billingStatus: HostedBillingStatus.active } });
+    const identityPrivate = await buildHostedMemberIdentityPrivateColumns({
+      memberId, phoneNumber: memberPhone, prisma: tx, privyUserId: null,
+      signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null, signupPhoneNumber: null,
+    });
+    await tx.hostedMemberIdentity.create({ data: {
+      ...identityPrivate, memberId, maskedPhoneNumberHint: "*** test",
+      phoneLookupKey: requireString(createHostedPhoneLookupKey(memberPhone)),
+      phoneNumberVerifiedAt: new Date(),
+    } });
+    await tx.hostedLinqLine.create({ data: {
+      phoneNumberLookupKey: lineKey, phoneNumberHint: "*** test",
+      phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(linePhone),
+      configuredAt: new Date(), egressPolicy: "enabled", healthStatus: "healthy",
+      maxNewConversationsPerDay: 1, proactiveConversationCount: consumed,
+      proactiveConversationDayUtc: startOfUtcDay(new Date()), source: "test",
+    } });
+  }, transactionOptions);
+  const member = await readHostedMemberSnapshot({ memberId, prisma });
+  if (!member) throw new Error("Expected a synthetic signup member.");
+  return { lineKey, linePhone, member, memberId, memberPhone };
+}
+
+async function cleanupActivationContactFixture(
+  prisma: PrismaClient,
+  fixture: { lineKey: string; memberId: string },
+) {
+  await prisma.hostedMember.deleteMany({ where: { id: fixture.memberId } });
+  await prisma.hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: fixture.lineKey } });
+}
 
 async function disconnectClients(clients: PrismaClient[]): Promise<void> {
   await Promise.all(clients.map((client) => client.$disconnect()));

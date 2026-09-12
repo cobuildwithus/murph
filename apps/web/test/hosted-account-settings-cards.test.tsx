@@ -148,9 +148,9 @@ describe("HostedAccountSettingsCards", () => {
   });
 
   test.each([
-    ["mismatched", { removable: false, status: "mismatched" as const }],
-    ["unknown", null],
-  ])("keeps a %s email provider state fail closed", (_label, emailState) => {
+    ["mismatched", { removable: false, status: "mismatched" as const }, "Change"],
+    ["unknown", null, "Refresh"],
+  ])("keeps a %s email provider state safe and recoverable", (_label, emailState, actionLabel) => {
     const markup = renderToStaticMarkup(
       React.createElement(HostedAccountSettingsCards, {
         account: {
@@ -170,7 +170,7 @@ describe("HostedAccountSettingsCards", () => {
     );
 
     expect(markup).toContain("member@example.com");
-    expect(markup).toContain("Refresh");
+    expect(markup).toContain(actionLabel);
     expect(markup).not.toContain('aria-label="Remove email"');
   });
 
@@ -380,15 +380,16 @@ describe("HostedAccountSettingsCards", () => {
     }
   });
 
-  test("routes a completed provider phone change through the existing phone recovery flow", async () => {
+  test.each(["phone", "email"] as const)("routes a completed provider %s change through its recovery flow", async (method) => {
     refresh.mockClear();
     const rendered = await renderClientComponent(
       React.createElement(HostedAccountSettingsCards, {
         account: {
           ...makeAccountSnapshot({ phoneNumber: "+14045550123" }),
+          email: { address: "member@example.com", verifiedAt: "2026-05-02T00:00:00.000Z" },
           privySignInStates: {
             ...protectedPrivySignInStates(),
-            phone: { removable: false, status: "mismatched" },
+            [method]: { removable: false, status: "mismatched" },
           },
         },
       }),
@@ -397,7 +398,7 @@ describe("HostedAccountSettingsCards", () => {
     try {
       const phoneRow = Array.from(rendered.container.querySelectorAll("div")).find(
         (candidate) =>
-          candidate.children[1]?.querySelector("span")?.textContent === "Phone",
+          candidate.children[1]?.querySelector("span")?.textContent === (method === "phone" ? "Phone" : "Email"),
       );
       const changeButton = Array.from(phoneRow?.querySelectorAll("button") ?? []).find(
         (candidate) => candidate.textContent === "Change",
@@ -411,7 +412,7 @@ describe("HostedAccountSettingsCards", () => {
       expect(refresh).not.toHaveBeenCalled();
       expect(
         rendered.container.querySelector("[data-link-mode]")?.getAttribute("data-link-mode"),
-      ).toBe("phone");
+      ).toBe(method);
       expect(
         rendered.container.querySelector("[data-link-intent]")?.getAttribute("data-link-intent"),
       ).toBe("manage");

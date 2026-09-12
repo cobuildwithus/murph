@@ -25,7 +25,6 @@ import {
 } from "./resend-plain-text-email";
 
 const HOSTED_SIGNUP_WELCOME_EMAIL_SUBJECT = "Welcome to Murph";
-const HOSTED_SIGNUP_WELCOME_EMAIL_RECENT_MEMBER_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
 
 type HostedSignupWelcomeEmailEnv = Readonly<Record<string, string | undefined>>;
 
@@ -35,7 +34,6 @@ export type HostedSignupWelcomeEmailResult =
         | "already_attempted"
         | "member_not_active"
         | "member_not_found"
-        | "member_too_old"
         | "no_welcome_email_recipient"
         | "not_configured";
       status: "skipped";
@@ -47,51 +45,6 @@ export type HostedSignupWelcomeEmailResult =
 
 export const HostedSignupWelcomeEmailError = HostedResendPlainTextEmailError;
 export type HostedSignupWelcomeEmailError = HostedResendPlainTextEmailError;
-
-export async function sendHostedSignupWelcomeEmailForRecentMember(input: {
-  env?: HostedSignupWelcomeEmailEnv;
-  fetchImpl?: typeof fetch;
-  maxAccountAgeMs?: number;
-  memberId: string;
-  now?: Date;
-  prisma?: Parameters<typeof readHostedMemberCoreState>[0]["prisma"];
-}): Promise<HostedSignupWelcomeEmailResult> {
-  const prisma = input.prisma ?? getPrisma();
-  const member = await readHostedMemberCoreState({
-    memberId: input.memberId,
-    prisma,
-  });
-
-  if (!member) {
-    return {
-      reason: "member_not_found",
-      status: "skipped",
-    };
-  }
-
-  if (
-    !isHostedSignupWelcomeEmailRecentMember({
-      maxAccountAgeMs: input.maxAccountAgeMs
-        ?? HOSTED_SIGNUP_WELCOME_EMAIL_RECENT_MEMBER_MAX_AGE_MS,
-      memberCreatedAt: member.createdAt,
-      now: input.now ?? new Date(),
-    })
-  ) {
-    return {
-      reason: "member_too_old",
-      status: "skipped",
-    };
-  }
-
-  return sendHostedSignupWelcomeEmailForMember({
-    env: input.env,
-    fetchImpl: input.fetchImpl,
-    member,
-    memberId: input.memberId,
-    now: input.now,
-    prisma,
-  });
-}
 
 export async function sendHostedSignupWelcomeEmailForMember(input: {
   env?: HostedSignupWelcomeEmailEnv;
@@ -291,14 +244,6 @@ function readHostedSignupWelcomeEmailConfig(
     founderName,
     resend,
   };
-}
-
-function isHostedSignupWelcomeEmailRecentMember(input: {
-  maxAccountAgeMs: number;
-  memberCreatedAt: Date;
-  now: Date;
-}): boolean {
-  return input.now.getTime() - input.memberCreatedAt.getTime() < input.maxAccountAgeMs;
 }
 
 function buildHostedSignupWelcomeEmailText(input: {
