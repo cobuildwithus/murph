@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-09-11
-Updated: 2026-09-11
+Updated: 2026-09-12
 
 ## Goal
 
@@ -157,6 +157,55 @@ Updated: 2026-09-11
   prevent a later independent rollback. The audience and event witnesses do not
   certify every opposite-direction Web-to-runtime contract. Preserve their
   specific rollout floors and report missing natural-traffic proof honestly.
+
+## Implementation and proof checkpoint
+
+- PR #3349 merged the serving-consumer activation gate and shared release deadline
+  after focused proof, independent final review, and all required CI passed.
+  The canonical Web and a newer container release now serve the compatible
+  versions. The protected deployment passed convergence verification; fresh
+  production evidence confirms restored diagnostic ingestion and no recurrence
+  of the two established protocol errors in the observed window.
+- Enabling the existing Telegram reminder journey exposed a stale scripted tool
+  payload. The fixture still supplied raw ISO `schedule.at`, while the current
+  model-facing tool requires `schedule.localAt`. The future-wake assertion caught
+  the failed save despite the scripted setup acknowledgement.
+- PR #3357 isolates the fixture repair. Replaying its actual generated arguments
+  through the production parser rejects the old shape and admits the repaired
+  shape, including minute and year-rollover boundaries. Required CI passed and
+  the fixture merged. Full protected integration now executes the fixed public
+  source. Both scheduled-Telegram tests subsequently passed through the actual
+  alarm, runtime and provider stub, including direct and group delivery without
+  manual nudges.
+- Full private integration intentionally resolves public main rather than an
+  arbitrary candidate override. The correct prerequisite order is fixture repair,
+  private selection and successful hosted proof, then public requirement #3350.
+  Requested source inputs alone are not proof of the source a workflow executed.
+- The private selection preserves the existing five production-core receipt names.
+  Its local verification, preliminary specialist review, and final external review
+  passed with valid tool attestations. The actual selected Telegram journey passed. Complete full integration remains
+  held for a separate Linq fixture prerequisite before private selection can merge.
+- Full integration found a second fixture mismatch after the separately merged
+  signed-direct Linq ingress change. Its current contract trusts explicit signed
+  directness unless durable group ownership contradicts it. The older composed
+  fixture expected provider refresh before any group route existed. PR #3379
+  uses absent directness for initial canonical group discovery, then a conflicting
+  direct flag for a guest after group-route creation. It retains every mailbox,
+  private-context and provider-delivery outcome assertion. Existing planner and
+  fixture-builder suites pass; complete hosted proof remains required.
+- Test registration, selection, successful setup and downstream completion are
+  separate facts. The final testing owner documents each gate and its trigger,
+  including the distinction between private full integration and public
+  production-core admission.
+- Existing Frog records already cover delayed Draft events superseding Ready CI
+  and narrowed shared fetch refspecs leaving tracking refs stale. Use a fresh Ready
+  event after stale event settlement and fetch the base with an explicit destination
+  ref; do not modify unrelated shared fetch configuration.
+- The temporarily interrupted checks for PRs #3341, #3339, and #3342 were
+  restored by their owners. All required checks pass and the PRs have merged.
+- The fixture's new Frog entry is task-owned and must be included with this final
+  plan-bearing completion commit. The plan remains active until the remaining
+  recovery, cross-repository proof, and completion work is finished.
 
 ## Verification
 
