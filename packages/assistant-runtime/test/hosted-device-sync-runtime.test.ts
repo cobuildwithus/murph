@@ -15423,13 +15423,13 @@ describe("hosted device-sync runtime", () => {
       provider: "junction", reason: "reconcile_due",
       hint: { jobs: [], reason: "retained_completion_fence", nextReconcileAt, junctionTemporalSweepKey: marker },
     });
-    assert.equal(await publishHostedDeviceSyncCompletionFence({ deviceSyncPort: port, wake }), nextReconcileAt);
+    await publishHostedDeviceSyncCompletionFence({ deviceSyncPort: port, wake });
     assert.deepEqual(applied[0]?.updates[0]?.connection?.metadata, {
       unrelatedProgress: "preserved", junctionTemporalSweepV1: marker,
     });
-    assert.equal(await publishHostedDeviceSyncCompletionFence({
+    await publishHostedDeviceSyncCompletionFence({
       deviceSyncPort: port, wake: { ...wake, expectedConnectedAt: "2026-03-01T00:00:00.000Z" },
-    }), null);
+    });
     assert.equal(applied.length, 1);
   });
 

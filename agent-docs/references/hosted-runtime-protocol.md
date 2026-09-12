@@ -2886,6 +2886,18 @@ It omits member/account/job identifiers, payloads,
 cursors, provider responses, health values, and raw errors. The marker declares
 the total observed count, sample limit, and truncation state. The Web parser must
 accept the object-array field before a runner capable of emitting it is deployed.
+
+Hosted runtime wake projection reads unfinished job deadlines only. Provider
+cadence remains in Web's `DeviceConnection.nextReconcileAt`; completing a
+checkpointed connection pass publishes that cadence without returning it as a
+runtime wake. The global scheduled reconciler supplies the next connection-scoped
+handoff. Local job retries, dirty acknowledgements, completion barriers, and
+dense-raw retention retain their existing runtime wake owners. Pending or failed
+Fitbit cutovers use the existing connectionless maintenance mailbox successor;
+they do not rewrite provider cadence to arrange a local retry. Already-published
+legacy timers may drain through the existing recovery path without rearming
+provider cadence.
+
 The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
 scheduled reconciler workflow, but web owns the signed legacy-named command that
