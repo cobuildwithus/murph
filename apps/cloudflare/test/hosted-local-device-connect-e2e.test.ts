@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   forwardWearableStage,
   startWearableHostProgress,
+  type WearableStage,
 } from "@murphai/hosted-local-harness/wearable-progress";
 
 import {
@@ -106,10 +107,14 @@ const junctionConfig = liveJunctionWearableConfig ?? syntheticJunctionConfig;
 
 let scenario: HostedLocalFullStackScenario | null = null;
 let stopHostProgress: (() => void) | undefined;
+let lastWearableStage: WearableStage | undefined;
 
 describe("hosted local device connect e2e", () => {
   beforeAll(async () => {
-    if (liveJunctionWearableConfig) stopHostProgress = startWearableHostProgress();
+    if (liveJunctionWearableConfig) {
+      lastWearableStage = undefined;
+      stopHostProgress = startWearableHostProgress(() => lastWearableStage);
+    }
     // The hosted stack needs Junction authority, but never human provider
     // login values. Capture them at module load and exclude them from every
     // Web, Worker, runner, and Temporal child process started by the harness.
@@ -876,7 +881,7 @@ async function runJunctionWearableBrowser(input: {
     const lines = pendingOutput.split(/\r?\n/u);
     pendingOutput = lines.pop() ?? "";
     for (const line of lines) {
-      forwardWearableStage(line);
+      lastWearableStage = forwardWearableStage(line) ?? lastWearableStage;
       if (line !== "MURPH_E2E_GARMIN_CONNECTED=1" || !input.onConnected || dataProof) continue;
       dataProof = input.onConnected(dataAbort.signal).catch((error: unknown) => {
         dataFailure = error;
