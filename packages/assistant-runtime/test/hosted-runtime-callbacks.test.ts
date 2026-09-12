@@ -15150,6 +15150,27 @@ describe("hosted runtime callbacks", () => {
       status: 400,
     },
     {
+      ambiguous: true,
+      failureStage: "http",
+      method: "POST",
+      path: "/attachments",
+      status: 299,
+    },
+    {
+      ambiguous: true,
+      failureStage: "http",
+      method: "POST",
+      path: "/attachments",
+      status: 408,
+    },
+    {
+      ambiguous: false,
+      failureStage: "http",
+      method: "POST",
+      path: "/attachments",
+      status: 499,
+    },
+    {
       ambiguous: false,
       failureStage: "http",
       method: "PUT",
