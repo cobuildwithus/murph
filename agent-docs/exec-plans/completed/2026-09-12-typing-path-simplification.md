@@ -1,6 +1,6 @@
 # Simplify message ingress and activation work
 
-Status: active
+Status: completed
 Created: 2026-09-12
 Updated: 2026-09-12
 
@@ -12,7 +12,7 @@ Updated: 2026-09-12
 
 - Obtain the requested ReviewGPT deletion review and implement evidence-supported recommendations.
 - Prefer net removal of responsibilities, branches, and awaited work without replacement caches, schedulers, or parallel planners.
-- Focused regression tests and affected typechecks pass; candidate review, applicable final ReviewGPT, and exact-head CI close the evidence.
+- Focused regression tests and affected typechecks pass; candidate review and applicable final ReviewGPT resolve the implementation. Exact-head CI remains the PR completion gate after this plan's archival commit.
 
 ## Scope
 
@@ -36,7 +36,7 @@ Updated: 2026-09-12
 2. Done: validated audience precedence, transaction authority, wake admission, and activation liveness counterexamples.
 3. Done: removed ordinary direct classification HTTP and unused identity reads; consolidated wake handoff; corrected hosted route-validation forwarding.
 4. Done: focused tests/typechecks, product journey proof, lint, complexity review, and changelog proof.
-5. In progress: candidate committed and draft PR opened; complete required review/CI and close this plan.
+5. Done: candidate committed, PR opened, and parent/final ReviewGPT passed. Archive this implementation plan; the original session retains ownership of exact-head PR CI through handoff.
 
 ## Decisions
 
@@ -60,3 +60,7 @@ Updated: 2026-09-12
 - PostgreSQL ownership proof: the shared test database had stale schema and permissions, so its setup failures were not behavioral evidence. Created an isolated local test database with repository migrations; seven selected signup/instant-start/cross-channel ownership races passed.
 - Product UX verdict: Ready for the bounded patch. Explicit direct ingress omits provider classification and unused identity loads; group precedence and ownership conflicts stay fenced; wake handoff overlaps only after admission and retains durable failure semantics; real hosted-email automation creation succeeds.
 - Changelog: two content-only entries; production archive rendering passed all ten focused tests, and Web prepared typecheck passed after generation. The documented app-directory test command found no files; existing Frog entry `20260911184822-documented-changelog-test` already owns that issue. Used repository-root Vitest invocation and created no duplicate entry.
+- Final ReviewGPT round 1: PASS on the committed implementation. Full sensitive snapshot, exact patch/blob match, completion marker, and captured model metadata were verified; the response took over five minutes. No findings accepted or rejected, no remediation, and no further source changes. The reviewer supplied source review, while local runs supplied executable proof.
+- Final parent review: required audience, ownership, recovery, and follow-up outcomes are preserved by the bounded patch. Source changes add seven lines overall while removing an ordinary provider call, two unused identity loads, and duplicate wake-protocol ownership. Classification complexity decreases; no dependency, state, or scheduler was introduced.
+- PR: #3367. Current-base merge-tree was clean. At archival, broad CI was still running; the original session must verify the resulting final head before reporting PR completion. The archival edit is explanatory documentation only and does not require another substantive ReviewGPT round.
+Completed: 2026-09-12
