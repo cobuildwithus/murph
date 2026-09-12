@@ -2,6 +2,11 @@
 
 Last verified: 2026-09-11
 
+Bounded Junction full-history batching, exact scalar continuation, and
+foreground yield are owned by `agent-docs/RELIABILITY.md`; provider and durable
+service restart/retry proof lives in
+`packages/device-syncd/test/junction-full-backfill-progress.test.ts`.
+
 ## Purpose
 
 Verification inventory, composed diff routing, cold stale-invocation coverage and
