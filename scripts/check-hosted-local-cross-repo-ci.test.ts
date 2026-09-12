@@ -71,6 +71,18 @@ describe("hosted-local cross-repository CI coverage", () => {
     expect(() => assertHostedLocalCrossRepoCiCoverage({ workflowText })).toThrow(/stale-deferred-replay/);
   });
 
+  it("requires Telegram scheduled delivery independently of first-contact coverage", () => {
+    const workflowText = hostedLocalCrossRepoCiRequirements
+      .filter(({ scenario }) => scenario !== "telegram-scheduled-reminder")
+      .map(({ scenario }) => `- scenarios: ${scenario}`).join("\n")
+      + "\n- scenarios: telegram";
+    expect(() => assertHostedLocalCrossRepoCiCoverage({ workflowText }))
+      .toThrow(/telegram-scheduled-reminder/);
+    expect(() => assertHostedLocalCrossRepoCiCoverage({
+      workflowText: `${workflowText}\n- scenarios: telegram-scheduled-reminder`,
+    })).not.toThrow();
+  });
+
   it("fails on a workflow scenario that the public harness does not own", () => {
     expect(() => assertHostedLocalCrossRepoCiCoverage({
       workflowText: "          - scenarios: imaginary-production-journey",
