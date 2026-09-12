@@ -18,9 +18,11 @@ import {
 } from "./assistant-codex-runtime.harness.ts";
 
 import path from 'node:path'
-import type {
-  AssistantResponseCard,
-  CompactTableWorkoutResponseCardV1,
+import {
+  renderAssistantResponseCardText,
+  renderAssistantWorkoutResponseCardText,
+  type AssistantResponseCard,
+  type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -2558,13 +2560,46 @@ describe('steered final segments', () => {
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
-  it('accepts a later no-reply while preserving an earlier pending answer', async () => {
+  it.each([
+    {
+      label: 'text',
+      card: null,
+      toolResult: '',
+      response: 'Answer one.',
+      transcriptResponse: null,
+    },
+    {
+      label: 'response card',
+      card: DAILY_NUTRITION_RESPONSE_CARD,
+      toolResult: 'response card attached',
+      response: renderAssistantResponseCardText(DAILY_NUTRITION_RESPONSE_CARD),
+      transcriptResponse: null,
+    },
+    {
+      label: 'oversized tracked-card recovery',
+      card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
+      toolResult: 'workout card envelope too large; full text recovery selected',
+      response: renderAssistantWorkoutResponseCardText(OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD),
+      transcriptResponse: expect.stringContaining(
+        `${renderAssistantWorkoutResponseCardText(OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD)}\n\n` +
+        `[Murph tracked workout source: ${OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD.tracking.entityId}; snapshot: `,
+      ),
+    },
+  ])('preserves earlier $label when a later no-reply wins', async ({
+    card, toolResult, response, transcriptResponse,
+  }) => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'user-1',
         type: 'user_message',
         message: 'First question',
       }),
+      ...(card === null ? [] : [{
+        card,
+        expectedText: toolResult,
+        id: 73,
+        kind: 'attach-response-card' as const,
+      }]),
       completedItemEvent({
         id: 'assistant-1',
         type: 'assistant_message',
@@ -2580,16 +2615,22 @@ describe('steered final segments', () => {
         id: 74,
         expectedText: 'finished without reply',
       },
-    ])
+    ], { responseCardsAvailable: true })
 
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([1])
     expect(result.finalMessage).toBe('')
+    expect(result.providerAuthoredFinalMessage).toBe('')
+    expect(result.transcriptMessage).toBeNull()
+    expect(result.responseCard).toBeNull()
+    expect(result.responseMedia).toEqual([])
+    expect(result.followUpRequest).toBeNull()
     expect(result.finalAction).toEqual({ kind: 'none' })
     expect(result.finalActionExplicit).toBe(true)
     expect(result.precedingAgentMessageSegments).toEqual([{
       deliveryContextOrdinal: 0,
       media: [],
-      response: 'Answer one.',
+      response,
+      ...(transcriptResponse === null ? {} : { transcriptResponse }),
     }])
   })
 
