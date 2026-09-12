@@ -312,31 +312,39 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    bounds, and precise partial windows do not manufacture instants with the
    worker process timezone. Generic account completion does not satisfy this
    resource-specific proof. For temporal resources, the configured reconcile
-   horizon is clamped to `1..14` authoritative local days. A scheduled
-   reconcile imports the newest eligible day immediately and enqueues each
-   older resource/day coordinate on the existing durable device-job queue,
-   newest day first. Queued or running rows remain the retry and deduplication
-   owner across restart. Succeeded rows remain execution history, not permanent
-   completion proof, because a later scheduled pull can observe newly admitted
-   sources or newly available provider data. Enqueueing any temporal child
-   sweeps every terminal row in the account's temporal dedupe namespace inside
-   the same transaction, so retained terminal history stays bounded by the
-   current horizon even as coordinates roll out of it or the vault timezone
-   changes. Failed, dead, or yielded work never
-   grants day authority, and any terminal row may be recreated by a later
-   reconcile. A failed, unavailable, or yielded immediate
-   resource becomes the same stable resource/day job ahead of the older
-   backlog; a retryable failure does not block an independent temporal sibling.
-   Temporal resource/day children never advance generic account completion.
-   Generic completion is account activity state, not complete-resource or
-   complete-floor coverage, so it never gates ordinary reconcile collection.
-   When a parent also retains ordinary work, its one durable ordinary reconcile
-   follow-up preserves that work without becoming a separate coverage ledger.
-   With two temporal resources, one reconcile therefore performs at most two
-   immediate one-day collections and normally schedules at most 26 older
-   one-resource/one-day jobs. If both immediate resources require durable
-   continuation, the queue bound is 28 resource/day jobs across the full
-   14-day horizon plus at most one ordinary reconcile follow-up, for 29
+   horizon is clamped to `1..14` authoritative local days. Reconciliation queues
+   the whole horizon newest first, with no inline temporal collection. The
+   provider-owned `junctionTemporalSweepV1` metadata hash covers the newest
+   eligible day, timezone, resources, horizon, and stable provider roster and
+   availability. Equivalent hourly passes skip the broad sweep; a changed scope
+   schedules it again. This scheduling marker and its children commit atomically
+   through existing local job completion. Hosted SQLite is excluded from workspace
+   snapshots: the existing retained wake carries the marker with its exact jobs.
+   Control-plane publication keeps the previous marker until an incoming retained
+   wake or the post-checkpoint completion fence proves durable recovery. A crash
+   before checkpoint replays the original root; a cold restore after checkpoint
+   recovers both queued work and suppression under the existing connection epoch.
+   Warm hydration marks a differing local sweep hash as unpublished progress so
+   the accepted comparison baseline remains the actual Web metadata, including
+   after an applied control update loses its transport response.
+   Missing or unrecognized metadata schedules safely. The marker is never health
+   completeness or source authority, and ordinary reconciliation is unchanged.
+   Oxygen/stress data-event execution also schedules affected local days within
+   the rolling feature horizon, plus up to three days awaiting the existing
+   24-hour lag. These future jobs become available only after day end plus lag.
+   An event batch cannot grant day authority: its child fetches the entire day.
+   Existing account execution fencing orders an event received during a fetch
+   after that fetch; enqueue then recreates a terminal day job. Queued/running
+   coordinates coalesce bursts and retain retries through restart. Daily safety
+   sweeps repair missed events and late provider changes. Data outside this
+   feature horizon retains ordinary ingestion rather than expanding temporal
+   recovery indefinitely.
+   Enqueueing any temporal child sweeps terminal rows in that account's temporal
+   namespace inside the same transaction, keeping retained execution history
+   bounded. Succeeded and dead rows can be recreated, while failed, dead, or
+   yielded work never grants authority. Temporal children never advance generic
+   account completion or suppress ordinary collection. Each full sweep schedules
+   at most 28 resource/day jobs plus one ordinary reconcile follow-up, for 29
    serialized rows. Each child performs at most one canonical import transaction,
    while the provider transport independently caps the collection at 100 pages
    and 25,000 records with no more than three attempts for each page request.

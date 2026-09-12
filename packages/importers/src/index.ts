@@ -1,3 +1,4 @@
+export { isActiveCanonicalWriteLockError } from "@murphai/core";
 export {
   importAssessmentResponse,
   prepareAssessmentResponseImport,

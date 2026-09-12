@@ -5,6 +5,7 @@ interface TestContainerStorage {
 }
 
 interface TestContainerContext {
+  waitUntil(promise: Promise<unknown>): void;
   container?: {
     readonly running: boolean;
   };
@@ -72,10 +73,12 @@ export class Container {
   sleepAfter: string | number = "10m";
 
   constructor(ctx?: {
+    waitUntil?(promise: Promise<unknown>): void;
     container?: TestContainerContext["container"];
     storage?: TestContainerStorage;
   }) {
     this.ctx = {
+      waitUntil: (promise) => { if (ctx?.waitUntil) ctx.waitUntil(promise); else void promise.catch(() => undefined); },
       ...(ctx?.container ? { container: ctx.container } : {}),
       storage: ctx?.storage ?? createMemoryStorage(),
     };

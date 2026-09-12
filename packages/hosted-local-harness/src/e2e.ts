@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import process from "node:process";
 
+import { assertHostedLocalVitestSelection } from "./e2e-test-selection.ts";
+
 import {
   removeHostedLocalWebAuthorityFromProcessEnvironment,
   sanitizeHostedLocalGenericEnvironment,
@@ -117,6 +119,7 @@ export type HostedLocalE2eScenarioName =
   | "snapshot-publication-fallback"
   | "snapshot-stress"
   | "stripe-billing-browser-matrix"
+  | "stale-deferred-replay"
   | "stuck-invocation-recovery"
   | "timezone-injection"
   | "usage-limit-ambiguous-send"
@@ -477,6 +480,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
       "^hosted local foreground reply priority e2e",
       "^hosted local foreground checkpoint ordering e2e",
     ],
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-stale-deferred-replay-e2e.test.ts",
+    name: "stale-deferred-replay",
+    testControls: true,
   },
 ] as const;
 
@@ -945,6 +953,19 @@ async function runHostedLocalVitestForScenarios(input: {
   const testNamePatterns = input.scenarios.length === 1
     ? input.scenarios[0]?.vitestProcessTestNamePatterns ?? [null]
     : [null];
+
+  const scenario = input.scenarios.length === 1 ? input.scenarios[0] : undefined;
+  if (scenario?.vitestProcessTestNamePatterns) {
+    await assertHostedLocalVitestSelection({
+      config: "apps/cloudflare/vitest.e2e.config.ts",
+      cwd: hostedLocalHarnessRepoRoot,
+      env: buildHostedLocalVitestScenarioEnv(input),
+      files: [scenario.file],
+      // Shard admission still validates the complete registry partition.
+      patterns: resolveHostedLocalE2eScenarios(scenario.name)[0]?.vitestProcessTestNamePatterns
+        ?? scenario.vitestProcessTestNamePatterns,
+    });
+  }
 
   for (let index = 0; index < testNamePatterns.length; index += 1) {
     const testNamePattern = testNamePatterns[index] ?? null;

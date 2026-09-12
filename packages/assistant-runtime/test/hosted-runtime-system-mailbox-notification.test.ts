@@ -78,6 +78,7 @@ import {
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   readHostedSystemMailboxState,
+  setHostedDeviceSyncMaintenanceMailboxWakeAt,
   resolveHostedSystemMailboxHandledThroughSeq,
   resolveHostedSystemMailboxProgress,
   resolveHostedSystemMailboxWakeCandidates,
@@ -3793,7 +3794,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("publishes a durable device-sync completion without retaining another runtime wake", async () => {
+  it.each([null, "2026-04-27T00:00:30.000Z"])("publishes device cadence without a runtime wake and preserves maintenance retry %s", async (maintenanceRetryAt) => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const connectionId = "dsc_completion_same_admission";
     const connectedAt = "2026-04-01T00:00:00.000Z";
@@ -3856,6 +3857,16 @@ describe("hosted system mailbox notification execution context", () => {
     });
 
     try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(FIXED_NOW);
+      if (maintenanceRetryAt) {
+        await setHostedDeviceSyncMaintenanceMailboxWakeAt({
+          nextWakeAt: maintenanceRetryAt,
+          now: () => FIXED_NOW,
+          userId: "member_123",
+          vaultRoot: workspace.vaultRoot,
+        });
+      }
       await enqueueHostedSystemMailboxItem({
         item: createResolvedDeviceSyncItem({
           id: "mailbox_item_system_device_sync_completion_same_admission",
@@ -3881,13 +3892,10 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
-        deviceSyncWake: {
-          at: nextReconcileAt,
-          reason: "device-sync.reconcile",
-        },
+        deviceSyncWake: undefined,
         failed: 0,
-        nextWakeAt: nextReconcileAt,
-        nextWakeReason: "device-sync.reconcile",
+        nextWakeAt: maintenanceRetryAt,
+        ...(maintenanceRetryAt ? { nextWakeReason: "device-sync.reconcile" } : {}),
         recorded: 0,
       });
       expect(fetchSnapshot).toHaveBeenCalledWith({
@@ -3904,8 +3912,12 @@ describe("hosted system mailbox notification execution context", () => {
           observedUpdatedAt: updatedAt,
         }],
       });
-      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
+      const remaining = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+      expect(remaining.map((item) => item.nextAttemptAt)).toEqual(
+        maintenanceRetryAt ? [maintenanceRetryAt] : [],
+      );
     } finally {
+      vi.useRealTimers();
       await workspace.cleanup();
     }
   });
@@ -4070,13 +4082,9 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
-        deviceSyncWake: {
-          at: nextReconcileAt,
-          reason: "device-sync.reconcile",
-        },
+        deviceSyncWake: undefined,
         failed: 0,
-        nextWakeAt: nextReconcileAt,
-        nextWakeReason: "device-sync.reconcile",
+        nextWakeAt: null,
         recorded: 0,
       });
       expect(fetchSnapshot).toHaveBeenCalledTimes(2);

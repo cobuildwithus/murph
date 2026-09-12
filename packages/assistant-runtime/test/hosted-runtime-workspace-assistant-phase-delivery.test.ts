@@ -160,16 +160,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     );
     expect(outboxLogIndex).toBeGreaterThanOrEqual(0);
     expect(finishLogIndex).toBeGreaterThan(outboxLogIndex);
-    expect(
-      mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.maintainAssistantAutoReplyRouteState.mock.invocationCallOrder[0] ?? 0,
-    );
-    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledWith({
-      shouldYield: shouldYieldBackgroundMaintenance,
-      signal: backgroundMaintenanceController.signal,
-      vault: "/tmp/murph-vault",
-    });
+    expect(mocks.maintainAssistantAutoReplyRouteState).not.toHaveBeenCalled();
   });
 
   it("waits for optional product feedback only after a queue-only foreground reply is sent", async () => {

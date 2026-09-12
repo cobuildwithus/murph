@@ -30370,6 +30370,8 @@ describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
       expect(result.responseDeliveryContextOrdinal).toBe(1)
       expect(result.responseMedia).toEqual([])
       expect(result.responseCard).toBeNull()
+      expect(result.followUpRequest).toBeNull()
+      expect(result.targetInputId).toBeNull()
       expect(finishAttempts).toHaveLength(1)
       expect(readDynamicToolAttempts(result.jsonEvents)).toEqual(finishAttempts)
     } finally {

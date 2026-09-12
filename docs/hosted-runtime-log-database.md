@@ -43,6 +43,34 @@ The isolated database does not store the raw hosted member id and has no
 cross-database foreign key. Attempt ids and other existing redacted operational
 correlation fields retain their current contract and limits.
 
+### Device import no-op counts
+
+`device-sync.pass_finished` includes whole-pass persistence outcome counts:
+`deviceSyncImportAppliedCount`, `deviceSyncImportNoopCount`,
+`deviceSyncImportFailedCount`, and `deviceSyncImportUnknownCount`.
+The matching `deviceSyncCompleteSourceDayImport*Count` fields count only
+imports supplied with complete-source-day authority, including imports inside
+reconciliation jobs. These subset counts measure the oxygen/stress temporal
+feature rereads; they are not all initial historical backfill work.
+
+An explicit importer `applied: false` is a no-op. Explicit `true` means
+persistence changed, which can include evidence-only writes rather than new
+health facts. A rejected import is failed even if its job later recovers; a
+resolved result without a boolean `applied` is unknown. Jobs that perform no
+import contribute zero counts. Job completion, provider response record counts,
+and returned canonical event counts cannot establish a persistence no-op.
+
+Counts aggregate every retained diagnostic before the existing slowest-job
+sample. The service buffer covers at least the hosted pass job limit.
+Compute the classified success no-op rate as `noop / (noop + applied)`, and
+report failed and unknown counts alongside it. Use the complete-source-day
+fields for that subset; do not sum them into the overall counts again.
+The sampled `deviceSyncJobTimingSummaries` remain timing evidence, not a
+rate denominator. These additions use the existing shallow scalar log contract
+and existing best-effort event; no extra callback, health payload, source id,
+window date, or durable scheduling state is added. Old log rows lack the fields
+and must be excluded from the measured cohort rather than treated as zeros.
+
 ### Ensure-processing summaries
 
 `runner.processing_finished` is one best-effort summary per completed

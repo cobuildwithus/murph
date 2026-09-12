@@ -489,9 +489,13 @@ checkbox, and frame counts so a protected-main run can distinguish an
 unchanged action surface from same-route DOM progression without exposing
 provider content. The runner re-reads the route after collecting those counts;
 if Garmin departs during that asynchronous sample, the current route wins over
-the stale pre-sample observation and the callback proof continues. After the
-persisted-state reload, the runner waits for the page load boundary before
-clicking Disconnect so server-rendered state cannot outrun its client handler.
+the stale pre-sample observation and the callback proof continues. Before each
+persisted-state assertion, the runner requires a successful HTTP response and the expected same-origin `/connect` destination. Initial navigation
+and reload have distinct failure stages; HTTP errors report only their numeric
+status and redirects use a fixed message. Neither can pass through matching
+markup or be hidden by the full connection-state wait. After the persisted-state
+reload, the runner waits for the page load boundary before clicking Disconnect
+so server-rendered state cannot outrun its client handler.
 Authorization-click failures retain the fixed action and timeout category,
 plus allowlisted host-family and route categories sampled before and after the
 click. The runner captures the original stage and diagnostic message before
@@ -501,6 +505,23 @@ Changes to the checkbox count or availability, the exact `Save` count or state,
 or the paired progression markers fail closed; unrelated negative actions and
 links are not part of the selection gate. The CI boundary keeps manual
 authorization disabled and challenge handling fail-closed.
+The browser also emits fixed execution-stage messages through its existing stdout
+pipe. The parent forwards only complete messages from the harness-owned closed
+vocabulary, including browser cleanup substeps; raw child output remains buffered.
+While a live wearable scenario runs, the parent reports numeric host CPU
+parallelism, one-minute load, and available/free/total memory every 30 seconds and stops
+that heartbeat after scenario cleanup. In GitHub Actions it also emits up to ten
+notice annotations containing the last validated stage, elapsed seconds, and the
+same numeric measurements. The first sample is immediate, then every four
+minutes or sooner when available memory falls below half its last annotated
+value. This respects the runner's per-step notice limit and makes bounded
+progress available separately from the final log archive. These observations cannot satisfy or
+replace connection, canonical-data, or cleanup proof. They contain no page,
+provider, account, URL, or environment content. Focused progress/privacy proof:
+`pnpm --dir packages/hosted-local-harness exec vitest run --config vitest.config.ts
+--no-coverage test/wearable-progress.test.ts` plus the existing Web wearable
+browser suite, whose pending-cleanup case requires progress before browser exit.
+
 The profile can reuse a still-valid Garmin session, while an expired session
 falls back to the dedicated login. See
 Kernel's [SSH tunnel](https://www.kernel.sh/docs/browsers/ssh),

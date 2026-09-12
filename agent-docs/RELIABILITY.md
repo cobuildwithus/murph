@@ -126,6 +126,22 @@ Last verified: 2026-09-04
   one fixed synthetic goal. A read-only observer requires the current checkpoint's
   published replica and no pending conversation input, then checks canonical
   goal and distinct-ID counts. A reply alone cannot satisfy this outcome gate.
+  Exceptional outcome reads emit at most one best-effort Web `console.warn` with
+  the fixed message `Hosted Linq production canary outcome read failed.` and only
+  a request-local `stage`: `member_lookup` selects the fixed identity;
+  `initial_authority` / `final_authority` distinguish the two access checks;
+  `initial_readiness` / `final_readiness` cover the local pending-input,
+  workspace/freshness and post-decryption race checks (including identity recheck);
+  `control_configuration`, `key_generation`, `session_request`, `session_parsing`,
+  `decryption`, and `goal_counting` identify their respective existing operations.
+  Stages identify where execution failed, not the exception's cause. Added
+  successful/not-ready work is only literal assignments; diagnostic allocation
+  and emission are failure-only. Exceptions, identifiers, refs, keys, payloads and
+  goal contents are never inspected for or included in this diagnostic. Logging
+  failure still yields the unchanged generic 503. For a bounded natural-traffic
+  query, filter the last 24 hours of Web logs by that exact message and return
+  only counts grouped by these eleven stages; do not invoke extra canaries,
+  poll the endpoint, retry, wake or refresh to collect evidence.
 - Protected native iOS and Android hosted E2E controllers run staggered every
   six hours and execute each admitted journey even when the same revision
   previously passed. Provider behavior can change independently of source.
@@ -1474,6 +1490,16 @@ Last verified: 2026-09-04
   of a future stream wrapper. Remove these two fields and their shared classifier
   once the framing/encoding prerequisite is characterized, or the bounded
   window yields no useful evidence; retained records expire under existing policy.
+- Core tags `CANONICAL_WRITE_LOCKED` errors with a closed `details.lockState`
+  (`active` or `stale`). Device imports retry only a real `VaultError` whose
+  code and owner-supplied state identify active contention. The existing local
+  job owner retains its backoff, attempt ceiling, lease and connection fences;
+  foreground cancellation/yield keeps its existing precedence. Missing, unknown
+  or malformed states, stale locks and other canonical failures retain their
+  existing classification. Contention diagnostics use a fixed summary without
+  lock metadata, paths, process commands or identifiers. This classification
+  adds no lock cleanup, wait extension or retry owner; older errors without
+  the discriminator remain fail-closed.
 - Hosted artifact reads and uploads are content-addressed and replay-safe. Transport
   failures plus HTTP 408, 429, and 5xx responses carry typed retryability into the
   existing device-sync job owner, which requeues with its normal bounded backoff.
@@ -2061,10 +2087,16 @@ Last verified: 2026-09-04
   is five seconds, bounding the paired six-page worst case at 30 seconds. A
   typed provider failure therefore reaches ordinary job backoff before the
   hosted 120-second device-pass cancellation can release it as an unclassified
-  yield. Each timeseries attempt owns one canonical resource and one complete
-  UTC day under the three-page, single-attempt bound. Page-heavy active-
+  yield. Full-job timeseries work groups up to 16 consecutive complete units
+  of the same resource into one durable job, stopping before another unit
+  after five seconds or foreground/abort notification. Each import still owns
+  one complete UTC day under the three-page, single-attempt bound. Page-heavy active-
   calorie and heart-rate days deterministically retry as complete UTC hours;
-  no partial aggregate or vendor cursor is persisted. `summaryResourceCursor`,
+  no partial aggregate or vendor cursor is persisted. A resource change, window
+  adaptation, workout-stream continuation, or future retry returns to the
+  existing queue. The scalar suffix survives restart; failure within a batch
+  may replay its bounded canonical prefix through the idempotent importer.
+  `summaryResourceCursor`,
   `summaryPhaseComplete`, `timeseriesCursor`, and `timeseriesResourceCursor`
   identify the next complete unit without changing job dedupe identity. The
   deployed v1 resource envelope is read only at this provider boundary,
@@ -3062,7 +3094,7 @@ Last verified: 2026-09-04
   bounded work rather than implicit fan-out.
 - Cloudflare container and Durable Object RPC methods must be invoked directly on the platform stub, not detached, bound, wrapped, or passed around as ordinary callbacks. Test doubles for hosted runner/container seams should model that direct-call contract so local coverage catches receiver/proxy mistakes before they become accepted-but-stuck runtime work.
 - Assistant turns and outbound sends should prefer system-emitted receipts plus idempotent outbox intents over model-authored logs. The receipt trail must stay non-canonical, compact, and safe to inspect through `murph status` / `murph doctor` even when transcripts are partially corrupted.
-- Cross-session auto-reply route state removes receipt-inventory reads from foreground unanchored selection. A foreground read with no valid migration marker fails optional context closed without scanning history; after migration it touches one exact route file and at most the one exact pending receipt. Unanchored provider egress requires the marker plus a running consuming receipt. An exact provider-message anchor remains authoritative before migration and persists its bounded pending claim before live steering, so a crash cannot let migration publish without that witness. Any claim failure prevents provider start and releases an earlier provider-input reservation. A same-turn claim upgrade retains one bounded, receipt-proven prior order so a completed turn can settle the earlier accepted context when a newer steer was abandoned. Completed or deferred claims advance only through matching context-intent evidence, terminal claims without that proof clear without consuming, and failed or blocked turns never settle either the current or prior order. Maintenance never precedes provider start or response delivery: local and one-shot runs reconcile after direct delivery or their queue drain and before continuing or returning; hosted foreground runs reconcile after checkpoint delivery or immediately after synchronous delivery has already completed, and hosted background or no-progress passes reconcile after their own delivery boundary. A maintenance-only hosted mutation forces the checkpoint that carries it; idle snapshot residue remains the fallback owner. Before the marker, maintenance performs one trusted outbox-and-receipt inventory migration under the runtime lock. Fresh foreground discovery marks an import in flight before lock-bound staging so maintenance yields cooperatively, while only the current item's post-stage observation makes that item's remainder abortable and schedules an immediate assistant wake; process or lease aborts retain separate hard-cancellation authority. Migration folds legacy running consumers and terminal consumption into the greatest per-route suppression watermark and writes `auto-reply/route-state-migration.json` last. A yielded partial fold reports whether it changed state, is safe to repeat, and cannot publish the marker. After the marker, maintenance scans no receipt history and exact-reads only receipts named by pending routes. Because the reconciliation boundary is quiescent, a still-running, missing, or corrupt pending witness is retired into the suppression watermark and cleared without representing successful provider consumption; exact anchors continue to bypass that watermark. A route with no remaining sent or exact-replyable accepted-media outbox delivery is deleted before reconciliation, including obsolete pending state. For one exact-replyable accepted Linq media intent, repeated partial retries and the eventual successful rich-link completion retain the first accepted-media `delivery.sentAt` as the stable route order; the intent's top-level `sentAt` and `updatedAt` still record the actual completion time. This removes route-specific receipt protection and abandonment timeouts while keeping generic receipt/journal retention independent. Once a migration marker or route claim is written, route-capable code is the workspace rollback floor. Deploy by draining older assistant writers before enabling the new writer on a workspace, then keep the marker and route subtree in every hosted snapshot and restore.
+- Cross-session auto-reply route state removes receipt-inventory reads from foreground unanchored selection. A foreground read with no valid migration marker fails optional context closed without scanning history; after migration it touches one exact route file and at most the one exact pending receipt. Unanchored provider egress requires the marker plus a running consuming receipt. An exact provider-message anchor remains authoritative before migration and persists its bounded pending claim before live steering, so a crash cannot let migration publish without that witness. Any claim failure prevents provider start and releases an earlier provider-input reservation. A same-turn claim upgrade retains one bounded, receipt-proven prior order so a completed turn can settle the earlier accepted context when a newer steer was abandoned. Completed or deferred claims advance only through matching context-intent evidence, terminal claims without that proof clear without consuming, and failed or blocked turns never settle either the current or prior order. Maintenance never precedes provider start or response delivery: local and one-shot runs reconcile after direct delivery or their queue drain and before continuing or returning; hosted foreground passes retain exact route/receipt handling without invoking full-history maintenance; hosted background passes reconcile after their own delivery boundary. A maintenance-only hosted mutation forces the checkpoint that carries it; idle snapshot residue also owns full route reconciliation. An unmigrated workspace waits for background or idle maintenance before optional unanchored context becomes eligible; exact provider-message anchors remain available before migration. Before the marker, maintenance performs one trusted outbox-and-receipt inventory migration under the runtime lock. Fresh foreground discovery marks an import in flight before lock-bound staging so maintenance yields cooperatively, while only the current item's post-stage observation makes that item's remainder abortable and schedules an immediate assistant wake; process or lease aborts retain separate hard-cancellation authority. Migration folds legacy running consumers and terminal consumption into the greatest per-route suppression watermark and writes `auto-reply/route-state-migration.json` last. A yielded partial fold reports whether it changed state, is safe to repeat, and cannot publish the marker. After the marker, maintenance scans no receipt history and exact-reads only receipts named by pending routes. Because the reconciliation boundary is quiescent, a still-running, missing, or corrupt pending witness is retired into the suppression watermark and cleared without representing successful provider consumption; exact anchors continue to bypass that watermark. A route with no remaining sent or exact-replyable accepted-media outbox delivery is deleted before reconciliation, including obsolete pending state. For one exact-replyable accepted Linq media intent, repeated partial retries and the eventual successful rich-link completion retain the first accepted-media `delivery.sentAt` as the stable route order; the intent's top-level `sentAt` and `updatedAt` still record the actual completion time. This removes route-specific receipt protection and abandonment timeouts while keeping generic receipt/journal retention independent. Once a migration marker or route claim is written, route-capable code is the workspace rollback floor. Deploy by draining older assistant writers before enabling the new writer on a workspace, then keep the marker and route subtree in every hosted snapshot and restore.
 - Assistant observability and recovery surfaces should stay persisted and replay-safe: diagnostics/status snapshots must tolerate missing files, and fault-injection coverage should exercise retryable provider/delivery/automation failure paths before those recovery hooks are trusted.
 - Hosted growth activity history reuses the authenticated daily growth snapshot
   cron and its UTC-date upsert; it has no second scheduler or retry owner. Each

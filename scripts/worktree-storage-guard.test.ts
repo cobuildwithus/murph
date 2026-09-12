@@ -324,7 +324,7 @@ describe('worktree storage guard', () => {
       readFileSync(path.join(sourceRoot, 'package.json'), 'utf8'),
     )
     expect(packageJson.scripts.prepare).toBe(
-      'if [ -z "${CI:-}" ] && [ -z "${VERCEL:-}" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then scripts/install-git-hooks; fi',
+      'if [ -z "${CI:-}" ] && [ -z "${VERCEL:-}" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then scripts/install-git-hooks --if-needed; fi',
     )
   })
 
@@ -803,6 +803,120 @@ touch hook-installed
     expect(vercel.status, vercel.stderr).toBe(0)
     expect(existsSync(marker)).toBe(false)
   })
+
+  it.each(['primary', 'linked'] as const)(
+    'skips configured %s hook setup when the shared lock is busy',
+    (checkout) => {
+      const harness = createHarness()
+      expect(runScript(harness, 'install-git-hooks').status).toBe(0)
+      const target = path.join(harness.root, 'configured')
+      if (checkout === 'linked') {
+        const creation = runScript(harness, 'create-worktree', ['-b', 'configured', target])
+        expect(creation.status, creation.stderr).toBe(0)
+      }
+      const configPaths = [
+        path.join(harness.primary, '.git', 'config'),
+        path.join(harness.state, 'gitconfig.current'),
+        path.join(harness.state, 'authorization-initialized'),
+      ]
+      const snapshot = () => configPaths.map((file) => ({
+        contents: readFileSync(file, 'utf8'),
+        inode: statSync(file).ino,
+        modified: statSync(file).mtimeMs,
+      }))
+      const before = snapshot()
+      // Model either native lock command timing out without a three-minute wait.
+      for (const command of ['flock', 'lockf']) {
+        executable(path.join(harness.fakeBin, command), '#!/bin/sh\nexit 75\n')
+      }
+      const result = spawnSync('bash', ['scripts/install-git-hooks', '--if-needed'], {
+        cwd: checkout === 'linked' ? target : harness.primary,
+        env: guardEnvironment(harness),
+        encoding: 'utf8',
+      })
+      expect(result.status, result.stderr).toBe(0)
+      expect(snapshot()).toEqual(before)
+      const normal = runScript(harness, 'install-git-hooks')
+      expect(normal.status).toBe(75)
+    },
+  )
+
+  it('completes configured hook setup while another process holds the native lock', async () => {
+    const harness = createHarness()
+    expect(runScript(harness, 'install-git-hooks').status).toBe(0)
+    const hasFlock = spawnSync('bash', ['-c', 'command -v flock']).status === 0
+    const holder = spawn(hasFlock ? 'flock' : 'lockf', [
+      hasFlock ? '-w' : '-t', '5', path.join(harness.state, 'lock'),
+      'bash', '-c', "printf 'locked\\n'; read -r release || :",
+    ], { env: guardEnvironment(harness), stdio: ['pipe', 'pipe', 'pipe'] })
+    const closed = new Promise<number | null>((resolve) => holder.once('close', resolve))
+    try {
+      await new Promise<void>((resolve, reject) => {
+        holder.once('error', reject)
+        holder.stdout.once('data', () => resolve())
+        holder.once('exit', () => reject(new Error('native lock holder exited before release')))
+      })
+      const result = await runWithHeldOpenInput(
+        'bash', ['scripts/install-git-hooks', '--if-needed'],
+        harness.primary, guardEnvironment(harness),
+      )
+      expect(result.timedOut).toBe(false)
+      expect(result.status, result.stderr).toBe(0)
+    } finally {
+      holder.stdin.end()
+      await closed
+    }
+  })
+
+  it.each(['include', 'hook-path', 'baseline'] as const)(
+    'serializes and repairs missing or stale %s during dependency hook setup',
+    (state) => {
+      const harness = createHarness()
+      const initial = runScript(harness, 'install-git-hooks', ['--if-needed'])
+      expect(initial.status, initial.stderr).toBe(0)
+      if (state === 'include') {
+        runGit(harness.primary, ['config', '--local', '--unset-all', 'include.path'])
+      } else if (state === 'hook-path') {
+        runGit(harness.primary, ['config', '--file', path.join(harness.state, 'gitconfig.current'), 'core.hooksPath', '.githooks'])
+      } else {
+        rmSync(path.join(harness.state, 'authorization-initialized'))
+      }
+      for (const command of ['flock', 'lockf']) {
+        executable(path.join(harness.fakeBin, command), '#!/bin/sh\nexit 75\n')
+      }
+      expect(runScript(harness, 'install-git-hooks', ['--if-needed']).status).toBe(75)
+      for (const command of ['flock', 'lockf']) rmSync(path.join(harness.fakeBin, command))
+      const repaired = runScript(harness, 'install-git-hooks', ['--if-needed'])
+      expect(repaired.status, repaired.stderr).toBe(0)
+      expect(runGit(harness.primary, ['config', '--get', 'core.hooksPath'])).toBe(realpathSync(path.join(harness.primary, '.githooks')))
+      expect(existsSync(path.join(harness.state, 'authorization-initialized'))).toBe(true)
+    },
+  )
+
+  it.each(['revoked', 'isolated'] as const)(
+    'rechecks %s authorization at prepare and commit after a successful no-op',
+    (state) => {
+      const harness = createHarness()
+      const target = path.join(harness.root, 'authorized')
+      const creation = runScript(harness, 'create-worktree', ['-b', 'authorized', target])
+      expect(creation.status, creation.stderr).toBe(0)
+      const prepare = () => spawnSync('bash', ['scripts/install-git-hooks', '--if-needed'], {
+        cwd: target, encoding: 'utf8', env: guardEnvironment(harness),
+      })
+      expect(prepare().status).toBe(0)
+      const adminDir = runGit(target, ['rev-parse', '--absolute-git-dir'])
+      if (state === 'revoked') rmSync(path.join(adminDir, 'murph-storage-guard-authorized'))
+      else writeFileSync(path.join(adminDir, 'murph-storage-guard-isolated'), '')
+      const rejected = prepare()
+      expect(rejected.status).toBe(1)
+      expect(rejected.stderr).toContain('bypassed scripts/create-worktree')
+      const commit = spawnSync('git', ['commit', '--allow-empty', '-m', 'must reject'], {
+        cwd: target, encoding: 'utf8', env: guardEnvironment(harness),
+      })
+      expect(commit.status).toBe(1)
+      expect(commit.stderr).toContain('bypassed scripts/create-worktree')
+    },
+  )
 
   it('avoids process substitution in the install-time guard', () => {
     const guard = readFileSync(

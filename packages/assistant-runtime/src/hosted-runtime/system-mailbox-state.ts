@@ -433,7 +433,9 @@ export async function removeHostedSystemMailboxPendingItems(input: {
   }));
 }
 
-export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
+// Reuse the existing durable maintenance item for retention and control-plane
+// retries. Its historical dense-raw-retention identity remains restore-compatible.
+export async function setHostedDeviceSyncMaintenanceMailboxWakeAt(input: {
   nextWakeAt: string | null;
   now?: () => string;
   persistAtCanonicalBoundary?: boolean;

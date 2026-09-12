@@ -6639,6 +6639,7 @@ describe("Linq group chat auto-provision", () => {
         });
         expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
           envelope: expect.objectContaining({
+            userId: "member_thread_container_123",
             message: expect.objectContaining({
               linqMessage: expect.objectContaining({
                 chatId: "chat_group_123",
@@ -6772,10 +6773,8 @@ describe("Linq group chat auto-provision", () => {
     vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
     vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
       .mockReturnValue(buildLinqMessageReceivedEvent({ isGroup: false }) as never);
-    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
-      handles: [],
-      isGroup: false,
-    });
+    vi.mocked(linqClient.getHostedLinqChatSummary)
+      .mockRejectedValue(new Error("Chat HTTP is not ownership authority"));
     vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -6789,12 +6788,10 @@ describe("Linq group chat auto-provision", () => {
       ok: true,
       reason: "wake-appended-thread-route",
     });
-    expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledWith({
-      chatId: "chat_group_123",
-      timeoutMs: 1_500,
-    });
+    expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
+        userId: "member_thread_container_123",
         message: expect.objectContaining({
           linqMessage: expect.objectContaining({
             chatId: "chat_group_123",
@@ -6818,19 +6815,9 @@ describe("Linq group chat auto-provision", () => {
       webhookIsGroup: true,
     },
     {
-      description: "incorrectly says direct",
-      service: "iMessage",
-      webhookIsGroup: false,
-    },
-    {
       description: "omits group directness",
       service: "iMessage",
       webhookIsGroup: null,
-    },
-    {
-      description: "incorrectly says direct",
-      service: "sms",
-      webhookIsGroup: false,
     },
     {
       description: "omits group directness",

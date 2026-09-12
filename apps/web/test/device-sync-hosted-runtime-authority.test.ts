@@ -482,6 +482,7 @@ function createAuthorityHarness(input: {
         externalAccountId: currentRecord.externalAccountId ?? "acct_123",
       })),
     getStoredConnectionAccountForUser: vi.fn(async () => currentStoredAccount),
+    hasPendingDirtyConnection: vi.fn(async () => false),
     listConnectionSources: vi.fn(async () => connectionSources),
     listConnectionSourcesForConnections: vi.fn(async (connectionIds: readonly string[]) =>
       connectionSources.filter((source) => connectionIds.includes(source.connectionId))
@@ -2468,6 +2469,67 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.upsertConnectionSource).not.toHaveBeenCalledWith(
       expect.objectContaining({ sourceInstanceKey: canonicalSourceInstanceKey }),
     );
+  });
+
+  it.each([
+    { google: "current", dirty: true, fitbitWrites: 0 },
+    { google: "current", dirty: false, fitbitWrites: 1 },
+    { google: "pending", dirty: true, fitbitWrites: 0 },
+    { google: "pending", dirty: false, fitbitWrites: 1 },
+    { google: "absent", dirty: true, fitbitWrites: 1 },
+  ])("checks dirty work once for a Fitbit terminal projection with $google Google authority and dirty=$dirty", async ({
+    google, dirty, fitbitWrites,
+  }) => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({ provider: "junction" }),
+      connectionSources: [
+        { sourceInstanceKey: "fitbit", sourceProviderSlug: "fitbit" },
+        ...(google === "current"
+          ? [{ sourceInstanceKey: "google_health", sourceProviderSlug: "google_health" }]
+          : []),
+      ],
+    });
+    harness.store.hasPendingDirtyConnection.mockResolvedValue(dirty);
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        method: "POST",
+        body: JSON.stringify({
+          userId: "user_123",
+          updates: [{
+            connectionId: "conn_123",
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            sources: [
+              {
+                sourceInstanceKey: "fitbit",
+                sourceProviderSlug: "fitbit",
+                observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+                lastSeenAt: "2026-04-06T10:05:00.000Z",
+                status: "disconnected",
+              },
+              ...(google === "pending" ? [{
+                sourceInstanceKey: "google_health",
+                sourceProviderSlug: "google_health",
+                observedLastSeenAt: null,
+                lastSeenAt: "2026-04-06T10:05:00.000Z",
+                status: "connected",
+              }] : []),
+            ],
+          }],
+        }),
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(harness.store.hasPendingDirtyConnection).toHaveBeenCalledTimes(google === "absent" ? 0 : 1);
+    const writes = harness.upsertConnectionSource.mock.calls.map(([write]) => write);
+    expect(writes.filter((write) => write.sourceProviderSlug === "fitbit")).toHaveLength(fitbitWrites);
+    expect(writes.filter((write) => write.sourceProviderSlug === "google_health")).toHaveLength(google === "pending" ? 1 : 0);
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(response.updates[0]?.writeUpdate).toBe(writes.length > 0 ? "applied" : "unchanged");
   });
 
   it("persists runtime source availability updates without rewriting connection state", async () => {

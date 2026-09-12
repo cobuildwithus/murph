@@ -53,6 +53,7 @@ import type {
   HandleWebhookResult,
   MarkPublicDeviceSyncConnectionSetupFailedResult,
   OAuthStateConsumeClaim,
+  OAuthStateRecord,
   ProviderConnectionResult,
   ProviderBeginConnectionResult,
   PublicDeviceSyncAccount,
@@ -1031,16 +1032,23 @@ export class DeviceSyncPublicIngress {
     );
   }
 
-  private async handleConnectionCallbackForProvider(
+  private buildConnectionCallbackContext(provider: string, stateRecord: OAuthStateRecord) {
+    return {
+      connectSourceId: readConnectSourceId(stateRecord.metadata),
+      connectTarget: readConnectTarget(stateRecord.metadata),
+      provider,
+      returnTo: this.sanitizeStoredReturnTo(stateRecord.returnTo ?? null),
+    };
+  }
+
+  private async claimConnectionCallback(
     provider: DeviceSyncProvider,
     input: HandleConnectionCallbackInput,
     callback: ReturnType<typeof prepareConnectionCallback>,
-  ): Promise<CompleteConnectionResult> {
+  ) {
     const now = callback.receivedAt;
-    const descriptor = this.describeProvider(provider);
     const callbackQuery = callback.query;
     const state = callback.state;
-
     const expectedOwnerId = normalizeString(input.expectedOwnerId);
     const preProviderError = resolveDefinitivePreProviderOAuthCallbackError(
       provider,
@@ -1100,12 +1108,7 @@ export class DeviceSyncPublicIngress {
           retryable: false,
           httpStatus: 409,
         }),
-        {
-          connectSourceId: readConnectSourceId(stateResult.record.metadata),
-          connectTarget: readConnectTarget(stateResult.record.metadata),
-          provider: provider.provider,
-          returnTo: this.sanitizeStoredReturnTo(stateResult.record.returnTo ?? null),
-        },
+        this.buildConnectionCallbackContext(provider.provider, stateResult.record),
       );
     }
 
@@ -1117,12 +1120,7 @@ export class DeviceSyncPublicIngress {
           retryable: false,
           httpStatus: 409,
         }),
-        {
-          connectSourceId: readConnectSourceId(stateResult.record.metadata),
-          connectTarget: readConnectTarget(stateResult.record.metadata),
-          provider: provider.provider,
-          returnTo: this.sanitizeStoredReturnTo(stateResult.record.returnTo ?? null),
-        },
+        this.buildConnectionCallbackContext(provider.provider, stateResult.record),
       );
     }
 
@@ -1134,30 +1132,42 @@ export class DeviceSyncPublicIngress {
           callbackError,
         });
       }
-      throw attachOAuthCallbackContext(preProviderError!, {
-        connectSourceId: readConnectSourceId(stateResult.record.metadata),
-        connectTarget: readConnectTarget(stateResult.record.metadata),
-        provider: provider.provider,
-        returnTo: this.sanitizeStoredReturnTo(stateResult.record.returnTo ?? null),
-      });
+      throw attachOAuthCallbackContext(
+        preProviderError!,
+        this.buildConnectionCallbackContext(provider.provider, stateResult.record),
+      );
     }
 
+    return {
+      stateResult,
+      callbackContext: this.buildConnectionCallbackContext(provider.provider, stateResult.record),
+    };
+  }
+
+  private async handleConnectionCallbackForProvider(
+    provider: DeviceSyncProvider,
+    input: HandleConnectionCallbackInput,
+    callback: ReturnType<typeof prepareConnectionCallback>,
+  ): Promise<CompleteConnectionResult> {
+    const now = callback.receivedAt;
+    const descriptor = this.describeProvider(provider);
+    const callbackQuery = callback.query;
+    const state = callback.state;
+
+    const { stateResult, callbackContext } = await this.claimConnectionCallback(provider, input, callback);
     const stateRecord = stateResult.record;
-    const returnTo = this.sanitizeStoredReturnTo(stateRecord.returnTo ?? null);
+    const { connectSourceId, connectTarget, returnTo } = callbackContext;
     const seededAccountId = readSeededConnectionAccountId(stateRecord.metadata);
     let seededExternalAccountId = readSeededConnectionExternalAccountId(stateRecord.metadata);
     const seededSetupExpiresAt = readSeededConnectionSetupExpiresAt(stateRecord.metadata);
     const seededConnectedAt = seededAccountId
       ? readSeededConnectionConnectedAt(stateRecord.metadata) ?? stateRecord.createdAt
       : null;
-    const connectSourceId = readConnectSourceId(stateRecord.metadata);
-    const connectTarget = readConnectTarget(stateRecord.metadata);
     const sourceProviderSlug = readSourceProviderSlug(stateRecord.metadata);
-    const callbackContext = {
-      connectSourceId,
-      connectTarget,
-      provider: provider.provider,
-      returnTo,
+    const connectionSourceContext = {
+      ...(connectSourceId ? { connectSourceId } : {}),
+      ...(connectTarget ? { connectTarget } : {}),
+      ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
     };
     let connection: ProviderConnectionResult | null = null;
     let account: PublicDeviceSyncAccount | null = null;
@@ -1169,66 +1179,29 @@ export class DeviceSyncPublicIngress {
     try {
       seededAccount = seededAccountId ? await this.store.getConnectionById(seededAccountId) : null;
 
-    if (seededAccount && seededAccount.provider !== provider.provider) {
-      throw attachOAuthCallbackContext(
-        deviceSyncError({
-          code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
-          message: "Device sync connection callback referenced a seeded account for another provider.",
-          retryable: false,
-          httpStatus: 400,
-        }),
-        callbackContext,
-      );
-    }
+      if (seededAccount && seededAccount.provider !== provider.provider) {
+        throw attachOAuthCallbackContext(
+          deviceSyncError({
+            code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
+            message: "Device sync connection callback referenced a seeded account for another provider.",
+            retryable: false,
+            httpStatus: 400,
+          }),
+          callbackContext,
+        );
+      }
 
-    if (seededAccountId && !seededAccount) {
-      throw attachOAuthCallbackContext(
-        deviceSyncError({
-          code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
-          message: "Device sync connection callback referenced an unexpected seeded account.",
-          retryable: false,
-          httpStatus: 400,
-        }),
-        callbackContext,
-      );
-    }
-
-    if (seededAccount?.status === "disconnected") {
-      throw attachOAuthCallbackContext(
-        deviceSyncError({
-          code: "CONNECTION_ALREADY_DISCONNECTED",
-          message: "Device sync connection callback was received after the seeded account was disconnected.",
-          retryable: false,
-          httpStatus: 409,
-        }),
-        callbackContext,
-      );
-    }
-
-    if (seededAccount && seededAccount.connectedAt !== seededConnectedAt) {
-      throw attachOAuthCallbackContext(
-        deviceSyncError({
-          code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
-          message: "Device sync connection changed after this connection flow started.",
-          retryable: false,
-          httpStatus: 409,
-        }),
-        callbackContext,
-      );
-    }
-
-    seededExternalAccountId = seededAccount?.externalAccountId ?? seededExternalAccountId ?? null;
-    reusedEstablishedJunctionAccount =
-      provider.provider === "junction"
-      && sourceProviderSlug !== null
-      && seededAccount !== null
-      && isEstablishedDeviceSyncConnection(seededAccount);
-
-    if (seededExternalAccountId) {
-      seededAccount ??= await this.store.getConnectionByExternalAccount(
-        provider.provider,
-        seededExternalAccountId,
-      );
+      if (seededAccountId && !seededAccount) {
+        throw attachOAuthCallbackContext(
+          deviceSyncError({
+            code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
+            message: "Device sync connection callback referenced an unexpected seeded account.",
+            retryable: false,
+            httpStatus: 400,
+          }),
+          callbackContext,
+        );
+      }
 
       if (seededAccount?.status === "disconnected") {
         throw attachOAuthCallbackContext(
@@ -1241,7 +1214,44 @@ export class DeviceSyncPublicIngress {
           callbackContext,
         );
       }
-    }
+
+      if (seededAccount && seededAccount.connectedAt !== seededConnectedAt) {
+        throw attachOAuthCallbackContext(
+          deviceSyncError({
+            code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
+            message: "Device sync connection changed after this connection flow started.",
+            retryable: false,
+            httpStatus: 409,
+          }),
+          callbackContext,
+        );
+      }
+
+      seededExternalAccountId = seededAccount?.externalAccountId ?? seededExternalAccountId ?? null;
+      reusedEstablishedJunctionAccount =
+        provider.provider === "junction"
+        && sourceProviderSlug !== null
+        && seededAccount !== null
+        && isEstablishedDeviceSyncConnection(seededAccount);
+
+      if (seededExternalAccountId) {
+        seededAccount ??= await this.store.getConnectionByExternalAccount(
+          provider.provider,
+          seededExternalAccountId,
+        );
+
+        if (seededAccount?.status === "disconnected") {
+          throw attachOAuthCallbackContext(
+            deviceSyncError({
+              code: "CONNECTION_ALREADY_DISCONNECTED",
+              message: "Device sync connection callback was received after the seeded account was disconnected.",
+              retryable: false,
+              httpStatus: 409,
+            }),
+            callbackContext,
+          );
+        }
+      }
 
       if (!descriptor.callbackUrl && connectionFlowRequiresCallbackUrl(descriptor.connectionKind)) {
         throw deviceSyncError({
@@ -1249,14 +1259,6 @@ export class DeviceSyncPublicIngress {
           message: `Device sync provider ${provider.provider} requires a connection callback URL but does not define a callback path.`,
           retryable: false,
           httpStatus: 500,
-        });
-      }
-
-      const callbackError = normalizeString(callbackQuery.get("error"));
-      if (callbackError && resolveDeviceProviderConnectionDescriptor(provider.descriptor).kind === "oauth2") {
-        this.logger.warn?.("OAuth callback was rejected by the provider.", {
-          provider: provider.provider,
-          callbackError,
         });
       }
 
@@ -1336,9 +1338,7 @@ export class DeviceSyncPublicIngress {
       const establishment = await this.hooks.onConnectionEstablished?.({
         account,
         connectionStartedAt: stateRecord.createdAt,
-        ...(connectSourceId ? { connectSourceId } : {}),
-        ...(connectTarget ? { connectTarget } : {}),
-        ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+        ...connectionSourceContext,
         connection: {
           ...connection,
           ...(initialJobs ? { initialJobs } : {}),
@@ -1366,21 +1366,19 @@ export class DeviceSyncPublicIngress {
       return {
         account,
         returnTo,
-        ...(connectSourceId ? { connectSourceId } : {}),
-        ...(connectTarget ? { connectTarget } : {}),
-        ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+        ...connectionSourceContext,
       };
     } catch (error) {
-      if (reusedEstablishedJunctionAccount) {
-        // Never apply account-wide cleanup to a source-scoped Link attempt.
-        // Provider completion precedes hosted source admission, so a rejected
-        // obsolete Link can have recreated the exact provider registration.
-        // The hosted hook owns source-epoch-aware target cleanup; it is the
-        // only safe place to remove that registration without touching the
-        // established parent or a newer accepted source epoch.
-        const cleanupAccount = account ?? seededAccount;
-        if (connection && cleanupAccount && sourceProviderSlug) {
-          try {
+      try {
+        if (reusedEstablishedJunctionAccount) {
+          // Never apply account-wide cleanup to a source-scoped Link attempt.
+          // Provider completion precedes hosted source admission, so a rejected
+          // obsolete Link can have recreated the exact provider registration.
+          // The hosted hook owns source-epoch-aware target cleanup; it is the
+          // only safe place to remove that registration without touching the
+          // established parent or a newer accepted source epoch.
+          const cleanupAccount = account ?? seededAccount;
+          if (connection && cleanupAccount && sourceProviderSlug) {
             await this.hooks.onConnectionSourceAdmissionRejected?.({
               account: cleanupAccount,
               connectionStartedAt: stateRecord.createdAt,
@@ -1388,70 +1386,39 @@ export class DeviceSyncPublicIngress {
               provider,
               now,
             });
-          } catch (cleanupError) {
-            throw attachOAuthCallbackContext(cleanupError, callbackContext);
           }
-        }
-      } else if (connection) {
-        try {
-          if (connectionPersisted && account) {
-            await this.cleanupPersistedOAuthConnection(
-              provider,
-              account,
-              connection,
-              now,
-              error,
-            );
-          } else if (isSeededAccountDisconnectedGuardError(error)) {
-            if (!await this.ensureFailedOAuthConnectionCleanupOwnership(
-              provider,
-              connection,
-              stateRecord.ownerId ?? null,
-              now,
-              { state, consumedAt: stateResult.consumedAt },
-            )) {
-              throw createOAuthSetupCleanupOwnershipError(error);
-            }
-          } else if (seededAccountId) {
-            await this.markSeededConnectionSetupFailed(
-              provider,
-              seededAccountId,
-              seededConnectedAt,
-              connection,
-              stateRecord.ownerId ?? null,
-              now,
-              error,
-              { state, consumedAt: stateResult.consumedAt },
-            );
-          } else {
-            if (!await this.ensureFailedOAuthConnectionCleanupOwnership(
-              provider,
-              connection,
-              stateRecord.ownerId ?? null,
-              now,
-              { state, consumedAt: stateResult.consumedAt },
-            )) {
-              throw createOAuthSetupCleanupOwnershipError(error);
-            }
+        } else if (connection && connectionPersisted && account) {
+          await this.cleanupPersistedOAuthConnection(
+            provider,
+            account,
+            connection,
+            now,
+            error,
+          );
+        } else if (connection && (isSeededAccountDisconnectedGuardError(error) || !seededAccountId)) {
+          if (!await this.ensureFailedOAuthConnectionCleanupOwnership(
+            provider,
+            connection,
+            stateRecord.ownerId ?? null,
+            now,
+            { state, consumedAt: stateResult.consumedAt },
+          )) {
+            throw createOAuthSetupCleanupOwnershipError(error);
           }
-        } catch (cleanupError) {
-          throw attachOAuthCallbackContext(cleanupError, callbackContext);
-        }
-      } else if (seededAccountId) {
-        try {
+        } else if (seededAccountId) {
           await this.markSeededConnectionSetupFailed(
             provider,
             seededAccountId,
             seededConnectedAt,
-            null,
+            connection,
             stateRecord.ownerId ?? null,
             now,
             error,
             { state, consumedAt: stateResult.consumedAt },
           );
-        } catch (cleanupError) {
-          throw attachOAuthCallbackContext(cleanupError, callbackContext);
         }
+      } catch (cleanupError) {
+        throw attachOAuthCallbackContext(cleanupError, callbackContext);
       }
 
       if (
