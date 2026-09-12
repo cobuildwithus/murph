@@ -330,6 +330,28 @@ Return only those aggregates. Never return `subject_key` values or raw JSON.
 The preflight log uses the existing runtime-log transport, and the error remains
 on the existing retry path; both changes are observability-only.
 
+### External route response validation (structured logs)
+
+The actual Cloudflare external route authority port emits at most one warning
+for a decoded HTTP-success response rejected by its existing parser, through
+`emitHostedExecutionStructuredLog`, not the runtime-log database callback.
+`responseIsObject`, `authorizedValid`, `assistantAskFallbackRequiredValid`, and
+`threadIsDirectValid` are validation booleans: absent optional fields are valid;
+all four are false for a non-object body. No response values, arbitrary keys,
+request authority, body, URL, headers, error text, or stack are included.
+`workspaceAttemptId` reuses the resolved write-fence attempt header through the
+existing sanitizer; `transport` is `direct` or `proxy`. The parser's return and
+exact thrown error remain unchanged, including legacy authorized-only success.
+There is no added request, authority read, retry, success log, or transport-failure
+log; only the failure path derives these fixed fields. For a fixed natural-traffic
+window, query existing structured logs with `schema = murph.hosted-execution.log.v1`,
+`component = hosted.runtime.control-plane`, `phase = runtime.starting`,
+`details.operation = thread_route_authority`, and
+`message = Hosted external thread route authority response validation failed.`;
+group counts by transport and the four booleans, using sanitized attempt correlation
+only when needed. These are observed validation failures, not an authorization or
+success-rate denominator; do not generate failures or replay traffic to collect them.
+
 ### Assistant-notification validation attribution
 
 An existing `mailbox.system_processed` warning with
