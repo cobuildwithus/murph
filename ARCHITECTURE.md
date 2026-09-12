@@ -2617,9 +2617,15 @@ welcome Linq instant-start share one transition. Telegram activation remains
 silent; when no bot thread exists yet, the persisted onboarding start is the
 durable pending fact and managed-automation reconciliation uses the first later
 deliverable direct route. That delayed seed stays anchored to the activation
-window and becomes a no-op after its cutoff. Activation seed failures retry
-through the activation mailbox, while later-route failures reuse the existing
-bounded managed-setup wake ladder. Canonical slug idempotency and onboarding
+window and becomes a no-op after its cutoff. The managed reconciler forwards its
+route-validation profile to that canonical seed, including hosted delivery
+rules. Activation seed failures retry through the activation mailbox, while
+later-route failures reuse the existing bounded managed-setup wake ladder.
+A missing route is currently a no-op, not a scheduled retry. Activation seeding
+therefore remains necessary until the existing route and maintenance owners
+establish a no-inbound continuation for a pristine, silent activation; an
+onboarding start alone does not create a deliverable automation or a wake.
+Canonical slug idempotency and onboarding
 state preserve completed or archived follow-ups as closed. No delivery receipt,
 channel-specific state, queue, or scheduler is another enrollment owner.
 The automation has at most one low-pressure opportunity on
@@ -2765,6 +2771,17 @@ event type and time, live/test mode, and the opaque Stripe event id. It never
 reads or includes member/customer identity, contact details, checkout contents,
 or raw provider payloads.
 
+Linq `message.received` audience selection uses the verified provider payload and
+canonical thread ownership, not an HTTP refresh on every direct message. An
+explicit `chat.is_group: false` is direct only when no durable group route was
+observed. A signed group flag or an existing group route selects the group
+container; the planner repeats the route lookup under the chat ownership lock,
+so a group route committed after preparation also wins before private-member
+admission. Missing or unrecognized directness still requires the bounded chat
+summary lookup: a member/home binding identifies an owner, not an audience.
+New group setup retains roster reads for participant and setup authority; those
+reads are not ordinary direct-message classification.
+
 Hosted thread routing prepares thread-container domain envelopes, delivery-route
 ciphertext, and mailbox ingress roots before the planner transaction.
 Telegram sender authority and Linq pending-contact authority resolve
@@ -2778,9 +2795,14 @@ or authority lock. When an opted-in speculative batch fails during envelope
 metadata lookup or verification, it retains that same rejection for every
 affected uncached root reference. A later mixed cached-and-uncached request
 observes cached failures before starting new metadata or provider work.
-Established Linq direct messages resolve only a narrow blind-index/member-id
-target and unwrap the mailbox-payload ingress root; established Linq and
-Telegram group routes also retain the exact observed delivery-route ciphertext,
+Established Linq direct messages resolve a blind-index/member-id target and
+prepare the required control and mailbox ingress roots plus the observed routing
+snapshot before `BEGIN`. They do not load or compare a full private identity
+snapshot unless Family acceptance/replay consumes it. The transaction still
+locks identity authority, repeats blind identity/home ownership lookups, and
+revalidates member, route snapshot, access, and root authority. Preparation is
+not an authorization cache. Established Linq and Telegram group routes also
+retain the exact observed delivery-route ciphertext,
 prewarm both the active control root used for replacement sealing and any
 decrypt-only control root named by that ciphertext, and prewarm the mailbox
 root. For an eligible unbound group, Web generates the
@@ -3488,15 +3510,20 @@ and its UserRunner and RunnerContainer RPC compatibility methods are removed.
 Older Web's best-effort helper treats that response as an optional hint failure.
 The inventory coordinator owns speculative preparation;
 normal admitted execution remains the only member-binding path. The Temporal
-mailbox signal remains the durable wake authority for hosted runtime work. For a
-committed known-checkpoint Linq message, Web first verifies the checkpoint owner
-and canonical participant-aware live access as part of the unconditional
-Temporal pointer signal. Assistant Ask request and completion handlers likewise
-append their encrypted mailbox item before signaling Temporal. Only after
-Temporal accepts the applicable durable signal does Web
-start one best-effort direct `ensure-processing` request to Cloudflare (Vercel
-OIDC, fire and forget, with at most one bounded retry and no mailbox payload). Access denial, expiry,
-or Temporal acceptance failure starts no direct wake. The direct request exists
+mailbox signal remains the durable wake authority for hosted runtime work.
+`handoffHostedMailboxWake` owns the shared Linq, Telegram, and Assistant Ask
+request/completion handoff after their encrypted mailbox append. The signal
+owner validates the expected owner and uses either the caller's current committed
+checkpoint (whose transaction proved admission/workspace authority) or the
+checkpoint reread and workspace admission required by replay. Only after that
+owner starts the Temporal request does the handoff overlap acknowledgement with
+a payloadless best-effort direct `ensure-processing` request to Cloudflare
+(Vercel OIDC, with at most one bounded retry). Pre-dispatch denial or expiry starts
+no hint. A later acknowledgement failure preserves the already-authorized hint
+but still rejects the handoff; it does not turn direct acceptance into durable
+success. Existing post-append caller handling and Temporal mailbox recovery remain
+unchanged. The webhook wrapper owns latency traces, not a second wake protocol.
+The direct request exists
 only to cut wake latency and may be dropped at any time with no correctness
 impact: accepted Linq reply delivery stamps the exact mailbox item with
 `consumedAt`, while Assistant Ask has deterministic request/completion identity,

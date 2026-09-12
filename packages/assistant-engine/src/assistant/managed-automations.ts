@@ -1221,6 +1221,7 @@ async function reconcileMurphManagedOnboardingFollowup({
           await seedMurphOnboardingFollowupFromStartedOnboarding({
             now,
             route,
+            routeValidationProfile: input.routeValidationProfile,
             stableKey,
             vault: input.vaultRoot,
           })
