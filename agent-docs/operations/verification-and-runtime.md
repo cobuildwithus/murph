@@ -489,9 +489,13 @@ checkbox, and frame counts so a protected-main run can distinguish an
 unchanged action surface from same-route DOM progression without exposing
 provider content. The runner re-reads the route after collecting those counts;
 if Garmin departs during that asynchronous sample, the current route wins over
-the stale pre-sample observation and the callback proof continues. After the
-persisted-state reload, the runner waits for the page load boundary before
-clicking Disconnect so server-rendered state cannot outrun its client handler.
+the stale pre-sample observation and the callback proof continues. Before each
+persisted-state assertion, the runner requires a successful HTTP response and the expected same-origin `/connect` destination. Initial navigation
+and reload have distinct failure stages; HTTP errors report only their numeric
+status and redirects use a fixed message. Neither can pass through matching
+markup or be hidden by the full connection-state wait. After the persisted-state
+reload, the runner waits for the page load boundary before clicking Disconnect
+so server-rendered state cannot outrun its client handler.
 Authorization-click failures retain the fixed action and timeout category,
 plus allowlisted host-family and route categories sampled before and after the
 click. The runner captures the original stage and diagnostic message before
