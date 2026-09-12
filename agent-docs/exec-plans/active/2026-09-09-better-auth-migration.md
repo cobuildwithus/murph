@@ -587,7 +587,7 @@ and webhook credentials. Previous task-owned Preview deployments must be retired
 before the line is seeded because their immutable runtime settings predate these
 overrides. Production settings and other branches remain unchanged.
 
-The opt-in `MURPH_PREVIEW_LINQ_UI_ONLY` build step requires the exact Preview
+The temporary opt-in `MURPH_PREVIEW_LINQ_UI_ONLY` build step requires the exact Preview
 branch/origin and absent Linq/Temporal credentials before any build command.
 Only after a successful normal build does the existing line sync run with
 provider inventory disabled. Ordinary builds remain unchanged. Twelve isolated
@@ -597,6 +597,27 @@ activation-wake tests and Web typecheck pass. Initial direct Vitest invocation
 found no tests because of workspace-root resolution; the repository runner
 executed all selected tests successfully.
 
-Hosted deployment, line readback and the operator signup replay remain pending.
-This qualifies signup UI only; queued welcome work is not evidence of delivery.
-Production activation and the broader live-auth qualification remain incomplete.
+The hosted bootstrap deployment `dpl_Gr9mDeCzetYdqStNRzceaYJoxeMD` on
+`1aca372dba20dada5ce0117c76f92f31fd24c524` is READY. Its guard passed, the
+existing line sync skipped provider inventory and completed, and read-only
+verification found exactly one configured, encrypted, assignable selected line.
+Both existing test members and all 222 applied migrations are preserved. The
+stable branch alias targets this deployment; protected homepage readback is
+HTTP 200, includes the selected public line and has no server-render fallback.
+Five previous task-owned READY Preview deployments were retired before seeding;
+all were verified ancestors of the owned branch. No production deployment or
+provider subscription was changed.
+
+After successful initialization, remove the temporary build hook and its opt-in
+flag. The normal build script returns byte-for-byte to the prior candidate;
+line configuration and the six blank messaging/Temporal overrides persist only
+on this Preview branch. Thus the final source differs from the previously
+verified candidate only in plan evidence; no permanent bootstrap machinery or
+new production behavior remains. The hosted application is identical to the
+previous candidate. This final cleanup uses the documentation-only review
+exemption; required exact-head CI is refreshed on the final authored head.
+
+The operator signup replay is pending. This qualifies signup UI only; queued
+welcome work is not evidence of delivery. Review or discard such Preview work
+before any later, separately qualified messaging enablement. Production
+activation and the broader live-auth qualification remain incomplete.
