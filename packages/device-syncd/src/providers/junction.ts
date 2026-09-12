@@ -631,7 +631,10 @@ const TIMESERIES_CHUNK_MS = 24 * 60 * 60_000;
 // starting canonical day owners until the outer deadline. One claimed job may
 // start at most 16 such owners; resource record/cardinality limits and the
 // client's collection attempt, page, and timeout limits remain the inner bound.
-const JUNCTION_HISTORICAL_RESOURCE_JOB_MAX_OWNER_UNITS = 16;
+const JUNCTION_JOB_MAX_OWNER_UNITS = 16;
+// Stop starting cheap full-job units after five seconds. Each unit retains its
+// existing request bounds and the worker's foreground/abort deadline.
+const JUNCTION_FULL_JOB_TIMESERIES_BATCH_MS = 5_000;
 // A date-only provider query can contain source-local records from UTC-12.
 // Delay calendar-day ownership until that date has closed in every admitted
 // civil offset instead of treating UTC midnight as globally complete.
@@ -4968,6 +4971,43 @@ export function createJunctionDeviceSyncProvider(
   }
 
   async function executeFullJobTimeseriesContinuation(
+    context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+    completedWorkoutStreamIdentities: ReadonlySet<string>,
+  ): Promise<ProviderJobResult> {
+    const startedAt = Date.now();
+    let currentJob = job;
+    for (let units = 1; ; units += 1) {
+      const result = await executeFullJobTimeseriesContinuationUnit(
+        context,
+        currentJob,
+        skippedOptionalResources,
+        completedWorkoutStreamIdentities,
+      );
+      const next = result.scheduledJobs?.[0];
+      if (
+        units >= JUNCTION_JOB_MAX_OWNER_UNITS
+        || Date.now() - startedAt >= JUNCTION_FULL_JOB_TIMESERIES_BATCH_MS
+        || context.shouldYield?.()
+        || context.signal?.aborted
+        || result.scheduledJobs?.length !== 1
+        || !next?.payload
+        || next.kind !== currentJob.kind
+        || next.payload.timeseriesResourceCursor === "workout_stream"
+        || next.payload.timeseriesResourceCursor !== currentJob.payload.timeseriesResourceCursor
+        || next.payload.timeseriesCursor === currentJob.payload.timeseriesCursor
+        || (next.availableAt && Date.parse(next.availableAt) > Date.parse(context.now))
+      ) {
+        return result;
+      }
+      // Only the existing scalar suffix advances. Canonical writes remain one
+      // complete day at a time; an interrupted job can replay them idempotently.
+      currentJob = { ...currentJob, payload: next.payload };
+    }
+  }
+
+  async function executeFullJobTimeseriesContinuationUnit(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
@@ -11747,7 +11787,7 @@ function tryStartJunctionHistoricalResourceJobOwnerUnit(
   }
   if (
     budget.startedOwnerUnits
-      >= JUNCTION_HISTORICAL_RESOURCE_JOB_MAX_OWNER_UNITS
+      >= JUNCTION_JOB_MAX_OWNER_UNITS
   ) {
     return false;
   }

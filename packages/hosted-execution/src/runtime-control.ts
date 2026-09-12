@@ -3620,6 +3620,37 @@ export interface HostedBrowserVaultReplicaPublishResponse {
   workspace: HostedWorkspaceState | null;
 }
 
+export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_PATH =
+  "/api/internal/hosted-runtime/protocol-admission";
+export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND =
+  "hosted_runtime_web_protocol_admission";
+export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION = 1;
+export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_MAX_BYTES = 16 * 1024;
+
+export interface HostedRuntimeWebProtocolAdmission {
+  kind: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND;
+  schemaVersion: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION;
+  nonce: string;
+  runtimeLogEventCodes: readonly string[];
+  threadRouteAuthority: { direct: unknown; group: unknown };
+}
+
+// A synthetic wire message, not a log write. Exercise every producer enum value
+// through the deployed consumer's actual parser rather than a capability label.
+export function buildHostedRuntimeLogProtocolProbe(
+  eventCode: HostedRuntimeLogEventCode,
+): HostedRuntimeLogRequest {
+  return { entries: [{
+    at: "2000-01-01T00:00:00.000Z",
+    component: "runner",
+    errorCode: "SYNTHETIC_PROTOCOL_PROBE",
+    redactedJson: { safeErrorMessage: "Synthetic protocol admission probe." },
+    eventCode,
+    level: "info",
+    phase: "invoke",
+  }] };
+}
+
 export const HOSTED_RUNTIME_LOG_LEVELS = [
   "debug",
   "info",

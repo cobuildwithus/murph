@@ -1877,6 +1877,20 @@ before fence or readiness work so a later caller-budget exit remains
 diagnosable without adding member or container identifiers. Failed, retried, or
 superseded starts do not emit an accepted attribution.
 
+Normal idle or completed-invocation cleanup retires the immutable member slot
+only after native destruction succeeds and the interaction generation remains
+unchanged. It then sends a best-effort retirement notification to the existing
+user owner without awaiting that owner from the slot lifecycle lock. The user
+owner reads the exact slot's durable retired binding outside its admission lock,
+then conditionally clears only the matching pending target under that lock. An
+active write fence or replacement target prevents the clear. No retirement hint
+alone grants authority, and the notification adds no remote wait under the
+foreground admission lock. A missed notification retains ordinary next-admission
+reconciliation; the already-retired slot can answer without another native
+liveness or destroy request. Warm reuse and uncertain stops retain their existing
+ownership and recovery behavior. This uses existing slot states and bindings and
+requires no Web, Temporal, or container-image wire change.
+
 Fresh allocation records `runnerTargetReconcileElapsedMs`, `standbyClaimElapsedMs`,
 and `runnerTargetBindElapsedMs` separately within the existing orchestration
 phase. Steps that were not needed record zero. `standbyAllocationElapsedMs` remains
@@ -2886,6 +2900,18 @@ It omits member/account/job identifiers, payloads,
 cursors, provider responses, health values, and raw errors. The marker declares
 the total observed count, sample limit, and truncation state. The Web parser must
 accept the object-array field before a runner capable of emitting it is deployed.
+
+Hosted runtime wake projection reads unfinished job deadlines only. Provider
+cadence remains in Web's `DeviceConnection.nextReconcileAt`; completing a
+checkpointed connection pass publishes that cadence without returning it as a
+runtime wake. The global scheduled reconciler supplies the next connection-scoped
+handoff. Local job retries, dirty acknowledgements, completion barriers, and
+dense-raw retention retain their existing runtime wake owners. Pending or failed
+Fitbit cutovers use the existing connectionless maintenance mailbox successor;
+they do not rewrite provider cadence to arrange a local retry. Already-published
+legacy timers may drain through the existing recovery path without rearming
+provider cadence.
+
 The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
 scheduled reconciler workflow, but web owns the signed legacy-named command that

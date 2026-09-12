@@ -13,6 +13,7 @@ import {
   requireConfiguredString,
 } from "./deploy-automation/shared.ts";
 import { assertHostedDeployEnvironmentAsync } from "./deploy-preflight.js";
+import { assertHostedWebProtocolAdmission } from "./deploy-web-protocol.ts";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
 import { prepareSmallRunnerNamespaceBootstrap, stageHostedRunnerRelease } from "./stage-runner-release.ts";
 import { createRunnerReleaseProvider } from "./runner-release-provider.ts";
@@ -59,6 +60,15 @@ export async function runDeployWorkerVersionCli(
     dependencies: {
       async deployDirect(input) {
         const retainServingRunner = input.containerRolloutMode === "worker-only";
+        // Retaining an image does not attest an older protocol requirement.
+        // Worker-only deployments must preserve the same Web consumer floor.
+        const admitWeb = () => assertHostedWebProtocolAdmission(env);
+        const assertActivationAllowed = async (expectedLiveVersion: string): Promise<void> => {
+          await admitWeb();
+          // Recheck Worker identity after the bounded Web I/O, not before it.
+          await assertLiveVersion(input.workerName, input.configPath, expectedLiveVersion);
+        };
+        await admitWeb();
         const containerProvider = createCloudflareContainerProvider({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
           apiToken: requireConfiguredString(env.CLOUDFLARE_API_TOKEN, "CLOUDFLARE_API_TOKEN"),
@@ -80,7 +90,7 @@ export async function runDeployWorkerVersionCli(
           const before = await readCloudflareContainerApplicationIdentities(
             retainedContainers, containerProvider.listApplications, "before", containerProvider.readRollout,
           );
-          await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
+          await assertActivationAllowed(currentVersionId);
           const output = await runWranglerLoggedCaptured([
             "deploy", "--config", bootstrapPath, "--name", input.workerName, "--containers-rollout=none",
             ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
@@ -119,7 +129,7 @@ export async function runDeployWorkerVersionCli(
           return parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
         };
         const activateVersion = async (configPath: string, versionId: string, expectedLiveVersion: string): Promise<void> => {
-          await assertLiveVersion(input.workerName, input.configPath, expectedLiveVersion);
+          await assertActivationAllowed(expectedLiveVersion);
           await runWranglerLogged([
             "versions", "deploy", `${versionId}@100%`, "--yes", "--config", configPath,
             "--name", input.workerName, "--message", input.deploymentMessage,
@@ -132,7 +142,7 @@ export async function runDeployWorkerVersionCli(
         // serving ceiling. Never refill the retired application on a retry.
         for (const retirement of staged.retirements) {
           await releaseProvider.assertDrained(retirement.applicationId);
-          await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
+          await assertActivationAllowed(currentVersionId);
           await releaseProvider.retireApplication(retirement);
         }
         const before = await readCloudflareContainerApplicationIdentities(
@@ -144,7 +154,7 @@ export async function runDeployWorkerVersionCli(
         });
         // Prove the isolated artifact before making the compatibility reader live.
         for (const application of staged.applications.filter(application => application.className === "DeploySmokeRunnerContainer")) {
-          await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
+          await assertActivationAllowed(currentVersionId);
           await releaseProvider.admitApplication(application);
           await releaseProvider.assertApplicationReady({ ...application, listApplications: containerProvider.listApplications });
         }
@@ -162,7 +172,7 @@ export async function runDeployWorkerVersionCli(
               HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: path.join(runnerBundleDir, ".murph-runner-bundle-manifest.json"),
             },
           });
-          await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
+          await assertActivationAllowed(stageVersionId);
           const rolloutSteps = input.containerRolloutMode === "gradual"
             ? [10, 25, 50, 100].slice(-Math.min(serving.specification.max_instances, 4)) : [100];
           await releaseProvider.admitApplication({ ...serving,
@@ -174,10 +184,10 @@ export async function runDeployWorkerVersionCli(
         // Small runners carry member work: their old image needs the same
         // compatibility reader before native mutation as the normal fleet.
         for (const application of staged.applications.filter(application => application.className === "SmallRunnerContainer")) {
-          await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
           if (application.applicationId) await releaseProvider.assertCapacity({
             applicationId: application.applicationId, specification: application.specification,
           });
+          await assertActivationAllowed(stageVersionId);
           await releaseProvider.admitApplication({ ...application, rolloutStepPercentage: 100 });
           await releaseProvider.assertApplicationReady({ ...application, listApplications: containerProvider.listApplications });
         }

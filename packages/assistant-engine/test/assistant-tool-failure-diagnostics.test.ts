@@ -4,6 +4,7 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseAssistantRuntimeIssueRecord } from '@murphai/runtime-state/node'
+import { cliTimingFailureCode } from '@murphai/runtime-state/cli-timing'
 import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
 import { DERIVED_KNOWLEDGE_PAGES_ROOT } from '@murphai/query'
 
@@ -243,7 +244,11 @@ describe('recognized CLI failure diagnostics', () => {
         summary: 'Codex command execution failed during provider turn.',
         details: { failureStage: 'execution', failureReason: 'nonzero_exit', diagnosticRole: 'completion',
           errorCategory: category, actionKind: 'command.execution', durationMsBucket: 'unknown', outputBytesBucket: 'lt_1kb',
-          commandFamily: 'vault-cli event', commandOrdinal: 1, exitCode: 1, vaultCliErrorCategory: category },
+          commandFamily: 'vault-cli event', commandOrdinal: 1, exitCode: 1, vaultCliErrorCategory: category,
+          commandAttribution: 'recognized', vaultCliCommand: 'event show',
+          vaultCliErrorAttribution: cliTimingFailureCode(code) === 'unknown' ? 'unknown_code' : 'recognized',
+          ...(cliTimingFailureCode(code) === 'unknown' ? {} : { vaultCliErrorCode: code }),
+          ...(stage ? { vaultCliErrorStage: stage } : {}) },
       })
       expect(JSON.stringify(issue)).not.toContain(sentinel)
     }
@@ -330,6 +335,7 @@ describe('recognized CLI failure diagnostics', () => {
     expect(tracker.recordEvent({ ...eventInput(complete), activeTurnId: 'other-turn' })).toBeNull()
     expect(tracker.recordEvent(eventInput(complete))?.details).toMatchObject({
       commandFamily: 'vault-cli event', commandOrdinal: 1, vaultCliErrorCategory: 'not_found',
+      commandAttribution: 'recognized', vaultCliCommand: 'event show', vaultCliErrorCode: 'not_found',
     })
     expect(tracker.recordEvent(eventInput(complete))).toBeNull()
   })
@@ -356,7 +362,10 @@ describe('knowledge command completion diagnostics', () => {
         summary: 'Codex command execution failed during provider turn.',
         details: { failureStage: 'execution', failureReason: 'nonzero_exit', diagnosticRole: 'completion',
           errorCategory: category, actionKind: 'command.execution', durationMsBucket: 'unknown', outputBytesBucket: 'lt_1kb',
-          commandFamily: 'vault-cli knowledge', commandOrdinal: 1, exitCode: 1, vaultCliErrorCategory: category },
+          commandFamily: 'vault-cli knowledge', commandOrdinal: 1, exitCode: 1, vaultCliErrorCategory: category,
+          commandAttribution: 'recognized', vaultCliCommand: `knowledge ${operation}`,
+          vaultCliErrorAttribution: 'recognized', vaultCliErrorCode: code,
+          ...(stage ? { vaultCliErrorStage: stage } : {}) },
       })
       expect(JSON.stringify(issue)).not.toContain(sentinel)
       expect(tracker.recordEvent(input)).toBeNull()
@@ -510,6 +519,12 @@ describe('existing diagnostic transport and denominator', () => {
         expect(encoded).not.toContain(sentinel)
         const parsed = parseAssistantRuntimeIssueRecord(JSON.parse(encoded))
         expect(parsed.details).toEqual(issues[index % 2]!.details)
+        expect(Object.keys(parsed.details ?? {}).length).toBeLessThanOrEqual(24)
+        const legacy = JSON.parse(encoded)
+        for (const key of ['commandAttribution', 'vaultCliCommand', 'vaultCliErrorAttribution', 'vaultCliErrorCode', 'vaultCliErrorStage']) {
+          Reflect.deleteProperty(legacy.details, key)
+        }
+        expect(parseAssistantRuntimeIssueRecord(legacy).details).toEqual(legacy.details)
         expect(parsed.operation).toBe(issues[index % 2]!.operation)
         expect(parsed.errorCode).toBe(issues[index % 2]!.errorCode)
       }
@@ -523,5 +538,77 @@ describe('existing diagnostic transport and denominator', () => {
     recordAssistantRuntimeIssueInputsBestEffort({ issues,
       policy: { ...policy, privateIssueCaptureEnabled: false }, vault: 'synthetic-vault' })
     expect(writes.write).not.toHaveBeenCalled()
+  })
+})
+
+describe('finite shell attribution without private payloads', () => {
+  const privateValues = ['SYNTHETIC_SECRET_TOKEN', 'SYNTHETIC_HEALTH_HISTORY', '/SYNTHETIC_PRIVATE_PATH']
+
+  it.each([
+    ['exercise_not_found', 'not_found'],
+    ['exercise_catalog_unavailable', 'unavailable'],
+    ['exercise_catalog_invalid', 'invalid_result'],
+    ['VALIDATION_ERROR', 'invalid_input'],
+  ])('distinguishes the existing exercise rejection %s', (code, category) => {
+    const issue = commandIssue(JSON.stringify(envelope(code, 'read')), 'vault-cli exercise show synthetic')
+    expect(issue?.details).toMatchObject({ commandAttribution: 'recognized', vaultCliCommand: 'exercise show',
+      vaultCliErrorAttribution: 'recognized', vaultCliErrorCode: code, vaultCliErrorStage: 'read',
+      errorCategory: category, vaultCliErrorCategory: category })
+  })
+
+  it.each([
+    [undefined, 'missing_output'], ['', 'missing_output'], ['plain stderr', 'unstructured_output'],
+    ['null', 'unstructured_output'], ['[]', 'unstructured_output'],
+    ['false', 'unstructured_output'], ['0', 'unstructured_output'],
+    ['"SYNTHETIC_SECRET_TOKEN"', 'unstructured_output'],
+    ['{"cause":{"code":"not_found"}}', 'unstructured_output'],
+    [' '.repeat(16_385), 'oversized_output'], ['界'.repeat(6000), 'oversized_output'],
+    [JSON.stringify(envelope('SYNTHETIC_SECRET_TOKEN')), 'unknown_code'],
+    [JSON.stringify(envelope('exercise_not_found_extra')), 'unknown_code'],
+  ] as const)('explains why structured failure detail is unavailable (%#)', (output, reason) => {
+    const raw = commandEvent(output, 'vault-cli exercise list')
+    Object.assign(raw.params.item, { stderr: JSON.stringify(envelope('conflict')), stdout: JSON.stringify(envelope('conflict')) })
+    const issue = createCodexActionRuntimeIssueTracker().recordEvent(eventInput(raw))
+    expect(issue?.details).toMatchObject({ vaultCliCommand: 'exercise list', vaultCliErrorAttribution: reason })
+    expect(issue?.details).not.toHaveProperty('vaultCliErrorCode')
+    expect(issue?.details).not.toHaveProperty('vaultCliErrorStage')
+    for (const value of privateValues) expect(JSON.stringify(issue)).not.toContain(value)
+  })
+
+  it('drops unknown codes/stages and all messages, paths, nested errors and results', () => {
+    for (const code of [privateValues[0], `exercise_not_found:${privateValues[1]}`, `ENOENT ${privateValues[2]}`]) {
+      const body = { ...envelope(code!, privateValues[1]), message: privateValues.join(' '),
+        hint: privateValues.join(' '), cause: envelope('conflict', 'write'), fieldErrors: privateValues }
+      const issue = commandIssue(JSON.stringify(body), `vault-cli food search-labels '${privateValues.join(' ')}'`)
+      expect(issue?.details).toMatchObject({ commandAttribution: 'recognized', vaultCliCommand: 'food search-labels',
+        vaultCliErrorAttribution: 'unknown_code', vaultCliErrorCategory: 'unknown' })
+      expect(issue?.details).not.toHaveProperty('vaultCliErrorCode')
+      expect(issue?.details).not.toHaveProperty('vaultCliErrorStage')
+      for (const value of privateValues) expect(JSON.stringify(issue)).not.toContain(value)
+    }
+  })
+
+  it('does not attribute a pipeline, compound command, oversized command or missing command to a subcommand', () => {
+    const examples: Array<[string | null, string]> = [
+      ['vault-cli exercise list | vault-cli food search-labels synthetic', 'shell_syntax'],
+      ['vault-cli exercise list; vault-cli food search-labels synthetic', 'shell_syntax'],
+      [`vault-cli exercise list ${'x'.repeat(4096)}`, 'oversized_command'],
+      [null, 'missing_command'], [`${privateValues[2]} synthetic`, 'unrecognized_executable'],
+    ]
+    for (const [command, reason] of examples) {
+      const raw = commandEvent(JSON.stringify(envelope('exercise_not_found')))
+      if (command === null) Reflect.deleteProperty(raw.params.item, 'command')
+      else raw.params.item.command = command
+      const parse = vi.spyOn(JSON, 'parse')
+      try {
+        const tracker = createCodexActionRuntimeIssueTracker()
+        const issue = tracker.recordEvent(eventInput(raw))
+        expect(parse).not.toHaveBeenCalled()
+        expect(issue?.details).toMatchObject({ commandFamily: 'command', commandAttribution: reason, commandOrdinal: 1 })
+        expect(issue?.details).not.toHaveProperty('vaultCliCommand')
+        expect(issue?.details).not.toHaveProperty('vaultCliErrorCategory')
+        expect(tracker.recordEvent(eventInput(raw))).toBeNull()
+      } finally { parse.mockRestore() }
+    }
   })
 })

@@ -1588,7 +1588,7 @@ describe("runHostedAssistantAutomation", () => {
 });
 
 describe("resolveHostedDeviceSyncNextWakeAt", () => {
-  it("reads durable store wakes without constructing configured providers", async () => {
+  it("projects job retries without projecting provider cadence or constructing providers", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-device-sync-wake-read-"));
     const store = new SqliteDeviceSyncStore(
       path.join(vaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH),
@@ -1628,7 +1628,7 @@ describe("resolveHostedDeviceSyncNextWakeAt", () => {
           vaultRoot,
         }),
       );
-      assert.equal(futureCadenceWakeAt, "2026-04-08T01:00:00.000Z");
+      assert.equal(futureCadenceWakeAt, null);
 
       const dueCadenceWakeAt = await withHostedMaintenanceNow(
         "2026-04-08T01:00:00.000Z",
@@ -1646,6 +1646,13 @@ describe("resolveHostedDeviceSyncNextWakeAt", () => {
         payload: {},
         provider: account.provider,
       });
+      store.patchAccount(account.id, { nextReconcileAt: "2026-04-08T00:15:00.000Z" });
+      const futureJobWakeAt = await withHostedMaintenanceNow(
+        "2026-04-08T00:00:00.000Z",
+        async () => resolveHostedDeviceSyncNextWakeAt({ deviceSyncConfig, vaultRoot }),
+      );
+      assert.equal(futureJobWakeAt, "2026-04-08T00:30:00.000Z");
+
       const dueJobWakeAt = await withHostedMaintenanceNow(
         "2026-04-08T01:00:00.000Z",
         async () => resolveHostedDeviceSyncNextWakeAt({
@@ -2154,7 +2161,7 @@ describe("runHostedDeviceSyncPass", () => {
     });
   });
 
-  it("schedules durable retry when automatic Fitbit cutover fails", async () => {
+  it.each(["failed", "pending"])("keeps an automatic Fitbit cutover %s retry outside provider cadence", async (outcome) => {
     const account = {
       id: "local_fitbit",
       nextReconcileAt: null as string | null,
@@ -2170,7 +2177,8 @@ describe("runHostedDeviceSyncPass", () => {
       runSchedulerOnce: vi.fn(async () => undefined),
     };
     const completeFitbitMigration = vi.fn(async () => {
-      throw new Error("provider unavailable");
+      if (outcome === "failed") throw new Error("provider unavailable");
+      return { connectionId: "hosted_fitbit", status: "pending" as const };
     });
     const patchAccount = vi.fn((_: string, patch: { nextReconcileAt: string | null }) => {
       account.nextReconcileAt = patch.nextReconcileAt;
@@ -2231,12 +2239,14 @@ describe("runHostedDeviceSyncPass", () => {
       ),
     );
 
-    expect(patchAccount).toHaveBeenCalledWith("local_fitbit", {
-      nextReconcileAt: "2026-08-11T10:05:30.000Z",
-    });
+    expect(patchAccount).not.toHaveBeenCalled();
+    expect(account.nextReconcileAt).toBeNull();
     expect(completeFitbitMigration).toHaveBeenCalledTimes(1);
     expect(service.runSchedulerOnce).toHaveBeenCalledTimes(1);
     expect(result.nextWakeAt).toBe("2026-08-11T10:05:30.000Z");
+    // The independent mailbox successor survives completion/dirty acknowledgement
+    // and uses the same snapshot-restored maintenance owner as retention.
+    await expectDenseRawRetentionMailboxWakeAt("2026-08-11T10:05:30.000Z");
   });
 
 
@@ -2645,6 +2655,46 @@ describe("runHostedDeviceSyncPass", () => {
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
   });
+
+  it.each([null, "2026-04-08T02:00:00.000Z"])(
+    "leaves provider cadence to the global reconciler after a completed pass (job retry: %s)",
+    async (nextJobWakeAt) => {
+      const service = {
+        close: vi.fn(),
+        drainWorker: vi.fn(async () => 1),
+        getNextJobWakeAt: () => nextJobWakeAt,
+        getNextWakeAt: () => "2026-04-08T01:00:00.000Z",
+        listJobFailureDiagnostics: vi.fn(() => []),
+        listAccounts: vi.fn(() => []),
+        runSchedulerOnce: vi.fn(async () => undefined),
+      };
+      mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+      const result = await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", () =>
+        runHostedDeviceSyncPass(
+          {
+            connectionId: "connection_scheduled",
+            eventId: "event_scheduled",
+            kind: "device-sync.wake",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+            reason: "reconcile_due",
+            userId: "member_123",
+          },
+          "/tmp/vault-root",
+          DEVICE_SYNC_CONFIG,
+          createMaintenanceDeviceSyncPortStub(),
+          45_000,
+          { retainFollowUpWakeUntilCheckpoint: true },
+        )
+      );
+      expect(result.processedJobs).toBe(1);
+      expect(result.skipped).toBe(false);
+      expect(result.nextWakeAt).toBe(nextJobWakeAt);
+      expect(result.postCheckpointRecord).toEqual(nextJobWakeAt
+        ? { kind: "device-sync.dirty-processed-batch", nextWakeAt: nextJobWakeAt, records: [] }
+        : null);
+      expect(service.runSchedulerOnce).toHaveBeenCalledWith("local_scheduled_account");
+    },
+  );
 
   it("does not turn due provider cadence into a runtime-timer wake loop", async () => {
     await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () => {

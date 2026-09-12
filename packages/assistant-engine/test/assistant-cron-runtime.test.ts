@@ -7054,6 +7054,78 @@ describe('assistant cron runtime orchestration', () => {
     }
   })
 
+  it.each([false, true])(
+    'retains callback delivery and session evidence when result classification fails=%s',
+    async (classificationFails) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-07-12T13:00:00.000Z'))
+      try {
+        const { vaultRoot } = await createRuntimeContext(
+          'assistant-cron-runtime-callback-result-',
+        )
+        const occurrenceAt = '2026-07-12T13:00:00.000Z'
+        const { claimed, paths, source } = await createClaimedNewsletterCronJob({
+          automationId: 'automation-callback-result',
+          occurrenceAt,
+          vaultRoot,
+        })
+        const pendingIntentId = 'outbox-callback-result'
+        cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (
+          notificationInput: {
+            onGroupEmailPendingDeliveryIntentId?: (intentId: string) => void
+            onProviderRequestStarted?: () => void
+          },
+        ) => {
+          notificationInput.onProviderRequestStarted?.()
+          notificationInput.onGroupEmailPendingDeliveryIntentId?.(pendingIntentId)
+          return {
+            decision: { kind: 'skip', privateSummary: 'Accepted delivery is pending.' },
+            ...(classificationFails
+              ? {
+                  postTurnDeliveryExpectations: {
+                    groupEmailSendResult: {
+                      status: 'unavailable',
+                      unavailableReason: 'send_failed',
+                    },
+                  },
+                }
+              : {}),
+            response: 'Accepted delivery is pending.',
+            session: { sessionId: 'session-callback-result' },
+          }
+        })
+
+        const result = await executeClaimedAssistantCronJob({
+          job: claimed,
+          paths,
+          trigger: 'scheduled',
+          vault: vaultRoot,
+        })
+
+        expect(result.run).toMatchObject({
+          error: classificationFails ? 'Group email delivery did not complete.' : null,
+          notificationDecision: { kind: 'skip', reasonCode: 'provider_skip' },
+          outcome: 'delivery_pending',
+          reason: classificationFails
+            ? 'delivery_pending_after_ASSISTANT_GROUP_EMAIL_DELIVERY_FAILED'
+            : 'delivery_pending',
+          response: 'Accepted delivery is pending.',
+          sessionId: 'session-callback-result',
+        })
+        const current = (await readAssistantCronCanonicalRuntimeStore(paths))
+          .jobs.find((record) => record.jobId === source.automationId)
+        expect(current?.state).toMatchObject({
+          consecutiveFailures: 0,
+          pendingDeliveryIntentId: pendingIntentId,
+          pendingOccurrenceAt: occurrenceAt,
+        })
+        expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
   it.each([
     {
       expectedLastFailedAt: null,

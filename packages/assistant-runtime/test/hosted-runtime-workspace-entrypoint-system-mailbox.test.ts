@@ -5699,8 +5699,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(deviceSyncPort.applyUpdatesCalls, 1);
       assert.equal(browserPublishCalls, 1);
       assert.equal(browserWriteCalls, 1);
-      assert.equal(first.nextWakeAt, "2026-04-27T00:05:00.000Z");
-      assert.equal(first.nextWakeReason, "device-sync.reconcile");
+      assert.equal(first.nextWakeAt, null);
+      assert.equal(first.nextWakeReason, undefined);
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
       assert.ok(currentWorkspace);
       assert.equal(
@@ -6434,9 +6434,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       assert.deepEqual(cadencePublications, ["2026-04-27T06:05:00.000Z"]);
       assert.equal(canonicalNextReconcileAt, "2026-04-27T06:05:00.000Z");
-      assert.equal(recovered.status, "scheduled");
-      assert.equal(recovered.nextWakeAt, "2026-04-27T06:05:00.000Z");
-      assert.equal(recovered.nextWakeReason, "device-sync.reconcile");
+      assert.equal(recovered.status, "idle");
+      assert.equal(recovered.nextWakeAt, null);
+      assert.equal(recovered.nextWakeReason, undefined);
       assert.ok(currentWorkspace);
       assert.equal(currentWorkspace.version, "6");
       assert.equal(currentWorkspace.systemMailboxProgressGeneration, "1");
@@ -6495,10 +6495,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(converged.nextWakeAt, null);
       assert.equal(converged.nextWakeReason, undefined);
       assert.equal(providerRequestClasses.length, providerRequestsBeforeConvergence);
-      assert.equal(checkpointAttempt, checkpointAttemptsBeforeConvergence + 1);
-      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "6");
+      assert.equal(checkpointAttempt, checkpointAttemptsBeforeConvergence);
+      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "5");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "7");
+      assert.equal(currentWorkspace.version, "6");
 
       const quiescentBucketAt = "2026-04-27T00:15:00.000Z";
       const quiescentAttemptId =
@@ -6516,17 +6516,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(providerRequestClasses.length, providerRequestsBeforeQuiescence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeQuiescence);
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "7");
+      assert.equal(currentWorkspace.version, "6");
       assert.equal(
         providerRequestClasses.length,
         providerRequestClassesAfterSettlement,
       );
-      assert.equal(checkpointAttempt, checkpointAttemptsAfterSettlement + 1);
-      assert.equal(checkpointAttempt, 7);
+      assert.equal(checkpointAttempt, checkpointAttemptsAfterSettlement);
+      assert.equal(checkpointAttempt, 6);
       assert.equal(checkpointAttempt, checkpointRequests.length);
       assert.equal(
         events.filter((event) => event.startsWith("checkpoint.commit:")).length,
-        6,
+        5,
       );
       assert.deepEqual([...observedScheduleEventIds], [scheduleEventId]);
       assert.deepEqual([...observedMailboxItemIds], [mailboxItemId]);

@@ -497,6 +497,15 @@ export class HostedUserRunner {
     return await this.hostedMediaRetention.delete(input);
   }
 
+  async recordRunnerContainerRetired(
+    input: Parameters<RuntimeProcessingController["verifyRetiredRunnerContainer"]>[0],
+  ): Promise<{ cleared: boolean }> {
+    if (!await this.runtimeProcessing.verifyRetiredRunnerContainer(input)) return { cleared: false };
+    return this.withRuntimeConsentMutationLock(async () => ({
+      cleared: await this.stateStore.clearStoppedRunnerContainerForUserControl(input),
+    }));
+  }
+
   async recordRuntimeCompletionFromContainer(
     input: Parameters<RuntimeInvocationService["recordRuntimeCompletionFromContainer"]>[0],
   ): ReturnType<RuntimeInvocationService["recordRuntimeCompletionFromContainer"]> {

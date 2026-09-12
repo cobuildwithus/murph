@@ -805,6 +805,111 @@ function appendRequiredAutomationLocalAtClarification(
     .join('\n\n')
 }
 
+type CodexTrailingResponseSelection = 'current' | 'retain' | 'promote' | 'suppress'
+
+function selectCodexTrailingResponse(input: {
+  candidate: CodexAppServerTrailingResponseCandidate | null
+  latestFinalAction: MurphDynamicToolFinalActionPatch | null
+  candidateFinalAction: MurphDynamicToolFinalActionPatch | null
+  currentMessage: string
+  currentMedia: readonly AssistantResponseMedia[]
+  currentCard: AssistantResponseCard | null
+  currentCardTextFallback: CompactTableWorkoutResponseCardV1 | null
+}): CodexTrailingResponseSelection {
+  if (input.candidate === null) {
+    return 'current'
+  }
+  // A later quiet acknowledgement must retain the earlier answer as a segment.
+  if (input.latestFinalAction?.kind === 'none') {
+    return 'promote'
+  }
+  if (input.latestFinalAction === null && input.candidateFinalAction?.kind === 'none') {
+    return 'suppress'
+  }
+  if (
+    normalizeNullableString(input.currentMessage) !== null ||
+    input.currentMedia.length > 0 ||
+    input.currentCard !== null ||
+    input.currentCardTextFallback !== null
+  ) {
+    return 'promote'
+  }
+  return 'retain'
+}
+
+function renderCodexResponseCardPresentation(input: {
+  card: AssistantResponseCard | null
+  cardTextFallback: CompactTableWorkoutResponseCardV1 | null
+  omitCardTracking: boolean
+}): { message: string; transcript: string } | null {
+  if (input.card) {
+    const message = renderAssistantResponseCardText(input.card)
+    return {
+      message,
+      transcript: input.omitCardTracking
+        ? message
+        : renderAssistantResponseCardTranscriptText(input.card),
+    }
+  }
+  if (input.cardTextFallback) {
+    return {
+      message: renderAssistantWorkoutResponseCardText(input.cardTextFallback),
+      transcript: renderAssistantWorkoutResponseCardTranscriptText(input.cardTextFallback),
+    }
+  }
+  return null
+}
+
+function buildCodexFinalResponsePresentation(input: {
+  modelMessage: string
+  media: readonly AssistantResponseMedia[]
+  card: AssistantResponseCard | null
+  cardTextFallback: CompactTableWorkoutResponseCardV1 | null
+  requiredClarifications: readonly RequiredAutomationLocalAtClarification[]
+  requiredApprovalUrls: readonly string[]
+  requiredSuffix: string | null
+  requiredFallback: string | null
+}): Pick<CodexAppServerTurnResult, 'finalMessage' | 'transcriptMessage' | 'responseCard'> {
+  const hasRequiredClarifications = input.requiredClarifications.length > 0
+  const renderedCard = renderCodexResponseCardPresentation({
+    card: input.card,
+    cardTextFallback: input.cardTextFallback,
+    omitCardTracking: hasRequiredClarifications,
+  })
+  const semanticMessage = renderedCard?.message ?? input.modelMessage
+  const requiredMessage =
+    normalizeNullableString(semanticMessage) ?? input.requiredFallback ?? semanticMessage
+  const finalMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredVaultFileApprovalUrls(
+      appendRequiredAutomationLocalAtClarification(
+        requiredMessage,
+        input.requiredClarifications,
+      ),
+      input.requiredApprovalUrls,
+    ),
+    input.requiredSuffix,
+    input.requiredFallback,
+  )
+  const semanticTranscript = renderedCard?.transcript ??
+    normalizeNullableString(input.modelMessage) ??
+    (input.media.length > 0 ? '' : null)
+  const transcriptMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredAutomationLocalAtClarification(
+      normalizeNullableString(semanticTranscript) ??
+        input.requiredFallback ??
+        semanticTranscript,
+      input.requiredClarifications,
+    ),
+    input.requiredSuffix,
+    input.requiredFallback,
+  )
+  return {
+    finalMessage,
+    transcriptMessage,
+    responseCard: hasRequiredClarifications ? null : input.card,
+  }
+}
+
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
@@ -4088,20 +4193,13 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const response = trailingSteerCandidate.card
-      ? renderAssistantResponseCardText(trailingSteerCandidate.card)
-      : trailingSteerCandidate.cardTextFallback
-        ? renderAssistantWorkoutResponseCardText(
-            trailingSteerCandidate.cardTextFallback,
-          )
-        : trailingSteerCandidate.response
-    const transcriptResponse = trailingSteerCandidate.card
-      ? renderAssistantResponseCardTranscriptText(trailingSteerCandidate.card)
-      : trailingSteerCandidate.cardTextFallback
-        ? renderAssistantWorkoutResponseCardTranscriptText(
-            trailingSteerCandidate.cardTextFallback,
-          )
-        : response
+    const renderedCard = renderCodexResponseCardPresentation({
+      card: trailingSteerCandidate.card,
+      cardTextFallback: trailingSteerCandidate.cardTextFallback,
+      omitCardTracking: false,
+    })
+    const response = renderedCard?.message ?? trailingSteerCandidate.response
+    const transcriptResponse = renderedCard?.transcript ?? response
     precedingAgentMessageSegments.push({
       ...(trailingSteerCandidate.contextReferences === undefined
         ? {}
@@ -6199,41 +6297,28 @@ async function runCodexAppServerTurnOnProcess(
   const latestFinalActionPatch = resolveFinalActionPatch(
     latestDeliveryContextOrdinal,
   )
-  let finalTrailingSteerCandidate = readTrailingSteerCandidate()
-  const trailingSteerCandidateDeliveryContextOrdinal =
-    finalTrailingSteerCandidate?.deliveryContextOrdinal ?? null
-  const trailingSteerCandidateFinalActionPatch =
-    trailingSteerCandidateDeliveryContextOrdinal !== null
-      ? resolveFinalActionPatch(trailingSteerCandidateDeliveryContextOrdinal)
-      : null
-  const suppressTrailingSteerCandidateForEarlierNoReply =
-    latestFinalActionPatch === null &&
-    finalTrailingSteerCandidate !== null &&
-    trailingSteerCandidateFinalActionPatch?.kind === 'none'
-  const shouldPromoteTrailingSteerCandidate =
-    finalTrailingSteerCandidate !== null &&
-    (
-      latestFinalActionPatch?.kind === 'none' ||
-      (
-        !suppressTrailingSteerCandidateForEarlierNoReply &&
-        (
-          normalizeNullableString(extractedFinalMessage) !== null ||
-          responseMedia.length > 0 ||
-          responseCard !== null ||
-          responseCardTextFallback !== null
-        )
-      )
-    )
-  if (shouldPromoteTrailingSteerCandidate) {
+  const finalTrailingSteerCandidate = readTrailingSteerCandidate()
+  const trailingResponseSelection = selectCodexTrailingResponse({
+    candidate: finalTrailingSteerCandidate,
+    latestFinalAction: latestFinalActionPatch,
+    candidateFinalAction: finalTrailingSteerCandidate === null
+      ? null
+      : resolveFinalActionPatch(finalTrailingSteerCandidate.deliveryContextOrdinal),
+    currentMessage: extractedFinalMessage,
+    currentMedia: responseMedia,
+    currentCard: responseCard,
+    currentCardTextFallback: responseCardTextFallback,
+  })
+  if (trailingResponseSelection === 'promote') {
     promoteTrailingSteerCandidate()
-    finalTrailingSteerCandidate = null
   }
+  const suppressTrailingSteerCandidateForEarlierNoReply =
+    trailingResponseSelection === 'suppress'
+  const finalResponseCandidate = trailingResponseSelection === 'retain'
+    ? finalTrailingSteerCandidate
+    : null
   const selectedFinalMessage =
-    finalTrailingSteerCandidate?.response ?? extractedFinalMessage
-  // A latest-context no-reply already promoted and cleared the candidate above.
-  const finalResponseCandidate = suppressTrailingSteerCandidateForEarlierNoReply
-    ? null
-    : finalTrailingSteerCandidate
+    finalResponseCandidate?.response ?? extractedFinalMessage
   const finalResponseMedia = finalResponseCandidate?.media ?? responseMedia
   const finalResponseCard = finalResponseCandidate?.card ?? responseCard
   if (finalResponseCard !== null && finalResponseMedia.length > 0) {
@@ -6263,54 +6348,20 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
-  const semanticFinalMessage = finalResponseCard
-    ? renderAssistantResponseCardText(finalResponseCard)
-    : finalResponseCardTextFallback
-      ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
-      : modelFinalMessage
-  const normalizedSemanticFinalMessage =
-    normalizeNullableString(semanticFinalMessage)
-  const requiredSemanticFinalMessage =
-    normalizedSemanticFinalMessage ??
-    requiredFinalResponseFallback ??
-    semanticFinalMessage
-  const requiredAutomationLocalAtClarificationsInOrder =
-    [...requiredAutomationLocalAtClarifications.values()]
-  const deliveredFinalResponseCard =
-    requiredAutomationLocalAtClarificationsInOrder.length === 0
-      ? finalResponseCard
-      : null
-  const finalMessage = appendRequiredFinalResponseSuffix(
-    appendRequiredVaultFileApprovalUrls(
-      appendRequiredAutomationLocalAtClarification(
-        requiredSemanticFinalMessage,
-        requiredAutomationLocalAtClarificationsInOrder,
-      ),
-      requiredVaultFileApprovalUrls,
-    ),
-    requiredFinalResponseSuffix,
-    requiredFinalResponseFallback,
-  )
-  const semanticTranscriptMessage = finalResponseCard
-    ? requiredAutomationLocalAtClarificationsInOrder.length === 0
-      ? renderAssistantResponseCardTranscriptText(finalResponseCard)
-      : renderAssistantResponseCardText(finalResponseCard)
-    : finalResponseCardTextFallback
-      ? renderAssistantWorkoutResponseCardTranscriptText(
-          finalResponseCardTextFallback,
-        )
-      : normalizeNullableString(modelFinalMessage) ??
-        (finalResponseMedia.length > 0 ? '' : null)
-  const transcriptMessage = appendRequiredFinalResponseSuffix(
-    appendRequiredAutomationLocalAtClarification(
-      normalizeNullableString(semanticTranscriptMessage) ??
-      requiredFinalResponseFallback ??
-      semanticTranscriptMessage,
-      requiredAutomationLocalAtClarificationsInOrder,
-    ),
-    requiredFinalResponseSuffix,
-    requiredFinalResponseFallback,
-  )
+  const {
+    finalMessage,
+    transcriptMessage,
+    responseCard: deliveredFinalResponseCard,
+  } = buildCodexFinalResponsePresentation({
+    modelMessage: modelFinalMessage,
+    media: finalResponseMedia,
+    card: finalResponseCard,
+    cardTextFallback: finalResponseCardTextFallback,
+    requiredClarifications: [...requiredAutomationLocalAtClarifications.values()],
+    requiredApprovalUrls: requiredVaultFileApprovalUrls,
+    requiredSuffix: requiredFinalResponseSuffix,
+    requiredFallback: requiredFinalResponseFallback,
+  })
   if (
     noReplySelected &&
     normalizeNullableString(extractedFinalMessage) !== null
@@ -6340,8 +6391,7 @@ async function runCodexAppServerTurnOnProcess(
     acceptedNoReplyDeliveryContextOrdinals:
       acceptedNoReplyDeliveryContextOrdinals,
     finalAction,
-    finalActionExplicit:
-      finalActionPatch?.kind === 'none' && !requiredUserVisibleOutput,
+    finalActionExplicit: noReplySelected,
     finalMessage,
     providerAuthoredFinalMessage: modelFinalMessage,
     transcriptMessage,

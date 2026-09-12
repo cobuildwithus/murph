@@ -2283,7 +2283,7 @@ application code.
   model id and provider pricing source. Specialized
   tools retain their existing provider owners independently of the core choice.
 - Assistant input follows one spine for local and hosted execution: source adapter -> `AssistantInputEvent` -> `AssistantInputSource` -> scanner/active turn -> accepted-input journal -> Codex. Source adapters may project accepted input into inbox for search, attachments, UI, and diagnostics, but inbox projection success is not the gate that decides whether Codex can see a decoded conversation message. `AssistantInputEvent` may carry bounded prompt-readiness facts such as attachment descriptors and minimized channel source metadata; prompt construction must read those first and use inbox capture/envelope data only as projection enrichment.
-- Cross-session auto-reply context consumption is portable private assistant operational state under `vault/.runtime/operations/assistant/auto-reply/**`, not an outbox mutation or a second delivery owner. One schema-versioned atomic record per exact route stores only `settledThrough` delivery order (`sentAt`, then `intentId`) and at most one pending `{ acceptedThrough, order, turnId }` claim. `acceptedThrough` preserves the one earlier same-turn claim whose receipt evidence exists when a newer steer is attempted; it is not committed until that turn becomes terminal. Linq partitions by the exact normalized provider thread target; stable email partitions by concrete identity, actor, and stable thread while excluding rotating serialized targets; every other route requires concrete channel, actor, thread, and exact delivery target. Legacy wildcard matches that cannot resolve to one digest are ineligible for optional unanchored context, while an exact provider-message-id anchor remains authoritative. The provider boundary writes or verifies the claim only after the consuming running receipt and accepted-input journal exist and before provider egress; exact anchors persist that bounded claim even while legacy migration is incomplete, while optional unanchored context waits for the marker. That same generic receipt is the sole terminal commit witness: completed or deferred folds the matching current order or its previously accepted fallback monotonically into `settledThrough`, failed or blocked discards both, and running, missing, or corrupt blocks optional context during foreground work. Route maintenance never runs before provider start or response delivery. Local and one-shot owners reconcile only after the current pass's direct delivery or queue drain completes and before the next pass or one-shot return; hosted foreground work reconciles after checkpoint delivery or immediately after an already-completed synchronous delivery, and hosted background or no-progress passes reconcile after their delivery boundary too. A maintenance-only hosted mutation promotes that pass to a durable checkpoint, while idle snapshot residue remains the fallback owner. The one-time migration reads trusted outbox and receipt inventories cooperatively under the runtime lock. Fresh foreground discovery raises the yield signal before lock-bound input staging and re-arms it after durable staging, so traversal can release the lock between entries; process or lease aborts also stop per-entry work. Migration folds every legacy terminal consumption and running consumer into the greatest per-route suppression watermark and writes the marker last; a partial fold reports its mutation for checkpointing and remains safe to repeat. Later maintenance reads outbox authority plus only the exact receipt named by each pending route. At that quiescent boundary an unresolved pending claim is retired into the same suppression watermark without asserting successful provider consumption, while an exact provider-message anchor may still bypass the watermark. A route record is removed immediately when no remaining outbox delivery can select that route, even if it contains an obsolete pending claim, so file cardinality follows live authority rather than historical routes. Folding on a bounded foreground read or post-delivery reconciliation is compaction rather than a post-finalization correctness write. Outbox state remains the content and delivery-attestation authority. In private direct replies, the bounded route-matched delivery reader can retain the latest consumed singleton workout relationship for interpretation; it strips consumed text and automation occurrence annotations, does not reclaim the delivery, and honors newer context decisions. The workout tracking product spec owns that continuity contract.
+- Cross-session auto-reply context consumption is portable private assistant operational state under `vault/.runtime/operations/assistant/auto-reply/**`, not an outbox mutation or a second delivery owner. One schema-versioned atomic record per exact route stores only `settledThrough` delivery order (`sentAt`, then `intentId`) and at most one pending `{ acceptedThrough, order, turnId }` claim. `acceptedThrough` preserves the one earlier same-turn claim whose receipt evidence exists when a newer steer is attempted; it is not committed until that turn becomes terminal. Linq partitions by the exact normalized provider thread target; stable email partitions by concrete identity, actor, and stable thread while excluding rotating serialized targets; every other route requires concrete channel, actor, thread, and exact delivery target. Legacy wildcard matches that cannot resolve to one digest are ineligible for optional unanchored context, while an exact provider-message-id anchor remains authoritative. The provider boundary writes or verifies the claim only after the consuming running receipt and accepted-input journal exist and before provider egress; exact anchors persist that bounded claim even while legacy migration is incomplete, while optional unanchored context waits for the marker. That same generic receipt is the sole terminal commit witness: completed or deferred folds the matching current order or its previously accepted fallback monotonically into `settledThrough`, failed or blocked discards both, and running, missing, or corrupt blocks optional context during foreground work. Route maintenance never runs before provider start or response delivery. Local and one-shot owners reconcile only after the current pass's direct delivery or queue drain completes and before the next pass or one-shot return; hosted foreground work performs no full-history maintenance; hosted background passes reconcile after their delivery boundary. Unmigrated workspaces wait for background or idle maintenance before optional unanchored context becomes eligible; exact provider-message anchors remain available. A maintenance-only hosted mutation promotes that pass to a durable checkpoint, while idle snapshot residue remains the fallback owner. The one-time migration reads trusted outbox and receipt inventories cooperatively under the runtime lock. Fresh foreground discovery raises the yield signal before lock-bound input staging and re-arms it after durable staging, so traversal can release the lock between entries; process or lease aborts also stop per-entry work. Migration folds every legacy terminal consumption and running consumer into the greatest per-route suppression watermark and writes the marker last; a partial fold reports its mutation for checkpointing and remains safe to repeat. Later maintenance reads outbox authority plus only the exact receipt named by each pending route. At that quiescent boundary an unresolved pending claim is retired into the same suppression watermark without asserting successful provider consumption, while an exact provider-message anchor may still bypass the watermark. A route record is removed immediately when no remaining outbox delivery can select that route, even if it contains an obsolete pending claim, so file cardinality follows live authority rather than historical routes. Folding on a bounded foreground read or post-delivery reconciliation is compaction rather than a post-finalization correctness write. Outbox state remains the content and delivery-attestation authority. In private direct replies, the bounded route-matched delivery reader can retain the latest consumed singleton workout relationship for interpretation; it strips consumed text and automation occurrence annotations, does not reclaim the delivery, and honors newer context decisions. The workout tracking product spec owns that continuity contract.
 
 - Provider transcript history and channel-native delivery history should stay with upstream adapters when possible; Murph stores local assistant transcript copies, minimal manual aliases, explicit conversation bindings, fixed auto-reply channel enablement state, timestamps/turn counts, provider session references, runtime automation run history, compact system-emitted turn receipts, idempotent outbound intent state, diagnostics counters/warnings, and persisted status snapshots under `vault/.runtime/operations/assistant/**`. Assistant runtime directories must stay private (`0700`) and assistant runtime files must stay private (`0600`). Secret-bearing provider headers for persisted sessions live only in private sidecars under `vault/.runtime/operations/assistant/secrets/**`; the general session JSON keeps only public headers, diagnostics/runtime-event writes redact inline secret material before persistence, and `assistant doctor --repair` can tighten permissive assistant runtime modes in place. Inline secret findings indicate stale local session data rather than a supported migration path. Fresh sessions may inject a small canonical memory block from `bank/memory.md`, and assistant turns now use one shared CLI-first Murph runtime surface plus a small helper-tool layer across manual and message-triggered automation turns. Codex App Server is the hard-cut assistant adapter: it reaches the canonical `vault-cli` surface through native local CLI/filesystem/env authority, defaults to unsandboxed execution plus no approval friction, and is trusted as a local operator path. Assistant-engine keeps one Codex App Server process warm across ordinary turns while the same restored workspace remains active; each ordinary turn is an RPC into that process. Prompts, session/thread/turn ids, working directories, thread capability configuration, delivery routes, and invocation-scoped automation or device authority stay in request data rather than process launch identity; thread capability configuration is supplied on both start and resume. Those capabilities are exposed only through narrow typed tools on the current root turn and are absent from the App Server and descendant shell environments. Before any hosted restore validates, replaces, clears, or sanitizes Codex home, the Cloudflare container invocation boundary synchronously stops the engine-owned process; the next process rebuilds its private indexes from the retained rollout. Other process replacement is limited to owner shutdown, process exit, proven unhealthy or poisoned protocol state, explicit operator shutdown, explicit workspace invocation abort/preemption, or a genuine process-level configuration change that Codex cannot accept through RPC. An explicit abort synchronously stops the exact owned App Server before the container job slot can be reused; ordinary turn and invocation completion do not. Codex App Server owns provider-native web-search behavior; Murph normalizes Codex `web.search` events into assistant trace and status output without carrying a separate Murph-side search provider or web-read tool layer. Managed OpenAI standalone search crosses the existing Worker credential boundary only as exact `POST /v1/alpha/search`; the Worker revalidates the provider/user/runner identity, injects the Worker-owned OpenAI credential, and strips runner authority before forwarding it. Accepted inbound channel messages are therefore treated as operator-authorized actions for the bound vault and may use the assistant runtime, canonical `memory`, canonical `automation`, self-target, and vault query/write surface. Murph owns transcript policy, turn orchestration, and tool/runtime planning, while canonical vault records remain authoritative on conflicts.
 The Codex dynamic-tool registration boundary derives one compact, complete JSON
@@ -2617,9 +2617,15 @@ welcome Linq instant-start share one transition. Telegram activation remains
 silent; when no bot thread exists yet, the persisted onboarding start is the
 durable pending fact and managed-automation reconciliation uses the first later
 deliverable direct route. That delayed seed stays anchored to the activation
-window and becomes a no-op after its cutoff. Activation seed failures retry
-through the activation mailbox, while later-route failures reuse the existing
-bounded managed-setup wake ladder. Canonical slug idempotency and onboarding
+window and becomes a no-op after its cutoff. The managed reconciler forwards its
+route-validation profile to that canonical seed, including hosted delivery
+rules. Activation seed failures retry through the activation mailbox, while
+later-route failures reuse the existing bounded managed-setup wake ladder.
+A missing route is currently a no-op, not a scheduled retry. Activation seeding
+therefore remains necessary until the existing route and maintenance owners
+establish a no-inbound continuation for a pristine, silent activation; an
+onboarding start alone does not create a deliverable automation or a wake.
+Canonical slug idempotency and onboarding
 state preserve completed or archived follow-ups as closed. No delivery receipt,
 channel-specific state, queue, or scheduler is another enrollment owner.
 The automation has at most one low-pressure opportunity on
@@ -2765,6 +2771,17 @@ event type and time, live/test mode, and the opaque Stripe event id. It never
 reads or includes member/customer identity, contact details, checkout contents,
 or raw provider payloads.
 
+Linq `message.received` audience selection uses the verified provider payload and
+canonical thread ownership, not an HTTP refresh on every direct message. An
+explicit `chat.is_group: false` is direct only when no durable group route was
+observed. A signed group flag or an existing group route selects the group
+container; the planner repeats the route lookup under the chat ownership lock,
+so a group route committed after preparation also wins before private-member
+admission. Missing or unrecognized directness still requires the bounded chat
+summary lookup: a member/home binding identifies an owner, not an audience.
+New group setup retains roster reads for participant and setup authority; those
+reads are not ordinary direct-message classification.
+
 Hosted thread routing prepares thread-container domain envelopes, delivery-route
 ciphertext, and mailbox ingress roots before the planner transaction.
 Telegram sender authority and Linq pending-contact authority resolve
@@ -2778,9 +2795,14 @@ or authority lock. When an opted-in speculative batch fails during envelope
 metadata lookup or verification, it retains that same rejection for every
 affected uncached root reference. A later mixed cached-and-uncached request
 observes cached failures before starting new metadata or provider work.
-Established Linq direct messages resolve only a narrow blind-index/member-id
-target and unwrap the mailbox-payload ingress root; established Linq and
-Telegram group routes also retain the exact observed delivery-route ciphertext,
+Established Linq direct messages resolve a blind-index/member-id target and
+prepare the required control and mailbox ingress roots plus the observed routing
+snapshot before `BEGIN`. They do not load or compare a full private identity
+snapshot unless Family acceptance/replay consumes it. The transaction still
+locks identity authority, repeats blind identity/home ownership lookups, and
+revalidates member, route snapshot, access, and root authority. Preparation is
+not an authorization cache. Established Linq and Telegram group routes also
+retain the exact observed delivery-route ciphertext,
 prewarm both the active control root used for replacement sealing and any
 decrypt-only control root named by that ciphertext, and prewarm the mailbox
 root. For an eligible unbound group, Web generates the
@@ -3501,15 +3523,20 @@ and its UserRunner and RunnerContainer RPC compatibility methods are removed.
 Older Web's best-effort helper treats that response as an optional hint failure.
 The inventory coordinator owns speculative preparation;
 normal admitted execution remains the only member-binding path. The Temporal
-mailbox signal remains the durable wake authority for hosted runtime work. For a
-committed known-checkpoint Linq message, Web first verifies the checkpoint owner
-and canonical participant-aware live access as part of the unconditional
-Temporal pointer signal. Assistant Ask request and completion handlers likewise
-append their encrypted mailbox item before signaling Temporal. Only after
-Temporal accepts the applicable durable signal does Web
-start one best-effort direct `ensure-processing` request to Cloudflare (Vercel
-OIDC, fire and forget, with at most one bounded retry and no mailbox payload). Access denial, expiry,
-or Temporal acceptance failure starts no direct wake. The direct request exists
+mailbox signal remains the durable wake authority for hosted runtime work.
+`handoffHostedMailboxWake` owns the shared Linq, Telegram, and Assistant Ask
+request/completion handoff after their encrypted mailbox append. The signal
+owner validates the expected owner and uses either the caller's current committed
+checkpoint (whose transaction proved admission/workspace authority) or the
+checkpoint reread and workspace admission required by replay. Only after that
+owner starts the Temporal request does the handoff overlap acknowledgement with
+a payloadless best-effort direct `ensure-processing` request to Cloudflare
+(Vercel OIDC, with at most one bounded retry). Pre-dispatch denial or expiry starts
+no hint. A later acknowledgement failure preserves the already-authorized hint
+but still rejects the handoff; it does not turn direct acceptance into durable
+success. Existing post-append caller handling and Temporal mailbox recovery remain
+unchanged. The webhook wrapper owns latency traces, not a second wake protocol.
+The direct request exists
 only to cut wake latency and may be dropped at any time with no correctness
 impact: accepted Linq reply delivery stamps the exact mailbox item with
 `consumedAt`, while Assistant Ask has deterministic request/completion identity,

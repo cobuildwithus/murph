@@ -1018,6 +1018,19 @@ function isHostedReviewedAssistantAskFallbackPayload(input: {
     && (input.media?.length ?? 0) === 0;
 }
 
+async function supersedeHostedAssistantAskCompletionAndRetry(input: {
+  intentId: string;
+  now: Date;
+  vaultRoot: string;
+}): Promise<never> {
+  await persistHostedAssistantAskFallbackSupersession(input);
+  throw new VaultCliError(
+    "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
+    "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
+    { retryable: true },
+  );
+}
+
 async function persistHostedAssistantAskFallbackSupersession(input: {
   intentId: string;
   now: Date;
@@ -2654,20 +2667,13 @@ function isHostedLinqProviderOutcomeAmbiguous(error: unknown): boolean {
       method === "POST"
       && error.context.failureStage === "http"
       && typeof status === "number"
-      && status >= 200
-      && status <= 299
     ) {
-      return true;
-    }
-    if (
-      method === "POST"
-      && error.context.failureStage === "http"
-      && typeof status === "number"
-      && status >= 400
-      && status <= 499
-      && status !== 408
-    ) {
-      return false;
+      if (status >= 200 && status <= 299) {
+        return true;
+      }
+      if (status >= 400 && status <= 499 && status !== 408) {
+        return false;
+      }
     }
   }
   if (
@@ -2795,18 +2801,14 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     ? input.intent
     : null;
   const authority = input.intent?.externalThreadRouteAuthority ?? null;
-  if (
-    !authority
-    && !reviewedCompletion
-    && (
-      payload.threadIsDirect === true
-      || !input.intent?.automationAuthority
-    )
-  ) {
-    return null;
-  }
   if (!authority) {
-    if (!input.intent?.automationAuthority && !reviewedCompletion) {
+    if (
+      !reviewedCompletion
+      && (
+        payload.threadIsDirect === true
+        || !input.intent?.automationAuthority
+      )
+    ) {
       return null;
     }
     throw new VaultCliError(
@@ -2888,16 +2890,11 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
         { retryable: false },
       );
     }
-    await persistHostedAssistantAskFallbackSupersession({
+    await supersedeHostedAssistantAskCompletionAndRetry({
       intentId: reviewedCompletion.intentId,
       now: new Date(),
       vaultRoot: input.vaultRoot,
     });
-    throw new VaultCliError(
-      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-      { retryable: true },
-    );
   }
   return target;
 }
@@ -4841,16 +4838,11 @@ function createHostedAssistantLinqSendDependency(input: {
                 { retryable: true },
               );
             }
-            await persistHostedAssistantAskFallbackSupersession({
+            await supersedeHostedAssistantAskCompletionAndRetry({
               intentId: input.intentId,
               now: new Date(),
               vaultRoot: input.vaultRoot,
             });
-            throw new VaultCliError(
-              "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-              "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-              { retryable: true },
-            );
           }
           providerAttempt = {
             attemptedAt: new Date(),
@@ -5126,16 +5118,11 @@ async function prepareHostedReviewedAssistantAskProviderEntry(input: {
     (currentContainsFallbackText && !currentIsFallback)
     || (requestContainsFallbackText && !requestIsFallback)
   ) {
-    await persistHostedAssistantAskFallbackSupersession({
+    await supersedeHostedAssistantAskCompletionAndRetry({
       intentId: input.intentId,
       now: input.now,
       vaultRoot: input.vaultRoot,
     });
-    throw new VaultCliError(
-      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-      { retryable: true },
-    );
   }
   if (current.message !== input.message) {
     throw new VaultCliError(
@@ -5147,16 +5134,11 @@ async function prepareHostedReviewedAssistantAskProviderEntry(input: {
     );
   }
   if (!currentIsFallback && Date.parse(expiresAt) <= input.now.getTime()) {
-    await persistHostedAssistantAskFallbackSupersession({
+    await supersedeHostedAssistantAskCompletionAndRetry({
       intentId: input.intentId,
       now: input.now,
       vaultRoot: input.vaultRoot,
     });
-    throw new VaultCliError(
-      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-      { retryable: true },
-    );
   }
   return expiresAt;
 }
