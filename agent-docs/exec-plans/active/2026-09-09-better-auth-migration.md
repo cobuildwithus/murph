@@ -621,3 +621,15 @@ The operator signup replay is pending. This qualifies signup UI only; queued
 welcome work is not evidence of delivery. Review or discard such Preview work
 before any later, separately qualified messaging enablement. Production
 activation and the broader live-auth qualification remain incomplete.
+
+### First phone connection follow-up
+
+- Outcome: email-first members can verify their first phone without enrolling an approval passkey.
+- Entry and promise: connect phone, enter its verification code, resume canonical onboarding.
+- Boundary: only an email-only first-party identity with no existing phone, Telegram, legacy identity, or approval state qualifies. Require primary authentication within five minutes and recheck under the member lock. Existing protected, replacement, removal, and Telegram paths retain approval.
+- Proof: real PostgreSQL route composition for initial setup, invalid codes, replay, stale/revoked sessions and concurrent protection; client interaction for direct phone verification and existing approval.
+- Local walkthrough: the real phone entry form renders directly and its code completion invokes no passkey enrollment or challenge; established method changes still request approval. PostgreSQL tests prove canonical/auth identity readback, wrong-code rejection, replay/replacement rejection, stale/silent/future primary proof, logout, legacy binding, concurrent first setup, and protection enrolled during provider verification.
+- Verification: 65 PostgreSQL account/auth cases and 10 credential client cases pass, along with Web typecheck, focused ESLint and the complexity guard (no functions above 20 in this delta).
+- Load: eligibility adds two bounded point reads in parallel before the operation and repeats them under the existing member lock; the settings reader performs those two reads only for an otherwise eligible email-only identity. No new storage or provider calls. Existing OTP delivery/checks stay outside the database transaction.
+- Changelog: the existing sign-in-and-approval-recovery entry covers this unshipped auth adoption follow-up.
+- Status: locally ready; hosted replay, final review, and exact-head CI pending.

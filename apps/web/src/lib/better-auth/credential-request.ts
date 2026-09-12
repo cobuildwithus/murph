@@ -10,7 +10,7 @@ import { getPrisma } from "../prisma";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { assertHostedBetterAuthIssuanceEnabled } from "./config";
 import { hostedAuthRequestIp } from "./admission";
-import { HOSTED_CREDENTIAL_CHANGE_KIND, parseHostedCredentialChange, prepareHostedCredentialChange, readHostedLoginMethods } from "./credential-change";
+import { HOSTED_CREDENTIAL_CHANGE_KIND, parseHostedCredentialChange, prepareHostedCredentialChange, readHostedInitialPhoneSetupAllowed, readHostedLoginMethods } from "./credential-change";
 import { commitHostedCredentialOtp, sendHostedCredentialOtp } from "./credential-otp";
 import { hostedAuthDelivery } from "./delivery";
 import { hostedAuthRateLimitStorage } from "./rate-limit";
@@ -26,15 +26,17 @@ async function readCredentialMutation(request: Request, operation: Operation) {
   if ((operation === "send" || operation === "verify") && (change.operation !== "set" || change.method === "telegram")) throw invalidRequest();
   if (operation === "remove" && change.operation !== "remove") throw invalidRequest();
   if (operation === "verify" && !body.code) throw invalidRequest();
-  if ((operation === "verify" || operation === "remove") && body.authorization === undefined) throw invalidRequest();
+  if (operation === "remove" && body.authorization === undefined) throw invalidRequest();
   return { ...body, change };
 }
 
 export async function readHostedLoginMethodsRequest(request: Request): Promise<Response> {
   const session = await requireHostedAppSessionFromRequest(request);
   if (!session.authProof) return jsonOk({ ok: true, requiresLogin: true });
-  const { methods } = await readHostedLoginMethods(getPrisma(), session.member.id);
-  return jsonOk({ ok: true, methods });
+  const prisma = getPrisma();
+  const current = await readHostedLoginMethods(prisma, session.member.id);
+  const initialPhoneSetupAllowed = await readHostedInitialPhoneSetupAllowed(prisma, session, current);
+  return jsonOk({ ok: true, methods: current.methods, initialPhoneSetupAllowed });
 }
 
 export async function changeHostedLoginMethodRequest(request: Request, operation: Operation): Promise<Response> {
@@ -59,6 +61,7 @@ export async function changeHostedLoginMethodRequest(request: Request, operation
     const prepared = await prepareHostedCredentialChange({ change, session, request, prisma,
       ...((operation === "verify" || operation === "remove") ? { authorization: body.authorization } : {}),
     });
+    if (operation === "verify" && body.authorization === undefined && !prepared.initialPhoneSetup) throw invalidRequest();
     if (operation === "challenge") return jsonOk(await createSensitiveActionChallenge({
       bindingHash: prepared.bindingHash, kind: HOSTED_CREDENTIAL_CHANGE_KIND, memberId: session.member.id, prisma,
     }));

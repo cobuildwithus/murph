@@ -231,6 +231,87 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     }, initialKind);
   }
 
+  async function withInitialPhoneMember(run: (f: {
+    memberId: string; prisma: ReturnType<typeof getPrisma>; token: string;
+    request(body: unknown): Request; change: HostedCredentialChange; code: string;
+  }) => Promise<void>) {
+    return withInitialPasskeyMember(async (f) => {
+      vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+      vi.stubEnv("VERCEL", "1");
+      const request = (body: unknown) => {
+        const req = f.request(body);
+        req.headers.set("x-vercel-forwarded-for", "2001:db8::195");
+        return req;
+      };
+      const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550195" };
+      const limits = [`send:contact:phone:${change.value}`, `verify:contact:phone:${change.value}`, `send:cooldown:phone:${change.value}`, "send:ip:2001:db8::195", "verify:ip:2001:db8::195"]
+        .map((value) => `arl_${authLookupKey("verification", "rate-limit", value)}`);
+      await f.prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: limits } } });
+      try {
+        expect((await (await loginMethods(request({}))).json()).initialPhoneSetupAllowed).toBe(true);
+        expect((await sendCredentialCode(request({ change }))).status).toBe(200);
+        const code = provider.codes.get(change.value!)!;
+        expect(code).toMatch(/^\d{6}$/u);
+        await run({ ...f, request, change, code });
+      } finally {
+        await hostedAuthAdapter(f.prisma)({}).deleteMany({ model: "verification", where: [{ field: "identifier", value: change.value }] });
+      }
+    });
+  }
+
+  it("completes initial phone setup with phone proof alone and rejects replay and replacement", () => withInitialPhoneMember(async (f) => {
+    expect((await verifyCredentialCode(f.request({ change: f.change, code: "invalid" }))).status).toBe(400);
+    const wrong = f.code === "000000" ? "111111" : "000000";
+    expect((await verifyCredentialCode(f.request({ change: f.change, code: wrong }))).status).toBe(400);
+    expect((await readHostedMemberIdentity(f))?.phoneNumber).toBeNull();
+    expect((await verifyCredentialCode(f.request({ change: f.change, code: f.code }))).status).toBe(200);
+    expect((await readHostedMemberIdentity(f))?.phoneNumber).toBe(f.change.value);
+    const state = await (await loginMethods(f.request({}))).json();
+    expect(state.methods.phone).toBe(f.change.value);
+    expect(state.initialPhoneSetupAllowed).toBe(false);
+    expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
+    expect((await getHostedAppSessionFromRequest(f.request({})))?.member.id).toBe(f.memberId);
+    expect((await verifyCredentialCode(f.request({ change: f.change, code: f.code }))).status).toBe(409);
+    expect((await verifyCredentialCode(f.request({ change: { ...f.change, expectedIdentity: f.change.value, value: "+12025550196" }, code: f.code }))).status).toBe(400);
+  }));
+
+  it.each(["stale", "exchanged", "future", "revoked", "protected", "legacy"] as const)("rejects initial phone setup after %s authority", (kind) => withInitialPhoneMember(async (f) => {
+    if (kind === "protected") expect((await registerPasskey(f.request(await initialEnrollment(f.request)))).status).toBe(200);
+    else if (kind === "legacy") {
+      const identity = await readHostedMemberIdentity(f);
+      await f.prisma.$transaction((tx) => upsertHostedMemberIdentity({
+        ...identity!, memberId: f.memberId, privyUserId: `did:privy:${f.memberId}`,
+        preparedControlRoot: { domain: "control", userId: f.memberId, rootKeyId: "synthetic-root" }, prisma: tx,
+      }));
+    }
+    else if (kind === "revoked") await logoutBrowser(f.request({}));
+    else await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
+      model: "session", where: [{ field: "token", value: f.token }],
+      update: { primaryAuthenticatedAt: kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -6 : 6) * 60_000) },
+    });
+    const response = await verifyCredentialCode(f.request({ change: f.change, code: f.code }));
+    expect([400, 401, 403]).toContain(response.status);
+    expect((await readHostedMemberIdentity(f))?.phoneNumber).toBeNull();
+  }));
+
+  it("rechecks approval established during initial phone provider verification", () => withInitialPhoneMember(async (f) => {
+    const registration = await initialEnrollment(f.request);
+    const check = sms.check.getMockImplementation()!;
+    sms.check.mockImplementationOnce(async (input) => {
+      const verified = await check(input);
+      expect((await registerPasskey(f.request(registration))).status).toBe(200);
+      return verified;
+    });
+    expect((await verifyCredentialCode(f.request({ change: f.change, code: f.code }))).status).toBe(409);
+    expect((await readHostedMemberIdentity(f))?.phoneNumber).toBeNull();
+  }));
+
+  it("commits only one concurrent initial phone setup", () => withInitialPhoneMember(async (f) => {
+    const responses = await Promise.all([1, 2].map(() => verifyCredentialCode(f.request({ change: f.change, code: f.code }))));
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    expect((await readHostedMemberIdentity(f))?.phoneNumber).toBe(f.change.value);
+  }));
+
   it("adds a verified phone with bound approval and preserves existing first-party sessions", () => withCredentialMember(async (f) => {
     const otherCookie = await f.loginAgain();
     const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550171" };

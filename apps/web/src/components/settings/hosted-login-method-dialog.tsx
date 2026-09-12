@@ -17,7 +17,7 @@ import { SettingsStatusLine } from "./connected-account-card";
 import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 
 type Methods = Record<HostedCredentialChange["method"], string | null>;
-type MethodResponse = { ok: true; methods: Methods; requiresLogin?: false } | { ok: true; requiresLogin: true };
+type MethodResponse = { ok: true; methods: Methods; initialPhoneSetupAllowed?: boolean; requiresLogin?: false } | { ok: true; requiresLogin: true };
 
 export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSaved }: {
   method: HostedCredentialChange["method"];
@@ -40,7 +40,11 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSav
   const [telegram, setTelegram] = useState<{ idToken: string; change: HostedCredentialChange; challenge: SensitiveActionChallengeResponse } | null>(null);
   const methods = current && !current.requiresLogin ? current.methods : null;
   const previous = methods?.[method] ?? null;
+  const initialPhoneSetup = method === "phone" && operation === "set" && previous === null
+    && current !== null && !current.requiresLogin && current.initialPhoneSetupAllowed === true;
   const label = method === "telegram" ? "Telegram" : method;
+  const needsInitialPasskey = initialPasskeyNeeded && !initialPhoneSetup;
+  const verifyLabel = initialPhoneSetup ? "Verify phone" : "Approve and save";
 
   useEffect(() => {
     const controller = new AbortController();
@@ -65,11 +69,11 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSav
     if (inFlight.current) return;
     inFlight.current = true; setPending(true); setError(null);
     try {
-      const challenge = telegram?.challenge ?? await requestHostedOnboardingJson<SensitiveActionChallengeResponse>({
+      const challenge = initialPhoneSetup ? null : telegram?.challenge ?? await requestHostedOnboardingJson<SensitiveActionChallengeResponse>({
         url: "/api/settings/login-methods/challenge", payload: { change: selected }, signal,
       });
       if (signal?.aborted || !mounted.current) return;
-      const authorization = await approval.signChallenge(challenge, selected);
+      const authorization = challenge ? await approval.signChallenge(challenge, selected) : undefined;
       if (signal?.aborted || !mounted.current) return;
       const suffix = selected.operation === "remove" ? "remove" : selected.method === "telegram" ? "telegram/verify" : "otp/verify";
       try {
@@ -104,7 +108,7 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSav
       <p className="text-sm text-muted-foreground">Sign in to approve changes to your login methods.</p>
       <Button type="button" onClick={() => { onOpenChange(false); openAuthDialog(); }}>Sign in to continue</Button>
     </>;
-    else if (initialPasskeyNeeded) content = <>
+    else if (needsInitialPasskey) content = <>
       <p className="text-sm text-muted-foreground">Set up a passkey to protect changes to your connected accounts.</p>
       <InitialPasskeySetupView enrollmentEnabled {...enrollment} onEnroll={() => void enrollment.enroll()} />
     </>;
@@ -128,7 +132,7 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSav
       }
       if (!signal.aborted) setTelegram({ ...prepared, idToken });
     }} />;
-    else content = <HostedContactCodeForm method={method} autoSubmit={false} verifyLabel="Approve and save"
+    else content = <HostedContactCodeForm method={method} autoSubmit={initialPhoneSetup} verifyLabel={verifyLabel}
       onSend={async (value, signal) => {
         const result = await requestHostedOnboardingJson<{ ok: true }>({ url: "/api/settings/login-methods/otp/send", payload: { change: change(value) }, signal });
         if (result.ok !== true) throw new Error("The code could not be sent. Try again.");

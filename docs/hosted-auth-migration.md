@@ -201,6 +201,15 @@ private Better Auth change-email API; phone proof uses its server-only consume
 API. Telegram verification binds numeric identity and nonce to this member and
 session, with a distinct purpose from login. No library catch-all is exposed.
 
+First phone setup for an email-only first-party member needs fresh primary
+login (within five minutes) and the new phone's code, without passkey enrollment.
+The server requires no canonical phone, Telegram login, legacy binding, or
+approval aggregate. It rechecks eligibility, freshness,
+and the original session under the member lock before consuming phone proof and
+writing both identities. Any established approval state keeps the normal approval
+path; stale primary proof requires signing in again. No other credential operation
+uses this exception. The reader's eligibility flag controls presentation only.
+
 Proof, canonical contact/routing writes, encrypted login records, approval
 acceptance and the durable channel wake commit together. Delivery, crypto
 preparation and runtime signaling occur outside the transaction. Wrong-code

@@ -5,7 +5,7 @@ import type { HostedContactCodeForm } from "@/src/components/hosted-onboarding/h
 import type { HostedTelegramProofButton } from "@/src/components/hosted-onboarding/hosted-telegram-proof-button";
 
 const mocks = vi.hoisted(() => ({
-  request: vi.fn(), sign: vi.fn(), saved: vi.fn(), enroll: vi.fn(),
+  realContact: false, request: vi.fn(), sign: vi.fn(), saved: vi.fn(), enroll: vi.fn(),
   enrollment: { registered: false, pending: false, error: null as string | null }, refresh: vi.fn(), openAuth: vi.fn(), close: vi.fn(),
   contact: null as ComponentProps<typeof HostedContactCodeForm> | null,
   telegram: null as ComponentProps<typeof HostedTelegramProofButton> | null,
@@ -17,9 +17,13 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mocks.refresh }
 vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({ useAuth: () => ({ openAuthDialog: mocks.openAuth }) }));
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({ requestHostedOnboardingJson: mocks.request }));
 vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization", () => ({ useSensitiveActionAuthorization: () => ({ signChallenge: mocks.sign }) }));
-vi.mock("@/src/components/hosted-onboarding/hosted-contact-code-form", () => ({ HostedContactCodeForm: (props: ComponentProps<typeof HostedContactCodeForm>) => {
-  mocks.contact = props; return createElement("button", { type: "button" }, props.verifyLabel);
-} }));
+vi.mock("@/src/components/hosted-onboarding/hosted-contact-code-form", async (original) => {
+  const { HostedContactCodeForm: Form } = await original<typeof import("@/src/components/hosted-onboarding/hosted-contact-code-form")>();
+  return { HostedContactCodeForm: (props: ComponentProps<typeof HostedContactCodeForm>) => {
+    mocks.contact = props;
+    return mocks.realContact ? createElement(Form, props) : createElement("button", { type: "button" }, props.verifyLabel);
+  } };
+});
 vi.mock("@/src/components/hosted-onboarding/hosted-telegram-proof-button", () => ({ HostedTelegramProofButton: (props: ComponentProps<typeof HostedTelegramProofButton>) => {
   mocks.telegram = props; return createElement("button", { type: "button" }, "Continue with Telegram");
 } }));
@@ -33,7 +37,7 @@ const methods = { email: "member@example.test", phone: null, telegram: "735001" 
 const challenge = { token: "synthetic-challenge", message: "Approve the selected change", expiresAt: "2099-01-01T00:00:00Z" };
 const authorization = { method: "passkey", token: challenge.token, assertion: { id: "synthetic-passkey" } };
 beforeEach(() => {
-  vi.resetAllMocks(); mocks.enrollment.registered = false; mocks.enrollment.pending = false; mocks.enrollment.error = null; mocks.contact = null; mocks.telegram = null;
+  vi.resetAllMocks(); mocks.realContact = false; mocks.enrollment.registered = false; mocks.enrollment.pending = false; mocks.enrollment.error = null; mocks.contact = null; mocks.telegram = null;
   mocks.sign.mockResolvedValue(authorization);
   mocks.request.mockImplementation(async ({ url }: { url: string }) => {
     if (url === "/api/settings/login-methods") return { ok: true, methods };
@@ -44,7 +48,10 @@ beforeEach(() => {
 });
 
 async function render(method: "email" | "phone" | "telegram", operation: "set" | "remove" = "set") {
-  return renderClientComponent(createElement(HostedLoginMethodDialog, { method, operation, onOpenChange: mocks.close, onSaved: mocks.saved }), { requireButton: false });
+  return renderClientComponent(createElement(HostedLoginMethodDialog, { method, operation, onOpenChange: mocks.close, onSaved: mocks.saved }), { requireButton: false, matchMedia: (query) => ({
+    matches: false, media: query, onchange: null, addListener() {}, removeListener() {},
+    addEventListener() {}, removeEventListener() {}, dispatchEvent: () => true,
+  }) });
 }
 async function click(rendered: Awaited<ReturnType<typeof render>>, text: string) {
   const button = [...rendered.container.querySelectorAll("button")].find((entry) => entry.textContent === text);
@@ -180,5 +187,30 @@ test("initial passkey setup stays in the connection dialog and resumes the selec
   await vi.waitFor(() => expect(mocks.contact?.method).toBe("phone"));
   expect(mocks.close).not.toHaveBeenCalled();
   expect(mocks.openAuth).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
+
+test("first phone setup uses the code form without enrolling or signing a passkey", async () => {
+  mocks.realContact = true;
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => url === "/api/settings/login-methods"
+    ? { ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialPhoneSetupAllowed: true }
+    : { ok: true, initialEnrollmentAllowed: true });
+  const rendered = await render("phone");
+  expect(mocks.contact?.method).toBe("phone");
+  expect(rendered.container.querySelector('input[type="tel"]')).not.toBeNull();
+  expect(rendered.container.textContent).toContain("Your phone");
+  expect(rendered.container.textContent).toContain("Send verification code");
+  expect(mocks.contact?.autoSubmit).toBe(true);
+  expect(mocks.contact?.verifyLabel).toBe("Verify phone");
+  expect(rendered.container.textContent).not.toContain("Set up a passkey");
+  const signal = new AbortController().signal;
+  await act(async () => { await mocks.contact!.onSend("+12025550195", signal); });
+  await act(async () => { await mocks.contact!.onVerify("+12025550195", "123456", signal); });
+  expect(mocks.enroll).not.toHaveBeenCalled();
+  expect(mocks.sign).not.toHaveBeenCalled();
+  expect(mocks.request.mock.calls.some(([input]) => input.url.endsWith("/challenge"))).toBe(false);
+  expect(mocks.saved).toHaveBeenCalledOnce();
+  expect(mocks.refresh).toHaveBeenCalledOnce();
   await rendered.cleanup();
 });
