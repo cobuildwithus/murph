@@ -308,6 +308,14 @@ export class DatabaseHealthMonitor {
     }
 
     try {
+      const latestSample = this.store.readRecentSamples(1)[0];
+      if (latestSample && observedAtMs <= latestSample.observedAtMs) {
+        return await this.handleAlertState({
+          checkedAtMs: runStartedAtMs,
+          conditions: latestSample.conditions,
+          sampleStatus: latestSample.scrapeStatus,
+        });
+      }
       const sample = await this.collectSample();
       const checkedAtMs = normalizeObservedAtMs(this.nowImplementation());
       this.transactionSync(() => {

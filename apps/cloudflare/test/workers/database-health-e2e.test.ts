@@ -185,6 +185,17 @@ describe("database health scheduled Worker path", () => {
     setDatabaseHealthMissingConnectionErrorScrapesRemaining(12);
     for (const slot of [2, 3, 4, 5, 6]) {
       await check(slot);
+      if (slot === 2) {
+        const requestsBeforeReplay = readDatabaseHealthPlanetScaleRequestCounts();
+        const samplesBeforeReplay = await monitor.readRecentSamples({ limit: 10 });
+        setDatabaseHealthNowMs(start + FIVE_MINUTES_MS * slot + 10_000);
+        await monitor.runScheduledCheck({ scheduledAtMs: start + FIVE_MINUTES_MS * slot });
+        expect(readDatabaseHealthPlanetScaleRequestCounts()).toEqual(requestsBeforeReplay);
+        await expect(monitor.readRecentSamples({ limit: 10 })).resolves.toEqual(samplesBeforeReplay);
+        await expect(monitor.readAlertState()).resolves.toMatchObject({
+          consecutiveScrapeFailures: 1,
+        });
+      }
       expect(readDatabaseHealthMessageRequests()).toHaveLength(2);
       await expect(monitor.readAlertState()).resolves.toMatchObject({
         monitoringAlertObligation: null,

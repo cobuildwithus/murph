@@ -1272,7 +1272,10 @@ limits, and local proof distinctions are owned by
   paging without losing the complementary baseline, failed-confirmation
   retention, positive recovered-counter deltas, persistent-gap telemetry
   paging, and the scheduled Durable Object boundary for that retry,
-  SQLite sample persistence and 30-day pruning, concrete
+  SQLite sample persistence and 30-day pruning, completed-slot and older-slot
+  replay without counter/evidence mutation, six-distinct-check telemetry and
+  pressure admission across replay/restart, same-slot pending delivery retry
+  under the hourly fence, replay after recovery using the newest sample, concrete
   connection thresholds, six-failure collection hysteresis, one acknowledged
   page per unresolved telemetry-notification window, recovered unadmitted threshold
   withdrawal before delivery, truthful partial-then-unavailable,

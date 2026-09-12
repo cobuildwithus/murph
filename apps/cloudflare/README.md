@@ -407,6 +407,10 @@ open the fallback monitoring incident after six consecutive checks. This keeps
 the existing maximum of two observations and four provider requests; even two
 sequential ten-second fetch timeouts per observation plus the one-second wait
 remain below the two-minute run lease.
+The newest persisted sample also bounds completed scheduled work: repeated or
+older scheduled timestamps skip collection and admission, and only resume pending
+message delivery using the latest observation and existing hourly fence. Replays
+therefore cannot advance the failure counter or replace stored sample evidence.
 Structured failure warnings retain the parsed-observation count and exact
 per-port omission counts without raw scrape content. An acknowledged
 telemetry-only page is

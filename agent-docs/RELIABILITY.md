@@ -682,6 +682,11 @@ Last verified: 2026-09-04
   owner. A five-minute Cron Trigger records one normalized PlanetScale sample
   or classified failure in Durable Object SQLite and prunes history after 30
   days. A two-minute persisted run lease coalesces overlapping cron delivery.
+  After lease admission, a scheduled timestamp at or before the newest persisted
+  sample resumes only pending delivery from that latest observation. It does not
+  scrape, overwrite evidence, advance counters, or readmit old conditions. This
+  keeps failure counts aligned with distinct samples across completed-slot replay
+  and restart; pending delivery still observes its body/key and hourly fence.
   Concrete unhealthy gauges page immediately. Metric families are normalized
   independently: primary-only Postgres and PgBouncer families require an
   explicit `planetscale_role="primary"` label, while the edge connection-error

@@ -182,6 +182,82 @@ describe("database health monitor", () => {
     expect(harness.monitor.readRecentSamples()).toHaveLength(1);
   });
 
+  it.each([false, true])("does not count completed slots twice (pressure at threshold: %s)", async (pressureAtThreshold) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let clientWaitSeconds = 0;
+    let incomplete = true;
+    const harness = createMonitorHarness({
+      linqResponses: [() => { throw new Error("ambiguous send"); }],
+      readMetricsBody: () => {
+        const body = buildMetricsBody({ branchId: BRANCH_ID, clientWaitSeconds });
+        return incomplete
+          ? body.replace(/^planetscale_postgres_settings_max_connections.*$/mu, "")
+          : body;
+      },
+    });
+    await harness.runScheduledCheck(FIVE_MINUTES_MS);
+    const firstSamples = harness.monitor.readRecentSamples();
+    const firstState = harness.monitor.readAlertState();
+    await harness.runScheduledCheck(FIVE_MINUTES_MS, FIVE_MINUTES_MS + 10_000);
+    expect(harness.monitor.readRecentSamples()).toEqual(firstSamples);
+    expect(harness.monitor.readAlertState()).toEqual(firstState);
+    expect(harness.planetScaleRequests).toHaveLength(4);
+
+    await harness.runScheduledCheck(FIVE_MINUTES_MS * 2);
+    harness.restartMonitor();
+    await harness.runScheduledCheck(FIVE_MINUTES_MS, FIVE_MINUTES_MS * 2 + 10_000);
+    expect(harness.monitor.readAlertState().consecutiveScrapeFailures).toBe(2);
+    expect(harness.planetScaleRequests).toHaveLength(8);
+    for (const slot of [3, 4, 5]) {
+      await harness.runScheduledCheck(FIVE_MINUTES_MS * slot);
+    }
+    expect(harness.allLinqRequests).toHaveLength(0);
+    clientWaitSeconds = pressureAtThreshold ? 8 : 0;
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 6)).resolves
+      .toMatchObject({ outcome: "alert_failed", sampleStatus: "failed" });
+    const pending = harness.monitor.readAlertState();
+    expect(pending).toMatchObject({
+      consecutiveScrapeFailures: 6,
+      monitoringAlertObligation: {
+        failures: 6,
+        incompleteChecks: 6,
+        unavailableChecks: 0,
+        missingMetrics: ["planetscale_postgres_settings_max_connections"],
+      },
+    });
+    expect(harness.monitor.readRecentSamples()).toHaveLength(6);
+    expect(pending.pendingAlertMessage).toContain("telemetry was incomplete for 6 checks");
+    expect(pending.pendingAlertMessage?.includes("PgBouncer wait 8s")).toBe(pressureAtThreshold);
+    const collectionRequests = harness.planetScaleRequests.length;
+    expect(collectionRequests).toBe(pressureAtThreshold ? 22 : 24);
+    const firstBodies = await Promise.all(harness.allLinqRequests.map(readLinqRequestBody));
+    expect(firstBodies).toHaveLength(2);
+
+    harness.restartMonitor();
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 6, FIVE_MINUTES_MS * 7))
+      .resolves.toMatchObject({ outcome: "alert_deferred" });
+    expect(harness.monitor.readAlertState()).toEqual(pending);
+    expect(harness.allLinqRequests).toHaveLength(2);
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 6, FIVE_MINUTES_MS * 6 + ONE_HOUR_MS))
+      .resolves.toMatchObject({ outcome: "alert_sent" });
+    expect(await Promise.all(harness.allLinqRequests.slice(2).map(readLinqRequestBody)))
+      .toEqual(firstBodies);
+    expect(harness.planetScaleRequests).toHaveLength(collectionRequests);
+    expect(harness.monitor.readAlertState().consecutiveScrapeFailures).toBe(6);
+    expect(harness.monitor.readRecentSamples()).toHaveLength(6);
+
+    clientWaitSeconds = 0;
+    incomplete = false;
+    await harness.runScheduledCheck(FIVE_MINUTES_MS * 19);
+    const recovered = harness.monitor.readAlertState();
+    expect(recovered).toMatchObject({ consecutiveScrapeFailures: 0, incidentOpen: false });
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS, FIVE_MINUTES_MS * 31))
+      .resolves.toEqual({ conditions: [], outcome: "healthy", sampleStatus: "ok" });
+    expect(harness.monitor.readAlertState()).toEqual(recovered);
+    expect(harness.allLinqRequests).toHaveLength(4);
+    expect(harness.planetScaleRequests).toHaveLength(collectionRequests + 2);
+  });
+
   it("pages at most once per hour and rotates evidence-bearing copy", async () => {
     let metricsBody = buildMetricsBody({
       branchId: BRANCH_ID,

@@ -1847,7 +1847,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   branch-local PgBouncer and Postgres connection conditions, and page two
   preconfigured direct operator Linq chats. Its SQLite contains only counts,
   ratios, bounded state maps, error-counter baselines, failure codes, and alert
-  admission state. Metric families normalize independently: an unavailable
+  admission state. After claiming the run lease, repeated or older scheduled
+  timestamps use the newest persisted sample to resume only pending delivery;
+  they do not scrape, replace evidence, increment counters, or readmit conditions.
+  Metric families normalize independently: an unavailable
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
   never treated as zero. Unusable collections receive one bounded retry after
