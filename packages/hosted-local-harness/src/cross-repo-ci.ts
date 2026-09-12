@@ -37,6 +37,10 @@ export const hostedLocalCrossRepoCiRequirements = [
     scenario: "linq-scheduled-reminder",
   },
   {
+    reason: "Proves scheduled Telegram delivery uses the route owner's direct or group audience.",
+    scenario: "telegram-scheduled-reminder",
+  },
+  {
     reason: "Proves device-sync background admission stays bounded without starving a recurring reminder.",
     scenario: "linq-reminder-device-sync-non-starvation",
   },
