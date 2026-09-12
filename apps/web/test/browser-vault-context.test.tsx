@@ -926,11 +926,10 @@ test("experiment deep links load core and metrics index before exact run-card bu
   assert.equal(firstBody.requestedMetricBuckets, undefined);
   const followUpBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
   assert.deepEqual(followUpBody.requestedMetricBuckets, ["00"]);
-  for (let flush = 0; flush < 4; flush += 1) {
-    await act(async () => {
-      await Promise.resolve();
-    });
-  }
+  await waitForCondition(
+    () => rendered.container.textContent === "ready:loaded:core+metrics-partial",
+    "experiment metric bucket loaded state",
+  );
   assert.equal(
     rendered.container.textContent,
     "ready:loaded:core+metrics-partial",

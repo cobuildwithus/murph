@@ -28,3 +28,12 @@ Capture completed attachment bytes from the response artifact endpoint as a fall
 This blocked exact application of a production-fix patch and required multiple replacement ReviewGPT runs plus an inline gzip/base64 transfer workaround.
 
 A later exact-artifact download created the expected patch file but timed out waiting for the matching CDP event and removed that invocation-owned file. Retrying with capture metadata then rejected the otherwise unique exported turn. Independent verification of the complete response hash (restoring the export-omitted terminal newline), committed user/assistant turn identities, response model and sole artifact label permitted exact recovery through the public downloader; the original capture metadata was preserved.
+
+A subsequent implementation run completed with a patch, but exact-metadata
+download failed twice after rehydrating the closed capture target. Exporting
+with the unchanged capture metadata succeeded. The public snapshot API verified
+the exact response and artifact on its recovered target; passing that verified
+target to the public downloader recovered the patch without another model send.
+The original capture metadata remained unchanged, and the recovery target was
+closed after use. The downloader should wait for rehydration using the same
+identity-aware behavior as the exporter.

@@ -19,6 +19,7 @@ import {
   compactTableWorkoutSemanticResponseCardV1Schema,
   dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
+  isTotalsOnlyDailyNutritionResponseCard,
   exerciseRoutineResponseCardV1Schema,
   renderExerciseRoutineResponseCardTextV1,
   renderTelegramRichContentResponseCardTextV1,
@@ -198,17 +199,41 @@ export const telegramRichContentResponseCardJsonSchema = {
 export const challengeStandingsResponseCardJsonSchema =
   createChallengeStandingsResponseCardJsonSchema()
 
+export const DAILY_NUTRITION_OPTIONAL_GOALS_INTRO =
+  'Here’s your nutrition card. If you’d like, we can set up goals too.'
+
+/** A single fixed invitation, not a general card-plus-prose escape hatch. */
+export function readDailyNutritionIntroduction(
+  card: AssistantResponseCard | null | undefined,
+  message: string | null | undefined,
+): string | null {
+  if (!card || !isTotalsOnlyDailyNutritionResponseCard(card) ||
+      card.kind !== 'daily_nutrition' ||
+      Object.values(card.totals).some((metric) =>
+        metric.total === null || metric.mealCount !== card.mealCount)) {
+    return null
+  }
+  const introduction = DAILY_NUTRITION_OPTIONAL_GOALS_INTRO
+  return message === introduction ||
+    message === `${renderDailyNutritionResponseCardText(card)}\n\n${introduction}`
+    ? introduction
+    : null
+}
+
 /**
  * User-visible semantic text used by non-native routes and definitive native
  * card fallback. Internal tracking references must never appear here.
  */
 export function renderAssistantResponseCardText(
   card: AssistantResponseCard,
+  companionMessage?: string | null,
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
   switch (parsed.kind) {
     case 'daily_nutrition':
-      return renderDailyNutritionResponseCardText(parsed)
+      return [renderDailyNutritionResponseCardText(parsed),
+        readDailyNutritionIntroduction(parsed, companionMessage)]
+        .filter((value) => value !== null).join('\n\n')
     case 'compact_table':
       return renderCompactTableResponseCardText(parsed, false)
     case 'exercise_routine':
@@ -245,11 +270,14 @@ export function renderAssistantWorkoutResponseCardTranscriptText(
  */
 export function renderAssistantResponseCardTranscriptText(
   card: AssistantResponseCard,
+  companionMessage?: string | null,
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
   switch (parsed.kind) {
     case 'daily_nutrition':
-      return renderDailyNutritionResponseCardText(parsed)
+      return [renderDailyNutritionResponseCardText(parsed),
+        readDailyNutritionIntroduction(parsed, companionMessage)]
+        .filter((value) => value !== null).join('\n\n')
     case 'compact_table':
       return renderCompactTableResponseCardText(parsed, true)
     case 'exercise_routine':
@@ -269,11 +297,15 @@ export type TelegramRichMessage = {
 /** Build one Telegram-native rich message from a frozen response card. */
 export function buildTelegramRichMessage(
   card: AssistantResponseCard,
+  companionMessage?: string | null,
 ): TelegramRichMessage {
   const parsed = assistantResponseCardSchema.parse(card)
   switch (parsed.kind) {
-    case 'daily_nutrition':
-      return { html: renderTelegramNutritionCardHtml(parsed) }
+    case 'daily_nutrition': {
+      const introduction = readDailyNutritionIntroduction(parsed, companionMessage)
+      return { html: renderTelegramNutritionCardHtml(parsed) + (introduction
+        ? `<p>${escapeTelegramRichHtml(introduction)}</p>` : '') }
+    }
     case 'compact_table':
       return { html: renderTelegramCompactTableCardHtml(parsed) }
     case 'exercise_routine':
@@ -318,6 +350,7 @@ export function buildLinqIMessageAppFallbackText(
 
 export function buildLinqIMessageAppLayout(
   card: AssistantResponseCard,
+  companionMessage?: string | null,
 ): LinqIMessageAppLayout {
   const parsed = assistantResponseCardSchema.parse(card)
   if (parsed.kind === 'exercise_routine') {
@@ -354,6 +387,15 @@ export function buildLinqIMessageAppLayout(
 
   const mealLabel = parsed.mealCount === 1 ? 'meal' : 'meals'
   const partialLabel = renderPartialNutritionLabel(parsed)
+  if (isTotalsOnlyDailyNutritionResponseCard(parsed)) {
+    const introduction = readDailyNutritionIntroduction(parsed, companionMessage)
+    return {
+      caption: `${parsed.localDate} · ${parsed.mealCount} logged ${mealLabel}`,
+      image_url: buildLinqIMessageAppCardImageUrl(parsed),
+      subcaption: [introduction, partialLabel].filter(Boolean).join(' ') ||
+        'Estimated nutrition logged so far; not necessarily everything eaten.',
+    }
+  }
   return {
     caption: `${formatNutritionCardDate(parsed.localDate)} · ${
       parsed.mealCount
@@ -999,7 +1041,8 @@ function renderTelegramNutritionCardHtml(
   const partialHtml = partial === null
     ? ''
     : `<blockquote>${escapeTelegramRichHtml(partial)}</blockquote>`
-  const goalsHtml = !isDailyNutritionResponseCardV2(card)
+  const totalsOnly = isTotalsOnlyDailyNutritionResponseCard(card)
+  const goalsHtml = !isDailyNutritionResponseCardV2(card) || totalsOnly
     ? ''
     : `<details><summary>Daily goals</summary><table bordered><tr><th>Nutrient</th><th>Target</th><th>Status</th></tr>${[
         renderTelegramNutritionGoalRow('Calories', card.goals.calories, ' cal'),
@@ -1009,8 +1052,9 @@ function renderTelegramNutritionCardHtml(
         renderTelegramNutritionGoalRow('Fiber', card.goals.fiberGrams, 'g'),
       ].join('')}</table></details>`
   return [
-    `<h2>${escapeTelegramRichHtml(formatNutritionCardDate(card.localDate))}</h2>`,
-    `<p>${card.mealCount} ${card.mealCount === 1 ? 'meal' : 'meals'}</p>`,
+    `<h2>${escapeTelegramRichHtml(totalsOnly ? card.localDate : formatNutritionCardDate(card.localDate))}</h2>`,
+    `<p>${totalsOnly ? 'Estimated · logged so far · ' : ''}${card.mealCount} ${totalsOnly ? 'logged ' : ''}${card.mealCount === 1 ? 'meal' : 'meals'}</p>`,
+    ...(totalsOnly ? ['<p>Logged records may not include everything eaten.</p>'] : []),
     `<figure><img src="${escapeTelegramRichHtmlAttribute(buildLinqIMessageAppCardImageUrl(card))}"/></figure>`,
     `<table bordered striped>${rows.map(([label, value]) => `<tr><td>${escapeTelegramRichHtml(label ?? '')}</td><td align="right"><b>${escapeTelegramRichHtml(value ?? '')}</b></td></tr>`).join('')}</table>`,
     goalsHtml,
@@ -1049,10 +1093,11 @@ function renderDailyNutritionResponseCardText(
     `about ${formatNutritionCardNumber(calorieTotal)} calories`,
     ...renderAvailableNutritionTotals(card),
   ]
-  const summary = `${formatNutritionCardDate(card.localDate)}: ${
+  const totalsOnly = isTotalsOnlyDailyNutritionResponseCard(card)
+  const summary = `${totalsOnly ? `${card.localDate} · estimated, logged so far` : formatNutritionCardDate(card.localDate)}: ${
     metrics.join(' · ')
-  } from ${card.mealCount} logged ${mealLabel}.`
-  const goals = isDailyNutritionResponseCardV2(card)
+  } from ${card.mealCount} logged ${mealLabel}.${totalsOnly ? ' Logged records may not include everything eaten.' : ''}`
+  const goals = isDailyNutritionResponseCardV2(card) && !totalsOnly
     ? `Targets: ${renderDailyNutritionGoals(card).join(' · ')}.`
     : null
   const partialLabel = renderPartialNutritionLabel(card)
@@ -1417,14 +1462,25 @@ function createAssistantResponseCardJsonSchema() {
         ],
       },
       goals: {
+        // A flat typed object stays concrete in Codex discovery. The condition
+        // enforces the same all-null/all-five bundle as the runtime validator.
+        if: { properties: { calories: { type: 'null' } } },
+        then: { properties: {
+          proteinGrams: { type: 'null' }, carbsGrams: { type: 'null' },
+          fatGrams: { type: 'null' }, fiberGrams: { type: 'null' },
+        } },
+        else: { properties: {
+          proteinGrams: { type: 'object' }, carbsGrams: { type: 'object' },
+          fatGrams: { type: 'object' }, fiberGrams: { type: 'object' },
+        } },
         type: 'object',
         additionalProperties: false,
         properties: {
-          calories: goal(assistantResponseCardV1Bounds.calories),
-          proteinGrams: goal(assistantResponseCardV1Bounds.macroGrams),
-          carbsGrams: goal(assistantResponseCardV1Bounds.macroGrams),
-          fatGrams: goal(assistantResponseCardV1Bounds.macroGrams),
-          fiberGrams: goal(assistantResponseCardV1Bounds.macroGrams),
+          calories: { ...goal(assistantResponseCardV1Bounds.calories), type: ['object', 'null'] },
+          proteinGrams: { ...goal(assistantResponseCardV1Bounds.macroGrams), type: ['object', 'null'] },
+          carbsGrams: { ...goal(assistantResponseCardV1Bounds.macroGrams), type: ['object', 'null'] },
+          fatGrams: { ...goal(assistantResponseCardV1Bounds.macroGrams), type: ['object', 'null'] },
+          fiberGrams: { ...goal(assistantResponseCardV1Bounds.macroGrams), type: ['object', 'null'] },
         },
         required: [
           'calories',

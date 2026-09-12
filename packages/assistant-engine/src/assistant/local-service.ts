@@ -2364,7 +2364,7 @@ export async function sendAssistantMessageLocal(
           ? null
           : providerResult.transcriptResponse ??
             (providerResult.responseCard
-              ? renderAssistantResponseCardTranscriptText(providerResult.responseCard)
+              ? renderAssistantResponseCardTranscriptText(providerResult.responseCard, providerResult.response)
               : null)
         const transcriptResponseText =
           rawTranscriptResponseText === null
@@ -3158,7 +3158,7 @@ function resolveAssistantProviderFinalResponseText(
 ): string {
   const card = normalizeAssistantProviderResponseCard(providerResult)
   if (card) {
-    return renderAssistantResponseCardText(card)
+    return renderAssistantResponseCardText(card, providerResult.response)
   }
 
   const response = normalizeNullableString(providerResult.response)

@@ -128,6 +128,18 @@ function offeredSchemaAccepts(value: unknown): boolean {
 }
 
 describe('attach_response_card schema compatibility', () => {
+  it('offers exactly all-null or all-five nutrition authoring in both schemas', () => {
+    const keys = Object.keys(NUTRITION_CARD.goals) as Array<keyof typeof NUTRITION_CARD.goals>
+    for (let mask = 0; mask < 32; mask++) {
+      const goals = Object.fromEntries(keys.map((key, index) =>
+        [key, mask & (1 << index) ? NUTRITION_CARD.goals[key] : null]))
+      const value = { card: { ...NUTRITION_CARD, goals } }
+      const valid = mask === 0 || mask === 31
+      assert.equal(offeredSchemaAccepts(value), valid, `provider mask ${mask}`)
+      assert.equal(attachResponseCardRuntimeSchema.safeParse(value).success, valid, `runtime mask ${mask}`)
+    }
+  })
+
   it('keeps representative provider and authoritative runtime decisions aligned', () => {
     const cases = [
       { value: { card: NUTRITION_CARD }, valid: true },

@@ -118,7 +118,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         fallbackMessage: message,
         idempotencyKey: idempotencyKey ?? null,
         replyToMessageId: replyToMessageId ?? null,
-        richMessage: buildTelegramRichMessage(card),
+        richMessage: buildTelegramRichMessage(card, message),
         ...(dependencies.signal ? { signal: dependencies.signal } : {}),
         target: candidate.target,
       }

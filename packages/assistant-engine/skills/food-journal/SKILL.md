@@ -94,7 +94,33 @@ When a numeric safety exception already applies, save the meal without calorie
 or macro estimates. Do not force a nutrition lookup, clarification, or safety
 preflight just to capture the meal.
 
-- After every verified private meal mutation, apply default attachment intent for its eligible daily nutrition card. For response-card attachment eligibility only, treat the accepted meal message as explicitly requesting that card; this is not an explicit numeric-card request and does not authorize target derivation, a paused proposal, or any Goal mutation. When the complete card safety, accepted active-goal authority, fresh same-date totals, route, and bounded-card checks pass and the card alone completely answers the turn, attach that card as the complete response with no companion prose. Without an already accepted complete bundle, or when any other prerequisite fails, keep the truthful fallback short and aligned with the user's focus. Never replace a failed card gate with improvised totals, goals, analysis, or a second response surface.
+- After every verified private meal mutation, apply default attachment intent for its eligible daily nutrition card. This includes an ordinary meal reply to an ordinary scheduled check-in; the reply is interactive meal intent, not target acceptance or new scheduled authority. Read fresh canonical same-date totals with `--resolve-goals`. When numeric suitability, complete stored-meal coverage, private routing, and bounded-card checks pass and the card completely answers the turn, attach it. `goalContext.status: ready` uses the unchanged five accepted snapshots; `missing` uses five explicit null goals, even when a subset of compatible targets exists. Never author a mixed bundle or derive, propose, accept, activate, or mutate goals to send a summary. Conflict, incompatible, capacity, incomplete totals, or other failed prerequisites retain the short truthful fallback. Never replace a failed gate with improvised totals, targets, analysis, or a second response surface.
+
+### Optional introduction, not an onboarding requirement
+
+For the first suitable complete totals-only card, include this exact brief
+final text after attachment succeeds. Goal setup is optional for the member;
+the first introduction should not be silently omitted when its conditions hold:
+
+> Here’s your nutrition card. If you’d like, we can set up goals too.
+
+Use it only when canonical memory/instructions and current conversation contain
+no prior decline, number-sensitive preference, or already-sent invitation. Read
+`vault-cli memory show --compact --format json` once when that context is not
+already available. If prior invitation evidence is pending rather than sent,
+defer another invitation; never call pending evidence delivery. Otherwise later
+cards have no invitation. A missing or unreadable preference read means omit the
+optional introduction, not block an otherwise eligible card. Never add analysis,
+numeric values, a second summary, or a follow-up question around that fixed copy.
+The runtime freezes the copy inside the card's single outbound effect and records
+a Context memory note only after successful send confirmation. Do not write an
+“offered” note at staging. Respect prior declines in any wording; an explicit
+“no goals” preference belongs in the existing canonical Instructions/Preferences
+owner. Declining the invitation is not authority to modify unrelated goals.
+Silence, a meal reply, and acceptance of a reminder never accept nutrition goals.
+Read `nutrition-strategy` only when the member engages in goal setup; an invitation
+is neither a numeric proposal nor acceptance.
+
 
 ## Provide numbers by default, with safety exceptions
 
@@ -107,10 +133,9 @@ numeric-suitability rule in the `murph.attach_response_card` prompt. Do not run
 a universal medical-history or measurement preflight. Also read and follow the
 target-authority and complete active-Goal discovery contract in
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
-before deciding that the accepted active bundle is complete for the card. Use its
-proposal workflow only if a target is genuinely missing after that read and the
-member made an explicit numeric-card or target-setting request. Default meal-card
-intent never invokes it.
+before selecting the all-null or accepted all-five presentation. Use its
+proposal workflow only for an explicit target-setting request, never merely a
+meal log, daily summary, numeric-card request, or scheduled closeout.
 Treat a routine daily-card request, including a requested meal estimate needed
 for that card, as one fulfillment workflow. Reply once with the card or one
 concise truthful fallback. Never narrate individual safety, totals, estimation,
@@ -165,12 +190,14 @@ Attach a partial card only when the member explicitly asks to see the currently
 available partial data after the limitation is clear; partial-card schema and
 rendering remain compatibility surfaces, not the normal interactive closeout.
 
-The first setup response explains a paused canonical proposal in ordinary text;
-it does not attach a goal-less card. An unambiguous acceptance may complete the
-pending explicit card request in that next response after the known-context
-suitability rule passes, activation and readback succeed, and a fresh same-date totals
-read completes. Other later eligible responses may
-use the accepted active goals in a card.
+An explicit target-setting response still explains a paused canonical proposal
+in ordinary text, not a card. Only unambiguous acceptance of that explained
+proposal may activate it. When an explicit combined target-setting and card
+request remains pending, the acceptance response may complete it after suitability,
+activation/readback, and fresh same-date totals. Ordinary summary requests use
+all-null goals when accepted authority is missing; they do not repeat a paused
+proposal or change its status. Complete stored records do not prove every meal
+eaten was logged; the card reports estimated nutrition logged so far.
 
 ## Ground numeric estimates in label and USDA data
 

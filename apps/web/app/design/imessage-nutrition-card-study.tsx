@@ -28,6 +28,16 @@ const SYNTHETIC_CARD: DailyNutritionResponseCardV2 = {
   },
 };
 
+const SYNTHETIC_TOTALS_ONLY_CARD: DailyNutritionResponseCardV2 = {
+  kind: "daily_nutrition", version: 2, localDate: "2026-09-11", mealCount: 1,
+  totals: {
+    calories: { total: 610, mealCount: 1 }, proteinGrams: { total: 28, mealCount: 1 },
+    carbsGrams: { total: 84, mealCount: 1 }, fatGrams: { total: 17, mealCount: 1 },
+    fiberGrams: { total: 14, mealCount: 1 },
+  },
+  goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null },
+};
+
 export function ImessageNutritionCardStudy() {
   return (
     <div className="rounded-2xl border border-border bg-card p-4 sm:p-8" inert>
@@ -39,14 +49,20 @@ export function ImessageNutritionCardStudy() {
           Daily nutrition card
         </h3>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-          The static fallback mirrors the shipping Messages balloon&apos;s default
-          state and embeds the canonical Murph mark in its native badge
-          footprint. Goal direction stays in the existing safe text recovery
-          instead of repeating status words in the bitmap. Messages supplies
-          the outer mask and concise date label; only partial totals add a short
-          subcaption.
+          Totals-only cards show estimated nutrition logged so far, without a
+          goal ring or target judgments. The second specimen preserves historical
+          goal-aware rendering. Both use the production static renderer and
+          canonical Murph mark; Messages supplies the outer mask.
         </p>
       </div>
+      <p className="mb-2 text-sm text-muted-foreground">Totals only · synthetic lentil lunch</p>
+      <div className="hidden sm:block">
+        <ScaledNutritionCard scale={0.72} card={SYNTHETIC_TOTALS_ONLY_CARD} />
+      </div>
+      <div className="sm:hidden">
+        <ScaledNutritionCard scale={0.255} card={SYNTHETIC_TOTALS_ONLY_CARD} />
+      </div>
+      <p className="mb-2 mt-6 text-sm text-muted-foreground">Historical goal-aware card</p>
       <div className="hidden sm:block">
         <ScaledNutritionCard scale={0.72} />
       </div>
@@ -57,7 +73,7 @@ export function ImessageNutritionCardStudy() {
   );
 }
 
-function ScaledNutritionCard({ scale }: { scale: number }) {
+function ScaledNutritionCard({ scale, card = SYNTHETIC_CARD }: { scale: number; card?: DailyNutritionResponseCardV2 }) {
   return (
     <div
       className="overflow-hidden rounded-xl border border-border"
@@ -74,7 +90,7 @@ function ScaledNutritionCard({ scale }: { scale: number }) {
           transformOrigin: "top left",
         }}
       >
-        <NutritionCardImage card={SYNTHETIC_CARD} />
+        <NutritionCardImage card={card} />
       </div>
     </div>
   );

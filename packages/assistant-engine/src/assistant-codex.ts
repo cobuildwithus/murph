@@ -1,3 +1,4 @@
+import { resolveDailyNutritionIntroduction } from './assistant/nutrition-card-introduction.js'
 import {
   completeDynamicToolFailureDiagnostics,
   createDynamicToolFailureIssue,
@@ -6263,8 +6264,13 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
+  const nutritionIntroduction = await resolveDailyNutritionIntroduction({
+    card: finalResponseCard,
+    message: modelFinalMessage,
+    vault: input.vaultRoot,
+  })
   const semanticFinalMessage = finalResponseCard
-    ? renderAssistantResponseCardText(finalResponseCard)
+    ? renderAssistantResponseCardText(finalResponseCard, nutritionIntroduction)
     : finalResponseCardTextFallback
       ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
       : modelFinalMessage
@@ -6293,7 +6299,7 @@ async function runCodexAppServerTurnOnProcess(
   )
   const semanticTranscriptMessage = finalResponseCard
     ? requiredAutomationLocalAtClarificationsInOrder.length === 0
-      ? renderAssistantResponseCardTranscriptText(finalResponseCard)
+      ? renderAssistantResponseCardTranscriptText(finalResponseCard, nutritionIntroduction)
       : renderAssistantResponseCardText(finalResponseCard)
     : finalResponseCardTextFallback
       ? renderAssistantWorkoutResponseCardTranscriptText(

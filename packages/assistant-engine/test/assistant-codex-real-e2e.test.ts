@@ -83,7 +83,8 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { OPENAI_CODEX_MODEL_PROVIDER_CONFIG } from '@murphai/operator-config/assistant/target-runtime'
-import { renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
+import { DAILY_NUTRITION_OPTIONAL_GOALS_INTRO, renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
+import { NUTRITION_GOAL_INVITATION_SENT_MEMORY } from '../src/assistant/nutrition-card-introduction.js'
 import { renderMarkdownMessageText } from '@murphai/operator-config/message-formatting'
 import {
   listEntitySchema,
@@ -29813,13 +29814,182 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
   })
 })
 
+
+const ALL_NULL_NUTRITION_GOALS = {
+  calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null,
+} as const
+const SYNTHETIC_LENTIL_LUNCH = [
+  'Please log my lentil-and-rice lunch for July 30, 2026.',
+  'I finished exactly one serving. The package label for that serving says',
+  '610 calories, 28 g protein, 84 g carbohydrate, 17 g fat, and 14 g fiber.',
+].join(' ')
+
+describeRealCodex('real Codex totals-only nutrition journeys', () => {
+  it.each(['first-summary', 'already-sent', 'prior-decline', 'abandoned-proposal'] as const)(
+    'serves complete canonical totals without target writes: %s', { timeout: 1_800_000 }, async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      try {
+        const result = await runRealNutritionCardAuthorityScenario({
+          config, conditionRecovery: 'none', goalScenario: 'no-goals', realVault: true,
+          initialPrompt: 'Show my logged nutrition totals for July 30, 2026.',
+          setupVault: async (vaultRoot) => {
+            if (scenario === 'already-sent') await upsertMemory(vaultRoot, {
+              section: 'Context', text: NUTRITION_GOAL_INVITATION_SENT_MEMORY,
+            })
+            if (scenario === 'prior-decline') await upsertMemory(vaultRoot, {
+              section: 'Instructions', text: 'I previously declined nutrition goal setup. Do not offer goals again. Logged totals are welcome.',
+            })
+            if (scenario === 'abandoned-proposal') await upsertGoal({
+              vaultRoot, slug: 'murph-daily-nutrition-starting-targets', title: 'Daily nutrition targets', status: 'abandoned',
+            })
+          },
+        })
+        expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2,
+          localDate: '2026-07-30', mealCount: 3, goals: ALL_NULL_NUTRITION_GOALS,
+          totals: { calories: { total: 1760, mealCount: 3 }, fiberGrams: { total: 24, mealCount: 3 } } })
+        expect(result.attachCallCount).toBe(1)
+        expect(readNutritionGoalMutationCommands(result.commands)).toEqual([])
+        expect(result.progressUpdates).toEqual([])
+        expect(result.finalMessage).toContain('logged so far')
+        if (scenario === 'first-summary') expect(result.finalMessage).toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
+        else expect(result.finalMessage).not.toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
+        // The helper asserts the entire canonical Goal registry and meal events
+        // are unchanged. An optional invitation is not a proposal or a sent receipt.
+      } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+    },
+  )
+
+  it.each(['ordinary', 'reminder-reply', 'incomplete-breakfast', 'number-sensitive'] as const)(
+    'keeps ordinary meal authority bounded: %s', { timeout: 1_800_000 }, async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      let breakfastId: string | undefined
+      try {
+        const result = await runRealNutritionCardAuthorityScenario({
+          config, conditionRecovery: 'none', goalScenario: 'no-goals', realVault: true,
+          seedMeals: false, allowMealWrites: true,
+          initialPrompt: (scenario === 'reminder-reply'
+            ? 'In reply to your ordinary midday meal check-in: ' : '') + SYNTHETIC_LENTIL_LUNCH,
+          setupVault: async (vaultRoot) => {
+            if (scenario === 'number-sensitive') await upsertMemory(vaultRoot, {
+              section: 'Instructions', text: 'Food logging only. Never show me calorie, macro, or nutrition numbers and never offer nutrition goals.',
+            })
+            if (scenario === 'incomplete-breakfast') {
+              breakfastId = (await addMeal({ vaultRoot, source: 'manual',
+                occurredAt: '2026-07-30T12:00:00Z', note: 'Synthetic breakfast with unknown contents and amount.' })).mealId
+            }
+          },
+          verifyVault: async (vaultRoot) => {
+            if (breakfastId) {
+              const state = await readAutomaticMealClarificationState({ mealId: breakfastId, vaultRoot })
+              expect(state.savedCalories).toBeNull()
+            }
+          },
+        })
+        const commands = expandRecordedVaultCommands(result.commands)
+        expect(commands.some((command) => command.startsWith('meal add '))).toBe(true)
+        expect(readNutritionGoalMutationCommands(commands)).toEqual([])
+        expect(result.progressUpdates).toEqual([])
+        if (scenario === 'ordinary' || scenario === 'reminder-reply') {
+          expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2, localDate: '2026-07-30',
+            mealCount: 1, goals: ALL_NULL_NUTRITION_GOALS,
+            totals: { calories: { total: 610, mealCount: 1 }, fiberGrams: { total: 14, mealCount: 1 } } })
+          expect(result.attachCallCount).toBe(1)
+          expect(result.finalMessage).toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
+        } else {
+          expect(result.card).toBeNull()
+          expect(result.attachCallCount).toBe(0)
+          if (breakfastId) expect(commands.filter((command) =>
+            /^(?:meal show|meal edit) /u.test(command) && command.includes(breakfastId!))).toEqual([])
+          if (scenario === 'number-sensitive') {
+            // A meal date is not a nutrition number. Reject nutrient values and goal offers.
+            expect(result.finalMessage).not.toMatch(/calories|kcal|\d\s*(?:g\b|grams)|protein|carb(?:s|ohydrate)?|\bfat\b|fiber|\bgoals?\b/iu)
+          }
+        }
+      } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+    },
+  )
+
+  it('finishes an eligible managed closeout retry with totals only and no goal setup', { timeout: 1_800_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    try {
+      const result = await runRealNutritionCardAuthorityScenario({
+        config, conditionRecovery: 'none', goalScenario: 'no-goals', realVault: true,
+        seedMeals: false, scheduledCloseout: true,
+        setupVault: async (vaultRoot) => {
+          // Same-occurrence cleanup evidence uses the existing canonical retry
+          // owner. No photo interpretation or new queue is needed for this case.
+          const photoPath = path.join(path.dirname(vaultRoot), 'synthetic-lentil-capture.jpg')
+          await writeFile(photoPath, 'synthetic already-reviewed capture bytes\n', 'utf8')
+          const meal = await addMeal({
+            vaultRoot, source: 'device', photoPath, occurredAt: '2026-07-30T16:00:00Z',
+            externalRef: { resourceId: 'totals_only_closeout_retry', resourceType: 'photo',
+              system: 'meal-photo-capture', version: '7'.repeat(64) },
+            note: 'Synthetic reviewed lentil lunch; one labeled serving.',
+            nutrition: { totals: { calories: 610, proteinGrams: 28, carbsGrams: 84, fatGrams: 17, fiberGrams: 14 },
+              provenance: { source: 'label', confidence: 'high', sourceDetail: 'Independently invented synthetic label.' } },
+          })
+          await removeAutomaticMealPhoto({ eventId: meal.event.id,
+            now: new Date('2026-07-31T01:01:00.000Z'), vaultRoot })
+        },
+        initialPrompt: [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions,
+          'Scheduled occurrence local date: 2026-07-30.',
+          'Scheduled occurrence instant: 2026-07-31T01:00:00.000Z.',
+        ].join('\n'),
+      })
+      expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2,
+        localDate: '2026-07-30', mealCount: 1, goals: ALL_NULL_NUTRITION_GOALS,
+        totals: { calories: { total: 610, mealCount: 1 }, fiberGrams: { total: 14, mealCount: 1 } } })
+      expect(result.attachCallCount).toBe(1)
+      expect(result.commands.some((command) => command.startsWith('meal closeout-work '))).toBe(true)
+      expect(readNutritionGoalMutationCommands(result.commands)).toEqual([])
+      expect(result.progressUpdates).toEqual([])
+      expect(result.finalMessage).not.toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
+      expect(result.finalMessage).not.toMatch(/\?/u)
+    } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  })
+
+  it('preserves an informed partial request without inventing missing fiber or goals', { timeout: 1_800_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    try {
+      const result = await runRealNutritionCardAuthorityScenario({
+        config, conditionRecovery: 'none', goalScenario: 'no-goals', realVault: true, seedMeals: false,
+        setupVault: async (vaultRoot) => { await addMeal({ vaultRoot, source: 'manual', occurredAt: '2026-07-30T16:00:00Z',
+          note: 'Synthetic packaged lentil lunch; the label did not supply fiber.', nutrition: {
+            totals: { calories: 610, proteinGrams: 28, carbsGrams: 84, fatGrams: 17 },
+            provenance: { source: 'label', confidence: 'high', sourceDetail: 'Synthetic package facts; fiber unavailable.' },
+          } }) },
+        initialPrompt: 'I understand fiber is missing from the saved July 30 lunch and the totals are partial. Please show the available partial nutrition card now; do not estimate or repair the missing fiber.',
+      })
+      expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2, goals: ALL_NULL_NUTRITION_GOALS,
+        totals: { fiberGrams: { total: null, mealCount: 0 } } })
+      expect(result.finalMessage).toMatch(/partial/iu)
+      expect(result.finalMessage).not.toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
+      expect(readNutritionGoalMutationCommands(result.commands)).toEqual([])
+    } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  })
+
+  it('does not drop the other half of a compound request to attach a card', { timeout: 1_800_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    try {
+      const result = await runRealNutritionCardAuthorityScenario({
+        config, conditionRecovery: 'none', goalScenario: 'no-goals', realVault: true,
+        initialPrompt: 'Summarize my logged nutrition for July 30, 2026, and translate "lentil lunch" into Spanish.',
+      })
+      expect(result.card).toBeNull()
+      expect(result.attachCallCount).toBe(0)
+      expect(result.finalMessage).toMatch(/lentejas/iu)
+      expect(readNutritionGoalMutationCommands(result.commands)).toEqual([])
+    } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  })
+})
+
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
   it.each([
     ['rolling-legacy', true],
     ['date-window', true],
     ['conflicting-targets', false],
     ['incompatible-unit', false],
-    ['activity-only', false],
+    ['activity-only', true],
   ] as const)('uses one canonical nutrition context read for %s', {
     timeout: 1_800_000,
   }, async (goalScenario, cardExpected) => {
@@ -29835,7 +30005,9 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
       expect(readNutritionGoalMutationCommands(commands)).toEqual([])
       expect(result.progressUpdates).toEqual([])
       expect(result.attachCallCount).toBe(cardExpected ? 1 : 0)
-      if (cardExpected) {
+      if (goalScenario === 'activity-only') {
+        expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2, goals: ALL_NULL_NUTRITION_GOALS })
+      } else if (cardExpected) {
         expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2, localDate: '2026-07-30',
           goals: { calories: { target: 1800 }, proteinGrams: { target: 140 }, fiberGrams: { target: 25 } } })
       } else {
@@ -29925,7 +30097,7 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
         conditionRecovery: 'none',
         goalScenario: 'activity-only',
       })
-      expect(activityOnly.card).toBeNull()
+      expect(activityOnly.card).toMatchObject({ kind: 'daily_nutrition', version: 2, goals: ALL_NULL_NUTRITION_GOALS })
       expect(activityOnly.progressUpdates).toEqual([])
       expect(readNutritionGoalMutationCommands(activityOnly.commands)).toEqual([])
 
@@ -29934,7 +30106,7 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
         conditionRecovery: 'none',
         goalScenario: 'activity-same-goal',
       })
-      expect(activitySameGoal.card).toBeNull()
+      expect(activitySameGoal.card).toMatchObject({ kind: 'daily_nutrition', version: 2, goals: ALL_NULL_NUTRITION_GOALS })
       expect(activitySameGoal.progressUpdates).toEqual([])
       expect(
         readNutritionGoalMutationCommands(activitySameGoal.commands),
@@ -32317,6 +32489,7 @@ type NutritionConditionRecovery =
   | 'wrong-id'
 
 type NutritionGoalScenario =
+  | 'no-goals'
   | 'conflicting-targets'
   | 'incompatible-unit'
   | 'date-window'
@@ -32344,6 +32517,11 @@ async function runRealNutritionCardAuthorityScenario(input: {
   conditionRecovery: NutritionConditionRecovery
   goalScenario: NutritionGoalScenario
   realVault?: boolean
+  scheduledCloseout?: boolean
+  seedMeals?: boolean
+  allowMealWrites?: boolean
+  setupVault?: (vaultRoot: string) => Promise<void>
+  verifyVault?: (vaultRoot: string) => Promise<void>
   initialPrompt?: string
   liveSteerPrompt?: string
 }): Promise<{
@@ -32366,7 +32544,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
       mkdir(binDirectory, { recursive: true }),
       mkdir(skillsRoot, { recursive: true }),
       writeFile(commandLog, '', 'utf8'),
-      ...(['food-journal', 'nutrition-strategy'] as const).map((slug) =>
+      ...(['food-journal', 'nutrition-strategy', 'automatic-meal-capture'] as const).map((slug) =>
         cp(
           path.join(resolveAssistantSkillsRoot(), slug),
           path.join(skillsRoot, slug),
@@ -32380,8 +32558,10 @@ async function runRealNutritionCardAuthorityScenario(input: {
       conditionRecovery: input.conditionRecovery,
       executablePath: path.join(binDirectory, 'vault-cli'),
       goalScenario: input.goalScenario,
+      seedMeals: input.seedMeals,
     })
 
+    if (input.realVault) await input.setupVault?.(vaultRoot)
     const goalsBefore = input.realVault ? await listGoals(vaultRoot) : null
     const eventsBefore = input.realVault ? (await readVaultRawTolerant(vaultRoot)).events : null
     const progressUpdates: string[] = []
@@ -32395,6 +32575,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
     )
     const result = await executeRealCodexAppServerTurn({
       ...REAL_NUTRITION_CARD_CONVERSATION_INPUT,
+      vaultRoot: input.realVault ? vaultRoot : undefined,
       approvalPolicy: 'never',
       baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
       codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
@@ -32427,8 +32608,10 @@ async function runRealNutritionCardAuthorityScenario(input: {
         hostedRuntime: true,
         modelBehaviorProfile: 'gpt5-agentic',
         onboardingGuidance: false,
-        ordinaryInboundTurn: true,
-        turnTrigger: 'automation-auto-reply',
+        ...(input.scheduledCloseout
+          ? { scheduledOccurrenceAt: '2026-07-31T01:00:00.000Z' }
+          : { ordinaryInboundTurn: true }),
+        turnTrigger: input.scheduledCloseout ? 'automation-cron' : 'automation-auto-reply',
       }) + '\n\nLocal fixture transport: For exec_command and write_stdin, print the complete returned object with text(result), never only result.output. Preserve session_id and continue that session until exit_code is present; never restart a command whose session is still running.',
       dynamicTools: [
         MURPH_ATTACH_RESPONSE_CARD_TOOL,
@@ -32472,7 +32655,8 @@ async function runRealNutritionCardAuthorityScenario(input: {
       throw liveSteerError
     }
     if (goalsBefore) expect(await listGoals(vaultRoot)).toEqual(goalsBefore)
-    if (eventsBefore) expect((await readVaultRawTolerant(vaultRoot)).events).toEqual(eventsBefore)
+    if (eventsBefore && !input.allowMealWrites) expect((await readVaultRawTolerant(vaultRoot)).events).toEqual(eventsBefore)
+    if (input.realVault) await input.verifyVault?.(vaultRoot)
     const commandText = (await readFile(commandLog, 'utf8')).trim()
     const attachCallCount = readCapabilityRoutingActions(result.jsonEvents)
       .filter((action) =>
@@ -32480,6 +32664,12 @@ async function runRealNutritionCardAuthorityScenario(input: {
         && action.tool === MURPH_ATTACH_RESPONSE_CARD_TOOL.name
       ).length
 
+    process.stdout.write('[nutrition-journey-reply] ' + JSON.stringify({
+      scenario: input.initialPrompt,
+      cardKind: result.responseCard?.kind ?? null,
+      reply: result.finalMessage,
+      authoredReply: result.providerAuthoredFinalMessage,
+    }) + '\n')
     return {
       attachCallCount,
       card: result.responseCard,
@@ -32494,6 +32684,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
 }
 
 async function materializeNutritionCardVaultCli(input: {
+  seedMeals?: boolean
   vaultRoot?: string
   commandLog: string
   conditionRecovery: NutritionConditionRecovery
@@ -32698,7 +32889,9 @@ async function materializeNutritionCardVaultCli(input: {
     entity: { ...conflictingGoal.entity,
       data: { ...conflictingGoal.entity.data, windowStartAt: '2026-08-01' } },
   }
-  const activeGoals = input.goalScenario === 'conflicting-targets'
+  const activeGoals = input.goalScenario === 'no-goals'
+    ? []
+    : input.goalScenario === 'conflicting-targets'
     ? [canonicalNutritionGoal, conflictingGoal]
     : input.goalScenario === 'incompatible-unit'
       ? [incompatibleGoal]
@@ -32726,7 +32919,7 @@ async function materializeNutritionCardVaultCli(input: {
     }
     await upsertMemory(vaultRoot, { section: 'Identity', text: 'Synthetic adult test profile, age 34.' })
     await upsertMemory(vaultRoot, { section: 'Context', text: 'A synthetic nutrition suitability review is complete. Self-directed numeric nutrition targets are suitable, and no target-changing constraint applies.' })
-    for (const [index, calories] of [600, 600, 560].entries()) {
+    for (const [index, calories] of (input.seedMeals === false ? [] : [600, 600, 560]).entries()) {
       await addMeal({ vaultRoot, source: 'manual', occurredAt: `2026-07-30T${12 + index * 3}:00:00Z`,
         note: 'Synthetic complete meal', nutrition: {
           totals: { calories, proteinGrams: index === 2 ? 47 : 45, carbsGrams: index === 2 ? 65 : 60, fatGrams: 18, fiberGrams: 8 },
