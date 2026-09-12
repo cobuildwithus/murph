@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "private-message-start-delay",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting before replies start",
+    "summary": "Murph spends less time preparing ordinary private messages before it starts responding.",
+    "details": "Applies to private iMessage, SMS, and RCS conversations.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": [3367]
+  }
+}
