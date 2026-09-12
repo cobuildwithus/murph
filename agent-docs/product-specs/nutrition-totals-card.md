@@ -1,7 +1,7 @@
 # Logged nutrition cards with optional targets
 
 Date: 2026-09-11.
-Execution: `agent-docs/exec-plans/active/2026-09-11-nutrition-totals-card.md`.
+Execution: `agent-docs/exec-plans/completed/2026-09-11-nutrition-totals-card.md`.
 
 ## Member outcome
 
