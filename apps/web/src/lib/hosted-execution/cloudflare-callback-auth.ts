@@ -68,14 +68,14 @@ export async function requireHostedCloudflareCallbackRequest(
 
 export async function requireHostedCloudflareSystemCallbackRequest(
   request: Request,
-  options: HostedCloudflareCallbackRequestOptions,
+  options: HostedCloudflareCallbackRequestOptions & { nonceOwner?: string },
 ): Promise<string> {
   if (request.headers.has(HOSTED_EXECUTION_USER_ID_HEADER)) {
     throw unauthorizedCloudflareCallbackError();
   }
 
   return requireHostedCloudflareSignedRequest(request, options, {
-    nonceOwner: HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_NONCE_OWNER,
+    nonceOwner: options.nonceOwner ?? HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_NONCE_OWNER,
     signatureUserId: null,
   });
 }
