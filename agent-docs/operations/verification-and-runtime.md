@@ -451,6 +451,15 @@ pnpm --dir packages/hosted-local-harness exec vitest run \
   test/junction-wearable-canary-workflow.test.ts
 ```
 
+Before starting the live wearable Vitest child, the E2E suite builds Web through
+`pnpm --dir apps/web build:hosted-local`. This uses the existing production build
+memory limits and synthetic smoke environment, with the same isolated smoke
+output suffix consumed by the harness's production-start selector. Compilation
+finishes before Web, Worker, Temporal, storage, and browser processes run
+together. Provider login and Junction/Kernel credentials remain restricted to
+the isolated test child. A failed build stops the suite before that child starts.
+Ordinary hermetic suites retain their existing preparation path.
+
 The private executor must expose and smoke-check the exact workspace Codex CLI installed
 by the frozen root dependency graph before hosted-local model-catalog
 preparation. That workspace pin currently matches the independently owned

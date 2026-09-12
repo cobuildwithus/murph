@@ -683,6 +683,18 @@ export async function runHostedLocalE2eSuite(
           scenarios,
         });
       });
+      if (liveWearableEnvironment.vitestEnvOverlay[JUNCTION_WEARABLE_LIVE_ENV] === "1") {
+        suiteEnv.NEXT_DIST_DIR_MODE = "smoke";
+        await runAdmittedStep(async () => {
+          await runForegroundCommand({
+            args: ["--dir", "apps/web", "build:hosted-local"],
+            command: "pnpm",
+            cwd: hostedLocalHarnessRepoRoot,
+            env: suiteEnv,
+            label: "Hosted local wearable production Web preparation",
+          });
+        });
+      }
       await runAdmittedStep(async () => {
         await runHostedLocalVitest({
           assertWorkAdmission,
