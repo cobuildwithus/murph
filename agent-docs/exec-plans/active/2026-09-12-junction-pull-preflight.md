@@ -88,3 +88,16 @@ checkpoint/cold-restore tests, and locked Web authority/idle-work/CAS tests.
   age explicitly, retaining the same telemetry behavior without mutable closure.
 - Provider regression tests (17), affected typechecks, and complexity guard pass.
   Corrected-head final review and CI remain required before completion.
+
+- Round 2: PASS on `cbaba72ec9fad11f3b6e17b184f01ffc12de6491`.
+  Same Vonneumann conversation, full snapshot, verified `gpt-6-pro` response hash,
+  over ten minutes, no findings. Reviewed the corrections and interacting owners;
+  21 reviewer assertions passed, with no independent repository-suite claim.
+- CI then exposed the generic hint reader missing the manifest's new continuation
+  field. Added that field to the existing closed allowlist; the manifest-derived
+  producer/reader contract reproduces the rejection and verifies transport.
+- The old package graph guard assumed recovery never read providers. This task
+  intentionally adds that capability: permit only the recovery route's exact
+  preflight-to-existing-registry edge. Keep checking every other recovery edge
+  and control route against the provider-free rule; no dynamic-import bypass or
+  duplicate provider/config factory was added.

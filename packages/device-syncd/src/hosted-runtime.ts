@@ -798,6 +798,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   includeProfile: "boolean",
   objectId: "string",
   occurredAt: "isoTimestamp",
+  reconcileProof: "string",
   resource: "string",
   resourceCategory: "string",
   sourceLifecycleEpoch: "number",

@@ -686,6 +686,10 @@ before a cadence-only compare-and-set. Existing member/connection, mailbox
 append, and workspace locks serialize the final decision; provider and securebox
 work stay outside transactions. Missing proof/authority, accepted work, failed or
 incomplete reads, exhausted probe budget, and failed CAS keep the ordinary wake.
+The recovery route intentionally reaches the existing provider registry only
+through this preflight; other control-plane routes and recovery paths retain
+their provider-free package graph. Continuation proof is declared in both the
+provider manifest and the generic hosted job-hint reader's closed field set.
 Changed results use the existing durable scheduled wake and canonical importer;
 that path intentionally refetches instead of adding another payload store.
 
