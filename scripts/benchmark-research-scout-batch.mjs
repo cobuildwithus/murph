@@ -8,11 +8,11 @@ import { setTimeout } from 'node:timers/promises'
 
 // Compare actual old/new clients against the same installed SDK and contracts.
 // Export the old source with git show; no provider or runtime credentials are used.
-const root = fileURLToPath(new URL('../../../', import.meta.url))
+const root = fileURLToPath(new URL('../', import.meta.url))
 const clientPath = path.join(root, 'packages/cli/src/research-scout-client.ts')
 const baselinePath = process.argv[2]
 assert.ok(baselinePath && process.argv.length === 3,
-  'Usage: node packages/cli/scripts/benchmark-research-scout-batch.mjs BASELINE_SOURCE.ts')
+  'Usage: node scripts/benchmark-research-scout-batch.mjs BASELINE_SOURCE.ts')
 // Reuse the existing declared esbuild owner, as other repository benchmarks do.
 const require = createRequire(path.join(root, 'apps/cloudflare/package.json'))
 const { build } = require('esbuild')

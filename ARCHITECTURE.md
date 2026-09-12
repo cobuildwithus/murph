@@ -3491,7 +3491,7 @@ never returns partial success. A pre-aborted batch makes no request. Unlike the
 old serial failure path, up to two already-authorized calls can overlap;
 cancellation does not undo provider work or guarantee reversal of its cost.
 Single-scout behavior is unchanged. The synthetic baseline/current comparator
-is `packages/cli/scripts/benchmark-research-scout-batch.mjs`.
+is `scripts/benchmark-research-scout-batch.mjs`.
 
 Hosted Linq typing-start events are verified, parsed strictly, and acknowledged
 without scheduling member lookup or runtime work. Current Web no longer sends
