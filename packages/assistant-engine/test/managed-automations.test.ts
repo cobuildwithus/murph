@@ -471,6 +471,58 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.records.has(seeds[1]!.automationId)).toBe(true)
   })
 
+  it('retains an update count when foreground work interrupts the next seed creation', async () => {
+    const firstSeed: MurphManagedAutomationSeed = {
+      automationId: 'automation_reconcile_before_yield',
+      instructions: 'Use the refreshed instructions.',
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      slug: 'reconcile-before-yield',
+      title: 'Refreshed maintenance',
+    }
+    const secondSeed: MurphManagedAutomationSeed = {
+      ...firstSeed,
+      automationId: 'automation_create_after_yield',
+      slug: 'create-after-yield',
+    }
+    managedAutomationMocks.records.set(firstSeed.automationId, {
+      automationId: firstSeed.automationId,
+      schedule: firstSeed.schedule,
+      slug: firstSeed.slug,
+      title: firstSeed.title,
+      continuityPolicy: 'preserve',
+      instructions: 'Previous instructions.',
+      route: defaultRoute,
+      status: 'active',
+      summary: 'Member-owned summary.',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+    })
+    const options = {
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      seeds: [firstSeed, secondSeed],
+      vaultRoot,
+    }
+
+    await expect(applyMurphManagedAutomations({
+      ...options,
+      shouldYield: () => managedAutomationMocks.upsertAutomation.mock.calls.length > 0,
+    })).resolves.toEqual({ created: 0, skipped: 0, updated: 1, yielded: true })
+    expect(managedAutomationMocks.records.has(secondSeed.automationId)).toBe(false)
+    const update = managedAutomationMocks.upsertAutomation.mock.calls[0]?.[0]
+    for (const field of ['activeUntil', 'assistantTargetOverride', 'contextReferences', 'summary']) {
+      expect(update).not.toHaveProperty(field)
+    }
+
+    await expect(applyMurphManagedAutomations(options)).resolves.toEqual({
+      created: 1,
+      skipped: 1,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.records.get(firstSeed.automationId)?.summary)
+      .toBe('Member-owned summary.')
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+  })
+
   it('threads the foreground yield hook through experiment lifecycle preparation', async () => {
     let shouldYieldNow = false
     const shouldYield = vi.fn(() => shouldYieldNow)

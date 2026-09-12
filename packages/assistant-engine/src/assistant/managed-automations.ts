@@ -1112,262 +1112,43 @@ export async function applyMurphManagedAutomations(
         }
       }
 
-      const seed = resolveMurphManagedAutomationCreateSeed({
-        seed: rawSeed,
+      const outcome = await createMurphManagedAutomation({
+        input,
+        now,
+        rawSeed,
+        resolveCreateRoute,
         stableKey,
       })
-      if (!seed) {
-        result.skipped += 1
-        continue
-      }
-
-      if (!murphManagedAutomationRuntimeRequirementsMet(seed, input.runtimeEnv)) {
-        result.skipped += 1
-        continue
-      }
-
-      if (isStaleMurphManagedOneShotSeed(seed, now)) {
-        result.skipped += 1
-        continue
-      }
-
-      let slugAlreadyOwned = false
-      for (const slug of [
-        seed.slug,
-        ...(MURPH_MANAGED_AUTOMATION_LEGACY_SLUGS[seed.automationId] ?? []),
-      ]) {
-        const existingSlug = await showAutomation({
-          slug,
-          vaultRoot: input.vaultRoot,
-        })
-        if (input.shouldYield?.() === true) {
-          return { ...result, yielded: true }
-        }
-        if (existingSlug) {
-          slugAlreadyOwned = true
-          break
-        }
-      }
-      if (slugAlreadyOwned) {
-        result.skipped += 1
-        continue
-      }
-
-      const route = await resolveCreateRoute()
-      if (input.shouldYield?.() === true) {
+      if (outcome === 'yielded') {
         return { ...result, yielded: true }
       }
-      if (!route) {
-        result.skipped += 1
-        continue
+      if (outcome !== null) {
+        result[outcome] += 1
       }
-      if (!murphManagedAutomationMatchesRoute(seed, route)) {
-        continue
-      }
-
-      const summary = normalizeMurphManagedAutomationSummary(seed)
-      if (input.shouldYield?.() === true) {
-        return { ...result, yielded: true }
-      }
-      await upsertAutomation({
-        ...(seed.activeUntil === undefined
-          ? {}
-          : { activeUntil: seed.activeUntil }),
-        automationId: seed.automationId,
-        continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
-        ...(seed.contextReferences === undefined
-          ? {}
-          : { contextReferences: [...seed.contextReferences] }),
-        instructions: seed.instructions,
-        now,
-        ...(seed.assistantTargetOverride === undefined
-          ? {}
-          : { assistantTargetOverride: seed.assistantTargetOverride }),
-        route,
-        schedule: seed.schedule,
-        slug: seed.slug,
-        status: 'active',
-        ...(summary === null
-          ? {}
-          : { summary }),
-        tags: buildMurphManagedAutomationTags(seed),
-        title: seed.title,
-        vaultRoot: input.vaultRoot,
-      })
-      result.created += 1
       continue
     }
 
-    const preserveExistingSchedule =
-      shouldSpreadMurphManagedAutomationSchedule(rawSeed)
-    const seed = rawSeed
-
-    const reactivateReconciledLifecycleOneShot =
-      canReactivateReconciledLifecycleOneShot({ existing, now, seed: rawSeed })
-    if (existing.status !== 'active' && !reactivateReconciledLifecycleOneShot) {
-      result.skipped += 1
-      continue
-    }
-
-    if (!murphManagedAutomationRuntimeRequirementsMet(seed, input.runtimeEnv)) {
-      result.skipped += 1
-      continue
-    }
-
-    if (
-      preserveExistingSchedule &&
-      existing.schedule.kind === 'at'
-    ) {
-      // Device-activity matching rewrites the reusable managed record into a
-      // due one-shot with occurrence-specific prompt context. Do not reconcile
-      // the weekly seed over that queued payload before the automation lane runs.
-      result.skipped += 1
-      continue
-    }
-
-    if (!murphManagedAutomationSeedChanged(
+    const outcome = await reconcileMurphManagedAutomation({
       existing,
-      seed,
-      { ignoreSchedule: preserveExistingSchedule },
-    ) && !reactivateReconciledLifecycleOneShot) {
-      result.skipped += 1
-      continue
-    }
-
-    // Seed has changed. Reconcile in place. A one-shot whose desired
-    // occurrence already passed cannot fire at the new time, but if the
-    // legacy stored occurrence is also a one-shot still in the future,
-    // keep firing at the legacy time so the user still gets the moment
-    // with the new content. Archive only when neither the new desired nor
-    // a legacy one-shot occurrence can still fire. A recurring legacy
-    // schedule (cron/every/dailyLocal) under one-shot instructions would
-    // fire the final-review repeatedly, so it must be replaced with the
-    // new desired schedule (and archived if that is itself stale).
-    const newDesiredOccurrenceStale = preserveExistingSchedule
-      ? false
-      : isStaleOneShotSchedule(seed.schedule, now)
-    const newDesiredWindowExpired = preserveExistingSchedule
-      ? false
-      : isStaleMurphManagedOneShotSeed(seed, now)
-    const legacyOneShotStillFires = canPreserveLegacyOneShotSchedule({
-      existingSchedule: existing.schedule,
+      input,
       now,
-      seed,
+      rawSeed,
     })
-    let reconciledSchedule: AutomationSchedule = preserveExistingSchedule
-      ? existing.schedule
-      : seed.schedule
-    let reconciledStatus: AutomationStatus = reactivateReconciledLifecycleOneShot
-      ? 'active'
-      : existing.status
-    if (newDesiredOccurrenceStale && legacyOneShotStillFires) {
-      reconciledSchedule = existing.schedule
-    } else if (newDesiredWindowExpired) {
-      reconciledStatus = 'archived'
-    }
-
-    const summary = normalizeMurphManagedAutomationSummary(seed)
-    if (input.shouldYield?.() === true) {
+    if (outcome === 'yielded') {
       return { ...result, yielded: true }
     }
-    await upsertAutomation({
-      ...(seed.activeUntil === undefined
-        ? {}
-        : { activeUntil: seed.activeUntil }),
-      automationId: existing.automationId,
-      continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
-      ...(seed.contextReferences === undefined
-        ? {}
-        : { contextReferences: [...seed.contextReferences] }),
-      instructions: seed.instructions,
-      now,
-      ...(seed.assistantTargetOverride === undefined
-        ? {}
-        : { assistantTargetOverride: seed.assistantTargetOverride }),
-      // Routes are user/runtime-owned: seeds never carry one, so updates
-      // preserve the existing route without re-checking deliverability.
-      // Only the create path validates routes, because that is the only
-      // point where this module chooses one.
-      route: existing.route,
-      schedule: reconciledSchedule,
-      slug: existing.slug,
-      status: reconciledStatus,
-      ...(summary === null
-        ? {}
-        : { summary }),
-      tags: buildMurphManagedAutomationTags(seed),
-      title: seed.title,
-      vaultRoot: input.vaultRoot,
-    })
-    result.updated += 1
+    result[outcome] += 1
   }
 
-  if (input.seeds === undefined) {
-    if (input.shouldYield?.() === true) {
-      return { ...result, yielded: true }
-    }
-    reportMurphManagedAutomationDiagnosticStage(input, {
-      stage: 'onboarding_followup',
-    })
-    const existingOnboardingFollowup = await showAutomation({
-      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
-      vaultRoot: input.vaultRoot,
-    })
-    if (input.shouldYield?.() === true) {
-      return { ...result, yielded: true }
-    }
-    let onboardingFollowupCreated = false
-    if (!existingOnboardingFollowup) {
-      if (!scheduleStableKeyUnavailable) {
-        let stableKey: string | null = null
-        try {
-          stableKey = await resolveScheduleStableKey()
-        } catch (error) {
-          scheduleStableKeyUnavailable = true
-          result.stableKeyFailure = error
-          result.stableKeyRetryNeeded = true
-        }
-        if (input.shouldYield?.() === true) {
-          return { ...result, yielded: true }
-        }
-        if (stableKey !== null) {
-          const route = await resolveCreateRoute()
-          if (route !== null) {
-            const seedResult =
-              await seedMurphOnboardingFollowupFromStartedOnboarding({
-                now,
-                route,
-                stableKey,
-                vault: input.vaultRoot,
-              })
-            if (seedResult.kind === 'ready') {
-              result.created += 1
-              onboardingFollowupCreated = true
-            }
-          }
-        }
-      }
-    }
-    const onboardingReconciliation = onboardingFollowupCreated
-      ? { diagnostic: null, updated: false, yielded: false }
-      : await reconcileExistingOnboardingFollowupAutomation({
-          existing: existingOnboardingFollowup,
-          now,
-          shouldYield: input.shouldYield ?? null,
-          vaultRoot: input.vaultRoot,
-        })
-    if (onboardingReconciliation.yielded) {
-      return { ...result, yielded: true }
-    }
-    if (onboardingReconciliation.diagnostic) {
-      reportMurphOnboardingFollowupDiagnostic(
-        input,
-        onboardingReconciliation.diagnostic,
-      )
-    }
-    if (onboardingReconciliation.updated) {
-      result.updated += 1
-    }
+  if (input.seeds === undefined && await reconcileMurphManagedOnboardingFollowup({
+    input,
+    now,
+    resolveCreateRoute,
+    resolveScheduleStableKey,
+    result,
+    scheduleStableKeyUnavailable,
+  })) {
+    return { ...result, yielded: true }
   }
 
   if (desiredExperimentSupportSeries !== null) {
@@ -1391,6 +1172,279 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
+}
+
+async function reconcileMurphManagedOnboardingFollowup({
+  input,
+  now,
+  resolveCreateRoute,
+  resolveScheduleStableKey,
+  result,
+  scheduleStableKeyUnavailable,
+}: {
+  input: ApplyMurphManagedAutomationsInput
+  now: Date
+  resolveCreateRoute: () => Promise<AutomationRoute | null>
+  resolveScheduleStableKey: () => Promise<string | null>
+  result: ApplyMurphManagedAutomationsResult
+  scheduleStableKeyUnavailable: boolean
+}): Promise<boolean> {
+  if (input.shouldYield?.() === true) {
+    return true
+  }
+  reportMurphManagedAutomationDiagnosticStage(input, {
+    stage: 'onboarding_followup',
+  })
+  const existingOnboardingFollowup = await showAutomation({
+    slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+    vaultRoot: input.vaultRoot,
+  })
+  if (input.shouldYield?.() === true) {
+    return true
+  }
+  let onboardingFollowupCreated = false
+  if (!existingOnboardingFollowup && !scheduleStableKeyUnavailable) {
+    let stableKey: string | null = null
+    try {
+      stableKey = await resolveScheduleStableKey()
+    } catch (error) {
+      result.stableKeyFailure = error
+      result.stableKeyRetryNeeded = true
+    }
+    if (input.shouldYield?.() === true) {
+      return true
+    }
+    if (stableKey !== null) {
+      const route = await resolveCreateRoute()
+      if (route !== null) {
+        const seedResult =
+          await seedMurphOnboardingFollowupFromStartedOnboarding({
+            now,
+            route,
+            stableKey,
+            vault: input.vaultRoot,
+          })
+        if (seedResult.kind === 'ready') {
+          result.created += 1
+          onboardingFollowupCreated = true
+        }
+      }
+    }
+  }
+  const onboardingReconciliation = onboardingFollowupCreated
+    ? { diagnostic: null, updated: false, yielded: false }
+    : await reconcileExistingOnboardingFollowupAutomation({
+        existing: existingOnboardingFollowup,
+        now,
+        shouldYield: input.shouldYield ?? null,
+        vaultRoot: input.vaultRoot,
+      })
+  if (onboardingReconciliation.yielded) {
+    return true
+  }
+  if (onboardingReconciliation.diagnostic) {
+    reportMurphOnboardingFollowupDiagnostic(
+      input,
+      onboardingReconciliation.diagnostic,
+    )
+  }
+  if (onboardingReconciliation.updated) {
+    result.updated += 1
+  }
+  return false
+}
+
+async function createMurphManagedAutomation({
+  input,
+  now,
+  rawSeed,
+  resolveCreateRoute,
+  stableKey,
+}: {
+  input: ApplyMurphManagedAutomationsInput
+  now: Date
+  rawSeed: MurphManagedAutomationSeed
+  resolveCreateRoute: () => Promise<AutomationRoute | null>
+  stableKey: string | null
+}): Promise<'created' | 'skipped' | 'yielded' | null> {
+  const seed = resolveMurphManagedAutomationCreateSeed({
+    seed: rawSeed,
+    stableKey,
+  })
+  if (!seed) {
+    return 'skipped'
+  }
+
+  if (!murphManagedAutomationRuntimeRequirementsMet(seed, input.runtimeEnv)) {
+    return 'skipped'
+  }
+
+  if (isStaleMurphManagedOneShotSeed(seed, now)) {
+    return 'skipped'
+  }
+
+  for (const slug of [
+    seed.slug,
+    ...(MURPH_MANAGED_AUTOMATION_LEGACY_SLUGS[seed.automationId] ?? []),
+  ]) {
+    const existingSlug = await showAutomation({
+      slug,
+      vaultRoot: input.vaultRoot,
+    })
+    if (input.shouldYield?.() === true) {
+      return 'yielded'
+    }
+    if (existingSlug) {
+      return 'skipped'
+    }
+  }
+
+  const route = await resolveCreateRoute()
+  if (input.shouldYield?.() === true) {
+    return 'yielded'
+  }
+  if (!route) {
+    return 'skipped'
+  }
+  if (!murphManagedAutomationMatchesRoute(seed, route)) {
+    return null
+  }
+
+  const summary = normalizeMurphManagedAutomationSummary(seed)
+  if (input.shouldYield?.() === true) {
+    return 'yielded'
+  }
+  await upsertAutomation({
+    ...buildMurphManagedAutomationSeedFields(seed, summary),
+    automationId: seed.automationId,
+    now,
+    route,
+    schedule: seed.schedule,
+    slug: seed.slug,
+    status: 'active',
+    vaultRoot: input.vaultRoot,
+  })
+  return 'created'
+}
+
+async function reconcileMurphManagedAutomation({
+  existing,
+  input,
+  now,
+  rawSeed,
+}: {
+  existing: AutomationRecord
+  input: ApplyMurphManagedAutomationsInput
+  now: Date
+  rawSeed: MurphManagedAutomationSeed
+}): Promise<'updated' | 'skipped' | 'yielded'> {
+  const preserveExistingSchedule =
+    shouldSpreadMurphManagedAutomationSchedule(rawSeed)
+  const seed = rawSeed
+
+  const reactivateReconciledLifecycleOneShot =
+    canReactivateReconciledLifecycleOneShot({ existing, now, seed: rawSeed })
+  if (existing.status !== 'active' && !reactivateReconciledLifecycleOneShot) {
+    return 'skipped'
+  }
+
+  if (!murphManagedAutomationRuntimeRequirementsMet(seed, input.runtimeEnv)) {
+    return 'skipped'
+  }
+
+  if (
+    preserveExistingSchedule &&
+    existing.schedule.kind === 'at'
+  ) {
+    // Device-activity matching rewrites the reusable managed record into a
+    // due one-shot with occurrence-specific prompt context. Do not reconcile
+    // the weekly seed over that queued payload before the automation lane runs.
+    return 'skipped'
+  }
+
+  if (!murphManagedAutomationSeedChanged(
+    existing,
+    seed,
+    { ignoreSchedule: preserveExistingSchedule },
+  ) && !reactivateReconciledLifecycleOneShot) {
+    return 'skipped'
+  }
+
+  // Seed has changed. Reconcile in place. A one-shot whose desired
+  // occurrence already passed cannot fire at the new time, but if the
+  // legacy stored occurrence is also a one-shot still in the future,
+  // keep firing at the legacy time so the user still gets the moment
+  // with the new content. Archive only when neither the new desired nor
+  // a legacy one-shot occurrence can still fire. A recurring legacy
+  // schedule (cron/every/dailyLocal) under one-shot instructions would
+  // fire the final-review repeatedly, so it must be replaced with the
+  // new desired schedule (and archived if that is itself stale).
+  const newDesiredOccurrenceStale = preserveExistingSchedule
+    ? false
+    : isStaleOneShotSchedule(seed.schedule, now)
+  const newDesiredWindowExpired = preserveExistingSchedule
+    ? false
+    : isStaleMurphManagedOneShotSeed(seed, now)
+  const legacyOneShotStillFires = canPreserveLegacyOneShotSchedule({
+    existingSchedule: existing.schedule,
+    now,
+    seed,
+  })
+  let reconciledSchedule: AutomationSchedule = preserveExistingSchedule
+    ? existing.schedule
+    : seed.schedule
+  let reconciledStatus: AutomationStatus = reactivateReconciledLifecycleOneShot
+    ? 'active'
+    : existing.status
+  if (newDesiredOccurrenceStale && legacyOneShotStillFires) {
+    reconciledSchedule = existing.schedule
+  } else if (newDesiredWindowExpired) {
+    reconciledStatus = 'archived'
+  }
+
+  const summary = normalizeMurphManagedAutomationSummary(seed)
+  if (input.shouldYield?.() === true) {
+    return 'yielded'
+  }
+  await upsertAutomation({
+    ...buildMurphManagedAutomationSeedFields(seed, summary),
+    automationId: existing.automationId,
+    now,
+    // Routes are user/runtime-owned: seeds never carry one, so updates
+    // preserve the existing route without re-checking deliverability.
+    // Only the create path validates routes, because that is the only
+    // point where this module chooses one.
+    route: existing.route,
+    schedule: reconciledSchedule,
+    slug: existing.slug,
+    status: reconciledStatus,
+    vaultRoot: input.vaultRoot,
+  })
+  return 'updated'
+}
+
+function buildMurphManagedAutomationSeedFields(
+  seed: MurphManagedAutomationSeed,
+  summary: string | null,
+) {
+  return {
+    ...(seed.activeUntil === undefined
+      ? {}
+      : { activeUntil: seed.activeUntil }),
+    continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
+    ...(seed.contextReferences === undefined
+      ? {}
+      : { contextReferences: [...seed.contextReferences] }),
+    instructions: seed.instructions,
+    ...(seed.assistantTargetOverride === undefined
+      ? {}
+      : { assistantTargetOverride: seed.assistantTargetOverride }),
+    ...(summary === null
+      ? {}
+      : { summary }),
+    tags: buildMurphManagedAutomationTags(seed),
+    title: seed.title,
+  }
 }
 
 async function archiveRetiredMurphManagedAutomations(input: {
