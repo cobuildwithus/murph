@@ -61,7 +61,6 @@ async function click(rendered: Awaited<ReturnType<typeof render>>, text: string)
 
 test("adding a method binds the destination and requires explicit approval after code entry", async () => {
   const rendered = await render("phone");
-  expect(rendered.container.textContent).toContain("Your existing sessions stay signed in.");
   const form = mocks.contact!;
   expect(form.autoSubmit).toBe(false);
   const selected = { method: "phone", operation: "set", expectedIdentity: null, value: "+15555550127" };

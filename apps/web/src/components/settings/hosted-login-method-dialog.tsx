@@ -146,9 +146,9 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSav
     <DialogContent className="max-w-[min(30rem,calc(100vw-2rem))] gap-6 border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[30rem] md:p-8">
       <DialogHeader className="gap-2 pr-10">
         <DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal text-popover-foreground">{operation === "remove" ? "Remove" : previous ? "Change" : "Add"} {label}</DialogTitle>
-        <DialogDescription className="max-w-[34ch] text-base/7 text-muted-foreground">{operation === "remove" || previous
-          ? "This changes where you can sign in and message Murph. Other sessions will be signed out; this browser stays signed in."
-          : "Add a way to sign in and message Murph. Your existing sessions stay signed in."}</DialogDescription>
+        {(operation === "remove" || previous) && <DialogDescription className="max-w-[34ch] text-base/7 text-muted-foreground">
+          This changes where you can sign in and message Murph. Other sessions will be signed out; this browser stays signed in.
+        </DialogDescription>}
       </DialogHeader>
       <div className="flex flex-col gap-4">{renderContent()}{error && !saved ? <SettingsStatusLine message={error} tone="destructive" /> : null}</div>
     </DialogContent>
