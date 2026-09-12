@@ -2604,8 +2604,9 @@ in its transaction. Later connection, authenticated completion, and companion
 admission reuse those keys; ordinary authenticated Web entry also repairs
 missing phone routing before projecting contact actions. The member lock
 revalidates access and identity and prevents duplicate capacity claims.
-Ingress encryption roots are prepared before the short database transaction;
-line reservation and mailbox append commit together, then runtime is signaled.
+Active ingress encryption roots, plus active control roots for phone routing
+writes, are prepared before the short database transaction. Line reservation
+and mailbox append commit together, then runtime is signaled.
 No connection creates a second activation or onboarding follow-up. The founder
 email remains a signup-only side effect, not a delayed email-link greeting.
 

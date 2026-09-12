@@ -854,7 +854,11 @@ Last verified: 2026-08-31
   consented fresh companion activation with a verified phone may enter the
   canonical signup-welcome path. Exact-member binding, signup idempotency,
   home-line health, and proactive capacity remain governed by the existing
-  starter enrollment, line reservation, and welcome owners. Exhausted proactive
+  starter enrollment, line reservation, and welcome owners. Channel welcome
+  writes prepare the active ingress root and, for phone routing, the active
+  control root before disabling provider calls inside the transaction. A cached
+  concrete root from decryption does not replace active-root preparation for
+  encryption. Exhausted proactive
   capacity must not block activation: Web still assigns an eligible home line
   without a proactive welcome, and inbound-first messaging remains available.
   If no line is assignable, activation still succeeds without creating route

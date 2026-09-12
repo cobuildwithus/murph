@@ -196,7 +196,7 @@ describe("welcome on a newly connected channel", () => {
     await run();
     expect(mocks.route).toHaveBeenCalledTimes(1);
     expect(mocks.append).toHaveBeenCalledTimes(1);
-    expect(mocks.unwrap).toHaveBeenCalledTimes(1);
+    expect(mocks.unwrap.mock.calls.map(([input]) => input.domain)).toEqual(["control", "ingress"]);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(member.routing.linqRecipientPhone).toBe(fromPhone);
   });

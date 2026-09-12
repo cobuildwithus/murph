@@ -31,10 +31,14 @@ export async function ensureHostedMemberChannelWelcome(input: {
     if (!eligible(member, input.channel) || !await readActiveHostedMemberAccess(input)) return null;
     if (await alreadyQueued(member, input.channel, input.prisma)) return null;
 
-    const root = await unwrapHostedDomainRootForWeb({
-      domain: "ingress", prisma: input.prisma, userId: input.memberId,
-    });
-    root.rootKey.fill(0);
+    const writeDomains = input.channel === "linq"
+      ? ["control", "ingress"] as const : ["ingress"] as const;
+    for (const domain of writeDomains) {
+      const root = await unwrapHostedDomainRootForWeb({
+        domain, prisma: input.prisma, userId: input.memberId,
+      });
+      root.rootKey.fill(0);
+    }
 
     return input.prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
       await lockHostedMemberRow(tx, input.memberId);
