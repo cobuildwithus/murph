@@ -7,6 +7,11 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  forwardWearableStage,
+  startWearableHostProgress,
+} from "@murphai/hosted-local-harness/wearable-progress";
+
+import {
   normalizeJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
 import {
@@ -100,9 +105,11 @@ const liveJunctionWearableConfig = readLiveJunctionWearableConfig(process.env);
 const junctionConfig = liveJunctionWearableConfig ?? syntheticJunctionConfig;
 
 let scenario: HostedLocalFullStackScenario | null = null;
+let stopHostProgress: (() => void) | undefined;
 
 describe("hosted local device connect e2e", () => {
   beforeAll(async () => {
+    if (liveJunctionWearableConfig) stopHostProgress = startWearableHostProgress();
     // The hosted stack needs Junction authority, but never human provider
     // login values. Capture them at module load and exclude them from every
     // Web, Worker, runner, and Temporal child process started by the harness.
@@ -157,8 +164,12 @@ describe("hosted local device connect e2e", () => {
   }, 600_000);
 
   afterAll(async () => {
-    await scenario?.stop();
-    scenario = null;
+    try {
+      await scenario?.stop();
+    } finally {
+      stopHostProgress?.();
+      scenario = null;
+    }
   }, 120_000);
 
   it(
@@ -865,6 +876,7 @@ async function runJunctionWearableBrowser(input: {
     const lines = pendingOutput.split(/\r?\n/u);
     pendingOutput = lines.pop() ?? "";
     for (const line of lines) {
+      forwardWearableStage(line);
       if (line !== "MURPH_E2E_GARMIN_CONNECTED=1" || !input.onConnected || dataProof) continue;
       dataProof = input.onConnected(dataAbort.signal).catch((error: unknown) => {
         dataFailure = error;
