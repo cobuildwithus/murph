@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 100,
+  "item": {
+    "id": "faster-research-checks",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting on research checks",
+    "summary": "When Murph checks several research topics, independent searches can run two at a time instead of waiting for each other.",
+    "details": "Research selection and privacy safeguards stay the same. Provider response times still affect how long a check takes.",
+    "relevanceTags": ["research"],
+    "sourcePullRequests": []
+  }
+}

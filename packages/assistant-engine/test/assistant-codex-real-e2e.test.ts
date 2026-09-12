@@ -14398,6 +14398,8 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
         try {
           const binDirectory = path.join(workingDirectory, 'bin')
           await mkdir(binDirectory)
+          await writeFile(path.join(binDirectory, 'calls.jsonl'), '')
+          await writeFile(path.join(binDirectory, 'retrievals.jsonl'), '')
           const finding = 'A synthetic randomized human study found that resistance training with one arm also improved strength in the untrained arm. This suggests some strength adaptation transfers through the nervous system rather than being confined to the practiced muscles. It does not establish injury prevention or a need to change training.'
           const context = {
             summary: 'The member has an ongoing interest in resistance training and how strength develops, stated three months ago and never withdrawn. There is no current experiment, symptom, recent change, open question, or decision. They enjoy explanations and do not want extra tasks. No recent unsolicited health note is waiting for a reply.',
@@ -14480,17 +14482,18 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
             sandbox: 'workspace-write',
             workingDirectory,
           })
-          const calls = (await readFile(path.join(binDirectory, 'calls.jsonl'), 'utf8'))
-            .trim().split('\n').map((line) => JSON.parse(line) as string[])
           console.info(`[research-scout ${repeated ? 'repeated' : 'ongoing-interest'}] ${result.finalMessage || '(silent)'}`)
+          const calls = (await readFile(path.join(binDirectory, 'calls.jsonl'), 'utf8'))
+            .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as string[])
           console.info('[research-scout commands]', calls.map((args) => args.slice(0, 2).join(' ')))
-          const retrievals = (await readFile(path.join(binDirectory, 'retrievals.jsonl'), 'utf8')).trim().split('\n')
-          expect(retrievals).toHaveLength(1)
+          const retrievals = (await readFile(path.join(binDirectory, 'retrievals.jsonl'), 'utf8'))
+            .trim().split('\n').filter(Boolean)
+          expect(retrievals, `Expected exactly one research retrieval; observed ${retrievals.length} retrievals.`).toHaveLength(1)
           const payload = JSON.parse(await readFile(path.join(binDirectory, 'payload.json'), 'utf8'))
           expect(researchScoutBatchPayloadSchema.safeParse(payload)).toMatchObject({ success: true })
           const writesPath = path.join(binDirectory, 'writes.jsonl')
           const writes = existsSync(writesPath)
-            ? (await readFile(writesPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { slug: string; body: string })
+            ? (await readFile(writesPath, 'utf8')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as { slug: string; body: string })
             : []
           expect(writes).toHaveLength(repeated ? 0 : 1)
           if (!repeated) {
