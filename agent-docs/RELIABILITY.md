@@ -126,6 +126,22 @@ Last verified: 2026-09-04
   one fixed synthetic goal. A read-only observer requires the current checkpoint's
   published replica and no pending conversation input, then checks canonical
   goal and distinct-ID counts. A reply alone cannot satisfy this outcome gate.
+  Exceptional outcome reads emit at most one best-effort Web `console.warn` with
+  the fixed message `Hosted Linq production canary outcome read failed.` and only
+  a request-local `stage`: `member_lookup` selects the fixed identity;
+  `initial_authority` / `final_authority` distinguish the two access checks;
+  `initial_readiness` / `final_readiness` cover the local pending-input,
+  workspace/freshness and post-decryption race checks (including identity recheck);
+  `control_configuration`, `key_generation`, `session_request`, `session_parsing`,
+  `decryption`, and `goal_counting` identify their respective existing operations.
+  Stages identify where execution failed, not the exception's cause. Added
+  successful/not-ready work is only literal assignments; diagnostic allocation
+  and emission are failure-only. Exceptions, identifiers, refs, keys, payloads and
+  goal contents are never inspected for or included in this diagnostic. Logging
+  failure still yields the unchanged generic 503. For a bounded natural-traffic
+  query, filter the last 24 hours of Web logs by that exact message and return
+  only counts grouped by these eleven stages; do not invoke extra canaries,
+  poll the endpoint, retry, wake or refresh to collect evidence.
 - Protected native iOS and Android hosted E2E controllers run staggered every
   six hours and execute each admitted journey even when the same revision
   previously passed. Provider behavior can change independently of source.
