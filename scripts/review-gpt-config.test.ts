@@ -166,10 +166,16 @@ afterEach(() => {
 });
 
 describe("ReviewGPT repository config", () => {
-  it.each(["hercules", "apollo"])("starts %s in the background", (lane) => {
+  it.each(["eragon", "hercules", "mountain", "vonneumann", "apollo"])("starts %s in the background", (lane) => {
     const result = runConfig(createHarness(), { REVIEW_GPT_BROWSER_LANE: lane });
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("launch=background\n");
+  });
+
+  it("preserves personal Main profile startup without dedicated-profile tab cleanup", () => {
+    const result = runConfig(createHarness(), { REVIEW_GPT_BROWSER_LANE: "main" });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("launch=foreground\n");
   });
 
   it("preserves an explicit foreground launch for interactive sign-in", () => {
