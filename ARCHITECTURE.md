@@ -2081,7 +2081,7 @@ The post-drain credential-shape constraint is itself a database rollback floor b
 
 `apps/cloudflare` encrypts each staged JPEG into a private per-user R2 object. Object deletion derives the user-namespaced R2 path directly and does not require the user's encryption context to remain available. The metadata-only `meal-photo.captured` mailbox item wakes `packages/assistant-runtime`, which verifies the object's length and digest, imports one idempotent photo-only meal through `packages/core`, and schedules object deletion only after the workspace checkpoint succeeds. The R2 lifecycle rule makes staged meal-photo objects eligible for asynchronous deletion at 31 days, one day beyond mailbox recovery retention; successful imports still delete staging immediately after the checkpoint, and 31 days is not a guaranteed physical-deletion deadline. Neither the enrollment row nor R2 is canonical meal truth; the member's encrypted hosted workspace remains the canonical record.
 
-That same canonical import ensures one ordinary Murph-managed automation for the member at 9:00pm local time; meal capture has no second automation opt-in and no meal-specific scheduler. Enrollment requires an existing active private iMessage or Telegram thread or a verified email target so that postcondition is deliverable, and each accepted upload carries that Web-resolved direct route in its private mailbox envelope. The first import uses the envelope route to create the automation, while later imports idempotently reuse the same automation record without another service lookup. A direct email occurrence re-resolves the bound member's current verified address through the existing signed Web-control boundary immediately before provider work, so replacement or revocation never leaves the saved address as delivery authority. Reconciliation authorizes runnable conversation or model work normally even when system lag is also present; a blocked model wake can still admit the existing import-only system mode. System-only import checkpoints the ordinary cron wake created by canonical import and then runs the ordinary post-checkpoint staging cleanup. An accepted meal capture is member-wide engagement under the existing 28-day automation policy, equivalent to a direct inbound interaction, so ordinary due automations may resume; AI-usage authorization remains unchanged. At runtime the ordinary automation agent reads one bounded batch of same-occurrence retry evidence followed by the oldest captures that still retain photos. Every selected capture remains inspection, enrichment or observation, read-back, and privacy-cleanup work. Only captures from the scheduled occurrence local date may contribute to member-visible output; historical-only work ends silently after cleanup, and mixed work excludes every historical capture from the current-date result. Eligible current-date work includes supported calorie and macro totals by default while still suppressing numbers in eating-disorder-risk, intuitive-eating, or number-sensitive contexts, and invokes the automatic-capture-only `meal remove-photo` command. Its first eligible closeout may also create and explain one paused daily-nutrition proposal after the prompt-owned known-context suitability rule and Goal reads pass and the stable managed Goal slug is proven absent; that Goal becomes the existing one-time marker, and later scheduled turns never create, change, or automatically repeat the proposal. Activation remains interactive. The retained photos are the only work queue. A no-photo meal whose removal revision was recorded at or after the current scheduled occurrence remains part of that occurrence's retry, preventing a mid-turn provider or partial-cleanup failure from losing the closeout without adding another state owner. `packages/core` owns the audited mutation: it preserves structured meal truth, replaces retained JPEG bytes with a privacy tombstone, updates the raw manifest atomically, and rejects non-capture meals or changed evidence.
+That same canonical import ensures one ordinary Murph-managed automation for the member at 9:00pm local time; meal capture has no second automation opt-in and no meal-specific scheduler. Enrollment requires an existing active private iMessage or Telegram thread or a verified email target so that postcondition is deliverable, and each accepted upload carries that Web-resolved direct route in its private mailbox envelope. The first import uses the envelope route to create the automation, while later imports idempotently reuse the same automation record without another service lookup. A direct email occurrence re-resolves the bound member's current verified address through the existing signed Web-control boundary immediately before provider work, so replacement or revocation never leaves the saved address as delivery authority. Reconciliation authorizes runnable conversation or model work normally even when system lag is also present; a blocked model wake can still admit the existing import-only system mode. System-only import checkpoints the ordinary cron wake created by canonical import and then runs the ordinary post-checkpoint staging cleanup. An accepted meal capture is member-wide engagement under the existing 28-day automation policy, equivalent to a direct inbound interaction, so ordinary due automations may resume; AI-usage authorization remains unchanged. At runtime the ordinary automation agent reads one bounded batch of same-occurrence retry evidence followed by the oldest captures that still retain photos. Every selected capture remains inspection, enrichment or observation, read-back, and privacy-cleanup work. Only captures from the scheduled occurrence local date may contribute to member-visible output; historical-only work ends silently after cleanup, and mixed work excludes every historical capture from the current-date result. Eligible current-date work includes supported calorie and macro totals by default while still suppressing numbers in eating-disorder-risk, intuitive-eating, or number-sensitive contexts, and invokes the automatic-capture-only `meal remove-photo` command. An eligible closeout uses the same complete logged-so-far totals-only card when accepted targets are missing. Scheduled work never derives, proposes, changes, repeats, or activates goals; explicit interactive target-setting remains the sole proposal owner. The retained photos are the only work queue. A no-photo meal whose removal revision was recorded at or after the current scheduled occurrence remains part of that occurrence's retry, preventing a mid-turn provider or partial-cleanup failure from losing the closeout without adding another state owner. `packages/core` owns the audited mutation: it preserves structured meal truth, replaces retained JPEG bytes with a privacy tombstone, updates the raw manifest atomically, and rejects non-capture meals or changed evidence.
 
 ### Clinical Records retrieval
 
@@ -2412,7 +2412,9 @@ private-direct scheduled turns, and the managed meal closeout share this one
 attachment tool. Scheduled use requires saved instructions that explicitly
 request a card; occurrence authority alone is not card intent. Because a card
 replaces the whole final response, it is only
-eligible when the card alone completely satisfies the current request. New
+eligible when the card alone completely satisfies the current request. The sole
+nutrition exception is a fixed first totals-only introduction frozen inside the
+same outbound effect, never arbitrary analysis or a second send. New
 accepted input in the same live turn invalidates an earlier card-only decision,
 and attachment is rejected after the delivery context advances. Every
 card copies the immediately preceding single-date canonical meal-totals read.
@@ -2423,8 +2425,18 @@ than values that would require conversion or invented authority. Query owns
 date windows, point compatibility, the existing calorie floor, and the narrow
 complete historical bundle display exception; prompts retain health
 suitability, card intent, meal recovery, and explicit proposal acceptance.
-Ordinary totals reads keep their existing shape. No new state or mutation owner
-is introduced, and any subsequent meal or Goal mutation requires a fresh read.
+Ordinary totals reads keep their existing shape. Fresh V2 authoring accepts
+exactly all five null goals or all five compatible accepted snapshots; mixed
+nullable historical readers remain unchanged. `missing` selects totals-only,
+including a compatible subset; conflict, incompatible and capacity stay text-only.
+An ordinary private meal reply, including a reply to a scheduled check-in, has
+card intent but never target-setting or unrelated-meal repair authority. Explicit
+summaries retain informed partial-data recovery. Complete records are not proof
+that everything eaten was logged. See `agent-docs/product-specs/nutrition-totals-card.md`.
+No new state or mutation owner is introduced, and any subsequent meal or Goal
+mutation requires a fresh read. The optional fixed introduction uses canonical
+memory/instructions; the outbox writes its Context note only after confirmed
+sending, using existing confirmation retry, not at attachment or staging.
 Both versions use the same deterministic text fallback, Linq capability
 boundary, and existing outbox idempotency lifecycle. Hosted inbound routing
 keeps the opaque conversation locator used for continuity separate from the
@@ -2434,11 +2446,13 @@ existing direct Linq chat owns native-card delivery without a reverse map or a
 new-chat workaround. Same-route inputs accepted during the live turn may update
 the reply message, reaction capability, and delivery idempotency inputs, but do
 not recreate the explicit-target override or replace the turn's thread binding.
-Linq explicitly requests interactive transcript rendering. A recipient with
+Linq requests static presentation (`interactive:false`) for all-null V2 nutrition
+cards so an unchanged external Swift reader cannot add a goal ring or placeholders.
+All other existing cards retain interactive transcript rendering. A recipient with
 the shipping Messages extension sees the extension-owned SwiftUI balloon; a
 recipient without it, including Messages on macOS, sees a provider-owned static
 layout with a generated image that mirrors the same compact native presentation.
-Nutrition images retain the calorie ring and metric row while remaining
+Goal-aware nutrition images retain the calorie ring and metric row while remaining
 rectangular so the provider owns the outer mask. The installed Messages
 extension retains its native icon and interactive identity. The provider
 request omits the optional App Store id, so app-absent static cards receive no
@@ -2448,8 +2462,11 @@ Their concise native caption keeps only the date and meal count instead of
 repeating visible totals or target amounts. The static default mirrors the
 native visible hierarchy without repeated direction labels; the safe text
 recovery retains the complete status meaning outside the bitmap.
-Null, incomplete, and unavailable goal states retain a neutral ring, and a
-short subcaption appears only when some totals are partial. Compact-table
+Goal-aware null, incomplete, and unavailable goal states retain a neutral ring.
+Totals-only images omit the ring entirely and label the selected date, logged meal
+coverage, estimated/logged-so-far values, and the not-every-meal caveat without
+target judgments. Their subcaption carries the fixed optional introduction or
+coverage wording; goal-aware subcaptions still appear only for partial totals. Compact-table
 images retain the table grid or workout progress and exercise rows without a
 large empty icon gutter. Their compact grid typography keeps short comparisons
 under one shared header, while stacked generic fields place each measured
@@ -2459,8 +2476,9 @@ chrome adds derived progress. Neither repeats the raster's rows or sets.
 Complete semantic text remains available through the deterministic text
 renderer and value-free recovery fallback.
 The nutrition image derives a quantitative calorie arc only from a complete
-total and an assessed non-null goal; V1, partial, null-goal, and
-unavailable-status snapshots retain only the neutral ring track. The extension
+total and an assessed non-null goal; V1 and goal-aware partial, null-calorie-goal,
+and unavailable-status snapshots retain only the neutral ring track. All-null
+V2 totals-only snapshots have no ring. The extension
 URL keeps the immutable V1, V2, V3, V4, or V5 snapshot in a bounded Base64URL
 fragment that the extension decodes offline. The static image URL carries that
 same bounded presentation envelope in one queryless path so the Web image route

@@ -886,6 +886,13 @@ describe('murph.attach_response_card', () => {
       'compound requests with complete ordinary text and no card',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Never add other companion prose, duplicate analysis, a target proposal or a second send.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Never write an offered/delivered marker while staging; the outbox records sent evidence in canonical memory after confirmation.',
+    )
+
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'vault-cli meal totals --from <date> --to <same-date>',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
@@ -910,7 +917,7 @@ describe('murph.attach_response_card', () => {
       'The runtime records tracking snapshotAt',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only',
+      "New authoring uses V2 with fiber and either all five goals null (totals-only) or all five accepted snapshots (goal-aware); mixed authoring is invalid.",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'use one workflow and end with one card or concise fallback. Never narrate safety, totals, estimation, or target resolution.',
@@ -932,7 +939,7 @@ describe('murph.attach_response_card', () => {
       'meal totals --from <date> --to <same-date> --resolve-goals --format json',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Only goalContext.status ready permits a card, subject to suitability, intent, and completeness.',
+      "goalContext.status ready permits the unchanged all-five accepted goal card; missing permits totals-only with all five goals null, even with a subset of compatible targets.",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'conflict, incompatible, or capacity means ordinary text, no card, and no Goal or measurement mutation.',
@@ -965,7 +972,7 @@ describe('murph.attach_response_card', () => {
       'Do not run a universal medical-history or measurement checklist.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A routine card with complete accepted goals needs no repeated screening unless new context raises a concern.',
+      "A routine totals-only card or a card with complete accepted goals needs no repeated screening unless new context raises a concern.",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'run vault-cli memory show --compact --format json once for the canonical Identity, Preferences, Instructions, and Context record',
@@ -983,7 +990,7 @@ describe('murph.attach_response_card', () => {
       'For a clear request-relevant suitability outcome, explicitly name the requested target or metric.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Otherwise ask one compact question covering every unresolved category',
+      "For explicit target-setting only, ask one compact question about concrete unresolved concerns that could materially change the advice.",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'underweight, frailty, or malnutrition',
@@ -1054,7 +1061,7 @@ describe('murph.attach_response_card', () => {
       'Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'An explicit numeric-card request or the one first eligible managed closeout authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use',
+      "Only explicit target-setting authorizes the existing paused canonical proposal, not activation or use",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write',
@@ -1069,22 +1076,22 @@ describe('murph.attach_response_card', () => {
       'Any derived target addition or change atomically pauses the complete managed bundle until acceptance',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'its next unambiguous acceptance may complete that pending request only after reapplying the known-context suitability rule',
+      "its next unambiguous acceptance may complete that pending request only after reapplying suitability, activation/readback and fresh same-date totals",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'A scheduled occurrence never activates provisional targets.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'once that Goal exists in any status, scheduled turns never create, change, or automatically repeat it.',
+      "A scheduled closeout never asks for target inputs or creates, changes, repeats or activates provisional targets.",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Explicit active targets win metric by metric',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'one consolidated question, never a goal-less card',
+      "A meal reply (including a reply to an ordinary scheduled check-in), daily summary or numeric-card request never derives, proposes, accepts, activates or mutates targets",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'conflicts, thresholds, ranges, unsafe numbers, or missing responsible calorie inputs',
+      "conflicts, thresholds, ranges or unsafe target numbers remain ordinary text, never substitute target authority",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
       'available only to the managed private-direct closeout',
@@ -1262,7 +1269,7 @@ describe('murph.attach_response_card', () => {
           fiberGrams: null,
         },
       },
-    })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+    })).toMatchObject({ kind: 'attach-response-card' })
 
     const contradictoryCard = {
       ...CARD,
@@ -2329,4 +2336,21 @@ describe('murph.attach_response_card', () => {
       success: false,
     })
   })
+})
+
+
+it('attaches fresh totals-only nutrition without targets, but not in a group or beside media', async () => {
+  const card = { ...CARD, goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null } }
+  const request = readCardToolRequest({ card })
+  expect(request?.kind).toBe('attach-response-card')
+  const attached = await executeCardTool({ request: request! })
+  expect(attached.responseCardPatch?.card).toEqual(card)
+  expect(attached.rpcResult.success).toBe(true)
+  const group = await executeCardTool({ request: request!, privateDirectResponseCardAllowed: false })
+  expect(group.rpcResult.success).toBe(false)
+  expect(group.responseCardPatch).toBeUndefined()
+  const withMedia = await executeCardTool({ request: request!, currentResponseMedia: [IMAGE] })
+  expect(withMedia.rpcResult.success).toBe(false)
+  const duplicate = await executeCardTool({ request: request!, currentResponseCard: card })
+  expect(duplicate.rpcResult.success).toBe(false)
 })

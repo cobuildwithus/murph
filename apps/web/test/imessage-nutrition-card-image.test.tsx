@@ -993,3 +993,20 @@ function getImageResponseCall(): [ReactElement, MockImageResponseInit] {
 function headersInitToRecord(headers: HeadersInit | undefined): Record<string, string> {
   return Object.fromEntries(new Headers(headers).entries());
 }
+
+
+test("totals-only nutrition shows date and logged coverage with no goal ring or judgment colors", async () => {
+  const { NutritionCardImage } = await import("@/src/components/imessage/nutrition-card-image");
+  const card: DailyNutritionResponseCardV2 = { ...CARD, localDate: "2026-09-11",
+    goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null } };
+  const markup = renderToStaticMarkup(<NutritionCardImage card={card} />);
+  assert.match(markup, /logged so far/u);
+  assert.match(markup, /2026-09-11/u);
+  assert.match(markup, /3 logged meals/u);
+  assert.match(markup, /Logged records may not include everything eaten/u);
+  assert.doesNotMatch(markup, /data-calorie-progress|stroke-dasharray|#B3332B|#995E08|#337338|target unavailable|Goal unavailable/u);
+  const unknown = renderToStaticMarkup(<NutritionCardImage card={{ ...card,
+    totals: { ...card.totals, fiberGrams: { total: null, mealCount: 0 } } }} />);
+  assert.match(unknown, />—</u);
+  assert.doesNotMatch(unknown, /0g fiber/u);
+});

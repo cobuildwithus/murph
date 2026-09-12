@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 100,
+  "item": {
+    "id": "logged-nutrition-without-goals",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Your logged nutrition, without setting goals",
+    "summary": "Meal replies and daily summaries can show your logged nutrition totals without requiring calorie or macro goals.",
+    "details": "The card shows estimates, the date, and how many logged meals contribute. It reflects what you logged, which may not include everything you ate. Goal setup is optional, and your preference to avoid nutrition numbers still comes first.",
+    "relevanceTags": [
+      "assistant",
+      "nutrition"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "See logged nutrition",
+      "prompt": "Show my logged nutrition totals for today."
+    }
+  }
+}

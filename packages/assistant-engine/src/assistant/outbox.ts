@@ -1,3 +1,4 @@
+import { containsNutritionGoalInvitation, recordSentNutritionGoalInvitation } from './nutrition-card-introduction.js'
 import { registerDeliveredAssistantFollowUp } from './follow-ups.js'
 import { randomUUID } from 'node:crypto'
 import {
@@ -336,7 +337,7 @@ export async function createAssistantOutboxIntent(
     const message = operation
       ? ''
       : card
-        ? renderAssistantResponseCardText(card)
+        ? renderAssistantResponseCardText(card, input.message)
         : normalizeOutboxMessage({
             media,
             message: input.message,
@@ -1411,7 +1412,8 @@ function assistantOutboxIntentRequiresTerminalConfirmation(input: {
   intent: AssistantOutboxIntent
   vault: string
 }): boolean {
-  return input.intent.followUpRequest !== undefined || (input.dispatchHooks?.confirmTerminalIntent !== undefined &&
+  return (input.intent.threadIsDirect === true && containsNutritionGoalInvitation(input.intent.message)) ||
+    input.intent.followUpRequest !== undefined || (input.dispatchHooks?.confirmTerminalIntent !== undefined &&
     input.dispatchHooks.requiresTerminalConfirmation?.({
       intent: input.intent,
       vault: input.vault,
@@ -1469,6 +1471,12 @@ async function confirmAssistantOutboxTerminalIntent(input: {
     })
     if (input.outcome.status === "sent") {
       await registerDeliveredAssistantFollowUp({ intent: input.intent, vault: input.vault })
+      // Success evidence only. Failure retries confirmation, not provider send.
+      await recordSentNutritionGoalInvitation({
+        message: input.intent.message,
+        threadIsDirect: input.intent.threadIsDirect,
+        vault: input.vault,
+      })
     }
   } catch {
     return rescheduleAssistantOutboxConfirmationRetry({

@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest'
 
 import {
   LINQ_IMESSAGE_APP_CARD_ORIGIN,
+  DAILY_NUTRITION_OPTIONAL_GOALS_INTRO,
+  readDailyNutritionIntroduction,
+  renderAssistantResponseCardTranscriptText,
   assistantResponseCardAuthoringSchema,
   assistantResponseCardJsonSchema,
   assistantResponseCardSchema,
@@ -122,10 +125,10 @@ describe('assistant response cards', () => {
             mealCount: { type: 'integer', minimum: 0, maximum: 100 },
           },
         }])) },
-        goals: { properties: Object.fromEntries(fields.map((field) => [field, {
+        goals: { anyOf: [{ properties: Object.fromEntries(fields.map((field) => [field, {
           type: 'object', additionalProperties: false, required: ['target', 'status'],
           properties: { target: { type: 'number', exclusiveMinimum: 0, maximum: 2_000 } },
-        }])) },
+        }])) }, { properties: { calories: { type: 'null' } } }] },
       } }, expect.anything(), expect.anything(),
     ] })
   })
@@ -138,7 +141,7 @@ describe('assistant response cards', () => {
         {
           additionalProperties: false,
           properties: {
-            goals: {
+            goals: { anyOf: [{
               additionalProperties: false,
               properties: {
                 calories: {
@@ -171,7 +174,7 @@ describe('assistant response cards', () => {
                 fatGrams: { type: 'object', additionalProperties: false },
                 fiberGrams: { type: 'object', additionalProperties: false },
               },
-            },
+            }, { properties: { calories: { type: 'null' } } }] },
             kind: { const: 'daily_nutrition' },
             localDate: {
               pattern: '^\\d{4}-\\d{2}-\\d{2}$',
@@ -815,7 +818,7 @@ describe('assistant response cards', () => {
       },
     }
     expect(buildLinqIMessageAppLayout(card)).toEqual({
-      caption: 'Jul 28 · 3 meals',
+      caption: '2026-07-28 · 3 logged meals',
       image_url: buildLinqIMessageAppCardImageUrl(card),
       subcaption: 'Some nutrition estimates were partial.',
     })
@@ -894,7 +897,10 @@ describe('assistant response cards', () => {
       image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2),
     })
     expect(proteinGoalLayout).not.toHaveProperty('subcaption')
-    expect(completeNoGoalsLayout).not.toHaveProperty('subcaption')
+    expect(completeNoGoalsLayout).toMatchObject({
+      caption: '2026-07-28 · 3 logged meals',
+      subcaption: 'Estimated nutrition logged so far; not necessarily everything eaten.',
+    })
     expect(directionalGoalsLayout).not.toHaveProperty('subcaption')
     expect(decodeAppCardImageUrl(proteinGoalLayout.image_url ?? '')).toEqual({
       schemaVersion: 2,
@@ -910,7 +916,7 @@ describe('assistant response cards', () => {
       },
     })
     expect(partialLayout).toEqual({
-      caption: 'Jul 28 · 4 meals',
+      caption: '2026-07-28 · 4 logged meals',
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
@@ -921,5 +927,70 @@ describe('assistant response cards', () => {
     expect(buildLinqIMessageAppFallbackText(COMPLETE_CARD_V2)).not.toMatch(
       /\d|today|day|time/iu,
     )
+  })
+})
+
+
+describe('totals-only daily nutrition', () => {
+  const goals = { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null }
+  const card: DailyNutritionResponseCardV2 = { ...COMPLETE_CARD_V2, goals }
+
+  it('authors only all-null or all-five while preserving every historical mixed reader', () => {
+    const keys = Object.keys(goals) as Array<keyof typeof goals>
+    for (let mask = 0; mask < 32; mask++) {
+      const mixed = { ...card, goals: { ...card.goals } }
+      keys.forEach((key, index) => {
+        mixed.goals[key] = mask & (1 << index) ? COMPLETE_CARD_V2.goals[key] : null
+      })
+      expect(assistantResponseCardAuthoringSchema.safeParse(mixed).success, `mask ${mask}`)
+        .toBe(mask === 0 || mask === 31)
+      expect(assistantResponseCardSchema.safeParse(mixed).success).toBe(true)
+    }
+  })
+
+  it('renders estimated logged coverage without goal judgments or unavailable-target placeholders', () => {
+    const before = structuredClone(card)
+    const text = renderAssistantResponseCardText(card)
+    const html = buildTelegramRichMessage(card).html
+    expect(text).toContain('2026-07-28 · estimated, logged so far')
+    expect(text).toContain('from 3 logged meals')
+    expect(text).toContain('Logged records may not include everything eaten.')
+    expect(text).toContain('26.5g fiber')
+    expect(text).not.toMatch(/target|goal|under|over|unavailable/iu)
+    expect(html).toContain('Estimated · logged so far · 3 logged meals')
+    expect(html).toContain('2026-07-28')
+    expect(html).not.toMatch(/Daily goals|<details>|target|🟠|🟢|⚪/u)
+    expect(card).toEqual(before)
+  })
+
+  it('allows only the fixed introduction on a complete totals-only card across text and channels', () => {
+    const intro = DAILY_NUTRITION_OPTIONAL_GOALS_INTRO
+    const message = renderAssistantResponseCardText(card, intro)
+    expect(message).toBe(`${renderAssistantResponseCardText(card)}\n\n${intro}`)
+    expect(renderAssistantResponseCardText(card, message)).toBe(message)
+    expect(renderAssistantResponseCardTranscriptText(card, intro)).toBe(message)
+    expect(buildLinqIMessageAppLayout(card, message).subcaption).toBe(intro)
+    expect(buildTelegramRichMessage(card, message).html.split(intro)).toHaveLength(2)
+    for (const invalid of ['Your protein is too low.', `${intro} More advice.`, `Analysis: ${intro}`]) {
+      expect(readDailyNutritionIntroduction(card, invalid)).toBeNull()
+      expect(renderAssistantResponseCardText(card, invalid)).toBe(renderAssistantResponseCardText(card))
+    }
+    expect(readDailyNutritionIntroduction(COMPLETE_CARD_V2, intro)).toBeNull()
+    expect(readDailyNutritionIntroduction(COMPLETE_CARD, intro)).toBeNull()
+    expect(buildLinqIMessageAppLayout(card).subcaption).not.toContain('Goal setup')
+  })
+
+  it('keeps explicit partial data unknown rather than zero and does not offer setup on it', () => {
+    const partial = { ...card, totals: { ...card.totals, fiberGrams: { total: null, mealCount: 0 } } }
+    expect(assistantResponseCardAuthoringSchema.safeParse(partial).success).toBe(true)
+    expect(renderAssistantResponseCardText(partial)).toContain('Some nutrition estimates were partial.')
+    expect(renderAssistantResponseCardText(partial)).not.toContain('0g fiber')
+    expect(readDailyNutritionIntroduction(partial, DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)).toBeNull()
+    expect(assistantResponseCardAuthoringSchema.safeParse({ ...partial,
+      totals: { ...partial.totals, fiberGrams: { total: null, mealCount: 1 } },
+    }).success).toBe(false)
+    expect(assistantResponseCardAuthoringSchema.safeParse({ ...card,
+      totals: { ...card.totals, calories: { total: 610, mealCount: 3 } },
+    }).success).toBe(true) // A target safety floor is not an intake minimum.
   })
 })
