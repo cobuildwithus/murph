@@ -1,6 +1,6 @@
 # Group wearable freshness checks and schedule recovery
 
-Status: active
+Status: completed
 Created: 2026-09-12
 Updated: 2026-09-12
 
@@ -80,7 +80,7 @@ guard, focused local-subscription journeys and required exact-head CI/review.
   polling loop from transport recovery.
 - A focused live missing-data journey exposed a conflict with generic scheduled
   control-copy suppression. Added an explicit group recovery exception and a
-  composed-prompt regression; live reply revalidation is in progress.
+  composed-prompt regression; the corrected live reply passed subsequent revalidation.
 - Initial subscription attempts failed before provider actions. The documented
   alternate-home path reached the provider; continue on that same authenticated
   home. No auth material was read or copied.
@@ -99,3 +99,17 @@ guard, focused local-subscription journeys and required exact-head CI/review.
   Responses stub. Individual input is unchanged; the group delta includes both
   the shared schema and recovery instructions. Exact Terra token counts are
   unavailable because no exact target tokenizer is configured.
+
+## Local completion
+
+Implementation and parent candidate review are complete. All six focused live
+journeys are Ready. Final focused Web coverage passed 239 tests, runtime coverage
+passed 61 tests, and protocol/prompt/parser checks passed. All four affected
+package/app typechecks, complexity, documentation checks and privacy review pass.
+The complete group provider input increases by 4,008 bytes (2.72%); individual
+input is unchanged. Exact target token counts remain unavailable.
+
+PR #3377 owns required exact-head CI and final ReviewGPT after this local
+completion record. Those external gates are pending, not claimed as passed.
+No production refresh, schedule mutation, member message or deployment occurred.
+Completed: 2026-09-12
