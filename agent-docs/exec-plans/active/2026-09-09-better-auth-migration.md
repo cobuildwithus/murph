@@ -565,3 +565,12 @@ instructions. Live account linking, Telegram, passkeys/recovery and full hosted
 activation still need qualification. Current corrections change presentation and
 client interaction only; canonical authorization and provider protocols are
 unchanged, so the frontend final-review exemption applies to this follow-up.
+
+Exact-head release CI found one stale first-passkey presentation assertion: it
+expected the older visible button label instead of the restored production row's
+short label. The correction asserts both the visible label and the retained
+accessible name, preserving the existing stale-login/authorization checks. This
+follow-up changes tests and evidence only; the application remains identical to
+31b5b143f578c8296ca11b678994154eae006458. Keep its queued Preview deployment;
+all six focused enrollment cases, Web typecheck and focused ESLint pass.
+Repeat exact-head CI without another Web build.

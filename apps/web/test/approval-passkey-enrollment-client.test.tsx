@@ -112,7 +112,8 @@ test("shows first-passkey setup and returns to login when primary proof is stale
   const rendered = await renderClientComponent(createElement(HostedPasskeySettings, {
     authenticated: true, enrollmentEnabled: true, secureApprovalStatus: { status: "not_configured", method: "initial" },
   }));
-  expect(rendered.button.textContent).toBe("Set up passkey");
+  expect(rendered.button.textContent).toBe("Set up");
+  expect(rendered.button.getAttribute("aria-label")).toBe("Set up passkey");
   await click(rendered);
   expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
   expect(mocks.authorize).not.toHaveBeenCalled();
