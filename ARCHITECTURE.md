@@ -2597,7 +2597,11 @@ non-identifying success response. A consented fresh companion activation with a
 verified phone may enter the canonical signup-welcome path. Exact-member
 binding, signup idempotency, home-line health, and proactive capacity remain
 owned by the existing starter enrollment, line reservation, and welcome
-services. Authenticated completion and phone synchronization also request the
+services. When activation has both a verified email and an eligible direct Linq
+route, it queues the same welcome on both. Email uses the original welcome key
+and text uses the phone welcome key; both are appended in the activation
+transaction. The onboarding follow-up still has its existing single route.
+Authenticated completion and phone synchronization also request the
 ordinary text welcome when an active member connects a verified phone without
 an assigned text route. The email welcome remains intact. This notification
 uses `signup-welcome:<member>:linq`, independently of the original
@@ -2606,7 +2610,7 @@ mailbox, first-contact state, and outbox own deduplication and recovery. It does
 not activate the member again or create a second onboarding follow-up. Deploy
 runtime welcome-key readers before the Web producer; original keys remain valid.
 Exhausted proactive capacity does not block activation: Web still
-assigns an eligible home line without a proactive welcome, preserving the
+assigns an eligible home line without a proactive text welcome, preserving the
 inbound-first messaging path. If no line is currently assignable, activation
 still succeeds without assigning a line. A later provider-attested direct
 message from the exact active member may bind the contacted managed line when

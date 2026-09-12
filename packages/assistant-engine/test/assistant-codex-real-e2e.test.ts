@@ -16421,7 +16421,7 @@ describeRealCodex('real Codex personal email audience e2e', () => {
 })
 
 describeRealCodex('real Codex direct email signup welcome e2e', () => {
-  it('queues email and later phone welcomes independently through the production notification turn', async () => {
+  it.each([true, false])('queues one signup welcome on each channel regardless of delivery order: emailFirst=%s', async (emailFirst) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-direct-email-signup-welcome-e2e-'),
@@ -16481,7 +16481,6 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
         vault: workingDirectory,
         workingDirectory,
       } satisfies Parameters<typeof sendAssistantNotificationLocal>[0]
-      const result = await sendAssistantNotificationLocal(notificationInput)
       const phoneKey = buildHostedMemberPhoneWelcomeDeliveryIdentity('synthetic-member')
       const phoneInput = {
         ...notificationInput,
@@ -16495,7 +16494,16 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
         deliveryIdempotencyKey: phoneKey,
         identityId: 'synthetic-phone-identity',
       }
-      const phoneWelcome = await sendAssistantNotificationLocal(phoneInput)
+      const first = await sendAssistantNotificationLocal(emailFirst ? notificationInput : phoneInput)
+      const second = await sendAssistantNotificationLocal(emailFirst ? phoneInput : notificationInput)
+      const result = emailFirst ? first : second
+      const phoneWelcome = emailFirst ? second : first
+      const emailReplay = await sendAssistantNotificationLocal(notificationInput)
+      expect(emailReplay.deliveryOutcome).toMatchObject({ kind: 'queued' })
+      if (result.deliveryOutcome?.kind !== 'queued') {
+        throw new Error('Expected the original email welcome to be queued.')
+      }
+      expect(emailReplay.deliveryOutcome).toMatchObject({ intentId: result.deliveryOutcome.intentId })
       const replay = await sendAssistantNotificationLocal(phoneInput)
       expect(phoneWelcome.response).toBe(welcomeText)
       expect(phoneWelcome.deliveryOutcome?.kind).toBe('queued')
@@ -16513,6 +16521,7 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
           reply: result.response,
           phoneReply: phoneWelcome.response,
           queuedMessages: intents.length,
+          emailFirst,
         })}\n`,
       )
       expect(result.decision).toMatchObject({

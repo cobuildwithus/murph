@@ -843,6 +843,78 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { textAvailable: true, suppress: false },
+    { textAvailable: false, suppress: false },
+    { textAvailable: true, suppress: true },
+  ])("welcomes verified email and phone independently: %j", async ({ textAvailable, suppress }) => {
+    const member = makeMemberSnapshot({
+      emailAuthorization: {
+        directPublicSender: null,
+        memberId: "member_123",
+        stripeCheckoutEmail: null,
+        verifiedEmail: {
+          address: "member@example.test",
+          lookupKey: "synthetic-email-lookup",
+          verifiedAt: new Date("2026-04-12T00:00:00.000Z"),
+        },
+      },
+    });
+    setActivationMemberSnapshot(member);
+    mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
+      welcomeRoute: textAvailable ? expectedLinqParticipantWelcomeRoute() : null,
+    });
+
+    for (const sourceEventId of ["synthetic-signup", "synthetic-retry"]) {
+      await activateHostedMemberForPositiveSourceTx({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId,
+          sourceType: "hosted.starter-enrollment",
+        },
+        memberId: member.core.id,
+        prisma: makeTransactionHarness() as never,
+        suppressSignupWelcome: suppress,
+      });
+    }
+
+    const envelopes = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(([call]) => call.envelope);
+    const activations = envelopes.filter((wake) => wake.kind === "member.activated");
+    const notifications = envelopes.filter((wake) => wake.kind === "assistant.notification.requested");
+    expect(activations).toHaveLength(2);
+    if (suppress) {
+      expect(notifications).toHaveLength(0);
+      expect(activations.every((wake) => wake.signupWelcome === null)).toBe(true);
+      return;
+    }
+    const email = notifications.filter((wake) => wake.notification.route.channel === "email");
+    const phone = notifications.filter((wake) => wake.notification.route.channel === "linq");
+    expect(email).toHaveLength(2);
+    expect(phone).toHaveLength(textAvailable ? 2 : 0);
+    for (const wake of email) {
+      expect(wake.notification).toMatchObject({
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        route: { delivery: { target: "member@example.test" } },
+      });
+    }
+    for (const wake of phone) {
+      expect(wake.eventId).toBe("assistant.notification.requested:signup-welcome:member_123:linq");
+      expect(wake.notification).toMatchObject({
+        deliveryIdempotencyKey: "signup-welcome:member_123:linq",
+        route: expectedLinqParticipantWelcomeRoute(),
+      });
+    }
+    for (const wake of notifications) {
+      expect(wake.notification).toMatchObject({
+        deliveryDedupeToken: wake.notification.deliveryIdempotencyKey,
+        deliveryDispatchMode: "queue-only",
+        responsePolicy: { kind: "require_send_exact_text", text: expectedSignupWelcomeText() },
+      });
+    }
+    expect(activations[0].onboardingFollowupRoute.channel).toBe(textAvailable ? "linq" : "email");
+  });
+
   it("keeps signup welcome text stable across source events sharing the per-member delivery identity", async () => {
     const member = makeMemberSnapshot();
 

@@ -3,13 +3,12 @@ import {
   type Prisma,
 } from "@prisma/client";
 import {
-  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionMemberActivatedWake,
-  buildHostedMemberSignupWelcomeInstructions,
+  buildHostedMemberPhoneWelcomeDeliveryIdentity,
+  buildHostedMemberSignupWelcomeNotificationWake,
   type HostedExecutionMemberActivationSignupWelcome,
   type HostedExecutionMemberActivatedWake,
   type HostedExecutionAssistantNotificationRoute,
-  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -343,9 +342,12 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     ?? buildHostedMemberActivationOnboardingFollowupRouteForMember(
       currentMember,
     );
-  const signupWelcomeRoute = input.suppressSignupWelcome
-    ? null
-    : onboardingFollowupRoute;
+  const { signupWelcomeRoute, phoneWelcomeRoute } = resolveHostedMemberActivationWelcomeRoutes({
+    linqRoute: resolvedLinqRoute,
+    member: currentMember,
+    onboardingFollowupRoute,
+    suppress: input.suppressSignupWelcome,
+  });
   const activationWake = buildHostedMemberActivationWakeForMember({
     emailLinked: input.emailLinked ?? resolveHostedMemberActivationEmailLinked(currentMember),
     member: currentMember,
@@ -356,14 +358,10 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     signupWelcomeRoute,
     welcomeMessage: input.welcomeMessage,
   });
-  const legacyWelcomeWake = buildHostedMemberSignupWelcomeNotificationWake({
-    activationWake,
-    occurredAt: input.dispatchContext.occurredAt,
-  });
   const appendedWake = await materializeHostedMemberActivationWakesTx({
     prisma: input.prisma,
     activationWake,
-    legacyWelcomeWake,
+    phoneWelcomeRoute,
   });
 
   return {
@@ -598,9 +596,38 @@ function buildHostedInactiveMemberActivationResult(
   };
 }
 
+function resolveHostedMemberActivationWelcomeRoutes(input: {
+  linqRoute: HostedExecutionAssistantNotificationRoute | null;
+  member: HostedMemberActivationSnapshot;
+  onboardingFollowupRoute: HostedExecutionAssistantNotificationRoute | null;
+  suppress?: boolean;
+}): {
+  signupWelcomeRoute: HostedExecutionAssistantNotificationRoute | null;
+  phoneWelcomeRoute: HostedExecutionAssistantNotificationRoute | null;
+} {
+  if (input.suppress) {
+    return { signupWelcomeRoute: null, phoneWelcomeRoute: null };
+  }
+  const email = input.member.emailAuthorization?.verifiedEmail;
+  if (!input.linqRoute || !email) {
+    return { signupWelcomeRoute: input.onboardingFollowupRoute, phoneWelcomeRoute: null };
+  }
+  const emailRoute = resolveHostedMemberAssistantNotificationRoute({
+    emailAddress: email.address,
+    emailLookupKey: email.lookupKey,
+    linqChatId: null,
+    memberId: input.member.core.id,
+    messaging: resolveHostedMemberMessagingState({ identity: null, routing: null }),
+  });
+  return {
+    signupWelcomeRoute: emailRoute ?? input.onboardingFollowupRoute,
+    phoneWelcomeRoute: emailRoute ? input.linqRoute : null,
+  };
+}
+
 async function materializeHostedMemberActivationWakesTx(input: {
   activationWake: HostedExecutionMemberActivatedWake;
-  legacyWelcomeWake: HostedExecutionWake | null;
+  phoneWelcomeRoute: HostedExecutionAssistantNotificationRoute | null;
   prisma: Prisma.TransactionClient;
 }): Promise<{ eventId: string; mailboxItemId: string }> {
   const appendedWake = await appendHostedMailboxEnvelopeTx({
@@ -608,11 +635,29 @@ async function materializeHostedMemberActivationWakesTx(input: {
     tx: input.prisma,
   });
 
-  if (input.legacyWelcomeWake) {
+  const { signupWelcome } = input.activationWake;
+  if (signupWelcome) {
     await appendHostedMailboxEnvelopeTx({
-      envelope: input.legacyWelcomeWake,
+      envelope: buildHostedMemberSignupWelcomeNotificationWake({
+        eventId: buildHostedMemberSignupWelcomeNotificationEventId(input.activationWake),
+        memberId: input.activationWake.userId,
+        occurredAt: input.activationWake.occurredAt,
+        ...signupWelcome,
+      }),
       tx: input.prisma,
     });
+    if (input.phoneWelcomeRoute) {
+      await appendHostedMailboxEnvelopeTx({
+        envelope: buildHostedMemberSignupWelcomeNotificationWake({
+          deliveryIdentity: buildHostedMemberPhoneWelcomeDeliveryIdentity(input.activationWake.userId),
+          memberId: input.activationWake.userId,
+          occurredAt: input.activationWake.occurredAt,
+          route: input.phoneWelcomeRoute,
+          text: signupWelcome.text,
+        }),
+        tx: input.prisma,
+      });
+    }
   }
 
   return {
@@ -723,37 +768,6 @@ function buildHostedMemberSignupWelcomeMessageSeed(input: {
   memberId: string;
 }): string {
   return buildHostedMemberSignupWelcomeDeliveryIdentity(input.memberId);
-}
-
-function buildHostedMemberSignupWelcomeNotificationWake(input: {
-  activationWake: HostedExecutionMemberActivatedWake;
-  occurredAt: string;
-}): HostedExecutionWake | null {
-  const signupWelcome = input.activationWake.signupWelcome;
-  if (!signupWelcome) {
-    return null;
-  }
-  const deliveryIdentity = buildHostedMemberSignupWelcomeDeliveryIdentity(input.activationWake.userId);
-
-  return buildHostedExecutionAssistantNotificationRequestedWake({
-    eventId: buildHostedMemberSignupWelcomeNotificationEventId(input.activationWake),
-    memberId: input.activationWake.userId,
-    notification: {
-      deliveryDedupeToken: deliveryIdentity,
-      deliveryDispatchMode: "queue-only",
-      deliveryIdempotencyKey: deliveryIdentity,
-      firstContact: {
-        markSeenOnDeliveryAccepted: true,
-      },
-      instructions: buildHostedMemberSignupWelcomeInstructions(signupWelcome.text),
-      responsePolicy: {
-        kind: "require_send_exact_text",
-        text: signupWelcome.text,
-      },
-      route: signupWelcome.route,
-    },
-    occurredAt: input.occurredAt,
-  });
 }
 
 function buildHostedMemberSignupWelcomeDeliveryIdentity(memberId: string): string {

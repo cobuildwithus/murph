@@ -595,6 +595,31 @@ export function buildHostedMemberPhoneWelcomeDeliveryIdentity(memberId: string):
   return `signup-welcome:${memberId}:linq`;
 }
 
+export function buildHostedMemberSignupWelcomeNotificationWake(input: {
+  memberId: string;
+  occurredAt: string;
+  route: HostedExecutionAssistantNotificationRoute;
+  text: string;
+  deliveryIdentity?: string;
+  eventId?: string;
+}): HostedExecutionAssistantNotificationRequestedWake {
+  const deliveryIdentity = input.deliveryIdentity ?? `signup-welcome:${input.memberId}`;
+  return buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId: input.eventId ?? `assistant.notification.requested:${deliveryIdentity}`,
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    notification: {
+      deliveryDedupeToken: deliveryIdentity,
+      deliveryIdempotencyKey: deliveryIdentity,
+      deliveryDispatchMode: "queue-only",
+      firstContact: { markSeenOnDeliveryAccepted: true },
+      instructions: buildHostedMemberSignupWelcomeInstructions(input.text),
+      responsePolicy: { kind: "require_send_exact_text", text: input.text },
+      route: input.route,
+    },
+  });
+}
+
 export function isHostedMemberSignupWelcomeDeliveryIdentity(
   value: string | null | undefined,
   memberId?: string,

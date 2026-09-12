@@ -1,8 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import {
-  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedMemberPhoneWelcomeDeliveryIdentity,
-  buildHostedMemberSignupWelcomeInstructions,
+  buildHostedMemberSignupWelcomeNotificationWake,
 } from "@murphai/hosted-execution";
 import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
 import {
@@ -61,19 +60,12 @@ export async function ensureHostedMemberPhoneWelcome(input: {
         seed: `signup-welcome:${input.memberId}`,
       }).text;
       const appended = await appendHostedMailboxEnvelopeTx({
-        envelope: buildHostedExecutionAssistantNotificationRequestedWake({
-          eventId: `assistant.notification.requested:${deliveryIdentity}`,
+        envelope: buildHostedMemberSignupWelcomeNotificationWake({
+          deliveryIdentity,
           memberId: input.memberId,
           occurredAt: new Date().toISOString(),
-          notification: {
-            deliveryDedupeToken: deliveryIdentity,
-            deliveryIdempotencyKey: deliveryIdentity,
-            deliveryDispatchMode: "queue-only",
-            firstContact: { markSeenOnDeliveryAccepted: true },
-            instructions: buildHostedMemberSignupWelcomeInstructions(text),
-            responsePolicy: { kind: "require_send_exact_text", text },
-            route: welcomeRoute,
-          },
+          route: welcomeRoute,
+          text,
         }),
         tx,
       });
