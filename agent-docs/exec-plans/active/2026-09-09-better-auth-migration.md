@@ -574,3 +574,29 @@ follow-up changes tests and evidence only; the application remains identical to
 31b5b143f578c8296ca11b678994154eae006458. Keep its queued Preview deployment;
 all six focused enrollment cases, Web typecheck and focused ESLint pass.
 Repeat exact-head CI without another Web build.
+
+
+### Preview signup without messaging delivery
+
+The operator selected an existing public Murph line for signup UI testing only.
+No production credentials, encrypted rows, member data or provider webhooks are
+copied. The selected public number is configured only in the adoption Preview;
+the existing line-sync owner encrypts it using the independent Preview keyring.
+Branch overrides clear both Temporal address/API-key aliases and Linq delivery
+and webhook credentials. Previous task-owned Preview deployments must be retired
+before the line is seeded because their immutable runtime settings predate these
+overrides. Production settings and other branches remain unchanged.
+
+The opt-in `MURPH_PREVIEW_LINQ_UI_ONLY` build step requires the exact Preview
+branch/origin and absent Linq/Temporal credentials before any build command.
+Only after a successful normal build does the existing line sync run with
+provider inventory disabled. Ordinary builds remain unchanged. Twelve isolated
+shell scenarios pass, including all credential rejection paths, wrong target,
+wrong branch/origin and failed build. The 21 existing Temporal, line-sync and
+activation-wake tests and Web typecheck pass. Initial direct Vitest invocation
+found no tests because of workspace-root resolution; the repository runner
+executed all selected tests successfully.
+
+Hosted deployment, line readback and the operator signup replay remain pending.
+This qualifies signup UI only; queued welcome work is not evidence of delivery.
+Production activation and the broader live-auth qualification remain incomplete.
