@@ -1,6 +1,6 @@
 # Avoid unchanged Junction reconciliation wakes
 
-Status: active
+Status: completed
 Created: 2026-09-12
 Updated: 2026-09-12
 
@@ -70,8 +70,9 @@ checkpoint/cold-restore tests, and locked Web authority/idle-work/CAS tests.
 - Product UX: Ready for candidate review based on synthetic boundary proof.
   Changelog not applicable: internal execution suppression and telemetry preserve
   member-facing polling cadence, data paths, and interactions.
-- Exact-head CI and final ReviewGPT remain pending. No deployment, measured
-  container reduction, or savings is claimed by local checks.
+- Final ReviewGPT is resolved on the implementation head. Required CI remains
+  the final PR-head handoff gate; no deployment, measured container reduction,
+  or savings is claimed by local checks.
 
 ## Candidate review
 
@@ -101,3 +102,23 @@ checkpoint/cold-restore tests, and locked Web authority/idle-work/CAS tests.
   preflight-to-existing-registry edge. Keep checking every other recovery edge
   and control route against the provider-free rule; no dynamic-import bypass or
   duplicate provider/config factory was added.
+
+## Final implementation evidence
+
+- Round 3: PASS on `142366dfb058467f65962bb5a796a2c601ca43f4`, with
+  zero findings. The same Vonneumann conversation received a full snapshot with
+  verified first/previous/current lineage. Captured `gpt-6-pro` model and exact
+  response hashes agree; the completed review exceeded the three-minute minimum.
+  Its source-level checks reproduced the old reader rejection and tested narrow
+  graph exceptions. No independent repository-suite or live-DB claim is made.
+- All 205 focused provider/manifest/hosted-hint/runtime/package-boundary tests
+  passed after the final source correction; device-syncd typecheck and complexity
+  guard passed. Earlier 105 provider regressions, 28 Web tests, four checkpoint
+  recovery cases, and assistant-runtime/Web typechecks also passed.
+- Parent final review confirmed the one-field reader change and the exact graph
+  exception, retained the existing import/checkpoint/scheduling owners, and
+  reviewed the complete authored diff and privacy boundaries. No open findings.
+- Implementation and review are complete. This plan-only closing commit changes
+  no behavior; required CI on that final PR head remains a handoff gate. Merge,
+  deployment, member rollout, and measurement of production outcomes are separate.
+Completed: 2026-09-12
