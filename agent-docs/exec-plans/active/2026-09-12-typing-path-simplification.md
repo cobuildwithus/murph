@@ -35,8 +35,8 @@ Updated: 2026-09-12
 1. Done: requested source-attached ReviewGPT recommendations and applied the bounded patch after local inspection.
 2. Done: validated audience precedence, transaction authority, wake admission, and activation liveness counterexamples.
 3. Done: removed ordinary direct classification HTTP and unused identity reads; consolidated wake handoff; corrected hosted route-validation forwarding.
-4. In progress: focused tests/typechecks, product journey proof, lint, and complexity review.
-5. Pending: commit the scoped candidate, complete required review/CI, and close this plan.
+4. Done: focused tests/typechecks, product journey proof, lint, complexity review, and changelog proof.
+5. In progress: candidate committed and draft PR opened; complete required review/CI and close this plan.
 
 ## Decisions
 
@@ -56,3 +56,7 @@ Updated: 2026-09-12
 - Engine mocked managed suite: 60 passed before replacing the new wiring-only test with core integration proof. Hosted email integration passes with the fix and fails without it with the expected local-email rejection.
 - Web typecheck: initial result found a void-return caller after handoff consolidation; corrected at the caller, then prepared typecheck passed. Engine typecheck passed before final integration-test edit; final check pending.
 - Complexity guard passed: classification complexity decreased from 27 to 26; existing planner hotspots remain and do not justify a broad second planner or speculative abstraction.
+- Final managed-automation core integration: 44 passed; engine typecheck passed. Web prepared typecheck passed after final source cleanup. Web lint passed with pre-existing warnings; the only unused import in changed source was removed and focused lint passed.
+- PostgreSQL ownership proof: the shared test database had stale schema and permissions, so its setup failures were not behavioral evidence. Created an isolated local test database with repository migrations; seven selected signup/instant-start/cross-channel ownership races passed.
+- Product UX verdict: Ready for the bounded patch. Explicit direct ingress omits provider classification and unused identity loads; group precedence and ownership conflicts stay fenced; wake handoff overlaps only after admission and retains durable failure semantics; real hosted-email automation creation succeeds.
+- Changelog: two content-only entries; production archive rendering passed all ten focused tests, and Web prepared typecheck passed after generation. The documented app-directory test command found no files; existing Frog entry `20260911184822-documented-changelog-test` already owns that issue. Used repository-root Vitest invocation and created no duplicate entry.
