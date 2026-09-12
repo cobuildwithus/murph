@@ -1877,6 +1877,20 @@ before fence or readiness work so a later caller-budget exit remains
 diagnosable without adding member or container identifiers. Failed, retried, or
 superseded starts do not emit an accepted attribution.
 
+Normal idle or completed-invocation cleanup retires the immutable member slot
+only after native destruction succeeds and the interaction generation remains
+unchanged. It then sends a best-effort retirement notification to the existing
+user owner without awaiting that owner from the slot lifecycle lock. The user
+owner reads the exact slot's durable retired binding outside its admission lock,
+then conditionally clears only the matching pending target under that lock. An
+active write fence or replacement target prevents the clear. No retirement hint
+alone grants authority, and the notification adds no remote wait under the
+foreground admission lock. A missed notification retains ordinary next-admission
+reconciliation; the already-retired slot can answer without another native
+liveness or destroy request. Warm reuse and uncertain stops retain their existing
+ownership and recovery behavior. This uses existing slot states and bindings and
+requires no Web, Temporal, or container-image wire change.
+
 Fresh allocation records `runnerTargetReconcileElapsedMs`, `standbyClaimElapsedMs`,
 and `runnerTargetBindElapsedMs` separately within the existing orchestration
 phase. Steps that were not needed record zero. `standbyAllocationElapsedMs` remains

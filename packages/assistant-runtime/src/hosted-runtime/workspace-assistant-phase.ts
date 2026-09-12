@@ -2287,14 +2287,11 @@ export async function runHostedWorkspaceAssistantPhase(
           result: timedForegroundAssistantResult,
         }),
       );
-      const result = await withHostedAutoReplyRouteMaintenanceAfterDelivery({
+      const result = withPostForegroundMemberMaintenanceAfterCheckpoint({
+        executionContext,
         input,
-        result: withPostForegroundMemberMaintenanceAfterCheckpoint({
-          executionContext,
-          input,
-          result: foregroundResult,
-          wake,
-        }),
+        result: foregroundResult,
+        wake,
       });
       if (providerCleanupPlan.stateQueued && !result.progressed) {
         return {

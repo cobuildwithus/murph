@@ -37,6 +37,9 @@ vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
   handoffHostedMailboxWake: mocks.handoffHostedMailboxWake,
 }));
 
+import { buildHostedRuntimeWebProtocolAdmission } from "../src/lib/hosted-execution/runtime-protocol";
+import { parseHostedExternalThreadRouteAuthorityResponse } from "@murphai/hosted-execution/parsers";
+
 import { POST } from "../app/api/internal/hosted-runtime/thread-route/authority/route";
 
 describe("hosted runtime thread route authority route", () => {
@@ -311,7 +314,10 @@ describe("hosted runtime thread route authority route", () => {
     ));
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ authorized: true, threadIsDirect });
+    const payload = await response.json();
+    const witness = buildHostedRuntimeWebProtocolAdmission("synthetic-nonce").threadRouteAuthority;
+    expect(payload).toEqual(threadIsDirect ? witness.direct : witness.group);
+    expect(parseHostedExternalThreadRouteAuthorityResponse(payload)).toEqual({ threadIsDirect });
     expect(
       mocks.assertHostedAssistantNotificationRouteAuthority,
     ).toHaveBeenCalledWith({

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "less-cleanup-between-replies",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less cleanup between replies",
+    "summary": "Murph keeps delivery-history housekeeping out of active replies, reducing work that can delay your next message.",
+    "details": "Background cleanup preserves reply tracking and upgrades older conversation state.",
+    "relevanceTags": ["messaging", "replies"],
+    "sourcePullRequests": [3361]
+  }
+}

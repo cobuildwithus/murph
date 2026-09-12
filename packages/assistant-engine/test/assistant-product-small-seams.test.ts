@@ -1118,6 +1118,7 @@ describe('assistant product small seams', () => {
     expect(written?.record.details).toEqual({
       actionKind: 'command.execution',
       commandFamily: 'search',
+      commandAttribution: 'recognized',
       commandOrdinal: 1,
       diagnosticRole: 'completion',
       durationMsBucket: 'unknown',

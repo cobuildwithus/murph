@@ -2,6 +2,11 @@
 
 Last verified: 2026-09-11
 
+Bounded Junction full-history batching, exact scalar continuation, and
+foreground yield are owned by `agent-docs/RELIABILITY.md`; provider and durable
+service restart/retry proof lives in
+`packages/device-syncd/test/junction-full-backfill-progress.test.ts`.
+
 ## Purpose
 
 Verification inventory, composed diff routing, cold stale-invocation coverage and
@@ -171,7 +176,7 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 | `agent-docs/operations/product-ux.md` | Product UX workflow. | Product UX workflow | High | 2026-08-31 |
 | `agent-docs/operations/live-provider-canaries.md` | Fresh native, Linq, Stripe and Garmin provider outcomes; GitHub dispatch, protected execution, exact receipts and cross-repository rollout. | Live provider proof | High | 2026-09-10 |
 | `agent-docs/operations/native-android-hosted-e2e.md` | Native Android verification operations. | Native Android verification operations | High | 2026-09-01 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, Draft-before-push readiness, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, remote browser health readiness, and wearable browser failure evidence captured before cleanup. | Verification policy | High | 2026-09-11 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, Draft-before-push readiness, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, remote browser health readiness, wearable browser failure evidence captured before cleanup, and HTTP/destination validation before persisted connection assertions. Wearable stage forwarding, numeric host progress, and bounded Actions notice retention. | Verification policy | High | 2026-09-11 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Database critical-section reliability. | Database critical-section reliability | High | 2026-08-09 |
 | `agent-docs/operations/typescript-verification-performance.md` | Verification performance policy. | Verification performance policy | Medium | 2026-07-29 |
 | `agent-docs/operations/completion-workflow.md` | Parent-owned completion evidence, final ReviewGPT eligibility and recovery before the first valid review, verified-base mergeability, and Draft-before-push ordering; specialist passes are retired. | Completion workflow | High | 2026-09-11 |
@@ -190,6 +195,8 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
 | `agent-docs/exec-plans/completed/2026-09-09-bundled-cli-query-timing-owner.md` | Exact-leaf runner bundle correction and proof handoff; actual assembled validation and parent evidence pending. | Historical implementation evidence | Low | 2026-09-09 |
 | `agent-docs/exec-plans/completed/2026-09-10-billing-browser-hydration.md` | Real React and Chromium proof for billing control replacement during hydration; provider outcome checks remain owned by the protected live matrix. | Historical implementation evidence | Low | 2026-09-10 |
+| `agent-docs/exec-plans/completed/2026-09-12-reply-wake-latency.md` | Migration-only foreground completion, retained background reconciliation, focused source proof, and production latency evidence gaps. | Historical implementation evidence | Low | 2026-09-12 |
+| `agent-docs/exec-plans/completed/2026-09-12-foreground-maintenance-deletion.md` | Removal of foreground route housekeeping and the interim migration-only mode; background and idle migration remain authoritative. | Historical implementation evidence | Low | 2026-09-12 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
 | `agent-docs/exec-plans/completed/2026-09-10-linq-acceptance-receipt-lock.md` | PR #3262: first-turn receipt serialization, composed PostgreSQL proof and final review; final-head CI tracked on the PR. | Historical implementation evidence | Low | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-11-pinned-release.md` | Candidate-preserving release checks and public ancestry admission; paired PRs track final CI and private-first rollout. | Historical implementation evidence | Low | 2026-09-11 |
