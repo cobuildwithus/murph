@@ -301,6 +301,31 @@ export class RuntimeProcessingController {
     });
   }
 
+  async verifyRetiredRunnerContainer(input: {
+    runnerContainerName: string;
+    userId: string;
+  }): Promise<boolean> {
+    if (!isHostedRunnerTargetName(input.runnerContainerName) || !this.input.runnerContainerNamespace) {
+      return false;
+    }
+    const record = await this.input.stateStore.readState();
+    if (record.userId !== input.userId || record.writeFence
+      || record.pendingRunnerContainerName !== input.runnerContainerName) return false;
+    // The notification is only a hint. Read the slot's durable retirement proof
+    // before clearing its exact pending assignment under the user-owner lock.
+    // This bounded remote read itself never holds that foreground admission lock.
+    const proof = await settleStandbyOperationWithinBudget(
+      () => this.runnerSlot(input.runnerContainerName).readStandbySlotBinding(),
+      { deadlineAtMs: Date.now() + this.input.env.webControlTimeoutMs },
+      this.input.env.webControlTimeoutMs,
+    );
+    if (proof.kind !== "completed" || !hostedRunnerSlotBindingMatchesTarget(proof.value, input.runnerContainerName)
+      || proof.value.state !== "retired" || proof.value.userId !== null || proof.value.claimId !== null) {
+      return false;
+    }
+    return true;
+  }
+
   async ensureForUser(
     input: RuntimeProcessingInput,
     diagnostics: RuntimeProcessingDiagnostics = { stage: "state_bind", details: {} },

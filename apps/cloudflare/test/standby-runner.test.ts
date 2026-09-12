@@ -325,6 +325,61 @@ describe("RunnerContainer slot lifecycle", () => {
     expect(harness.destroy).not.toHaveBeenCalled();
   });
 
+  it("retires a stopped member slot before asynchronously clearing its assignment", async () => {
+    const notification = createDeferred<{ cleared: boolean }>();
+    const recordRunnerContainerRetired = vi.fn(() => notification.promise);
+    const h = createStandbyContainerHarness({ environment: {
+      USER_RUNNER: { getByName: vi.fn(() => ({ recordRunnerContainerRetired })) },
+    } });
+    const input = { claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID,
+      region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" };
+    await h.container.bindStandbySlot(input);
+
+    // An unresolved callback must not hold the slot lifecycle lock.
+    await h.container.onActivityExpired();
+    expect(h.destroy).toHaveBeenCalledOnce();
+    await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({
+      state: "retired", userId: null, claimId: null,
+    });
+    expect(recordRunnerContainerRetired).toHaveBeenCalledWith({
+      runnerContainerName: h.slotName, userId: "member_123",
+    });
+    await expect(h.container.bindStandbySlot(input)).rejects.toThrow("cannot be rebound");
+    notification.resolve({ cleared: true });
+    await h.flushWaitUntil();
+  });
+
+  it("keeps stopped-slot recovery cheap when the retirement notification fails", async () => {
+    const recordRunnerContainerRetired = vi.fn(async () => { throw new Error("unavailable"); });
+    const h = createStandbyContainerHarness({ environment: {
+      USER_RUNNER: { getByName: () => ({ recordRunnerContainerRetired }) },
+    } });
+    await h.container.bindStandbySlot({ claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID,
+      region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" });
+    await h.container.onActivityExpired();
+    await h.flushWaitUntil();
+    const nativeRead = vi.spyOn(h.container, "getState").mockClear().mockRejectedValue(new Error("slow native lookup"));
+    await expect(h.container.resolveRetainedStandbySlot({ currentReleaseId: RELEASE_ID,
+      region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" }))
+      .resolves.toMatchObject({ state: "retired" });
+    expect(nativeRead).not.toHaveBeenCalled();
+    expect(h.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("does not publish retirement after an unconfirmed native stop", async () => {
+    const recordRunnerContainerRetired = vi.fn(async () => ({ cleared: true }));
+    const h = createStandbyContainerHarness({
+      destroy: async () => { throw new Error("platform unavailable"); },
+      environment: { USER_RUNNER: { getByName: () => ({ recordRunnerContainerRetired }) } },
+    });
+    await h.container.bindStandbySlot({ claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID,
+      region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" });
+    await h.container.onActivityExpired();
+    await h.flushWaitUntil();
+    expect(recordRunnerContainerRetired).not.toHaveBeenCalled();
+    await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({ state: "bound" });
+  });
+
   it("keeps retryable unbound retirement member-free", async () => {
     const destroy = vi.fn()
       .mockRejectedValueOnce(new Error("platform unavailable"))
@@ -1266,7 +1321,8 @@ function createStandbyContainerHarness(input: {
   preflightReady?: boolean;
 } = {}) {
   const db = new DatabaseSync(":memory:");
-  const state = createDurableObjectState(db, []);
+  const pending: Promise<unknown>[] = [];
+  const state = createDurableObjectState(db, pending);
   let preflightReady = input.preflightReady ?? false;
   let nativeStatus = input.nativeStatus ?? "running";
   const codexPreflight = vi.fn(async () => {
@@ -1320,6 +1376,7 @@ function createStandbyContainerHarness(input: {
     startAndWaitForPorts,
   });
   return {
+    async flushWaitUntil() { await Promise.all(pending.splice(0)); },
     codexPreflight,
     container,
     environment,

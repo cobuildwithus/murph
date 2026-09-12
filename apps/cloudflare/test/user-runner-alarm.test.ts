@@ -1201,6 +1201,112 @@ describe("HostedUserRunner execution coordination", () => {
     expect(harness.invoke).toHaveBeenCalledOnce();
   });
 
+  it("clears a proven retirement before the next message without an old-target RPC", async () => {
+    const oldTarget = `runner--v-release_1--${"c".repeat(32)}`;
+    const retired: HostedStandbySlotBinding = { slotName: oldTarget, releaseId: "release_1",
+      region: "GLOBAL", state: "retired", claimId: null, userId: null };
+    const readProof = vi.fn(async () => retired);
+    const slowReconcile = vi.fn(async () => {
+      await new Promise(resolve => setTimeout(resolve, 900));
+      return retired;
+    });
+    const h = createRunnerHarness({
+      runnerRuntimeEnvSource: { ...TEST_RUNNER_RUNTIME_ENV_SOURCE, CF_VERSION_METADATA: { id: "release_1" } },
+      runnerContainerStubForName(name, stub) {
+        if (name === oldTarget) {
+          stub.readStandbySlotBinding = readProof;
+          stub.resolveRetainedStandbySlot = slowReconcile;
+        }
+        return stub;
+      },
+    });
+    await h.runner.bindUser(TEST_USER_ID);
+    h.sql.exec("UPDATE runner_meta SET active_runner_container_name = ? WHERE singleton = 1", oldTarget);
+    await expect(h.runner.recordRunnerContainerRetired({ runnerContainerName: oldTarget, userId: TEST_USER_ID }))
+      .resolves.toEqual({ cleared: true });
+    expect(readProof).toHaveBeenCalledOnce();
+    expect(readActiveRunnerContainerNameForTest(h.sql)).toBeNull();
+    h.runnerContainerNames.length = 0;
+    await expect(h.runner.ensureRuntimeProcessingForUser({ userId: TEST_USER_ID,
+      orchestrationAttemptId: "fresh-after-retirement" })).resolves.toMatchObject({ kind: "runtime_processing_accepted" });
+    await h.flushWaitUntil();
+    expect(h.invoke).toHaveBeenCalledOnce();
+    expect(slowReconcile).not.toHaveBeenCalled();
+    expect(h.runnerContainerNames).not.toContain(oldTarget);
+  });
+
+  it("admits a message while retirement proof is delayed and preserves the replacement", async () => {
+    const oldTarget = `runner--v-release_1--${"c".repeat(32)}`;
+    const retired: HostedStandbySlotBinding = { slotName: oldTarget, releaseId: "release_1",
+      region: "GLOBAL", state: "retired", claimId: null, userId: null };
+    const started = createDeferred<void>();
+    const proof = createDeferred<HostedStandbySlotBinding>();
+    const h = createRunnerHarness({
+      runnerRuntimeEnvSource: { ...TEST_RUNNER_RUNTIME_ENV_SOURCE, CF_VERSION_METADATA: { id: "release_1" } },
+      runnerContainerStubForName(name, stub) {
+        if (name === oldTarget) {
+          stub.readStandbySlotBinding = async () => { started.resolve(); return proof.promise; };
+          stub.resolveRetainedStandbySlot = async () => retired;
+        }
+        return stub;
+      },
+    });
+    await h.runner.bindUser(TEST_USER_ID);
+    h.sql.exec("UPDATE runner_meta SET active_runner_container_name = ? WHERE singleton = 1", oldTarget);
+    const notification = h.runner.recordRunnerContainerRetired({ runnerContainerName: oldTarget, userId: TEST_USER_ID });
+    await started.promise;
+    await expect(h.runner.ensureRuntimeProcessingForUser({ userId: TEST_USER_ID,
+      orchestrationAttemptId: "message-during-retirement-proof" })).resolves.toMatchObject({ kind: "runtime_processing_accepted" });
+    const replacement = readActiveRunnerContainerNameForTest(h.sql);
+    expect(replacement).not.toBeNull();
+    expect(replacement).not.toBe(oldTarget);
+    proof.resolve(retired);
+    await expect(notification).resolves.toEqual({ cleared: false });
+    expect(readActiveRunnerContainerNameForTest(h.sql)).toBe(replacement);
+    await h.flushWaitUntil();
+  });
+
+  it.each(["bound", "retiring", "wrong-slot", "unavailable"])(
+    "preserves the pending assignment when retirement proof is %s", async mode => {
+      const oldTarget = `runner--v-release_1--${"c".repeat(32)}`;
+      const h = createRunnerHarness({ runnerContainerStubForName(_name, stub) {
+        stub.readStandbySlotBinding = async () => {
+          if (mode === "unavailable") throw new Error("unavailable");
+          if (mode === "bound") return { slotName: oldTarget, releaseId: "release_1", region: "GLOBAL",
+            state: "bound", userId: TEST_USER_ID, claimId: "standby-claim-12345678-1234-4123-8123-123456789abc" };
+          return { slotName: mode === "wrong-slot" ? `runner--v-release_1--${"d".repeat(32)}` : oldTarget,
+            releaseId: "release_1", region: "GLOBAL", state: mode === "retiring" ? "retiring" : "retired",
+            claimId: null, userId: null };
+        };
+        return stub;
+      } });
+      await h.runner.bindUser(TEST_USER_ID);
+      h.sql.exec("UPDATE runner_meta SET active_runner_container_name = ? WHERE singleton = 1", oldTarget);
+      await expect(h.runner.recordRunnerContainerRetired({ runnerContainerName: oldTarget, userId: TEST_USER_ID }))
+        .resolves.toEqual({ cleared: false });
+      expect(readActiveRunnerContainerNameForTest(h.sql)).toBe(oldTarget);
+    },
+  );
+
+  it.each(["wrong-user", "replacement", "active-fence"])(
+    "ignores a retirement notification with %s without contacting the slot", async mode => {
+      const target = `runner--v-release_1--${"c".repeat(32)}`;
+      const replacement = `runner--v-release_1--${"d".repeat(32)}`;
+      const h = createRunnerHarness();
+      await h.runner.bindUser(TEST_USER_ID);
+      h.sql.exec("UPDATE runner_meta SET active_runner_container_name = ? WHERE singleton = 1",
+        mode === "replacement" ? replacement : target);
+      if (mode === "active-fence") {
+        h.sql.exec("UPDATE runner_meta SET active_attempt_id = ?, active_kind = 'runtime', active_started_at = ? WHERE singleton = 1", "active-synthetic", FIXED_NOW);
+      }
+      await expect(h.runner.recordRunnerContainerRetired({ runnerContainerName: target,
+        userId: mode === "wrong-user" ? "other-member" : TEST_USER_ID })).resolves.toEqual({ cleared: false });
+      expect(h.runnerContainerNames).toEqual([]);
+      expect(readActiveRunnerContainerNameForTest(h.sql)).toBe(mode === "replacement" ? replacement : target);
+      if (mode === "active-fence") expect(readRunnerMeta(h.sql).active_attempt_id).toBe("active-synthetic");
+    },
+  );
+
   it("releases consent withdrawal after retained standby resolution exhausts the command budget", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
