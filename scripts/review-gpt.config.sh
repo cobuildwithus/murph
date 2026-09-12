@@ -253,6 +253,8 @@ managed_browser_background_mode="${managed_browser_background_mode:-balanced}"
 # JavaScript. Settled local measurement used more CPU and memory, so keep the
 # resource-efficient default headful and leave headless as an explicit override.
 managed_browser_display_mode="${managed_browser_display_mode:-headful}"
+# Start review lanes without taking focus from the app the user is working in.
+managed_browser_launch_mode="${managed_browser_launch_mode:-background}"
 export REVIEW_GPT_SELECTED_BROWSER_LANE="$review_gpt_selected_browser_lane"
 
 name_prefix="murph-$review_gpt_selected_browser_lane-chatgpt-audit"

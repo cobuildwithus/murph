@@ -135,6 +135,7 @@ else
 fi
 printf 'selected=%s\\n' "$review_gpt_selected_browser_lane"
 printf 'binary=%s\\n' "$browser_binary_path"
+printf 'launch=%s\\n' "$managed_browser_launch_mode"
 `,
     ],
     {
@@ -165,6 +166,20 @@ afterEach(() => {
 });
 
 describe("ReviewGPT repository config", () => {
+  it.each(["hercules", "apollo"])("starts %s in the background", (lane) => {
+    const result = runConfig(createHarness(), { REVIEW_GPT_BROWSER_LANE: lane });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("launch=background\n");
+  });
+
+  it("preserves an explicit foreground launch for interactive sign-in", () => {
+    const result = runConfig(createHarness('managed_browser_launch_mode="foreground"\n'), {
+      REVIEW_GPT_BROWSER_LANE: "hercules",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("launch=foreground\n");
+  });
+
   it("includes every managed lane in the default automatic pool", () => {
     const harness = createHarness();
     const result = runConfig(harness, {
