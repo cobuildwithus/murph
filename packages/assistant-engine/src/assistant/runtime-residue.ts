@@ -242,8 +242,6 @@ export async function pruneAssistantGeneratedDeliveryResidue(input: {
 
 export async function maintainAssistantAutoReplyRouteState(
   input: {
-    /** Limit foreground completion to first-use migration. */
-    migrationOnly?: boolean
     shouldYield?: (() => boolean) | null
     signal?: AbortSignal | null
     vault: string
@@ -264,9 +262,6 @@ export async function maintainAssistantAutoReplyRouteState(
       input.signal?.throwIfAborted()
       const migrationStatus =
         await readAssistantAutoReplyRouteMigrationStatusAtPaths(paths)
-      if (input.migrationOnly && migrationStatus === 'complete') {
-        return { changed: false, trusted: true }
-      }
       const outbox = await readOutboxInventory(
         paths.outboxDirectory,
         input.vault,
