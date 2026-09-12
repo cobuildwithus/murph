@@ -98,8 +98,9 @@ preflight just to capture the meal.
 
 ### Optional introduction, not an onboarding requirement
 
-For the first suitable complete totals-only card, the only allowed companion is
-this exact brief final text after attachment succeeds:
+For the first suitable complete totals-only card, include this exact brief
+final text after attachment succeeds. Goal setup is optional for the member;
+the first introduction should not be silently omitted when its conditions hold:
 
 > Here’s your nutrition card. If you’d like, we can set up goals too.
 

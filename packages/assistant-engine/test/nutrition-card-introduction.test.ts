@@ -1,8 +1,10 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { initializeVault, listGoals, readMemoryDocument, upsertGoal } from '@murphai/core'
+import { MURPH_ATTACH_RESPONSE_CARD_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
+import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import {
   DAILY_NUTRITION_OPTIONAL_GOALS_INTRO,
   renderAssistantResponseCardText,
@@ -69,4 +71,10 @@ it('fails closed on unreadable optional preference evidence without inventing an
   expect(await resolveDailyNutritionIntroduction({ card, message: DAILY_NUTRITION_OPTIONAL_GOALS_INTRO, vault: root })).toBeNull()
   expect(renderAssistantResponseCardText(card)).toContain('610 calories')
   expect(containsNutritionGoalInvitation('ordinary meal confirmation')).toBe(false)
+})
+
+it('keeps the shipped invitation instructions compatible with the exact renderer contract', async () => {
+  const skill = await readFile(path.join(resolveAssistantSkillsRoot(), 'food-journal', 'SKILL.md'), 'utf8')
+  expect(skill).toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
+  expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
 })

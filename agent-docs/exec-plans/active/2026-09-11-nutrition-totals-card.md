@@ -65,7 +65,7 @@ unavailable goals, so mixed server versions are not product-compatible.
 ReviewGPT authored the implementation patch against the task base. Parent review
 corrected stale goal-required assertions, compared stable memory records instead
 of generated empty-document timestamps, refined invitation copy, and improved
-small-card label sizing.
+small-card label sizing. A first-summary replay ended immediately after attachment; the existing attachment success response now reminds the model to include the fixed invitation when eligible.
 
 - Contracts, operator-config and assistant-engine typechecks: passed.
 - Web typecheck and changed-component ESLint: passed.
@@ -75,11 +75,14 @@ small-card label sizing.
 - CLI authoring compatibility: 5 passed. Canonical goal resolver: 21 passed.
 - Web image component: 25 passed. Changelog page: 10 passed.
 - Browser production-component study: passed at 390px and 1440px; parent inspected
-  both synthetic captures. Static provider/handset composition remains unavailable.
-- Real subscription journey on gpt-5.6-terra: reminder meal reply passed, one
-  totals-only card and no Goal writes. A repeat caught an unnecessary progress preamble; tightened the existing routine-meal progress guidance. Focused reply review remains in progress.
+  both synthetic captures. The deployed preview study and actual 1200×539 image route returned HTTP 200; the generated PNG was inspected. Handset composition remains unavailable.
+- Real subscription journeys on gpt-5.6-terra: six focused scenarios passed:
+  reminder meal reply, first summary, prior decline, number-sensitive logging,
+  unrelated incomplete breakfast, and managed closeout retry. Parent reviewed
+  replies, one-card/suppression counts and absence of Goal mutations: Ready.
+  First-summary/decline were rerun after attachment feedback was clarified.
 - Complete first-provider request measurement, identical synthetic fixtures:
-  direct 177109 -> 177254 UTF-8 bytes (+145, +0.082%); group 161198 -> 161198
+  direct 177109 -> 177400 UTF-8 bytes (+291, +0.164%); group 161198 -> 161198
   (0). Excludes only prompt_cache_key. Exact Terra tokenizer unavailable, so
   no token totals are claimed.
 - Complexity diff: pass; no increase in debt above 20. Existing dispatch/parser
@@ -87,9 +90,11 @@ small-card label sizing.
 
 ## Remaining completion gates
 
-- [ ] Final focused live reply and suppression review.
-- [ ] Draft PR, current reviewer-openable design evidence and source PR reference.
-- [ ] Parent candidate review, final ReviewGPT and exact-head CI.
+- [x] Final focused live reply and suppression review.
+- [x] Draft PR #3347, source PR reference and inspected screenshot attachments.
+- [x] Current reviewer-openable design preview build.
+- [x] Parent candidate review.
+- [ ] Final ReviewGPT and exact-head CI.
 - [ ] Close this plan and verify base mergeability.
 
 No live member delivery or production mutation was performed. Rollout must

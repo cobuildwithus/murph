@@ -1,3 +1,4 @@
+import { nutritionCardAttachmentGuidance } from '../assistant/nutrition-card-introduction.js'
 import { parseDynamicToolArguments } from './dynamic-tools/dynamic-tool-wrapper.js'
 import {
   completeDynamicToolFailureDiagnostics,
@@ -3367,7 +3368,7 @@ async function dispatchMurphDynamicToolRequest(
         vaultRoot: input.vaultRoot ?? null,
       })
       return {
-        ...toolTextResult(true, 'response card attached'),
+        ...toolTextResult(true, nutritionCardAttachmentGuidance(card)),
         responseCardPatch: { card },
       }
     }

@@ -68,7 +68,8 @@ For the first suitable complete totals-only card, the only allowed companion is:
 
 > Here’s your nutrition card. If you’d like, we can set up goals too.
 
-The model selects that exact copy only when current conversation and canonical
+The successful complete totals-only attachment reminds the model of this narrow
+final-text rule. The model includes that exact copy only when current conversation and canonical
 memory/instructions show no decline, number-sensitive preference, sent invitation
 or visible pending invitation. Unknown/unreadable optional preference evidence
 means omit the invitation, not block the card. Free-text preferences remain the

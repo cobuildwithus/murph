@@ -60,3 +60,11 @@ export async function recordSentNutritionGoalInvitation(input: {
     text: NUTRITION_GOAL_INVITATION_SENT_MEMORY,
   })
 }
+
+/** Keep the first-invitation decision visible at the successful attachment boundary. */
+export function nutritionCardAttachmentGuidance(card: AssistantResponseCard): string {
+  if (!readDailyNutritionIntroduction(card, DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)) {
+    return 'response card attached'
+  }
+  return `response card attached. In an interactive turn with no prior decline, number-sensitive preference, sent/pending invitation or existing goal-setup proposal, finish with exactly: ${DAILY_NUTRITION_OPTIONAL_GOALS_INTRO} Check canonical memory once if that context is missing. Otherwise omit the introduction; scheduled turns never include it. Do not repeat nutrition values or send another message.`
+}

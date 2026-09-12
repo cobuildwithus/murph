@@ -29851,7 +29851,8 @@ describeRealCodex('real Codex totals-only nutrition journeys', () => {
         expect(readNutritionGoalMutationCommands(result.commands)).toEqual([])
         expect(result.progressUpdates).toEqual([])
         expect(result.finalMessage).toContain('logged so far')
-        if (scenario !== 'first-summary') expect(result.finalMessage).not.toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
+        if (scenario === 'first-summary') expect(result.finalMessage).toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
+        else expect(result.finalMessage).not.toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
         // The helper asserts the entire canonical Goal registry and meal events
         // are unchanged. An optional invitation is not a proposal or a sent receipt.
       } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
@@ -29893,12 +29894,16 @@ describeRealCodex('real Codex totals-only nutrition journeys', () => {
             mealCount: 1, goals: ALL_NULL_NUTRITION_GOALS,
             totals: { calories: { total: 610, mealCount: 1 }, fiberGrams: { total: 14, mealCount: 1 } } })
           expect(result.attachCallCount).toBe(1)
+          expect(result.finalMessage).toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
         } else {
           expect(result.card).toBeNull()
           expect(result.attachCallCount).toBe(0)
           if (breakfastId) expect(commands.filter((command) =>
             /^(?:meal show|meal edit) /u.test(command) && command.includes(breakfastId!))).toEqual([])
-          if (scenario === 'number-sensitive') expect(result.finalMessage).not.toMatch(/\d|goal setup/iu)
+          if (scenario === 'number-sensitive') {
+            // A meal date is not a nutrition number. Reject nutrient values and goal offers.
+            expect(result.finalMessage).not.toMatch(/calories|kcal|\d\s*(?:g\b|grams)|protein|carb(?:s|ohydrate)?|\bfat\b|fiber|\bgoals?\b/iu)
+          }
         }
       } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
     },
@@ -32659,11 +32664,12 @@ async function runRealNutritionCardAuthorityScenario(input: {
         && action.tool === MURPH_ATTACH_RESPONSE_CARD_TOOL.name
       ).length
 
-    console.info('[nutrition-journey-reply]', JSON.stringify({
+    process.stdout.write('[nutrition-journey-reply] ' + JSON.stringify({
       scenario: input.initialPrompt,
       cardKind: result.responseCard?.kind ?? null,
       reply: result.finalMessage,
-    }))
+      authoredReply: result.providerAuthoredFinalMessage,
+    }) + '\n')
     return {
       attachCallCount,
       card: result.responseCard,

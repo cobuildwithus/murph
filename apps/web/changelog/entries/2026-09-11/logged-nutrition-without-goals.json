@@ -12,7 +12,7 @@
       "assistant",
       "nutrition"
     ],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [3347],
     "tryIt": {
       "label": "See logged nutrition",
       "prompt": "Show my logged nutrition totals for today."

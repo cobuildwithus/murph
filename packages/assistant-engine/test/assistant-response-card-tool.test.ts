@@ -1,3 +1,4 @@
+import { DAILY_NUTRITION_OPTIONAL_GOALS_INTRO } from '@murphai/operator-config/assistant-response-cards'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { Buffer } from 'node:buffer'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -2346,6 +2347,7 @@ it('attaches fresh totals-only nutrition without targets, but not in a group or 
   const attached = await executeCardTool({ request: request! })
   expect(attached.responseCardPatch?.card).toEqual(card)
   expect(attached.rpcResult.success).toBe(true)
+  expect(attached.rpcResult.contentItems).toEqual([{ type: 'inputText', text: expect.stringContaining(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO) }])
   const group = await executeCardTool({ request: request!, privateDirectResponseCardAllowed: false })
   expect(group.rpcResult.success).toBe(false)
   expect(group.responseCardPatch).toBeUndefined()
