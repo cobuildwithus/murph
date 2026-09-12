@@ -1461,15 +1461,26 @@ function createAssistantResponseCardJsonSchema() {
           'fiberGrams',
         ],
       },
-      goals: { anyOf: [{
+      goals: {
+        // A flat typed object stays concrete in Codex discovery. The condition
+        // enforces the same all-null/all-five bundle as the runtime validator.
+        if: { properties: { calories: { type: 'null' } } },
+        then: { properties: {
+          proteinGrams: { type: 'null' }, carbsGrams: { type: 'null' },
+          fatGrams: { type: 'null' }, fiberGrams: { type: 'null' },
+        } },
+        else: { properties: {
+          proteinGrams: { type: 'object' }, carbsGrams: { type: 'object' },
+          fatGrams: { type: 'object' }, fiberGrams: { type: 'object' },
+        } },
         type: 'object',
         additionalProperties: false,
         properties: {
-          calories: goal(assistantResponseCardV1Bounds.calories),
-          proteinGrams: goal(assistantResponseCardV1Bounds.macroGrams),
-          carbsGrams: goal(assistantResponseCardV1Bounds.macroGrams),
-          fatGrams: goal(assistantResponseCardV1Bounds.macroGrams),
-          fiberGrams: goal(assistantResponseCardV1Bounds.macroGrams),
+          calories: { ...goal(assistantResponseCardV1Bounds.calories), type: ['object', 'null'] },
+          proteinGrams: { ...goal(assistantResponseCardV1Bounds.macroGrams), type: ['object', 'null'] },
+          carbsGrams: { ...goal(assistantResponseCardV1Bounds.macroGrams), type: ['object', 'null'] },
+          fatGrams: { ...goal(assistantResponseCardV1Bounds.macroGrams), type: ['object', 'null'] },
+          fiberGrams: { ...goal(assistantResponseCardV1Bounds.macroGrams), type: ['object', 'null'] },
         },
         required: [
           'calories',
@@ -1478,24 +1489,7 @@ function createAssistantResponseCardJsonSchema() {
           'fatGrams',
           'fiberGrams',
         ],
-      }, {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          calories: { type: 'null' },
-          proteinGrams: { type: 'null' },
-          carbsGrams: { type: 'null' },
-          fatGrams: { type: 'null' },
-          fiberGrams: { type: 'null' },
-        },
-        required: [
-          'calories',
-          'proteinGrams',
-          'carbsGrams',
-          'fatGrams',
-          'fiberGrams',
-        ],
-      }] },
+      },
     },
     required: [
       'kind',

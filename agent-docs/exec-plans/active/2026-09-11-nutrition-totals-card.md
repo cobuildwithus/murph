@@ -1,6 +1,6 @@
 # Logged nutrition without required targets
 
-Status: active. Implementation and focused checks complete; PR review in progress.
+Status: active. CI-driven schema correction verified; second review pending.
 Date: 2026-09-11
 
 ## Outcome
@@ -29,7 +29,7 @@ Missing accepted goals selects totals-only presentation, never goal creation.
 ## UX journeys and non-goals
 
 Invented lentil-lunch check-in reply -> canonical meal readback -> one dated,
-estimated logged-so-far card, no target writes. First suitable card may include
+estimated logged-so-far card, no target writes. First suitable card includes
 one fixed optional-goals introduction. Subsequent cards and prior declines do not
 repeat it. Explicit target-setting remains proposal then acceptance; silence and
 meal replies never accept. Incomplete unrelated breakfast -> short fallback, no
@@ -94,9 +94,42 @@ small-card label sizing. A first-summary replay ended immediately after attachme
 - [x] Draft PR #3347, source PR reference and inspected screenshot attachments.
 - [x] Current reviewer-openable design preview build.
 - [x] Parent candidate review.
-- [ ] Final ReviewGPT and exact-head CI.
-- [ ] Close this plan and verify base mergeability.
+- [x] Final ReviewGPT: round 1 PASS at 37596f907d7724754e3b06f19c7504b5a99059b2.
+- [ ] ReviewGPT round 2 and exact-head CI.
+- [x] Current-base mergeability: clean merge-tree against verified main
+  962252727c573702e44f0f284c1f152b1379a061.
+- [ ] Close this plan after candidate CI completes.
 
 No live member delivery or production mutation was performed. Rollout must
 verify actual provider/handset composition; local HTTP contracts and browser
 component captures do not prove a received Messages or Telegram balloon.
+
+## Final review disposition
+
+ReviewGPT round 1 used the full guarded snapshot on Eragon. The exact accepted
+turn and completed response were captured after more than six minutes; tool model
+evidence confirms gpt-6-pro. The reviewer checked all 41 changed blobs against
+the patch and traced the core authoring, rendering, delivery and confirmation
+paths. Result: PASS; zero findings received, accepted or rejected, so no
+review-requested remediation was required. This was source-and-test inspection,
+not test execution by ReviewGPT. Parent review concurs with that disposition.
+
+Broad CI subsequently found six stale expectations and two real provider-schema
+regressions: a nested goal union erased concrete nested definitions in native
+and code-mode Codex discovery. A comparison using the prior goal shape isolated
+the cause. Flat nullable goal fields plus an if/then/else bundle constraint
+preserve all-null/all-five validity while keeping generated declarations concrete.
+The canonical compatibility check exercises all 32 presence combinations. The
+real App Server checks now pass for native table fields, code-mode nutrition
+fields, valid card attachment and mixed-bundle rejection. Updated only stale
+prompt budgets/snapshots, progress copy and channel argument expectations.
+
+The corrected first-summary live replay passed with one card and the exact
+invitation, no progress preamble and no Goal writes. First-input recapture remains
+177400 bytes direct and 161198 bytes group. Operator, CLI compatibility, real
+provider contracts, card-tool and progress checks passed; types and complexity
+passed.
+
+All other first-candidate CI checks passed; the corrected candidate requires a
+second full ReviewGPT review and its own required CI. The first-reviewed head
+remains immutable. Final CI status is recorded in PR #3347.

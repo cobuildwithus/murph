@@ -125,10 +125,10 @@ describe('assistant response cards', () => {
             mealCount: { type: 'integer', minimum: 0, maximum: 100 },
           },
         }])) },
-        goals: { anyOf: [{ properties: Object.fromEntries(fields.map((field) => [field, {
-          type: 'object', additionalProperties: false, required: ['target', 'status'],
+        goals: { properties: Object.fromEntries(fields.map((field) => [field, {
+          type: ['object', 'null'], additionalProperties: false, required: ['target', 'status'],
           properties: { target: { type: 'number', exclusiveMinimum: 0, maximum: 2_000 } },
-        }])) }, { properties: { calories: { type: 'null' } } }] },
+        }])) },
       } }, expect.anything(), expect.anything(),
     ] })
   })
@@ -141,7 +141,7 @@ describe('assistant response cards', () => {
         {
           additionalProperties: false,
           properties: {
-            goals: { anyOf: [{
+            goals: {
               additionalProperties: false,
               properties: {
                 calories: {
@@ -164,17 +164,17 @@ describe('assistant response cards', () => {
                     },
                   },
                   required: ['target', 'status'],
-                  type: 'object',
+                  type: ['object', 'null'],
                 },
                 proteinGrams: {
                   additionalProperties: false,
-                  type: 'object',
+                  type: ['object', 'null'],
                 },
-                carbsGrams: { type: 'object', additionalProperties: false },
-                fatGrams: { type: 'object', additionalProperties: false },
-                fiberGrams: { type: 'object', additionalProperties: false },
+                carbsGrams: { type: ['object', 'null'], additionalProperties: false },
+                fatGrams: { type: ['object', 'null'], additionalProperties: false },
+                fiberGrams: { type: ['object', 'null'], additionalProperties: false },
               },
-            }, { properties: { calories: { type: 'null' } } }] },
+            },
             kind: { const: 'daily_nutrition' },
             localDate: {
               pattern: '^\\d{4}-\\d{2}-\\d{2}$',
