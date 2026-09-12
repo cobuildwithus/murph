@@ -189,13 +189,7 @@ async function main(): Promise<void> {
       timeout: config.timeoutMs,
     });
 
-    stage = "murph_persisted_connect_page";
-    await page.goto(new URL("/connect", config.webBaseUrl).toString(), {
-      waitUntil: "domcontentloaded",
-    });
-    await assertWearableConnectionState(page, config, "connected");
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await assertWearableConnectionState(page, config, "connected");
+    await requirePersistedWearableConnection(page, config);
 
     if (config.awaitCanonicalData) {
       stage = "garmin_canonical_data";
@@ -1141,6 +1135,30 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
   ].join(" ");
 }
 
+async function requirePersistedWearableConnection(
+  page: Page,
+  config: BrowserConfig,
+): Promise<void> {
+  for (const phase of ["navigation", "reload"] as const) {
+    stage = `murph_persisted_connect_${phase}`;
+    const response = phase === "navigation"
+      ? await page.goto(new URL("/connect", config.webBaseUrl).toString(), {
+        waitUntil: "domcontentloaded",
+      })
+      : await page.reload({ waitUntil: "domcontentloaded" });
+    // Chromium can finish navigation on an HTTP error page. Do not replace
+    // that failure with a full connection-state wait or accept stale markup.
+    if (!response?.ok()) {
+      throw new Error(`Persisted connect navigation returned HTTP ${response?.status() ?? "none"}.`);
+    }
+    const url = new URL(page.url());
+    if (url.origin !== config.webOrigin || url.pathname !== "/connect") {
+      throw new Error("Persisted connect navigation left the expected page.");
+    }
+    await assertWearableConnectionState(page, config, "connected");
+  }
+}
+
 async function assertWearableConnectionState(
   page: Page,
   config: BrowserConfig,
@@ -1322,6 +1340,7 @@ export {
   navigateToHostedLocalStart as navigateToHostedLocalJunctionStartForTest,
   openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
+  requirePersistedWearableConnection as requireHostedLocalJunctionPersistedConnectionForTest,
   sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,
   stopKernelTunnel as stopHostedLocalJunctionKernelTunnelForTest,
   waitForCanonicalDataCheck as waitForHostedLocalJunctionCanonicalDataCheckForTest,
