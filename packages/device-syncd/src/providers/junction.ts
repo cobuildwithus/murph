@@ -53,7 +53,7 @@ import {
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
 import {
-  appendJunctionReconcileRecords, encodeJunctionReconcileProof,
+  appendJunctionReconcileRecords, beginJunctionReconcileDigest, encodeJunctionReconcileProof,
   hashJunctionReconcileValue, readJunctionReconcileProof,
   type JunctionReconcileProof,
 } from "../junction-reconcile-proof.ts";
@@ -1159,19 +1159,27 @@ export function createJunctionDeviceSyncProvider(
     const binding = reconcileProofBinding(context.account, providers);
     if (job.payload.summaryResourceCursor || job.payload.summaryPhaseComplete) {
       const prior = readJunctionReconcileProof(job.payload.reconcileProof);
-      return prior && prior.binding === binding && prior.validUntil > context.now ? prior : null;
+      return prior && prior.binding === binding && prior.timeZone === context.vaultTimeZone
+        && prior.validUntil > context.now ? prior : null;
     }
     const utcEnd = Date.parse(floorUtcDayTimestamp(context.now)) + TIMESERIES_CHUNK_MS;
     const globalEnd = Date.parse(floorUtcDayTimestamp(new Date(Date.parse(context.now)
       - JUNCTION_PROVIDER_CALENDAR_DAY_CLOSE_LAG_MS).toISOString()))
       + TIMESERIES_CHUNK_MS + JUNCTION_PROVIDER_CALENDAR_DAY_CLOSE_LAG_MS;
     const localEnd = resolveVaultLocalDayWindow(toLocalDayKey(context.now, context.vaultTimeZone), context.vaultTimeZone)?.windowEnd;
-    if (!localEnd) return null;
-    return {
-      binding, digest: binding, timeZone: context.vaultTimeZone,
+    const latestAuthoritativeDay = latestAuthoritativeVaultDayKey(context.now, context.vaultTimeZone);
+    if (!localEnd || !latestAuthoritativeDay) return null;
+    const nextAuthorityWindow = resolveVaultLocalDayWindow(addIsoDateDays(latestAuthoritativeDay, 1), context.vaultTimeZone);
+    if (!nextAuthorityWindow) return null;
+    // Fixed elapsed closure lag can cross a DST offset transition before the
+    // next local midnight. Preserve that earlier repair eligibility too.
+    const nextAuthorityAt = Date.parse(nextAuthorityWindow.windowEnd) + JUNCTION_TEMPORAL_AUTHORITY_LAG_MS;
+    const proof = {
+      binding, timeZone: context.vaultTimeZone,
       windowStart: resolveCurrentSummaryWindow(context.now, reconcileDays).windowStart,
-      validUntil: new Date(Math.min(utcEnd, globalEnd, Date.parse(localEnd))).toISOString(),
+      validUntil: new Date(Math.min(utcEnd, globalEnd, Date.parse(localEnd), nextAuthorityAt)).toISOString(),
     };
+    return { ...proof, digest: beginJunctionReconcileDigest(config.clientUserIdSecret, proof) };
   }
 
   function appendReconcileSnapshots(
@@ -1257,7 +1265,7 @@ export function createJunctionDeviceSyncProvider(
       observe(providers);
       const binding = reconcileProofBinding(account, providers);
       if (binding !== baseline.binding) return finish("changed", "authority_or_inventory_changed");
-      let proof = { ...baseline, digest: binding };
+      let proof = { ...baseline, digest: beginJunctionReconcileDigest(config.clientUserIdSecret, baseline) };
       const units = buildReconcileSummaryResourceUnits(summaryResources.filter((resource) => resource !== JUNCTION_PROFILE_SUMMARY_RESOURCE));
       // Two independent units at a time; digest order remains the runtime order.
       for (let offset = 0; offset < units.length; offset += 2) {

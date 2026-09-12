@@ -669,7 +669,10 @@ turning it into a hosted baseline; old continuations lacking proof still import.
 Web refetches the same summary start through current time, retaining older rows
 rather than shrinking the comparison window. It uses complete collection
 responses and existing calendar filtering. Proof expires at the earliest next
-UTC midnight, global provider-day closure, or vault-local midnight. Expiry and
+UTC midnight, global provider-day closure, vault-local midnight, or the next
+fixed-lag temporal-authority boundary across an offset transition. The digest
+also binds the original start, expiry, and timezone, so edited scope cannot
+reuse matching record evidence. Expiry and
 pending scheduler-owned history/recovery cause ordinary execution. New config,
 source lifecycle, or provider inventory changes also require the runtime. A
 future change to comparison/normalization semantics must advance the binding

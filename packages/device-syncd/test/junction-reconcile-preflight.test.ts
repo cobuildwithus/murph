@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { JUNCTION_RECONCILE_PROOF_METADATA_KEY } from "../src/metadata.ts";
 import { encodeJunctionHistoricalBackfillStatus } from "../src/junction-historical-backfill-progress.ts";
-import { readJunctionReconcileProof } from "../src/junction-reconcile-proof.ts";
+import { encodeJunctionReconcileProof, readJunctionReconcileProof } from "../src/junction-reconcile-proof.ts";
 import {
   createAccount, createStoredAccount, createConnectionSource, createJunctionProvider,
   createJunctionJobContext, createJob, createJobFromInput, executeJunctionJob,
@@ -12,7 +12,7 @@ import { createJsonResponse, readUrl } from "./helpers.ts";
 const NOW = "2026-04-03T14:00:00.000Z";
 const LATER = "2026-04-03T15:00:00.000Z";
 
-function harness(options: { bounded?: boolean; timeseries?: boolean; resources?: string[] } = {}) {
+function harness(options: { bounded?: boolean; timeseries?: boolean; resources?: string[]; sdkActivity?: boolean } = {}) {
   let rows: unknown[] = [{ id: "activity-1", date: "2026-04-02", steps: 1234, source: { provider: "garmin" } }];
   let timeseriesValue = 99;
   let malformed = false;
@@ -25,7 +25,8 @@ function harness(options: { bounded?: boolean; timeseries?: boolean; resources?:
     if (url.pathname.includes("/user/providers/")) return createJsonResponse({ providers: [{
       id: "provider-garmin-1", slug: "garmin", status: "connected", resource_availability: { activity: true },
     }] });
-    if (url.pathname.includes("/summary/")) return createJsonResponse(malformed ? null : { data: rows });
+    if (url.pathname.includes("/summary/")) return createJsonResponse(malformed ? null
+      : options.sdkActivity ? { activity: rows } : { data: rows });
     if (url.pathname.includes("/timeseries/")) return createJsonResponse({ groups: { garmin: [{
       source: { provider: "garmin", type: "watch" }, data: [{ timestamp: "2026-04-02T12:00:00.000Z", value: timeseriesValue, unit: "mg/dL" }],
     }] } });
@@ -65,7 +66,10 @@ function harness(options: { bounded?: boolean; timeseries?: boolean; resources?:
     calls: () => calls, imports: () => imports,
     probe: () => executor.probeScheduledReconcile!(stored(), LATER),
     async importBaseline() {
-      let job = createJob("reconcile", { windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" });
+      const windowEnd = `${context.now.slice(0, 10)}T00:00:00.000Z`;
+      let job = createJob("reconcile", {
+        windowStart: new Date(Date.parse(windowEnd) - 7 * 86_400_000).toISOString(), windowEnd,
+      });
       for (let index = 0; index < 20; index += 1) {
         const result = await executeJunctionJob(provider, context, job);
         Object.assign(account.metadata, result.metadataPatch);
@@ -98,6 +102,21 @@ test("Junction detects a correction with unchanged count, id and date", async ()
   const h = harness({ bounded: true });
   await h.importBaseline();
   h.setRows([{ id: "activity-1", date: "2026-04-02", steps: 4321, source: { provider: "garmin" } }]);
+  assert.equal((await h.probe()).outcome, "changed");
+});
+
+test("SDK-decoded timestamp corrections invalidate the imported content proof", async () => {
+  const h = harness({ sdkActivity: true });
+  const row = {
+    id: "activity-sdk-1", user_id: "synthetic-junction-user",
+    date: "2026-04-02T00:00:00.000Z", calendar_date: "2026-04-02",
+    steps: 1234, source: { provider: "garmin" },
+    created_at: "2026-04-02T12:00:00.000Z", updated_at: "2026-04-03T13:00:00.000Z",
+  };
+  h.setRows([row]);
+  await h.importBaseline();
+  assert.equal((await h.probe()).outcome, "unchanged");
+  h.setRows([{ ...row, updated_at: "2026-04-03T14:30:00.000Z" }]);
   assert.equal((await h.probe()).outcome, "changed");
 });
 
@@ -197,4 +216,27 @@ test("a restored container's local disconnect counter does not invalidate shared
   await h.importBaseline();
   h.account.disconnectGeneration = 0;
   assert.equal((await h.probe()).outcome, "unchanged");
+});
+
+test("fall-back timezone closure cannot extend proof past newly eligible temporal repair", async () => {
+  const h = harness();
+  h.context.now = "2026-11-02T00:30:00.000Z";
+  h.context.vaultTimeZone = "America/New_York";
+  h.account.lastSyncCompletedAt = h.context.now;
+  await h.importBaseline();
+  // The October 31 day ended at 04:00Z before the offset transition. Its fixed
+  // 24-hour authority lag ends before the next local midnight at 05:00Z.
+  assert.equal(readJunctionReconcileProof(h.account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY])?.validUntil,
+    "2026-11-02T04:00:00.000Z");
+});
+
+test("comparison binds the original window and expiry instead of accepting edited scope", async () => {
+  const h = harness();
+  await h.importBaseline();
+  const proof = readJunctionReconcileProof(h.account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY]);
+  assert.ok(proof);
+  h.account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY] = encodeJunctionReconcileProof({
+    ...proof, validUntil: "2026-04-04T12:00:00.000Z",
+  });
+  assert.equal((await h.probe()).outcome, "changed");
 });

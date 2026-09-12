@@ -29,8 +29,7 @@ export async function preflightHostedScheduledReconcile(input: {
   now: Date;
   store?: PrismaDeviceSyncControlPlaneStore;
 }): Promise<ScheduledReconcilePreflightResult> {
-  let webhookAgeBucket: ScheduledReconcilePreflightResult["webhookAgeBucket"];
-  const fallback = (reason: string): ScheduledReconcilePreflightResult => ({
+  const fallback = (reason: string, webhookAgeBucket?: ScheduledReconcilePreflightResult["webhookAgeBucket"]): ScheduledReconcilePreflightResult => ({
     outcome: "ineligible", reason, wakeAvoided: false,
     requestCount: 0, recordCount: 0, responseBytes: 0, elapsedMs: 0,
     ...(webhookAgeBucket ? { webhookAgeBucket } : {}),
@@ -55,11 +54,11 @@ export async function preflightHostedScheduledReconcile(input: {
 
   const baseline = await readLocked(async (state) => state);
   if (!baseline) return fallback(ineligibleReason);
-  webhookAgeBucket = classifyWebhookAge(baseline.record.lastWebhookAt, input.now);
+  const webhookAgeBucket = classifyWebhookAge(baseline.record.lastWebhookAt, input.now);
   // The securebox owner can unwrap keys externally. Never perform this inside
   // either database-only authority transaction.
   const materialized = await store.materializeStoredConnectionAccount(baseline.record);
-  if (!materialized || materialized.credential.kind !== "provider_config") return fallback("account_unavailable");
+  if (!materialized || materialized.credential.kind !== "provider_config") return fallback("account_unavailable", webhookAgeBucket);
   const account: StoredDeviceSyncAccount = {
     ...materialized,
     credential: materialized.credential,
@@ -82,7 +81,7 @@ export async function preflightHostedScheduledReconcile(input: {
     }),
   };
   if (!await readLocked(async (current) => current?.fingerprint === baseline.fingerprint)) {
-    return fallback("authority_changed_before_fetch");
+    return fallback("authority_changed_before_fetch", webhookAgeBucket);
   }
 
   const controller = new AbortController();

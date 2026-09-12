@@ -38,6 +38,9 @@ export function readJunctionReconcileProof(value: unknown): JunctionReconcilePro
 // Canonicalize object key ordering, preserving nested array semantics. Sort only
 // the outer provider collection: pagination/row order is not a data change.
 function stableJson(value: unknown): string {
+  // The Junction SDK decodes record timestamps into Dates, whose enumerable
+  // properties are empty. Hash their serialized value just like wire timestamps.
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value !== null && typeof value === "object") {
     return `{${Object.entries(value).filter(([, entry]) => entry !== undefined)
@@ -55,4 +58,8 @@ export function appendJunctionReconcileRecords(
   secret: string, digest: string, resource: string, records: readonly unknown[],
 ): string {
   return hashJunctionReconcileValue(secret, [digest, resource, records.map(stableJson).sort()]);
+}
+
+export function beginJunctionReconcileDigest(secret: string, proof: Omit<JunctionReconcileProof, "digest">): string {
+  return hashJunctionReconcileValue(secret, [proof.binding, proof.windowStart, proof.validUntil, proof.timeZone]);
 }
