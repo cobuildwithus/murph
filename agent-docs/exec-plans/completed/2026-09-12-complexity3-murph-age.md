@@ -1,6 +1,6 @@
 # Remove the active Murph Age feature
 
-Status: active
+Status: completed
 Created: 2026-09-12
 Updated: 2026-09-12
 
@@ -82,3 +82,9 @@ Updated: 2026-09-12
 - Existing saved health records and generic metric, query/browser, wearable, lab, goal, and experiment mechanics remain. The complete surviving health-metrics suite passes.
 - The retirement note is content-only, uses the existing changelog archive presentation, and makes no replacement or data-deletion claim.
 - Result: Ready for parent candidate review. All selected journeys and focused checks pass; parent owns final review and exact-head CI.
+
+## Implementation handoff
+
+- Draft PR #3370 contains the two verified Pro-authored patches, canonical CLI generated artifacts, and the retirement note with its actual PR provenance.
+- Local integration is complete and focused evidence is green. Parent owns candidate review, Ready admission, final ReviewGPT, exact-head CI, and merge.
+Completed: 2026-09-12
