@@ -32,12 +32,10 @@ Food-journal answers "what happened?" This skill answers "what should we do next
 - Use `behavior-followthrough` when reminders, recurring support, accountability, or repeated adherence repair becomes the main job.
 
 Persist only a plan or preference the user accepts, using the best-fit existing
-surface. The narrow paused daily-card proposal below has two initiation paths:
-an explicit numeric-card request, or the first eligible managed automatic meal
-closeout when the complete canonical read proves that no managed proposal has
-ever existed. Either path authorizes only that canonical draft so provisional
-values do not live in transient assistant state; it remains unusable until
-later acceptance. Do not duplicate facts across stores.
+surface. Only an explicit target-setting request initiates the paused canonical
+nutrition-target proposal below; it remains unusable until later acceptance.
+A numeric card, ordinary meal log, or scheduled closeout is not target-setting
+intent. Do not duplicate facts across stores.
 
 ## Data First
 
@@ -51,33 +49,34 @@ The lowest useful tracking burden wins:
 - **Light structure:** one or two targets, such as protein occasions, a pre-training snack, carbohydrate during a long session, or a hydration plan.
 - **Quantified:** calories or full macros only when explicitly wanted, materially useful, and safe.
 
-Outside the one first-run managed closeout proposal below, do not give
-unsolicited calorie, macro, or weight-loss estimates. Past tracking alone does
-not imply current consent. Treat appetite cues as information, not a test of
+Do not give unsolicited calorie, macro, or weight-loss targets. Food-journal
+owns requested estimates and ordinary meal-log totals, with its number-sensitive
+exceptions. Past tracking alone does not imply consent to target setup. Treat appetite cues as information, not a test of
 virtue or a guarantee of adequacy.
 
 ### Daily nutrition-card goals
 
-An explicit request for a numeric daily nutrition card supplies numeric intent
-for Murph's goal-aware card workflow. The first eligible managed automatic meal
-closeout may also propose once when complete all-status Goal discovery proves
-that no managed proposal has ever existed. Both paths authorize only the paused
-canonical proposal; neither activates or uses provisional targets. The
-`murph.attach_response_card` prompt owns the numeric-suitability rule. Apply it
-from known context and do not add a universal medical-history or measurement
-preflight. It may ask one compact safety question before proposing new targets,
-but a routine card with accepted goals does not repeat screening without a new
-concern. Apply that rule only to the numeric target or guidance the known fact
+Targets are optional. A numeric daily summary and an ordinary private meal log
+use the owned card when complete fresh same-date totals, suitability and route
+permit: `ready` supplies five accepted goal snapshots; `missing` supplies five
+nulls. Conflict, incompatible or capacity is not missing and stays text-only.
+A summary never derives, proposes, accepts, activates, or mutates targets.
+The food-journal skill owns the once-only optional introduction; prior declines
+and number-sensitive preferences suppress it, and silence never accepts goals.
+
+For explicit target-setting, read `references/daily-nutrition-card-goals.md`.
+It retains evidence-grounded derivation, the single canonical Goal proposal,
+explanation-before-card, explicit acceptance and decline semantics. The card tool
+prompt owns the numeric-suitability rule: use one compact safety question only
+when a concrete concern needs clarification for the requested advice; do not add a universal medical-history or measurement
+preflight. A totals-only card needs no target-derivation inputs, and
+a routine card with accepted goals does not repeat screening without a new concern.
+Apply that rule only to the numeric target or guidance the known fact
 materially affects. An allergy, intolerance, dietary restriction, or
 clinician-directed diet is not by itself a reason to suppress benign totals or
-an accepted compatible target bundle. When five usable daily goals are missing,
-read and follow
-`references/daily-nutrition-card-goals.md`. That reference owns
-evidence-grounded default derivation, the single canonical Goal proposal, and
-the explanation-before-card sequence. Do not send a goal-less card, create a
-second goal store, or broaden the one scheduled exception into recurring
-unsolicited diet planning.
-
+an accepted compatible target bundle. Number-sensitive/intuitive-eating/eating-disorder
+contexts still suppress numeric cards. A scheduled closeout never initiates or
+repeats a proposal, changes a Goal, or asks target-setup questions.
 A scheduled occurrence with unresolved suitability uses ordinary nonnumeric
 closeout text and makes no proposal, mutation, question, or card.
 

@@ -2240,7 +2240,9 @@ describe('assistant system prompt cache stability', () => {
     // visibility, and workspace-safe launch recovery; focused Terra proof owns it.
     // Private group-consent recovery adds 609 characters; focused Terra journeys
     // verify the actionable next step and prevent ineffective context handoffs.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(72_803)
+    // Nutrition guidance adds 287 characters; six focused Terra journeys cover
+    // first-card invitation, suppression, routine logging and scheduled closeout.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(73_090)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
