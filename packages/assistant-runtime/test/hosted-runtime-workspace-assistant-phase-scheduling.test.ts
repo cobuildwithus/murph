@@ -1198,6 +1198,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledOnce();
     expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledWith({
+      migrationOnly: true,
       shouldYield: null,
       signal: null,
       vault: "/tmp/murph-vault",

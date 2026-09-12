@@ -1105,7 +1105,7 @@ describe('assistant runtime residue pruning', () => {
     await expectPathExists(resolveAssistantTurnReceiptPath(paths, recentTurnId))
   })
 
-  it('cooperatively owns local migration without rescanning receipts after the marker', async () => {
+  it('cooperatively owns local migration without rescanning history after the marker', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-post-pass-migration-',
     )
@@ -1165,6 +1165,7 @@ describe('assistant runtime residue pruning', () => {
     let observedPartialRouteState = false
     await expect(
       maintainAssistantAutoReplyRouteState({
+        migrationOnly: true,
         shouldYield: () => {
           observedPartialRouteState = existsSync(routeStatePath)
           return observedPartialRouteState
@@ -1178,6 +1179,7 @@ describe('assistant runtime residue pruning', () => {
     )
 
     await expect(maintainAssistantAutoReplyRouteState({
+      migrationOnly: true,
       vault: vaultRoot,
     })).resolves.toEqual({ changed: true, trusted: true })
 
@@ -1200,6 +1202,19 @@ describe('assistant runtime residue pruning', () => {
     await expect(maintainAssistantAutoReplyRouteState({
       vault: vaultRoot,
     })).resolves.toEqual({ changed: false, trusted: true })
+    await writeFile(
+      path.join(paths.outboxDirectory, 'malformed.json'),
+      '{invalid outbox json',
+      'utf8',
+    )
+    await expect(maintainAssistantAutoReplyRouteState({
+      migrationOnly: true,
+      vault: vaultRoot,
+    })).resolves.toEqual({ changed: false, trusted: true })
+    // Background maintenance still inventories history and fails closed.
+    await expect(maintainAssistantAutoReplyRouteState({
+      vault: vaultRoot,
+    })).resolves.toEqual({ changed: false, trusted: false })
   })
 
   it('retires a quiescent route claim while generic journal retention remains authoritative', async () => {

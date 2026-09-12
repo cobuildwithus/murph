@@ -3097,8 +3097,15 @@ async function withHostedAutoReplyRouteMaintenanceAfterDelivery(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
+  // Preserve first-use migration, then leave full history reconciliation to
+  // background/no-progress recovery and idle snapshot pruning.
+  const migrationOnly = input.result.foregroundReplyFailed === 0
+    && input.result.progressed === true;
   if (!input.result.afterCheckpoint) {
-    const changed = await maintainHostedAutoReplyRouteState(input.input);
+    const changed = await maintainHostedAutoReplyRouteState(
+      input.input,
+      migrationOnly,
+    );
     if (!changed || input.result.progressed === true) {
       return input.result;
     }
@@ -3114,7 +3121,10 @@ async function withHostedAutoReplyRouteMaintenanceAfterDelivery(input: {
     ...input.result,
     afterCheckpoint: async () => {
       const postDelivery = await afterDeliveryCheckpoint();
-      const changed = await maintainHostedAutoReplyRouteState(input.input);
+      const changed = await maintainHostedAutoReplyRouteState(
+        input.input,
+        migrationOnly,
+      );
       return postDelivery ?? (changed
         ? { checkpointReason: "assistant_runtime_commit" }
         : null);
@@ -3125,6 +3135,7 @@ async function withHostedAutoReplyRouteMaintenanceAfterDelivery(input: {
 
 async function maintainHostedAutoReplyRouteState(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  migrationOnly = false,
 ): Promise<boolean> {
   if (input.shouldYieldBackgroundMaintenance?.() === true) {
     return false;
@@ -3134,6 +3145,7 @@ async function maintainHostedAutoReplyRouteState(
     ?? null;
   try {
     const result = await maintainAssistantAutoReplyRouteState({
+      ...(migrationOnly ? { migrationOnly: true } : {}),
       shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
       signal: maintenanceSignal,
       vault: input.restored.vaultRoot,
