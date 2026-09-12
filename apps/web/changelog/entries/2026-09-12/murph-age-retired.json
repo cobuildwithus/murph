@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "murph-age-retired",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Experimental Murph Age retired",
+    "summary": "The experimental Murph Age calculators and age CLI commands are retired.",
+    "details": "Existing saved health records are unchanged.",
+    "relevanceTags": [
+      "health-data",
+      "cli"
+    ],
+    "sourcePullRequests": []
+  }
+}

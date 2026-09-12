@@ -198,6 +198,10 @@ test("normalization strips extras and rejects unsafe labels, numbers, dimensions
   })) };
   assert.deepEqual(normalizeCliTiming(JSON.parse(JSON.stringify(extra))), valid);
   assert.equal(cliTimingCommand("goal list --id PRIVATE_SENTINEL"), "other");
+  for (const leaf of ["report", "scaffold", "preview", "preview-view", "calculate", "calculate-bundle",
+    "inputs", "model-cards", "evidence"]) {
+    assert.equal(cliTimingCommand(`age ${leaf}`), "other");
+  }
   for (const mutate of [
     (r: CliTiming) => { r.commands[0]!.command = "/PRIVATE_SENTINEL"; },
     (r: CliTiming) => { r.commands[0]!.calls = Number.MAX_SAFE_INTEGER + 1; },
@@ -220,8 +224,8 @@ test("normalization strips extras and rejects unsafe labels, numbers, dimensions
 
 test("bounded cardinality and arithmetic overflow drop whole incoming calls, not legacy data", () => {
   const aggregate = emptyCliTiming();
-  const names = ["age calculate", "age evidence", "age inputs", "age model-cards", "age preview",
-    "age preview-view", "age report", "age scaffold", "allergy list", "allergy save", "allergy show",
+  const names = ["blood-test show", "capture show", "condition show", "document show", "food show",
+    "goal show", "provider list", "supplement list", "allergy list", "allergy save", "allergy show",
     "allergy scaffold", "assertion save", "assertion scaffold", "assistant ask", "assistant chat",
     "assistant status", "assistant stop", "assistant run", "audit list", "audit show", "audit tail",
     "automation list", "automation show", "batch", "blood-test list", "capture list", "condition list",
