@@ -3480,6 +3480,19 @@ window to a well-formed past-or-near-present range. The shared Exa
 research-scout request recipe, query shape, and structured-output schema live
 in `@murphai/contracts` so local CLI and hosted Worker validation cannot drift.
 
+The CLI's `fetchExaResearchScoutBatchCandidates` validates all input before
+starting at most two independent lanes at once (four lanes maximum). Each call
+still traverses the existing request validator and hosted per-operation
+authorization, with its own 60-second deadline, caller abort, and no retry.
+Results retain input order and the full provider envelopes. The first observed
+lane failure closes admission, cancels siblings, and joins every worker before
+rethrowing that original typed failure; caller abort also closes admission and
+never returns partial success. A pre-aborted batch makes no request. Unlike the
+old serial failure path, up to two already-authorized calls can overlap;
+cancellation does not undo provider work or guarantee reversal of its cost.
+Single-scout behavior is unchanged. The synthetic baseline/current comparator
+is `scripts/benchmark-research-scout-batch.mjs`.
+
 Hosted Linq typing-start events are verified, parsed strictly, and acknowledged
 without scheduling member lookup or runtime work. Current Web no longer sends
 member-specific shell-prewarm hints from typing, message routing, or instant
