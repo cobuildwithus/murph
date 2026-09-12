@@ -18,12 +18,23 @@ obscuring the assistant outcome. Merely creating an empty retrieval log is not
 sufficient: trim().split('\n') counts empty content as one entry and can defer
 the failure to a missing payload instead of reporting the observed zero reads.
 
+In agent sessions, Vitest 4.1.6's `MinimalReporter` delegates to
+`DefaultReporter` with `silent: 'passed-only'`
+(`node_modules/vitest/dist/chunks/index.UpGiHP7g.js`, lines 3867-3875), hiding
+successful synthetic replies and bounded diagnostics. Without an explicit
+reporter, `buildAssistantRealCodexVitestArgs` in
+`scripts/run-assistant-real-codex-e2e.ts` inherits that behavior.
+
 ## Possible Solution
 
 Precreate the two owned empty logs during fixture setup, print the actual reply
 before any log read, filter empty lines, and fail with the observed retrieval
 count before reading payload.json. Keep all original effect and quiet-result
 assertions; do not change prompts, model selection, or provider behavior.
+
+Select `--reporter=default` in `buildAssistantRealCodexVitestArgs` and pin it
+in the existing exact-arguments test so successful reply/diagnostic evidence
+remains visible. This changes only reporting, not live inputs or assertions.
 
 ## Minimal Reproducible Example
 
