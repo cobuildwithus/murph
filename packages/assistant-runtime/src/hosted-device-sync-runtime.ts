@@ -37,6 +37,7 @@ import type {
   StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import {
+  JUNCTION_RECONCILE_PROOF_METADATA_KEY,
   JUNCTION_TEMPORAL_SWEEP_METADATA_KEY,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
@@ -549,7 +550,7 @@ function buildHostedDeviceSyncCompletionFenceUpdate(
     baseline.localState.nextReconcileAt, hint.nextReconcileAt,
   );
   const metadata = projectHostedCheckpointedConnectionMetadata(
-    baseline.connection.metadata, baseline.connection.metadata, hint.junctionTemporalSweepKey,
+    baseline.connection.metadata, baseline.connection.metadata, hint.junctionTemporalSweepKey, hint.junctionReconcileProof,
   );
   const metadataChanged = !equalJsonRecords(metadata, baseline.connection.metadata);
   if (!advancedReconcileAt && !metadataChanged) {
@@ -797,6 +798,9 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
     }
 
     const baseline = snapshotByConnectionId.get(hostedConnectionId) ?? null;
+    const checkpointedHint = readHostedCheckpointedConnectionHint(
+      input.wake, hostedConnectionId, account.connectedAt,
+    );
     const update = buildHostedDeviceSyncRuntimeConnectionUpdate({
       account,
       baseline,
@@ -804,9 +808,8 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       deferNextReconcileAtToBaseline:
         input.deferNextReconcileAtForLocalAccountId === localAccountId,
       hostedConnectionId,
-      checkpointedTemporalSweepKey: readHostedCheckpointedTemporalSweepKey(
-        input.wake, hostedConnectionId, account.connectedAt,
-      ),
+      checkpointedTemporalSweepKey: checkpointedHint?.junctionTemporalSweepKey,
+      checkpointedReconcileProof: checkpointedHint?.junctionReconcileProof,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
       sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
       sources: store.listConnectionSources({
@@ -1090,12 +1093,9 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     return null;
   }
 
-  const temporalSweepKey = account.metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
   const retainedHint = {
     ...(input.wake.hint ?? {}),
-    ...(typeof temporalSweepKey === "string"
-      ? { junctionTemporalSweepKey: temporalSweepKey }
-      : {}),
+    ...checkpointProofHint(account.metadata),
   };
 
   // A provider job can create multiple follow-ups. The execution/admission
@@ -1160,10 +1160,9 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     (entry) => entry.connection.id === input.state.localToHostedAccountIds.get(localAccountId),
   );
   const baselineNextReconcileAt = baseline?.localState.nextReconcileAt ?? null;
-  const baselineSweepKey = baseline?.connection.metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
   const nextReconcileAt = account.nextReconcileAt ?? null;
   if (nextReconcileAt === baselineNextReconcileAt
-    && (typeof temporalSweepKey !== "string" || temporalSweepKey === baselineSweepKey)) {
+    && !hasUnpublishedCheckpointProof(account.metadata, baseline?.connection.metadata ?? {})) {
     return null;
   }
 
@@ -1179,6 +1178,23 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
       },
     },
   };
+}
+
+function checkpointProofHint(metadata: Record<string, unknown>): {
+  junctionTemporalSweepKey?: string;
+  junctionReconcileProof?: string;
+} {
+  const sweep = metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
+  const proof = metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY];
+  return {
+    ...(typeof sweep === "string" ? { junctionTemporalSweepKey: sweep } : {}),
+    ...(typeof proof === "string" ? { junctionReconcileProof: proof } : {}),
+  };
+}
+
+function hasUnpublishedCheckpointProof(local: Record<string, unknown>, hosted: Record<string, unknown>): boolean {
+  return [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, JUNCTION_RECONCILE_PROOF_METADATA_KEY]
+    .some((key) => typeof local[key] === "string" && local[key] !== hosted[key]);
 }
 
 function resolveHostedDeviceSyncRetainedWakeAt(cadenceAt: string | null, retryAt: string): string {
@@ -1846,30 +1862,38 @@ function buildHostedDeviceSyncWakeAccountPatch(
     account.nextReconcileAt ?? null,
     hint.nextReconcileAt,
   );
-  if (!nextReconcileAt && (!hint.junctionTemporalSweepKey
-    || hint.junctionTemporalSweepKey === account.metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY])) {
+  const sweepChanged = hint.junctionTemporalSweepKey !== undefined
+    && hint.junctionTemporalSweepKey !== account.metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
+  const proofChanged = hint.junctionReconcileProof !== undefined
+    && hint.junctionReconcileProof !== account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY];
+  if (!nextReconcileAt && !sweepChanged && !proofChanged) {
     return null;
   }
   return {
     ...(nextReconcileAt ? { nextReconcileAt } : {}),
-    ...(hint.junctionTemporalSweepKey ? {
+    ...(sweepChanged || proofChanged ? {
       metadata: {
         ...account.metadata,
-        [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY]: hint.junctionTemporalSweepKey,
+        ...(hint.junctionTemporalSweepKey === undefined ? {} : {
+          [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY]: hint.junctionTemporalSweepKey,
+        }),
+        ...(hint.junctionReconcileProof === undefined ? {} : {
+          [JUNCTION_RECONCILE_PROOF_METADATA_KEY]: hint.junctionReconcileProof,
+        }),
       },
     } : {}),
   };
 }
 
-function readHostedCheckpointedTemporalSweepKey(
+function readHostedCheckpointedConnectionHint(
   wake: HostedRuntimeEvent,
   connectionId: string,
   connectedAt: string,
-): string | undefined {
+): NonNullable<ReturnType<typeof resolveHostedDeviceSyncWakeContext>["hint"]> | undefined {
   return wake.kind === "device-sync.wake"
       && wake.connectionId === connectionId
       && wake.expectedConnectedAt === connectedAt
-    ? wake.hint?.junctionTemporalSweepKey
+    ? wake.hint ?? undefined
     : undefined;
 }
 
@@ -1877,14 +1901,19 @@ function projectHostedCheckpointedConnectionMetadata(
   localMetadata: Record<string, unknown>,
   baselineMetadata: Record<string, unknown>,
   checkpointedSweepKey: string | undefined,
+  checkpointedReconcileProof: string | undefined,
 ): Record<string, unknown> {
   const metadata = { ...localMetadata };
-  const publishedSweepKey = checkpointedSweepKey
-    ?? baselineMetadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
-  if (publishedSweepKey === undefined) {
-    delete metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
-  } else {
-    metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY] = publishedSweepKey;
+  for (const [key, checkpointedValue] of [
+    [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, checkpointedSweepKey],
+    [JUNCTION_RECONCILE_PROOF_METADATA_KEY, checkpointedReconcileProof],
+  ] as const) {
+    const publishedValue = checkpointedValue ?? baselineMetadata[key];
+    if (publishedValue === undefined) {
+      delete metadata[key];
+    } else {
+      metadata[key] = publishedValue;
+    }
   }
   return metadata;
 }
@@ -1894,6 +1923,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   baseline: HostedDeviceSyncRuntimeConnectionSnapshot | null;
   codec: ReturnType<typeof createSecretCodec>;
   checkpointedTemporalSweepKey?: string;
+  checkpointedReconcileProof?: string;
   deferNextReconcileAtToBaseline: boolean;
   hostedConnectionId: string;
   observedTokenVersion: number | null;
@@ -2018,7 +2048,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   // survived the workspace checkpoint. Before then, retain Web's marker.
   const baselineMetadata = baselineConnection?.metadata ?? {};
   const metadata = projectHostedCheckpointedConnectionMetadata(
-    input.account.metadata, baselineMetadata, input.checkpointedTemporalSweepKey,
+    input.account.metadata, baselineMetadata, input.checkpointedTemporalSweepKey, input.checkpointedReconcileProof,
   );
   if (!equalJsonRecords(metadata, baselineMetadata)) {
     update.connection = {

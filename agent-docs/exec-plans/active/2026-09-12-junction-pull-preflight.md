@@ -1,0 +1,74 @@
+# Avoid unchanged Junction reconciliation wakes
+
+Status: active
+Created: 2026-09-12
+Updated: 2026-09-12
+
+## Goal and scope
+
+Avoid ordinary scheduled container wakes when bounded Junction reads prove the
+same content was already imported and checkpointed. Measure comparison outcomes,
+provider collection cost, fallback reasons, and successfully avoided wakes before
+considering a lower polling frequency. Keep the current cadence and canonical
+import owner. No new queue, vendor refresh request, or canonical health store.
+
+## Product UX
+
+Patch. Outcome: unchanged scheduled checks can finish without member execution.
+Reaches: settled Junction connections; new/updated data still uses existing durable
+wake/import work. New connections, unfinished history, daily repair, dirty work,
+revoked access, unavailable providers, and old checkpoints preserve their current
+path. Proof: provider-shaped correction/no-change tests, import-failure and
+checkpoint/cold-restore tests, and locked Web authority/idle-work/CAS tests.
+
+## Design and constraints
+
+- Reuse ordinary summary readers and the latest globally closed calendar-day
+  readers; introspection counters are not negative change evidence.
+- A keyed content digest covers actual records and inventory/configuration/source
+  lifecycle binding. Persist only a bounded versioned proof, not provider data.
+- Carry partial digest through existing summary continuation payloads. Publish the
+  completed proof through the existing checkpoint completion fence; generic
+  precheckpoint metadata updates must withhold it.
+- Keep the original summary start while checking through current time. Expire
+  proof at the next UTC day, global provider-day closure, or vault-local midnight.
+  Ordinary daily/full repair and scheduler-owned history remain available.
+- Web may skip only with current consent/access/connection/source authority and
+  the durable mailbox/checkpoint/dirty state proving no pending accepted work.
+  Provider work runs outside database transactions. Final CAS advances cadence
+  only; it cannot acknowledge dirty work, mark import success, or extend proof.
+- Bound sweep preflights, execution concurrency, collection pages, and wall time.
+  Unchanged callbacks count as avoided wakes only after the final CAS succeeds.
+- Collection/decoded-record metrics are not HTTP request totals, cold starts,
+  canonical novelty, or a billing estimate.
+
+## Tasks
+
+1. Implement provider content proof and read-only comparison with bounded fetches.
+2. Fence proof publication and cold recovery using existing runtime protocol.
+3. Add Web admission/CAS and aggregate telemetry to the due sweep.
+4. Prove corrections, failures, history/day boundaries, and authority races.
+5. Update owner documentation, review complexity/privacy, run focused checks.
+6. Commit/push draft candidate, run required final ReviewGPT with exact-head CI,
+   resolve findings, and close the plan after completion gates pass.
+
+## Evidence and remaining work
+
+- Provider content proof: 14 scenarios passed, including actual-value correction,
+  closed-day measurement correction, collection ordering, partial continuation,
+  import failure, reconnect, local restore counters, and repair expiry.
+- Existing provider client/resource/webhook regressions: 105 scenarios passed.
+- Shared runtime/manifest contracts: 142 scenarios passed.
+- Checkpoint/cold-restore runtime: four focused scenarios passed.
+- Web preflight/sweeper: 28 scenarios passed, including injected concurrent
+  authority, consent, mailbox, checkpoint, and CAS changes. Live PostgreSQL
+  concurrency is not claimed by these mocks.
+- Device-syncd, assistant-runtime, and Web typechecks passed.
+- Parent diff/privacy review and complexity guard passed. Existing provider and
+  runtime hotspots retain or reduce debt; source authority and mailbox idle proof
+  remain distinct small functions. No new dependencies or database tables.
+- Product UX: Ready for candidate review based on synthetic boundary proof.
+  Changelog not applicable: internal execution suppression and telemetry preserve
+  member-facing polling cadence, data paths, and interactions.
+- Exact-head CI and final ReviewGPT remain pending. No deployment, measured
+  container reduction, or savings is claimed by local checks.

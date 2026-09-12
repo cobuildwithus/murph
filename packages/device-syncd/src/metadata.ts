@@ -1,3 +1,4 @@
+export const JUNCTION_RECONCILE_PROOF_METADATA_KEY = "junctionReconcileProofV1";
 export const JUNCTION_TEMPORAL_SWEEP_METADATA_KEY = "junctionTemporalSweepV1";
 
 const DEVICE_SYNC_METADATA_MAX_ENTRIES = 16;
