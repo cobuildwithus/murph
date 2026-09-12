@@ -15,7 +15,6 @@ import {
   TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY,
   TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
   TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
-  TEMPORAL_COMPATIBILITY_RUN_TIMEOUT_MS,
   TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS,
   TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS,
   buildAttestationJobName,
@@ -866,54 +865,98 @@ test("controller dispatches main only after exact private-head, workflow, and pu
   }));
 });
 
-test("controller finalizes a last-admitted success before the private token safety boundary", async () => {
-  let nowMs = 0;
-  let dispatchFinishedAt = null;
-  let privateMainReads = 0;
-  await withCompatibilityEnv(async () => withFetch(async (url) => {
-    nowMs += 30_000;
-    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
-      privateMainReads += 1;
-      return jsonResponse(privateMainRef());
-    }
-    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
-      return jsonResponse({
-        id: WORKFLOW_ID,
-        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
-        state: "active",
-      });
-    }
-    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
-    if (url.endsWith("/dispatches")) {
-      dispatchFinishedAt = nowMs;
-      return jsonResponse({ workflow_run_id: RUN_ID });
-    }
-    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
-      assert.notEqual(dispatchFinishedAt, null);
-      nowMs = dispatchFinishedAt + TEMPORAL_COMPATIBILITY_RUN_TIMEOUT_MS;
-      return jsonResponse(privateRun());
-    }
-    if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
-      return jsonResponse({ jobs: proofJobs(), total_count: 4 });
-    }
-    throw new Error(`unexpected URL ${url}`);
-  }, async () => {
-    const proof = await runTemporalCompatibility(compatibilityArgs({
-      now: () => nowMs,
-      sleepFn: async (duration) => {
-        nowMs += duration;
+for (const releaseScope of [HOSTED_RELEASE_SCOPE_NONE, HOSTED_RELEASE_SCOPE_PRODUCTION_CORE]) {
+  test(`controller completes ${releaseScope} after twenty queued and twenty-five executing minutes`, async () => {
+    let dispatchedAt;
+    const observedStatuses = new Set();
+    await withTimedController({
+      releaseScope,
+      respond: ({ kind }, clock) => {
+        if (kind === "dispatch") dispatchedAt = clock.ms;
+        if (kind !== "run") return;
+        const elapsed = clock.ms - dispatchedAt;
+        const status = elapsed < 20 * 60_000 ? "queued"
+          : elapsed < 45 * 60_000 ? "in_progress" : "completed";
+        observedStatuses.add(status);
+        return jsonResponse(privateRun({
+          status,
+          conclusion: status === "completed" ? "success" : null,
+        }));
       },
-    }));
-    assert.equal(proof.readerCount, 3);
-  }));
-  assert.equal(privateMainReads, 2);
-  assert.ok(nowMs < TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS);
-  assert.ok(
-    TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS - nowMs
-      > TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS,
-  );
-});
+    }, async ({ clock, run }) => {
+      const proof = await run();
+      assert.equal(proof.releaseScope, releaseScope);
+      assert.deepEqual([...observedStatuses], ["queued", "in_progress", "completed"]);
+      assert.equal(clock.ms - dispatchedAt, 45 * 60_000);
+      assert.ok(clock.ms < TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS);
+      assert.equal(clock.calls.filter(({ kind }) => kind === "jobs").length, 1);
+      assert.equal(clock.calls.filter(({ kind }) => kind === "cancel" || kind === "force-cancel").length, 0);
+    });
+  });
+}
+
+for (const lateKind of ["run", "jobs", "public", "ancestry", "private"]) {
+  test(`controller rejects ${lateKind} response bodies arriving at the credential boundary`, async () => {
+    let deliveredLate = false;
+    await withTimedController({
+      releaseScope: HOSTED_RELEASE_SCOPE_PRODUCTION_CORE,
+      respond: ({ kind, occurrence }, clock, response) => {
+        // Exercise the optional protected-main ancestry read during finalization.
+        if (kind === "public" && occurrence === 2) response = jsonResponse(publicMainRef(MOVED_PRIVATE_SHA));
+        const finalRead = (kind !== "public" && kind !== "private") || occurrence === 2;
+        if (kind === lateKind && finalRead) {
+          const json = response.json.bind(response);
+          response.json = async () => {
+            const body = await json();
+            clock.ms = TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS;
+            deliveredLate = true;
+            return body;
+          };
+        }
+        return response;
+      },
+    }, async ({ clock, run }) => {
+      await assert.rejects(run);
+      assert.equal(deliveredLate, true);
+      assert.equal(clock.calls.at(-1).kind, lateKind);
+      assert.ok(clock.calls.every(({ at }) => at < TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS));
+    });
+  });
+}
+
+for (const releaseScope of [HOSTED_RELEASE_SCOPE_NONE, HOSTED_RELEASE_SCOPE_PRODUCTION_CORE]) {
+  test(`controller finalizes a last-admitted ${releaseScope} success within the reserve`, async () => {
+    const deadline = TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS - TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS;
+    let observedSuccessAt;
+    await withTimedController({
+      releaseScope,
+      respond: ({ kind, occurrence }, clock) => {
+        if (kind === "run") {
+          if (clock.ms < deadline - 15_000) {
+            return jsonResponse(privateRun({ status: "in_progress", conclusion: null }));
+          }
+          // A final status read takes just under its remaining 15-second budget.
+          clock.ms = deadline - 1;
+          observedSuccessAt = clock.ms;
+        } else {
+          clock.ms += 30_000;
+        }
+        if (releaseScope !== HOSTED_RELEASE_SCOPE_NONE && kind === "public" && occurrence === 2) {
+          return jsonResponse(publicMainRef(MOVED_PRIVATE_SHA));
+        }
+      },
+    }, async ({ clock, run }) => {
+      const proof = await run();
+      assert.equal(proof.releaseScope, releaseScope);
+      assert.equal(observedSuccessAt, deadline - 1);
+      const finalReads = clock.calls.filter(({ at }) => at >= observedSuccessAt);
+      assert.deepEqual(finalReads.map(({ kind }) => kind), releaseScope === HOSTED_RELEASE_SCOPE_NONE
+        ? ["jobs", "public", "private"] : ["jobs", "public", "ancestry", "private"]);
+      assert.equal(clock.ms, observedSuccessAt + finalReads.length * 30_000);
+      assert.ok(clock.ms < TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS);
+    });
+  });
+}
 
 for (const releaseScope of [HOSTED_RELEASE_SCOPE_FOREGROUND, HOSTED_RELEASE_SCOPE_PRODUCTION_CORE]) {
   for (const advanceAt of [0, 1, 2]) {
@@ -1228,59 +1271,188 @@ test("controller cancels only its accepted run when status polling becomes uncer
   }));
 });
 
-test("controller times out and cancels only its accepted run", async () => {
-  const controlUrls = [];
-  let nowMs = 0;
-  let forceCancelFinishedAt = null;
-  let runReads = 0;
-  await withCompatibilityEnv(async () => withFetch(async (url) => {
-      nowMs += 30_000;
-      if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
-        return jsonResponse(privateMainRef());
+for (const settles of [true, false]) {
+  test(`controller exhausts the shared budget and ${settles ? "settles" : "fails closed on"} its exact run`, async () => {
+    const deadline = TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS - TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS;
+    let forceCancelFinishedAt;
+    await withTimedController({
+      respond: ({ kind, timeoutMs }, clock) => {
+        if (kind === "cancel" || kind === "force-cancel") clock.ms += 30_000;
+        if (kind === "force-cancel") forceCancelFinishedAt = clock.ms;
+        if (kind === "run") {
+          // Use the full request allowance without delivering a response at or
+          // after its abort boundary; sleeps consume the rest of each wait.
+          clock.ms += timeoutMs - 1;
+          const complete = settles && forceCancelFinishedAt !== undefined
+            && clock.ms >= forceCancelFinishedAt + 2 * 60_000 - 15_000;
+          return jsonResponse(privateRun({
+            status: complete ? "completed" : "in_progress",
+            conclusion: complete ? "cancelled" : null,
+          }));
+        }
+      },
+    }, async ({ clock, run }) => {
+      await assert.rejects(run, (error) => {
+        assert.equal(error instanceof AggregateError, !settles);
+        if (settles) assert.match(error.message, /run timed out/u);
+        else assert.match(error.message, /could not be proven terminal/u);
+        return true;
+      });
+      const cancellation = clock.calls.filter(({ kind }) => kind === "cancel" || kind === "force-cancel");
+      assert.deepEqual(cancellation.map(({ kind, at }) => [kind, at]), [
+        ["cancel", deadline], ["force-cancel", deadline + 30_000 + 2 * 60_000],
+      ]);
+      assert.ok(cancellation.every(({ url }) => url.includes(`/actions/runs/${RUN_ID}/`)));
+      assert.ok(clock.ms <= deadline + 2 * 30_000 + 2 * 2 * 60_000);
+      assert.ok(clock.ms < TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS);
+      assert.equal(clock.calls.filter(({ kind }) => kind === "jobs").length, 0);
+    });
+  });
+}
+
+for (const failure of ["failed run", "failed proof job", "malformed attestation", "incomplete jobs", "changed public head"]) {
+  test(`controller still rejects ${failure} after the old timeout ceiling`, async () => {
+    await withTimedController({
+      respond: async ({ kind, occurrence }, clock, response) => {
+        if (kind === "run") {
+          if (clock.ms < 45 * 60_000) {
+            return jsonResponse(privateRun({ status: "in_progress", conclusion: null }));
+          }
+          if (failure === "failed run") return jsonResponse(privateRun({ conclusion: "failure" }));
+        }
+        if (kind === "jobs") {
+          const page = await response.json();
+          if (failure === "failed proof job") page.jobs[0].conclusion = "failure";
+          if (failure === "malformed attestation") page.jobs[3].name = "Temporal compatibility attestation [malformed]";
+          if (failure === "incomplete jobs") page.total_count += 1;
+          return jsonResponse(page);
+        }
+        if (kind === "public" && occurrence === 2 && failure === "changed public head") {
+          return jsonResponse(pullRequest({
+            head: { repo: { full_name: "cobuildwithus/murph" }, sha: MOVED_PRIVATE_SHA },
+          }));
+        }
+      },
+    }, async ({ clock, run }) => {
+      await assert.rejects(run, (error) => !(error instanceof AggregateError));
+      assert.equal(clock.ms, 45 * 60_000);
+      // The exact run is already terminal; do not cancel it or dispatch another.
+      assert.deepEqual(clock.calls.filter(({ method }) => method === "POST").map(({ kind }) => kind), ["dispatch"]);
+    });
+  });
+}
+
+for (const ordinaryCancelStatus of [202, 503]) {
+  test(`controller clips late cancellation and settlement after cancel HTTP ${ordinaryCancelStatus}`, async () => {
+    let settling = false;
+    await withTimedController({
+      respond: ({ kind, timeoutMs }, clock) => {
+        if (kind === "cancel") {
+          assert.equal(timeoutMs, 10_000);
+          settling = true;
+          return new Response(null, { status: ordinaryCancelStatus });
+        }
+        if (kind === "force-cancel") assert.equal(timeoutMs, 10_000);
+        if (kind === "run") {
+          if (!settling) {
+            clock.ms = TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS - 10_000;
+            return new Response(null, { status: 503 });
+          }
+          assert.equal(timeoutMs, 10_000);
+          clock.ms += 9_999;
+          return jsonResponse(privateRun({ conclusion: "cancelled" }));
+        }
+      },
+    }, async ({ clock, run }) => {
+      await assert.rejects(run, (error) => {
+        assert.ok(!(error instanceof AggregateError));
+        assert.match(error.message, /run lookup failed with HTTP 503/u);
+        return true;
+      });
+      assert.equal(clock.ms, TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS - 1);
+      assert.deepEqual(clock.calls.filter(({ method }) => method === "POST").map(({ kind }) => kind),
+        ordinaryCancelStatus === 202 ? ["dispatch", "cancel"] : ["dispatch", "cancel", "force-cancel"]);
+    });
+  });
+}
+
+for (const elapsed of [
+  TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS - TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS - 30_000,
+  TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS,
+]) {
+  test(`controller does not dispatch when preflight consumes ${elapsed}ms`, async () => {
+    await withTimedController({
+      respond: ({ kind }, clock) => {
+        if (kind === "public") clock.ms = elapsed;
+      },
+    }, async ({ clock, run }) => {
+      await assert.rejects(run);
+      assert.deepEqual(clock.calls.map(({ kind }) => kind), ["private", "workflow", "public"]);
+    });
+  });
+}
+
+test("controller clips finalization HTTP to the remaining credential budget", async () => {
+  await withTimedController({
+    respond: ({ kind, occurrence, timeoutMs }, clock) => {
+      if (kind === "jobs") clock.ms = TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS - 5_000;
+      if (kind === "public" && occurrence === 2) {
+        assert.equal(timeoutMs, 5_000);
+        clock.ms += timeoutMs;
       }
-      if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
-        return jsonResponse({
-          id: WORKFLOW_ID,
-          name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-          path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
-          state: "active",
-        });
-      }
-      if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
-      if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
-      if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)) {
-        controlUrls.push(url);
-        return new Response(null, { status: 202 });
-      }
-      if (url.endsWith(`/actions/runs/${RUN_ID}/force-cancel`)) {
-        controlUrls.push(url);
-        forceCancelFinishedAt = nowMs;
-        return new Response(null, { status: 202 });
-      }
-      if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
-        runReads += 1;
-        const forceCancellationSettled = forceCancelFinishedAt !== null
-          && nowMs - forceCancelFinishedAt >= 2 * 60_000;
-        return jsonResponse(privateRun(forceCancellationSettled
-          ? { conclusion: "cancelled", status: "completed" }
-          : { conclusion: null, status: "in_progress" }));
-      }
-      throw new Error(`unexpected URL ${url}`);
-    }, async () => {
-      await assert.rejects(() => runTemporalCompatibility(compatibilityArgs({
-        now: () => nowMs,
-        sleepFn: async (duration) => {
-          nowMs += duration;
-        },
-      })), /run timed out/u);
-    }));
-  assert.deepEqual(controlUrls, [
-    `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
-    `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/force-cancel`,
-  ]);
-  assert.ok(runReads > 2);
-  assert.ok(nowMs < TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS);
+    },
+  }, async ({ clock, run }) => {
+    await assert.rejects(run, /timing budget/u);
+    assert.equal(clock.ms, TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS);
+    assert.equal(clock.calls.at(-1).kind, "public");
+  });
 });
+
+test("controller shares the usable deadline with initial exact-run visibility recovery", async () => {
+  const deadline = TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS - TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS;
+  let cancelled = false;
+  await withTimedController({
+    respond: ({ kind }, clock) => {
+      if (kind === "public") clock.ms = deadline - 30_001;
+      if (kind === "dispatch") clock.ms += 30_000;
+      if (kind === "cancel") cancelled = true;
+      if (kind === "run" && !cancelled) return new Response(null, { status: 404 });
+    },
+  }, async ({ clock, run }) => {
+    await assert.rejects(run, (error) => !(error instanceof AggregateError));
+    assert.deepEqual(clock.calls.filter(({ kind }) => kind === "run" || kind === "cancel")
+      .map(({ kind, at, timeoutMs }) => [kind, at, timeoutMs]), [
+      ["run", deadline - 1, 1], ["cancel", deadline, 30_000], ["run", deadline, 30_000],
+    ]);
+  });
+});
+
+for (const lateKind of ["cancel", "force-cancel", "settlement"]) {
+  test(`controller cannot extend the credential boundary during ${lateKind}`, async () => {
+    let cancelling = false;
+    let forceCancelled = false;
+    await withTimedController({
+      respond: ({ kind, timeoutMs }, clock) => {
+        if (kind === "cancel") cancelling = true;
+        if (kind === "force-cancel") forceCancelled = true;
+        if (kind === lateKind) clock.ms = TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS;
+        if (kind === "run") {
+          if (!cancelling) return new Response(null, { status: 503 });
+          if (lateKind === "settlement") {
+            clock.ms = TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS;
+            return jsonResponse(privateRun({ conclusion: "cancelled" }));
+          }
+          if (!forceCancelled) clock.ms += timeoutMs - 1;
+          return jsonResponse(privateRun({ status: "in_progress", conclusion: null }));
+        }
+      },
+    }, async ({ clock, run }) => {
+      await assert.rejects(run, AggregateError);
+      assert.equal(clock.calls.at(-1).kind, lateKind === "settlement" ? "run" : lateKind);
+      assert.ok(clock.calls.every(({ at }) => at < TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS));
+    });
+  });
+}
 
 test("missing dispatch identity never issues a broad or guessed cancellation", async () => {
   const controls = [];
@@ -1327,6 +1499,8 @@ test("accepted-run cancellation force-cancels only after ordinary cancellation s
     if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
       const forceCancellationSettled = forceCancelFinishedAt !== null
         && nowMs - forceCancelFinishedAt >= 2 * 60_000;
+      // Deliver the terminal response just inside the two-minute wait.
+      if (forceCancellationSettled) nowMs -= 1;
       return jsonResponse(privateRun(forceCancellationSettled
         ? { conclusion: "cancelled", status: "completed" }
         : { conclusion: null, status: "in_progress" }));
@@ -1345,7 +1519,7 @@ test("accepted-run cancellation force-cancels only after ordinary cancellation s
     });
     assert.deepEqual(controls, ["cancel", "force-cancel"]);
     assert.equal(forceCancelFinishedAt, 3 * 60_000);
-    assert.equal(nowMs, 5 * 60_000);
+    assert.equal(nowMs, 5 * 60_000 - 1);
   });
 });
 
@@ -1517,6 +1691,78 @@ test("Repo Hygiene owns the focused controller contract test", async () => {
   );
   assert.match(workflow, /node --test scripts\/hosted-orchestration-compatibility\.test\.mjs/u);
 });
+
+// Fake only HTTP and time; all admission, polling, proof and settlement run in
+// the real controller. Record the actual AbortSignal timeout of every request.
+async function withTimedController({
+  releaseScope = HOSTED_RELEASE_SCOPE_NONE,
+  respond = () => undefined,
+}, fn) {
+  const clock = { ms: 0, calls: [] };
+  const timeouts = new WeakMap();
+  const originalTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = (ms) => {
+    const signal = originalTimeout(ms);
+    timeouts.set(signal, ms);
+    return signal;
+  };
+  try {
+    await withFetch(async (url, init) => {
+      let kind;
+      let response;
+      if (url.includes(`/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/git/ref/`)) {
+        kind = "private";
+        response = jsonResponse(privateMainRef());
+      } else if (url.endsWith("/pulls/42") || url.endsWith("/git/ref/heads/main")) {
+        kind = "public";
+        response = jsonResponse(url.endsWith("/pulls/42") ? pullRequest() : publicMainRef());
+      } else if (url.includes("/compare/")) {
+        kind = "ancestry";
+        response = jsonResponse({ status: "ahead", base_commit: { sha: PUBLIC_SHA },
+          merge_base_commit: { sha: PUBLIC_SHA } });
+      } else if (url.endsWith("/dispatches")) {
+        kind = "dispatch";
+        response = jsonResponse({ workflow_run_id: RUN_ID });
+      } else if (url.includes("/actions/workflows/")) {
+        kind = "workflow";
+        response = jsonResponse({ id: WORKFLOW_ID, name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+          path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH, state: "active" });
+      } else if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
+        kind = "run";
+        response = jsonResponse(privateRun());
+      } else if (url.includes(`/actions/runs/${RUN_ID}/jobs?`)) {
+        kind = "jobs";
+        const jobs = proofJobs({ releaseScope });
+        response = jsonResponse({ jobs, total_count: jobs.length });
+      } else if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)
+        || url.endsWith(`/actions/runs/${RUN_ID}/force-cancel`)) {
+        kind = url.endsWith("/force-cancel") ? "force-cancel" : "cancel";
+        response = new Response(null, { status: 202 });
+      } else {
+        throw new Error(`unexpected URL ${url}`);
+      }
+      const call = { kind, url, at: clock.ms, method: init.method ?? "GET",
+        timeoutMs: timeouts.get(init.signal),
+        occurrence: 1 + clock.calls.filter((entry) => entry.kind === kind).length };
+      assert.ok(call.timeoutMs > 0 && call.timeoutMs <= 30_000);
+      clock.calls.push(call);
+      return await respond(call, clock, response) ?? response;
+    }, () => fn({
+      clock,
+      run: (overrides = {}) => runTemporalCompatibility(compatibilityArgs({
+        dispatchMode: releaseScope === HOSTED_RELEASE_SCOPE_NONE ? "temporal_compatibility" : HOSTED_RELEASE_ADMISSION_MODE,
+        expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+        releaseScope,
+        prNumber: releaseScope === HOSTED_RELEASE_SCOPE_NONE ? 42 : null,
+        now: () => clock.ms,
+        sleepFn: async (ms) => { clock.ms += ms; },
+        ...overrides,
+      })),
+    }));
+  } finally {
+    AbortSignal.timeout = originalTimeout;
+  }
+}
 
 async function withCompatibilityEnv(fn) {
   return fn();

@@ -32,6 +32,75 @@ additional deploy-smoke slot. The unused member application stays at zero.
 The scaffold declares the budget on `RunnerContainer`; staging moves that budget
 to `NextRunnerContainer` when the live release selects that namespace.
 
+### Live Web protocol admission
+
+`deploy-worker-version.cli.ts` admits the **served** `HOSTED_WEB_BASE_URL` before
+release work and again before each namespace bootstrap, native retirement or
+application admission, compatibility activation, and final promotion. Each
+boundary then rechecks the current Worker identity. Uploading an inactive version
+is not admission; artifact/fleet smoke and native convergence receipts remain
+required and do not attest Web compatibility. Retries and worker-only releases
+must obtain fresh admission; there is no persisted compatibility receipt or skip
+flag.
+
+The signed, bodyless GET `/api/internal/hosted-runtime/protocol-admission` uses
+existing Web callback signature verification and replay protection, with its own
+system nonce owner (not the Temporal binding-admission contract). The request
+binds the protocol version and a fresh nonce in the signed query. The no-store
+reply echoes that nonce and contains executable evidence from two existing owners:
+
+- The Web runtime-log reader parses synthetic entries for its actual event-code
+  enum. The candidate requires its declared producer vocabulary to be a subset
+  of the reader's; a future reader's extra codes are allowed. The actual log route and
+  probe use the same parser, including `runner.processing_finished`.
+- The normal thread-route authority handler and probe share their response
+  builder. The candidate uses the actual Worker response parser on both direct
+  and group witnesses, requiring explicit `true` and `false`. Denial, malformed
+  audience and inverted direct/group semantics fail closed. The Worker parser
+  still accepts legacy authorized responses for callers that do not need an
+  audience; the runtime's scheduled-delivery boolean requirement and independent
+  callback reauthorization are unchanged.
+
+Worker-only releases run both checks too: retaining an image does not prove that
+it lacks the audience requirement. Without an attested contract for that retained
+artifact, mode alone cannot safely lower the consumer floor. The declared log
+vocabulary is conservative (not pruned to call-site reachability); a legacy Web
+must gain the compatible reader/response encoding before this CLI can activate it.
+Old callers remain compatible with the additive Web response. Neither check
+requires equal or monotonically ordered source revisions.
+
+Each admission requires three successful samples, one second apart. Any failed
+sample ends the attempt, rather than retrying until a compatible replica happens
+to answer. Every sample has a ten-second end-to-end deadline and a 16 KiB streamed
+response limit. Only HTTPS origin requests, non-redirected HTTP 200, JSON, no-store
+and absent/zero Age are admitted. Authentication failures, unavailable Web,
+unknown protocol versions, stale nonce, malformed evidence and missing contracts
+fail closed. Diagnostics contain fixed reason codes or locally owned event codes,
+not remote response bodies, URLs, signatures or deployment identities.
+
+**Bootstrap:** deploy the additive Web endpoint and compatible readers to the
+actual serving Web origin first and finish propagation before deploying this
+CLI. A Web revision with no admission endpoint returns 404 and is deliberately
+not admitted, even when otherwise compatible. Backport the endpoint with evidence
+from that revision's real owners when retaining an older compatible Web; do not
+copy a newer revision's claimed evidence. Missing or incorrect callback signing
+configuration must be repaired through the existing protected deployment path.
+An already-incompatible live pair still needs a compatible Web forward fix; this
+guard prevents the next mutation, not damage already in progress.
+
+This is a bounded directed-contract check, not a Git SHA ordering rule or a claim
+of global atomic rollout. Three observations cannot prove every Web replica has
+converged, nor prevent an independent Web rollback after the check. Keep the
+serving alias stable and preserve the required reader floor throughout activation
+and subsequent operation. Admission tests event-code parsing and the authority
+response encoding, not database route correctness, every log field, or all
+Web-to-runtime features. In particular, selected custom-inference revisions flow
+in the opposite direction: the **Custom Inference Activation** procedure below
+still owns flag enablement, selected-state migration and the runtime rollback
+floor. This GET neither reads member selection nor authorizes that feature's
+activation. New wire obligations need narrowly derived executable witnesses at
+their actual owners, not labels in a general capability registry.
+
 ### Selected-account size experiment
 
 `SmallRunnerContainer` has a ten-instance ceiling outside the regular fleet
