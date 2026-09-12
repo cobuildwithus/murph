@@ -303,7 +303,7 @@ describe("murph.group dynamic tool", () => {
         "question",
       ],
       group_data: [
-        "action", "audience", "confidence", "date", "displayName", "factIndex",
+        "action", "audience", "confidence", "date", "displayName", "factIndex", "freshness",
         "grantId", "message_ref", "metric", "note", "noteType", "permissionText",
         "privateQuestion", "projectionScopes", "standaloneLink", "title", "unit", "value",
       ],
@@ -394,7 +394,7 @@ describe("murph.group dynamic tool", () => {
       Object.keys(
         MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.inputSchema.properties,
       ),
-    ).toEqual(["action", "projectionScopes"]);
+    ).toEqual(["action", "freshness", "projectionScopes"]);
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description.length)
       .toBeLessThanOrEqual(350);
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description)
@@ -1419,6 +1419,31 @@ describe("murph.group dynamic tool", () => {
     expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
       "unverifiedOwnerContactLabel",
     );
+  });
+
+  it("preserves wearable freshness through parsing, execution, and the model result", async () => {
+    const freshness = [{ projectionScopeKey: "sleep-duration-days.v0", date: "2026-08-04" }];
+    const projectionScopes = [{ projectionKind: "sleep-duration-days.v0" as const }];
+    const metadata = { checkedAt: "2026-08-04T14:20:00.000Z", refreshStatus: "requested" as const };
+    const request = readMurphDynamicToolRequest(groupToolCall({ action: "read_shared", projectionScopes, freshness }));
+    expect(request).toMatchObject({ kind: "group", request: { freshness } });
+    if (!request || request.kind !== "group") throw new Error("Expected group read.");
+    const groupSharedReadRequest = vi.fn(async () => ({ status: "ok" as const, members: [], requestedProjectionScopeKeys: ["sleep-duration-days.v0"], freshness: metadata }));
+    const result = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, hostedToolContext: createGroupHostedToolContext({ groupSharedReadRequest, groupToolAvailable: false }),
+      nextUsageOrdinal: () => 1, progressDelivery: null, request, vaultRoot: null,
+    });
+    expect(groupSharedReadRequest).toHaveBeenCalledWith({ projectionScopes, freshness });
+    expect(readGroupToolPayload(result)).toMatchObject({ result: { freshness: metadata } });
+    expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.inputSchema.properties).toHaveProperty("freshness");
+    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties).not.toHaveProperty("freshness");
+    for (const invalid of [
+      { audience: "group_email", freshness },
+      { freshness: [{ ...freshness[0], date: "2026-02-30" }] },
+      { freshness: [{ ...freshness[0], projectionScopeKey: "steps-days.v0" }] },
+    ]) {
+      expect(readMurphDynamicToolRequest(groupToolCall({ action: "read_shared", projectionScopes, ...invalid }))).not.toMatchObject({ kind: "group" });
+    }
   });
 
   it("parses a bounded exact shared-data read without model-supplied authority", () => {

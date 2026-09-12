@@ -861,6 +861,23 @@ export const MURPH_GROUP_SHARED_READ_TOOL = {
   },
 } as const
 
+const GROUP_SHARED_FRESHNESS_SCHEMA = {
+  type: 'array',
+  minItems: 1,
+  maxItems: 21,
+  uniqueItems: true,
+  description: 'Optional only for ordinary read_shared. For a dated wearable update, supply each required projectionScopeKey and YYYY-MM-DD date. Missing consented dates trigger a bounded sync request and fresh consent-aware reread. checkedAt is a shared-data check, not a device-upload time. Does not guarantee new provider data.',
+  items: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      projectionScopeKey: { type: 'string', minLength: 1, maxLength: 191 },
+      date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    },
+    required: ['projectionScopeKey', 'date'],
+  },
+} as const
+
 /**
  * Scheduled group turns can read shared facts and offer group access without
  * exposing the provider-specific native-message versus link decision.
@@ -878,6 +895,7 @@ export const MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL = {
         type: 'string',
         enum: ['read_shared', 'offer_access'],
       },
+      freshness: GROUP_SHARED_FRESHNESS_SCHEMA,
       projectionScopes: {
         type: 'array',
         minItems: 1,
@@ -1161,6 +1179,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         description:
           'For ordinary read_shared, one to three exact consent-aware group projections, including additive exact-grant activation time when available. For read_shared with audience="group_email", the exact bounded projections allowed into this email composition; the trusted host intersects them with live recipient grants. For offer_access, supply only the exact permissions requested by the person; existing sleep timing or connection-status permission does not include sleep duration. Show the consent surface immediately for a direct request or accepted offer, with no preliminary confirmation. Omitting projectionScopes requests every selectable permission and is not appropriate for adding one missing scope. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
       },
+      freshness: GROUP_SHARED_FRESHNESS_SCHEMA,
       audience: {
         type: 'string',
         enum: ['group_email'],
@@ -1281,7 +1300,7 @@ const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
     'context', 'grantId', 'membershipId', 'message_ref', 'question',
   ],
   group_data: [
-    'audience', 'confidence', 'date', 'displayName', 'factIndex', 'grantId',
+    'audience', 'confidence', 'date', 'displayName', 'factIndex', 'freshness', 'grantId',
     'message_ref', 'metric', 'note', 'noteType', 'permissionText',
     'privateQuestion', 'projectionScopes', 'standaloneLink', 'title', 'unit',
     'value',

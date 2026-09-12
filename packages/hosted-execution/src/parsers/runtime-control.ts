@@ -1,3 +1,4 @@
+import { parseHostedGroupSharedFreshnessRequirements } from "../group-shared-freshness.ts";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -1427,6 +1428,7 @@ function parseHostedRuntimeGroupSharedDataRequest(
       record,
       new Set([
         "action",
+        "freshness",
         "linqSenderHandles",
         "projectionScopes",
         "telegramSenderHandles",
@@ -1434,13 +1436,17 @@ function parseHostedRuntimeGroupSharedDataRequest(
       "Hosted runtime group tool read_shared request",
     );
     const senderHandles = parseHostedRuntimeGroupSenderHandlesRequest(record);
+    const projectionScopes = parseHostedRuntimeGroupSharedRequestedProjectionScopes(
+      record.projectionScopes,
+      "Hosted runtime group tool read_shared request projectionScopes",
+    );
     return {
       action,
       ...senderHandles,
-      projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
-        record.projectionScopes,
-        "Hosted runtime group tool read_shared request projectionScopes",
-      ),
+      projectionScopes,
+      ...(record.freshness === undefined ? {} : {
+        freshness: parseHostedGroupSharedFreshnessRequirements(record.freshness, projectionScopes),
+      }),
     };
   }
   if (action === "prepare_email") {
@@ -2507,7 +2513,7 @@ function parseHostedRuntimeGroupSharedReadResult(
 
   assertAllowedObjectKeys(
     result,
-    new Set(["members", "requestedProjectionScopeKeys", "status"]),
+    new Set(["members", "requestedProjectionScopeKeys", "status", "freshness"]),
     `Hosted runtime group tool read_shared ${status} response result`,
   );
   const requestedScopes =
@@ -2519,6 +2525,9 @@ function parseHostedRuntimeGroupSharedReadResult(
     "Hosted runtime group tool read_shared response members",
   );
   if (status === "none") {
+    if (result.freshness !== undefined) {
+      throw new TypeError("Shared freshness requires an authorized ok response.");
+    }
     if (rawMembers.length !== 0) {
       throw new TypeError(
         "Hosted runtime group tool read_shared none response members must be empty.",
@@ -2578,6 +2587,9 @@ function parseHostedRuntimeGroupSharedReadResult(
   });
 
   return {
+    ...(result.freshness === undefined ? {} : {
+      freshness: parseHostedGroupSharedFreshnessResult(result.freshness),
+    }),
     members,
     requestedProjectionScopeKeys: requestedScopes.map(
       ({ projectionScopeKey }) => projectionScopeKey,
@@ -9185,4 +9197,17 @@ function readNullableNonNegativeBigIntString(
   }
 
   return requireNonNegativeBigIntString(value, label);
+}
+
+function parseHostedGroupSharedFreshnessResult(value: unknown): { checkedAt: string; refreshStatus: "requested" | "not_needed" | "unavailable" } {
+  const record = requireObject(value, "Shared freshness response");
+  assertAllowedObjectKeys(record, new Set(["checkedAt", "refreshStatus"]), "Shared freshness response");
+  const refreshStatus = record.refreshStatus;
+  if (refreshStatus !== "requested" && refreshStatus !== "not_needed" && refreshStatus !== "unavailable") {
+    throw new TypeError("Shared freshness refreshStatus is invalid.");
+  }
+  return {
+    checkedAt: parseHostedRuntimeGroupCanonicalTimestamp(record.checkedAt, "Shared freshness checkedAt"),
+    refreshStatus,
+  };
 }

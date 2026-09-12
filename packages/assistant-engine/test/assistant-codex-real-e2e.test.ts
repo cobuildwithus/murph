@@ -9292,6 +9292,150 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     360_000,
   )
 
+  it.each(['accept', 'decline'] as const)(
+    'respects the wearable update schedule offer: %s',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wearable-schedule-e2e-'))
+      const fixture = createVersionedAutomationPatchFixture({
+        current: {
+          automationId: 'automation-sleep-summary', lookupId: 'daily-sleep-summary', effectiveTimeZone: 'America/Chicago',
+          occurrenceProjection: { nextOccurrenceAt: '2026-07-30T14:00:00.000Z', status: 'resolved' },
+          schedule: { kind: 'dailyLocal', localTime: '09:00', timeZone: 'America/Chicago' },
+          status: 'active', updatedAt: '2026-07-28T12:00:00.000Z',
+        },
+        patch: (request, current) => {
+          if (!request.schedule) throw new Error('Expected a schedule-only patch.')
+          return { ...current, schedule: request.schedule, updatedAt: '2026-07-29T14:10:00.000Z',
+            occurrenceProjection: { nextOccurrenceAt: '2026-07-30T14:30:00.000Z', status: 'resolved' },
+          }
+        },
+      })
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+          developerInstructions: buildHostedGroupStatusDeveloperInstructions('families', true),
+          dynamicTools: [MURPH_AUTOMATION_TOOL], env: config.env, groupConversation: true,
+          hostedToolContext: {
+            automationTool: { request: fixture.request }, computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => { throw new Error('Unavailable in synthetic journey.'); }, vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: [
+            'Conversation context: The daily group sleep report is automation-sleep-summary, also listed as daily-sleep-summary.',
+            'Murph previously offered: Some sleep results are still pending. Shall I send future daily reports half an hour later?',
+            scenario === 'accept' ? 'Current message from the automation creator: Yes, move it half an hour later going forward.' : 'Current message from the automation creator: No, keep the usual time.',
+          ].join('\n'),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const reply = result.finalMessage.trim()
+        process.stdout.write(`[wearable-schedule-e2e] ${JSON.stringify({ scenario, reply, actions: fixture.requests.map((request) => request.action) })}\n`)
+        if (scenario === 'accept') {
+          expect(fixture.requests.map((request) => request.action)).toEqual(['inspect', 'patch'])
+          const patch = fixture.requests[1]
+          expect(patch).toMatchObject({ action: 'patch', expectedUpdatedAt: '2026-07-28T12:00:00.000Z' })
+          if (patch?.action !== 'patch' || !patch.schedule) throw new Error('Expected a versioned schedule patch.')
+          expect(Object.keys(patch).sort()).toEqual(['action', 'expectedUpdatedAt', 'lookup', 'schedule'])
+          expect([undefined, 'America/Chicago']).toContain(patch.schedule.kind === 'dailyLocal' || patch.schedule.kind === 'cron' ? patch.schedule.timeZone : 'invalid')
+          if (patch.schedule.kind === 'dailyLocal') expect(patch.schedule.localTime).toBe('09:30')
+          else if (patch.schedule.kind === 'cron') expect(patch.schedule.expression).toBe('30 9 * * *')
+          else throw new Error('Expected the same daily recurrence.')
+          expect(reply).toMatch(/9:30/iu)
+          expect(reply).toMatch(/central|chicago/iu)
+          expect(reply).not.toMatch(/\?/u)
+        } else {
+          expect(fixture.requests.filter((request) => request.action !== 'inspect')).toHaveLength(0)
+          expect(reply).not.toMatch(/moved|rescheduled|30 minutes later|9:30/iu)
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 360_000,
+  )
+
+  it.each(['available', 'missing', 'unavailable', 'previously_declined'] as const)(
+    'handles wearable freshness recovery in a scheduled group update: %s',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wearable-freshness-e2e-'))
+      const sharedRequests: unknown[] = []
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions('group', 'shared_read', 'linq', true),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL, MURPH_AUTOMATION_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot }, groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false, currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+            automationTool: { request: async (request) => { automationRequests.push(request); throw new Error('No schedule change has been authorized.'); } },
+            groupSharedReader: { request: async (request) => {
+              sharedRequests.push(request)
+              return {
+                status: 'ok', requestedProjectionScopeKeys: ['sleep-duration-days.v0'],
+                freshness: { checkedAt: '2026-08-05T13:04:00.000Z', refreshStatus: scenario === 'unavailable' ? 'unavailable' : 'requested' },
+                members: ['Rowan', 'Quinn'].map((displayName, index) => ({
+                  displayName, currentTurnHandles: [], memberId: `member_freshness_${index}`, participantId: `participant_freshness_${index}`,
+                  projections: [{ projectionScope: { projectionKind: 'sleep-duration-days.v0' }, projectionScopeKey: 'sleep-duration-days.v0',
+                    grantStatus: 'granted', dataStatus: scenario === 'available' || index === 0 ? 'available' : 'missing',
+                    records: scenario === 'available' || index === 0 ? [{ recordKey: '2026-08-05', occurredAt: '2026-08-05T00:00:00.000Z',
+                      data: { date: '2026-08-05', metricKey: 'total-sleep-minutes', value: 420 + index * 15, unit: 'minutes' },
+                    }] : [],
+                  }],
+                })),
+              } satisfies AssistantHostedGroupSharedReadResponse
+            } },
+            sendVaultFile: async () => { throw new Error('Unavailable in synthetic journey.'); }, vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: [
+            'Scheduled group automation: daily-sleep-summary. Runs every day at 09:00 America/New_York.',
+            'Recipe: Share today’s sleep duration for everyone. Keep it short.',
+            ...(scenario === 'previously_declined' ? ['Recent conversation: The report creator declined the offered later time and asked to keep the usual schedule.'] : []),
+          ].join('\n'),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected the scheduled report.')
+        const reply = renderMarkdownMessageText(decision.text).text
+        process.stdout.write(`[wearable-freshness-e2e] ${JSON.stringify({ scenario, reply })}\n`)
+        expect(sharedRequests).toEqual([{
+          projectionScopes: [{ projectionKind: 'sleep-duration-days.v0' }],
+          freshness: [{ projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-05' }],
+        }])
+        expect(automationRequests).toHaveLength(0)
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(1)
+        expect(reply).toMatch(/Rowan/iu)
+        expect(reply).toMatch(/7(?:h| hours?)/iu)
+        expect(reply).not.toMatch(/reconnect|connect your|enable sharing|permission|0h|zero sleep|successfully synced|already moved|schedule (?:has been|was) changed/iu)
+        if (scenario === 'available') {
+          expect(reply).toMatch(/Quinn/iu)
+          expect(reply).toMatch(/7(?:h| hours?).*15/iu)
+          expect(reply).not.toMatch(/30 minutes|hasn.t arrived|not arrived|missing/iu)
+        } else {
+          expect(reply).toMatch(/Quinn/iu)
+          expect(reply).toMatch(/9:04/iu)
+          if (scenario === 'previously_declined') {
+            expect(reply).not.toMatch(/30(?:[- ]|\s*)min|half an hour|9:30|\?/iu)
+          } else {
+            expect(reply).toMatch(/30(?:[- ]|\s*)min|half an hour|9:30/iu)
+            expect(reply).toMatch(/\?/u)
+          }
+          expect(reply).not.toMatch(/Quinn[^\n]{0,40}0(?:h| hours?)/iu)
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 360_000,
+  )
+
   it(
     'keeps four-person scheduled sleep and steps reports in separate participant rows',
     async () => {
@@ -36659,9 +36803,11 @@ function buildScheduledAutomationDeveloperInstructions(
     | 'shared_read'
     | 'none' = 'families',
   channel: 'email' | 'linq' = 'linq',
+  assistantHostedAutomationAvailable = false,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
+    assistantHostedAutomationAvailable,
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
@@ -36926,9 +37072,11 @@ function buildHostedGroupStatusDeveloperInstructions(
     | 'families'
     | 'shared_read'
     | 'none' = 'families',
+  assistantHostedAutomationAvailable = false,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
+    assistantHostedAutomationAvailable,
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],

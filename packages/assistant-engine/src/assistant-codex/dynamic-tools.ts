@@ -41,6 +41,7 @@ import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
+  parseHostedGroupSharedFreshnessRequirements,
   HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
@@ -742,6 +743,10 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .object({
       action: z.literal('read_shared'),
       audience: z.literal('group_email').optional(),
+      freshness: z.array(z.object({
+        projectionScopeKey: z.string().min(1).max(191),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+      }).strict()).min(1).max(21).optional(),
       projectionScopes: z
         .array(groupVaultShareProjectionScopeSchema)
         .min(1)
@@ -755,6 +760,16 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         ),
     })
     .strict()
+    .refine((request) => {
+      if (request.freshness === undefined) return true
+      if (request.audience !== undefined) return false
+      try {
+        parseHostedGroupSharedFreshnessRequirements(request.freshness, request.projectionScopes)
+        return true
+      } catch {
+        return false
+      }
+    }, { message: 'freshness requires exact requested wearable scopes and dates in an ordinary shared read', path: ['freshness'] })
     .refine(
       (request) =>
         request.audience === 'group_email'
@@ -1280,6 +1295,7 @@ type MurphGroupToolRequest =
     >
   | {
       action: 'read_shared'
+      freshness?: readonly { projectionScopeKey: string; date: string }[]
       audience?: 'group_email'
       projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
     }
@@ -4480,6 +4496,7 @@ function groupSharedModelResult(
     }
   }
   return {
+    ...(result.freshness ? { freshness: result.freshness } : {}),
     members: result.members.map((member) => ({
       // Empty handles and a null name carried no information but were
       // serialized for every member on every read.
@@ -4912,6 +4929,7 @@ function groupAccessOfferModelResult(response: GroupAccessOfferHostResponse) {
 }
 
 async function executeGroupSharedRead(input: {
+  abortSignal?: AbortSignal | null
   hostedToolContext: AssistantHostedToolContext | null
   request: Extract<MurphGroupToolRequest, { action: 'read_shared' }>
   turnState: MurphGroupSharedReadTurnState | null
@@ -4927,7 +4945,8 @@ async function executeGroupSharedRead(input: {
   try {
     const result = await groupSharedReader.request({
       projectionScopes: input.request.projectionScopes,
-    })
+      ...(input.request.freshness ? { freshness: input.request.freshness } : {}),
+    }, ...(input.abortSignal ? [{ signal: input.abortSignal }] : []))
     const modelResult = groupSharedModelResultText(groupSharedModelResult(result))
     recordGroupSharedReadProof({
       capacityPartial: modelResult.capacityPartial,
@@ -4938,7 +4957,8 @@ async function executeGroupSharedRead(input: {
       true,
       modelResult.text,
     )
-  } catch {
+  } catch (error) {
+    if (input.abortSignal?.aborted) throw error;
     if (input.turnState) {
       input.turnState.invalid = true
     }
@@ -5441,6 +5461,7 @@ async function executeGroupTool(
       });
     }
     return executeGroupSharedRead({
+      abortSignal: input.abortSignal,
       hostedToolContext: input.hostedToolContext,
       request: input.request,
       turnState: input.groupSharedReadTurnState,
@@ -7466,16 +7487,7 @@ function parseGroupArguments(
     return { ok: true, request: currentSenderRequest };
   }
   if (parsed.args.action === "read_shared") {
-    return {
-      ok: true,
-      request: {
-        action: "read_shared",
-        ...(parsed.args.audience === undefined
-          ? {}
-          : { audience: parsed.args.audience }),
-        projectionScopes: parsed.args.projectionScopes,
-      },
-    };
+    return { ok: true, request: parsed.args };
   }
   if (parsed.args.action === "send_email") {
     return { ok: true, request: parsed.args };

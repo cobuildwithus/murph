@@ -83,6 +83,12 @@ dirty state. Conversation work still preempts the offer. Group reads query the
 current Web-owned snapshot on demand, so publication adds no per-group wake,
 cache invalidation, fanout, or second projection owner.
 
+Dated group wearable updates can request a bounded freshness check through that
+same reader. Web queues ordinary personal sync wakes only for eligible members
+with missing consented dates; runtime briefly rereads the current shared
+snapshots. This adds no alternate health store or provider-to-group data path.
+The check timestamp describes shared visibility, never proof of a watch upload.
+
 A group participant's explicit dated daily-metric report uses that same owner
 split. The model submits the exact accepted-message ref, never a member id. Web
 reopens the accepted group input, resolves its current canonical sender, and

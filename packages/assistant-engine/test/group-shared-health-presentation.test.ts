@@ -8,6 +8,31 @@ import {
 } from '../src/assistant/system-prompt.js'
 
 describe('group shared metric presentation prompt', () => {
+  it('composes bounded date checks and a consent-based schedule offer', () => {
+    const prompt = buildHostedGroupSharedPrompt()
+    expect(prompt).toContain('when the tool exposes `freshness`')
+    expect(prompt).toContain('do not loop or make another tool call to poll')
+    expect(prompt).toContain('not proof the wearable uploaded or the provider completed a refresh')
+    const scheduled = buildAssistantSystemPrompt({
+      assistantCliContract: null, onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
+      assistantHostedGroupToolSurface: 'shared_read', assistantHostedAutomationAvailable: true, channel: 'linq',
+      cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      conversationScope: 'group', hostedRuntime: true,
+      currentLocalDate: '2026-08-05', currentTimeZone: 'America/New_York',
+      turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2026-08-05T13:00:00.000Z',
+    })
+    expect(scheduled).toContain('Scheduled automation changes for this group room are available through `murph.automation`')
+    expect(scheduled).toContain('move future updates 30 minutes later')
+    expect(scheduled).toContain('specific recovery decision permitted by the control-wording rule')
+    expect(scheduled).toContain('still report the actual check time')
+    expect(scheduled).toContain('Permission gaps (`not_granted`) are not a timing problem')
+    expect(scheduled).toContain('was declined or a previous offer remains unanswered')
+    expect(prompt).toContain('Only after an authorized affirmative reply')
+    expect(prompt).toContain('preserving its timezone, recurrence, content, and destination')
+    expect(prompt).toContain('Confirm the saved local time with its timezone when it differs from the chat timezone')
+    expect(prompt).toContain('A refusal or unrelated reply leaves the schedule unchanged')
+  })
+
   it('separates same-row name presentation from sender effects', () => {
     const prompt = buildHostedGroupSharedPrompt()
 
