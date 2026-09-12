@@ -11399,9 +11399,6 @@ test.each([
       assert.equal(processedReconcile?.priority, 40);
       assert.equal(requestedProviderDays.length, 0);
       assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
-      const firstContinuation = await restarted.service.runWorkerOnce();
-      assert.equal(firstContinuation?.kind, "reconcile");
-      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
       const terminalContinuation = await restarted.service.runWorkerOnce();
       assert.equal(terminalContinuation?.kind, "reconcile");
       assert.equal(

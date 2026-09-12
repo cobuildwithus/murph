@@ -6,7 +6,7 @@
     "kind": "improvement",
     "priority": 2,
     "title": "Connected health history catches up faster",
-    "summary": "Initial history sync through Junction can make more progress between background pauses.",
+    "summary": "Initial history sync can make more progress between background pauses.",
     "details": "Sync keeps its place across interruptions and provider retries while giving new messages priority.",
     "relevanceTags": ["devices"],
     "sourcePullRequests": [3366]
