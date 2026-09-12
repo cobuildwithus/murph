@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "faster-connected-history",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Connected health history catches up faster",
+    "summary": "Initial history sync through Junction can make more progress between background pauses.",
+    "details": "Sync keeps its place across interruptions and provider retries while giving new messages priority.",
+    "relevanceTags": ["devices"],
+    "sourcePullRequests": []
+  }
+}

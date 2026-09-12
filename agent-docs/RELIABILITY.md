@@ -2071,10 +2071,16 @@ Last verified: 2026-09-04
   is five seconds, bounding the paired six-page worst case at 30 seconds. A
   typed provider failure therefore reaches ordinary job backoff before the
   hosted 120-second device-pass cancellation can release it as an unclassified
-  yield. Each timeseries attempt owns one canonical resource and one complete
-  UTC day under the three-page, single-attempt bound. Page-heavy active-
+  yield. Full-job timeseries work groups up to 16 consecutive complete units
+  of the same resource into one durable job, stopping before another unit
+  after five seconds or foreground/abort notification. Each import still owns
+  one complete UTC day under the three-page, single-attempt bound. Page-heavy active-
   calorie and heart-rate days deterministically retry as complete UTC hours;
-  no partial aggregate or vendor cursor is persisted. `summaryResourceCursor`,
+  no partial aggregate or vendor cursor is persisted. A resource change, window
+  adaptation, workout-stream continuation, or future retry returns to the
+  existing queue. The scalar suffix survives restart; failure within a batch
+  may replay its bounded canonical prefix through the idempotent importer.
+  `summaryResourceCursor`,
   `summaryPhaseComplete`, `timeseriesCursor`, and `timeseriesResourceCursor`
   identify the next complete unit without changing job dedupe identity. The
   deployed v1 resource envelope is read only at this provider boundary,

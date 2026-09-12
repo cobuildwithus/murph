@@ -820,7 +820,6 @@ test("Junction source-scoped history completes only after terminal admitted work
     });
     let processedJobs = 0;
     let failedExecutions = 0;
-    let markerBeforePassBoundary = false;
     let terminalJob = job;
 
     for (let index = 0; index < 2_000; index += 1) {
@@ -844,11 +843,6 @@ test("Junction source-scoped history completes only after terminal admitted work
       }
       processedJobs += 1;
       terminalJob = job;
-      if (processedJobs === HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT) {
-        markerBeforePassBoundary = liveSources.some((source) =>
-          typeof source.resourceAvailabilitySummary?.[completedAtKey] === "string"
-        );
-      }
       const next = result.scheduledJobs?.find((candidate) =>
         candidate.kind === "backfill"
         && candidate.payload?.sourceProviderSlug === jobSourceProviderSlug
@@ -859,7 +853,6 @@ test("Junction source-scoped history completes only after terminal admitted work
           failedExecutions,
           importedSnapshots,
           liveSources,
-          markerBeforePassBoundary,
           processedJobs,
           providerRequests: requests.filter(({ url }) =>
             url.pathname.includes("/summary/") || url.pathname.includes("/timeseries/")
@@ -877,6 +870,9 @@ test("Junction source-scoped history completes only after terminal admitted work
         next.payload?.historicalProofSourceProviderSlug,
         "google_health",
       );
+      assert.equal(liveSources.some((source) =>
+        typeof source.resourceAvailabilitySummary?.[completedAtKey] === "string"
+      ), false, "pending history must not certify terminal completion");
       job = createJobFromInput(next, index);
     }
     throw new Error("Source-scoped Junction backfill did not terminate.");
@@ -995,9 +991,8 @@ test("Junction source-scoped history completes only after terminal admitted work
     timeseriesResources: ["steps", "heartrate"],
   });
   assert.ok(
-    long.processedJobs > HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT,
+    long.processedJobs < HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT,
   );
-  assert.equal(long.markerBeforePassBoundary, false);
   assert.equal(long.failedExecutions, 1);
   assert.equal(long.completionWrites, 1);
   assert.equal(long.importedSnapshots.length, 0);

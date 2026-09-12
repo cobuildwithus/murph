@@ -9926,11 +9926,9 @@ test("Junction reconcile atomically queues a daily temporal sweep that survives 
       const processedFollowUp = await restarted.service.runWorkerOnce();
       assert.equal(processedFollowUp?.id, reconcileFollowUp.id);
       assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
-      for (let continuationRun = 0; continuationRun < 4; continuationRun += 1) {
-        const continued = await restarted.service.runWorkerOnce();
-        assert.equal(continued?.kind, "reconcile");
-        assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
-      }
+      const continued = await restarted.service.runWorkerOnce();
+      assert.equal(continued?.kind, "reconcile");
+      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
       const terminalFollowUp = await restarted.service.runWorkerOnce();
       assert.equal(terminalFollowUp?.kind, "reconcile");
       assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, now.toISOString());
@@ -11176,12 +11174,12 @@ test("Junction maximum temporal catch-up yields to ordinary continuation before 
     const ordinaryContinuation = await fixture.service.runWorkerOnce(account.id);
     assert.equal(ordinaryContinuation?.id, ordinaryContinuations[0]?.id);
     assert.equal(ordinaryContinuation?.payload.timeseriesResourceCursor, "blood_oxygen");
+    assert.ok(requests.length >= 1 && requests.length <= 14);
+    assert.ok(requests.every((request) => request.resource === "blood_oxygen"));
     assert.deepEqual(
-      requests.at(-1) && {
-        dayKey: requests.at(-1)?.start?.slice(0, 10),
-        resource: requests.at(-1)?.resource,
-      },
-      { dayKey: "2026-08-01", resource: "blood_oxygen" },
+      requests.map((request) => request.start?.slice(0, 10)),
+      Array.from({ length: requests.length }, (_, index) =>
+        `2026-08-${String(index + 1).padStart(2, "0")}`),
     );
     const canonicalAfterOrdinary = latestLiveRecords(
       await (await import("@murphai/core")).readJsonlRecords({
