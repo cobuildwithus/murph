@@ -1486,39 +1486,6 @@ export async function planHostedOnboardingLinqWebhook(
     existingMemberLookup,
     existingPendingLinqContactLookupPresent: Boolean(existingPendingLinqContactLookup),
   });
-  const buildExistingMemberDuplicatePlan = (duplicateInput: {
-    existingMemberActive: boolean;
-    mailboxItemId: string;
-    memberId: string;
-  }): HostedOnboardingLinqDirectPlan =>
-    logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildActiveMemberDirectPlan({
-        desiredSideEffects: [],
-        postCommitGroupJoinConfirmationMemberIds: [duplicateInput.memberId],
-        response: {
-          duplicate: true,
-          ignored: true,
-          ok: true,
-          reason: "duplicate-webhook-event",
-        },
-        // No checkpoint on the duplicate read: this transaction did not run
-        // the append-path workspace upsert, so the retry keeps the legacy
-        // signal path that repairs a missing workspace row.
-        wakeHandoffs: [{
-          eventId: input.event.event_id,
-          mailboxItemId: duplicateInput.mailboxItemId,
-          source: "linq",
-          userId: duplicateInput.memberId,
-        }],
-      }),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        duplicate: true,
-        existingMemberActive: duplicateInput.existingMemberActive,
-        existingMemberMatch,
-        reason: "duplicate-webhook-event",
-        routeStage: "active-member-duplicate",
-      }),
-    );
   const memberRouteBindingAuthority = resolveHostedLinqHomeLineRouteBindingAuthority({
     existingMemberMatch,
     participantContact,
@@ -1589,117 +1556,20 @@ export async function planHostedOnboardingLinqWebhook(
   }
 
   if (existingMember) {
-    if (!preparedDirectMailboxControlAuthority) {
-      await lockHostedMemberRow(input.prisma, existingMember.id);
-    }
-    const exactMemberAccess = await readHostedRuntimeAiAccessDecision({
-      memberId: existingMember.id,
-      noticeSeed: input.event.event_id,
-      now: new Date(occurredAt),
-      prisma: input.prisma,
+    const admission = await admitHostedLinqExistingDirectMemberTx({
+      context,
+      directMailboxPreparationFailureProvided,
+      directMailboxPreparationProvided,
+      existingMember,
+      existingMemberMatch,
+      input,
+      preparedDirectMailboxControlAuthority,
     });
-    existingMemberEffectiveActive = exactMemberAccess.allowed;
-    // The committed mailbox row is the canonical classification for this exact
-    // member/event pair. Repair its wake before mutable Family, group, quota, or
-    // routing state can reinterpret a provider redelivery.
-    const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
-      dedupeKey: input.event.event_id,
-      prisma: input.prisma,
-      userId: existingMember.id,
-    });
-    if (existingMailboxItem) {
-      return buildExistingMemberDuplicatePlan({
-        existingMemberActive: existingMemberEffectiveActive,
-        mailboxItemId: existingMailboxItem.id,
-        memberId: existingMember.id,
-      });
+    if ("response" in admission) {
+      return admission;
     }
-    if (directMailboxPreparationFailureProvided) {
-      if (
-        !exactMemberAccess.allowed
-        && exactMemberAccess.reason !== "health_data_consent_withdrawn"
-      ) {
-        throw input.directMailboxPreparationFailure;
-      }
-    }
-    if (
-      !exactMemberAccess.allowed
-      && exactMemberAccess.reason === "health_data_consent_withdrawn"
-    ) {
-      if (
-        !isHostedLinqDirectChatAttested(messageEvent)
-        || !exactMemberAccess.userNotice
-      ) {
-        return buildHostedLinqIgnoredPlan(input.event, context, {
-          accessReason: exactMemberAccess.reason,
-          existingMemberActive: false,
-          existingMemberMatch,
-          reason: "health-data-consent-withdrawn",
-          routeStage: "health-data-consent-withdrawn",
-        });
-      }
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildInactiveMemberAccessNoticeResponse({
-          chatId: summary.chatId,
-          memberId: existingMember.id,
-          message: exactMemberAccess.userNotice.message,
-          messageId: summary.messageId,
-          noticeCode: exactMemberAccess.userNotice.code,
-          occurredAt,
-          sourceEventId: input.event.event_id,
-        }),
-        buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          accessReason: exactMemberAccess.reason,
-          existingMemberActive: false,
-          existingMemberMatch,
-          noticeCode: exactMemberAccess.userNotice.code,
-          reason: HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON[
-            exactMemberAccess.userNotice.code
-          ],
-          routeStage: "health-data-consent-withdrawn",
-        }),
-      );
-    }
-
-    if (
-      directMailboxPreparationProvided
-      && input.preparedDirectMailboxPayloadRoot === null
-    ) {
-      // Exact duplicate, withdrawn consent, suspension, and stable owner
-      // mismatch already terminated above. Any other existing member can still
-      // enter Family, group-reply, instant-start, signup, or route policy that
-      // reads or writes private routing, even while mailbox access is inactive.
-      throw hostedLinqDirectMailboxPreparationRequired("member");
-    }
-
-    if (directMailboxPreparationFailureProvided) {
-      // Exact duplicate and withdrawn consent are the only outcomes whose
-      // authority is complete without private routing. Quota, Family, group,
-      // and home-route decisions require the prepared state, so preserve the
-      // provider retry instead of partially reclassifying this event.
-      throw input.directMailboxPreparationFailure;
-    }
-
-    if (directMailboxPreparationProvided) {
-      if (!preparedDirectMailboxControlAuthority) {
-        throw hostedLinqDirectMailboxPreparationRequired("member");
-      }
-      if (
-        exactMemberAccess.allowed
-        && !preparedDirectMailboxControlAuthority.preparedIngressRoot
-        && preparedDirectMailboxControlAuthority.preparedFamilyInvite?.kind
-          !== "accepted_replay"
-      ) {
-        throw hostedLinqDirectMailboxPreparationRequired("ingress-root");
-      }
-      preparedDirectRoutingAuthority =
-        await revalidatePreparedHostedLinqDirectRoutingTx({
-          memberId: existingMember.id,
-          prepared: preparedDirectMailboxControlAuthority,
-          prisma: input.prisma,
-        });
-    }
-
+    existingMemberEffectiveActive = admission.existingMemberActive;
+    preparedDirectRoutingAuthority = admission.preparedRoutingAuthority;
   }
 
   const familyPlan = await planHostedLinqFamilyInviteWebhook({
@@ -1914,6 +1784,172 @@ export async function planHostedOnboardingLinqWebhook(
   });
 }
 
+async function admitHostedLinqExistingDirectMemberTx(admission: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  directMailboxPreparationFailureProvided: boolean;
+  directMailboxPreparationProvided: boolean;
+  existingMember: HostedMemberCoreState;
+  existingMemberMatch: HostedLinqExistingMemberMatch;
+  input: HostedOnboardingLinqWebhookPlannerInput;
+  preparedDirectMailboxControlAuthority: PreparedHostedLinqDirectMailboxPayloadRoot | null;
+}): Promise<
+  | HostedOnboardingLinqDirectPlan
+  | {
+      existingMemberActive: boolean;
+      preparedRoutingAuthority: PreparedHostedLinqDirectMailboxPayloadRoot | null;
+    }
+> {
+  const {
+    context,
+    directMailboxPreparationFailureProvided,
+    directMailboxPreparationProvided,
+    existingMember,
+    existingMemberMatch,
+    input,
+    preparedDirectMailboxControlAuthority,
+  } = admission;
+  const { messageEvent, occurredAt, summary } = context;
+  let preparedDirectRoutingAuthority: PreparedHostedLinqDirectMailboxPayloadRoot | null = null;
+  if (!preparedDirectMailboxControlAuthority) {
+    await lockHostedMemberRow(input.prisma, existingMember.id);
+  }
+  const exactMemberAccess = await readHostedRuntimeAiAccessDecision({
+    memberId: existingMember.id,
+    noticeSeed: input.event.event_id,
+    now: new Date(occurredAt),
+    prisma: input.prisma,
+  });
+  const existingMemberEffectiveActive = exactMemberAccess.allowed;
+  // The committed mailbox row is the canonical classification for this exact
+  // member/event pair. Repair its wake before mutable Family, group, quota, or
+  // routing state can reinterpret a provider redelivery.
+  const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: input.event.event_id,
+    prisma: input.prisma,
+    userId: existingMember.id,
+  });
+  if (existingMailboxItem) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildActiveMemberDirectPlan({
+        desiredSideEffects: [],
+        postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
+        response: {
+          duplicate: true,
+          ignored: true,
+          ok: true,
+          reason: "duplicate-webhook-event",
+        },
+        // No checkpoint on the duplicate read: this transaction did not run
+        // the append-path workspace upsert, so the retry keeps the legacy
+        // signal path that repairs a missing workspace row.
+        wakeHandoffs: [{
+          eventId: input.event.event_id,
+          mailboxItemId: existingMailboxItem.id,
+          source: "linq",
+          userId: existingMember.id,
+        }],
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        duplicate: true,
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        reason: "duplicate-webhook-event",
+        routeStage: "active-member-duplicate",
+      }),
+    );
+  }
+  if (directMailboxPreparationFailureProvided) {
+    if (
+      !exactMemberAccess.allowed
+      && exactMemberAccess.reason !== "health_data_consent_withdrawn"
+    ) {
+      throw input.directMailboxPreparationFailure;
+    }
+  }
+  if (
+    !exactMemberAccess.allowed
+    && exactMemberAccess.reason === "health_data_consent_withdrawn"
+  ) {
+    if (
+      !isHostedLinqDirectChatAttested(messageEvent)
+      || !exactMemberAccess.userNotice
+    ) {
+      return buildHostedLinqIgnoredPlan(input.event, context, {
+        accessReason: exactMemberAccess.reason,
+        existingMemberActive: false,
+        existingMemberMatch,
+        reason: "health-data-consent-withdrawn",
+        routeStage: "health-data-consent-withdrawn",
+      });
+    }
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildInactiveMemberAccessNoticeResponse({
+        chatId: summary.chatId,
+        memberId: existingMember.id,
+        message: exactMemberAccess.userNotice.message,
+        messageId: summary.messageId,
+        noticeCode: exactMemberAccess.userNotice.code,
+        occurredAt,
+        sourceEventId: input.event.event_id,
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        accessReason: exactMemberAccess.reason,
+        existingMemberActive: false,
+        existingMemberMatch,
+        noticeCode: exactMemberAccess.userNotice.code,
+        reason: HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON[
+          exactMemberAccess.userNotice.code
+        ],
+        routeStage: "health-data-consent-withdrawn",
+      }),
+    );
+  }
+
+  if (
+    directMailboxPreparationProvided
+    && input.preparedDirectMailboxPayloadRoot === null
+  ) {
+    // Exact duplicate, withdrawn consent, suspension, and stable owner
+    // mismatch already terminated above. Any other existing member can still
+    // enter Family, group-reply, instant-start, signup, or route policy that
+    // reads or writes private routing, even while mailbox access is inactive.
+    throw hostedLinqDirectMailboxPreparationRequired("member");
+  }
+
+  if (directMailboxPreparationFailureProvided) {
+    // Exact duplicate and withdrawn consent are the only outcomes whose
+    // authority is complete without private routing. Quota, Family, group,
+    // and home-route decisions require the prepared state, so preserve the
+    // provider retry instead of partially reclassifying this event.
+    throw input.directMailboxPreparationFailure;
+  }
+
+  if (directMailboxPreparationProvided) {
+    if (!preparedDirectMailboxControlAuthority) {
+      throw hostedLinqDirectMailboxPreparationRequired("member");
+    }
+    if (
+      exactMemberAccess.allowed
+      && !preparedDirectMailboxControlAuthority.preparedIngressRoot
+      && preparedDirectMailboxControlAuthority.preparedFamilyInvite?.kind
+        !== "accepted_replay"
+    ) {
+      throw hostedLinqDirectMailboxPreparationRequired("ingress-root");
+    }
+    preparedDirectRoutingAuthority =
+      await revalidatePreparedHostedLinqDirectRoutingTx({
+        memberId: existingMember.id,
+        prepared: preparedDirectMailboxControlAuthority,
+        prisma: input.prisma,
+      });
+  }
+
+  return {
+    existingMemberActive: existingMemberEffectiveActive,
+    preparedRoutingAuthority: preparedDirectRoutingAuthority,
+  };
+}
+
 async function planHostedLinqFirstContactWebhook(planner: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   existingMember: HostedMemberCoreState | null;
@@ -1939,7 +1975,6 @@ async function planHostedLinqFirstContactWebhook(planner: {
     preparedDirectRoutingAuthority,
   } = planner;
   const { messageEvent, occurredAt, recipientPhoneNumber, summary } = context;
-  const existingMemberEffectiveActive = existingMemberActive;
   const buildUnassignableHomeLinePlan = (routeStage: string) =>
     buildHostedLinqUnassignableHomeLinePlan({
       context,
@@ -1981,7 +2016,7 @@ async function planHostedLinqFirstContactWebhook(planner: {
     participantContact,
   })) {
     return buildHostedLinqIgnoredPlan(input.event, context, {
-      existingMemberActive: existingMemberEffectiveActive,
+      existingMemberActive,
       existingMemberMatch,
       reason: "undeliverable-first-contact",
       routeStage: "ignored-undeliverable-first-contact",
@@ -1995,7 +2030,7 @@ async function planHostedLinqFirstContactWebhook(planner: {
     });
   if (firstContactContentDisposition === "contentless") {
     return buildHostedLinqIgnoredPlan(input.event, context, {
-      existingMemberActive: existingMemberEffectiveActive,
+      existingMemberActive,
       existingMemberMatch,
       reason: "contentless-first-contact",
       routeStage: "ignored-contentless-first-contact",
@@ -2004,7 +2039,7 @@ async function planHostedLinqFirstContactWebhook(planner: {
 
   if (firstContactContentDisposition === "blocked") {
     return buildHostedLinqIgnoredPlan(input.event, context, {
-      existingMemberActive: existingMemberEffectiveActive,
+      existingMemberActive,
       existingMemberMatch,
       reason: "blocked-first-contact-content",
       routeStage: "ignored-blocked-first-contact-content",
@@ -2037,22 +2072,13 @@ async function planHostedLinqFirstContactWebhook(planner: {
     && (input.requireFirstContactAdmission === true || instantStartCandidate)
     && input.firstContactAdmissionDecision?.kind !== "allow"
   ) {
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildFirstContactAdmissionRequiredPlan({
-        participantContact,
-        request: buildHostedLinqFirstContactAdmissionRequest({
-          context,
-          event: input.event,
-          participantContact,
-        }),
-      }),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: Boolean(existingMemberEffectiveActive),
-        existingMemberMatch,
-        reason: "first-contact-admission-required",
-        routeStage: "first-contact-admission-required",
-      }),
-    );
+    return buildFirstContactAdmissionRequiredPlan({
+      context,
+      event: input.event,
+      existingMemberActive: Boolean(existingMemberActive),
+      existingMemberMatch,
+      participantContact,
+    });
   }
 
   const existingDailyState = existingMember
@@ -2065,7 +2091,7 @@ async function planHostedLinqFirstContactWebhook(planner: {
 
   if (existingDailyState?.onboardingLinkSentAt && !groupJoinContext) {
     return buildHostedLinqIgnoredPlan(input.event, context, {
-      existingMemberActive: existingMemberEffectiveActive,
+      existingMemberActive,
       existingMemberMatch,
       reason: "signup-link-already-sent",
       routeStage: "first-contact-signup-already-sent",
@@ -2090,7 +2116,7 @@ async function planHostedLinqFirstContactWebhook(planner: {
   const retryableFallbackRecipientPhone =
     await readRetryableUnsentFallbackRecipientPhone({
       bindingResult,
-      existingMemberActive: Boolean(existingMemberEffectiveActive),
+      existingMemberActive: Boolean(existingMemberActive),
       memberId: existingMember?.id ?? null,
       onboardingLinkSentAt: existingDailyState?.onboardingLinkSentAt ?? null,
       prisma: input.prisma,
@@ -2103,39 +2129,12 @@ async function planHostedLinqFirstContactWebhook(planner: {
       return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
     }
 
-    const dailyState = await incrementHostedLinqInboundDailyState({
+    return planHostedLinqFallbackSignupTx({
+      assignedPhone: retryableFallbackRecipientPhone,
       memberId: existingMember.id,
-      occurredAt,
-      prisma: input.prisma,
+      planner,
+      routeStage: "first-contact-fallback-retry",
     });
-    const invite = await issueHostedInviteTx({
-      channel: "linq",
-      memberId: existingMember.id,
-      prisma: input.prisma,
-    });
-
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildFallbackSignupLinkResponse({
-        assignedPhone: retryableFallbackRecipientPhone,
-        groupJoinCode: groupJoinContext?.joinCode,
-        groupJoinOutreachId: groupJoinContext?.outreachId,
-        inviteCode: invite.inviteCode,
-        inviteId: invite.id,
-        memberId: existingMember.id,
-        occurredAt,
-        participantContact,
-        sourceEventId: input.event.event_id,
-      }),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        chatDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
-        dailyInboundCount: dailyState.inboundCount,
-        existingMemberActive: existingMemberEffectiveActive,
-        existingMemberMatch,
-        fallbackLine: true,
-        reason: "sent-signup-link",
-        routeStage: "first-contact-fallback-retry",
-      }),
-    );
   }
   const blockedPlan = buildRouteBindingBlockedPlan(bindingResult, {
     capacityExhausted: "ignored-home-line-capacity-exhausted",
@@ -2253,39 +2252,12 @@ async function planHostedLinqFirstContactWebhook(planner: {
       });
     }
 
-    const dailyState = await incrementHostedLinqInboundDailyState({
+    return planHostedLinqFallbackSignupTx({
+      assignedPhone,
       memberId: member.id,
-      occurredAt,
-      prisma: input.prisma,
+      planner,
+      routeStage: "first-contact-signup-link",
     });
-    const invite = await issueHostedInviteTx({
-      channel: "linq",
-      memberId: member.id,
-      prisma: input.prisma,
-    });
-
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildFallbackSignupLinkResponse({
-        assignedPhone,
-        groupJoinCode: groupJoinContext?.joinCode,
-        groupJoinOutreachId: groupJoinContext?.outreachId,
-        inviteCode: invite.inviteCode,
-        inviteId: invite.id,
-        memberId: member.id,
-        occurredAt,
-        participantContact,
-        sourceEventId: input.event.event_id,
-      }),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        chatDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
-        dailyInboundCount: dailyState.inboundCount,
-        existingMemberActive: existingMemberEffectiveActive,
-        existingMemberMatch,
-        fallbackLine: true,
-        reason: "sent-signup-link",
-        routeStage: "first-contact-signup-link",
-      }),
-    );
   }
 
   if (instantStartEligible) {
@@ -2323,7 +2295,7 @@ async function planHostedLinqFirstContactWebhook(planner: {
       },
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
         chatDirectAttested: true,
-        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberActive,
         existingMemberMatch,
         reason: "instant-start-enrollment-required",
         routeDecision: bindingResult.kind,
@@ -2345,7 +2317,7 @@ async function planHostedLinqFirstContactWebhook(planner: {
   if (dailyState.onboardingLinkSentAt && !groupJoinContext) {
     return buildHostedLinqIgnoredPlan(input.event, context, {
       dailyInboundCount: dailyState.inboundCount,
-      existingMemberActive: existingMemberEffectiveActive,
+      existingMemberActive,
       existingMemberMatch,
       reason: "signup-link-already-sent",
       routeStage: "first-contact-signup-already-sent",
@@ -2375,10 +2347,65 @@ async function planHostedLinqFirstContactWebhook(planner: {
     buildHostedLinqWebhookPlannerDetails(input.event, context, {
       chatDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
       dailyInboundCount: dailyState.inboundCount,
-      existingMemberActive: existingMemberEffectiveActive,
+      existingMemberActive,
       existingMemberMatch,
       reason: "sent-signup-link",
       routeStage: "first-contact-signup-link",
+    }),
+  );
+}
+
+async function planHostedLinqFallbackSignupTx({
+  assignedPhone,
+  memberId,
+  planner,
+  routeStage,
+}: {
+  assignedPhone: string;
+  memberId: string;
+  planner: Parameters<typeof planHostedLinqFirstContactWebhook>[0];
+  routeStage: "first-contact-fallback-retry" | "first-contact-signup-link";
+}): Promise<HostedOnboardingLinqDirectPlan> {
+  const {
+    context,
+    existingMemberActive,
+    existingMemberMatch,
+    groupJoinContext,
+    participantContact,
+    plannerInput: input,
+  } = planner;
+  const { messageEvent, occurredAt } = context;
+  const dailyState = await incrementHostedLinqInboundDailyState({
+    memberId,
+    occurredAt,
+    prisma: input.prisma,
+  });
+  const invite = await issueHostedInviteTx({
+    channel: "linq",
+    memberId,
+    prisma: input.prisma,
+  });
+
+  return logHostedLinqWebhookPlannerDecisionAndReturn(
+    buildFallbackSignupLinkResponse({
+      assignedPhone,
+      groupJoinCode: groupJoinContext?.joinCode,
+      groupJoinOutreachId: groupJoinContext?.outreachId,
+      inviteCode: invite.inviteCode,
+      inviteId: invite.id,
+      memberId,
+      occurredAt,
+      participantContact,
+      sourceEventId: input.event.event_id,
+    }),
+    buildHostedLinqWebhookPlannerDetails(input.event, context, {
+      chatDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
+      dailyInboundCount: dailyState.inboundCount,
+      existingMemberActive,
+      existingMemberMatch,
+      fallbackLine: true,
+      reason: "sent-signup-link",
+      routeStage,
     }),
   );
 }
@@ -4060,22 +4087,13 @@ async function planHostedLinqGroupChatWebhook(input: {
       && input.firstContactAdmissionDecision?.kind !== "allow"
     ) {
       return withNextRequiredPendingSetupCandidateId(
-        logHostedLinqWebhookPlannerDecisionAndReturn(
-          buildFirstContactAdmissionRequiredPlan({
-            participantContact,
-            request: buildHostedLinqFirstContactAdmissionRequest({
-              context: input.context,
-              event: input.event,
-              participantContact,
-            }),
-          }),
-          buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-            existingMemberActive: false,
-            existingMemberMatch: senderIdentityMatch,
-            reason: "first-contact-admission-required",
-            routeStage: "first-contact-admission-required",
-          }),
-        ),
+        buildFirstContactAdmissionRequiredPlan({
+          context: input.context,
+          event: input.event,
+          existingMemberActive: false,
+          existingMemberMatch: senderIdentityMatch,
+          participantContact,
+        }),
       );
     }
 
@@ -4203,21 +4221,32 @@ async function planHostedLinqDailyQuotaAdmissionDenied(input: {
 }
 
 function buildFirstContactAdmissionRequiredPlan(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  event: HostedLinqWebhookEvent;
+  existingMemberActive: boolean;
+  existingMemberMatch: HostedLinqExistingMemberMatch;
   participantContact: HostedLinqParticipantContact;
-  request: HostedLinqFirstContactAdmissionRequest;
 }): HostedOnboardingLinqDirectPlan {
-  return {
-    ...buildActiveMemberDirectPlan({
-      desiredSideEffects: [],
-      response: {
-        ignored: true,
-        ok: true,
-        reason: "first-contact-admission-required",
-      },
+  return logHostedLinqWebhookPlannerDecisionAndReturn(
+    {
+      ...buildActiveMemberDirectPlan({
+        desiredSideEffects: [],
+        response: {
+          ignored: true,
+          ok: true,
+          reason: "first-contact-admission-required",
+        },
+      }),
+      firstContactAdmissionParticipantContact: input.participantContact,
+      firstContactAdmissionRequest: buildHostedLinqFirstContactAdmissionRequest(input),
+    },
+    buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+      existingMemberActive: input.existingMemberActive,
+      existingMemberMatch: input.existingMemberMatch,
+      reason: "first-contact-admission-required",
+      routeStage: "first-contact-admission-required",
     }),
-    firstContactAdmissionParticipantContact: input.participantContact,
-    firstContactAdmissionRequest: input.request,
-  };
+  );
 }
 
 export function buildHostedLinqFirstContactAdmissionRequest(input: {
