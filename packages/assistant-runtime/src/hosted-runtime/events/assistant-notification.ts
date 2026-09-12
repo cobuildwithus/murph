@@ -32,6 +32,7 @@ import type { AssistantCronJob } from "@murphai/operator-config/assistant-cli-co
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedMemberSignupWelcomeInstructions,
+  isHostedMemberSignupWelcomeDeliveryIdentity,
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -1438,12 +1439,11 @@ function isHostedThreadRouteEgressUnauthorizedError(error: unknown): boolean {
 function isHostedSignupWelcomeNotification(
   wake: HostedExecutionAssistantNotificationRequestedWake,
 ): boolean {
-  const signupWelcomeToken = `signup-welcome:${wake.userId}`;
   return (
     wake.notification.responsePolicy?.kind === "require_send_exact_text"
     && wake.notification.firstContact?.markSeenOnDeliveryAccepted === true
-    && wake.notification.deliveryDedupeToken === signupWelcomeToken
-    && wake.notification.deliveryIdempotencyKey === signupWelcomeToken
+    && isHostedMemberSignupWelcomeDeliveryIdentity(wake.notification.deliveryIdempotencyKey, wake.userId)
+    && wake.notification.deliveryDedupeToken === wake.notification.deliveryIdempotencyKey
   );
 }
 

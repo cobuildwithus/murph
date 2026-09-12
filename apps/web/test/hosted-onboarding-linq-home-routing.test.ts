@@ -117,13 +117,13 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
     mocks.readHostedMemberRoutingState.mockResolvedValue(buildMaterializationRouting());
   });
 
-  it("materializes a provider-dispatched welcome chat onto the assigned home line", async () => {
+  it.each(["", ":linq"])("materializes a provider-dispatched welcome chat onto the assigned home line: %s", async (suffix) => {
     const prisma = buildMaterializationPrisma();
 
     await expect(materializeHostedSignupWelcomeHomeRouteTx({
       directRecipientPhoneNumber,
       fromPhoneNumber,
-      idempotencyKey: `signup-welcome:${memberId}`,
+      idempotencyKey: `signup-welcome:${memberId}${suffix}`,
       linqChatId,
       memberId,
       prisma: prisma as never,

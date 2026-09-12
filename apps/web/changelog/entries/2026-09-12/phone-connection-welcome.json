@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "phone-connection-welcome",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "A welcome on your connected phone",
+    "summary": "Connect your phone after signing up by email, and Murph can welcome you by text too.",
+    "details": "Your email welcome stays available. Repeating phone setup does not send another text welcome.",
+    "relevanceTags": ["onboarding", "imessage"],
+    "sourcePullRequests": []
+  }
+}

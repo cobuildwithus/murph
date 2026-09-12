@@ -65,6 +65,7 @@ import {
 import {
   buildHostedExecutionGroupContextHandoffInstructions,
   buildHostedMemberSignupWelcomeInstructions,
+  buildHostedMemberPhoneWelcomeDeliveryIdentity,
 } from '@murphai/hosted-execution'
 import {
   buildMurphHostedPermissionProfileTomlLines,
@@ -16420,7 +16421,7 @@ describeRealCodex('real Codex personal email audience e2e', () => {
 })
 
 describeRealCodex('real Codex direct email signup welcome e2e', () => {
-  it('delivers the exact activation welcome through the production notification turn', async () => {
+  it('queues email and later phone welcomes independently through the production notification turn', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-direct-email-signup-welcome-e2e-'),
@@ -16446,7 +16447,7 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
         timezone: 'America/New_York',
         vaultRoot: workingDirectory,
       })
-      const result = await sendAssistantNotificationLocal({
+      const notificationInput = {
         actorId: null,
         bindingDeliveryTarget: 'member@example.test',
         channel: 'email',
@@ -16479,13 +16480,39 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
         turnTrigger: 'manual-deliver',
         vault: workingDirectory,
         workingDirectory,
-      })
+      } satisfies Parameters<typeof sendAssistantNotificationLocal>[0]
+      const result = await sendAssistantNotificationLocal(notificationInput)
+      const phoneKey = buildHostedMemberPhoneWelcomeDeliveryIdentity('synthetic-member')
+      const phoneInput = {
+        ...notificationInput,
+        actorId: 'synthetic-phone-actor',
+        bindingDeliveryTarget: '+12025550123',
+        channel: 'linq',
+        deliveryKind: 'participant' as const,
+        deliverySource: { kind: 'linq' as const, fromPhoneNumber: '+12025550124' },
+        deliveryTarget: null,
+        deliveryDedupeToken: phoneKey,
+        deliveryIdempotencyKey: phoneKey,
+        identityId: 'synthetic-phone-identity',
+      }
+      const phoneWelcome = await sendAssistantNotificationLocal(phoneInput)
+      const replay = await sendAssistantNotificationLocal(phoneInput)
+      expect(phoneWelcome.response).toBe(welcomeText)
+      expect(phoneWelcome.deliveryOutcome?.kind).toBe('queued')
+      expect(replay.decision.kind).toBe('skip')
+      expect(replay.response).toBeNull()
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(2)
+      expect(intents.map((intent) => intent.channel).sort()).toEqual(['email', 'linq'])
+      expect(new Set(intents.map((intent) => intent.deliveryIdempotencyKey)).size).toBe(2)
 
       process.stdout.write(
         `[real-codex direct email signup welcome] ${JSON.stringify({
           decision: result.decision.kind,
           delivery: result.deliveryOutcome?.kind ?? null,
           reply: result.response,
+          phoneReply: phoneWelcome.response,
+          queuedMessages: intents.length,
         })}\n`,
       )
       expect(result.decision).toMatchObject({

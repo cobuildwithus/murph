@@ -135,7 +135,7 @@ describe("hosted Linq egress authority", () => {
     );
   });
 
-  it("allows explicit signup welcome first contact for the bound runtime user", async () => {
+  it.each(["signup-welcome:member-1", "signup-welcome:member-1:linq"])("allows explicit signup welcome first contact for the bound runtime user: %s", async (welcomeKey) => {
     const prisma = createPrismaStub({
       identityPhone: "+15550100001",
       homeLinePhone: "+15550100099",
@@ -144,7 +144,7 @@ describe("hosted Linq egress authority", () => {
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: false,
       fromPhoneNumber: "+15550100099",
-      idempotencyKey: "signup-welcome:member-1",
+      idempotencyKey: welcomeKey,
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "+15550100001",

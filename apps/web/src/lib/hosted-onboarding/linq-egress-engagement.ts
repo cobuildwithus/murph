@@ -1,3 +1,4 @@
+import { isHostedMemberSignupWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import type {
@@ -56,7 +57,6 @@ export type HostedLinqRuntimeEgressAssertionResult = {
   sourceEventId?: string;
 };
 
-const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 const HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT = 100;
 
 const HOSTED_LINQ_DIRECT_INBOUND_MAILBOX_ITEM_SELECT = {
@@ -1007,8 +1007,7 @@ function isHostedLinqSignupWelcomeFirstContact(input: {
   idempotencyKey?: string | null;
   memberId: string;
 }): boolean {
-  return normalizeNullable(input.idempotencyKey)
-    === `${HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX}${input.memberId}`;
+  return isHostedMemberSignupWelcomeDeliveryIdentity(input.idempotencyKey, input.memberId);
 }
 
 function normalizeNullable(value: string | null | undefined): string | null {

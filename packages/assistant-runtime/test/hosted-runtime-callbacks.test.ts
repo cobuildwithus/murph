@@ -961,7 +961,7 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("pre-claims non-idempotent signup welcome delivery effects before provider dispatch", async () => {
+  it.each(["signup-welcome:member_placeholder", "signup-welcome:member_placeholder:linq"])("pre-claims non-idempotent signup welcome delivery effects before provider dispatch: %s", async (welcomeKey) => {
     const previousDispatchState = createPreparedPreviousDispatchState();
     mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValueOnce({
       intent: {
@@ -979,7 +979,7 @@ describe("hosted runtime callbacks", () => {
     const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: [
         createEffect({
-          idempotencyKey: "signup-welcome:member_placeholder",
+          idempotencyKey: welcomeKey,
           message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
           transportIdempotent: false,
         }),
@@ -989,7 +989,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).toHaveBeenCalledWith({
-      deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+      deliveryIdempotencyKey: welcomeKey,
       deliveryTransportIdempotent: false,
       intentId: "intent_123",
       startedAt: "2026-04-08T00:00:05.000Z",
@@ -2354,7 +2354,7 @@ describe("hosted runtime callbacks", () => {
     }
   });
 
-  it("abandons a queued signup welcome when a foreground reply targets the same route", async () => {
+  it.each(["signup-welcome:member_placeholder", "signup-welcome:member_placeholder:linq"])("abandons a queued signup welcome when a foreground reply targets the same route: %s", async (welcomeKey) => {
     mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue({
       status: "abandoned",
     });
@@ -2362,10 +2362,10 @@ describe("hosted runtime callbacks", () => {
       {
         actorId: null,
         bindingDelivery: { kind: "thread", target: "thread_1" },
-        channel: "telegram",
+        channel: welcomeKey.endsWith(":linq") ? "linq" : "telegram",
         createdAt: "2026-04-08T00:00:00.000Z",
         dedupeKey: "dedupe_signup_welcome",
-        deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+        deliveryIdempotencyKey: welcomeKey,
         deliveryTransportIdempotent: false,
         explicitTarget: null,
         identityId: null,
@@ -2385,7 +2385,7 @@ describe("hosted runtime callbacks", () => {
       {
         actorId: null,
         bindingDelivery: { kind: "thread", target: "thread_1" },
-        channel: "telegram",
+        channel: welcomeKey.endsWith(":linq") ? "linq" : "telegram",
         createdAt: "2026-04-08T00:00:05.000Z",
         dedupeKey: "dedupe_foreground",
         deliveryIdempotencyKey: null,
@@ -14157,13 +14157,13 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
   });
 
-  it("sends signup welcome Linq egress authority with participant context", async () => {
+  it.each(["signup-welcome:member_123", "signup-welcome:member_123:linq"])("sends signup welcome Linq egress authority with participant context: %s", async (welcomeKey) => {
     const effect = createEffect({
       actorId: "ain_blinded_member_phone",
       answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
       bindingDeliveryTarget: "+15550100001",
       channel: "linq",
-      idempotencyKey: "signup-welcome:member_123",
+      idempotencyKey: welcomeKey,
       message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
       transportIdempotent: false,
     });
@@ -14185,7 +14185,7 @@ describe("hosted runtime callbacks", () => {
         answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
         directRecipientPhoneNumber: null,
         fromPhoneNumber: "+15550100099",
-        idempotencyKey: "signup-welcome:member_123",
+        idempotencyKey: welcomeKey,
         message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
         replyToMessageId: null,
         target: "+15550100001",
@@ -14195,7 +14195,7 @@ describe("hosted runtime callbacks", () => {
       return createDispatchResult({
         delivery: createDelivery({
           channel: "linq",
-          idempotencyKey: "signup-welcome:member_123",
+          idempotencyKey: welcomeKey,
           providerMessageId: delivery.providerMessageId,
           providerMessageIds: delivery.providerMessageIds,
           providerThreadId: delivery.providerThreadId,
@@ -14233,7 +14233,7 @@ describe("hosted runtime callbacks", () => {
           threadIsDirect: true,
         }),
         fromPhoneNumber: "+15550100099",
-        idempotencyKey: "signup-welcome:member_123",
+        idempotencyKey: welcomeKey,
         target: "+15550100001",
         targetKind: "participant",
       }),

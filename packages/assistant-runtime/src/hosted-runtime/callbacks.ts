@@ -21,6 +21,7 @@ import {
   HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
   HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
   sanitizeHostedExecutionStructuredLogDetails,
+  isHostedMemberSignupWelcomeDeliveryIdentity,
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
@@ -1271,14 +1272,7 @@ function isHostedSignupWelcomeDeliveryPayload(
 function isHostedSignupWelcomeDeliveryIdempotencyKey(
   idempotencyKey: string | null | undefined,
 ): boolean {
-  const normalized = idempotencyKey?.trim() ?? "";
-  if (!normalized.startsWith(HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX)) {
-    return false;
-  }
-  const tokenTarget = normalized.slice(
-    HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX.length,
-  );
-  return tokenTarget.length > 0 && !tokenTarget.includes(":");
+  return isHostedMemberSignupWelcomeDeliveryIdentity(idempotencyKey);
 }
 
 function hostedAssistantDeliveryRecipientKeysOverlap(

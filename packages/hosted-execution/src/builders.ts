@@ -589,6 +589,20 @@ export function buildHostedMemberSignupWelcomeInstructions(text: string): string
   ].join("\n\n");
 }
 
+// A later phone connection gets its own welcome without colliding with the
+// original email delivery. Keep the original identity valid for queued work.
+export function buildHostedMemberPhoneWelcomeDeliveryIdentity(memberId: string): string {
+  return `signup-welcome:${memberId}:linq`;
+}
+
+export function isHostedMemberSignupWelcomeDeliveryIdentity(
+  value: string | null | undefined,
+  memberId?: string,
+): boolean {
+  const match = /^signup-welcome:([^:]+)(?::linq)?$/u.exec(value?.trim() ?? "");
+  return match !== null && (memberId === undefined || match[1] === memberId);
+}
+
 function cloneMemberActivationSignupWelcome(
   value: HostedExecutionMemberActivationSignupWelcome,
 ): HostedExecutionMemberActivationSignupWelcome {
