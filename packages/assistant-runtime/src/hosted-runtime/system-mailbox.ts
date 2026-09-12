@@ -745,6 +745,7 @@ function resolveHostedSystemMailboxPreparedItemRetryWakeReason(
 const HOSTED_RESUMABLE_BACKGROUND_SYSTEM_ACTIONS: ReadonlySet<HostedSystemMailboxRouteAction> = new Set([
   "run-device-sync-wake",
   "apply-clinical-enrichment",
+  "apply-member-activation",
 ]);
 
 function isHostedResumableBackgroundSystemAction(action: HostedSystemMailboxRouteAction): boolean {
@@ -1492,9 +1493,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     signal: input.signal,
     ...(input.shouldYieldBackgroundMaintenance
       ? {
-          shouldYieldAssistantAskCompletion: input.shouldYieldBackgroundMaintenance,
-          shouldYieldClinicalRecords: input.shouldYieldBackgroundMaintenance,
-          shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance,
+          shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
         }
       : {}),
     sourceMailboxItemId: input.pendingItem.itemId,

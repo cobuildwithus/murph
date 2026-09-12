@@ -4837,7 +4837,9 @@ async function prepareForegroundSystemMailboxSelection(
     runtime: phaseInput.runtime,
     runtimeEnv: phaseInput.runtimeEnv,
     signal: phaseInput.signal ?? null,
-    shouldYieldBackgroundMaintenance: null,
+    shouldYieldBackgroundMaintenance: hasExclusiveSelection
+      ? phaseInput.shouldYieldBackgroundMaintenance ?? null
+      : null,
     vaultRoot: phaseInput.restored.vaultRoot,
   });
   let foregroundCausalPreparation = hasExclusiveSelection
@@ -5313,8 +5315,8 @@ async function runSystemMailboxMaintenancePhase(
             phaseInput.shouldYieldBackgroundMaintenance ?? null,
           vaultRoot: phaseInput.restored.vaultRoot,
         }));
-  const shouldYieldAfterSystemMailboxPreparation = !hasExclusiveSelection
-    && phaseInput.shouldYieldBackgroundMaintenance?.() === true;
+  const shouldYieldAfterSystemMailboxPreparation =
+    phaseInput.shouldYieldBackgroundMaintenance?.() === true;
   const foregroundCausalPreparationSelected =
     systemMailboxPreparation !== null
     && isForegroundCausalSystemMailboxPreparation(systemMailboxPreparation);
