@@ -1,8 +1,186 @@
+diff --git a/README.md b/README.md
+index 32c33ed35285f37ebbd96f175368ed0ccfa8f585..e2150aae0567d2a00fea414199e8a3e3c84f2504 100644
+--- a/README.md
++++ b/README.md
+@@ -136,7 +136,7 @@ cobuild-review-gpt --config scripts/review-gpt.config.sh --chat 69a86c41-cca8-83
+ cobuild-review-gpt --config scripts/review-gpt.config.sh --chat-url https://chatgpt.com/c/69a86c41-cca8-8327-975a-1716caa599cf
+ ```
+ 
+-Model selection defaults to `gpt-6-pro`; `--model pro` also targets GPT-6 Pro. ReviewGPT verifies the explicit `6 Pro` composer label. The picker's `Latest` row is only a navigation choice: its selection alone is not model proof. When Latest is selected at lower power, ReviewGPT moves the combined five-position Power control to Pro, then verifies the explicit `6 Pro` label before sending. Older versions and a bare `Pro` effort label cannot satisfy a GPT-6 Pro request. The resulting response must also pass the normal model-confirmation contract; GPT-6 Pro accepts the `gpt-6-pro` response slug and rejects older Pro or Thinking slugs.
++Model selection defaults to `gpt-6-pro`; `--model pro` also targets GPT-6 Pro. ReviewGPT verifies the explicit `6 Pro` composer label. The picker's `Latest` row is only a navigation choice: its selection alone is not model proof. When Latest is selected at lower power, ReviewGPT moves the combined five-position Power control to Pro, then verifies the explicit `6 Pro` label before sending. Older versions and a bare `Pro` effort label cannot satisfy a GPT-6 Pro request. Response-model metadata is checked when available; GPT-6 Pro accepts the `gpt-6-pro` response slug and rejects older Pro or Thinking slugs.
+ 
+ Explicit `--model gpt-5.6-sol` retains the previous Sol target, including its Advanced picker and response-slug aliases. Other versioned aliases such as `gpt-5.5`, `gpt-5.5-thinking`, and `gpt-5.5-pro`, plus the plain tier aliases `instant` and `thinking`, retain their existing picker behavior. Plain `gpt-5.5` targets Instant. Non-Pro aliases do not match Pro rows, and obsolete `Extended Pro` labels are not accepted as Pro proof. Older model targets leave the separate Effort control and slider unchanged. If the requested model is disabled, rate-limited, or unavailable, the run fails instead of silently continuing on the current model. Thinking defaults to `current` and does not open an independent thinking menu. Explicit `xhigh` and legacy `extended` thinking targets remain unsupported. Deep Research uses its dedicated page and ignores normal model and thinking forcing.
+ 
+@@ -238,7 +238,7 @@ In addition to the review workflow, the incur runtime also exposes:
+ - Every confirmed send reports the selected browser endpoint and a replayable `thread wake` command containing that endpoint and exact thread URL. Send also atomically persists a private capture sidecar (beside `--response-file`, or in the run's temporary staging directory) with the accepted target and committed user-turn identity. Prior recovery metadata remains in place until a new send is accepted and its replacement sidecar is durable. A waited completion atomically upgrades it with the exact assistant turn, response digest, and artifact controls. Deep Research captures separately bind the parent assistant turn that owns artifacts and the final iframe report content, so wake can validate both sources before export. Content-derived prompt, response, artifact-label, artifact-href, parent-anchor, and iframe-report identities are stored only as hashes; raw text prefixes, data URL contents, and signed artifact routes are not retained.
+ - A waited capture that loses its page websocket first reconnects to the originally accepted target ID. If that target no longer exists, ReviewGPT may create one replacement target at the exact canonical thread URL, but it never selects or navigates another existing tab. The replacement is accepted only after the stored thread and committed-turn identity validate, and recovery never resends or extends the original response deadline. If that identity cannot be proved, capture fails closed and the replayable wake command is the recovery path.
+ - A response is only captured after it stays unchanged across consecutive quiet polls (no busy status, no stop control) for several seconds, so interim assistant status messages emitted before long tool/connector work are not mistaken for the final reply.
+-- Waited runs that request a concrete model require exactly one unfenced, unquoted `MODEL_CONFIRMATION` line outside rendered quote and code containers in an assistant turn whose immediately preceding user turn is the exact turn committed by this run. An ephemeral per-run nonce at the start of the sent prompt disambiguates concurrent lanes and is the package-owned sentinel that prevents duplicate protocol insertion; ordinary task text cannot suppress the confirmation instructions. The nonce is never written to attestation evidence. A matching textual name passes. `UNKNOWN` passes immediately when the same assistant snapshot exposes matching ChatGPT response-model metadata, including the `gpt-5.6-sol` alias's compatible `gpt-5-6-pro`, `gpt-5-6-thinking`, and `gpt-5.6-sol-wm` backend slugs, or after at least 5 minutes of observed generation when model metadata is unavailable. This compatibility is directional: selecting Sol/Pro accepts those platform aliases without reinterpreting an explicitly requested Thinking model. Any other present GPT slug mismatch still fails, as do missing or multiple confirmation lines, pre-prompt or concurrently authored turns, named model mismatches, and an unverified `UNKNOWN` below the elapsed-time threshold. A completed concrete-GPT capture with matching platform metadata emits a versioned `REVIEW_GPT_MODEL_VERIFICATION` JSON record with `requestedModel`, `responseModelSlug`, and `responseSha256`; the digest covers the exact normalized UTF-8 response-file bytes. The elapsed-time fallback does not claim platform-model evidence. With `--response-file`, the mandatory response is written atomically with owner-only permissions before completion is emitted. The evidence sidecar is optional: a sidecar-only persistence failure produces a warning, omits the verification record, and never invalidates or repeats the completed response. Exact-target cleanup remains bounded; cleanup uncertainty after a completed capture is reported separately and does not turn that capture into a retryable model failure. A new waited response-file attempt removes only the derived sidecar before browser work, and partial or failed captures never create attestation evidence.
++- Waited concrete-model runs check ChatGPT response-model metadata when available. ReviewGPT does not ask the assistant to identify itself or require a `MODEL_CONFIRMATION` line. Missing metadata produces no model-verification evidence; a present incompatible model slug still fails. The `gpt-5.6-sol` alias accepts `gpt-5-6-pro`, `gpt-5-6-thinking`, and `gpt-5.6-sol-wm` backend slugs without reinterpreting an explicitly requested Thinking model. The response must belong to the exact user turn committed by this run. An ephemeral per-run nonce at the start of the sent prompt disambiguates concurrent lanes and prevents duplicate protocol insertion; it is never written to attestation evidence. A completed concrete-GPT capture with matching platform metadata emits a versioned `REVIEW_GPT_MODEL_VERIFICATION` JSON record with `requestedModel`, `responseModelSlug`, and `responseSha256`; the digest covers the exact normalized UTF-8 response-file bytes. Elapsed time and assistant self-descriptions do not claim platform-model evidence. With `--response-file`, the mandatory response is written atomically with owner-only permissions before completion is emitted. The evidence sidecar is optional: a sidecar-only persistence failure produces a warning, omits the verification record, and never invalidates or repeats the completed response. Exact-target cleanup remains bounded; cleanup uncertainty after a completed capture is reported separately and does not turn that capture into a retryable model failure. A new waited response-file attempt removes only the derived sidecar before browser work, and partial or failed captures never create attestation evidence.
+ - A visible “Capabilities reduced until…” notice is a rate limit even when ChatGPT keeps answering or Pro is unselectable. ReviewGPT checks before model selection, before sending, and during response capture and wake. It fails with `REVIEW_GPT_RATE_LIMITED` before accepting completion or model evidence. The reset time is included in the driver error. The calling agent should exclude that lane for the current retry sequence and start a fresh full review on another configured, signed-in browser lane with the same requested model and review context. Never move an existing conversation across lanes or accept a reduced-capability answer. Try each allowed lane at most once; if none is available, report the limit and wait for recovery. ReviewGPT itself operates one configured browser per invocation; lane selection belongs to the caller.
+ - `--response-marker <text>` makes capture contract-based instead of heuristic: the wait only accepts a response containing that exact text, so prompts that instruct the assistant to end its final message with the marker are immune to interim status messages even across minutes-long quiet gaps. A marked concrete-model response may complete before the trust threshold only when the same snapshot exposes compatible concrete platform-model metadata; otherwise the duration floor still applies. A too-fast unverified response fails closed, preserves the diagnostic response in `--response-file`, and emits no model-verification attestation. The threshold defaults to 5 minutes and can be raised or lowered with `--minimum-marked-response-time <duration>` or `minimum_marked_response_ms`; it must remain positive and cannot disable the fallback gate. If the marker never appears, capture fails after writing the best snapshot when one was configured.
+ - Browsers throttle background tabs, which can freeze the DOM the capture reads mid-stream. The capture session pins focus emulation and an active page lifecycle only for its owned page over CDP, then releases emulated focus before retaining or closing the page. While generation is active, ReviewGPT samples the large live response DOM once per minute and hard-refreshes the exact accepted thread with cache bypassed every 10 minutes; after generation becomes quiet, it returns to short stability polls. This keeps capture reliable without forcing every profile tab to run unthrottled or continuously rescanning UI that no caller consumes.
+diff --git a/dist/bin.mjs b/dist/bin.mjs
+index f155eba591585aafb19a2768a9da80cc9e173676..67034907d9f566a1607eb04513688779f8af38a2 100644
+--- a/dist/bin.mjs
++++ b/dist/bin.mjs
+@@ -21,7 +21,7 @@ const cli = Cli.create('cobuild-review-gpt', {
+         preset: z.array(z.string()).optional().describe('Preset(s) to include. Repeatable, comma-separated, or passed as bare preset tokens.'),
+         prompt: z.array(z.string()).optional().describe('Append custom prompt text inline. Repeatable.'),
+         promptFile: z.array(z.string()).optional().describe('Append prompt content from a local file. Repeatable.'),
+-        model: z.string().optional().describe('Draft model target. gpt-6-pro (default) and pro target GPT-6 Pro. Waited concrete-model sends require an explicit matching MODEL_CONFIRMATION response line and compatible response-model metadata.'),
++        model: z.string().optional().describe('Draft model target. gpt-6-pro (default) and pro target GPT-6 Pro. Waited concrete-model sends check response-model metadata when available; no model self-confirmation is requested.'),
+         thinking: z.string().optional().describe('Draft thinking target. Use current for normal Pro runs; xhigh and legacy extended are unsupported and fail closed.'),
+         appConnector: z.string().optional().describe('ChatGPT app connector target, such as github. Alias: --connector.'),
+         connector: z.string().optional().describe('Alias for --app-connector.'),
+diff --git a/dist/chatgpt-dom-snapshot-shared.js b/dist/chatgpt-dom-snapshot-shared.js
+index 014260a352fd19fdd79f3c9001e04797ac22dbb0..a95281de86b711e992ad10ccafa17c8df4385103 100644
+--- a/dist/chatgpt-dom-snapshot-shared.js
++++ b/dist/chatgpt-dom-snapshot-shared.js
+@@ -340,95 +340,6 @@ function chatGptTextIndicatesRateLimit(value) {
+   );
+ }
+ 
+-function extractModelConfirmationText(node, getComputedStyleValue) {
+-  const excludedTags = new Set(['BLOCKQUOTE', 'CODE', 'PRE']);
+-  const blockTags = new Set([
+-    'ARTICLE',
+-    'DIV',
+-    'H1',
+-    'H2',
+-    'H3',
+-    'H4',
+-    'H5',
+-    'H6',
+-    'LI',
+-    'OL',
+-    'P',
+-    'SECTION',
+-    'TABLE',
+-    'TBODY',
+-    'TD',
+-    'TH',
+-    'THEAD',
+-    'TR',
+-    'UL',
+-  ]);
+-  const chunks = [];
+-  const appendBreak = () => {
+-    const lastChunk = chunks.at(-1) || '';
+-    if (!lastChunk.endsWith('\n')) chunks.push('\n');
+-  };
+-  const displayCreatesBoundary = (display) => {
+-    const normalized = String(display || '').toLowerCase();
+-    return (
+-      normalized === 'block' ||
+-      normalized === 'flex' ||
+-      normalized === 'grid' ||
+-      normalized === 'list-item' ||
+-      normalized === 'table' ||
+-      normalized.startsWith('table-')
+-    );
+-  };
+-  const visit = (current) => {
+-    if (!current) return;
+-    if (current.nodeType === 3) {
+-      chunks.push(String(current.nodeValue || ''));
+-      return;
+-    }
+-
+-    const tagName = String(current.tagName || '').toUpperCase();
+-    let computedStyle = null;
+-    try {
+-      computedStyle = typeof getComputedStyleValue === 'function'
+-        ? getComputedStyleValue(current)
+-        : null;
+-    } catch {}
+-    const hidden = Boolean(
+-      current.hidden ||
+-      String(current.getAttribute?.('aria-hidden') || '').toLowerCase() === 'true' ||
+-      computedStyle?.display === 'none' ||
+-      computedStyle?.visibility === 'hidden'
+-    );
+-    if (hidden) return;
+-    const computedDisplay = String(computedStyle?.display || '').trim();
+-    const createsBoundary = computedDisplay
+-      ? displayCreatesBoundary(computedDisplay)
+-      : blockTags.has(tagName) || tagName === 'BLOCKQUOTE' || tagName === 'PRE';
+-    if (excludedTags.has(tagName)) {
+-      if (createsBoundary) appendBreak();
+-      return;
+-    }
+-    if (tagName === 'BR') {
+-      appendBreak();
+-      return;
+-    }
+-
+-    const isBlock = createsBoundary;
+-    if (isBlock) appendBreak();
+-    for (const child of Array.from(current.childNodes || [])) visit(child);
+-    if (isBlock) appendBreak();
+-  };
+-
+-  visit(node);
+-  return chunks
+-    .join('')
+-    .replace(/\u00a0/gu, ' ')
+-    .replace(/[ \t]+\n/gu, '\n')
+-    .replace(/\n[ \t]+/gu, '\n')
+-    .replace(/\n{2,}/gu, '\n')
+-    .trim();
+-}
+-
+ function buildChatGptCaptureStateExpression({
+   desiredChatId = '',
+   desiredOrigin = '',
+@@ -444,7 +355,6 @@ function buildChatGptCaptureStateExpression({
+   const normalizeComparableTextSource = normalizeComparableText.toString();
+   const canonicalizeChatGptTurnNodesSource = canonicalizeChatGptTurnNodes.toString();
+   const threadStatusTextIndicatesBusySource = threadStatusTextIndicatesBusy.toString();
+-  const extractModelConfirmationTextSource = extractModelConfirmationText.toString();
+ 
+   return `(() => {
+     const root = document.querySelector('main') ?? document.body;
+@@ -460,7 +370,6 @@ function buildChatGptCaptureStateExpression({
+     const normalizeComparableText = ${normalizeComparableTextSource};
+     const canonicalizeChatGptTurnNodes = ${canonicalizeChatGptTurnNodesSource};
+     const threadStatusTextIndicatesBusy = ${threadStatusTextIndicatesBusySource};
+-    const extractModelConfirmationText = ${extractModelConfirmationTextSource};
+     const visible = (node) => {
+       if (!node || typeof node.getBoundingClientRect !== 'function') return false;
+       const rect = node.getBoundingClientRect();
+@@ -551,10 +460,6 @@ function buildChatGptCaptureStateExpression({
+         : '';
+       const assistantTurnId = turnIdentity(node, 'assistant', assistantTurnIndex, signature);
+       const modelSlug = String(node.getAttribute?.('data-message-model-slug') || '').trim();
+-      const modelConfirmationText = extractModelConfirmationText(
+-        node,
+-        (element) => window.getComputedStyle(element),
+-      );
+       let hasCopyButton = false;
+       const assistantAliases = assistantTurnGroupFor(node)?.aliases || [node];
+       for (const assistantAlias of assistantAliases) {
+@@ -572,7 +477,6 @@ function buildChatGptCaptureStateExpression({
+         assistantTurnId,
+         assistantTurnIndex,
+         hasCopyButton,
+-        modelConfirmationText,
+         modelSlug,
+         precedingUserMessageSignature,
+         precedingUserTurnId,
+@@ -723,7 +627,6 @@ module.exports = {
+   canonicalizeChatGptTurnNodes,
+   collectChatGptTurnAttachmentTexts,
+   chatGptTextIndicatesRateLimit,
+-  extractModelConfirmationText,
+   normalizeComparableText,
+   normalizeResponseText,
+   sanitizeDeepResearchResponseText,
 diff --git a/dist/chatgpt-thread-snapshot-lib.mjs b/dist/chatgpt-thread-snapshot-lib.mjs
-index d4d31ac9172093d9b0b84df0e1fd3a22dbab189b..6600d0abd4c81ce58250efb7f55bd1934b738465 100644
+index 4ba6e49dbb83de266aceda796cbd41012bf471e7..4eb9aaf5552c20c9dee66968e4f6eb89e383ac5f 100644
 --- a/dist/chatgpt-thread-snapshot-lib.mjs
 +++ b/dist/chatgpt-thread-snapshot-lib.mjs
-@@ -89,6 +89,10 @@ function matchesStoredTurnId(liveValue, storedValue) {
+@@ -90,6 +90,10 @@ function matchesStoredTurnId(liveValue, storedValue) {
      return String(liveValue ?? '') === String(storedValue ?? '') ||
          sanitizedCaptureTurnId(liveValue) === String(storedValue ?? '');
  }
@@ -13,7 +191,7 @@ index d4d31ac9172093d9b0b84df0e1fd3a22dbab189b..6600d0abd4c81ce58250efb7f55bd193
  function matchesCapturedAssistant(snapshot, capture) {
      return (matchesStoredTurnId(snapshot.assistantTurnId, capture.assistantTurnId) &&
          matchesStoredCaptureValue(snapshot.precedingUserMessageSignature, capture.precedingUserMessageSignature) &&
-@@ -181,7 +185,7 @@ export function scopeThreadSnapshotToCaptureIdentity(snapshot, capture) {
+@@ -182,7 +186,7 @@ export function scopeThreadSnapshotToCaptureIdentity(snapshot, capture) {
      if (!assistantResponse) {
          if (!capture)
              return normalized;
@@ -22,7 +200,7 @@ index d4d31ac9172093d9b0b84df0e1fd3a22dbab189b..6600d0abd4c81ce58250efb7f55bd193
              matchesStoredCaptureValue(candidate.signature, capture.committedUserTurn.signature));
          if (committedUserMatches.length !== 1) {
              throw new Error(`Captured committed user-turn identity resolved to ${committedUserMatches.length} turns; refusing ambiguous wake.`);
-@@ -190,7 +194,7 @@ export function scopeThreadSnapshotToCaptureIdentity(snapshot, capture) {
+@@ -191,7 +195,7 @@ export function scopeThreadSnapshotToCaptureIdentity(snapshot, capture) {
          if (normalized.userSnapshots.some((candidate) => candidate.turnIndex > committedUserTurn.turnIndex)) {
              throw new Error('Captured committed user turn is no longer the latest request; refusing to wait on a different turn.');
          }
@@ -31,8 +209,21 @@ index d4d31ac9172093d9b0b84df0e1fd3a22dbab189b..6600d0abd4c81ce58250efb7f55bd193
              candidate.precedingUserTurnIndex === committedUserTurn.turnIndex &&
              matchesStoredCaptureValue(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature));
          if (pendingAssistantMatches.length > 1) {
+diff --git a/dist/delay-cli.mjs b/dist/delay-cli.mjs
+index c77310ffa00cf1ce4e3807f1b70cf45b2dcbacaa..9393b286eaa588b10918cbbc4034cda6155d053c 100644
+--- a/dist/delay-cli.mjs
++++ b/dist/delay-cli.mjs
+@@ -229,7 +229,7 @@ export function createDelayCli() {
+             preset: z.array(z.string()).optional().describe('Preset(s) to include. Repeatable, comma-separated, or passed as bare preset tokens.'),
+             prompt: z.array(z.string()).optional().describe('Append custom prompt text inline. Repeatable. When following up on an existing chat, any inline prompt overrides the built-in delayed follow-up prompt.'),
+             promptFile: z.array(z.string()).optional().describe('Append prompt content from a local file. Repeatable.'),
+-            model: z.string().optional().describe('Draft model target. gpt-6-pro (default) and pro target GPT-6 Pro. Waited concrete-model sends require an explicit matching MODEL_CONFIRMATION response line and compatible response-model metadata.'),
++            model: z.string().optional().describe('Draft model target. gpt-6-pro (default) and pro target GPT-6 Pro. Waited concrete-model sends check response-model metadata when available; no model self-confirmation is requested.'),
+             thinking: z.string().optional().describe('Draft thinking target. Use current for normal Pro runs; xhigh and legacy extended are unsupported and fail closed.'),
+             deepResearch: z.boolean().optional().describe('Use the dedicated ChatGPT Deep Research page.'),
+             chat: z.string().optional().describe('Target ChatGPT URL or chat ID.'),
 diff --git a/dist/review-gpt-lib.mjs b/dist/review-gpt-lib.mjs
-index 65d9b9ca92011d1751f0e6b4a19aa9bee1bef702..2af81964fa14375f69d3cad22076c8a24a3456f0 100644
+index 3d47b33b436588ed00c29db8ed327e4c43d8cc5f..cdc325e096dfd228da68b9d5bfa07cc5f1f352bb 100644
 --- a/dist/review-gpt-lib.mjs
 +++ b/dist/review-gpt-lib.mjs
 @@ -1126,6 +1126,7 @@ export function formatSensitiveArtifactFailure(zipPath, findings) {
@@ -106,11 +297,175 @@ index 02756c3b597e2970392f7c29ef669318e2a4037f..5e9cb84d2e8a945cec0d3b2d6c4b9188
                  tabLifecycle: c.options.tabLifecycle,
              });
              return {
+diff --git a/src/bin.mts b/src/bin.mts
+index 82c76e1350aa41d71c053fbc91ced14e24a5ffe6..f929debc7ea6a000a23151255870008170124016 100644
+--- a/src/bin.mts
++++ b/src/bin.mts
+@@ -29,7 +29,7 @@ const cli = Cli.create('cobuild-review-gpt', {
+     preset: z.array(z.string()).optional().describe('Preset(s) to include. Repeatable, comma-separated, or passed as bare preset tokens.'),
+     prompt: z.array(z.string()).optional().describe('Append custom prompt text inline. Repeatable.'),
+     promptFile: z.array(z.string()).optional().describe('Append prompt content from a local file. Repeatable.'),
+-    model: z.string().optional().describe('Draft model target. gpt-6-pro (default) and pro target GPT-6 Pro. Waited concrete-model sends require an explicit matching MODEL_CONFIRMATION response line and compatible response-model metadata.'),
++    model: z.string().optional().describe('Draft model target. gpt-6-pro (default) and pro target GPT-6 Pro. Waited concrete-model sends check response-model metadata when available; no model self-confirmation is requested.'),
+     thinking: z.string().optional().describe('Draft thinking target. Use current for normal Pro runs; xhigh and legacy extended are unsupported and fail closed.'),
+     appConnector: z.string().optional().describe('ChatGPT app connector target, such as github. Alias: --connector.'),
+     connector: z.string().optional().describe('Alias for --app-connector.'),
+diff --git a/src/chatgpt-dom-snapshot-shared.js b/src/chatgpt-dom-snapshot-shared.js
+index 014260a352fd19fdd79f3c9001e04797ac22dbb0..a95281de86b711e992ad10ccafa17c8df4385103 100644
+--- a/src/chatgpt-dom-snapshot-shared.js
++++ b/src/chatgpt-dom-snapshot-shared.js
+@@ -340,95 +340,6 @@ function chatGptTextIndicatesRateLimit(value) {
+   );
+ }
+ 
+-function extractModelConfirmationText(node, getComputedStyleValue) {
+-  const excludedTags = new Set(['BLOCKQUOTE', 'CODE', 'PRE']);
+-  const blockTags = new Set([
+-    'ARTICLE',
+-    'DIV',
+-    'H1',
+-    'H2',
+-    'H3',
+-    'H4',
+-    'H5',
+-    'H6',
+-    'LI',
+-    'OL',
+-    'P',
+-    'SECTION',
+-    'TABLE',
+-    'TBODY',
+-    'TD',
+-    'TH',
+-    'THEAD',
+-    'TR',
+-    'UL',
+-  ]);
+-  const chunks = [];
+-  const appendBreak = () => {
+-    const lastChunk = chunks.at(-1) || '';
+-    if (!lastChunk.endsWith('\n')) chunks.push('\n');
+-  };
+-  const displayCreatesBoundary = (display) => {
+-    const normalized = String(display || '').toLowerCase();
+-    return (
+-      normalized === 'block' ||
+-      normalized === 'flex' ||
+-      normalized === 'grid' ||
+-      normalized === 'list-item' ||
+-      normalized === 'table' ||
+-      normalized.startsWith('table-')
+-    );
+-  };
+-  const visit = (current) => {
+-    if (!current) return;
+-    if (current.nodeType === 3) {
+-      chunks.push(String(current.nodeValue || ''));
+-      return;
+-    }
+-
+-    const tagName = String(current.tagName || '').toUpperCase();
+-    let computedStyle = null;
+-    try {
+-      computedStyle = typeof getComputedStyleValue === 'function'
+-        ? getComputedStyleValue(current)
+-        : null;
+-    } catch {}
+-    const hidden = Boolean(
+-      current.hidden ||
+-      String(current.getAttribute?.('aria-hidden') || '').toLowerCase() === 'true' ||
+-      computedStyle?.display === 'none' ||
+-      computedStyle?.visibility === 'hidden'
+-    );
+-    if (hidden) return;
+-    const computedDisplay = String(computedStyle?.display || '').trim();
+-    const createsBoundary = computedDisplay
+-      ? displayCreatesBoundary(computedDisplay)
+-      : blockTags.has(tagName) || tagName === 'BLOCKQUOTE' || tagName === 'PRE';
+-    if (excludedTags.has(tagName)) {
+-      if (createsBoundary) appendBreak();
+-      return;
+-    }
+-    if (tagName === 'BR') {
+-      appendBreak();
+-      return;
+-    }
+-
+-    const isBlock = createsBoundary;
+-    if (isBlock) appendBreak();
+-    for (const child of Array.from(current.childNodes || [])) visit(child);
+-    if (isBlock) appendBreak();
+-  };
+-
+-  visit(node);
+-  return chunks
+-    .join('')
+-    .replace(/\u00a0/gu, ' ')
+-    .replace(/[ \t]+\n/gu, '\n')
+-    .replace(/\n[ \t]+/gu, '\n')
+-    .replace(/\n{2,}/gu, '\n')
+-    .trim();
+-}
+-
+ function buildChatGptCaptureStateExpression({
+   desiredChatId = '',
+   desiredOrigin = '',
+@@ -444,7 +355,6 @@ function buildChatGptCaptureStateExpression({
+   const normalizeComparableTextSource = normalizeComparableText.toString();
+   const canonicalizeChatGptTurnNodesSource = canonicalizeChatGptTurnNodes.toString();
+   const threadStatusTextIndicatesBusySource = threadStatusTextIndicatesBusy.toString();
+-  const extractModelConfirmationTextSource = extractModelConfirmationText.toString();
+ 
+   return `(() => {
+     const root = document.querySelector('main') ?? document.body;
+@@ -460,7 +370,6 @@ function buildChatGptCaptureStateExpression({
+     const normalizeComparableText = ${normalizeComparableTextSource};
+     const canonicalizeChatGptTurnNodes = ${canonicalizeChatGptTurnNodesSource};
+     const threadStatusTextIndicatesBusy = ${threadStatusTextIndicatesBusySource};
+-    const extractModelConfirmationText = ${extractModelConfirmationTextSource};
+     const visible = (node) => {
+       if (!node || typeof node.getBoundingClientRect !== 'function') return false;
+       const rect = node.getBoundingClientRect();
+@@ -551,10 +460,6 @@ function buildChatGptCaptureStateExpression({
+         : '';
+       const assistantTurnId = turnIdentity(node, 'assistant', assistantTurnIndex, signature);
+       const modelSlug = String(node.getAttribute?.('data-message-model-slug') || '').trim();
+-      const modelConfirmationText = extractModelConfirmationText(
+-        node,
+-        (element) => window.getComputedStyle(element),
+-      );
+       let hasCopyButton = false;
+       const assistantAliases = assistantTurnGroupFor(node)?.aliases || [node];
+       for (const assistantAlias of assistantAliases) {
+@@ -572,7 +477,6 @@ function buildChatGptCaptureStateExpression({
+         assistantTurnId,
+         assistantTurnIndex,
+         hasCopyButton,
+-        modelConfirmationText,
+         modelSlug,
+         precedingUserMessageSignature,
+         precedingUserTurnId,
+@@ -723,7 +627,6 @@ module.exports = {
+   canonicalizeChatGptTurnNodes,
+   collectChatGptTurnAttachmentTexts,
+   chatGptTextIndicatesRateLimit,
+-  extractModelConfirmationText,
+   normalizeComparableText,
+   normalizeResponseText,
+   sanitizeDeepResearchResponseText,
 diff --git a/src/chatgpt-thread-snapshot-lib.mts b/src/chatgpt-thread-snapshot-lib.mts
-index dfdd71b7d5f53e0aed0ad438cb9b95c7892912d0..16caf02fa705b92cb231152d6a834c8549a981ff 100644
+index 327c2569e2d1e3f232820b42dcce462823c780ba..c7a2e991fd071d33d39aebfc9db3121e70a677b3 100644
 --- a/src/chatgpt-thread-snapshot-lib.mts
 +++ b/src/chatgpt-thread-snapshot-lib.mts
-@@ -215,6 +215,20 @@ function matchesStoredTurnId(liveValue: unknown, storedValue: unknown): boolean
+@@ -41,7 +41,6 @@ export type ThreadAssistantSnapshot = {
+     text: string;
+   };
+   hasCopyButton: boolean;
+-  modelConfirmationText?: string;
+   modelSlug?: string;
+   precedingUserMessageSignature?: string;
+   precedingUserTurnId?: string;
+@@ -217,6 +216,20 @@ function matchesStoredTurnId(liveValue: unknown, storedValue: unknown): boolean
      sanitizedCaptureTurnId(liveValue) === String(storedValue ?? '');
  }
  
@@ -131,7 +486,7 @@ index dfdd71b7d5f53e0aed0ad438cb9b95c7892912d0..16caf02fa705b92cb231152d6a834c85
  function matchesCapturedAssistant(
    snapshot: ThreadAssistantSnapshot,
    capture: NonNullable<ThreadCaptureIdentity['assistantResponse']>,
-@@ -339,7 +353,13 @@ export function scopeThreadSnapshotToCaptureIdentity(
+@@ -341,7 +354,13 @@ export function scopeThreadSnapshotToCaptureIdentity(
      if (!capture) return normalized;
      const committedUserMatches = normalized.userSnapshots.filter(
        (candidate) =>
@@ -146,7 +501,7 @@ index dfdd71b7d5f53e0aed0ad438cb9b95c7892912d0..16caf02fa705b92cb231152d6a834c85
          matchesStoredCaptureValue(candidate.signature, capture.committedUserTurn.signature),
      );
      if (committedUserMatches.length !== 1) {
-@@ -353,7 +373,13 @@ export function scopeThreadSnapshotToCaptureIdentity(
+@@ -355,7 +374,13 @@ export function scopeThreadSnapshotToCaptureIdentity(
      }
      const pendingAssistantMatches = normalized.assistantSnapshots.filter(
        (candidate) =>
@@ -161,11 +516,218 @@ index dfdd71b7d5f53e0aed0ad438cb9b95c7892912d0..16caf02fa705b92cb231152d6a834c85
          candidate.precedingUserTurnIndex === committedUserTurn.turnIndex &&
          matchesStoredCaptureValue(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature),
      );
+diff --git a/src/delay-cli.mts b/src/delay-cli.mts
+index bf8f25a7678dc85c4fe3480b440bcfbf75c8876d..9608bb82bca8aecfdac299e76e96685159b653e1 100644
+--- a/src/delay-cli.mts
++++ b/src/delay-cli.mts
+@@ -308,7 +308,7 @@ export function createDelayCli() {
+       preset: z.array(z.string()).optional().describe('Preset(s) to include. Repeatable, comma-separated, or passed as bare preset tokens.'),
+       prompt: z.array(z.string()).optional().describe('Append custom prompt text inline. Repeatable. When following up on an existing chat, any inline prompt overrides the built-in delayed follow-up prompt.'),
+       promptFile: z.array(z.string()).optional().describe('Append prompt content from a local file. Repeatable.'),
+-      model: z.string().optional().describe('Draft model target. gpt-6-pro (default) and pro target GPT-6 Pro. Waited concrete-model sends require an explicit matching MODEL_CONFIRMATION response line and compatible response-model metadata.'),
++      model: z.string().optional().describe('Draft model target. gpt-6-pro (default) and pro target GPT-6 Pro. Waited concrete-model sends check response-model metadata when available; no model self-confirmation is requested.'),
+       thinking: z.string().optional().describe('Draft thinking target. Use current for normal Pro runs; xhigh and legacy extended are unsupported and fail closed.'),
+       deepResearch: z.boolean().optional().describe('Use the dedicated ChatGPT Deep Research page.'),
+       chat: z.string().optional().describe('Target ChatGPT URL or chat ID.'),
 diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
-index 420aced0c8030a23f61e41e5112823fb90d8b0d8..6c99f01ff93167be8ec68317805da6a6b00c5e1f 100644
+index b8e25dc175d6daaacd8b7062c3f5fa19797071ab..372f141f2109db00b3b723f1fda115a97be551bd 100644
 --- a/src/prepare-chatgpt-draft.js
 +++ b/src/prepare-chatgpt-draft.js
-@@ -1304,9 +1304,8 @@ function markedResponseDurationFailure({
+@@ -47,7 +47,7 @@ const minimumMarkedResponseMs = Number(process.env.ORACLE_DRAFT_MINIMUM_MARKED_R
+ const shouldSend = /^(1|true|yes|on)$/i.test(String(process.env.ORACLE_DRAFT_SEND || '0'));
+ const idleDraftTimeoutMs = Number(process.env.REVIEW_GPT_IDLE_DRAFT_TIMEOUT_MS || 0);
+ const baseDraftPrompt = process.env.ORACLE_DRAFT_PROMPT || '';
+-const modelAttestationTurnNonce = modelConfirmationRequired({
++const modelAttestationTurnNonce = modelVerificationRequired({
+   isDeepResearchMode,
+   shouldSend,
+   shouldWaitForResponse,
+@@ -55,7 +55,7 @@ const modelAttestationTurnNonce = modelConfirmationRequired({
+ })
+   ? randomUUID()
+   : '';
+-const draftPrompt = appendModelConfirmationPrompt(baseDraftPrompt, {
++const draftPrompt = appendResponseCapturePrompt(baseDraftPrompt, {
+   isDeepResearchMode,
+   responseMarker,
+   shouldSend,
+@@ -127,7 +127,6 @@ const DEEP_RESEARCH_AUTO_START_GRACE_MS = 60_000;
+ const DEEP_RESEARCH_AUTO_START_POLL_MS = 1000;
+ const DEEP_RESEARCH_START_RETRY_DELAY_MS = 2000;
+ const DEEP_RESEARCH_START_ATTEMPTS = 3;
+-const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = 5 * 60 * 1000;
+ const HARD_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+ const SAFE_RETRY_STAGES = new Set([
+   'connect',
+@@ -1140,9 +1139,8 @@ function responseStateAssistantFailureText(state) {
+ 
+ /**
+  * True when a deadline snapshot cannot be a completed response because the
+- * required completion marker is absent. This takes precedence over model
+- * attestation: partial text has no MODEL_CONFIRMATION line yet, so attesting
+- * first would misreport a wait timeout as a model mismatch.
++ * required completion marker is absent. Incomplete work takes precedence over
++ * model metadata checks so a wait timeout keeps its actual failure reason.
+  */
+ function timeoutSnapshotMissingResponseMarker(responseMarkerValue, snapshotText) {
+   const marker = String(responseMarkerValue || '');
+@@ -1157,7 +1155,7 @@ function missingResponseMarkerMessage(responseMarkerValue, result) {
+   return `Assistant response did not contain required completion marker "${responseMarkerValue}" before the wait timeout.${rateLimitSuffix}`;
+ }
+ 
+-function normalizeModelConfirmationName(value) {
++function normalizeModelName(value) {
+   const normalized = String(value || '')
+     .trim()
+     .toLowerCase()
+@@ -1171,7 +1169,7 @@ function normalizeModelConfirmationName(value) {
+ }
+ 
+ function responseModelSlugMatchesExpected(responseModelSlug, expectedModel) {
+-  const reported = normalizeModelConfirmationName(responseModelSlug);
++  const reported = normalizeModelName(responseModelSlug);
+   if (reported === expectedModel) {
+     return true;
+   }
+@@ -1184,7 +1182,7 @@ function responseModelSlugMatchesExpected(responseModelSlug, expectedModel) {
+   return expectedModel === 'gpt56pro' && (reported === 'gpt56thinking' || reported === 'gpt56solwm');
+ }
+ 
+-function modelConfirmationRequired(input) {
++function modelVerificationRequired(input) {
+   return Boolean(
+     input?.shouldSend &&
+       input?.shouldWaitForResponse &&
+@@ -1193,111 +1191,27 @@ function modelConfirmationRequired(input) {
+   );
+ }
+ 
+-function modelConfirmationPromptBlock(targetModel, responseMarkerValue = '', turnNonce = '') {
+-  const target = String(targetModel || '').trim();
+-  const normalizedTurnNonce = String(turnNonce || '').trim();
+-  const lines = normalizedTurnNonce
+-    ? [`REVIEW_GPT_TURN_NONCE: ${normalizedTurnNonce}`]
+-    : [];
+-  lines.push(
+-    `Complete the requested work even if you cannot independently identify the active model.`,
+-    `If you can confirm the active model is ${target}, include this exact line in your final response:`,
+-    `MODEL_CONFIRMATION: ${target}`,
+-    `If you cannot confirm the active model is ${target}, include this exact line in your final response instead:`,
+-    `MODEL_CONFIRMATION: UNKNOWN`,
+-    `Do not stop or shorten the requested work because model confirmation is unknown.`,
+-  );
+-  if (responseMarkerValue) {
+-    lines.push(`Include ${responseMarkerValue} only after the requested work is complete.`);
+-  }
+-  return lines.join('\n');
+-}
+-
+-function appendModelConfirmationPrompt(prompt, input) {
++function appendResponseCapturePrompt(prompt, input) {
+   const value = String(prompt || '');
+-  if (!modelConfirmationRequired(input)) {
+-    return value;
+-  }
+-  const normalizedTurnNonce = String(input?.turnNonce || '').trim();
+-  const turnNonceLine = normalizedTurnNonce
+-    ? `REVIEW_GPT_TURN_NONCE: ${normalizedTurnNonce}`
+-    : '';
+-  if (turnNonceLine && value.includes(turnNonceLine)) {
+-    return value;
+-  }
+-  return `${modelConfirmationPromptBlock(
+-    input.targetModel,
+-    input.responseMarker,
+-    normalizedTurnNonce,
+-  )}\n\n${value}`;
+-}
+-
+-function extractModelConfirmationValues(responseText) {
+-  const values = [];
+-  let fenceCharacter = '';
+-  let fenceLength = 0;
+-  for (const line of String(responseText || '').split(/\r?\n/u)) {
+-    if (fenceCharacter) {
+-      const closingFence = line.match(/^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/u);
+-      const marker = closingFence?.[1] || '';
+-      if (marker[0] === fenceCharacter && marker.length >= fenceLength) {
+-        fenceCharacter = '';
+-        fenceLength = 0;
+-      }
+-      continue;
+-    }
+-    const openingFence = line.match(/^[ ]{0,3}(`{3,}|~{3,})(.*)$/u);
+-    if (openingFence && (openingFence[1][0] !== '`' || !openingFence[2].includes('`'))) {
+-      fenceCharacter = openingFence[1][0];
+-      fenceLength = openingFence[1].length;
+-      continue;
+-    }
+-    const match = line.match(/^[ ]{0,3}MODEL_CONFIRMATION\s*:\s*(.+?)\s*$/iu);
+-    const value = String(match?.[1] || '').trim();
+-    if (value) values.push(value);
+-  }
+-  return values;
++  if (!modelVerificationRequired(input)) return value;
++  const turnNonce = String(input?.turnNonce || '').trim();
++  const nonceLine = turnNonce ? `REVIEW_GPT_TURN_NONCE: ${turnNonce}` : '';
++  if (nonceLine && value.startsWith(`${nonceLine}\n`)) return value;
++  const lines = nonceLine ? [nonceLine] : [];
++  if (input?.responseMarker) {
++    lines.push(`Include ${input.responseMarker} only after the requested work is complete.`);
++  }
++  return lines.length ? `${lines.join('\n')}\n\n${value}` : value;
+ }
+ 
+-function extractModelConfirmationValue(responseText) {
+-  return extractModelConfirmationValues(responseText)[0] || '';
+-}
+-
+-function modelConfirmationFailure(
+-  targetModel,
+-  modelConfirmationText,
+-  responseModelSlug = '',
+-  generationElapsedMs = 0,
+-) {
+-  if (isCurrentSelectionTarget(targetModel)) {
+-    return '';
+-  }
+-
+-  const expected = normalizeModelConfirmationName(targetModel);
+-  const confirmations = extractModelConfirmationValues(modelConfirmationText);
+-  if (confirmations.length === 0) {
+-    return `Assistant response did not include MODEL_CONFIRMATION for requested model ${targetModel}.`;
+-  }
+-  if (confirmations.length !== 1) {
+-    return `Assistant response included multiple MODEL_CONFIRMATION lines for requested model ${targetModel}.`;
+-  }
+-  const actual = confirmations[0];
+-  const actualNormalized = normalizeModelConfirmationName(actual);
+-  const reportedSlug = normalizeModelConfirmationName(responseModelSlug);
+-  const reportedSlugMatches = responseModelSlugMatchesExpected(responseModelSlug, expected);
+-  const acceptsPlatformVerifiedUnknown =
+-    actualNormalized === 'unknown' &&
++function responseModelFailure(targetModel, responseModelSlug = '') {
++  if (isCurrentSelectionTarget(targetModel)) return '';
++  const expected = normalizeModelName(targetModel);
++  if (
+     expected.startsWith('gpt') &&
+-    reportedSlugMatches;
+-  const acceptsTimedUnknown =
+-    actualNormalized === 'unknown' &&
+-    Number.isFinite(Number(generationElapsedMs)) &&
+-    Number(generationElapsedMs) >= MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS;
+-  if (actualNormalized !== expected && !acceptsPlatformVerifiedUnknown && !acceptsTimedUnknown) {
+-    return `Assistant response confirmed model ${actual}, expected ${targetModel}.`;
+-  }
+-
+-  if (expected.startsWith('gpt') && reportedSlug && !reportedSlugMatches) {
++    String(responseModelSlug || '').trim() &&
++    !responseModelSlugMatchesExpected(responseModelSlug, expected)
++  ) {
+     return `Assistant response DOM reported model ${responseModelSlug}, expected ${targetModel}.`;
+   }
+   return '';
+@@ -1308,9 +1222,8 @@ function markedResponseDurationFailure({
    responseMarker: requiredMarker,
    responseElapsedMs,
    minimumResponseMs = 5 * 60 * 1000,
@@ -176,7 +738,7 @@ index 420aced0c8030a23f61e41e5112823fb90d8b0d8..6c99f01ff93167be8ec68317805da6a6
      return '';
    }
  
-@@ -1327,7 +1326,7 @@ function markedResponseDurationFailure({
+@@ -1331,7 +1244,7 @@ function markedResponseDurationFailure({
    const minimumLabel = Number.isSafeInteger(requiredMinimumMs) && requiredMinimumMs > 0
      ? formatDurationMs(requiredMinimumMs)
      : 'invalid configured duration';
@@ -185,7 +747,97 @@ index 420aced0c8030a23f61e41e5112823fb90d8b0d8..6c99f01ff93167be8ec68317805da6a6
  }
  
  function formatDurationMs(durationMs) {
-@@ -5758,7 +5757,6 @@ async function main() {
+@@ -1357,7 +1270,6 @@ function modelAttestationForSnapshot(
+   snapshot,
+   includeEvidence = false,
+   committedUserTurnSignature = '',
+-  generationElapsedMs = 0,
+ ) {
+   if (!isCurrentSelectionTarget(targetModel)) {
+     const expectedUserTurnSignature = String(committedUserTurnSignature || '').trim();
+@@ -1378,11 +1290,9 @@ function modelAttestationForSnapshot(
+     }
+   }
+ 
+-  const failure = modelConfirmationFailure(
++  const failure = responseModelFailure(
+     targetModel,
+-    snapshot?.modelConfirmationText,
+     snapshot?.modelSlug,
+-    generationElapsedMs,
+   );
+   if (failure || !includeEvidence) {
+     return { evidence: null, failure };
+@@ -1392,7 +1302,7 @@ function modelAttestationForSnapshot(
+   const responseModelSlug = String(snapshot?.modelSlug || '').trim();
+   if (
+     isCurrentSelectionTarget(requestedModel) ||
+-    !normalizeModelConfirmationName(requestedModel).startsWith('gpt') ||
++    !normalizeModelName(requestedModel).startsWith('gpt') ||
+     !responseModelSlug
+   ) {
+     return { evidence: null, failure: '' };
+@@ -4993,7 +4903,7 @@ async function main() {
+         skipped: true,
+       };
+     }
+-    const usesCombinedProPicker = normalizeModelConfirmationName(modelTargetRaw) === 'gpt6pro';
++    const usesCombinedProPicker = normalizeModelName(modelTargetRaw) === 'gpt6pro';
+     const result = usesCombinedProPicker
+       ? await driveDraftModelSelectionNatively(modelTargetRaw)
+       : await evaluate(buildModelSelectionExpression(modelTargetRaw, 'select'));
+@@ -5626,7 +5536,7 @@ async function main() {
+     // nextResponseStabilityCount), so the standard window is wider to ride out
+     // brief busy-indicator gaps between an interim message and continued work.
+     const stablePollsRequired = isDeepResearchMode ? 4 : 12;
+-    const requiresNewTurnModelAttestation = modelConfirmationRequired({
++    const requiresNewTurnModelAttestation = modelVerificationRequired({
+       isDeepResearchMode,
+       shouldSend,
+       shouldWaitForResponse,
+@@ -5642,8 +5552,8 @@ async function main() {
+     }
+     if (requiresNewTurnModelAttestation && !committedTurnSignature) {
+       return {
+-        status: 'model-confirmation-failed',
+-        modelConfirmationFailure: `Could not bind the assistant response to the committed user turn for requested model ${modelTargetRaw}.`,
++        status: 'model-verification-failed',
++        responseModelFailure: `Could not bind the assistant response to the committed user turn for requested model ${modelTargetRaw}.`,
+         responseText: '',
+         href: '',
+       };
+@@ -5662,7 +5572,6 @@ async function main() {
+     let stableText = '';
+     let stableCount = 0;
+     let sawGenerationActive = false;
+-    let generationStartedAt = 0;
+     let lastHardRefreshAt = responseWaitStartedAt;
+ 
+     // Re-assert before the wait: a navigation since session setup can reset
+@@ -5713,7 +5622,6 @@ async function main() {
+       const generationActive = Boolean(state?.stopVisible || state?.statusBusy);
+       if (generationActive) {
+         sawGenerationActive = true;
+-        generationStartedAt ||= Date.now();
+       }
+       const assistantFailureText = responseStateAssistantFailureText(state);
+       if (assistantFailureText && !generationActive) {
+@@ -5755,12 +5663,11 @@ async function main() {
+           candidate,
+           true,
+           committedTurnSignature,
+-          generationStartedAt ? Date.now() - generationStartedAt : 0,
+         );
+         if (modelAttestation.failure) {
+           return {
+-            status: 'model-confirmation-failed',
+-            modelConfirmationFailure: modelAttestation.failure,
++            status: 'model-verification-failed',
++            responseModelFailure: modelAttestation.failure,
+             responseText: candidate.text,
+             href: state?.href || '',
+           };
+@@ -5770,7 +5677,6 @@ async function main() {
            responseMarker,
            responseElapsedMs: Date.now() - responseWaitStartedAt,
            minimumResponseMs: minimumMarkedResponseMs,
@@ -193,8 +845,68 @@ index 420aced0c8030a23f61e41e5112823fb90d8b0d8..6c99f01ff93167be8ec68317805da6a6
          });
          if (responseDurationFailure) {
            return {
+@@ -5799,13 +5705,7 @@ async function main() {
+     }
+ 
+     if (bestSnapshot?.text) {
+-      // Report the missing completion marker before running the model
+-      // attestation. A snapshot captured at the deadline is an unfinished turn
+-      // -- often just the streamed reasoning summary -- and unfinished text has
+-      // no MODEL_CONFIRMATION line yet. Attesting first turns every ordinary
+-      // wait timeout into "did not include MODEL_CONFIRMATION", which sends the
+-      // operator after the prompt or the model selection when the real cause is
+-      // that the response never completed.
++      // Preserve the incomplete-work failure before checking model metadata.
+       if (timeoutSnapshotMissingResponseMarker(responseMarker, bestSnapshot.text)) {
+         return {
+           status: 'timeout-missing-marker',
+@@ -5820,12 +5720,11 @@ async function main() {
+         bestSnapshot,
+         false,
+         committedTurnSignature,
+-        generationStartedAt ? Date.now() - generationStartedAt : 0,
+       );
+       if (modelAttestation.failure) {
+         return {
+-          status: 'model-confirmation-failed',
+-          modelConfirmationFailure: modelAttestation.failure,
++          status: 'model-verification-failed',
++          responseModelFailure: modelAttestation.failure,
+           responseText: bestSnapshot.text,
+           href: lastState?.href || '',
+           partial: true,
+@@ -7188,11 +7087,11 @@ async function main() {
+           }
+           const cooldown = responseResult.rateLimited ? ' ChatGPT also exposed a rate/usage-limit signal; cool down before retrying.' : '';
+           throw new Error(`ChatGPT generation failed: ${responseResult.failureText}.${cooldown}`);
+-        } else if (responseResult?.status === 'model-confirmation-failed') {
++        } else if (responseResult?.status === 'model-verification-failed') {
+           if (responseFile) {
+             writeCapturedResponseFile(responseFile, responseResult.responseText);
+           }
+-          throw new Error(responseResult.modelConfirmationFailure || 'Assistant response did not confirm the requested model.');
++          throw new Error(responseResult.responseModelFailure || 'Assistant response model verification failed.');
+         } else if (responseResult?.status === 'target-identity-failed') {
+           throw new Error(responseResult.failureText || 'Assistant response capture lost its exact target identity.');
+         } else {
+@@ -7431,12 +7330,11 @@ module.exports = {
+   assertMarkedResponseDurationTrusted,
+   markedResponseDurationFailure,
+   modelAttestationForSnapshot,
+-  appendModelConfirmationPrompt,
+-  extractModelConfirmationValue,
++  appendResponseCapturePrompt,
+   ensureDraftThinkingSelected,
+-  modelConfirmationFailure,
++  responseModelFailure,
+   timeoutSnapshotMissingResponseMarker,
+-  modelConfirmationRequired,
++  modelVerificationRequired,
+   scoreDeepResearchStartButtonCandidate,
+   responseStatusTextIndicatesBusy,
+   responseStatusTextsIndicateBusy,
 diff --git a/src/review-gpt-lib.mts b/src/review-gpt-lib.mts
-index 7a4a5ab6b4121fadbf294bf0c9d5a4f7e6af9dde..651d53290b2f83682fb41793f93dca18ca9dfd29 100644
+index a7631b54f2d8d46604dc77d28f27ead8debbb6cf..0ad45fa93090c8d46d8109ea755c85e17e8cf86f 100644
 --- a/src/review-gpt-lib.mts
 +++ b/src/review-gpt-lib.mts
 @@ -1560,6 +1560,7 @@ export function formatSensitiveArtifactFailure(

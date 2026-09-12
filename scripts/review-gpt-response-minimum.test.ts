@@ -8,11 +8,10 @@ import { afterEach, describe, expect, it } from "vitest";
 const require = createRequire(import.meta.url);
 const review = require("../node_modules/@cobuild/review-gpt/src/prepare-chatgpt-draft.js");
 const roots: string[] = [];
-const responseText = "MODEL_CONFIRMATION: gpt-6-pro\nSynthetic review proof.\nREVIEW_COMPLETE";
+const responseText = "Synthetic review proof.\nREVIEW_COMPLETE";
 const committedUserTurn = { turnId: "user-synthetic", turnIndex: 0, signature: "synthetic-request" };
 const snapshot = {
   text: responseText,
-  modelConfirmationText: "MODEL_CONFIRMATION: gpt-6-pro",
   modelSlug: "gpt-6-pro",
   assistantTurnId: "assistant-synthetic",
   assistantTurnIndex: 1,
@@ -42,6 +41,17 @@ afterEach(() => {
 });
 
 describe("installed ReviewGPT marked-response minimum", () => {
+  it("assembles a nonce-bound prompt without model self-confirmation", () => {
+    const prompt = review.appendResponseCapturePrompt("Review the synthetic change.", {
+      shouldSend: true, shouldWaitForResponse: true, isDeepResearchMode: false,
+      targetModel: "gpt-6-pro", responseMarker: "REVIEW_COMPLETE", turnNonce: "synthetic-nonce",
+    });
+    expect(prompt).toContain("REVIEW_GPT_TURN_NONCE: synthetic-nonce");
+    expect(prompt).toContain("Include REVIEW_COMPLETE only after the requested work is complete.");
+    expect(prompt).toContain("Review the synthetic change.");
+    expect(prompt).not.toMatch(/MODEL_CONFIRMATION|confirm.*model/i);
+  });
+
   it.each([false, true])("enforces elapsed time with model evidence=%s", (evidence) => {
     for (const elapsed of [0, 175_650, 179_999, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(durationFailure(elapsed, evidence)).toContain("response is untrusted");
