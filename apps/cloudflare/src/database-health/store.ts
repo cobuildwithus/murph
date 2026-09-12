@@ -227,6 +227,16 @@ export class DatabaseHealthStore {
     return this.readAlertState();
   }
 
+  clearUnadmittedMonitoringAlertObligation(): void {
+    // An admitted body may already have reached a recipient. Preserve it and
+    // its idempotency key; only withdraw telemetry that has not entered it.
+    this.sql.exec(
+      `UPDATE database_health_meta
+       SET monitoring_alert_owed_json = NULL
+       WHERE singleton = 1 AND pending_alert_includes_monitoring = 0`,
+    );
+  }
+
   deferConnectionErrors(input: {
     checkedAtMs: number;
     directCount: number;
@@ -427,8 +437,9 @@ export class DatabaseHealthStore {
     );
   }
 
-  readLatestMonitoringEvidence(): DatabaseHealthMonitoringEvidence | null {
-    const row = this.sql.exec<{
+  readRecentMonitoringEvidence(limit: number): DatabaseHealthMonitoringEvidence[] {
+    const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+    return this.sql.exec<{
       failure_code: string;
       monitoring_evidence_json: string | null;
     }>(
@@ -436,21 +447,20 @@ export class DatabaseHealthStore {
        FROM database_health_samples
        WHERE scrape_status = 'failed'
        ORDER BY observed_at_ms DESC
-       LIMIT 1`,
-    ).toArray()[0];
-    if (!row) {
-      return null;
-    }
-    if (row.monitoring_evidence_json !== null) {
-      return parseMonitoringEvidence(row.monitoring_evidence_json);
-    }
-    return {
-      availability: row.failure_code === "required_metrics_missing"
-        ? "incomplete"
-        : "unavailable",
-      connectionErrorEvidence: null,
-      missingMetrics: [],
-    };
+       LIMIT ?`,
+      safeLimit,
+    ).toArray().map((row) => {
+      if (row.monitoring_evidence_json !== null) {
+        return parseMonitoringEvidence(row.monitoring_evidence_json);
+      }
+      return {
+        availability: row.failure_code === "required_metrics_missing"
+          ? "incomplete"
+          : "unavailable",
+        connectionErrorEvidence: null,
+        missingMetrics: [],
+      };
+    });
   }
 
   pruneSamples(beforeMs: number): void {

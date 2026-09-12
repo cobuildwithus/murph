@@ -403,7 +403,7 @@ a port first seen there advances its baseline. Each observed port advances only
 its own usable baseline; an omitted port retains its prior baseline, and new or
 reset region series are suppressed independently. Absence never becomes zero
 and an old counter delta is never replayed. Persistent missing families still
-open the fallback monitoring incident after two consecutive checks. This keeps
+open the fallback monitoring incident after six consecutive checks. This keeps
 the existing maximum of two observations and four provider requests; even two
 sequential ten-second fetch timeouts per observation plus the one-second wait
 remain below the two-minute run lease.
@@ -411,8 +411,8 @@ Structured failure warnings retain the parsed-observation count and exact
 per-port omission counts without raw scrape content. An acknowledged
 telemetry-only page is
 one-shot for one unresolved operator-notification window.
-Crossing the two-failure threshold records one bounded alert obligation in the
-existing incident row. The first two-check window counts incomplete versus
+Crossing the six-failure threshold records one bounded alert obligation in the
+existing incident row. The first six-check window counts incomplete versus
 unavailable observations, unions only canonical missing families, and sums
 parsed observations plus exact 5432/6432 omission counts from checks where the
 whole family was absent.
@@ -424,19 +424,21 @@ preserves the legacy reader correlation invariant across rollback. Legacy
 evidence, including a single-port monitoring obligation, remains readable. Any
 window containing legacy evidence reports unavailable port detail
 rather than presenting a partial ratio as exact. An older
-pending page or connection-error priority cannot lose the obligation; recovery
-and another gap before acknowledgment coalesce into that same notification
-while the first threshold window remains authoritative. The obligation does
-not occupy a closed provider fence.
+pending page or connection-error priority retains the obligation while telemetry
+remains incomplete. A complete check clears an obligation that has not entered
+a pending message, so a recovered gap cannot generate a delayed page when the
+hourly fence opens. A pending telemetry-bearing body and its idempotency key
+remain immutable across recovery because delivery may already have occurred.
+The obligation does not occupy a closed provider fence.
 At the same time, until an incident admits its first page, concrete evidence
 that appears on the threshold or a later sample, including either
 connection-error category, persists in one combined immutable body. The exact
 pressure and truthful telemetry facts therefore share the next eligible attempt
 and one acknowledgment cycle. For acknowledged-incident recurrence, the next
 eligible sample supplies any still-current unsafe evidence while historical
-telemetry keeps its own observation time. Only acknowledgment of a
-telemetry-bearing page clears the obligation; a later complete sample then
-closes and rearms the incident. After acknowledgment, incomplete samples remain
+telemetry keeps its own observation time. Acknowledgment clears an admitted
+telemetry obligation; a later complete sample then closes and rearms the incident.
+Unadmitted recovered telemetry is withdrawn and rearmed without notification. After acknowledgment, incomplete samples remain
 queryable but cannot repeat telemetry copy inside concrete-pressure pages
 unless a later rearmed threshold creates a new obligation. When a
 connection-error condition takes admission priority after an earlier page, any

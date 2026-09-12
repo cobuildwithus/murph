@@ -1873,11 +1873,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   observed port, including one first seen by confirmation, advances only its
   usable baseline; an omitted port retains its prior baseline,
   and new or reset region series are independently suppressed so an old delta is
-  never replayed. A telemetry-only notification opens after two consecutive
+  never replayed. A telemetry-only notification opens after six consecutive
   incomplete or failed collections. Every successfully parsed observation is
   retained, including an all-family-
   missing first parse followed by retry transport failure; `unavailable` is
-  reserved for a check with no parsed observation. The first two-check threshold
+  reserved for a check with no parsed observation. The first six-check threshold
   window counts incomplete versus unavailable observations, unions only
   canonical missing families, and sums parsed observations plus exact omission
   counts for ports 5432/6432 from checks where the whole family was absent. It uses the threshold
@@ -1888,17 +1888,18 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   the canonical connection-error family is missing. This preserves the legacy
   reader correlation invariant across rollback. Legacy single-port monitoring
   obligations remain readable. If any sample in the
-  two-check window predates detailed port
+  six-check window predates detailed port
   evidence, the aggregate keeps port detail unknown instead of presenting a
   partial ratio as exact. Structured collection warnings include the bounded
   parsed-observation count and per-port omission counts without raw provider
   payloads. One bounded
   obligation in the
-  existing incident row survives a busy pending slot, restart, and recovery
-  until a telemetry-bearing page is acknowledged. Recovery and another metric
-  gap before that acknowledgment coalesce into the same unresolved operator
-  notification instead of creating a backlog; the first threshold window
-  remains authoritative. An owed telemetry page alone does not occupy a closed
+  existing incident row survives a busy pending slot and restart while telemetry
+  is incomplete. Recovery clears an obligation that has not entered a pending
+  body, preventing a delayed page for an already recovered gap. A pending
+  telemetry-bearing body remains immutable until acknowledged because delivery
+  may be ambiguous. A later gap after unadmitted recovery starts a fresh window.
+  An owed telemetry page alone does not occupy a closed
   provider fence. Before an incident admits its
   first page, concrete evidence—including either connection-error category—that
   appears on the threshold or a later sample persists in one combined immutable
@@ -1906,8 +1907,8 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   eligible attempt and one acknowledgment cycle.
   An acknowledged-incident recurrence waits for the eligible sample, which
   includes any still-current unsafe evidence and labels historical telemetry by
-  its own observation time. A later complete collection rearms telemetry only
-  after the obligation is acknowledged. Its additive alert-state and
+  its own observation time. A complete collection rearms unadmitted telemetry
+  immediately; admitted telemetry rearms after acknowledgment. Its additive alert-state and
   sample-evidence columns preserve the existing schema version; current code
   also recognizes a telemetry pending body cleared by the
   prior Worker, preventing a duplicate after rollback and re-upgrade. Concrete

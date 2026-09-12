@@ -169,6 +169,49 @@ describe("database health scheduled Worker path", () => {
     });
   });
 
+  it("withdraws recovered telemetry before delivery and pages a new sustained gap", async () => {
+    resetDatabaseHealthMessageRequests();
+    const start = Date.now();
+    const monitor = readDatabaseHealthNamespace().getByName("telemetry-recovery");
+    const check = async (slot: number) => {
+      const scheduledAtMs = start + FIVE_MINUTES_MS * slot;
+      setDatabaseHealthNowMs(scheduledAtMs);
+      return await monitor.runScheduledCheck({ scheduledAtMs });
+    };
+    await check(0);
+    expect(readDatabaseHealthMessageRequests()).toHaveLength(2);
+    setDatabaseHealthClientWaitSeconds(0);
+    await check(1);
+    setDatabaseHealthMissingConnectionErrorScrapesRemaining(12);
+    for (const slot of [2, 3, 4, 5, 6]) {
+      await check(slot);
+      expect(readDatabaseHealthMessageRequests()).toHaveLength(2);
+      await expect(monitor.readAlertState()).resolves.toMatchObject({
+        monitoringAlertObligation: null,
+      });
+    }
+    await check(7);
+    await expect(monitor.readAlertState()).resolves.toMatchObject({
+      consecutiveScrapeFailures: 6,
+      monitoringAlertObligation: { failures: 6, incompleteChecks: 6 },
+      pendingAlertMessage: null,
+    });
+    await check(8);
+    await expect(monitor.readAlertState()).resolves.toMatchObject({
+      incidentOpen: false, monitoringAlertObligation: null,
+    });
+    await check(12);
+    expect(readDatabaseHealthMessageRequests()).toHaveLength(2);
+
+    setDatabaseHealthMissingConnectionErrorScrapesRemaining(12);
+    for (const slot of [13, 14, 15, 16, 17, 18]) await check(slot);
+    const messages = readDatabaseHealthMessageRequests();
+    expect(messages).toHaveLength(4);
+    expect(messages[2]?.messageParts[0]?.value).toContain("incomplete for 6 checks");
+    expect(messages[2]?.messageParts[0]?.value).toContain("5432 in 12/12; 6432 in 12/12");
+    expect(messages[3]?.messageParts).toEqual(messages[2]?.messageParts);
+  });
+
   it("retains a truthful page through recovery and the hourly fence", async () => {
     resetDatabaseHealthMessageRequests();
     const scheduledAtMs = Date.now();

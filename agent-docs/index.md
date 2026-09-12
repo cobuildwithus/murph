@@ -59,6 +59,12 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 `references/hosted-temporal-orchestration.md`, `SECURITY.md`, and
 `../apps/web/README.md`. Vercel remains the managed Git promotion owner.
 
+Database-monitor telemetry paging requires six consecutive failed collections;
+recovery withdraws unadmitted telemetry while concrete alerts and ambiguous
+notification retries retain their existing guarantees. Owners are
+`agent-docs/RELIABILITY.md` and `apps/cloudflare/README.md`; focused scenarios
+are indexed in `agent-docs/references/testing-ci-map.md`.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

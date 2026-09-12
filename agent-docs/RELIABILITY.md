@@ -718,20 +718,20 @@ Last verified: 2026-09-04
   omitted port retains its prior baseline, and new or reset region series are
   independently suppressed. This makes transient counter-family absence less
   noisy without converting unknown to zero, replaying an old delta, or weakening
-  the two-check telemetry fallback. The confirmation retains the existing
+  the six-check telemetry fallback. The confirmation retains the existing
   two-observation/four-request ceiling. Including two sequential ten-second
   fetch timeouts per observation, its 41-second worst-case wall time remains
   below the persisted two-minute run lease and the platform's 15-minute
   scheduled runtime. Structured failure warnings include the actual
   parsed-observation count and per-port omission counts, without raw provider
   payloads or signed scrape values.
-  Discovery, scrape, parse, or incomplete required metrics must recur on two
+  Discovery, scrape, parse, or incomplete required metrics must recur on six
   consecutive runs before paging the monitoring condition. A failed check never
   erases a successfully parsed observation: even an all-family-
   missing parse remains an incomplete observation if its retry later fails,
   while `unavailable` means that the check produced no parsed observation.
   Crossing the threshold persists one bounded telemetry-page obligation in the
-  existing incident row. The represented first two-check window counts
+  existing incident row. The represented first six-check window counts
   incomplete versus unavailable observations, unions only canonical missing
   families, and sums parsed observations plus exact 5432/6432 omission counts
   from checks where the whole family was absent.
@@ -744,13 +744,14 @@ Last verified: 2026-09-04
   collection failure, but durable evidence clears that diagnostic count unless
   the canonical connection-error family is missing. This preserves the legacy
   reader correlation invariant across rollback. Legacy single-port monitoring
-  obligations remain readable. The obligation survives an
-  occupied pending-message slot,
-  restart, recovery, and connection-error-only prioritization; only
-  acknowledgment of a pending body that includes the monitoring condition
-  clears it. Recovery and another threshold before acknowledgment deliberately
-  coalesce into that unresolved notification, retaining the first threshold
-  window; this monitor does not maintain an outage backlog. The additive
+  obligations remain readable. While telemetry is incomplete, the obligation
+  survives an occupied pending-message slot, restart, and connection-error-only
+  prioritization. A complete check clears an obligation that has not entered a
+  pending message, even when an older concrete-pressure message remains pending.
+  Once a pending body includes telemetry, preserve that body and its idempotency
+  key through recovery and restart: a recipient may already have received it.
+  A later gap after unadmitted recovery starts its own six-check window. There
+  is no backlog of recovered monitoring-only incidents. The additive
   columns retain the existing schema version so a rollback Worker can ignore
   them. Current code recognizes the prior Worker's cleared pending key/body with
   the telemetry marker still set as an acknowledgment and removes the stale

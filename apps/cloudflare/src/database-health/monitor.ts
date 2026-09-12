@@ -46,7 +46,7 @@ const PLANETSCALE_SIGNED_PARAMETER_LIMIT = 16;
 const PLANETSCALE_SIGNED_PARAMETER_NAME_LIMIT = 64;
 const PLANETSCALE_SIGNED_PARAMETER_VALUE_LIMIT = 2_048;
 const PLANETSCALE_SCRAPE_URL_LENGTH_LIMIT = 8_192;
-const MONITORING_FAILURE_ALERT_COUNT = 2;
+const MONITORING_FAILURE_ALERT_COUNT = 6;
 
 const DATABASE_ALERT_OPENINGS = [
   "The database monitor recorded an alerting observation.",
@@ -599,6 +599,7 @@ export class DatabaseHealthMonitor {
     const { sample } = input;
     if (sample.status === "ok") {
       this.store.setConsecutiveScrapeFailures(0);
+      this.store.clearUnadmittedMonitoringAlertObligation();
     } else {
       this.store.setConsecutiveScrapeFailures(sample.failures);
     }
@@ -611,8 +612,10 @@ export class DatabaseHealthMonitor {
       && sample.failures === MONITORING_FAILURE_ALERT_COUNT
       && currentMonitoringCondition
     ) {
-      const priorEvidence = this.store.readLatestMonitoringEvidence();
-      if (priorEvidence === null) {
+      const priorEvidence = this.store.readRecentMonitoringEvidence(
+        MONITORING_FAILURE_ALERT_COUNT - 1,
+      );
+      if (priorEvidence.length !== MONITORING_FAILURE_ALERT_COUNT - 1) {
         throw new Error(
           "Database monitoring threshold is missing prior evidence.",
         );
@@ -620,7 +623,7 @@ export class DatabaseHealthMonitor {
       const monitoringAlertObligation = buildMonitoringAlertObligation({
         checkedAtMs: input.checkedAtMs,
         failures: currentMonitoringCondition.failures,
-        observations: [priorEvidence, sample.monitoringEvidence],
+        observations: [...priorEvidence, sample.monitoringEvidence],
       });
       Object.assign(currentMonitoringCondition, {
         connectionErrorEvidence:
