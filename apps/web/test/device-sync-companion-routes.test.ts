@@ -445,6 +445,20 @@ describe("device sync companion routes", () => {
       expect(response.status).toBe(400);
     });
 
+    it.each([
+      "hosted_response_rejected", "hosted_credentials_unavailable", "hosted_invalid_response",
+    ])("accepts the closed first-party diagnostic code %s", async (diagnosticCode) => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode, errorKind: "unavailable", method: "session",
+        retryable: true, stage: "session_refresh",
+      }));
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith("Companion auth diagnostic.", expect.objectContaining({
+        diagnosticCode, errorKind: "unavailable", method: "session", stage: "session_refresh",
+      }));
+    });
+
     it("accepts the checked-in iOS OTP failure contract", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const contract = JSON.parse(await readFile(

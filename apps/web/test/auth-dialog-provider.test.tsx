@@ -1250,3 +1250,24 @@ test("AuthProvider reloads plain home so it can read canonical onboarding state"
 
   await rendered.cleanup();
 });
+
+
+test.each(["active", "checkout"])("AuthProvider resumes the native account-settings entry after %s login", async (stage) => {
+  const { AuthProvider } = await import("@/src/components/hosted-onboarding/auth-dialog-provider");
+  const reload = vi.fn();
+  const assign = vi.fn();
+  const rendered = await renderClientComponent(createElement(AuthProvider, { authenticated: false }), { requireButton: false });
+  Object.defineProperty(rendered.window, "location", {
+    configurable: true,
+    value: {
+      assign, reload, hash: "", origin: "https://join.example.test", pathname: "/settings/accounts",
+      href: "https://join.example.test/settings/accounts?companion=ios", search: "?companion=ios",
+    },
+  });
+  await act(async () => { await mocks.authDialogProps?.onCompleted?.({
+    activationPending: false, inviteCode: "synthetic-invite", joinUrl: "/join/synthetic-invite", stage,
+  }); });
+  expect(reload).toHaveBeenCalledOnce();
+  expect(assign).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});

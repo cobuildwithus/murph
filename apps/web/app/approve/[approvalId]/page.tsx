@@ -34,6 +34,7 @@ import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { cn } from "@/src/lib/utils";
+import { readApprovalPasskeyState } from "@/src/lib/sensitive-actions/passkey-store";
 
 import { APPROVE_OG_ALT } from "./approve-share-card";
 
@@ -98,8 +99,9 @@ export default async function ActionApprovalPage({
   }
 
   if (!isTerminalActionApproval(approval)) {
+    const state = await readApprovalPasskeyState({ memberId: session.member.id, prisma: getPrisma() }).catch(() => null);
     return (
-      <HostedPrivyBoundary>
+      <HostedPrivyBoundary legacyApprovalRequired={Boolean(session.privyUserId) && state?.credentials.length === 0}>
         <ActionApprovalCard approval={approval} />
       </HostedPrivyBoundary>
     );

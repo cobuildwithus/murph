@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-09-09
-Updated: 2026-09-09
+Updated: 2026-09-10
 
 ## Goal
 
@@ -202,3 +202,375 @@ failed before send. The successful retry included the complete compressed,
 hash-verified Better Auth 1.7.3 dependency source and the guarded repository ZIP.
 The completed response came from the requested Pro model and inspected both
 repository and decoded dependency contracts. No deployment or activation occurred.
+
+## PR 3 implementation progress
+
+The Telegram login owner now verifies the numeric profile ID, issuer, audience,
+nonce, signature and expiry. A five-minute browser-bound nonce is consumed with
+canonical member selection and private Better Auth session issuance in one
+database-only transaction. Existing imported accounts cannot be resurrected
+from messaging routing after removal. New and referral members retain canonical
+identity and onboarding owners. Six PostgreSQL journeys pass, including a
+forced session-write failure followed by retry of the same proof; ten signed
+token cases and Web typecheck also pass. The new native OTP response carries
+the issued session expiry so apps can durably store it without a second read.
+
+Web client adoption, credential controls, first-factor setup/recovery, and
+native implementations remain in progress. Native work uses isolated checkouts;
+the transition must preserve the installation's existing member key only after
+same-member server exchange, store the first-party session in platform secure
+storage, retain SDK restoration until that write succeeds, and never fall back
+to SDK credentials after first-party rejection. No PR 3 deployment or activation
+has occurred. PR 2 review remediation remains owned by its earlier checkout.
+
+
+The iOS transition now uses one host-private Keychain record for the first-party
+credential and its retirement marker, preserving the existing local member key
+after same-member exchange. The temporary SDK adapter only restores, refreshes
+and signs out existing sessions. Fixed native HTTP routes replace new SDK login.
+Lost exchange responses, unavailable secure storage, expired/offline sessions,
+rejected replacement credentials and late renewal after sign-out have focused
+proof. The initial continuity run passes 344 tests; the subsequent HTTP,
+Keychain, configuration and diagnostics run passes 73 tests. These include real
+Simulator Keychain persistence and exclusion of Messages-group lookalikes.
+Xcode build and SwiftFormat checks pass. Physical-device/provider qualification
+and native exact-head UI evidence remain release/review work.
+
+Infrequent phone/Telegram changes reuse secure web account settings through an
+ephemeral browser session. No credential enters the callback URL, and returning
+only triggers canonical admission. The web counterpart and first-factor setup,
+credential controls, recovery and full web adoption are still being implemented.
+Android adoption remains outstanding. Three closed first-party diagnostic codes
+are accepted by the existing backend owner; all 115 companion route cases and
+Web typecheck pass. Native and backend PR 3 remain uncommitted and unactivated.
+The adoption checkout now includes PR 2's runner correction at
+ca1c6a115aaf050df78a939c77f0590f0737e995. Its verified gpt-6-pro round 3 review passed with no qualifying findings (response SHA-256 d48d9a2295d210e492327ff351e99801552f203df61929e074ae4f2ebf83a306), and all required exact-head CI checks are green. PRs #3127 and #3128 merge cleanly with their declared bases; #3128 is Ready with issuance off.
+
+
+Initial approval enrollment now has a bounded first-party path for newly
+unprotected accounts only. It reuses the existing challenge and encrypted
+credential owners and requires primary proof within five minutes, no legacy
+identity and no established factor. Silent exchange, stale/future primary proof,
+other sessions, revocation and concurrent first enrollment are covered through
+actual OTP/public routes and real PostgreSQL/WebAuthn fixtures. The final
+38-case PostgreSQL run passes, including the existing ten-case approval boundary
+suite and explicit legacy-binding rejection. The client now selects initial
+setup from a server hint, keeps existing-factor enrollment, and opens login when
+primary proof is stale. Focused client tests and Web typecheck pass; rendered
+evidence and credential-control/recovery flows remain outstanding.
+
+Credential controls use the existing canonical contact/routing writers and
+sensitive-action challenge owner. Each approval binds the exact method, old
+identity, new identity, operation, member and browser session. New contact proof
+is consumed with canonical/projection writes and approval acceptance. Adding a
+method preserves existing sessions; replacing/removing one revokes other
+sessions and fences legacy native credentials, while keeping the authorizing
+first-party browser session. This is a security change, distinct from migration.
+The last usable sign-in cannot be removed. No automatic account merging or
+provider-token retention is introduced. Code delivery and crypto preparation
+remain outside transactions. Tests must prove matching canonical readback,
+rollback/retry, stale approval, competing owners and revocation races.
+
+
+Credential verification now passes 43 canonical-member PostgreSQL cases and ten
+Telegram PostgreSQL cases, plus the existing ten approval PostgreSQL cases and
+ten real signed Telegram-token cases. These cover target/session binding,
+competing owners, last-method preservation, email alias rotation, concurrent
+completion, failed commit rollback/retry, cross-purpose Telegram proof, imported
+native continuity, cross-format revocation and durable channel wakes despite
+signaling failure. A mixed-case canonical email initially rejected its normalized
+login projection; normalization at the agreement check fixes that reproduced
+case without relaxing ownership. Web typecheck passes.
+
+The main dialog and invite entry now share first-party phone/email/Telegram
+login. Code preloading does not start authentication. Confirmed login moves to
+retryable product completion, preserving consent/checkout behavior without
+repeating OTP. Telegram opens synchronously from its click with a prepared nonce;
+blocked/canceled popups and late callbacks are bounded. Credential changes use
+explicit approval and refresh canonical state after uncertain commit responses.
+The old homepage runtime wrappers and join provider bootstrap were removed.
+Settings and invite models no longer wait for provider account display hints.
+
+The independent `/settings/accounts` route reuses connection and passkey controls
+without the dashboard's subscription redirect. This is the native browser
+counterpart and unfinished-signup messaging entry. Its fixed iOS/development
+return links carry no credential; login resumes the page and native admission
+remains the only completion authority. The shared code form preserves normalized
+contact/code ownership through autofill, resend, duplicate actions and unmount.
+Hourly visible-browser renewal calls the existing fixed endpoint; a PostgreSQL
+regression proves the legacy session row and response cookies remain unchanged.
+
+The focused Web client/invite/settings run passes 160 tests. Account-page and
+AuthProvider continuation proof passes 42 further tests; the canonical-member
+43-case PostgreSQL suite and Web typecheck pass after the renewal regression.
+The earlier combined backend/client suite passed 155 tests. These runs overlap
+and must not be added as a distinct-test total. Complexity passes all 55 changed
+source files, reducing existing dialog, invite-model and Settings debt. Full
+rendered journeys and candidate review remain outstanding.
+
+PR 3 remains Hold and is not activated. Required follow-up includes legacy-factor
+reauthentication independent of the new primary-login dialog, operational
+independent recovery without a primary-OTP downgrade, removal of legacy logout
+and remaining production entry dependencies, native qualification/Android work,
+and exact-head UI/CI/ReviewGPT evidence. First-party passkey controls still share
+legacy SDK hooks pending that separation. Deploy the completed PR 3 UI together
+with enabled issuance after reader/recovery qualification; an issuance pause
+keeps the first-party UI and compatible session readers. Do not import or widen
+while these user journeys are incomplete. This is an intermediate checkpoint,
+not the final candidate or a claim of production continuity.
+
+First-party approval now has no SDK hooks, and account settings omit the legacy
+provider for initial or established Murph passkeys. The temporary wallet port
+restores an existing factor for the server-selected legacy principal, checks it
+again after wallet loading, and refuses missing-factor creation during approval.
+Legacy setup has a separate provider dialog and canonical member checks before
+provider changes; neither operation completes primary login or replaces the
+Murph session. Missing or invalid server-selected approval methods fail closed.
+
+The final focused follow-up passes 154 cases across eight client and real
+PostgreSQL suites. These include wrong restored accounts, changed accounts
+during wallet loading, first-party ownership blocking legacy setup, no fallback
+after passkey rejection, and server-owned principal selection. Web typecheck,
+changed-file lint and complexity pass. Real-device provider restoration,
+independent recovery, remaining legacy entry/logout cleanup, native work and
+candidate UI/CI/ReviewGPT remain Hold. The earlier hook-separation and legacy
+reauthentication implementation gaps are closed; this is still an intermediate
+checkpoint and no deployment or import has occurred.
+
+Production sign-out now waits only for confirmed server revocation and refreshes
+the canonical page; the legacy SDK cleanup component is deleted. Canonical
+account deletion navigates directly to the farewell, retaining the durable
+cleanup status. Approval and data-privacy pages omit the SDK for migrated
+factors; an optional factor-read outage leaves the decision/deletion surface
+available, while the action endpoints retain authorization authority.
+
+The focused sign-out/privacy run passes 57 tests, and the approval/Settings page
+run passes 79 tests. Web typecheck, changed-file lint and the five-source-file
+complexity check pass. The cleanup adds no persisted state or dependencies.
+
+Independent saved-key recovery now reuses the approval aggregate and one-use
+challenge owner. One nullable column holds a member/field-bound encrypted
+SHA-256 digest of a random 32-byte key. A current Murph passkey authorizes
+generation; fresh first-party primary proof plus the previously saved key
+authorizes a new user-verified passkey. The short commit replaces all old
+approval credentials, consumes the key/challenge, revokes other sessions and
+fences legacy native admission. Generation preserves sessions. This adds no
+service, session format, permit ledger, or contact-only support override.
+
+Settings exposes explicit create/save and recover controls. Keys remain in
+dialog memory, closing aborts further submission, late WebAuthn results cannot
+commit after dismissal, and uncertain commits refresh canonical state without
+automatic replay. The nullable-column migration was applied only to the
+isolated local task database. Existing members who lost every legacy factor
+before migrating remain an explicit retirement exception; no OTP downgrade is
+introduced to make that inventory appear complete.
+
+Recovery proof passes all 54 canonical-member PostgreSQL cases, including real
+WebAuthn, wrong/moved/rotated proof, simultaneous redemption, failed database
+commit with safe retry, stale/silent/suspended primary authority, and imported
+native/browser revocation. Seventeen focused client/enrollment cases pass. The
+ten-case existing approval PostgreSQL suite and ten schema/privacy checks pass.
+These totals overlap earlier runs. Web typecheck, changed-file lint and the ten
+changed-source complexity check pass. Full rendered journeys, final candidate
+review, Android/native qualification and retirement work remain outstanding;
+PR 3 is still unactivated.
+
+## PR 3 browser proof
+
+Six Chromium journeys pass across phone and desktop widths. Real login controls
+accept phone/email codes, focus OTP input, and preserve a confirmed login when
+product loading fails; an explicit retry repeats completion without another
+code. Public navigation and opening login load no Privy SDK. API responses in
+this browser lane are synthetic; PostgreSQL tests own authentication proof.
+The inert design study uses the production settings presenter with a static
+referral action, so it makes no account request. Stacking connection actions on
+phones keeps addresses readable. Selected synthetic images were inspected at
+native resolution. Web typecheck, the verified-contact/last-method regression,
+changed-file lint and full PR complexity guard pass; no new hotspot exceeds 20.
+
+The broader public-loading run also reported a recoverable server-render error
+on the unchanged experiment library. The same error reproduces on the clean
+parent branch in its existing public-auth smoke test, which still passes.
+Recorded this existing diagnostic gap through Frog. No authentication failure
+appeared in the six journeys. Final review, exact-head CI, native qualification
+and retirement remain outstanding.
+
+The Web adoption candidate is PR #3132, stacked on #3128. Its release note uses
+the existing archive renderer; all ten fragment/page cases and Web typecheck
+pass. Public preview and final review are being prepared on the stable candidate.
+
+### Adoption session-cache correction
+
+Retirement verification exposed a first-party login boundary gap: a successful
+OTP or Telegram response can replace the browser cookie before its body is
+read, while the previous member's decrypted vault remains mounted. Both
+composed login regression cases failed before the correction. Verification
+now uses the existing session client owner to invalidate every tab at successful
+headers and reload after an unreadable or invalid success body. Failed
+nonreplacement responses preserve the current cache. No new state or logout
+step was added. All 90 focused login, session and live-vault checks and Web
+typecheck pass. This source change requires ReviewGPT round 2 and current-head
+CI before PR #3132 is ready again.
+
+### Adoption renewal ordering correction
+
+ReviewGPT round 2 at 82d5147a74b274e222ca1cf5f9c32a11c741aa9a returned one accepted High finding: an older renewal response can overwrite a successful replacement cookie. Its captured response, committed-turn identity and requested/response gpt-6-pro metadata agree (response SHA-256 14d775b11bc601cff7e4d1f03a698854e6a66f52e0564ad4eb490d238f0a4c11).
+
+Both OTP and Telegram regression cases failed before the correction. The existing session client now serializes cookie writes through one origin-wide Web Lock; the renewal component participates, and verification/logout have bounded waits. Browsers without that API skip automatic browser renewal and retain the original lifetime. Native renewal and valid server sessions are unchanged. Real Chromium with actual HttpOnly Set-Cookie responses passed same-tab and cross-tab OTP/Telegram ordering. All 97 focused session, login and live-vault cases passed before the two additional fallback/failure cases. Final verification and round 3 remain required.
+
+
+### 2026-09-10 client compiler and incomplete review recovery
+
+Web adoption CI's actual Next TypeScript 5 compiler inferred a nested Promise from the Web Locks callback, although the source TypeScript 7 check passed. Marking the existing cookie-write helper async fixes the compiler contract without changing the lock owner or session policy. The same correction already has focused test, both compiler and ReviewGPT PASS evidence in retirement candidate #3134 at 87786eda0b935ac32614fc843665e0aadefa971c.
+
+Round 3's first attempt at 4dd15d07dabb7d37e1ae3763e79693d01150a42c produced only an initial inspection note after more than 75 minutes. Exact-thread exports and refresh showed no active generation, final verdict, completion marker or completed-response model evidence. This incomplete attempt is invalid and does not count as a substantive round. Its capture metadata and diagnostics are retained locally. Only its proven five-process watcher group was stopped; the managed browser and conversation were preserved. The independently known CI correction is being applied before the corrected candidate's full round-3 audit. The immutable first-reviewed head remains 3bbff6a97ccb5c30bff6d997c849aba9c27a38d0 and previous valid head remains 82d5147a74b274e222ca1cf5f9c32a11c741aa9a. No earlier finding or review baseline is reset.
+
+
+### Twilio Verify account-settings integration
+
+Outcome: login and phone credential changes use the same provider-managed SMS
+proof while preserving exact action approval and canonical session rules.
+Reaches: phone additions/replacements, wrong-code budgets, concurrent completion,
+resends, canonical rollback and unchanged email/recovery paths.
+Proof: actual settings routes with real PostgreSQL and the single-use synthetic
+Verify boundary, plus focused provider/Telegram regressions and Web typecheck.
+
+The qualified backend is PR #3217. Its private phone plugin rejects verification
+unless the caller supplies the prepared generation-bound local approval; the
+older credential owner calls consumePhoneNumberOTP without that callback.
+Reuse prepareHostedAuthSmsOtp outside the credential transaction and
+verifyHostedAuthSmsOtpTx under the existing OTP/member locks. Preserve the
+credential owner's canonical commit, one-use action proof, rollback and session
+revocation policy. Remove obsolete SMS delivery stubs; no new state or dependency.
+
+The original adoption candidate passed three substantive ReviewGPT rounds.
+This later provider integration changes production behavior. Cap retrospective:
+the previous three rounds resolved the original adoption candidate; this is the
+new Verify integration, with no unresolved earlier findings or repeated repair
+mechanism. The renewed rollout instruction authorizes continuing this bounded
+change and its required review. Continue with a full fourth review, preserving
+the first-reviewed head and previous resolved head. Activation, native
+qualification and vendor retirement remain separate rollout gates.
+
+Reproduced the unintegrated phone path through the real settings route: a valid
+provider-generated challenge returned AUTH_CODE_INVALID before the canonical
+rollback test could reach its injected database failure. The correction uses
+external preparation and the transaction-bound callback, and passes request
+cancellation through both Verify operations. Added composed wrong-code/resend
+proof, asserted that canonical retry reuses one provider approval, and retained
+concurrent/replay and session-continuity assertions. Removed obsolete SMS
+delivery properties from credential and Telegram session owners. Focused lint
+and the full adoption complexity guard pass. Both PostgreSQL suites pass all
+66 cases; provider/admission/Telegram token tests pass 26 cases. Web typecheck
+passes. Parent review confirms no provider work under credential locks, exact
+generation/code binding, one-use action consumption and unchanged session rules.
+Current-head CI and the additional final review remain before merge readiness.
+
+
+### Preview provisioning and CI follow-up
+
+A fresh, unseeded PlanetScale `auth-preview` development branch now has all 222
+candidate migrations, zero members, dedicated runtime/migration credentials,
+and independent branch-scoped Vercel auth keys. New Preview GCP identity and KMS
+resources pass exact subject, audience and key-scoped IAM readback. The protected
+application Preview is queued with issuance disabled. Email/SMS settings and
+actual hosted authentication, recovery and native continuity remain incomplete.
+Production provider secrets were not read locally. The older rehearsal branch
+is retained and main merges continue without a hold.
+
+Exact-head CI exposed a recovery fixture scheduling assumption: a losing request
+can reject an already-consumed key with 403 before reaching the transactional
+credential-generation conflict that returns 409. The corrected test still
+requires one success, one rejection, consumed recovery material, and only the
+winner's factor. All 56 canonical PostgreSQL cases, Web typecheck and focused
+ESLint pass. The isolated local test schema initially lacked an additive column;
+`prisma migrate deploy` rejected its existing unbaselined schema with P3005.
+`prisma db push` synchronized that local test database before the successful
+rerun. The hosted Preview database used the complete migration chain separately.
+No application auth code changed; this test correction uses the low-risk final
+review exemption. Exact-head CI and the independently owned WHOOP diagnostic
+fixture correction remain pending.
+
+
+### Production UI parity audit
+
+Reference: live production Web commit b2a559812972d70644cffb2bf43923fc9211047d,
+compared with adoption candidate c08a130c739e049eb6ba97dcc9756f4d2799e5a8.
+Audit all changed Web presentation owners and their consumers before final
+rendered proof. Preserve the canonical authentication, credential approval,
+session revocation and recovery contracts; restore unintended presentation drift.
+
+| Surface | Source finding and selected correction |
+| --- | --- |
+| Public sign-in and landing-page auth | Shared theme, dialog shell and phone-entry primitives match production. Restore email entry label, placeholder, field and button sizing, background, spacing, pending feedback and submit copy. |
+| Code verification and invite auth | Preserve the shared six-digit input and focus logic. Restore method-specific copy, phone/email secondary controls and compact invite sizing. |
+| Completion retry and consent | Preserve retry without another OTP and the unchanged legal card. Restore full-sized actions, pending feedback and production auth error presentation. |
+| Telegram proof | Preserve nonce preparation, explicit popup click, cancellation and proof ownership. Reuse production Telegram button presentation and icon for ready/retry/pending states. |
+| Messaging settings and credential dialogs | Preserve canonical verified-only display and last-method removal protection. Restore Telegram display names, existing action copy/colors/wrapping, destructive Remove affordance and identity-dialog frame. |
+| Passkeys and recovery | Preserve new enrollment and recovery states. Use the existing Passkey settings row for initial enrollment; retain established enabled, unavailable and legacy migration presentations. |
+| Privacy, approvals, navigation, root/join providers | Inspect provider/session substitutions and confirm existing rendered content is retained. |
+| Other production-to-branch differences | Trace inherited main changes separately, including retired browser-route redirects and updated CLI examples, before considering any restoration. |
+
+Proof will cover loaded and empty email/phone entry, send/verification failure,
+code entry, resend/change-method, compact invite verification, completion retry,
+Telegram ready/cancel/error, connected/unconnected settings and new passkey and
+recovery states at phone and desktop widths. Use synthetic data only. Record
+remaining intentional differences and exact-head hosted status in the PR.
+
+
+The onboarding walkthrough found an unnecessary account-settings handoff after
+email signup. Replace it with Phone and Telegram connection actions in the
+existing join card. Reuse the credential dialog and approval endpoints in place;
+initial passkey enrollment also stays in that dialog. Successful credential
+readback refreshes the invite automatically. Existing invite-status polling and
+server messaging/activation gates decide the next screen, including connections
+completed elsewhere. Preserve legacy approval context for legacy identities.
+Do not reinstate the old Privy linking path or skip canonical credential approval.
+
+Read-only Preview checks confirmed email and phone verification records, while
+Linq line inventory is empty. This is a separate activation configuration gap;
+a verified contact alone does not prove working messaging or completed setup.
+
+The broader rendered audit also reproduced a server-rendering failure in the
+sidebar chat action. The server passes a streamed React child to the client;
+cloning that unresolved child loses its component type. Normalize the supplied
+trigger with React Children before cloning. The existing button, contact routing
+and login dialog remain unchanged. Real Next browser proof now rejects both
+server fallback templates and uncaught page errors, and opens the sidebar login
+control. Removing the custom server trigger eliminated the failure during
+isolation; restoring it with normalization passes the same page checks.
+
+Current presentation evidence: eight Chromium auth/study/failure journeys pass
+at 390px/1280px; public Experiments, Goals and Home rendering passes at
+412px/1440px, with the sidebar sign-in action replayed at desktop width.
+The auth, credential and join follow-up passes 66 focused cases; sidebar/contact
+routing passes 11. Initial-passkey completion reloads canonical factors directly
+from the enrollment state; only the credential dialog owns the successful save
+refresh. Focused tests cover canceled/failed approval and lost commit responses
+without false success. Inspect synthetic screenshots before PR attachment.
+
+The source comparison retains intentionally new first-party credential approval,
+passkey/recovery controls, verified-only identity display, and explicit contact
+proof for invite authentication. Inherited main changes to retired route redirects
+and CLI examples are independent work and remain intact. Shared theme and base
+controls match the production reference. The existing sign-in-and-approval-recovery
+changelog item covers this unshipped feature; these corrections restore its UI
+and completion behavior rather than announcing another shipped feature.
+
+Product UX remains Hold for full activation: Preview email and phone verification
+succeeded on separate accounts, and the Preview Linq inventory is empty. No
+account merge or production messaging configuration was performed. The setup
+screen now explains messaging unavailability without exposing internal database
+instructions. Live account linking, Telegram, passkeys/recovery and full hosted
+activation still need qualification. Current corrections change presentation and
+client interaction only; canonical authorization and provider protocols are
+unchanged, so the frontend final-review exemption applies to this follow-up.
+
+Exact-head release CI found one stale first-passkey presentation assertion: it
+expected the older visible button label instead of the restored production row's
+short label. The correction asserts both the visible label and the retained
+accessible name, preserving the existing stale-login/authorization checks. This
+follow-up changes tests and evidence only; the application remains identical to
+31b5b143f578c8296ca11b678994154eae006458. Keep its queued Preview deployment;
+all six focused enrollment cases, Web typecheck and focused ESLint pass.
+Repeat exact-head CI without another Web build.

@@ -69,7 +69,7 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 | `docs/device-sync-hosted-control-plane.md` | Current hosted control-plane direction for device sync. | Device-sync architecture direction | Medium | 2026-09-08 |
 | `docs/device-provider-contribution-kit.md` | Maintainer guide for adding wearable providers. | Provider contribution workflow | Medium | 2026-05-13 |
 | `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations. | Device-provider normalization planning | Medium | 2026-07-14 |
-| `docs/hosted-auth-migration.md` | Staged Privy removal, encrypted Better Auth backend, Ops import, session/native continuity and retirement gates. | Hosted auth migration rollout | High | 2026-09-09 |
+| `docs/hosted-auth-migration.md` | Staged Privy removal, encrypted Better Auth backend, Ops import, approved credential changes, saved-key recovery, shared account connections, session/native continuity and retirement gates. | Hosted auth migration rollout | High | 2026-09-10 |
 | `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam and future rotation constraints. | Hosted contact-privacy rotation seam | Medium | 2026-07-16 |
 | `docs/hosted-linq-db-home-lines-migration.md` | Database-backed Linq home-line assignment, provider inventory freshness, and bounded Serializable snapshot recovery. | Hosted Linq line ownership and rollout | High | 2026-09-11 |
 | `docs/hosted-account-data-deletion-export.md` | Hosted account data export and deletion workflow, store coverage, security checks, and retention limits. | Hosted account privacy workflow | High | 2026-05-13 |

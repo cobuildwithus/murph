@@ -32,12 +32,12 @@ import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 
+import { HostedPrivyBoundary } from "./hosted-privy-boundary";
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
 import { JoinInviteStarterUsageIsland } from "./join-invite-starter-usage-island";
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import type {
   JoinInvitePageModel,
-  JoinInviteTelegramAccountSeed,
 } from "./join-invite-page-model";
 import {
   JoinInviteCheckoutPlanButtonIsland,
@@ -126,12 +126,7 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       && model.familyBillingRecovery !== "syncing"
       && !starterUsageReady
       && status.messagingSetupRequired ? (
-        <JoinInviteMessagingSetupPanel
-          authenticated={status.session.authenticated}
-          expectedPrivyUserId={model.expectedPrivyUserId}
-          initialTelegramAccount={model.telegramAccountForMessagingSetup}
-          privySessionMatchesAppSession={model.privySessionMatchesAppSession}
-        />
+        <JoinInvitePanelCard><HostedPrivyBoundary legacyApprovalRequired={model.messagingSetupLegacyApprovalRequired === true}><JoinInviteMessagingSetupIsland /></HostedPrivyBoundary></JoinInvitePanelCard>
       ) : null}
 
       {!model.launchConsent.gateActive
@@ -265,29 +260,6 @@ function JoinInviteLaunchLegalConsentPanel({
       initialStatus={model.launchConsent.initialStatus}
       inviteCode={model.inviteCode}
     />
-  );
-}
-
-function JoinInviteMessagingSetupPanel({
-  authenticated,
-  expectedPrivyUserId,
-  initialTelegramAccount,
-  privySessionMatchesAppSession,
-}: {
-  authenticated: boolean;
-  expectedPrivyUserId: string | null;
-  initialTelegramAccount: JoinInviteTelegramAccountSeed | null;
-  privySessionMatchesAppSession: boolean;
-}) {
-  return (
-    <JoinInvitePanelCard>
-      <JoinInviteMessagingSetupIsland
-        authenticated={authenticated}
-        expectedPrivyUserId={expectedPrivyUserId}
-        initialTelegramAccount={initialTelegramAccount}
-        privySessionMatchesAppSession={privySessionMatchesAppSession}
-      />
-    </JoinInvitePanelCard>
   );
 }
 

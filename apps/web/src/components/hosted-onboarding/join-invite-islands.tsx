@@ -2,7 +2,11 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { usePrivy, useUser } from "@privy-io/react-auth";
+import dynamic from "next/dynamic";
+import { Phone } from "lucide-react";
+import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
+import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
+import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
 import { ArrowRightIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -13,7 +17,6 @@ import type {
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";
 import {
-  HOSTED_PRIVY_AUTH_METHODS,
   type HostedInviteEmailAuthTarget,
   type HostedInvitePhoneAuthTarget,
   type HostedInviteVerificationMode,
@@ -26,34 +29,21 @@ import {
 } from "@/src/lib/hosted-groups/group-start-handoff";
 
 import {
-  ConsentSkeleton,
   HostedLegalConsentCard,
   type HostedLegalConsentAcceptScope,
 } from "../legal/hosted-legal-consent-card";
-import { useHostedPhoneLinkDiagnostics } from "../settings/hosted-phone-link-diagnostics";
-import { ConnectTelegram } from "../settings/hosted-telegram-settings";
-import { HostedPhoneSettings } from "../settings/hosted-phone-settings";
-import {
-  HostedIdentitySessionLoading,
-  HostedIdentitySessionMismatch,
-} from "../settings/hosted-settings-identity-link-dialog";
 import {
   requestHostedBillingCheckout,
   requestHostedOnboardingJson,
   type HostedStarterUsageEnrollmentResponse,
 } from "./client-api";
-import { HostedAuthPanel } from "./hosted-auth-panel";
-import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
-import { HostedEmailAuthButton } from "./hosted-email-auth-button";
+import { HostedFirstPartyAuthPanel } from "./hosted-first-party-auth-panel";
 import { logoutHostedAppSession } from "./hosted-app-session-client";
-import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
 import { useHostedInviteStatusRefresh } from "./invite-status-client";
-import type { JoinInviteTelegramAccountSeed } from "./join-invite-page-model";
 import {
   shouldRefreshJoinInviteStatusFromPayload,
   type JoinInviteStatusRefreshSnapshot,
 } from "./join-invite-state";
-import { useHostedAuthCompletion } from "./use-hosted-auth-completion";
 
 export function JoinInviteStatusRefreshIsland({
   current,
@@ -131,80 +121,21 @@ export function JoinInvitePhoneVerificationIsland({
   verificationMode: HostedInviteVerificationMode;
 }) {
   const router = useRouter();
-  const { logout } = usePrivy();
-  const emailAuthCompletion = useHostedAuthCompletion({
-    inviteCode,
-    onCompleted: () => {
-      router.refresh();
-    },
-  });
-
-  if (verificationMode === "invite_email") {
-    if (emailAuthCompletion.completingMethod) {
-      return (
-        <div aria-busy="true" aria-live="polite" role="status">
-          <ConsentSkeleton />
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-3">
-        <HostedEmailAuthButton
-          active
-          inline
-          lockedEmailAddress={
-            emailAuthTarget?.kind === "saved" ? emailAuthTarget.emailAddress : null
-          }
-          onAuthenticated={emailAuthCompletion.completeAuth}
-        />
-        {emailAuthCompletion.errorMessage ? (
-          <Alert variant="destructive">
-            <AlertTitle>Unable to continue</AlertTitle>
-            <AlertDescription>{emailAuthCompletion.errorMessage}</AlertDescription>
-          </Alert>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (verificationMode === "manual_phone") {
-    return (
-      <HostedAuthPanel
-        inviteCode={inviteCode}
-        methods={HOSTED_PRIVY_AUTH_METHODS}
-        onCompleted={() => {
-          router.refresh();
-        }}
-        onSignOut={() => {
-          router.refresh();
-        }}
-        requireLaunchConsentOnCompletion
-        size="compact"
-      />
-    );
-  }
-
-  const resolvedPhoneAuthTarget =
-    verificationMode === "invite_phone"
-      ? phoneAuthTarget
-      : ({ kind: "manual" } as const);
-  const resolvedPhoneHint = verificationMode === "invite_phone" ? phoneHint : null;
-
-  return (
-    <HostedInvitePhoneAuth
+  const savedPhoneHint = phoneAuthTarget?.kind === "saved" ? phoneAuthTarget.phoneHint : phoneHint;
+  return <div className="flex flex-col gap-4">
+    {verificationMode === "invite_phone" && savedPhoneHint ? <p className="text-sm text-muted-foreground">
+      Enter the phone number ending in {savedPhoneHint.replace(/\D/gu, "").slice(-4)} to use this invite.
+    </p> : null}
+    <HostedFirstPartyAuthPanel
       inviteCode={inviteCode}
-      phoneAuthTarget={resolvedPhoneAuthTarget}
-      phoneHint={resolvedPhoneHint}
-      onSignOut={async () => {
-        await logoutHostedAppSession({ logoutPrivy: logout });
-        router.refresh();
-      }}
-      onCompleted={() => {
-        router.refresh();
-      }}
+      initialEmailAddress={emailAuthTarget?.kind === "saved" ? emailAuthTarget.emailAddress : undefined}
+      methods={verificationMode === "manual_phone" ? ["phone", "email", "telegram"] : verificationMode === "invite_email" ? ["email"] : ["phone"]}
+      onCompleted={() => router.refresh()}
+      onSignOut={() => router.refresh()}
+      requireLaunchConsentOnCompletion
+      size="compact"
     />
-  );
+  </div>;
 }
 
 export function JoinInviteSignOutButtonIsland({
@@ -215,14 +146,13 @@ export function JoinInviteSignOutButtonIsland({
   pendingLabel?: string;
 } = {}) {
   const router = useRouter();
-  const { logout } = usePrivy();
   const [signOutPending, setSignOutPending] = useState(false);
 
   async function handleSignOut() {
     setSignOutPending(true);
 
     try {
-      await logoutHostedAppSession({ logoutPrivy: logout });
+      await logoutHostedAppSession();
       router.refresh();
     } finally {
       setSignOutPending(false);
@@ -242,93 +172,23 @@ export function JoinInviteSignOutButtonIsland({
   );
 }
 
-export function JoinInviteMessagingSetupIsland({
-  authenticated,
-  expectedPrivyUserId,
-  initialTelegramAccount,
-  privySessionMatchesAppSession,
-}: {
-  authenticated: boolean;
-  expectedPrivyUserId: string | null;
-  initialTelegramAccount: JoinInviteTelegramAccountSeed | null;
-  privySessionMatchesAppSession: boolean;
-}) {
-  const router = useRouter();
-  const {
-    authenticated: privyAuthenticated,
-    logout,
-    ready: privyReady,
-  } = usePrivy();
-  const { user } = useUser();
-  const [reauthPending, setReauthPending] = useState(false);
-  const clientIdentityPending =
-    !privyReady || (privyAuthenticated && user === null);
-  const clientSessionMatchesAppSession =
-    authenticated
-    && privyReady
-    && privyAuthenticated
-    && privySessionMatchesAppSession
-    && expectedPrivyUserId !== null
-    && user?.id === expectedPrivyUserId;
-  const createPhoneDiagnosticReporter = useHostedPhoneLinkDiagnostics({
-    appAuthenticated: authenticated,
-    clientUserMatchesExpected: expectedPrivyUserId !== null && user?.id === expectedPrivyUserId,
-    clientUserPresent: Boolean(user?.id),
-    expectedUserPresent: expectedPrivyUserId !== null,
-    operation: user?.phone?.number ? "update" : "link",
-    privyAuthenticated,
-    privyReady,
-    serverSessionMatches: privySessionMatchesAppSession,
-    showLinkForm: true,
-    surface: "join_invite",
-  });
+const HostedLoginMethodDialog = dynamic(() => import("../settings/hosted-login-method-dialog").then((module) => module.HostedLoginMethodDialog), { ssr: false });
 
-  function refresh() {
-    router.refresh();
-  }
+export function JoinInviteMessagingSetupIsland() {
+  const [method, setMethod] = useState<"phone" | "telegram" | null>(null);
+  return <>
+    <JoinInviteMessagingSetupView onSelect={setMethod} />
+    {method ? <HostedLoginMethodDialog method={method} operation="set"
+      onOpenChange={(open) => { if (!open) setMethod(null); }}
+      onSaved={() => setMethod(null)} /> : null}
+  </>;
+}
 
-  async function handleSignInAgain() {
-    setReauthPending(true);
-
-    try {
-      await logoutHostedAppSession({ logoutPrivy: logout });
-      router.refresh();
-    } finally {
-      setReauthPending(false);
-    }
-  }
-
-  if (clientIdentityPending) {
-    return <HostedIdentitySessionLoading />;
-  }
-
-  if (!clientSessionMatchesAppSession) {
-    return (
-      <HostedIdentitySessionMismatch
-        disabled={reauthPending}
-        onSignInAgain={handleSignInAgain}
-        pending={reauthPending}
-      />
-    );
-  }
-
-  return (
-    <HostedContactChannelChoice
-      phone={
-        <HostedPhoneSettings
-          diagnosticReporterFactory={createPhoneDiagnosticReporter}
-          onLinked={refresh}
-        />
-      }
-      telegram={
-        <ConnectTelegram
-          authenticated={clientSessionMatchesAppSession}
-          initialTelegramAccount={initialTelegramAccount}
-          onSynced={refresh}
-        />
-      }
-    />
-  );
+export function JoinInviteMessagingSetupView({ onSelect }: { onSelect: (method: "phone" | "telegram") => void }) {
+  return <HostedContactChannelChoice
+    phone={<Button type="button" size="xl" className="w-full" onClick={() => onSelect("phone")}><Phone aria-hidden="true" />Connect phone</Button>}
+    telegram={<HostedInlineAuthButton icon={<TelegramIcon className="h-5 w-5" />} onClick={() => onSelect("telegram")}>Connect Telegram</HostedInlineAuthButton>}
+  />;
 }
 
 export function JoinInviteLegalConsentIsland({

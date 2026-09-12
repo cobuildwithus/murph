@@ -14,6 +14,7 @@ export async function readHostedSecureApprovalStatus(input: {
   try {
     const state = await readApprovalPasskeyState(input);
     if (state.credentials.length > 0) return { status: "configured", method: "passkey" };
+    if (!input.privyUserId && state.encrypted === null) return { status: "not_configured", method: "initial" };
     if (!input.privyUserId) return { status: "unavailable" };
     return readHostedPrivyWalletMfaStatus(await readHostedPrivyUserById(input.privyUserId));
   } catch {

@@ -16,14 +16,14 @@ const mocks = vi.hoisted(() => ({
   panelProps: null as null | { phoneInputAutoFocus?: boolean },
 }));
 
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", async () => {
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", async () => {
   mocks.loadAttempt += 1;
   if (mocks.loadAttempt === 1) {
     throw new Error("Chunk unavailable");
   }
 
   return {
-    HostedAuthPanelIsland(props: { phoneInputAutoFocus?: boolean }) {
+    HostedFirstPartyAuthPanel(props: { phoneInputAutoFocus?: boolean }) {
       mocks.panelProps = props;
       return createElement(
         "div",

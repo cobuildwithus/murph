@@ -12,18 +12,14 @@ import {
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { cn } from "@/src/lib/utils";
 
-import type { HostedAuthPanelView } from "./hosted-auth-panel";
-import { claimHostedTelegramOAuthDialogIntent } from "./hosted-telegram-oauth-intent";
-import type { HostedAuthRuntimeState } from "./hosted-auth-runtime";
+import type { HostedFirstPartyAuthPanelView as HostedAuthPanelView } from "./hosted-first-party-auth-panel";
 
 type HostedAuthPanelModule = typeof import(
-  "@/src/components/hosted-onboarding/hosted-auth-panel-island"
+  "@/src/components/hosted-onboarding/hosted-first-party-auth-panel"
 );
 
 let hostedAuthPanelModule: HostedAuthPanelModule | null = null;
 let hostedAuthPanelLoadPromise: Promise<HostedAuthPanelModule> | null = null;
-
-export type AuthDialogPrivyRuntimeState = HostedAuthRuntimeState;
 
 export const DEFAULT_AUTH_DIALOG_TITLE = "Log in or sign up";
 export const DEFAULT_AUTH_DIALOG_DESCRIPTION =
@@ -97,7 +93,7 @@ function loadHostedAuthPanelModule(): Promise<HostedAuthPanelModule> {
 
   if (!hostedAuthPanelLoadPromise) {
     hostedAuthPanelLoadPromise = import(
-      "@/src/components/hosted-onboarding/hosted-auth-panel-island"
+      "@/src/components/hosted-onboarding/hosted-first-party-auth-panel"
     )
       .then((mod) => {
         hostedAuthPanelModule = mod;
@@ -113,9 +109,9 @@ function loadHostedAuthPanelModule(): Promise<HostedAuthPanelModule> {
 }
 
 export function readLoadedHostedAuthPanelIsland():
-  | HostedAuthPanelModule["HostedAuthPanelIsland"]
+  | HostedAuthPanelModule["HostedFirstPartyAuthPanel"]
   | null {
-  return hostedAuthPanelModule?.HostedAuthPanelIsland ?? null;
+  return hostedAuthPanelModule?.HostedFirstPartyAuthPanel ?? null;
 }
 
 export function preloadHostedAuthPanelIsland() {
@@ -135,7 +131,6 @@ export function AuthDialog({
   title = DEFAULT_AUTH_DIALOG_TITLE,
   description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
   onCompleted,
-  privyRuntime,
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,
 }: {
@@ -147,7 +142,6 @@ export function AuthDialog({
   title?: string;
   description?: string;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
-  privyRuntime?: AuthDialogPrivyRuntimeState;
   requireLaunchConsentOnCompletion?: boolean;
   showPassiveLegalNotice?: boolean;
 }) {
@@ -162,15 +156,7 @@ export function AuthDialog({
   const readyAuthPanelModule = AuthPanelModule ?? hostedAuthPanelModule;
 
   useEffect(() => {
-    if (open || !claimHostedTelegramOAuthDialogIntent()) {
-      return;
-    }
-
-    onOpenChange(true);
-  }, [onOpenChange, open]);
-
-  useEffect(() => {
-    if (!open || privyRuntime !== undefined || readyAuthPanelModule) {
+    if (!open || readyAuthPanelModule) {
       return;
     }
 
@@ -207,7 +193,7 @@ export function AuthDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, privyRuntime, readyAuthPanelModule]);
+  }, [open, readyAuthPanelModule]);
 
   useEffect(() => {
     if (
@@ -263,9 +249,6 @@ export function AuthDialog({
 
   const dismissLocked = panelView !== "auth";
   const consentPresentation = panelView === "consent";
-  const runtimeError = privyRuntime?.kind === "unconfigured"
-    ? "Sign in is not configured yet."
-    : null;
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen && dismissLocked) {
@@ -298,7 +281,7 @@ export function AuthDialog({
       <DialogContent
         ref={dialogContentRef}
         initialFocus={
-          privyRuntime === undefined && !readyAuthPanelModule
+          !readyAuthPanelModule
             ? dialogContentRef
             : undefined
         }
@@ -314,23 +297,13 @@ export function AuthDialog({
           panelView={panelView}
           title={title}
         />
-        {!open ? null : runtimeError ? (
-          <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
-            {runtimeError}
-          </div>
-        ) : privyRuntime?.kind === "configured" ? (
-          <privyRuntime.AuthPanel
-            {...authPanelProps}
-            onRestartPrivy={privyRuntime.restart}
-            privyAttempt={privyRuntime.attempt}
-          />
-        ) : loadError ? (
+        {!open ? null : loadError ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
             {loadError}
           </div>
         ) : readyAuthPanelModule ? (
           <div ref={loadedPanelRef} data-auth-dialog-panel="loaded">
-            <readyAuthPanelModule.HostedAuthPanelIsland {...authPanelProps} />
+            <readyAuthPanelModule.HostedFirstPartyAuthPanel {...authPanelProps} />
           </div>
         ) : open ? (
           <AuthPanelSkeleton />

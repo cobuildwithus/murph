@@ -20,11 +20,11 @@ const mocks = vi.hoisted(() => ({
 
 type MockHostedAuthPanelView = "auth" | "auth-active" | "consent";
 
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () => {
   mocks.hostedAuthPanelIslandModuleLoad();
 
   return {
-    HostedAuthPanelIsland(props: {
+    HostedFirstPartyAuthPanel(props: {
       autoSendPastedPhoneNumber?: boolean;
       onCompleted?: (payload: {
         activationPending: boolean;

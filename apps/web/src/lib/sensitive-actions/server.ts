@@ -50,7 +50,7 @@ export async function createSensitiveActionChallenge(input: {
   assertBindingHash(input.bindingHash);
   const origin = requireSensitiveActionOrigin();
   const now = input.now ?? new Date();
-  const ttl = input.kind === "approval.passkey.enroll" ? 5 * 60 * 1000 : SENSITIVE_ACTION_CHALLENGE_TTL_MS;
+  const ttl = input.kind === "approval.passkey.enroll" || input.kind === "approval.passkey.recover" ? 5 * 60 * 1000 : SENSITIVE_ACTION_CHALLENGE_TTL_MS;
   const expiresAt = new Date(now.getTime() + ttl);
   const challenge = createSensitiveActionChallengeMaterial({
     bindingHash: input.bindingHash,

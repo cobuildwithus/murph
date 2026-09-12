@@ -207,7 +207,7 @@ beforeEach(() => {
   }));
 });
 
-test("JoinLayout warms hosted Privy for the join route segment", async () => {
+test("JoinLayout renders without loading Privy", async () => {
   const { default: JoinLayout } = await import("../app/join/layout");
 
   const markup = renderToStaticMarkup(
@@ -218,12 +218,8 @@ test("JoinLayout warms hosted Privy for the join route segment", async () => {
     ),
   );
 
-  expect(mocks.resourceHintOrigins).toEqual(expect.arrayContaining([
-    "https://auth.privy.io",
-    "https://challenges.cloudflare.com",
-  ]));
-  assert.match(markup, /data-hosted-privy-boundary="true"/);
-  assert.match(markup, /data-privy-resource-hints=/);
+  assert.doesNotMatch(markup, /data-hosted-privy-boundary/);
+  assert.doesNotMatch(markup, /data-privy-resource-hints/);
   assert.match(markup, /data-join-child="true"/);
 });
 
@@ -251,10 +247,8 @@ test("JoinInvitePage builds a server model with the app-session member", async (
   expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
   expect(mocks.joinInvitePageViewProps?.model).toMatchObject({
     awaitingInviteSessionResolution: false,
-    expectedPrivyUserId: "test-privy-user",
     inviteCode: "invite code",
     preview: false,
-    privySessionMatchesAppSession: true,
     status: {
       stage: "verify",
     },
@@ -371,7 +365,7 @@ test("JoinInvitePage keeps Privy-only sessions out of invite and legal gates", a
     }),
   );
 
-  expect(mocks.getHostedPrivySession).toHaveBeenCalled();
+  expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
   expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
     authenticatedMember: null,
     inviteCode: "invite-code",
@@ -511,122 +505,21 @@ test("JoinInvitePage keeps first-time checkout independent of Family recovery re
   expect(mocks.joinInvitePageViewProps?.model.familyBillingRecovery).toBeNull();
 });
 
-test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed", async () => {
+test("messaging setup uses canonical admission without reading or serializing provider accounts", async () => {
   const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
-  mocks.getHostedPrivySession.mockResolvedValueOnce({
-    identity: {
-      phone: null,
-      userId: "test-privy-user",
-      wallet: null,
-    },
-    linkedAccounts: [
-      {
-        address: "hidden@example.test",
-        type: "email",
-      },
-      {
-        first_name: "Do",
-        id: "telegram-test-user",
-        last_name: "Not Serialize",
-        photo_url: "https://example.test/avatar.png",
-        privateMetadata: "do-not-serialize",
-        type: "telegram",
-        username: "murph_test",
-      },
-    ],
-    verifiedPrivyUser: {
-      id: "test-privy-user",
-    },
-  });
-  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
-    authenticated: true,
-    authenticatedMember: {
-      billingStatus: "active",
-      createdAt: new Date("2025-03-27T08:00:00.000Z"),
-      id: "member_123",
-      suspendedAt: null,
-      updatedAt: new Date("2025-03-27T08:00:00.000Z"),
-    },
-    linkedAccounts: [],
-    session: {
-      privyUserId: "test-privy-user",
-      identity: null,
-      linkedAccounts: [],
-      verifiedPrivyUser: {
-        id: "test-privy-user",
-      },
-    },
-  });
+  mocks.getHostedPrivySession.mockRejectedValueOnce(new Error("provider unavailable"));
   mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
     messagingSetupRequired: true,
-    session: {
-      authenticated: true,
-      expiresAt: null,
-      matchesInvite: true,
-    },
+    session: { authenticated: true, expiresAt: null, matchesInvite: true },
     stage: "checkout",
   }));
-  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
-    launchGranted: true,
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({ launchGranted: true }));
+  renderToStaticMarkup(await JoinInvitePage({
+    params: Promise.resolve({ inviteCode: "invite-code" }), searchParams: Promise.resolve({}),
   }));
-
-  renderToStaticMarkup(
-    await JoinInvitePage({
-      params: Promise.resolve({ inviteCode: "invite-code" }),
-      searchParams: Promise.resolve({ preview: undefined }),
-    }),
-  );
-
-  expect(mocks.joinInvitePageViewProps?.model.telegramAccountForMessagingSetup).toEqual({
-    telegramUserId: "telegram-test-user",
-    username: "murph_test",
-  });
-});
-
-test("JoinInvitePage withholds Telegram seed when the fresh Privy user does not match", async () => {
-  const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
-  mocks.getHostedPrivySession.mockResolvedValueOnce({
-    identity: {
-      phone: null,
-      userId: "different-privy-user",
-      wallet: null,
-    },
-    linkedAccounts: [
-      {
-        id: "telegram-test-user",
-        type: "telegram",
-        username: "murph_test",
-      },
-    ],
-    verifiedPrivyUser: {
-      id: "different-privy-user",
-    },
-  });
-  mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
-    messagingSetupRequired: true,
-    session: {
-      authenticated: true,
-      expiresAt: null,
-      matchesInvite: true,
-    },
-    stage: "checkout",
-  }));
-  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
-    launchGranted: true,
-  }));
-
-  renderToStaticMarkup(
-    await JoinInvitePage({
-      params: Promise.resolve({ inviteCode: "invite-code" }),
-      searchParams: Promise.resolve({ preview: undefined }),
-    }),
-  );
-
-  expect(mocks.joinInvitePageViewProps?.model).toMatchObject({
-    expectedPrivyUserId: "test-privy-user",
-    privySessionMatchesAppSession: false,
-    telegramAccountForMessagingSetup: null,
-  });
+  expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+  expect(mocks.joinInvitePageViewProps?.model.status.messagingSetupRequired).toBe(true);
+  expect(mocks.joinInvitePageViewProps?.model).not.toHaveProperty("telegramAccountForMessagingSetup");
 });
 
 test("JoinInvitePage keeps route copy and uses a dedicated Open Graph image", async () => {

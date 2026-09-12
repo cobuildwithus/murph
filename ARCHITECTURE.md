@@ -2980,6 +2980,23 @@ the same member. Protected commits compare authenticated snapshots under locks.
 Current signup, consent, billing and admission owners remain shared. The rollout
 and eventual deletion of compatibility code belong to `docs/hosted-auth-migration.md`.
 
+The first-party Web login panel is shared by the main dialog and invite entry.
+Confirmed login commits before retryable product completion; consent and billing
+retain their existing owners. An hourly visible-tab check uses the fixed session
+renewal route, whose legacy branch never extends an old cookie. Account contact
+controls share one implementation between dashboard Settings and the independent
+`/settings/accounts` page, so unfinished signups and native browser handoffs do
+not enter a paid-access redirect loop. Native return links are fixed, contain no
+credential or member identity, and confer no admission authority.
+
+Credential changes bind approval to the method, operation, old/new identity,
+canonical member and current browser session. New contact proof, canonical and
+encrypted login records, challenge consumption and channel wake commit together.
+Adding a method preserves sessions; replacement/removal preserves only the
+authorizing first-party browser and revokes other sessions, including legacy
+native admission. The existing last-method and cross-member ownership guards
+remain authoritative.
+
 Approval passkeys live with the sensitive-action owner. One encrypted aggregate
 per canonical member holds at most eight WebAuthn credentials; the existing
 member crypto owner binds its confidentiality and integrity. Browser options
@@ -2992,6 +3009,16 @@ stale proof. The counter update and approved mutation share the challenge's
 transaction. Unmigrated members retain the legacy wallet verifier; enrolled
 members cannot fall back. The reader-first rollout and original browser-session
 drain are owned by `docs/hosted-auth-migration.md`.
+
+The same approval aggregate holds one optional encrypted digest for a saved
+recovery key. A current Murph passkey authorizes generation; fresh first-party
+primary proof plus the previously saved random key authorizes replacement.
+Recovery reuses the one-use challenge, atomically replaces all approval
+credentials, consumes the key and revokes other sessions through the existing
+auth owners. It creates no login session, contact claim, separate ledger or
+operator override. Existing protected accounts cannot bootstrap recovery from
+primary login alone. The rollout owner defines unresolved-factor retirement
+gates and the additive nullable-column deployment order.
 
 Hosted browser wearable OAuth is a same-browser, same-member, same-host
 boundary. Start issues one short-lived, host-only callback proof bound to the

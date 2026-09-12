@@ -2,8 +2,7 @@
 
 import { Fingerprint } from "lucide-react";
 
-import { usePasskeyWalletMfa } from "@/src/components/sensitive-actions/use-passkey-wallet-mfa";
-import { AuthButton } from "@/src/components/ui/auth-button";
+import { useLegacyWalletApproval } from "@/src/components/sensitive-actions/legacy-wallet-approval-context";
 import { Button } from "@/src/components/ui/button";
 import type { HostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/shared";
 import { useApprovalPasskeyEnrollment } from "@/src/components/sensitive-actions/use-approval-passkey-enrollment";
@@ -11,6 +10,8 @@ import { cn } from "@/src/lib/utils";
 
 import { ApprovalPasskeyStatus, ApprovalPasskeyUpdate } from "./approval-passkey-status";
 import { SettingsStatusLine } from "./connected-account-card";
+import { SettingsRow } from "./settings-row";
+import { HostedApprovalRecoverySettings } from "./hosted-approval-recovery-settings";
 
 export function HostedPasskeySettings({
   authenticated,
@@ -26,9 +27,34 @@ export function HostedPasskeySettings({
   }
 
   if (secureApprovalStatus.method === "passkey") {
-    return <ApprovalPasskeyStatus />;
+    return <><ApprovalPasskeyStatus /><HostedApprovalRecoverySettings enabled={enrollmentEnabled} /></>;
   }
+  if (secureApprovalStatus.method === "initial") return <InitialPasskeySetup enrollmentEnabled={enrollmentEnabled} />;
   return <PasskeySetup enrollmentEnabled={enrollmentEnabled} secureApprovalStatus={secureApprovalStatus} />;
+}
+
+function InitialPasskeySetup({ enrollmentEnabled }: { enrollmentEnabled: boolean }) {
+  const enrollment = useApprovalPasskeyEnrollment();
+  return <InitialPasskeySetupView enrollmentEnabled={enrollmentEnabled} {...enrollment} onEnroll={() => void enrollment.enroll()} />;
+}
+
+export function InitialPasskeySetupView({ enrollmentEnabled, pending, registered, error, onEnroll }: {
+  enrollmentEnabled: boolean;
+  pending: boolean;
+  registered: boolean;
+  error: string | null;
+  onEnroll: () => void;
+}) {
+  return <div className="flex flex-col gap-2">
+    {registered ? <ApprovalPasskeyStatus /> : <SettingsRow
+      icon={<Fingerprint className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+      label="Passkey" value={pending ? "Setting up…" : "Not set up"} empty
+      action={<Button aria-label="Set up passkey" aria-busy={pending} disabled={!enrollmentEnabled || pending} type="button" onClick={onEnroll}>
+        {pending ? "Setting up…" : "Set up"}
+      </Button>}
+    />}
+    {error ? <SettingsStatusLine message={error} tone="destructive" /> : null}
+  </div>;
 }
 
 function PasskeySetup({
@@ -42,10 +68,11 @@ function PasskeySetup({
     clientAuthenticated,
     configured,
     ensureConfigured,
+    loginForSetup,
     error,
     pendingLabel,
     ready,
-  } = usePasskeyWalletMfa();
+  } = useLegacyWalletApproval().setup;
   const isRunning = pendingLabel !== null;
   const serverConfigured = secureApprovalStatus.status === "configured";
   const effectiveConfigured = serverConfigured || configured;
@@ -117,15 +144,15 @@ function PasskeySetup({
           : showReauthAction
             ? (
                 <div className="shrink-0">
-                  <AuthButton
+                  <Button
                     type="button"
                     size="default"
                     variant="default"
                     disabled={isRunning}
-                    authSatisfied={clientAuthenticated}
+                    onClick={() => void loginForSetup()}
                   >
-                    Sign in
-                  </AuthButton>
+                    Verify existing sign-in
+                  </Button>
                 </div>
               )
           : null}

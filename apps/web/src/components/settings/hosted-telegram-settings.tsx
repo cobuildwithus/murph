@@ -4,7 +4,6 @@ import { useLinkAccount, usePrivy, useUser } from "@privy-io/react-auth";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import type { JoinInviteTelegramAccountSeed } from "@/src/components/hosted-onboarding/join-invite-page-model";
 import {
   ContactSupportAction,
   shouldShowContactSupportAction,
@@ -25,7 +24,7 @@ import { toErrorMessage } from "./hosted-settings-utils";
 
 export function ConnectTelegram(props: {
   authenticated: boolean;
-  initialTelegramAccount: JoinInviteTelegramAccountSeed | null;
+  initialTelegramAccount: { telegramUserId: string; username: string | null } | null;
   onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
 }) {
   const { authenticated, initialTelegramAccount, onSynced } = props;
