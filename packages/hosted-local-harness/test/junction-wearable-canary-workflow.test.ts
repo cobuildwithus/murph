@@ -61,9 +61,9 @@ describe("live Junction wearable canary workflow", () => {
 
   it("confirms the required Vital disclosure before waiting for provider authorization", () => {
     const disclosureOffset = browserRunner.indexOf(
-      'stage = "murph_vital_disclosure";',
+      'setStage("murph_vital_disclosure");',
     );
-    const connectOffset = browserRunner.indexOf('stage = "murph_connect_start";');
+    const connectOffset = browserRunner.indexOf('setStage("murph_connect_start");');
 
     expect(disclosureOffset).toBeGreaterThan(0);
     expect(connectOffset).toBeGreaterThan(disclosureOffset);
