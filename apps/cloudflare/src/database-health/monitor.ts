@@ -754,7 +754,7 @@ export class DatabaseHealthMonitor {
         && admittedConditions.length > 0
         && !shouldHoldMonitoringForFence
         && (
-          isNewIncident
+          alertState.alertSequence === 0
           || hasConnectionError
           || attemptFenceOpen
           || monitoringAlertObligation !== null
