@@ -2830,6 +2830,102 @@ describe('real Codex live fixture contracts', () => {
     }
   })
 
+  describe('research scout diagnostics', () => {
+    it('distinguishes a silent finish from a turn with no observed tools', () => {
+      const empty = buildResearchScoutTurnDiagnostics({ jsonEvents: [], providerActionCount: 0, finalMessage: '' })
+      expect(empty.nativeCommandCount).toBe(0)
+      expect(empty.dynamicTools).toEqual([])
+      expect(empty.completedAgentMessageCount).toBe(0)
+      const result = buildResearchScoutTurnDiagnostics({
+        providerActionCount: 1, finalMessage: '', jsonEvents: [
+          { method: 'item/tool/call', params: { tool: 'finish_without_reply', arguments: {} } },
+          { method: 'item/completed', params: { item: {
+            type: 'dynamicToolCall', tool: 'finish_without_reply', arguments: {}, success: true,
+          } } },
+        ],
+      })
+      expect(result.providerActionCount).toBe(1)
+      expect(result.nativeCommandCount).toBe(0)
+      expect(result.dynamicToolAttemptCount).toBe(1)
+      expect(result.dynamicTools).toEqual([{ eventIndex: 1, tool: 'finish_without_reply', success: true }])
+      expect(result.finalMessageChars).toBe(0)
+    })
+
+    it('classifies surfaced native failures without treating missing exits as success', () => {
+      const cases = [
+        [127, 'zsh:1: command not found: vault-cli', 'fixture-cli-unavailable'],
+        [127, '/bin/bash: vault-cli: command not found', 'fixture-cli-unavailable'],
+        [1, "Error: Cannot find module '@murphai/contracts'", 'module-resolution'],
+        [1, 'Error [ERR_MODULE_NOT_FOUND]: private module details', 'module-resolution'],
+        [64, 'Unsupported synthetic command', 'unsupported-synthetic-command'],
+        [1, 'EXA_API_KEY is missing', 'environment-missing'],
+        [1, 'Missing environment variable: RESEARCH_FIXTURE_RESOLVER', 'environment-missing'],
+        [0, 'EXA_API_KEY is not missing', null],
+        [0, 'success', null],
+        [-1, '', null],
+        [null, '', null],
+      ] as const
+      for (const [exitCode, output, outputSignal] of cases) {
+        const result = buildResearchScoutTurnDiagnostics({
+          providerActionCount: 1, finalMessage: '', jsonEvents: [
+            { method: 'item/commandExecution/outputDelta', params: { itemId: 'cmd', delta: output } },
+            { method: 'item/completed', params: { item: {
+              id: 'cmd', type: 'commandExecution', command: 'vault-cli knowledge show-index',
+              exitCode, aggregatedOutput: '',
+            } } },
+          ],
+        })
+        expect(result.nativeCommands).toEqual([{
+          eventIndex: 1, exitCode, success: exitCode === null ? null : exitCode === 0, outputSignal,
+        }])
+        expect(result.nativeCommandFailures).toBe(exitCode !== null && exitCode !== 0 ? 1 : 0)
+        expect(result.nativeCommandUnknownOutcomes).toBe(exitCode === null ? 1 : 0)
+      }
+    })
+
+    it('counts native completions rather than expanded batch children', () => {
+      const result = buildResearchScoutTurnDiagnostics({
+        providerActionCount: 1, finalMessage: '', jsonEvents: [{
+          method: 'item/completed', params: { item: { type: 'command_execution', exit_code: 0 } },
+        }],
+      }, [0, 1].map(() => ({ command: 'vault-cli knowledge show-index',
+        eventIndex: 0, kind: 'command' as const, ok: true, output: '{}' })))
+      expect(result.nativeCommandCount).toBe(1)
+      expect(result.nativeCommands).toEqual([{ eventIndex: 0, exitCode: 0, success: true, outputSignal: null }])
+    })
+
+    it('bounds metadata, ignores reasoning, and never emits provider text or arguments', () => {
+      const privateText = '/private/fixture/path SECRET_ENV=secret-value raw-output'
+      const result = buildResearchScoutTurnDiagnostics({
+        providerActionCount: 21, finalMessage: privateText,
+        jsonEvents: [
+          { method: 'item/completed', params: { item: {
+            type: 'reasoning', get text() { throw new Error('Reasoning must not be read') },
+          } } },
+          { method: 'item/completed', params: { item: { type: 'agentMessage', text: privateText } } },
+          ...Array.from({ length: 10 }, () => ({ method: 'item/completed', params: { item: {
+            type: 'commandExecution', command: privateText, exitCode: 0, aggregatedOutput: privateText,
+          } } })),
+          ...Array.from({ length: 10 }, () => ({ method: 'item/completed', params: { item: {
+            type: 'dynamicToolCall', tool: privateText, arguments: { privateText }, success: false,
+            contentItems: [{ text: privateText }],
+          } } })),
+        ],
+      })
+      expect(result.nativeCommandCount).toBe(10)
+      expect(result.nativeCommands).toHaveLength(8)
+      expect(result.nativeCommandsOmitted).toBe(2)
+      expect(result.dynamicToolCount).toBe(10)
+      expect(result.dynamicTools).toHaveLength(8)
+      expect(result.dynamicToolsOmitted).toBe(2)
+      expect(result.dynamicTools.every((tool) => tool.tool === 'unrecognized' && !tool.success)).toBe(true)
+      expect(result.completedAgentMessageCount).toBe(1)
+      expect(result.completedAgentMessageChars).toBe(privateText.length)
+      expect(result.finalMessageChars).toBe(privateText.length)
+      expect(JSON.stringify(result)).not.toMatch(/private|SECRET_ENV|secret-value|raw-output|Reasoning/u)
+    })
+  })
+
   it('retains streamed policy before a yielded command completion without duplicating its tail', () => {
     const events = [
       { method: 'item/commandExecution/outputDelta', params: { itemId: 'read-policy', delta: 'Complete policy\n' } },
@@ -14399,6 +14495,8 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
         try {
           const binDirectory = path.join(workingDirectory, 'bin')
           await mkdir(binDirectory)
+          await writeFile(path.join(binDirectory, 'calls.jsonl'), '')
+          await writeFile(path.join(binDirectory, 'retrievals.jsonl'), '')
           const finding = 'A synthetic randomized human study found that resistance training with one arm also improved strength in the untrained arm. This suggests some strength adaptation transfers through the nervous system rather than being confined to the practiced muscles. It does not establish injury prevention or a need to change training.'
           const context = {
             summary: 'The member has an ongoing interest in resistance training and how strength develops, stated three months ago and never withdrawn. There is no current experiment, symptom, recent change, open question, or decision. They enjoy explanations and do not want extra tasks. No recent unsolicited health note is waiting for a reply.',
@@ -14481,24 +14579,31 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
             sandbox: 'workspace-write',
             workingDirectory,
           })
-          const calls = (await readFile(path.join(binDirectory, 'calls.jsonl'), 'utf8'))
-            .trim().split('\n').map((line) => JSON.parse(line) as string[])
+          const actions = readCapabilityRoutingActions(result.jsonEvents)
+          console.info('[research-scout turn]', JSON.stringify({
+            scenario: repeated ? 'repeated' : 'ongoing-interest',
+            ...buildResearchScoutTurnDiagnostics(result, actions),
+          }))
           console.info(`[research-scout ${repeated ? 'repeated' : 'ongoing-interest'}] ${result.finalMessage || '(silent)'}`)
-          console.info('[research-scout commands]', calls.map((args) => args.slice(0, 2).join(' ')))
-          const retrievals = (await readFile(path.join(binDirectory, 'retrievals.jsonl'), 'utf8')).trim().split('\n')
-          expect(retrievals).toHaveLength(1)
-          const payload = JSON.parse(await readFile(path.join(binDirectory, 'payload.json'), 'utf8'))
-          expect(researchScoutBatchPayloadSchema.safeParse(payload)).toMatchObject({ success: true })
+          const calls = (await readFile(path.join(binDirectory, 'calls.jsonl'), 'utf8'))
+            .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as string[])
+          const retrievals = (await readFile(path.join(binDirectory, 'retrievals.jsonl'), 'utf8'))
+            .trim().split('\n').filter(Boolean)
           const writesPath = path.join(binDirectory, 'writes.jsonl')
           const writes = existsSync(writesPath)
-            ? (await readFile(writesPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { slug: string; body: string })
+            ? (await readFile(writesPath, 'utf8')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as { slug: string; body: string })
             : []
+          console.info('[research-scout effects]', JSON.stringify({
+            cliCallCount: calls.length, retrievalCount: retrievals.length, writeCount: writes.length,
+          }))
+          expect(retrievals, `Expected exactly one research retrieval; observed ${retrievals.length} retrievals.`).toHaveLength(1)
+          const payload = JSON.parse(await readFile(path.join(binDirectory, 'payload.json'), 'utf8'))
+          expect(researchScoutBatchPayloadSchema.safeParse(payload)).toMatchObject({ success: true })
           expect(writes).toHaveLength(repeated ? 0 : 1)
           if (!repeated) {
             expect(writes[0]?.slug).toBe('weekly-health-research-scout')
             expect(writes[0]?.body).toContain('https://example.org/synthetic-resistance-trial')
           }
-          const actions = readCapabilityRoutingActions(result.jsonEvents)
           const finishCalls = actions.filter((action) => action.kind === 'dynamic'
             && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
           if (repeated) {
@@ -38299,6 +38404,66 @@ function readCapabilityRoutingActions(
     }
     return []
   })
+}
+
+function buildResearchScoutTurnDiagnostics(input: {
+  jsonEvents: readonly unknown[]
+  providerActionCount: number
+  finalMessage: string
+}, actions = readCapabilityRoutingActions(input.jsonEvents)) {
+  // Count native completions, not the batch children expanded by the routing helper.
+  const commands = input.jsonEvents.flatMap((event, eventIndex) => {
+    const record = readRecord(event)
+    if (readString(record?.method, record?.type) !== 'item/completed') return []
+    const item = readRecord(readRecord(record?.params)?.item)
+    if (item?.type !== 'commandExecution' && item?.type !== 'command_execution') return []
+    const rawExitCode = item.exitCode ?? item.exit_code
+    const exitCode = typeof rawExitCode === 'number' && Number.isInteger(rawExitCode)
+      ? rawExitCode : null
+    const output = actions.flatMap((action) => action.kind === 'command'
+      && action.eventIndex === eventIndex ? [action.output] : []).join('\n')
+    return [{
+      eventIndex,
+      exitCode,
+      success: exitCode !== null ? exitCode === 0
+        : item.status === 'failed' || item.status === 'declined' ? false : null,
+      outputSignal: classifyResearchScoutCommandOutput(output),
+    }]
+  })
+  const tools = actions.flatMap((action) => action.kind === 'dynamic' ? [{
+    eventIndex: action.eventIndex,
+    // This journey admits only this tool; never echo arbitrary provider strings.
+    tool: action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name ? action.tool : 'unrecognized',
+    success: action.success,
+  }] : [])
+  const messages = readCompletedAgentMessages(input.jsonEvents)
+  return {
+    eventCount: input.jsonEvents.length,
+    providerActionCount: input.providerActionCount,
+    nativeCommandCount: commands.length,
+    nativeCommandFailures: commands.filter((command) => command.success === false).length,
+    nativeCommandUnknownOutcomes: commands.filter((command) => command.success === null).length,
+    nativeCommands: commands.slice(0, 8),
+    nativeCommandsOmitted: Math.max(0, commands.length - 8),
+    dynamicToolAttemptCount: readDynamicToolAttempts(input.jsonEvents).length,
+    dynamicToolCount: tools.length,
+    dynamicTools: tools.slice(0, 8),
+    dynamicToolsOmitted: Math.max(0, tools.length - 8),
+    completedAgentMessageCount: messages.length,
+    completedAgentMessageChars: messages.reduce((sum, message) => sum + message.text.length, 0),
+    finalMessageChars: input.finalMessage.length,
+  }
+}
+
+function classifyResearchScoutCommandOutput(output: string): string | null {
+  // Signatures are diagnostic evidence, not inferred causes. Unmatched output stays unknown.
+  const signatures = [
+    ['fixture-cli-unavailable', /(?:command not found:[^\r\n]*\bvault-cli\b|\bvault-cli:\s*(?:command not found|not found|no such file or directory))/iu],
+    ['module-resolution', /\b(?:ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED|ERR_REQUIRE_ESM)\b|Cannot find (?:module|package)/iu],
+    ['unsupported-synthetic-command', /\bUnsupported synthetic command\b/u],
+    ['environment-missing', /\b(?:EXA_API_KEY|RESEARCH_FIXTURE_RESOLVER)(?:\s+is)?\s*:?\s*(?:missing|unset|not (?:set|available|defined))\b|\bMissing (?:environment variable[:\s]+)?(?:EXA_API_KEY|RESEARCH_FIXTURE_RESOLVER)\b/iu],
+  ] as const
+  return signatures.find(([, pattern]) => pattern.test(output))?.[0] ?? null
 }
 
 function readBatchCapabilityRoutingActions(input: {
