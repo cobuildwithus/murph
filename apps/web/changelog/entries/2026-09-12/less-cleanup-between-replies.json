@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "less-cleanup-between-replies",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less cleanup between replies",
+    "summary": "Murph leaves delivery-history housekeeping to background work after a successful reply, reducing work that can delay your next message.",
+    "details": "Reply receipts and recovery checks remain in place, including recovery for older conversations.",
+    "relevanceTags": ["messaging", "replies"],
+    "sourcePullRequests": []
+  }
+}

@@ -166,6 +166,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       mocks.maintainAssistantAutoReplyRouteState.mock.invocationCallOrder[0] ?? 0,
     );
     expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledWith({
+      migrationOnly: true,
       shouldYield: shouldYieldBackgroundMaintenance,
       signal: backgroundMaintenanceController.signal,
       vault: "/tmp/murph-vault",
