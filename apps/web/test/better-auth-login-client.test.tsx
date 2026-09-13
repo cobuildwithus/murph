@@ -181,3 +181,15 @@ test.each(["phone", "telegram"] as const)("clears the previous vault at %s login
   expect(mocks.completed).not.toHaveBeenCalled();
   expect(mocks.logout).not.toHaveBeenCalled();
 });
+
+
+test("places a Telegram failure above both alternative buttons and clears it on retry", async () => {
+  await render();
+  await act(async () => { mocks.telegram!.onErrorChange?.("Synthetic Telegram failure"); });
+  const alert = rendered!.container.querySelector('[role="alert"]');
+  expect(alert?.textContent).toBe("Synthetic Telegram failure");
+  expect(alert?.nextElementSibling?.textContent).toContain("Continue with Telegram");
+  expect(alert?.nextElementSibling?.textContent).toContain("Email");
+  await act(async () => { mocks.telegram!.onErrorChange?.(null); });
+  expect(rendered!.container.querySelector('[role="alert"]')?.textContent).toBe("");
+});

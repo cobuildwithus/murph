@@ -23,13 +23,12 @@ export async function verifyHostedTelegramIdToken(input: {
     // OIDC sub and Telegram's Bot API user ID are different identifiers. Only
     // the verified profile id preserves the canonical messaging/login binding.
     if (payload.nonce !== input.nonce) throw invalidToken("nonce_mismatch");
-    if (typeof payload.id !== "number"
-      || !Number.isSafeInteger(payload.id) || payload.id <= 0
-      || typeof payload.iat !== "number" || typeof payload.exp !== "number") throw invalidToken("profile");
+    const telegramUserId = readTelegramProfileId(payload.id);
+    if (typeof payload.iat !== "number" || typeof payload.exp !== "number") throw invalidToken("timestamp");
     const authenticatedAt = new Date(payload.iat * 1_000);
     const expiresAt = new Date(payload.exp * 1_000);
     if (!Number.isFinite(authenticatedAt.getTime()) || !Number.isFinite(expiresAt.getTime())) throw invalidToken("timestamp");
-    return { telegramUserId: String(payload.id), authenticatedAt, expiresAt };
+    return { telegramUserId, authenticatedAt, expiresAt };
   } catch (error) {
     if (error instanceof errors.JWTClaimValidationFailed) {
       const claim = ["iss", "aud", "iat", "exp", "nonce"].includes(error.claim) ? error.claim : "other";
@@ -39,6 +38,14 @@ export async function verifyHostedTelegramIdToken(input: {
     if (isHostedOnboardingError(error)) throw error;
     throw invalidToken("verification_unavailable");
   }
+}
+
+function readTelegramProfileId(value: unknown): string {
+  const id = typeof value === "number" ? String(value) : value;
+  if (typeof id !== "string" || !/^[1-9]\d{0,15}$/u.test(id) || !Number.isSafeInteger(Number(id))) {
+    throw invalidToken(value === undefined ? "profile_id_missing" : "profile_id_format");
+  }
+  return id;
 }
 
 function invalidToken(reason: string) {

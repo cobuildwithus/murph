@@ -86,13 +86,13 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
       origin: baseURL, "content-type": "application/json", "x-vercel-forwarded-for": ip, ...(cookie ? { cookie } : {}),
     }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   }
-  async function begin(id = String(randomInt(100_000_000, 999_999_999))) {
+  async function begin(id = String(randomInt(100_000_000, 999_999_999)), profileIdAsString = false) {
     telegramIds.add(id);
     const response = await start(request("/api/auth/telegram/start"));
     expect(response.status).toBe(200);
     const { nonce } = await response.json(); nonces.add(nonce);
     const cookie = response.headers.getSetCookie()[0].split(";")[0];
-    const idToken = await new SignJWT({ id: Number(id), nonce, email: "untrusted@example.test", phone_number: "+12025550111" })
+    const idToken = await new SignJWT({ id: profileIdAsString ? id : Number(id), nonce, email: "untrusted@example.test", phone_number: "+12025550111" })
       .setProtectedHeader({ alg: "ES256" }).setIssuer("https://oauth.telegram.org").setAudience(clientId)
       .setSubject("different-oidc-subject").setIssuedAt().setExpirationTime("5m").sign(keys.privateKey);
     return { id, nonce, cookie, idToken };
@@ -203,8 +203,8 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     expect((await readHostedLoginMethods(getPrisma(), existingMember.memberId)).methods.telegram).toBe(existing.id);
   });
 
-  it("creates a canonical member, completes onboarding, and keeps provider contacts out of login authority", async () => {
-    const prisma = getPrisma(); const flow = await begin();
+  it.each([false, true])("creates a canonical member and completes onboarding with string profile ID=%s", async (profileIdAsString) => {
+    const prisma = getPrisma(); const flow = await begin(undefined, profileIdAsString);
     const response = await finish(flow, { timeZone: "America/Denver" });
     expect(response.status).toBe(200);
     const body = await response.json(); memberIds.add(body.memberId);
@@ -228,7 +228,7 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     const flow = await begin(); const first = await finish(flow); expect(first.status).toBe(200);
     const body = await first.json(); memberIds.add(body.memberId);
     expect((await finish(flow)).status).toBe(401);
-    const again = await finish(await begin(flow.id)); expect(again.status).toBe(200);
+    const again = await finish(await begin(flow.id, true)); expect(again.status).toBe(200);
     expect(await again.json()).toMatchObject({ memberId: body.memberId });
     expect(await getPrisma().hostedAuthRecord.count({ where: { model: "session", memberId: body.memberId } })).toBe(2);
   });

@@ -26,9 +26,14 @@ describe("verified Telegram login identity", () => {
     expect(Object.keys(result).sort()).toEqual(["authenticatedAt", "expiresAt", "telegramUserId"]);
   });
 
+  it("normalizes a signed decimal-string profile ID without substituting the OIDC subject", async () => {
+    const result = await verifyHostedTelegramIdToken({ token: await token({ id: "1234567890" }), nonce, clientId: "123456789" }, keys);
+    expect(result.telegramUserId).toBe("1234567890");
+  });
+
   it.each([
     { iss: "https://example.test" }, { aud: "other-client" }, { nonce: "other-nonce" },
-    { exp: 1 }, { iat: 1 }, { id: undefined }, { id: "1234567890" }, { id: 9007199254740992 },
+    { exp: 1 }, { iat: 1 }, { id: undefined }, { id: "0123456789" }, { id: "1e9" }, { id: " 1234567890" }, { id: "123.0" }, { id: "0" }, { id: "9007199254740992" }, { id: null }, { id: 9007199254740992 },
   ])("rejects invalid provider authority %j", async (changes) => {
     await expect(verifyHostedTelegramIdToken({ token: await token(changes), nonce, clientId: "123456789" }, keys))
       .rejects.toMatchObject({ code: "AUTH_TELEGRAM_INVALID" });

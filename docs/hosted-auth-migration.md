@@ -198,7 +198,9 @@ changes. They require the current browser session and canonical member, reject
 other members' contacts, and preserve the last usable sign-in. Existing approval
 covers the exact operation and old/new identity. Email changes use the pinned
 private Better Auth change-email API; phone proof uses its server-only consume
-API. Telegram verification binds numeric identity and nonce to this member and
+API. Telegram verification accepts only a signed positive safe-integer profile `id`,
+encoded as a JSON number or a canonical decimal string; it never substitutes
+the OIDC `sub`. Verification binds that numeric identity and nonce to this member and
 session, with a distinct purpose from login. No library catch-all is exposed.
 
 First phone setup for an email-only first-party member needs fresh primary

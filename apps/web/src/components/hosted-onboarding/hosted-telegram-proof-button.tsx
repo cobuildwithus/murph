@@ -36,16 +36,22 @@ function loadTelegramLogin(): Promise<TelegramLogin> {
   return scriptLoad;
 }
 
-export function HostedTelegramProofButton({ purpose, onProof, label = "Continue with Telegram" }: {
+export function HostedTelegramProofButton({ purpose, onProof, onErrorChange, label = "Continue with Telegram" }: {
   purpose: "login" | "credential";
   onProof: (idToken: string, signal: AbortSignal) => Promise<void>;
   label?: string;
+  onErrorChange?: (error: string | null) => void;
 }) {
   const [attempt, setAttempt] = useState(0);
   const [ready, setReady] = useState<{ api: TelegramLogin; clientId: number; nonce: string; expiresAt: number } | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const current = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    onErrorChange?.(error);
+    return () => { onErrorChange?.(null); };
+  }, [error, onErrorChange]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -112,7 +118,7 @@ export function HostedTelegramProofButton({ purpose, onProof, label = "Continue 
 
   return <div className="flex flex-col gap-3">
     {error ? <>
-      <SettingsStatusLine message={error} tone="destructive" />
+      {!onErrorChange ? <SettingsStatusLine message={error} tone="destructive" /> : null}
       <HostedInlineAuthButton icon={<TelegramIcon className="h-5 w-5" />} onClick={retry}>Try again</HostedInlineAuthButton>
     </> : <HostedInlineAuthButton busy={!ready || pending} disabled={!ready || pending} onClick={open}
       icon={!ready || pending ? <Spinner aria-hidden="true" /> : <TelegramIcon className="h-5 w-5" />}>

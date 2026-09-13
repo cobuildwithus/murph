@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { SettingsStatusLine } from "@/src/components/settings/connected-account-card";
 import { Phone } from "lucide-react";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 import { Button } from "@/src/components/ui/button";
@@ -45,6 +46,7 @@ export function HostedFirstPartyAuthPanel({
   const [pending, setPending] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [telegramError, setTelegramError] = useState<string | null>(null);
   const [completion, setCompletion] = useState<HostedPrivyCompletionPayload | null>(null);
   const operation = useRef<AbortController | null>(null);
   const mounted = useRef(true);
@@ -129,9 +131,10 @@ export function HostedFirstPartyAuthPanel({
           OR
           <span className="h-px flex-1 bg-border" />
         </div>
+        <SettingsStatusLine message={telegramError} tone="destructive" className="empty:hidden" />
         <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
           {(["telegram", "phone", "email"] as const).filter((entry) => methods.includes(entry) && entry !== method).map((entry) => entry === "telegram" ? <HostedTelegramProofButton
-            key={entry} purpose="login" label="Telegram"
+            key={entry} purpose="login" label="Telegram" onErrorChange={setTelegramError}
             onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)}
           /> : <HostedInlineAuthButton
             key={entry}

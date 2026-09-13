@@ -13,10 +13,10 @@ beforeEach(() => {
   mocks.proof.mockResolvedValue(undefined);
 });
 afterEach(async () => { await rendered?.cleanup(); rendered = null; vi.useRealTimers(); });
-async function render(purpose: "login" | "credential" = "login") {
+async function render(purpose: "login" | "credential" = "login", onErrorChange?: (error: string | null) => void) {
   rendered = await renderClientComponent(createElement("button", null, "Mount"));
   rendered.window.Telegram = { Login: { auth: mocks.auth, close: mocks.close } };
-  await rendered.rerender(createElement(HostedTelegramProofButton, { purpose, onProof: mocks.proof }));
+  await rendered.rerender(createElement(HostedTelegramProofButton, { purpose, onProof: mocks.proof, onErrorChange }));
   return rendered;
 }
 async function click(label: string) {
@@ -106,4 +106,17 @@ test("prepares before the click and keeps the action label during a slow start",
   await act(async () => { resolve({ ok: true, nonce: "n".repeat(43), clientId: "123456789" }); });
   await click("Continue with Telegram");
   expect(mocks.auth).toHaveBeenCalledOnce();
+});
+
+
+test("reports inline-button errors to its shared status region and clears them on unmount", async () => {
+  const changed = vi.fn();
+  const view = await render("login", changed);
+  await click("Continue with Telegram");
+  await finish({ error: "popup_closed" });
+  expect(changed).toHaveBeenLastCalledWith(expect.stringContaining("was canceled"));
+  expect(view.container.querySelector('[role="alert"]')).toBeNull();
+  expect(view.container.textContent).toContain("Try again");
+  await view.rerender(createElement("button", null, "Closed"));
+  expect(changed).toHaveBeenLastCalledWith(null);
 });
