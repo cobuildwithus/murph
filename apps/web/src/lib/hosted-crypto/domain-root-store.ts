@@ -118,6 +118,12 @@ export interface UnwrappedHostedDomainRootReference
 export type PreparedHostedCryptoDomainRootCandidates =
   ReadonlyMap<HostedCryptoDomain, HostedDomainRootKeyEnvelopeV1>;
 
+// Metadata only: preparation snapshots never replace locked root authority.
+const preparedActiveHostedDomainRootRows = new WeakMap<
+  PreparedHostedCryptoDomainRootCandidates,
+  ReadonlyMap<HostedCryptoDomain, HostedUserCryptoEnvelopeRow>
+>();
+
 export interface PreparedHostedDomainRootForWeb {
   readonly domain: HostedCryptoDomain;
   readonly rootKeyId: string;
@@ -188,13 +194,13 @@ export async function prepareHostedDomainRootForWeb(input: {
     });
     rootKeyId = candidate.rootKeyId;
   } else {
-    const unwrapped = await unwrapHostedDomainRootForWeb({
+    const unwrapped = await unwrapActiveHostedDomainRootForWeb({
       domain: input.domain,
       prisma: input.prisma,
       retainFailureInScopedCache: true,
       signal: input.signal,
       userId: input.userId,
-    });
+    }, preparedActiveHostedDomainRootRows.get(preparedCandidates)?.get(input.domain));
     try {
       rootKeyId = unwrapped.envelope.rootKeyId;
     } finally {
@@ -393,15 +399,17 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
   userId: string;
 }): Promise<PreparedHostedCryptoDomainRootCandidates> {
   const prisma = input.prisma ?? getPrisma();
-  const activeDomains = await readActiveHostedCryptoDomains({
+  const domains = [...new Set(input.domains ?? ALL_DOMAINS)];
+  const activeRows = await readActiveHostedDomainRootRows({
+    domains,
     prisma,
     userId: input.userId,
   });
-  const missing = (input.domains ?? ALL_DOMAINS).filter(
-    (domain) => !activeDomains.has(domain),
-  );
+  const prepared = new Map<HostedCryptoDomain, HostedDomainRootKeyEnvelopeV1>();
+  preparedActiveHostedDomainRootRows.set(prepared, activeRows);
+  const missing = domains.filter((domain) => !activeRows.has(domain));
   if (missing.length === 0) {
-    return new Map();
+    return prepared;
   }
   const preparedEntries: Array<readonly [
     HostedCryptoDomain,
@@ -421,7 +429,10 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
     return [];
   });
   if (pending.length === 0) {
-    return new Map(preparedEntries);
+    for (const [domain, envelope] of preparedEntries) {
+      prepared.set(domain, envelope);
+    }
+    return prepared;
   }
   const maxConcurrency = input.maxConcurrency ?? missing.length;
   if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency <= 0) {
@@ -462,7 +473,10 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
   if (hasError) {
     throw firstError;
   }
-  return new Map(preparedEntries);
+  for (const [domain, envelope] of preparedEntries) {
+    prepared.set(domain, envelope);
+  }
+  return prepared;
 }
 
 export async function provisionHostedCryptoDomainRootsForUser(input: {
@@ -625,6 +639,13 @@ export async function unwrapHostedDomainRootForWeb(input: {
   signal?: AbortSignal;
   userId: string;
 }): Promise<UnwrappedHostedDomainRoot> {
+  return unwrapActiveHostedDomainRootForWeb(input);
+}
+
+async function unwrapActiveHostedDomainRootForWeb(
+  input: Parameters<typeof unwrapHostedDomainRootForWeb>[0],
+  preparedRow?: HostedUserCryptoEnvelopeRow,
+): Promise<UnwrappedHostedDomainRoot> {
   if (!WEB_UNWRAP_DOMAINS.has(input.domain)) {
     throw new Error(`Web is not allowed to unwrap hosted ${input.domain} domain roots.`);
   }
@@ -632,11 +653,13 @@ export async function unwrapHostedDomainRootForWeb(input: {
   const unwrapped = await unwrapWithScopedCache(
     activeCacheKey,
     async () => {
-      const envelope = await readActiveHostedDomainRootEnvelopeOrThrow({
-        domain: input.domain,
-        prisma: input.prisma,
-        userId: input.userId,
-      });
+      const envelope = preparedRow
+        ? await parseAssertAndVerifyEnvelope(preparedRow, input)
+        : await readActiveHostedDomainRootEnvelopeOrThrow({
+            domain: input.domain,
+            prisma: input.prisma,
+            userId: input.userId,
+          });
       const concreteCacheKey = createHostedDomainRootReferenceKey({
         domain: input.domain,
         rootKeyId: envelope.rootKeyId,
@@ -1251,17 +1274,31 @@ function assertExpectedGcpKmsWrap(input: {
   }
 }
 
-async function readActiveHostedCryptoDomains(input: {
+async function readActiveHostedDomainRootRows(input: {
+  domains: readonly HostedCryptoDomain[];
   prisma: HostedCryptoClient;
   userId: string;
-}): Promise<Set<HostedCryptoDomain>> {
-  const rows = await input.prisma.$queryRaw<Array<{ domain: HostedCryptoDomain }>>`
-    SELECT DISTINCT domain::text AS domain
+}): Promise<ReadonlyMap<HostedCryptoDomain, HostedUserCryptoEnvelopeRow>> {
+  if (input.domains.length === 0) {
+    return new Map();
+  }
+  // The active user/domain unique index bounds this snapshot to four rows.
+  const rows = await input.prisma.$queryRaw<HostedUserCryptoEnvelopeRow[]>`
+    SELECT
+      id,
+      user_id AS "userId",
+      domain::text AS domain,
+      root_key_id AS "rootKeyId",
+      status::text AS status,
+      signed_envelope_json AS "signedEnvelopeJson",
+      updated_at AS "updatedAt"
     FROM hosted_user_crypto_envelope
     WHERE user_id = ${input.userId}
+      AND domain = ANY(${input.domains}::hosted_crypto_domain[])
       AND status = 'active'::hosted_crypto_envelope_status
+    LIMIT ${input.domains.length}
   `;
-  return new Set(rows.map((row) => row.domain));
+  return new Map(rows.map((row) => [row.domain, row]));
 }
 
 async function acquireHostedDomainRootAuthorityLockTx(input: {
