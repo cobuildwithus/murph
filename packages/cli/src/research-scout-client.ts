@@ -110,20 +110,50 @@ export async function fetchExaResearchScoutBatchCandidates(
     )
   }
 
-  const client = createExaResearchScoutClient(apiKey, dependencies)
+  const cancellation = new AbortController()
+  const signal = dependencies.signal
+    ? AbortSignal.any([dependencies.signal, cancellation.signal])
+    : cancellation.signal
+  const client = createExaResearchScoutClient(apiKey, { ...dependencies, signal })
   const lanes: ResearchScoutBatchResult['lanes'] = []
-  for (const lane of input.lanes) {
-    lanes.push({
-      label: lane.label,
-      response: await fetchExaResearchScoutResponse(
-        buildExaResearchScoutBatchLaneRequest({
-          profile: lane.profile,
-          since: input.since,
-          until: input.until,
-          maxCandidates: input.maxCandidatesPerLane,
-        }),
-        client,
-      ),
+  let nextLane = 0
+  let failure: { error: unknown } | undefined
+
+  // Two local workers bound egress while retaining the input order. Each owns
+  // its failure before cancelling siblings, so an abort cannot mask its cause.
+  await Promise.all(Array.from({ length: Math.min(2, input.lanes.length) }, async () => {
+    try {
+      while (!signal.aborted && nextLane < input.lanes.length) {
+        const index = nextLane++
+        const lane = input.lanes[index]
+        lanes[index] = {
+          label: lane.label,
+          response: await fetchExaResearchScoutResponse(
+            buildExaResearchScoutBatchLaneRequest({
+              profile: lane.profile,
+              since: input.since,
+              until: input.until,
+              maxCandidates: input.maxCandidatesPerLane,
+            }),
+            client,
+          ),
+        }
+      }
+    } catch (error) {
+      failure ??= { error }
+      cancellation.abort()
+    }
+  }))
+
+  // All workers (including cancelled response-body reads) have settled here.
+  if (failure) {
+    throw failure.error
+  }
+  if (signal.aborted) {
+    throw createExaResearchScoutRequestError({
+      abortedByCaller: true,
+      failureStage: 'request',
+      transportErrorName: readSafeErrorName(signal.reason),
     })
   }
 
