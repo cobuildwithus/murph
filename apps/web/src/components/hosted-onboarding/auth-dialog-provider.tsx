@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname, useSelectedLayoutSegment } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -78,10 +79,22 @@ export function AuthProvider({
   authenticationStatus?: "ready" | "unavailable";
   children?: ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  const dashboardRoute = useSelectedLayoutSegment() === "(dashboard)";
+  const autoOpenPath = dashboardRoute && !authenticated && authenticationStatus === "ready"
+    ? pathname
+    : null;
+  const [promptPath, setPromptPath] = useState(autoOpenPath);
+  const [open, setOpen] = useState(autoOpenPath !== null);
   const [authIntent, setAuthIntent] = useState<"default" | "data-privacy">(
     "default",
   );
+
+  if (promptPath !== autoOpenPath) {
+    setPromptPath(autoOpenPath);
+    setOpen(autoOpenPath !== null);
+    setAuthIntent("default");
+  }
 
   const openAuthDialog = useCallback(() => {
     setAuthIntent("default");
@@ -117,7 +130,10 @@ export function AuthProvider({
       return;
     }
 
-    if (shouldResumeCurrentAuthUrl(payload)) {
+    if (
+      (dashboardRoute && isHostedOnboardingAccessibleStage(payload.stage))
+      || shouldResumeCurrentAuthUrl(payload)
+    ) {
       navigateHostedAuthRedirect(readCurrentBrowserPath());
       return;
     }
@@ -128,7 +144,7 @@ export function AuthProvider({
     }
 
     navigateHostedAuthRedirect(payload.joinUrl);
-  }, [authIntent, authenticated]);
+  }, [authIntent, authenticated, dashboardRoute]);
 
   const value = useMemo(
     () => ({

@@ -18,6 +18,10 @@ for (const width of [412, 1440]) {
           ? route.continue() : route.abort();
       });
       expect((await page.goto("/experiments", { waitUntil: "load", timeout: 90_000 }))?.status()).toBe(200);
+      const signIn = page.getByRole("dialog", { name: "Log in or sign up" });
+      await expect(signIn).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(signIn).toHaveCount(0);
       const cards = page.locator('a[href^="/experiments/"]').filter({ has: page.locator("img") });
       await expect(cards.first()).toBeVisible();
       await cards.nth(5).scrollIntoViewIfNeeded();

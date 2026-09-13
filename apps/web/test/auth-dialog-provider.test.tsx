@@ -4,7 +4,10 @@ import { afterEach, expect, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
+  pathname: "/",
+  segment: null as string | null,
   authDialogProps: null as {
+    onOpenChange?: (open: boolean) => void;
     description?: string;
     onCompleted?: (payload: {
       activationPending: boolean;
@@ -25,6 +28,12 @@ const mocks = vi.hoisted(() => ({
       | "cross-document"
       | "cross-document-clear"
   ) => void),
+}));
+
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/navigation")>(),
+  usePathname: () => mocks.pathname,
+  useSelectedLayoutSegment: () => mocks.segment,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
@@ -84,6 +93,91 @@ afterEach(() => {
   vi.unstubAllGlobals();
   mocks.authDialogProps = null;
   mocks.sessionInvalidationListener = null;
+  mocks.pathname = "/";
+  mocks.segment = null;
+});
+
+test("dashboard sign-in opens on entry, respects dismissal, and opens on another page", async () => {
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const view = () => createElement(AuthProvider, { authenticated: false });
+  const rendered = await renderClientComponent(view(), { requireButton: false });
+  expect(mocks.authDialogProps?.open).toBe(false);
+
+  mocks.segment = "(dashboard)";
+  mocks.pathname = "/journal";
+  await rendered.rerender(view());
+  expect(mocks.authDialogProps?.open).toBe(true);
+
+  await act(async () => mocks.authDialogProps?.onOpenChange?.(false));
+  await rendered.rerender(view());
+  expect(mocks.authDialogProps?.open).toBe(false);
+
+  mocks.pathname = "/home";
+  await rendered.rerender(view());
+  expect(mocks.authDialogProps?.open).toBe(true);
+  await rendered.cleanup();
+});
+
+test.each([
+  { authenticated: false, authenticationStatus: "ready" as const, segment: "(dashboard)", opens: true },
+  { authenticated: true, authenticationStatus: "ready" as const, segment: "(dashboard)", opens: false },
+  { authenticated: false, authenticationStatus: "unavailable" as const, segment: "(dashboard)", opens: false },
+  { authenticated: false, authenticationStatus: "ready" as const, segment: "design", opens: false },
+])("automatic sign-in respects session and route: %j", async ({ segment, opens, ...props }) => {
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  mocks.segment = segment;
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, props),
+    { requireButton: false },
+  );
+  expect(mocks.authDialogProps?.open).toBe(opens);
+  await rendered.cleanup();
+});
+
+test.each(["/home", "/patterns", "/journal", "/biomarkers/example"])(
+  "dashboard sign-in resumes the full current URL: %s",
+  async (pathname) => {
+    const { AuthProvider } = await import(
+      "@/src/components/hosted-onboarding/auth-dialog-provider"
+    );
+    mocks.segment = "(dashboard)";
+    mocks.pathname = pathname;
+    const href = `https://join.example.test${pathname}?view=recent#details`;
+    const rendered = await renderClientComponent(
+      createElement(AuthProvider, { authenticated: false }),
+      { location: { href, origin: "https://join.example.test", pathname, search: "?view=recent", hash: "#details" } },
+    );
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    expect(rendered.reload).toHaveBeenCalledTimes(1);
+    expect(rendered.assign).not.toHaveBeenCalled();
+    expect(rendered.window.location.href).toBe(href);
+    await rendered.cleanup();
+  },
+);
+
+test("dashboard sign-in keeps incomplete onboarding on its join route", async () => {
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  mocks.segment = "(dashboard)";
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, { authenticated: false }),
+  );
+  await act(async () => mocks.authDialogProps?.onCompleted?.({
+    activationPending: false,
+    inviteCode: "invite-code",
+    joinUrl: "/join/invite-code",
+    stage: "verify",
+  }));
+  expect(rendered.assign).toHaveBeenCalledWith("/join/invite-code");
+  expect(rendered.reload).not.toHaveBeenCalled();
+  await rendered.cleanup();
 });
 
 test("AuthProvider reloads a document that receives a cross-tab session transition", async () => {
