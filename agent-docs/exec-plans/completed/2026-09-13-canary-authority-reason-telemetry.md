@@ -1,6 +1,6 @@
 # Classify canary authority failures without private data
 
-Status: active
+Status: completed
 Created: 2026-09-13
 
 ## Outcome and invariant
@@ -35,4 +35,7 @@ Use this task's isolated checkout. The earlier stage-only telemetry is merged. T
 - ReviewGPT supplied the exact three-file implementation patch; parent review accepted it unchanged. The read body and generic throw are byte-identical to the baseline.
 - Test-only application produced 25 expected failures and 35 passes; the full patch passes all 71 reader, route and authority cases. Web typecheck passes.
 - Complexity guard passes with unchanged maximum 19 and no hotspot above 20; logging guard, docs gardening and whitespace checks pass. Parent privacy/cost/ownership review passes.
-- Final pushed-head ReviewGPT and exact-head required CI remain pending.
+- Final ReviewGPT round 1 passed on 62bdcb1bb8a132b60401de7fe1a8876045e6739b with no qualifying findings or accepted findings remaining. Parent final review passes.
+- The final closeout changes only this explanatory plan and its index; source, tests and Reliability remain identical to the reviewed candidate. Required final-head CI and any telemetry-only Web deployment remain external completion gates.
+Updated: 2026-09-13
+Completed: 2026-09-13
