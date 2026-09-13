@@ -6642,9 +6642,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
       const prepareInitialForegroundState = async (): Promise<void> => {
         result = await runForegroundPass({
-          initialMailboxImport,
+          // Promotion already qualified a conversation batch. Import that batch
+          // instead of reusing the system-only result from invocation startup.
+          initialMailboxImport: systemMailboxForegroundWakePrefetch ? undefined : initialMailboxImport,
           initialMailboxImportContext,
-          initialMailboxPrefetch: initialMailboxImportResult.prefetch,
+          initialMailboxPrefetch: systemMailboxForegroundWakePrefetch ?? initialMailboxImportResult.prefetch,
           latencySeed: null,
           ...(initialProviderStartCriticalPath
             ? { providerStartCriticalPath: initialProviderStartCriticalPath }
