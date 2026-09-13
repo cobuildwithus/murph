@@ -78,6 +78,27 @@ test("pattern cards show available comparisons on phones and retain result detai
   await expect(drawer.getByRole("status")).toHaveText("May 10, 2026 · Running");
   await expect(drawer).not.toContainText("Tap a day");
 
+  // Browser chrome leaves less room on phones. The last evidence line must
+  // remain painted and reachable, with the heading and close control in view.
+  await page.setViewportSize({ width: 390, height: 600 });
+  const evidencePeriod = drawer.getByText(/^Data from /);
+  await evidencePeriod.scrollIntoViewIfNeeded();
+  await expect(evidencePeriod).toBeInViewport({ ratio: 1 });
+  await expect.poll(() => evidencePeriod.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return element.contains(document.elementFromPoint(
+      bounds.left + bounds.width / 2,
+      bounds.top + bounds.height / 2,
+    ));
+  })).toBe(true);
+  await expect(drawer.locator('[data-slot="drawer-title"]')).toBeInViewport({ ratio: 1 });
+  await expect(drawer.getByRole("button", { name: "Close pattern details" })).toBeInViewport({ ratio: 1 });
+  if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
+    await drawer.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-scrolled-evidence.png"), animations: "disabled" });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await drawer.locator("summary").scrollIntoViewIfNeeded();
+
   await expect.poll(async () => {
     const bounds = await drawer.boundingBox();
     return bounds ? Math.abs(bounds.y + bounds.height - 844) : 844;
