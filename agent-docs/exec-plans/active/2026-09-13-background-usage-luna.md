@@ -76,3 +76,11 @@ Updated: 2026-09-13
 - Parent reply review found that the email fixture accepted an invalid delivery decision. Journal live fixtures now use scheduled production tool admission (finish-without-reply disabled), consistent occurrence/timezone context, and the real notification decision parser. Three focused journeys are rerunning on the same authorized Luna subscription. Latest assistant typecheck passes.
 
 - Production-aligned live runs returned send decisions for routine captures, exposing a gap between the skill finish rule and the existing silent-save product contract. Replaced that ambiguous finish rule with explicit silent-save behavior while preserving notices, necessary clarification, and unresolved due check-ins. Focused prompt proof and the latest typecheck pass; the two affected live cases are rerunning.
+
+## Current handoff
+
+- Draft PR: https://github.com/cobuildwithus/murph/pull/3405
+- Product UX: Hold. Final Luna notice and email journeys pass their required effects, privacy, and valid delivery decisions. The strict calendar journey stays quiet and saves one eligible plan, but creates zero required follow-up automations; it fails the exact-one-follow-up assertion. Do not weaken this assertion or mark the model swap ready.
+- Deterministic proof is green: 325 assistant owner tests, seven connected-app prompt tests, one 10,000-meal selection test, two closeout CLI tests, ten changelog tests, affected typechecks, emitted build, and complexity guard.
+- Final ReviewGPT has not started because focused live proof has not passed. Required ready-state CI is also outstanding. The PR remains draft and has not been merged or deployed.
+- Next work: replace the remaining free-form Journal effect planning with bounded, host-owned collection/reconciliation and scheduling, preserving the source and private-ledger contracts; then rerun the strict calendar journey before readiness and final review. The larger deterministic rewrite is unfinished.
