@@ -1,6 +1,6 @@
 # Preserve foreground admission through background checkpoint completion
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -60,7 +60,9 @@ consumers remain compatible. Production deployment is separate from local proof.
   the independent owner remains below the complexity threshold (maximum 18).
 - Changelog rendering (10 cases), Web typecheck, docs drift, and docs gardening
   pass. Parent candidate review passes privacy, ownership, failure, and scope
-  checks. Pending: applicable final review and exact-head CI. No model behavior,
+  checks. Final ReviewGPT round 1 passed on the implementation commit; its
+  captured model and response hash were verified. Exact-head CI remains a PR
+  completion gate. No model behavior,
   prompt, tools, or reply policy
   changed; deterministic admission and composed provider-shaped delivery are
   the direct proof for this scheduling correction.
@@ -80,3 +82,14 @@ consumers remain compatible. Production deployment is separate from local proof.
 - An independent completion/wake race also consumed a notification without
   qualification. The existing waiter now joins its delivery and retains it on
   completion failure. It adds no external I/O or persisted state.
+
+## Completion evidence
+
+Parent review confirms the change keeps existing admission authority, canonical
+writes, independent attempt lifetime, and unchanged wire/storage contracts. Product
+UX is Ready for the synthetic admission, delivery, and recovery journeys.
+ReviewGPT returned PASS for PR #3399 at implementation commit
+`435cdb051555317c0edca860871822c5237005c4`, with no qualifying findings. The final
+commit only archives this evidence; production source and tests remain unchanged.
+CI on the final head and production deployment are distinct from this local proof.
+Completed: 2026-09-13
