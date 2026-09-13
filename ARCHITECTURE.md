@@ -2626,26 +2626,28 @@ binding and encrypted conversation mailbox append remain one Web-owned
 transaction; unmanaged, ambiguous, disabled, flagged, critical, unhealthy, or
 structurally unavailable recipient lines cannot establish this exact-line
 authority, and ordinary fallback selection remains fail-closed when no eligible
-line exists. Member activation owns unfinished-onboarding follow-up enrollment
-for every signup path. It persists the canonical onboarding start at the
-activation timestamp and carries an optional direct follow-up route separately
-from the optional signup welcome. A present route seeds the existing finite
-automation before optional welcome delivery, so standard Linq and suppressed-
-welcome Linq instant-start share one transition. Telegram activation remains
-silent; when no bot thread exists yet, the persisted onboarding start is the
-durable pending fact and managed-automation reconciliation uses the first later
-deliverable direct route. That delayed seed stays anchored to the activation
-window and becomes a no-op after its cutoff. The managed reconciler forwards its
-route-validation profile to that canonical seed, including hosted delivery
-rules. Activation seed failures retry through the activation mailbox, while
-later-route failures reuse the existing bounded managed-setup wake ladder.
-A missing route is currently a no-op, not a scheduled retry. Activation seeding
-therefore remains necessary until the existing route and maintenance owners
-establish a no-inbound continuation for a pristine, silent activation; an
-onboarding start alone does not create a deliverable automation or a wake.
-Canonical slug idempotency and onboarding
-state preserve completed or archived follow-ups as closed. No delivery receipt,
-channel-specific state, queue, or scheduler is another enrollment owner.
+line exists. Member activation persists the canonical onboarding start at the
+activation timestamp. Its accepted mailbox envelope carries the optional direct
+follow-up route separately from the optional signup welcome. The managed
+follow-up reconciler is the sole lifecycle owner for creation, migration, and
+closure; both activation and ordinary managed maintenance use it. Activation
+retains its mailbox item and original route until that reconciliation finishes,
+so silent Linq and email signups do not depend on another inbound message.
+Telegram activation remains silent. When no direct route exists yet, the saved
+onboarding start lets ordinary managed reconciliation enroll the first later
+deliverable direct route within the original activation window.
+
+Foreground input preempts activation through the existing resumable system
+mailbox path, including the member-maintenance pass after a reply. Follow-up
+creation checks foreground priority between prerequisite reads and complete
+canonical source/cursor writes. A yielded partial creation remains the existing
+finite source until its original occurrence cursor is durable, then reconciliation
+publishes recurrence. It never leaves detached writes running beside a reply.
+The pending mailbox and existing managed-setup wake ladder own continuation;
+there is no new enrollment flag, route store, queue, or scheduler. Exceptions
+retain normal mailbox retries. Hosted route validation applies to both initial
+creation and resumed reconciliation. Canonical slug identity and onboarding state
+preserve paused, completed, archived, and expired follow-ups.
 The automation has at most one low-pressure opportunity on
 each of the next three local days and the existing completion, decline,
 response, suspension, and expiry stops. The companion path does not send the

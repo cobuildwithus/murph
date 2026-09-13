@@ -2603,7 +2603,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "member.activated",
         "member.action.requested",
       ],
-      shouldYieldBackgroundMaintenance: null,
+      shouldYieldBackgroundMaintenance: expect.any(Function),
     }));
     expect(postCheckpoint).toEqual(expect.objectContaining({
       afterDurableCheckpoint: expect.any(Function),

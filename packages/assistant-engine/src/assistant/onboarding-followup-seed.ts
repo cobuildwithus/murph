@@ -20,6 +20,7 @@ export type MurphOnboardingFollowupSeedResult =
   | { kind: 'not-applicable' }
   | { job: AssistantCronJob; kind: 'ready' }
   | { kind: 'preserved-closed' }
+  | { kind: 'yielded' }
 
 export async function seedMurphOnboardingFollowupAutomation(input: {
   activeUntil?: string
@@ -27,6 +28,7 @@ export async function seedMurphOnboardingFollowupAutomation(input: {
   now?: Date
   route: AutomationRoute
   routeValidationProfile?: AssistantCronDeliveryRouteValidationProfile
+  shouldYield?: (() => boolean) | null
   stableKey: string
   vault: string
 }): Promise<AssistantCronJob | null> {
@@ -49,6 +51,7 @@ export async function seedMurphOnboardingFollowupAutomation(input: {
       ? {}
       : { routeValidationProfile: input.routeValidationProfile }),
     schedule: resolveMurphOnboardingFollowupSchedule(input.stableKey),
+    shouldYield: input.shouldYield,
     slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
     summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
     tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
@@ -62,14 +65,17 @@ export async function seedMurphOnboardingFollowupFromStartedOnboarding(
     now?: Date
     route: AutomationRoute
     routeValidationProfile?: AssistantCronDeliveryRouteValidationProfile
+    shouldYield?: (() => boolean) | null
     stableKey: string
     vault: string
   },
 ): Promise<MurphOnboardingFollowupSeedResult> {
+  if (input.shouldYield?.() === true) return { kind: 'yielded' }
   if (input.route.threadIsDirect !== true) {
     return { kind: 'not-applicable' }
   }
   const onboardingState = await readAssistantOnboardingState(input.vault)
+  if (input.shouldYield?.() === true) return { kind: 'yielded' }
   if (onboardingState.createdAt === null) {
     return { kind: 'not-applicable' }
   }
@@ -80,6 +86,7 @@ export async function seedMurphOnboardingFollowupFromStartedOnboarding(
   const now = input.now ?? new Date()
   const schedule = resolveMurphOnboardingFollowupSchedule(input.stableKey)
   const timeZone = await resolveAssistantCronDefaultTimeZone(input.vault)
+  if (input.shouldYield?.() === true) return { kind: 'yielded' }
   const originalFirstOccurrenceAt =
     computeAssistantCronFirstRunAfterCurrentLocalDay({
       after: new Date(onboardingState.createdAt),
@@ -114,9 +121,11 @@ export async function seedMurphOnboardingFollowupFromStartedOnboarding(
     ...(input.routeValidationProfile === undefined
       ? {}
       : { routeValidationProfile: input.routeValidationProfile }),
+    shouldYield: input.shouldYield,
     stableKey: input.stableKey,
     vault: input.vault,
   })
+  if (input.shouldYield?.() === true) return { kind: 'yielded' }
   return job === null
     ? { kind: 'preserved-closed' }
     : { job, kind: 'ready' }

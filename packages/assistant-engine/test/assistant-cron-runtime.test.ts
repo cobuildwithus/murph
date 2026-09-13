@@ -661,6 +661,55 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('yields recurring setup after a durable source write and resumes the original occurrence', async () => {
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-setup-yield-')
+    let foregroundArrived = false
+    const writeAutomation = cronMocks.upsertAutomation.getMockImplementation()!
+    cronMocks.upsertAutomation.mockImplementationOnce(async (...args) => {
+      const written = await writeAutomation(...args)
+      foregroundArrived = true
+      return written
+    })
+    const input = {
+      activeUntil: '2026-04-11T15:00:00.000Z',
+      firstOccurrenceAt: '2026-04-09T13:30:00.000Z',
+      firstOccurrencePolicy: 'after-current-local-day' as const,
+      instructions: 'Continue onboarding if useful.',
+      now: new Date('2026-04-08T10:00:00.000Z'),
+      route: {
+        channel: 'telegram' as const,
+        deliverySource: null,
+        deliveryTarget: 'synthetic-room',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: true,
+      },
+      schedule: { kind: 'dailyLocal' as const, localTime: '13:30' },
+      shouldYield: () => foregroundArrived,
+      slug: 'synthetic-onboarding-yield',
+      title: 'Synthetic onboarding continuation',
+      vault: vaultRoot,
+    }
+
+    expect(await upsertAssistantCronAutomation(input)).toBeNull()
+    expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(1)
+    const partial = findCanonicalAutomation(vaultRoot, input.slug)
+    expect(partial?.schedule).toEqual({ kind: 'at', at: input.firstOccurrenceAt })
+
+    foregroundArrived = false
+    const resumed = await upsertAssistantCronAutomation({
+      ...input,
+      now: new Date('2026-04-08T12:00:00.000Z'),
+    })
+    expect(resumed?.jobId).toBe(partial?.automationId)
+    expect(resumed?.state.nextRunAt).toBe(input.firstOccurrenceAt)
+    expect(findCanonicalAutomation(vaultRoot, input.slug)).toMatchObject({
+      activeUntil: input.activeUntil,
+      schedule: input.schedule,
+    })
+  })
+
   it('upserts canonical automations by slug and defers the first run to the next local day', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-upsert-automation-',
