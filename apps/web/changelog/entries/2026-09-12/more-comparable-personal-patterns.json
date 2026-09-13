@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "more-comparable-personal-patterns",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More comparable Personal Patterns",
+    "summary": "Patterns compares better-matched days and checks that a finding repeats across time before showing a direction.",
+    "details": "Device comparisons account for observed daytime data and recent activity. Sleep quality uses one consistent metric, and the familiar cards and details stay the same.",
+    "relevanceTags": ["patterns", "wearables"],
+    "sourcePullRequests": [],
+    "tryIt": { "label": "Open Patterns", "href": "/patterns" }
+  }
+}
