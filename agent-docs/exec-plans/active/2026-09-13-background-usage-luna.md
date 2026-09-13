@@ -74,3 +74,5 @@ Updated: 2026-09-13
 
 - The corrected calendar run exposed the ambiguous event-time instruction: Luna sometimes chose the event end instead of one hour later. Clarified the existing skill to use event end plus one hour, with a concrete timezone example; seven focused connected-app prompt tests pass.
 - Parent reply review found that the email fixture accepted an invalid delivery decision. Journal live fixtures now use scheduled production tool admission (finish-without-reply disabled), consistent occurrence/timezone context, and the real notification decision parser. Three focused journeys are rerunning on the same authorized Luna subscription. Latest assistant typecheck passes.
+
+- Production-aligned live runs returned send decisions for routine captures, exposing a gap between the skill finish rule and the existing silent-save product contract. Replaced that ambiguous finish rule with explicit silent-save behavior while preserving notices, necessary clarification, and unresolved due check-ins. Focused prompt proof and the latest typecheck pass; the two affected live cases are rerunning.

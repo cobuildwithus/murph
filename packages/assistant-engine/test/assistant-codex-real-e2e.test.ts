@@ -14310,7 +14310,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         workingDirectory,
       })
 
-      expect(parseAssistantNotificationDecision(result.finalMessage).kind).toBe('skip')
+      expect(parseAssistantNotificationDecision(result.finalMessage).kind, result.finalMessage).toBe('skip')
       const providerOperations = connectedAppRequests.map(
         (request) => request.operation,
       )
@@ -14536,7 +14536,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         workingDirectory,
       })
 
-      expect(parseAssistantNotificationDecision(result.finalMessage).kind).toBe('skip')
+      expect(parseAssistantNotificationDecision(result.finalMessage).kind, result.finalMessage).toBe('skip')
       const providerOperations = connectedAppRequests.map(
         (request) => request.operation,
       )

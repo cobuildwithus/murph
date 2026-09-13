@@ -85,6 +85,9 @@ per segment.
 
 ## Finish
 
-Rewrite the ledger after successful reads and canonical writes. If there is no
-new account, relevant plan, update, cancellation, or due check-in, return skip.
-Never send a process report.
+Rewrite the ledger after successful reads and canonical writes. Routine plan
+saves, updates, cancellations, and scheduling a future check-in stay silent:
+return the scheduled `skip` decision, with an internal `privateSummary` only.
+Send a message only for a new connection notice, a necessary clarification, or
+a currently due check-in that passive evidence has not resolved. A new saved
+plan or trip alone is never a reason to send. Never send a process report.
