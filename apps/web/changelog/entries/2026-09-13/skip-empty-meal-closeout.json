@@ -9,6 +9,6 @@
     "summary": "Nightly automatic meal closeout no longer uses AI when there are no captured meals awaiting review.",
     "details": "Pending meal photos and unfinished closeouts still get processed, including photos from earlier days.",
     "relevanceTags": ["nutrition", "usage"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3402]
   }
 }
