@@ -14,6 +14,7 @@ import {
   renderAssistantHostedImageCompletionSystemText,
 } from '../src/assistant/hosted-image-completion.js'
 import { getAssistantCronAutomationInspection } from '../src/assistant/cron/inspection.js'
+import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.js'
 import { appendAssistantCronRun } from '../src/assistant/cron/store.js'
 import { WORKFLOW_SKILL_REFERENCES } from './support/workflow-skill-policy.js'
 import { execFile } from 'node:child_process'
@@ -25043,6 +25044,107 @@ describeRealCodex('real Codex automation edit progress e2e', () => {
       expect(reply).toMatch(/updated|changed|done|set|now say/iu)
       expect(reply).toMatch(/stand up and stretch/iu)
       expect(reply).not.toMatch(/expectedUpdatedAt|schema|version|unable|failed|couldn.t/iu)
+      expect(result.runtimeIssueInputs).toEqual([])
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex weekday automation authoring e2e', () => {
+  it('changes a finite calendar reminder to weekdays while preserving its cutoff', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-weekday-automation-e2e-'))
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const current = {
+      automationId: 'automation_stretch', lookupId: 'stretch-break',
+      title: 'Stretch break', instructions: 'Take a stretch break.',
+      contextReferences: [], effectiveTimeZone: 'America/New_York',
+      occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: '2026-10-10T18:00:00.000Z' },
+      schedule: { kind: 'cron' as const, expression: '0 14 9-15 10 *', timeZone: 'America/New_York' },
+      status: 'active' as const, updatedAt: '2026-10-09T16:00:00.000Z',
+    }
+    let activeUntil: string | null = '2026-10-16T00:00:00-04:00'
+    let savedSchedule = current.schedule
+    const fixture = createVersionedAutomationPatchFixture({
+      current,
+      patch(request, record) {
+        if (request.schedule?.kind !== 'cron') throw new Error('Expected a weekday recurrence.')
+        expect(request.status).toBeUndefined()
+        expect(request.instructions).toBeUndefined()
+        expect(request.retargetToCurrentConversation).toBeUndefined()
+        savedSchedule = { ...request.schedule, timeZone: request.schedule.timeZone ?? record.effectiveTimeZone! }
+        if (request.activeUntil !== undefined) activeUntil = request.activeUntil
+        return {
+          ...record, schedule: savedSchedule, updatedAt: '2026-10-09T19:01:00.000Z',
+          occurrenceProjection: {
+            status: 'resolved',
+            nextOccurrenceAt: computeAssistantCronNextRunAt(savedSchedule, new Date('2026-10-09T19:00:00.000Z')),
+          },
+        }
+      },
+    })
+    try {
+      await mkdir(binDirectory, { recursive: true })
+      const inventory = { ok: true, data: {
+        compact: true, count: 1, totalCount: 1, nextCursor: null,
+        items: [{ ...current, activeUntil }],
+      } }
+      const executable = path.join(binDirectory, 'vault-cli')
+      await writeFile(executable, [
+        '#!/bin/sh', 'set -eu', 'case "$*" in',
+        `  automation\\ list*) printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(inventory))} ;;`,
+        '  *) echo "Only read-only automation list is available in this synthetic fixture." >&2; exit 2 ;;',
+        'esac',
+      ].join('\n') + '\n')
+      await chmod(executable, 0o755)
+      const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex'
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand, codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: 'Read-only inventory: vault-cli automation list --compact --format json. Use the automation tool for hosted inspections and writes.',
+          assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: false,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, assistantContextSnapshotPrompt: null,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-10-09',
+          currentInstant: '2026-10-09T19:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false, ordinaryInboundTurn: true, turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [MURPH_AUTOMATION_TOOL],
+        env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        fixtureBinDirectory: binDirectory,
+        hostedToolContext: {
+          automationTool: { request: fixture.request },
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+          sendVaultFile: async () => { throw new Error('Unexpected file send.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Change my stretch-break reminder to weekdays only. Keep 2 pm New York time and its existing October 15 end date.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const automationCalls = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'dynamic' && action.tool === MURPH_AUTOMATION_TOOL.name)
+      const reply = result.finalMessage.trim()
+      process.stdout.write('[weekday-automation-live] ' + JSON.stringify({
+        reply, schedule: savedSchedule, activeUntil, actions: fixture.requests.map((request) => request.action),
+      }) + '\n')
+      expect(fixture.requests.map((request) => request.action)).toEqual(['inspect', 'patch'])
+      expect(automationCalls).toHaveLength(2)
+      expect(automationCalls.every((action) => action.kind === 'dynamic' && action.success)).toBe(true)
+      expect(readDynamicToolAttempts(result.jsonEvents).filter((attempt) => attempt.tool === MURPH_AUTOMATION_TOOL.name)).toHaveLength(2)
+      expect(savedSchedule.timeZone).toBe('America/New_York')
+      expect(computeAssistantCronNextRunAt(savedSchedule, new Date('2026-10-09T19:00:00.000Z')))
+        .toBe('2026-10-12T18:00:00.000Z')
+      expect(activeUntil).not.toBeNull()
+      expect(new Date(activeUntil!).toISOString()).toBe('2026-10-16T04:00:00.000Z')
+      expect(reply).toMatch(/weekday|Monday.*Friday|Mon.*Fri/iu)
+      expect(reply).toMatch(/2\s*(?::00)?\s*p\.?m\.?/iu)
+      expect(reply).not.toMatch(/queued|expectedUpdatedAt|schema|cron|unable|failed|couldn.t/iu)
       expect(result.runtimeIssueInputs).toEqual([])
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])

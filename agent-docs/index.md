@@ -53,7 +53,8 @@ first-pending evidence) are specified in
 Automation edit schema discovery and attended progress guidance are owned by
 `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`. Real Codex native-schema and
 declaration preservation, independent schema/runtime structural admission parity,
-versioned edits, nutrition/personalization inputs, and quick-versus-long progress proof is indexed in `agent-docs/references/testing-ci-map.md`.
+versioned edits, finite weekday cron authoring, nutrition/personalization inputs,
+and quick-versus-long progress proof is indexed in `agent-docs/references/testing-ci-map.md`.
 `agent-docs/product-specs/bring-your-own-inference.md` owns complete custom-provider
 tool-description transport and its existing byte/count bounds.
 
