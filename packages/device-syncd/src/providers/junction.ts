@@ -5175,6 +5175,11 @@ export function createJunctionDeviceSyncProvider(
     completedWorkoutStreamIdentities: ReadonlySet<string>,
   ): Promise<ProviderJobResult> {
     const startedAt = Date.now();
+    let emptySourceFence: JunctionSourceLifecycleFence | null = null;
+    const deferEmptySourceCheck = job.kind === "reconcile"
+      && !normalizeProviderSlug(job.payload.sourceProviderSlug)
+      ? (fence: JunctionSourceLifecycleFence) => { emptySourceFence ??= fence; }
+      : undefined;
     let currentJob = job;
     for (let units = 1; ; units += 1) {
       const result = await executeFullJobTimeseriesContinuationUnit(
@@ -5182,6 +5187,7 @@ export function createJunctionDeviceSyncProvider(
         currentJob,
         skippedOptionalResources,
         completedWorkoutStreamIdentities,
+        deferEmptySourceCheck,
       );
       const next = result.scheduledJobs?.[0];
       if (
@@ -5197,6 +5203,17 @@ export function createJunctionDeviceSyncProvider(
         || next.payload.timeseriesCursor === currentJob.payload.timeseriesCursor
         || (next.availableAt && Date.parse(next.availableAt) > Date.parse(context.now))
       ) {
+        // Empty windows made no canonical writes. Validate the bounded batch
+        // before its scalar continuation or terminal progress can be saved.
+        if (
+          emptySourceFence
+          && !isJunctionSourceLifecycleFenceCurrent(
+            emptySourceFence,
+            await readJunctionImportSources(context),
+          )
+        ) {
+          throw junctionTimeseriesSourceLifecycleSuperseded();
+        }
         return result;
       }
       // Only the existing scalar suffix advances. Canonical writes remain one
@@ -5210,6 +5227,7 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     completedWorkoutStreamIdentities: ReadonlySet<string>,
+    deferEmptySourceCheck?: (fence: JunctionSourceLifecycleFence) => void,
   ): Promise<ProviderJobResult> {
     const window = resolveJobWindow(
       job,
@@ -5380,6 +5398,7 @@ export function createJunctionDeviceSyncProvider(
             collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT,
             context,
             dateQueryFormat: timeseriesWindowHours === 1 ? "datetime" : "date",
+            deferEmptySourceCheck,
             resource,
             skippedOptionalResources,
             sourceProviderSlug,
@@ -5445,6 +5464,7 @@ export function createJunctionDeviceSyncProvider(
     authorizedLocalDay?: { dayKey: string; timeZone: string };
     context: ProviderJobContext;
     dateQueryFormat: JunctionDateQueryFormat;
+    deferEmptySourceCheck?: (fence: JunctionSourceLifecycleFence) => void;
     resource: string;
     collectionWorkLimit?: JunctionCollectionWorkLimit;
     skippedOptionalResources: JunctionSkippedOptionalResource[];
@@ -5512,16 +5532,13 @@ export function createJunctionDeviceSyncProvider(
       };
     }
 
-    const currentSources = sourceLifecycleFence || records.length > 0 || input.authorizedLocalDay
-      ? await readJunctionImportSources(input.context)
-      : input.context.account.sources ?? [];
-    if (
-      sourceLifecycleFence
-      && !isJunctionSourceLifecycleFenceCurrent(sourceLifecycleFence, currentSources)
-    ) {
-      throw junctionTimeseriesSourceLifecycleSuperseded();
-    }
-    if (records.length === 0 && !input.authorizedLocalDay) {
+    const currentSources = await readJunctionTimeseriesImportSources({
+      context: input.context,
+      deferEmptySourceCheck: input.deferEmptySourceCheck,
+      hasCanonicalWork: records.length > 0 || Boolean(input.authorizedLocalDay),
+      sourceLifecycleFence,
+    });
+    if (!currentSources) {
       return {
         historicalProviderRecordsSeen: providerRecordsSeen,
         historicalRecordsSeen: false,
@@ -8619,6 +8636,31 @@ async function readJunctionImportSources(
   return context.listConnectionSources
     ? await context.listConnectionSources()
     : context.account.sources ?? [];
+}
+
+async function readJunctionTimeseriesImportSources(input: {
+  context: ProviderJobContext;
+  deferEmptySourceCheck?: (fence: JunctionSourceLifecycleFence) => void;
+  hasCanonicalWork: boolean;
+  sourceLifecycleFence: JunctionSourceLifecycleFence | null;
+}): Promise<readonly JunctionImportAdmissionSource[] | null> {
+  if (!input.hasCanonicalWork) {
+    if (!input.sourceLifecycleFence) {
+      return null;
+    }
+    if (input.deferEmptySourceCheck) {
+      input.deferEmptySourceCheck(input.sourceLifecycleFence);
+      return null;
+    }
+  }
+  const sources = await readJunctionImportSources(input.context);
+  if (
+    input.sourceLifecycleFence
+    && !isJunctionSourceLifecycleFenceCurrent(input.sourceLifecycleFence, sources)
+  ) {
+    throw junctionTimeseriesSourceLifecycleSuperseded();
+  }
+  return input.hasCanonicalWork ? sources : null;
 }
 
 async function prepareJunctionImportSnapshot(
