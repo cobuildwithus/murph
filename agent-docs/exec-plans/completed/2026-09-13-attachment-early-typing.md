@@ -1,6 +1,6 @@
 # Earlier activity while attachment evidence is prepared
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -44,3 +44,11 @@ Integrate the independently requested ReviewGPT patch against current main. Pref
 - Complexity guard passed: importer debt 48 to 47, maximum 49 to 48; unchanged staging/source-metadata hotspots 33/26 reviewed. Channel activity maximum 12 to 14 with zero debt.
 - Changelog rendering 10/10 and Web typecheck passed. Exact-head CI and final ReviewGPT remain delivery gates.
 - Deployment: process-local state and optional in-memory handle field only; old/new runtimes remain wire-compatible. Ordinary container release, no coordinated migration or new rollback floor. Production rollout and live-provider latency measurement are separate.
+
+## Final review
+
+- PR #3398: parent review and final ReviewGPT round 1 passed on af3ee9905e1cbfd37a2dba0d26de46fd205d44fc. No findings received, accepted or rejected; no remediation required.
+- The full sensitive snapshot was confirmed attached. Hercules selected GPT-6 Pro, and response metadata confirms gpt-6-pro. Capture completed after approximately five minutes with the exact target, completion marker, all ten patch postimages and reverse-apply validation confirmed. The static audit is proportionate to the changed owners; repository checks supply execution proof.
+- One pre-submission browser-surface failure on Phlebas was retried on Hercules against the same head; it did not count as a review round.
+- Final changes only archive this plan and record review evidence. Production source remains identical to the reviewed head. Exact-head CI and current-base mergeability remain final delivery checks.
+Completed: 2026-09-13
