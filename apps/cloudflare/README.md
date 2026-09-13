@@ -411,6 +411,10 @@ The newest persisted sample also bounds completed scheduled work: repeated or
 older scheduled timestamps skip collection and admission, and only resume pending
 message delivery using the latest observation and existing hourly fence. Replays
 therefore cannot advance the failure counter or replace stored sample evidence.
+An inherited counter below six is capped by the contiguous failed suffix of the
+newest five samples, stopping at a healthy sample. This repairs old-writer replay
+counts when the next sample commits. Counts already at or above six retain their
+one-shot outage semantics.
 Structured failure warnings retain the parsed-observation count and exact
 per-port omission counts without raw scrape content. An acknowledged
 telemetry-only page is

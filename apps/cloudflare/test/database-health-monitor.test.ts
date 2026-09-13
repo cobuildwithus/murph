@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DatabaseHealthMonitor } from "../src/database-health/monitor.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
 import { buildMetricsBody } from "./helpers/database-health.ts";
+import legacyReplayState from "./helpers/database-health-legacy-replay.json";
 
 const BRANCH_ID = "branch_test";
 const BRANCH_NAME = "main";
@@ -256,6 +257,58 @@ describe("database health monitor", () => {
     expect(harness.monitor.readAlertState()).toEqual(recovered);
     expect(harness.allLinqRequests).toHaveLength(4);
     expect(harness.planetScaleRequests).toHaveLength(collectionRequests + 2);
+  });
+
+  it.each([false, true])("repairs inherited replay counts (earlier failed history: %s)", async (earlierFailure) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let clientWaitSeconds = 0;
+    const harness = createMonitorHarness({readMetricsBody: () =>
+      buildMetricsBody({ branchId: BRANCH_ID, clientWaitSeconds })
+        .replace(/^planetscale_postgres_settings_max_connections.*$/mu, ""),
+    });
+    harness.restoreLegacyReplayState(earlierFailure);
+    harness.restartMonitor();
+    expect(harness.monitor.readAlertState().consecutiveScrapeFailures).toBe(2);
+    expect(harness.monitor.readRecentSamples()).toHaveLength(earlierFailure ? 3 : 2);
+    for (const slot of [5, 6, 7, 8]) {
+      if (slot === 7) harness.restartMonitor();
+      await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * slot)).resolves
+        .toMatchObject({ sampleStatus: "failed" });
+      expect(harness.monitor.readAlertState()).toMatchObject({
+        consecutiveScrapeFailures: slot - 3,
+        monitoringAlertObligation: null,
+      });
+    }
+    clientWaitSeconds = 8;
+    await harness.runScheduledCheck(FIVE_MINUTES_MS * 9);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      consecutiveScrapeFailures: 6,
+      monitoringAlertObligation: {
+        checkedAtMs: FIVE_MINUTES_MS * 9,
+        failures: 6,
+        incompleteChecks: 6,
+        unavailableChecks: 0,
+        missingMetrics: ["planetscale_postgres_settings_max_connections"],
+      },
+    });
+    expect(harness.allLinqRequests).toHaveLength(0);
+    harness.restartMonitor();
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS * 17)).resolves
+      .toMatchObject({ outcome: "alert_sent", sampleStatus: "failed" });
+    const body = await readLinqRequestBody(harness.primaryLinqRequests[0]);
+    expect(body.message.parts[0]?.value).toContain("PgBouncer wait 8s");
+    expect(body.message.parts[0]?.value).toContain("telemetry was incomplete for 6 checks");
+    expect(body.message.parts[0]?.value).toContain("window ended 00:45 UTC");
+    clientWaitSeconds = 0;
+    await harness.runScheduledCheck(FIVE_MINUTES_MS * 18);
+    harness.restartMonitor();
+    await harness.runScheduledCheck(FIVE_MINUTES_MS * 31);
+    expect(harness.allLinqRequests).toHaveLength(2);
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      consecutiveScrapeFailures: 9,
+      monitoringAlertObligation: null,
+      pendingAlertMessage: null,
+    });
   });
 
   it("pages at most once per hour and rotates evidence-bearing copy", async () => {
@@ -4947,6 +5000,25 @@ function createMonitorHarness(input: {
           missingMetrics: input.missingMetrics,
         }),
       );
+    },
+    restoreLegacyReplayState(earlierFailure: boolean) {
+      // Synthetic rows captured by executing the pre-PR writer at the fixture's source commit.
+      const samples = legacyReplayState.samples.filter((sample) =>
+        earlierFailure || sample.observed_at_ms !== FIVE_MINUTES_MS
+      );
+      for (const [table, rows] of [
+        ["database_health_meta", legacyReplayState.meta],
+        ["database_health_samples", samples],
+      ] as const) {
+        sql.exec(`DELETE FROM ${table}`);
+        for (const row of rows) {
+          const columns = Object.keys(row);
+          sql.exec(
+            `INSERT INTO ${table} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+            ...Object.values(row),
+          );
+        }
+      }
     },
     setSecondaryLinqRecipient(recipient: string) {
       secondaryLinqRecipient = recipient;

@@ -308,7 +308,10 @@ export class DatabaseHealthMonitor {
     }
 
     try {
-      const latestSample = this.store.readRecentSamples(1)[0];
+      const recentSamples = this.store.readRecentSamples(
+        MONITORING_FAILURE_ALERT_COUNT - 1,
+      );
+      const latestSample = recentSamples[0];
       if (latestSample && observedAtMs <= latestSample.observedAtMs) {
         return await this.handleAlertState({
           checkedAtMs: runStartedAtMs,
@@ -316,7 +319,17 @@ export class DatabaseHealthMonitor {
           sampleStatus: latestSample.scrapeStatus,
         });
       }
-      const sample = await this.collectSample();
+      let priorFailures = this.store.readAlertState().consecutiveScrapeFailures;
+      if (priorFailures < MONITORING_FAILURE_ALERT_COUNT) {
+        const healthyIndex = recentSamples.findIndex(
+          (sample) => sample.scrapeStatus === "ok",
+        );
+        priorFailures = Math.min(
+          priorFailures,
+          healthyIndex < 0 ? recentSamples.length : healthyIndex,
+        );
+      }
+      const sample = await this.collectSample(priorFailures);
       const checkedAtMs = normalizeObservedAtMs(this.nowImplementation());
       this.transactionSync(() => {
         this.persistSampleAndAlertAdmission({
@@ -346,7 +359,9 @@ export class DatabaseHealthMonitor {
     return this.store.readAlertState();
   }
 
-  private async collectSample(): Promise<DatabaseHealthCollectedSample> {
+  private async collectSample(
+    priorFailures: number,
+  ): Promise<DatabaseHealthCollectedSample> {
     const previousConnectionErrorCounterBaseline =
       this.store.readLatestConnectionErrorCounterBaseline();
     try {
@@ -371,8 +386,6 @@ export class DatabaseHealthMonitor {
           observation.snapshot,
           connectionErrorDeltas,
         );
-        const priorFailures =
-          this.store.readAlertState().consecutiveScrapeFailures;
         const failures = priorFailures + 1;
         if (failures >= MONITORING_FAILURE_ALERT_COUNT) {
           conditions.push({
@@ -433,8 +446,6 @@ export class DatabaseHealthMonitor {
       const missingMetrics = error instanceof DatabaseMetricsParseError
         ? error.missingMetrics
         : [];
-      const priorFailures =
-        this.store.readAlertState().consecutiveScrapeFailures;
       const failures = priorFailures + 1;
       const conditions: DatabaseHealthCondition[] =
         failures >= MONITORING_FAILURE_ALERT_COUNT

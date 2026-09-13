@@ -687,6 +687,12 @@ Last verified: 2026-09-04
   scrape, overwrite evidence, advance counters, or readmit old conditions. This
   keeps failure counts aligned with distinct samples across completed-slot replay
   and restart; pending delivery still observes its body/key and hourly fence.
+  Before six failures, inherited counters are capped by the contiguous failed
+  suffix of the newest five distinct samples, stopping at the latest healthy
+  sample. This repairs old-writer replay drift without counting failures from
+  an earlier recovered gap. Counts already at or above six remain unchanged to
+  preserve one-shot outage state. The reconciled count commits with the next
+  collected sample and alert admission in the existing SQLite transaction.
   Concrete unhealthy gauges page immediately. Metric families are normalized
   independently: primary-only Postgres and PgBouncer families require an
   explicit `planetscale_role="primary"` label, while the edge connection-error

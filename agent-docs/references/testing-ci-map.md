@@ -1275,7 +1275,11 @@ limits, and local proof distinctions are owned by
   SQLite sample persistence and 30-day pruning, completed-slot and older-slot
   replay without counter/evidence mutation, six-distinct-check telemetry and
   pressure admission across replay/restart, same-slot pending delivery retry
-  under the hourly fence, replay after recovery using the newest sample, concrete
+  under the hourly fence, replay after recovery using the newest sample,
+  inherited replay-count repair from synthetic pre-PR-writer SQLite fixtures
+  with and without older recovered failures, truthful six-distinct-sample
+  windows and pressure delivery after upgrade, preserved acknowledged-outage
+  one-shot state, concrete
   connection thresholds, six-failure collection hysteresis, one acknowledged
   page per unresolved telemetry-notification window, recovered unadmitted threshold
   withdrawal before delivery, truthful partial-then-unavailable,

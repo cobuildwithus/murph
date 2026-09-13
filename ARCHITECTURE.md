@@ -1850,6 +1850,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   admission state. After claiming the run lease, repeated or older scheduled
   timestamps use the newest persisted sample to resume only pending delivery;
   they do not scrape, replace evidence, increment counters, or readmit conditions.
+  Before the six-check threshold, the existing failure counter is capped by the
+  contiguous failed suffix of the newest five samples. This repairs inherited
+  duplicate-slot counting while preserving already-thresholded one-shot state;
+  the correction persists with the next sample in the admission transaction.
   Metric families normalize independently: an unavailable
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
