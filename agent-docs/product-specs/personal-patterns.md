@@ -225,7 +225,10 @@ results become one summary with at most three highlights.
 The hosted runtime emits a privacy-safe internal email alert when this managed
 run fails or when its occurrence starts too late and expires. Alert delivery
 uses the existing operational email channel and does not change the member's
-message. A complete platform outage requires an external uptime monitor,
+message. Usage-limit failures and expirations with recorded evidence of a usage
+pause are expected interruptions and do not send this alert, including when the
+expired occurrence is discovered after an allowance reset. Missing historical
+evidence preserves the alert; unrelated terminal failures still notify operators. A complete platform outage requires an external uptime monitor,
 because the runtime cannot report while it is offline.
 
 Only a new grade A-D identity can trigger that daily message. Letter grades and

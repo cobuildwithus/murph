@@ -2332,8 +2332,15 @@ Scheduled-job completion diagnostics expose `retryScheduled` after the cron
 owner finalizes durable runtime state. Web prefixes that field as
 `failureRetryScheduled` in persisted redacted log details. Personal Patterns
 operator email ignores failed events unless this field is explicitly `false`;
-missing fields from an older runtime stay quiet, while occurrence-expired
-events remain terminal. Every terminal event for one scheduled occurrence uses
+missing fields from an older runtime stay quiet. Explicit provider usage-limit
+failures stay quiet too. Occurrence-expired events remain terminal, but Web
+suppresses their operator email when retained `runtime.ai_usage_gate` observations
+establish a platform usage pause at the occurrence or before expiry detection.
+These Web-owned observations use the existing `assistant.automation_detail` event
+with type `runtime.ai_usage_gate`, carry only time and a usage-limited boolean, survive
+an allowance reset under normal diagnostic retention, and never change runtime
+admission. Missing history preserves the ordinary alert. The alert callback uses
+its authenticated member identity for the bounded lookup before coalescing. Every terminal event for one scheduled occurrence uses
 one member-independent email body and Resend idempotency key, so concurrent
 member failures coalesce without a new alert queue or persistence owner.
 The generic email describes either expiry or terminal failure without asserting
@@ -3035,12 +3042,24 @@ schedule hints retire when that advanced cadence is retained after recording.
 A cold idle pass can also checkpoint retirement of already-covered eligible
 schedule hints without running a provider job; it first gives runnable work its
 normal priority. Webhook hints still require dirty-work admission, and equal
-cadences, explicit jobs, manual requests, and connection-epoch barriers remain
+cadences, explicit jobs, attempted or scoped manual requests, and connection-epoch barriers remain
 pending. When a pass cannot progress, already-due eligible schedule hints share
 the owner retry backoff so they cannot repeatedly readmit it.
 If a pristine webhook or companion dirty hint was deferred to an owner's future
 retry, an otherwise idle pass may readmit the validated owner only when the
 existing compactor proves an eligible hint can retire during that admission.
+Pristine manual-reconcile requests for the same member, provider, connection
+and epoch use this existing owner admission too. The request must contain only
+`reason: manual_reconcile` and an optional occurrence hint. The atomic claim
+carries `manual_reconcile_pending` in the retained wake before removing covered
+requests, preserving the exact retained jobs. Hydration first restores those
+jobs and then calls the provider-owned manual job creator. Recovery carries
+the resulting exact jobs with the ordinary `manual_reconcile` reason, which
+does not recreate roots when jobs are present. A pre-hydration yield or failed
+creation preserves pending intent. Old snapshots remain readable; snapshots
+with the new pending reason require corrected restore consumers. Roll out the
+runner coherently before admitting transfers and retain that runtime rollback
+floor until all pending reasons have drained. Web requires no schema change.
 Invocation filters and substantive-work barriers still apply. The owner fetches
 canonical dirty work before acknowledgement; exact job retry times stay intact,
 and removing the admitted hints prevents repeated idle admissions.

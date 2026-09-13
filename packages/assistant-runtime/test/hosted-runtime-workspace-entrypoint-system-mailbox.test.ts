@@ -1494,7 +1494,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test.each(["none", "superseded", "equal", "deferred", "connected"])("system mailbox retains only necessary device work across restore (schedule: %s)", async (schedule) => {
+  test.each(["none", "superseded", "equal", "deferred", "connected", "manual"])("system mailbox retains only necessary device work across restore (schedule: %s)", async (schedule) => {
     const retainedRetry = schedule !== "none";
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1610,6 +1610,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             wake: { connectionId, eventId: queuedItem.dedupeKey, expectedConnectedAt: TEST_NOW,
               kind: "device-sync.wake", occurredAt: reason === "reconcile_due" ? scheduledAt : TEST_NOW,
               ...(reason === "reconcile_due" ? { hint: { nextReconcileAt: scheduledAt, occurredAt: scheduledAt } } : {}),
+              ...(reason === "reconcile_due" && schedule === "manual"
+                ? { hint: { reason: "manual_reconcile", occurredAt: TEST_NOW } } : {}),
               ...(reason === "connected" ? { hint: { scopes: ["read:sleep"], jobs: [{
                 dedupeKey: "synthetic-new-source-job", kind: "resource" as const,
                 payload: { resourceType: "sleep", resourceId: "synthetic-new-sleep" },
@@ -1626,7 +1628,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           pending: state.pending.map((item) => ({ ...item, nextAttemptAt: retryAt })),
         }));
       }
-      if (schedule === "connected") {
+      if (schedule === "connected" || schedule === "manual") {
         const preempted = await prepareHostedSystemMailboxItemForCheckpoint({
           allowedRouteActions: ["run-device-sync-wake"],
           now: () => TEST_NOW,
@@ -1644,8 +1646,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(acceptedWake?.kind, "device-sync.wake");
         if (acceptedWake?.kind !== "device-sync.wake") throw new Error("Missing synthetic device owner");
         assert.deepEqual(acceptedWake.hint?.jobs?.[0], futureJobs[0]);
-        assert.equal(acceptedWake.hint?.jobs?.[1]?.availableAt, TEST_NOW);
-        assert.deepEqual(acceptedWake.hint?.scopes, ["read:sleep"]);
+        if (schedule === "connected") {
+          assert.equal(acceptedWake.hint?.jobs?.[1]?.availableAt, TEST_NOW);
+          assert.deepEqual(acceptedWake.hint?.scopes, ["read:sleep"]);
+        } else {
+          assert.deepEqual(acceptedWake.hint?.jobs, futureJobs);
+          assert.equal(acceptedWake.hint?.reason, "manual_reconcile_pending");
+        }
         assert.equal(providerPaths.length, 0);
       }
       const runPass = async () => {
@@ -1724,8 +1731,21 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       }
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        schedule === "superseded" || schedule === "deferred" || schedule === "connected" ? "3" : schedule === "equal" ? "2" : "1",
+        schedule === "superseded" || schedule === "deferred" || schedule === "connected" || schedule === "manual" ? "3" : schedule === "equal" ? "2" : "1",
       );
+      if (schedule === "manual") {
+        assert.equal(pending[0]?.wake.kind === "device-sync.wake" ? pending[0].wake.hint?.reason : null,
+          "manual_reconcile");
+        const fetchCount = providerPaths.length;
+        await runPass();
+        assert.equal(providerPaths.length, fetchCount);
+        assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, pending);
+        vi.setSystemTime(new Date(retryAt));
+        await runPass();
+        assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 1);
+        assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+        assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
+      }
       if (schedule === "connected") {
         const newSleep = await findEventByExternalRef({
           resourceId: "synthetic-new-sleep", resourceType: "sleep", system: "whoop", vaultRoot,

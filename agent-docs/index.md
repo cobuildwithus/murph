@@ -17,6 +17,10 @@ Empty automatic meal closeout admission is owned by `ARCHITECTURE.md`;
 canonical queue, scheduler, and focused real-Codex proof are indexed in
 `agent-docs/references/testing-ci-map.md`.
 
+Manual device refresh admission during retained history retries, one-shot
+provider job creation and recovery compatibility are owned by
+`agent-docs/RELIABILITY.md` and the hosted runtime protocol reference.
+
 Verification inventory, composed diff routing, cold stale-invocation coverage and
 UTC PostgreSQL connection proof are indexed in
 `agent-docs/references/testing-ci-map.md`.
@@ -29,7 +33,7 @@ Prepared device-webhook revision rebinding and content-free transport/replan
 diagnostics are owned by `agent-docs/RELIABILITY.md`; local PostgreSQL burst and
 cryptographic-binding proof is indexed in `agent-docs/references/testing-ci-map.md`.
 
-Personal Patterns expiry and checkpoint wake diagnostics are specified in
+Personal Patterns usage-pause alert suppression, expiry, and checkpoint wake diagnostics are specified in
 `agent-docs/RELIABILITY.md` and the hosted runtime protocol reference.
 
 Runtime-owned terminal Linq send recovery and replacement receipt ownership

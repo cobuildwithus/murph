@@ -1673,9 +1673,22 @@ Last verified: 2026-09-04
   cadence hint; canonical snapshot hydration still owns connection authority.
   Foreground preemption, execution failure and cold restore retain the merged
   wake, including every older cursor and retry deadline. A distinct epoch,
-  disconnect or reauthorization event, other explicit job, manual request,
+  disconnect or reauthorization event, other explicit job, scoped manual request,
   recording or attempted item, unknown hint semantics, colliding job identity,
   or newer scheduled cadence remains a same-connection ordering barrier.
+  A pristine same-epoch manual reconcile request with only its reason and
+  optional occurrence hint also joins the owner immediately. Its atomic claim
+  stores `manual_reconcile_pending` in the existing wake hint before removing
+  the request. Hydration restores exact older jobs first, then delegates new
+  manual jobs to the device-sync service. Recovery replaces that pending reason
+  with `manual_reconcile` and the complete exact job set, so cold restore does
+  not recreate manual roots or reset retries. Preemption before hydration keeps
+  the pending reason; failed job creation keeps it retryable. Attempted requests,
+  scoped or job-bearing manual hints, authority mismatches and caller exclusions
+  remain barriers. These semantics require the corrected runner after the first
+  pending-manual checkpoint; older runners cannot interpret that intent. Use a
+  coordinated runner rollout with corrected restore consumers before enabling
+  admission, and do not roll back below it while pending intents remain.
   New hints arriving after admission remain independently queued. On a newer
   dirty revision, the post-checkpoint acknowledgement directly advances the
   retained owner's next attempt when the retained job hints prove capacity;
@@ -2199,7 +2212,21 @@ Last verified: 2026-09-04
   projection of id, lifecycle status, and setup phase. Selection never opens
   credential ciphertext; connect and resume mutation owners still revalidate
   the exact selected connection and source authority.
-- Personal Patterns operator email is terminal-state only. A failed cron
+- Personal Patterns operator email excludes usage-limit interruptions. Explicit
+  `ASSISTANT_CODEX_USAGE_LIMIT` terminal failures stay quiet. Expirations stay
+  quiet when the authenticated member's retained usage-gate observations show
+  a limit at the occurrence or during its wait, or a retained failure for that
+  exact occurrence records a provider usage limit. An allowed decision before the
+  occurrence closes the earlier pause; a later reset does not erase it.
+  Web records actual authoritative gate decisions with type `runtime.ai_usage_gate`
+  inside the existing `assistant.automation_detail` event after the response; read-only status, ungated model-free work,
+  and diagnostics never alter admission. A selected inference override records
+  an unpaused decision. The existing isolated log store and retention own this
+  metadata; no billing state or new scheduler is introduced. One bounded,
+  subject-scoped query classifies at most 50 candidates before email coalescing.
+  Missing/retired history and diagnostic failures preserve ordinary alerts,
+  and non-usage terminal failures still alert even beside a suppressed expiry.
+  All remaining Personal Patterns operator email is terminal-state only. A failed cron
   attempt remains silent while the finalized job has a scheduled retry. Web
   treats an absent retry disposition from an older runner as non-terminal, so
   the consumer can deploy first. Terminal failures and expired occurrences for
@@ -2230,8 +2257,15 @@ Last verified: 2026-09-04
   Linq and Telegram acceptance milestones stay asynchronous. The engine's
   existing turn handle retains the original provider acceptance timestamp for
   the initial accepted-input journal and subsequent pre-provider or live-steered
-  admissions. Its readiness promise covers admission before or after typing
-  starts, without an import-time sample or a foreground telemetry wait. Failed
+  admissions. Eligible, unconsumed Linq attachments may start that same session
+  after durable input staging, while model admission still waits for settled
+  evidence. The existing per-chat claim retains one preparation handle; the
+  validated turn takes it only through the same provider-fetch authority,
+  rebinding cancellation without another start or a reset session budget.
+  Import failure cancels only an unclaimed preparation. Provider acceptance,
+  never staging or a claimed target alone, supplies the retained timestamp.
+  Its readiness promise covers admission before or after typing starts without
+  a foreground telemetry wait. Telegram keeps turn-owned start. Failed
   starts and stopped, aborted, expired or failed provider handles supply no new
   evidence. Linq's existing provider cooldown is unchanged. Signup's
   early Web typing hint is also retained, so neither produces a missing-typing

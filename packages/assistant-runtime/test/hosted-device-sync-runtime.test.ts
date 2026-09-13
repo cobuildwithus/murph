@@ -9796,12 +9796,14 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("manual reconcile wakes delegate job creation to the device-sync service", async () => {
+  test.each(["standalone", "retained", "retry"])("manual reconcile wakes delegate job creation to the device-sync service (%s)", async (scenario) => {
+    const retained = scenario !== "standalone";
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
     await mkdir(vaultRoot, { recursive: true });
     const demoProvider = createFakeProvider();
+    const createScheduledJobs = vi.fn(() => ({ jobs: [], nextReconcileAt: null }));
     const junctionProvider: DeviceSyncProvider = {
       ...demoProvider,
       provider: "junction",
@@ -9810,6 +9812,7 @@ describe("hosted device-sync runtime", () => {
         provider: "junction",
         displayName: "Junction",
       },
+      jobExecutor: { async executeJob() { return {}; }, createScheduledJobs },
     };
     const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
 
@@ -9842,26 +9845,52 @@ describe("hosted device-sync runtime", () => {
         tokenBundle: null,
       });
 
-      await syncHostedDeviceSyncControlPlaneState({
+      const retainedJob = { kind: "resource" as const, dedupeKey: "synthetic-preserved-history",
+        availableAt: "2026-04-05T10:00:00.000Z", maxAttempts: 2, priority: 20 };
+      const wake = buildDeviceSyncWake({
+        connectionId: "hosted_conn_manual_reconcile",
+        hint: retained ? { reason: "manual_reconcile_pending", jobs: [retainedJob] }
+          : { reason: "manual_reconcile" },
+        occurredAt: "2026-04-04T10:00:00.000Z", reason: "reconcile_due",
+      });
+      if (scenario === "retry") {
+        const before = structuredClone(wake);
+        createScheduledJobs.mockImplementationOnce(() => { throw new Error("Synthetic manual creation failure"); });
+        await assert.rejects(syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+          wake, secret: DEVICE_SYNC_SECRET, service,
+        }), /Synthetic manual creation failure/u);
+        assert.deepEqual(wake, before);
+        assert.equal(readJobsForAccount(service, account.id).length, 1);
+      }
+      const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
-        wake: buildDeviceSyncWake({
-          connectionId: "hosted_conn_manual_reconcile",
-          hint: {
-            reason: "manual_reconcile",
-          },
-          occurredAt: "2026-04-04T10:00:00.000Z",
-          reason: "reconcile_due",
-        }),
+        wake,
         secret: DEVICE_SYNC_SECRET,
         service,
       });
 
       const jobs = readJobsForAccount(service, account.id);
-      assert.equal(jobs.length, 1);
-      assert.equal(jobs[0]?.kind, "reconcile");
-      assert.equal(jobs[0]?.priority, 80);
-      assert.deepEqual(JSON.parse(jobs[0]?.payloadJson ?? "{}"), {});
-      assert.equal(jobs[0]?.status, "queued");
+      assert.equal(jobs.length, retained ? 2 : 1);
+      const manualJob = jobs.find((job) => job.kind === "reconcile");
+      assert.ok(manualJob);
+      assert.equal(manualJob.priority, 80);
+      assert.deepEqual(JSON.parse(manualJob.payloadJson), {});
+      assert.equal(manualJob.status, "queued");
+      if (retained) {
+        const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+        assert.equal(recovery?.wake.hint?.reason, "manual_reconcile");
+        assert.deepEqual(recovery?.wake.hint?.jobs?.find((job) => job.dedupeKey === retainedJob.dedupeKey), retainedJob);
+        assert.equal(recovery?.wake.hint?.jobs?.filter((job) => job.kind === "reconcile").length, 1);
+        assert.ok(recovery);
+        const creationCount = createScheduledJobs.mock.calls.length;
+        await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+          wake: recovery.wake, secret: DEVICE_SYNC_SECRET, service,
+        });
+        assert.equal(createScheduledJobs.mock.calls.length, creationCount);
+        assert.equal(readJobsForAccount(service, account.id).length, 2);
+      }
       assert.equal(
         getStore(service).getAccountById(account.id)?.nextReconcileAt,
         "2026-04-04T12:00:00.000Z",

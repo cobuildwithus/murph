@@ -1029,6 +1029,10 @@ async function applyHostedDeviceSyncWakeHint(input: {
     });
   }
 
+  if (wake.hint?.reason === "manual_reconcile_pending") {
+    input.service.queueManualReconcile(localAccountId);
+  }
+
   const wakePatch = buildHostedDeviceSyncWakeAccountPatch(account, wake.hint);
   if (wakePatch) {
     store.patchAccount(localAccountId, wakePatch);
@@ -1093,10 +1097,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     return null;
   }
 
-  const retainedHint = {
-    ...(input.wake.hint ?? {}),
-    ...checkpointProofHint(account.metadata),
-  };
+  const retainedHint = buildHostedRetainedDeviceSyncWakeHint(account.metadata, input.wake.hint);
 
   // A provider job can create multiple follow-ups. The execution/admission
   // budget must never truncate or reject work already accepted by the queue.
@@ -1180,13 +1181,17 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
   };
 }
 
-function checkpointProofHint(metadata: Record<string, unknown>): {
-  junctionTemporalSweepKey?: string;
-  junctionReconcileProof?: string;
-} {
+function buildHostedRetainedDeviceSyncWakeHint(
+  metadata: Record<string, unknown>,
+  hint: HostedExecutionDeviceSyncWake["hint"],
+): NonNullable<HostedExecutionDeviceSyncWake["hint"]> {
   const sweep = metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
   const proof = metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY];
   return {
+    ...hint,
+    // Exact recovered jobs now own the manual request. A cold restore must not
+    // recreate its root while those jobs retain provider continuation cursors.
+    ...(hint?.reason === "manual_reconcile_pending" ? { reason: "manual_reconcile" } : {}),
     ...(typeof sweep === "string" ? { junctionTemporalSweepKey: sweep } : {}),
     ...(typeof proof === "string" ? { junctionReconcileProof: proof } : {}),
   };
