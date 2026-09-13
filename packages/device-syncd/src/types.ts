@@ -1158,7 +1158,24 @@ export interface DeviceWebhookHandler {
   verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult>;
 }
 
+export interface ScheduledReconcileProbeResult {
+  outcome: "unchanged" | "changed" | "ineligible";
+  reason: string;
+  nextReconcileAt?: string;
+  /** Complete logical collection reads, including inventory; not HTTP pages. */
+  requestCount: number;
+  recordCount: number;
+  /** Serialized decoded records, not transport/billing bytes. */
+  responseBytes: number;
+  elapsedMs: number;
+}
+
 export interface DeviceJobExecutor {
+  probeScheduledReconcile?(
+    account: StoredDeviceSyncAccount,
+    now: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<ScheduledReconcileProbeResult>;
   // Optional execution scope for one bounded worker drain. Never retains live
   // authorization; a new drain or standalone worker call gets a fresh scope.
   createPassExecutor?(): DeviceJobExecutor;

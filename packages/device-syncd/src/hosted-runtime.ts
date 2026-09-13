@@ -1,6 +1,6 @@
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 
-import { JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
+import { JUNCTION_RECONCILE_PROOF_METADATA_KEY, JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
@@ -19,6 +19,7 @@ import type {
   DeviceConnectionSourceStatus,
 } from "./client.ts";
 export {
+  JUNCTION_RECONCILE_PROOF_METADATA_KEY,
   JUNCTION_TEMPORAL_SWEEP_METADATA_KEY,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
@@ -249,16 +250,14 @@ export function mergeHostedDeviceSyncConnectionMetadata(input: {
     localConnectionStateUnpublished: input.localConnectionStateUnpublished,
     localMetadata: input.localMetadata ?? {},
   });
-  // Local SQLite owns the marker together with its queued children. Hydration
-  // must not discard unpublished scheduling progress within this connection
-  // epoch; cold restores recover it from the checkpointed wake instead.
-  const localSweepKey = input.localMetadata?.[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
-  if (typeof localSweepKey === "string") {
-    merged.metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY] = localSweepKey;
-    // The accepted hydration baseline must remain the actual Web metadata until
-    // this local scheduling progress has crossed its checkpoint boundary.
-    merged.preservedLocalProgress ||= localSweepKey
-      !== input.hostedMetadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
+  // Local SQLite owns unpublished scheduling/import progress. Keep the actual
+  // Web baseline until a checkpointed continuation authorizes publication.
+  for (const key of [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, JUNCTION_RECONCILE_PROOF_METADATA_KEY]) {
+    const localValue = input.localMetadata?.[key];
+    if (typeof localValue === "string") {
+      merged.metadata[key] = localValue;
+      merged.preservedLocalProgress ||= localValue !== input.hostedMetadata[key];
+    }
   }
   return merged;
 }
@@ -750,6 +749,7 @@ export interface HostedExecutionDeviceSyncJobHint {
 }
 
 export interface HostedExecutionDeviceSyncWakeHint {
+  junctionReconcileProof?: string;
   junctionTemporalSweepKey?: string;
   eventType?: string | null;
   jobs?: HostedExecutionDeviceSyncJobHint[];
@@ -798,6 +798,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   includeProfile: "boolean",
   objectId: "string",
   occurredAt: "isoTimestamp",
+  reconcileProof: "string",
   resource: "string",
   resourceCategory: "string",
   sourceLifecycleEpoch: "number",
@@ -1543,6 +1544,15 @@ export function parseHostedExecutionDeviceSyncWakeHint(
       record.jobs,
       "Hosted execution device-sync.wake hint jobs",
     ).map((entry, index) => parseHostedExecutionDeviceSyncJobHint(entry, index));
+  }
+
+  if (record.junctionReconcileProof !== undefined) {
+    if (typeof record.junctionReconcileProof !== "string"
+      || record.junctionReconcileProof.trim().length === 0
+      || record.junctionReconcileProof.length > 256) {
+      throw new TypeError("Hosted execution device-sync.wake hint junctionReconcileProof must be a nonempty string of at most 256 characters.");
+    }
+    next.junctionReconcileProof = record.junctionReconcileProof;
   }
 
   if (record.junctionTemporalSweepKey !== undefined) {

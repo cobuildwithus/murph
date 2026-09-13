@@ -314,6 +314,7 @@ function buildDeviceSyncWake(input: {
   expectedConnectedAt?: string | null;
   hint?: {
     junctionTemporalSweepKey?: string;
+    junctionReconcileProof?: string;
     jobs?: Array<{
       availableAt?: string;
       dedupeKey?: string;
@@ -15467,6 +15468,125 @@ describe("hosted device-sync runtime", () => {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
+  });
+
+  test("fences Junction reconcile proofs through warm retries and checkpointed cold continuations", async () => {
+    const connectedAt = "2026-04-01T00:00:00.000Z";
+    const now = "2026-04-24T12:00:00.000Z";
+    const nextReconcileAt = "2026-04-24T13:00:00.000Z";
+    const connectionId = "hosted_conn_reconcile_proof";
+    const proof = "v1|2026-04-24T12:00:00.000Z|" + "a".repeat(64);
+    const workspaces = await Promise.all(["warm", "cold"].map(async (slug) => {
+      const workspace = await createHostedRuntimeWorkspace(`hosted-junction-proof-${slug}-`);
+      await mkdir(workspace.vaultRoot, { recursive: true });
+      return workspace;
+    }));
+    const [warm, cold] = workspaces;
+    assert.ok(warm && cold);
+    const services = workspaces.map(({ vaultRoot }) => createDeviceSyncServiceForVault(vaultRoot));
+    const [service, restoredService] = services;
+    assert.ok(service && restoredService);
+    let metadata: Record<string, unknown> = { unrelatedProgress: "preserved" };
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async fetchSnapshot() {
+        return buildRuntimeSnapshot({ connectedAt, connectionId, externalAccountId: "proof-source",
+          provider: "demo", localState: { nextReconcileAt }, metadata });
+      },
+      async applyUpdates(input) {
+        for (const update of input.updates) {
+          if (update.connection?.metadata) metadata = { ...update.connection.metadata };
+        }
+        return { appliedAt: now, userId: "member_123", updates: input.updates.map((update) => ({
+          connection: null, connectionId: update.connectionId, status: "updated" as const,
+          tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
+        })) };
+      },
+      async createConnectLink() { throw new Error("Unexpected connection request"); },
+    };
+    const wake = buildDeviceSyncWake({ connectionId, expectedConnectedAt: connectedAt,
+      occurredAt: now, provider: "demo", reason: "reconcile_due", hint: { jobs: [] } });
+    try {
+      let state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+      });
+      const accountId = state.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(accountId);
+      getStore(service).markSyncSucceeded(accountId, now, null, {
+        metadataPatch: { junctionReconcileProofV1: proof }, nextReconcileAt,
+      });
+      const reconcile = () => reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, state, wake,
+      });
+      await reconcile();
+      assert.equal(metadata.junctionReconcileProofV1, undefined,
+        "An ordinary pre-checkpoint control update cannot publish a local proof");
+      state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+      });
+      assert.equal(getStore(service).getAccountById(accountId)?.metadata.junctionReconcileProofV1, proof);
+      assert.equal(state.snapshot?.connections[0]?.connection.metadata.junctionReconcileProofV1, undefined);
+      await reconcile();
+      assert.equal(metadata.junctionReconcileProofV1, undefined,
+        "A warm retry cannot turn unpublished local progress into a Web baseline");
+
+      const completion = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+      assert.equal(completion?.wake.hint?.reason, "retained_completion_fence");
+      assert.equal(completion?.wake.hint?.junctionReconcileProof, proof,
+        "A proof-only change requires a checkpoint even when cadence is unchanged");
+      getStore(service).enqueueJob({ accountId, availableAt: nextReconcileAt, kind: "resource",
+        provider: "demo", priority: 40, dedupeKey: "proof-child", payload: { resource: "sleep" } });
+      const continuation = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+      assert.equal(continuation?.wake.hint?.junctionReconcileProof, proof);
+      assert.equal(continuation?.wake.hint?.jobs?.length, 1);
+      assert.ok(continuation);
+      const parsedWake = parseHostedExecutionWake(JSON.parse(JSON.stringify(continuation.wake)));
+      assert.ok(parsedWake.kind === "device-sync.wake");
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: restoredService, wake: parsedWake,
+      });
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      assert.equal(getStore(restoredService).getAccountById(restoredAccountId)?.metadata.junctionReconcileProofV1, proof);
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: restoredService,
+        state: restoredState, wake: parsedWake,
+      });
+      assert.equal(metadata.junctionReconcileProofV1, proof);
+    } finally {
+      services.forEach(closeHostedRuntimeDeviceSyncService);
+      await Promise.all(workspaces.map(({ cleanup }) => cleanup()));
+    }
+  });
+
+  test("publishes checkpointed reconcile proofs without cadence changes and fences reconnects", async () => {
+    const connectedAt = "2026-04-01T00:00:00.000Z";
+    const nextReconcileAt = "2026-04-24T13:00:00.000Z";
+    const connectionId = "hosted_conn_completed_proof";
+    const proof = "v1|" + "b".repeat(64);
+    const snapshot = buildRuntimeSnapshot({ connectedAt, connectionId, externalAccountId: "completed-proof",
+      provider: "junction", localState: { nextReconcileAt }, metadata: { unrelatedProgress: "preserved" } });
+    const applied: ApplyUpdatesRequest[] = [];
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createSnapshotOnlyDeviceSyncPort(snapshot),
+      async applyUpdates(input) {
+        applied.push(input);
+        return { appliedAt: nextReconcileAt, userId: "member_123", updates: input.updates.map((update) => ({
+          connection: null, connectionId: update.connectionId, status: "updated" as const,
+          tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
+        })) };
+      },
+    };
+    const wake = buildDeviceSyncWake({ connectionId, expectedConnectedAt: connectedAt,
+      occurredAt: nextReconcileAt, provider: "junction", reason: "reconcile_due",
+      hint: { jobs: [], reason: "retained_completion_fence", nextReconcileAt, junctionReconcileProof: proof } });
+    await publishHostedDeviceSyncCompletionFence({ deviceSyncPort: port, wake });
+    assert.deepEqual(applied[0]?.updates[0]?.connection?.metadata, {
+      unrelatedProgress: "preserved", junctionReconcileProofV1: proof,
+    });
+    await publishHostedDeviceSyncCompletionFence({ deviceSyncPort: port,
+      wake: { ...wake, expectedConnectedAt: "2026-03-01T00:00:00.000Z" } });
+    assert.equal(applied.length, 1);
   });
 
   test("publishes a checkpointed sweep marker even without a cadence change and fences reconnects", async () => {

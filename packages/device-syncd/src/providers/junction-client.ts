@@ -510,7 +510,9 @@ export class JunctionClient {
     }
     return this.fetchWindowedCollection(
       { ...input, dateQueryFormat: resolveJunctionSummaryDateQueryFormat(input) },
-      extractCollectionRecords,
+      input.requireStructurallyCompleteCollection
+        ? extractStructurallyCompleteSummaryRecords
+        : extractCollectionRecords,
       (cursor) => this.requestSummaryPage(input, cursor),
     );
   }
@@ -1941,6 +1943,22 @@ function extractCollectionRecords(payload: unknown, resource?: string): unknown[
   }
 
   return resource ? [record] : [];
+}
+
+function extractStructurallyCompleteSummaryRecords(payload: unknown, resource: string): unknown[] {
+  const envelope = readPlainObject(payload);
+  const candidates = Array.isArray(payload) ? [payload] : envelope
+    ? [...resolveCollectionEnvelopeKeys(resource), "data", "results", "items", "records"].map((key) => envelope[key])
+    : [];
+  const records = candidates.find(Array.isArray);
+  if (!records || records.some((record) => !readPlainObject(record))) {
+    throw deviceSyncError({
+      code: "JUNCTION_SUMMARY_COLLECTION_INCOMPLETE",
+      message: "Junction summary response did not contain a complete collection.",
+      retryable: true,
+    });
+  }
+  return records;
 }
 
 function resolveCollectionEnvelopeKeys(resource: string): readonly string[] {
