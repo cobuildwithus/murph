@@ -9,6 +9,6 @@
     "summary": "Fixed a case where older source references could prevent Murph from saving and sharing a new research finding.",
     "details": "Existing research history and its source references are preserved.",
     "relevanceTags": ["research", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3401]
   }
 }
