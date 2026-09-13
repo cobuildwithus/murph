@@ -3035,12 +3035,24 @@ schedule hints retire when that advanced cadence is retained after recording.
 A cold idle pass can also checkpoint retirement of already-covered eligible
 schedule hints without running a provider job; it first gives runnable work its
 normal priority. Webhook hints still require dirty-work admission, and equal
-cadences, explicit jobs, manual requests, and connection-epoch barriers remain
+cadences, explicit jobs, attempted or scoped manual requests, and connection-epoch barriers remain
 pending. When a pass cannot progress, already-due eligible schedule hints share
 the owner retry backoff so they cannot repeatedly readmit it.
 If a pristine webhook or companion dirty hint was deferred to an owner's future
 retry, an otherwise idle pass may readmit the validated owner only when the
 existing compactor proves an eligible hint can retire during that admission.
+Pristine manual-reconcile requests for the same member, provider, connection
+and epoch use this existing owner admission too. The request must contain only
+`reason: manual_reconcile` and an optional occurrence hint. The atomic claim
+carries `manual_reconcile_pending` in the retained wake before removing covered
+requests, preserving the exact retained jobs. Hydration first restores those
+jobs and then calls the provider-owned manual job creator. Recovery carries
+the resulting exact jobs with the ordinary `manual_reconcile` reason, which
+does not recreate roots when jobs are present. A pre-hydration yield or failed
+creation preserves pending intent. Old snapshots remain readable; snapshots
+with the new pending reason require corrected restore consumers. Roll out the
+runner coherently before admitting transfers and retain that runtime rollback
+floor until all pending reasons have drained. Web requires no schema change.
 Invocation filters and substantive-work barriers still apply. The owner fetches
 canonical dirty work before acknowledgement; exact job retry times stay intact,
 and removing the admitted hints prevents repeated idle admissions.

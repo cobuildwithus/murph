@@ -1673,9 +1673,22 @@ Last verified: 2026-09-04
   cadence hint; canonical snapshot hydration still owns connection authority.
   Foreground preemption, execution failure and cold restore retain the merged
   wake, including every older cursor and retry deadline. A distinct epoch,
-  disconnect or reauthorization event, other explicit job, manual request,
+  disconnect or reauthorization event, other explicit job, scoped manual request,
   recording or attempted item, unknown hint semantics, colliding job identity,
   or newer scheduled cadence remains a same-connection ordering barrier.
+  A pristine same-epoch manual reconcile request with only its reason and
+  optional occurrence hint also joins the owner immediately. Its atomic claim
+  stores `manual_reconcile_pending` in the existing wake hint before removing
+  the request. Hydration restores exact older jobs first, then delegates new
+  manual jobs to the device-sync service. Recovery replaces that pending reason
+  with `manual_reconcile` and the complete exact job set, so cold restore does
+  not recreate manual roots or reset retries. Preemption before hydration keeps
+  the pending reason; failed job creation keeps it retryable. Attempted requests,
+  scoped or job-bearing manual hints, authority mismatches and caller exclusions
+  remain barriers. These semantics require the corrected runner after the first
+  pending-manual checkpoint; older runners cannot interpret that intent. Use a
+  coordinated runner rollout with corrected restore consumers before enabling
+  admission, and do not roll back below it while pending intents remain.
   New hints arriving after admission remain independently queued. On a newer
   dirty revision, the post-checkpoint acknowledgement directly advances the
   retained owner's next attempt when the retained job hints prove capacity;

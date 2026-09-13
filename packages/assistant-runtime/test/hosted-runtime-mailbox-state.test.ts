@@ -1071,8 +1071,8 @@ describe("hosted runtime system mailbox state", () => {
         } });
         await updateHostedSystemMailboxState(vaultRoot, () => state);
         await expect(resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot, now: () => now }))
-          .resolves.toEqual({ at: boundary === "same-connection" ? retryAt : now,
-            executionClass: boundary === "same-connection" ? null : "model_free",
+          .resolves.toEqual({ at: now,
+            executionClass: "model_free",
             reason: "device-sync.reconcile" });
         const restored = await readHostedSystemMailboxState(vaultRoot);
         expect(restored.pending).toEqual(state.pending);
