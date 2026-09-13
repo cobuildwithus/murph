@@ -2621,7 +2621,25 @@ non-identifying success response. A consented fresh companion activation with a
 verified phone may enter the canonical signup-welcome path. Exact-member
 binding, signup idempotency, home-line health, and proactive capacity remain
 owned by the existing starter enrollment, line reservation, and welcome
-services. Exhausted proactive capacity does not block activation: Web still
+services.
+
+At execution, canonical direct channel welcomes inspect the existing imported
+conversation watermark. No prior conversation input preserves the exact signup
+welcome; prior input selects a brief contextual greeting through the existing
+output-only private continuation profile. Context contains at most sixteen
+direct sessions, each read through a 16 KiB transcript tail, then the latest
+eight excerpts capped at 800 characters. Group and unknown audiences and
+outgoing-only sessions cannot supply context. No tools, private-memory reads,
+resumable provider thread, or additional delivery authority are granted.
+Existing outbox intents are reused on retry, including legacy welcome keys
+only when their bound destination agrees. An email welcome, including a retained legacy welcome,
+never follows ordinary email retargeting to a different verified address, and
+replies to a previous email cannot suppress a greeting on the new destination.
+Deploy compatible runtime key readers
+before Web emits destination-scoped keys; old keys remain valid. Reverting the
+reader after new keys are emitted is not a safe standalone rollback.
+
+Exhausted proactive capacity does not block activation: Web still
 assigns an eligible home line without a proactive welcome, preserving the
 inbound-first messaging path. If no line is currently assignable, activation
 still succeeds without assigning a line. A later provider-attested direct

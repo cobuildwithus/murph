@@ -68,7 +68,7 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
-| `ARCHITECTURE.md` | Current runtime architecture, including hosted media identity, reference-only preservation, checkpoint cleanup, receipt recovery, clinical document enrichment, and retired member shell-hint transport. | Current runtime architecture | High | 2026-09-11 |
+| `ARCHITECTURE.md` | Current runtime architecture, including channel-welcome reader compatibility and bounded contextual greetings, hosted media identity, reference-only preservation, checkpoint cleanup, receipt recovery, clinical document enrichment, and retired member shell-hint transport. | Current runtime architecture | High | 2026-09-12 |
 | `agent-docs/ARCHITECTURE_GUIDANCE.md` | Architecture planning guidance. | Architecture planning guidance | High | 2026-08-24 |
 | `PRODUCT.md` | Strategic design context: register, users, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
 | `DESIGN.md` | Visual design system. | Visual design system | High | 2026-07-22 |
@@ -106,6 +106,7 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-16 |
 | `agent-docs/product-specs/nutrition-totals-card.md` | Logged-so-far nutrition cards without mandatory targets; invitation evidence, recovery, and native skew. | Nutrition card product spec | High | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-11-nutrition-totals-card.md` | Completed implementation, assistant proof and review for optional-goal daily cards. | Completed execution plan | High | 2026-09-11 |
+| `agent-docs/exec-plans/completed/2026-09-12-channel-welcome-reader-rollout.md` | Consumer-first release extraction for channel welcomes; production rollout remains with the deployment owners. | Historical implementation evidence | Low | 2026-09-12 |
 | `agent-docs/product-specs/imessage-workout-tracking.md` | iMessage workout product spec and chat-only routine access. | iMessage workout product spec | High | 2026-09-08 |
 | `agent-docs/product-specs/bring-your-own-inference.md` | Personal custom inference contract covering verified member-owned endpoints, settings without runner wakes, mailbox revision handoff, explicit selection, no silent fallback, privacy, metering, and recovery. | Hosted assistant/custom inference product spec | High | 2026-07-31 |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated measured-biomarker navigation over preserved private lab history. | Biomarkers product spec | High | 2026-07-20 |
