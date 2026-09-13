@@ -9,6 +9,6 @@
     "summary": "Connecting another source under the same provider no longer has to wait for older history retries.",
     "details": "Previously queued history keeps its place and retry schedule while the new connection starts syncing.",
     "relevanceTags": ["devices"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3388]
   }
 }
