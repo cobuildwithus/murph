@@ -12,6 +12,8 @@
       "messaging",
       "attachments"
     ],
-    "sourcePullRequests": []
+    "sourcePullRequests": [
+      3398
+    ]
   }
 }
