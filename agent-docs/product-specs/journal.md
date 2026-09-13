@@ -107,6 +107,12 @@ into one normalized itinerary and stores no message body, price, booking code,
 attachment, exact address, or other traveler. Calendar events and trips get at
 most one follow-up after passive evidence is checked first.
 
+Both managed passes use `gpt-5.6-luna` with high reasoning effort, independent
+of the member's conversation model. Existing active managed records converge
+through ordinary seed reconciliation. These passes still use the existing
+connected-context agent and private ledger; model-free source reconciliation
+and a bounded classification-only model step are not implemented.
+
 ## Read model
 
 The Journal projection reads canonical events and metric points from the last

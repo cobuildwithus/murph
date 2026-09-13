@@ -37,6 +37,7 @@ import {
   executeMemberMemoryDynamicTool,
 } from '../src/assistant-codex/dynamic-tools/member-memory.js'
 import * as assistantDiagnostics from '../src/assistant/diagnostics.js'
+import * as mealCloseoutEligibility from '../src/assistant/automatic-meal-closeout-eligibility.js'
 import {
   resolveAssistantConversationPolicy,
   resolveAssistantConversationScope,
@@ -245,6 +246,7 @@ import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
@@ -4517,6 +4519,33 @@ describe('assistant cron runtime orchestration', () => {
     expect(providerInput?.instructions).not.toContain(
       'read the matching movement skill and its shared exercise-catalog reference',
     )
+  })
+
+  it.each([true, false])('checks empty meal work before entering notification planning: skip=%s', async (skip) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:01:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-empty-meal-')
+    await completeAssistantOnboarding({ completedAt: '2026-04-08T09:00:00.000Z', reason: 'user_answered', vault: vaultRoot })
+    const managed = MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: managed.automationId, continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z', updatedAt: '2026-04-08T08:00:00.000Z',
+      instructions: managed.instructions, title: managed.title, tags: [...managed.tags],
+      route: { channel: 'telegram', deliverySource: null, deliveryTarget: 'room-1', identityId: null, participantId: null, threadId: null, threadIsDirect: true },
+      schedule: { kind: 'dailyLocal', localTime: '10:00' }, status: 'active', supportKind: null,
+    })
+    const gate = vi.spyOn(mealCloseoutEligibility, 'canSkipManagedAutomaticMealCloseout').mockResolvedValue(skip)
+    try {
+      expect(await processDueAssistantCronJobsLocal({ limit: 1, vault: vaultRoot })).toEqual({ failed: 0, processed: 1, succeeded: skip ? 0 : 1 })
+      expect(gate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        automationId: managed.automationId, instructions: managed.instructions,
+        occurrenceAt: '2026-04-08T10:00:00.000Z', vaultRoot,
+      }))
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(skip ? 0 : 1)
+      expect(await processDueAssistantCronJobsLocal({ limit: 1, vault: vaultRoot })).toEqual({ failed: 0, processed: 0, succeeded: 0 })
+    } finally {
+      gate.mockRestore()
+    }
   })
 
   it.each([

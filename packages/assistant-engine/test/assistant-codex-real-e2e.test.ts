@@ -223,6 +223,7 @@ import type {
   AssistantUsageRecorder,
 } from '../src/assistant/execution-context.ts'
 import {
+  resolveMurphManagedAutomationSeed,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -14068,7 +14069,8 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
           '- Current local time: 08:00 Europe/Warsaw.',
           '- Complete the normal scheduled decision.',
         ].join('\n\n'),
-        reasoningEffort: 'low',
+        reasoningEffort: resolveMurphManagedAutomationSeed(automation.automationId)
+          ?.assistantTargetOverride?.reasoningEffort ?? 'low',
         sandbox: 'workspace-write',
         workingDirectory,
       })
@@ -14263,7 +14265,8 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
           '- Current local time: 08:00 Europe/Warsaw.',
           '- Complete the normal scheduled decision.',
         ].join('\n\n'),
-        reasoningEffort: 'low',
+        reasoningEffort: resolveMurphManagedAutomationSeed(automation.automationId)
+          ?.assistantTargetOverride?.reasoningEffort ?? 'low',
         sandbox: 'workspace-write',
         workingDirectory,
       })
@@ -14481,7 +14484,8 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
           '- Current local time: 08:00 Europe/Warsaw.',
           '- Complete the normal scheduled decision.',
         ].join('\n\n'),
-        reasoningEffort: 'low',
+        reasoningEffort: resolveMurphManagedAutomationSeed(automation.automationId)
+          ?.assistantTargetOverride?.reasoningEffort ?? 'low',
         sandbox: 'workspace-write',
         workingDirectory,
       })

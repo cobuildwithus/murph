@@ -413,6 +413,10 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     hostedRuntimeOnly: true,
+    assistantTargetOverride: {
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'high',
+    },
     tags: ['murph-managed:journal-connected-context'],
     instructions: [
       'Run the private Journal connected-context morning pass.',
@@ -438,6 +442,10 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     hostedRuntimeOnly: true,
+    assistantTargetOverride: {
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'high',
+    },
     tags: ['murph-managed:journal-connected-context'],
     instructions: [
       'Run the private Journal connected-context afternoon pass.',
