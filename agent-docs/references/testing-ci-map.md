@@ -2,6 +2,14 @@
 
 Last verified: 2026-09-11
 
+Foreground promotion regression proof lives in the assistant-runtime entrypoint
+system-preemption suite: a conversation arriving during device completion or
+checkpointing is imported from its qualified batch before assistant admission,
+without a second conversation fetch. The workspace-runner suite covers concurrent
+completion/wake acceptance, empty-hint qualification, and retained wakes on failed
+completion. The concurrent-device-import integration suite proves reply delivery
+while downloads remain held and subsequent canonical import/acknowledgment.
+
 ## Current Repo Checks
 
 The canary outcome suite controls Date.now relative to its replica fixture

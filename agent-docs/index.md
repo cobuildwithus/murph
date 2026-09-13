@@ -66,6 +66,10 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 The completed canary authority diagnostic plan is
 [`2026-09-13-canary-authority-reason-telemetry.md`](exec-plans/completed/2026-09-13-canary-authority-reason-telemetry.md).
 
+Foreground promotion batch reuse and completion/wake race preservation are owned
+by `agent-docs/references/hosted-runtime-protocol.md`; focused admission, import
+overlap, and recovery proof is indexed in `agent-docs/references/testing-ci-map.md`.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
