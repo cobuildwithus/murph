@@ -82,7 +82,8 @@ no component, drawer text, canonical schema, or notification owner changed.
   exercises the generalized matcher at one control.
 - Privacy scan and diff whitespace check: passed.
 
-Pending scoped candidate commit, PR evidence, required final ReviewGPT and
+Candidate committed and published as PR #3391. Parent candidate review, privacy
+scan and mergeability check passed. Pending required final ReviewGPT and
 exact-head CI. No production mutation or deployment has been performed.
 
 ## Implementation decisions

@@ -9,7 +9,7 @@
     "summary": "Patterns compares better-matched days and checks that a finding repeats across time before showing a direction.",
     "details": "Device comparisons account for observed daytime data and recent activity. Sleep quality uses one consistent metric, and the familiar cards and details stay the same.",
     "relevanceTags": ["patterns", "wearables"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [3391],
     "tryIt": { "label": "Open Patterns", "href": "/patterns" }
   }
 }
