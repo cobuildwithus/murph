@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { mock } from 'node:test'
 import { foodLabelResponse, syntheticOats } from './food-label-response.ts'
 
 const [expectedRequests, ...argv] = process.argv.slice(2)
@@ -19,9 +20,10 @@ globalThis.fetch = async (input, init) => {
 }
 process.on('exit', () => { assert.equal(requests, Number(expectedRequests)) })
 process.loadEnvFile = () => { assert.fail('Child must not load .env') }
-// Batch duration is result data. Freeze its existing wall clock, not timing's
-// monotonic clock, so telemetry-on/off stdout can be compared byte for byte.
-Date.now = () => 1_900_000_000_000
+// Batch duration and an absent memory document's default dates are result data.
+// Freeze Date.now AND new Date(), not timing's monotonic clock, so telemetry-on/off
+// stdout can be compared byte for byte through the real source graph.
+mock.timers.enable({ apis: ['Date'], now: 1_900_000_000_000 })
 
 // Same source entry as production batch actions. Unlike old tests, do NOT
 // inject exit/stdout: Incur's failure path really terminates this process.

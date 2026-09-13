@@ -9,6 +9,7 @@ import path from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { test } from 'vitest'
+import { createEmptyMemoryDocument, memoryDocumentRelativePath, renderMemoryDocument, upsertMemoryRecord } from '@murphai/contracts'
 import { normalizeCliTiming, type CliTiming } from '@murphai/runtime-state/cli-timing'
 import { syntheticOats } from './fixtures/food-label-response.ts'
 
@@ -16,7 +17,8 @@ const root = fileURLToPath(new URL('../../..', import.meta.url))
 const childFile = fileURLToPath(new URL('./fixtures/cli-timing-child.ts', import.meta.url))
 const tsx = import.meta.resolve('tsx')
 const key = '0123456789abcdef0123456789abcdef'
-const sentinels = ['SYNTHETIC_SECRET_TOKEN', 'SYNTHETIC_HEALTH_HISTORY', 'SYNTHETIC_PRIVATE_PATH']
+const sentinels = ['SYNTHETIC_SECRET_TOKEN', 'SYNTHETIC_HEALTH_HISTORY', 'SYNTHETIC_PRIVATE_PATH',
+  'SYNTHETIC_MEMORY_VALUE', 'mem_synthetic_missing', 'bank/memory.md']
 
 async function tree(directory: string): Promise<unknown> {
   const names = (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))
@@ -32,9 +34,9 @@ async function isolated(run: (directory: string, invoke: (
   await mkdir(path.join(directory, 'vault'))
   await writeFile(path.join(directory, '.env'), 'MURPH_DATA_API_KEY=SYNTHETIC_DO_NOT_LOAD\n')
   await writeFile(path.join(directory, 'vault', 'sentinel.txt'), 'SYNTHETIC_HEALTH_HISTORY')
-  const before = await tree(directory)
   try {
     await run(directory, async (argv, expectedRequests = 0, timed = true) => {
+      const before = await tree(directory) // Include any synthetic fixture seeded before this invocation.
       const socket = createSocket('udp4')
       const port = randomInt(49_152, 65_536)
       const messages: string[] = []
@@ -73,6 +75,7 @@ async function isolated(run: (directory: string, invoke: (
           assert.equal(envelope.key, key)
           timing = normalizeCliTiming(envelope.timing)
           assert.ok(timing)
+          assert.deepEqual(envelope.timing, timing, 'the wire report contains only normalized finite fields')
           for (const sentinel of sentinels) assert.ok(!messages[0]!.includes(sentinel))
           assert.ok(!messages[0]!.includes('synthetic oats'))
         }
@@ -191,3 +194,53 @@ test('real batch children report once, preserve stop-on-error and reject nested 
     assert.deepEqual(nested.timing!.commands, [])
   })
 }, 120_000)
+
+for (const kind of ['empty', 'missing', 'invalid', 'valid'] as const) test(`real memory read: ${kind}`, async () => {
+  await isolated(async (directory, invoke) => {
+    const vault = path.join(directory, 'vault')
+    const inserted = upsertMemoryRecord(createEmptyMemoryDocument(new Date('2030-01-15T00:00:00.000Z')), {
+      now: new Date('2030-01-15T00:00:01.000Z'), section: 'Context', text: 'SYNTHETIC_MEMORY_VALUE',
+    })
+    const markdown = renderMemoryDocument({ document: inserted.document })
+    const invalidMarkdown = markdown.replace(/murph-memory:\{.*\}/u, 'murph-memory:{broken-json}')
+    assert.notEqual(invalidMarkdown, markdown, 'fixture must break real canonical metadata')
+    if (kind === 'valid' || kind === 'invalid') {
+      const memoryPath = path.join(vault, memoryDocumentRelativePath)
+      await mkdir(path.dirname(memoryPath), { recursive: true })
+      await writeFile(memoryPath, kind === 'valid' ? markdown : invalidMarkdown)
+    }
+    const argv = ['memory', 'show',
+      ...(kind === 'missing' ? ['mem_synthetic_missing'] : kind === 'valid' ? [inserted.record.id] : []),
+      '--vault', vault, '--format', 'json']
+    const off = await invoke(argv, 0, false)
+    const on = await invoke(argv)
+    assert.deepEqual({ ...on, timing: null }, off, 'telemetry cannot change exits, output, errors or hints')
+    const code = kind === 'missing' ? 'memory_not_found' : kind === 'invalid' ? 'memory_document_invalid' : null
+    assert.equal(on.code, code ? 1 : 0)
+    const output = JSON.parse(on.stdout)
+    if (code) {
+      assert.equal(output.code, code)
+      assert.equal(output.stage, 'read')
+      assert.equal(output.retryable, false)
+      const invalidLine = invalidMarkdown.split('\n').findIndex((line) => line.includes('SYNTHETIC_MEMORY_VALUE')) + 1
+      assert.equal(output.message, kind === 'missing'
+        ? 'The requested canonical memory record does not exist.'
+        : `Canonical memory document bank/memory.md:${invalidLine} could not be read.`)
+    } else {
+      assert.equal(output.document.exists, kind === 'valid')
+      assert.deepEqual(output.document.records.map(({ id, text }: { id: string; text: string }) => ({ id, text })),
+        kind === 'valid' ? [{ id: inserted.record.id, text: 'SYNTHETIC_MEMORY_VALUE' }] : [])
+      assert.equal(output.memory?.id ?? null, kind === 'valid' ? inserted.record.id : null)
+    }
+    const timing = on.timing!
+    assert.equal(timing.reportCount, 1)
+    assert.equal(timing.commands.length, 1)
+    assert.equal(timing.commands[0]!.command, 'memory show')
+    assert.equal(timing.commands[0]!.outcome, code ? 'error' : 'ok')
+    assert.equal(timing.commands[0]!.calls, 1)
+    assert.deepEqual(timing.commands[0]!.failures, code ? [{ code, stage: 'read', count: 1 }] : undefined)
+    for (const forbidden of [vault, inserted.record.id, markdown, invalidMarkdown, output.message].filter(Boolean)) {
+      assert.ok(!JSON.stringify(timing).includes(forbidden))
+    }
+  })
+}, 90_000)
