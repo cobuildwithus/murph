@@ -67,11 +67,11 @@ for (const width of [390, 1280]) {
     await dialog.getByRole("button", { name: "Create recovery key", exact: true }).click();
     await expect(dialog.getByLabel("Recovery key", { exact: true })).toHaveValue(key);
     expect(mutations).toBe(3);
-    await dialog.getByRole("button", { name: "Copy key", exact: true }).click();
+    await dialog.getByRole("button", { name: "Copy", exact: true }).click();
     await expect(dialog.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(key);
     const downloading = page.waitForEvent("download");
-    await dialog.getByRole("button", { name: "Download key", exact: true }).click();
+    await dialog.getByRole("button", { name: "Download", exact: true }).click();
     const download = await downloading;
     expect(download.suggestedFilename()).toBe("murph-recovery-key.txt");
     expect(await readFile((await download.path())!, "utf8")).toBe(key + "\n");

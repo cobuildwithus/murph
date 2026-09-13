@@ -99,8 +99,8 @@ export function ApprovalRecoveryDialog({ onClose }: { onClose: () => void }) {
       <Label htmlFor="approval-saved-recovery-key" className="sr-only">Recovery key</Label>
       <Input id="approval-saved-recovery-key" inputSize="xl" value={savedKey} readOnly autoComplete="off" spellCheck={false} className="font-mono" />
       <div className="grid grid-cols-2 gap-3">
-        <Button type="button" size="lg" variant="outline" onClick={() => void copyKey()}>{copied ? "Copied" : "Copy key"}</Button>
-        <Button type="button" size="lg" variant="outline" onClick={downloadKey}>Download key</Button>
+        <Button type="button" size="lg" variant="outline" onClick={() => void copyKey()}>{copied ? "Copied" : "Copy"}</Button>
+        <Button type="button" size="lg" variant="outline" onClick={downloadKey}>Download</Button>
       </div>
       <Button type="button" size="xl" onClick={close}>Done</Button>
     </>;
