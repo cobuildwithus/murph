@@ -13,6 +13,10 @@ service restart/retry proof lives in
 
 ## Purpose
 
+Empty automatic meal closeout admission is owned by `ARCHITECTURE.md`;
+canonical queue, scheduler, and focused real-Codex proof are indexed in
+`agent-docs/references/testing-ci-map.md`.
+
 Verification inventory, composed diff routing, cold stale-invocation coverage and
 UTC PostgreSQL connection proof are indexed in
 `agent-docs/references/testing-ci-map.md`.

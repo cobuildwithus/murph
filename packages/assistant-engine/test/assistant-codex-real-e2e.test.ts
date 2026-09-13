@@ -6,6 +6,7 @@ import { importClinicalFhirSnapshot } from '@murphai/vault-usecases/clinical-rec
 import { executeClinicalDocumentExtraction } from '../src/clinical-document-extraction.ts'
 import * as clinicalExtractionCodex from '../src/assistant-codex.ts'
 import { parsePersonalPatternNotificationLedger } from '../src/assistant/personal-patterns-eligibility.js'
+import { canSkipManagedAutomaticMealCloseout } from '../src/assistant/automatic-meal-closeout-eligibility.js'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
   ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
@@ -3082,6 +3083,35 @@ describe('real Codex live fixture contracts', () => {
       }
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
+    }
+  })
+
+  it('keeps automatic meal closeout fixture help read-only', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'automatic-meal-help-'))
+    try {
+      const binDirectory = path.join(root, 'bin')
+      const stateFile = path.join(root, 'state')
+      await writeFile(stateFile, 'initial\n')
+      await materializeAutomaticMealCloseoutVaultCli({
+        binDirectory, commandLogPath: path.join(root, 'commands'),
+        photoRelativePath: 'raw/meals/capture.jpg', retrySucceeds: true,
+        failFirstEdit: false, stateFile,
+      })
+      const cli = path.join(binDirectory, 'vault-cli')
+      for (const command of ['edit', 'remove-photo']) {
+        for (const flag of ['--help', '-h']) {
+          expect((await execFileAsync(cli, ['meal', command, flag])).stdout).toContain('Usage:')
+          expect(await readFile(stateFile, 'utf8')).toBe('initial\n')
+        }
+      }
+      await execFileAsync(cli, ['meal', 'edit', 'meal_fixture', '--note', 'Synthetic observation'])
+      expect(await readFile(stateFile, 'utf8')).toBe('enriched\n')
+      await execFileAsync(cli, ['meal', 'remove-photo', '--help'])
+      expect(await readFile(stateFile, 'utf8')).toBe('enriched\n')
+      await execFileAsync(cli, ['meal', 'remove-photo', 'meal_fixture'])
+      expect(await readFile(stateFile, 'utf8')).toBe('removed\n')
+    } finally {
+      await removeRealCodexTemporaryPath(root)
     }
   })
 
@@ -30054,7 +30084,7 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
     }
   })
 
-  it('keeps historical automatic meal closeout silent', {
+  it('keeps historical automatic meal closeout silent through empty-queue preflight', {
     timeout: 900_000,
   }, async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -30103,6 +30133,22 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
         }),
         writeFile(stateFile, 'initial\n', 'utf8'),
       ])
+
+      const admissionVault = path.join(workingDirectory, 'admission-vault')
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: admissionVault })
+      const admission = {
+        automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.automationId,
+        occurrenceAt: '2026-08-28T01:00:00.000Z',
+        timeZone: 'America/New_York',
+        vaultRoot: admissionVault,
+      }
+      expect(await canSkipManagedAutomaticMealCloseout(admission)).toBe(true)
+      await addMeal({
+        vaultRoot: admissionVault, source: 'device', photoPath,
+        occurredAt: '2026-08-24T16:00:00.000Z',
+        externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'historical-preflight' },
+      })
+      expect(await canSkipManagedAutomaticMealCloseout(admission)).toBe(false)
 
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: true,
@@ -30156,6 +30202,7 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
         `[historical-automatic-meal-closeout-e2e] ${JSON.stringify({
           cardAttached: result.responseCard !== null,
           commandCount: commands.length,
+          commands: commands.map((command) => command.replaceAll(workingDirectory, '<FIXTURE_ROOT>')),
           decision: decision.kind,
           scenario: 'historical-only',
         })}\n`,
@@ -30920,6 +30967,13 @@ async function materializeAutomaticMealCloseoutVaultCli(input: {
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
       `state="$(cat ${quoteNutritionShellLiteral(input.stateFile)})"`,
+      'for argument in "$@"; do',
+      '  case "$argument" in',
+      '    --help|-h)',
+      `      ${emit('Usage: vault-cli meal edit <id> [--note <text>] [--ingredient <text> ...] [--format json]; vault-cli meal remove-photo <id> [--format json]')}`,
+      '      exit 0 ;;',
+      '  esac',
+      'done',
       'case "$*" in',
       `  meal\\ closeout-work\\ *) ${emit(mealList)} ;;`,
       `  meal\\ list\\ *) ${emit(mealList)} ;;`,

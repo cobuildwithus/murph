@@ -76,6 +76,7 @@ type MockAutomationRecord = {
 const cronMocks = vi.hoisted(() => ({
   archiveAutomationIfActiveUntilElapsed: vi.fn(),
   canSkipManagedPersonalPatterns: vi.fn(),
+  canSkipManagedAutomaticMealCloseout: vi.fn(),
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
   buildExperimentFinalResultsSeeds: vi.fn(),
@@ -103,6 +104,10 @@ const cronMocks = vi.hoisted(() => ({
 
 vi.mock('../src/assistant/personal-patterns-eligibility.js', () => ({
   canSkipManagedPersonalPatterns: cronMocks.canSkipManagedPersonalPatterns,
+}))
+
+vi.mock('../src/assistant/automatic-meal-closeout-eligibility.js', () => ({
+  canSkipManagedAutomaticMealCloseout: cronMocks.canSkipManagedAutomaticMealCloseout,
 }))
 
 vi.mock('@murphai/core', async (importOriginal) => ({
@@ -246,6 +251,8 @@ import {
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
+  type MurphManagedAutomationSeed,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
@@ -285,6 +292,7 @@ const LEGACY_ROUTE_TARGET_ENV_NAME = [
 const tempRoots: string[] = []
 
 beforeEach(() => {
+  cronMocks.canSkipManagedAutomaticMealCloseout.mockReset().mockResolvedValue(false)
   cronMocks.canSkipManagedPersonalPatterns.mockReset().mockResolvedValue(false)
   vi.useRealTimers()
   cronMocks.automationsByVault.clear()
@@ -6261,6 +6269,63 @@ describe('assistant cron runtime orchestration', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('skips empty automatic meal closeout before model entry and runs the next occurrence with work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T21:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-empty-meal-')
+    const automationId = MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID
+    addManagedBackgroundAutomation(vaultRoot, automationId)
+    cronMocks.canSkipManagedAutomaticMealCloseout.mockResolvedValueOnce(true)
+    expect(await processDueAssistantCronJobsLocal({ limit: 1, vault: vaultRoot }))
+      .toEqual({ failed: 0, processed: 1, succeeded: 0 })
+    expect(cronMocks.canSkipManagedAutomaticMealCloseout).toHaveBeenCalledWith(
+      expect.objectContaining({ automationId, occurrenceAt: '2026-04-08T21:00:00.000Z', timeZone: 'UTC', vaultRoot }),
+    )
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+    expect(await listAssistantCronRuns({ job: automationId, vault: vaultRoot }))
+      .toMatchObject({ runs: [{ outcome: 'skipped_gate', status: 'skipped',
+        error: 'No captured meals are awaiting closeout.' }] })
+    const next = await getAssistantCronJob(vaultRoot, automationId)
+    expect(next.state.nextRunAt).toBe('2026-04-09T21:00:00.000Z')
+    expect(next.state.consecutiveFailures).toBe(0)
+    vi.setSystemTime(new Date(next.state.nextRunAt!))
+    await processDueAssistantCronJobsLocal({ limit: 1, vault: vaultRoot })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries automatic meal closeout read failures without model entry or losing the occurrence', async () => {
+    vi.useFakeTimers()
+    const occurrenceAt = '2026-04-08T21:00:00.000Z'
+    vi.setSystemTime(new Date(occurrenceAt))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-meal-read-failure-')
+    const automationId = MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID
+    addManagedBackgroundAutomation(vaultRoot, automationId)
+    cronMocks.canSkipManagedAutomaticMealCloseout.mockRejectedValueOnce(new Error('Queue read failed'))
+    expect(await processDueAssistantCronJobsLocal({ limit: 1, vault: vaultRoot }))
+      .toEqual({ failed: 1, processed: 1, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    const retry = await getAssistantCronJob(vaultRoot, automationId)
+    expect(retry.state.consecutiveFailures).toBe(1)
+    vi.setSystemTime(new Date(retry.state.nextRunAt!))
+    await processDueAssistantCronJobsLocal({ limit: 1, vault: vaultRoot })
+    expect(cronMocks.canSkipManagedAutomaticMealCloseout).toHaveBeenLastCalledWith(
+      expect.objectContaining({ occurrenceAt }),
+    )
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps explicit automatic meal closeout runs outside empty-queue suppression', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T21:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-meal-manual-')
+    addManagedBackgroundAutomation(vaultRoot, MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
+    cronMocks.canSkipManagedAutomaticMealCloseout.mockResolvedValue(true)
+    await runAssistantCronJobNow({ job: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID, vault: vaultRoot })
+    expect(cronMocks.canSkipManagedAutomaticMealCloseout).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
   })
 
   it('skips unchanged Personal Patterns before model entry and resumes Luna high on the next changed occurrence', async () => {
@@ -13938,7 +14003,7 @@ async function createLocalJob(
 }
 
 function addManagedBackgroundAutomation(vaultRoot: string, automationId: string) {
-  const seed = MURPH_MANAGED_AUTOMATIONS.find(
+  const seed: MurphManagedAutomationSeed | undefined = [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION, ...MURPH_MANAGED_AUTOMATIONS].find(
     (candidate) => candidate.automationId === automationId,
   )
   if (!seed) {
@@ -13946,6 +14011,7 @@ function addManagedBackgroundAutomation(vaultRoot: string, automationId: string)
   }
   getVaultAutomationStore(vaultRoot).push({
     ...seed,
+    continuityPolicy: seed.continuityPolicy ?? 'fresh',
     createdAt: '2026-04-08T00:00:00.000Z',
     route: {
       channel: 'telegram',
@@ -13957,7 +14023,7 @@ function addManagedBackgroundAutomation(vaultRoot: string, automationId: string)
       threadIsDirect: true,
     },
     status: 'active',
-    tags: [...seed.tags],
+    tags: [...(seed.tags ?? [])],
     updatedAt: '2026-04-08T00:00:00.000Z',
   })
   return seed
