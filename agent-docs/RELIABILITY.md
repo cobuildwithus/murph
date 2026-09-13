@@ -1654,8 +1654,17 @@ Last verified: 2026-09-04
   its explicit cadence is strictly earlier than the retained owner's; equal or
   missing cadence cannot prove reconciliation ran. This transfers the hints to
   the existing durable continuation before dirty input is fetched; it never discards its provider jobs or backoff. A
-  distinct epoch, lifecycle event, explicit job, manual request, recording or
-  attempted item, or newer cadence remains a same-connection ordering barrier.
+  Same-epoch connection-established work may join this admission when its
+  initial jobs have explicit, non-colliding identities and fit the existing
+  pass admission bound. The atomic claim adds those jobs, preserving their
+  original availability, to the existing owner's exact retry hints before
+  removing the covered input. It carries the latest supplied scopes and later
+  cadence hint; canonical snapshot hydration still owns connection authority.
+  Foreground preemption, execution failure and cold restore retain the merged
+  wake, including every older cursor and retry deadline. A distinct epoch,
+  disconnect or reauthorization event, other explicit job, manual request,
+  recording or attempted item, unknown hint semantics, colliding job identity,
+  or newer scheduled cadence remains a same-connection ordering barrier.
   New hints arriving after admission remain independently queued. On a newer
   dirty revision, the post-checkpoint acknowledgement directly advances the
   retained owner's next attempt when the retained job hints prove capacity;

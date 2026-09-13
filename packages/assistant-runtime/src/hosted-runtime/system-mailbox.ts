@@ -54,7 +54,7 @@ import {
   isHostedRetainedDeviceScheduledAdmission,
   mergeHostedSystemMailboxRollbackItems,
   projectHostedDeviceHintCoverage,
-  projectHostedEligibleDirtyHintIds,
+  projectHostedEligibleDeviceHintIds,
   selectHostedModelFreeSystemMailboxItems,
   projectHostedSystemMailboxRetainedDeviceWakeAdmission,
   readHostedSystemMailboxContinuationItemIds,
@@ -398,12 +398,12 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           eligibleItemIds.has(item.itemId)
         ),
       };
-      const coverage = projectHostedDeviceHintCoverage({ now: startedAt, pending: state.pending });
-      const eligibleDirtyHintIds = projectHostedEligibleDirtyHintIds({ eligibleItemIds, state });
+      const coverage = projectHostedDeviceHintCoverage({ eligibleItemIds, now: startedAt, pending: state.pending });
+      const eligibleDeviceHintIds = projectHostedEligibleDeviceHintIds({ eligibleItemIds, state });
       const pending = findHostedRunnableSystemMailboxItem({
         allowedRouteActions: input.allowedRouteActions ?? null,
         pendingOnly: input.pendingOnly,
-        continuationItemIds, coverage, eligibleDirtyHintIds,
+        continuationItemIds, coverage, eligibleDeviceHintIds,
         now: startedAt,
         state: selectionState,
       });
@@ -432,9 +432,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         };
       }
 
+      const admittedWake = coverage.get(pending.itemId)?.admittedWake;
       const collapsed = collapseConsecutiveHostedBrowserVaultRefreshItems({
         pending: state.pending.filter((item) => !coverage.get(pending.itemId)?.coveredHintIds.has(item.itemId)),
-        selected: pending,
+        selected: admittedWake ? { ...pending, wake: admittedWake } : pending,
       });
 
       if (
