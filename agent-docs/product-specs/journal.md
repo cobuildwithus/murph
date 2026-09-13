@@ -105,7 +105,8 @@ The 08:00 pass also uses narrow transport and lodging confirmation searches.
 Its first pass looks back at most 90 days for future travel. It groups one trip
 into one normalized itinerary and stores no message body, price, booking code,
 attachment, exact address, or other traveler. Calendar events and trips get at
-most one follow-up after passive evidence is checked first.
+most one follow-up after passive evidence is checked first. Calendar check-ins
+are scheduled one hour after the event ends, using the event timezone.
 
 Both managed passes use `gpt-5.6-luna` with high reasoning effort, independent
 of the member's conversation model. Existing active managed records converge

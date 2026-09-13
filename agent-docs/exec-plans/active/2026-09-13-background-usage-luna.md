@@ -71,3 +71,6 @@ Updated: 2026-09-13
 - Live notice passed on an authorized alternate subscription. Calendar proof had a stale event-end timing assertion and email proof counted CLI help as a write. Corrected only these fixture assertions using the existing help classifier and exact promised hour-after-event instant; rerunning on the same subscription.
 
 - After base reconciliation: 325 focused assistant tests, one large-selection query test, two closeout CLI regressions, and all three affected typechecks pass. The source gate and cron lifecycle match the current base; only SQL selection changes beneath them.
+
+- The corrected calendar run exposed the ambiguous event-time instruction: Luna sometimes chose the event end instead of one hour later. Clarified the existing skill to use event end plus one hour, with a concrete timezone example; seven focused connected-app prompt tests pass.
+- Parent reply review found that the email fixture accepted an invalid delivery decision. Journal live fixtures now use scheduled production tool admission (finish-without-reply disabled), consistent occurrence/timezone context, and the real notification decision parser. Three focused journeys are rerunning on the same authorized Luna subscription. Latest assistant typecheck passes.

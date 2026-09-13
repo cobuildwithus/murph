@@ -56,7 +56,9 @@ and its pending follow-up. Never create a second plan for the same provider id.
 
 Before a follow-up, check passive Journal or wearable evidence. If it already
 shows what happened, do not ask. Otherwise schedule one private check-in one
-hour after the event. Save that one-shot check-in with `murph.automation` in
+hour after the event ends, using its end timestamp rather than its start.
+For example, an 18:00–19:00 event gets a 20:00 check-in in the event timezone.
+Save that one-shot check-in with `murph.automation` in
 the same pass that creates the plan. Bind it to the current private
 conversation and include the new Journal event id as a context reference. Its
 instructions must check passive evidence first and stay quiet when that

@@ -11,6 +11,14 @@ import {
 } from '../src/assistant/system-prompt.js'
 
 describe('connected-apps skill and system-prompt coverage', () => {
+  it('anchors Journal follow-ups to event end while preserving passive-evidence suppression', async () => {
+    const skill = (await readFile(path.join(resolveAssistantSkillsRoot(), 'journal-connected-context', 'SKILL.md'), 'utf8')).replace(/\s+/gu, ' ')
+    expect(skill).toContain('one private check-in one hour after the event ends, using its end timestamp rather than its start')
+    expect(skill).toContain('an 18:00–19:00 event gets a 20:00 check-in in the event timezone')
+    expect(skill).toContain('If it already shows what happened, do not ask.')
+    expect(skill).not.toContain('one hour after the event starts')
+  })
+
   it('owns the approved service and toolkit use cases in the skill', async () => {
     const skill = await readConnectedAppsSkill()
 

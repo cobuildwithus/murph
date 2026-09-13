@@ -14044,18 +14044,21 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
       ])
       const connectedAppRequests: Array<{ operation: string }> = []
       const result = await executeRealCodexAppServerTurn({
-        allowFinishWithoutReply: true,
+        allowFinishWithoutReply: false,
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand:
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
+          currentLocalDate: '2026-08-31',
+          currentTimeZone: 'Europe/Warsaw',
+          scheduledOccurrenceAt: '2026-08-31T06:00:00.000Z',
+        }),
         dynamicTools: [
           MURPH_CONNECTED_APPS_MANAGE_TOOL,
           MURPH_CONNECTED_APPS_SEARCH_TOOL,
           MURPH_CONNECTED_APPS_EXECUTE_TOOL,
-          MURPH_FINISH_WITHOUT_REPLY_TOOL,
         ],
         env: {
           ...config.env,
@@ -14075,7 +14078,7 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
                   accounts: [
                     {
                       alias: 'Personal',
-                      connectedAt: '2026-08-31T06:30:00.000Z',
+                      connectedAt: '2026-08-31T05:30:00.000Z',
                       id: 'calendar_new',
                       status: 'ACTIVE',
                       toolkit: 'googlecalendar',
@@ -14107,6 +14110,7 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
         workingDirectory,
       })
 
+      expect(parseAssistantNotificationDecision(result.finalMessage).kind).toBe('send_message')
       expect(connectedAppRequests).toEqual([{ operation: 'manage' }])
       expect(await readFile(ledgerCapturePath, 'utf8')).toContain('calendar_new')
       expect(result.finalMessage).toMatch(/calendar|Journal/iu)
@@ -14169,19 +14173,22 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       }> = []
       const automationRequests: AssistantHostedAutomationToolRequest[] = []
       const result = await executeRealCodexAppServerTurn({
-        allowFinishWithoutReply: true,
+        allowFinishWithoutReply: false,
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand:
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
+          currentLocalDate: '2026-08-31',
+          currentTimeZone: 'Europe/Warsaw',
+          scheduledOccurrenceAt: '2026-08-31T06:00:00.000Z',
+        }),
         dynamicTools: [
           MURPH_AUTOMATION_TOOL,
           MURPH_CONNECTED_APPS_MANAGE_TOOL,
           MURPH_CONNECTED_APPS_SEARCH_TOOL,
           MURPH_CONNECTED_APPS_EXECUTE_TOOL,
-          MURPH_FINISH_WITHOUT_REPLY_TOOL,
         ],
         env: {
           ...config.env,
@@ -14303,6 +14310,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         workingDirectory,
       })
 
+      expect(parseAssistantNotificationDecision(result.finalMessage).kind).toBe('skip')
       const providerOperations = connectedAppRequests.map(
         (request) => request.operation,
       )
@@ -14397,19 +14405,22 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
       }> = []
       const automationRequests: AssistantHostedAutomationToolRequest[] = []
       const result = await executeRealCodexAppServerTurn({
-        allowFinishWithoutReply: true,
+        allowFinishWithoutReply: false,
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand:
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
+          currentLocalDate: '2026-08-31',
+          currentTimeZone: 'Europe/Warsaw',
+          scheduledOccurrenceAt: '2026-08-31T06:00:00.000Z',
+        }),
         dynamicTools: [
           MURPH_AUTOMATION_TOOL,
           MURPH_CONNECTED_APPS_MANAGE_TOOL,
           MURPH_CONNECTED_APPS_SEARCH_TOOL,
           MURPH_CONNECTED_APPS_EXECUTE_TOOL,
-          MURPH_FINISH_WITHOUT_REPLY_TOOL,
         ],
         env: {
           ...config.env,
@@ -14525,6 +14536,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         workingDirectory,
       })
 
+      expect(parseAssistantNotificationDecision(result.finalMessage).kind).toBe('skip')
       const providerOperations = connectedAppRequests.map(
         (request) => request.operation,
       )
@@ -38324,6 +38336,7 @@ function buildAdaptiveWearableDeveloperInstructions(input: {
 
 function buildWeeklyHealthInsightDeveloperInstructions(input: {
   currentLocalDate?: string
+  currentTimeZone?: string
   scheduledOccurrenceAt?: string
 } = {}): string {
   return buildAssistantSystemPrompt({
@@ -38340,7 +38353,7 @@ function buildWeeklyHealthInsightDeveloperInstructions(input: {
     conversationScope: 'direct',
     currentLocalDate: input.currentLocalDate ?? '2026-08-09',
     scheduledOccurrenceAt: input.scheduledOccurrenceAt,
-    currentTimeZone: 'America/New_York',
+    currentTimeZone: input.currentTimeZone ?? 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
