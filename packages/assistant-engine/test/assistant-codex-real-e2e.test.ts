@@ -13559,7 +13559,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
 })
 
 describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2e', () => {
-  it.each([false, true])('sends a clear bounded digest with a full link (initial digest sent: %s)', async (initialDigestSent) => {
+  it.each([false, true])('sends exactly one Personal Pattern without a link (initial digest sent: %s)', async (initialDigestSent) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.slug === 'personal-patterns-update',
@@ -13662,26 +13662,32 @@ describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2
       expect(finishCalls).toHaveLength(0)
       expect(message).toMatch(/yard work/iu)
       expect(message).not.toMatch(/\bgrade\b|\b[A-E][- ](?:grade|association)\b|evidence days|classification|ledger/iu)
-      expect(message).toMatch(/(?:tend(?:ed|s)? to|tentative|early|hint|seem(?:ed|s)?|may|might)/iu)
       expect(message).not.toMatch(/other factors|proof (?:of|that)|not caus(?:es|ation)|correlation.{0,20}causation/iu)
       expect(message).not.toMatch(/(?:^|\n)\s*[•*-]\s/u)
-      expect(message.trim().split(/\s+/u).length).toBeLessThanOrEqual(100)
+      expect(message.trim().split(/\s+/u).length).toBeLessThanOrEqual(65)
       expect(message).toMatch(/(?:16|sixteen)\s+(?:comparable |matched )?(?:days|nights|comparisons|cases)/iu)
-      expect(message.trim()).toMatch(/\nhttps:\/\/www\.withmurph\.ai\/patterns$/u)
+      expect(message).not.toMatch(/https?:|www\.|\/patterns\b|\bpatterns\b|see the rest/iu)
       expect(message).not.toMatch(/`|\]\(|(?:^|\s)\/patterns\b/u)
       expect(message).not.toMatch(/\b(?:should|need to|must) (?:do|add|stop|avoid|change)\b/iu)
       const ledger = await readFile(ledgerCapturePath, 'utf8')
       for (const outcomeId of ['hrv', 'sleep_score', 'readiness_score', 'respiratory_rate']) {
         expect(ledger).toContain(outcomeId)
       }
-      // Four eligible outcomes must be recorded, but the message remains bounded.
+      // All four outcomes stay reviewed; only one finding reaches the member.
       const mentionedOutcomes = [
         /\bHRV\b|heart.rate variability/iu,
         /sleep/iu,
         /readiness/iu,
         /breathing|respiratory/iu,
       ].filter((pattern) => pattern.test(message))
-      expect(mentionedOutcomes.length).toBeLessThanOrEqual(3)
+      expect(mentionedOutcomes).toHaveLength(1)
+      expect(message).toMatch(/\bHRV\b|heart.rate variability/iu)
+      expect(message).toMatch(/next (?:day|morning)|following (?:day|morning)|day after/iu)
+      const reportsDelta = /(?:20|twenty)\s*(?:ms|milliseconds)/iu.test(message)
+      const reportsMeans = /(?:70|seventy)\s*(?:ms|milliseconds)/iu.test(message)
+        && /(?:50|fifty)\s*(?:ms|milliseconds)/iu.test(message)
+      expect(reportsDelta || reportsMeans).toBe(true)
+      expect(message).toMatch(/without|(?:non|not)[ -]yard[ -]work|days (?:you |with )?(?:didn.t|did not|weren.t)/iu)
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
