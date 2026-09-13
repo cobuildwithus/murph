@@ -74,11 +74,31 @@ test("pattern cards show available comparisons on phones and retain result detai
   const dates = drawer.getByRole("group", { name: "Comparison dates" });
   await expect(dates).toBeVisible();
   await expect(dates.getByRole("button")).toHaveCount(120);
-  await expect(drawer).toContainText("Some dates unavailable");
-  await expect(drawer).toContainText("No running record doesn't mean no running.");
+  await expect(drawer.locator("summary")).toContainText("Partial dates");
   await dates.getByRole("button", { name: "May 10, 2026 · Running", exact: true }).tap();
   await expect(drawer.getByRole("status")).toHaveText("May 10, 2026 · Running");
   await expect(drawer).not.toContainText("Tap a day");
+
+  // Browser chrome leaves less room on phones. The last evidence line must
+  // remain painted and reachable, with the heading and close control in view.
+  await page.setViewportSize({ width: 390, height: 600 });
+  const evidencePeriod = drawer.getByText(/^Data from /);
+  await evidencePeriod.scrollIntoViewIfNeeded();
+  await expect(evidencePeriod).toBeInViewport({ ratio: 1 });
+  await expect.poll(() => evidencePeriod.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return element.contains(document.elementFromPoint(
+      bounds.left + bounds.width / 2,
+      bounds.top + bounds.height / 2,
+    ));
+  })).toBe(true);
+  await expect(drawer.locator('[data-slot="drawer-title"]')).toBeInViewport({ ratio: 1 });
+  await expect(drawer.getByRole("button", { name: "Close pattern details" })).toBeInViewport({ ratio: 1 });
+  if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
+    await drawer.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-scrolled-evidence.png"), animations: "disabled" });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await drawer.locator("summary").scrollIntoViewIfNeeded();
 
   await expect.poll(async () => {
     const bounds = await drawer.boundingBox();
@@ -192,8 +212,8 @@ test("pattern cards show available comparisons on phones and retain result detai
       const date = calendar.getByRole("button", { name: "May 10, 2026 · Running", exact: true });
       await date.focus();
       await page.keyboard.press("ArrowRight");
-      await expect(calendar.getByRole("button", { name: "May 17, 2026 · No comparison date shown", exact: true })).toBeFocused();
-      await expect(popover.getByRole("status")).toHaveText("May 17, 2026 · No comparison date shown");
+      await expect(calendar.getByRole("button", { name: "May 17, 2026 · No comparison recorded", exact: true })).toBeFocused();
+      await expect(popover.getByRole("status")).toHaveText("May 17, 2026 · No comparison recorded");
       if (process.env.DESIGN_PROOF_OUTPUT_DIR && width === 1440) {
         await popover.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-evidence-desktop.png"), animations: "disabled" });
       }
