@@ -56,9 +56,13 @@ for (const width of [390, 1280]) {
     await study.evaluate((element) => element.removeAttribute("inert"));
     const panel = study.locator('[data-auth-study="recovery"]');
     await capture(page, panel, `recovery-actions-${width}`);
-    await panel.getByRole("button", { name: "Save a recovery key", exact: true }).click();
+    await expect(panel.getByRole("button")).toHaveCount(1);
+    await panel.getByRole("button", { name: "Recovery key", exact: true }).click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByRole("heading", { name: "Create a recovery key" })).toBeVisible();
+    await expect(dialog.getByRole("heading", { name: "Recovery key", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Use a recovery key", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Create recovery key", exact: true })).toHaveCSS("height", "56px");
+    expect(mutations).toBe(0);
     await capture(page, dialog, `recovery-create-${width}`);
     await dialog.getByRole("button", { name: "Create recovery key", exact: true }).click();
     await expect(dialog.getByLabel("Recovery key", { exact: true })).toHaveValue(key);
@@ -77,9 +81,16 @@ for (const width of [390, 1280]) {
     await capture(page, dialog, `recovery-saved-${width}`);
     await dialog.getByRole("button", { name: "Done", exact: true }).click();
     await expect(dialog).toHaveCount(0);
-    await panel.getByRole("button", { name: "Use a recovery key", exact: true }).click();
+    await panel.getByRole("button", { name: "Recovery key", exact: true }).click();
+    await dialog.getByRole("button", { name: "Use a recovery key", exact: true }).click();
     await expect(dialog.getByLabel("Saved recovery key", { exact: true })).toBeVisible();
     await capture(page, dialog, `recovery-use-${width}`);
+    await dialog.getByLabel("Saved recovery key", { exact: true }).fill(key);
+    await dialog.getByRole("button", { name: "Back", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Create recovery key", exact: true })).toBeVisible();
+    expect(mutations).toBe(3);
+    await dialog.getByRole("button", { name: "Use a recovery key", exact: true }).click();
+    await expect(dialog.getByLabel("Saved recovery key", { exact: true })).toHaveValue("");
   });
 }
 

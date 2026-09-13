@@ -39,8 +39,11 @@ beforeEach(() => {
   });
 });
 async function render(mode: "rotate" | "recover") {
-  const rendered = await renderClientComponent(createElement(ApprovalRecoveryDialog, { mode, onClose: mocks.close }));
-  if (mode === "recover") await act(async () => { mocks.enterKey?.(key); });
+  const rendered = await renderClientComponent(createElement(ApprovalRecoveryDialog, { onClose: mocks.close }));
+  if (mode === "recover") {
+    await click(rendered, "Use a recovery key");
+    await act(async () => { mocks.enterKey?.(key); });
+  }
   return rendered;
 }
 async function click(rendered: Awaited<ReturnType<typeof render>>, label: string) {

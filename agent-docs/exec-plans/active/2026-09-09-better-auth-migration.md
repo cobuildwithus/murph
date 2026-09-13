@@ -669,7 +669,7 @@ activation and the broader live-auth qualification remain incomplete.
 
 ## Recovery presentation follow-up
 
-- Outcome: passkey recovery actions share the compact Settings row and button variants. Create, save, and use dialogs retain one concise explanation; the saved key can be copied or downloaded as a plain-text file.
+- Outcome: one recovery-key action sits at the right of the passkey Settings row. Its dialog offers creation or use of a saved key, with the same dimensions, typography, padding, and controls as account dialogs. The saved key can be copied or downloaded as a plain-text file.
 - Boundary: downloads use a local Blob and a neutral filename. No new endpoint, persisted browser state, key issuance, authentication, or recovery rule is introduced.
-- Product UX: Ready for Preview. Eleven existing client cases pass, including stale-primary recovery requiring login and canceled WebAuthn. Two composed Chromium journeys cover phone/desktop creation, exact clipboard and downloaded-file contents, retained dialog state, completion, and recovery entry. Synthetic screenshots were inspected; backend proof is mocked in these browser journeys.
+- Product UX: Ready for Preview. Eleven existing client cases pass, including stale-primary recovery requiring login and canceled WebAuthn. Two composed Chromium journeys cover the single entry action, both choices, phone/desktop creation, exact clipboard and downloaded-file contents, retained dialog state, completion, recovery entry, and returning to the choices without a mutation. Synthetic screenshots were inspected; backend proof is mocked in these browser journeys.
 - Verification: Web typecheck, changed-file ESLint, diff checks, and complexity pass; no new hotspots. The existing unshipped adoption changelog covers this follow-up. Frontend interaction exemption retains the earlier sensitive-rule review.

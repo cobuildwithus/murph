@@ -17,20 +17,20 @@ type Mode = "rotate" | "recover";
 const ROOT = "/api/settings/approval-passkeys";
 
 export function HostedApprovalRecoverySettings({ enabled }: { enabled: boolean }) {
-  const [mode, setMode] = useState<Mode | null>(null);
+  const [open, setOpen] = useState(false);
   return <>
-    <ApprovalPasskeyStatus action={<div className="flex flex-wrap justify-end gap-1">
-      <Button type="button" size="sm" variant="ghost" aria-label="Save a recovery key" disabled={!enabled} onClick={() => setMode("rotate")}>Save key</Button>
-      <Button type="button" size="sm" variant="ghost" aria-label="Use a recovery key" disabled={!enabled} onClick={() => setMode("recover")}>Use key</Button>
-    </div>} />
-    {mode ? <ApprovalRecoveryDialog mode={mode} onClose={() => setMode(null)} /> : null}
+    <ApprovalPasskeyStatus action={
+      <Button type="button" size="sm" variant="ghost" disabled={!enabled} onClick={() => setOpen(true)}>Recovery key</Button>
+    } />
+    {open ? <ApprovalRecoveryDialog onClose={() => setOpen(false)} /> : null}
   </>;
 }
 
-export function ApprovalRecoveryDialog({ mode, onClose }: { mode: Mode; onClose: () => void }) {
+export function ApprovalRecoveryDialog({ onClose }: { onClose: () => void }) {
   const { openAuthDialog } = useAuth();
   const { authorize } = useSensitiveActionAuthorization();
   const router = useRouter();
+  const [mode, setMode] = useState<Mode>("rotate");
   const [key, setKey] = useState("");
   const [savedKey, setSavedKey] = useState<string | null>(null);
   const [recovered, setRecovered] = useState(false);
@@ -97,37 +97,40 @@ export function ApprovalRecoveryDialog({ mode, onClose }: { mode: Mode; onClose:
   function content() {
     if (savedKey) return <>
       <Label htmlFor="approval-saved-recovery-key" className="sr-only">Recovery key</Label>
-      <Input id="approval-saved-recovery-key" value={savedKey} readOnly autoComplete="off" spellCheck={false} className="font-mono" />
-      <div className="flex items-center gap-2">
-        <Button type="button" size="sm" variant="outline" onClick={() => void copyKey()}>{copied ? "Copied" : "Copy key"}</Button>
-        <Button type="button" size="sm" variant="outline" onClick={downloadKey}>Download key</Button>
-        <Button type="button" size="sm" className="ml-auto" onClick={close}>Done</Button>
+      <Input id="approval-saved-recovery-key" inputSize="xl" value={savedKey} readOnly autoComplete="off" spellCheck={false} className="font-mono" />
+      <div className="grid grid-cols-2 gap-3">
+        <Button type="button" size="lg" variant="outline" onClick={() => void copyKey()}>{copied ? "Copied" : "Copy key"}</Button>
+        <Button type="button" size="lg" variant="outline" onClick={downloadKey}>Download key</Button>
       </div>
+      <Button type="button" size="xl" onClick={close}>Done</Button>
     </>;
     if (recovered) return <>
       <SettingsStatusLine message="Your passkey is replaced. Other devices need to sign in again. Save a new recovery key for next time." tone="success" />
-      <Button type="button" onClick={close}>Done</Button>
+      <Button type="button" size="xl" onClick={close}>Done</Button>
     </>;
     return <>
       {mode === "recover" ? <>
         <Label htmlFor="approval-recovery-key">Saved recovery key</Label>
-        <Input id="approval-recovery-key" type="password" value={key} onChange={(event) => setKey(event.target.value)} autoComplete="off" autoFocus spellCheck={false} disabled={pending} />
+        <Input id="approval-recovery-key" inputSize="xl" type="password" value={key} onChange={(event) => setKey(event.target.value)} autoComplete="off" autoFocus spellCheck={false} disabled={pending} />
       </> : null}
-      <Button type="button" disabled={pending || (mode === "recover" && !key.trim())} onClick={() => void submit()}>
+      <Button type="button" size="xl" disabled={pending || (mode === "recover" && !key.trim())} onClick={() => void submit()}>
         {pending ? "Working…" : mode === "recover" ? "Replace passkey" : "Create recovery key"}
       </Button>
+      {mode === "rotate"
+        ? <Button type="button" size="xl" variant="outline" disabled={pending} onClick={() => { setError(null); setMode("recover"); }}>Use a recovery key</Button>
+        : <Button type="button" size="lg" variant="ghost" disabled={pending} onClick={() => { setError(null); setKey(""); setMode("rotate"); }}>Back</Button>}
     </>;
   }
 
   return <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
-    <DialogContent>
-      <DialogHeader><DialogTitle>{mode === "recover" ? "Recover your passkey" : savedKey ? "Save your recovery key" : "Create a recovery key"}</DialogTitle>
-        <DialogDescription>{savedKey
+    <DialogContent className="max-w-[min(30rem,calc(100vw-2rem))] gap-6 border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[30rem] md:p-8">
+      <DialogHeader className="gap-2 pr-10"><DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal text-popover-foreground">{mode === "recover" ? "Recover your passkey" : savedKey ? "Save your recovery key" : "Recovery key"}</DialogTitle>
+        <DialogDescription className="max-w-[34ch] text-base/7 text-muted-foreground">{savedKey
           ? "This key is shown only once. Save it somewhere private, separate from your passkey."
           : mode === "recover"
             ? "Using your key replaces all previous passkeys and signs out your other devices."
             : "A backup if you lose your passkey. Creating a new key replaces any previous recovery key."}</DialogDescription></DialogHeader>
-      <div className="flex flex-col gap-3">{content()}{error ? <SettingsStatusLine message={error} tone="destructive" /> : null}</div>
+      <div className="flex flex-col gap-4">{content()}{error ? <SettingsStatusLine message={error} tone="destructive" /> : null}</div>
     </DialogContent>
   </Dialog>;
 }
