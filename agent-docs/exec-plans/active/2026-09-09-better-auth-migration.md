@@ -642,3 +642,10 @@ activation and the broader live-auth qualification remain incomplete.
 - Telegram preparation runs without disabling or animating the initial button. An early click reserves the SDK's named popup synchronously, then continues automatically; cancellation, unmount, blocked windows, duplicate clicks, and stale preparation have focused coverage.
 - Verification: 60 client/journey cases, 84 composed PostgreSQL cases, Web typecheck, focused lint, and complexity guard pass. Two Chromium journeys pass, including popup reuse after transient activation expires and inspected desktop/mobile messaging renders. Provider calls in browser proof are synthetic; live account verification is separate.
 - Hosted readback confirmed one active Telegram-connected member with completed onboarding and workspace creation before the authorized Preview reset. The reset preserved schema and line configuration and returned zero member/auth/session records. No production data was changed.
+
+
+### Follow-up: initial connection rendering
+
+- Cause: inline setup reused the Settings reader gate, and its client-only import plus empty pending branch withheld both controls until two requests completed. The earlier design study composed presentation controls separately and did not exercise that gate.
+- Correction: render the actual inline editor on the server and while settings load; actions await the existing reader result before using the unchanged mutation/approval endpoints. Bound the background reads and retain retry on failure. The design study now mounts the production onboarding island directly.
+- Proof: 37 credential/join client cases pass, including delayed reads and unmount before proof forwarding. Two Chromium journeys pass; the composed setup has controls in server HTML and at desktop/mobile widths before the settings reply, and an early send continues once after the reply. Web typecheck, lint, and complexity pass. Authentication rules and persistence are unchanged; this frontend-only loading correction uses the final-review exemption, retaining round 7 as the sensitive-rule review.

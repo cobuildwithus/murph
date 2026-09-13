@@ -39,8 +39,8 @@ const mocks = vi.hoisted(() => ({
   useHostedInviteStatusRefresh: vi.fn(),
 }));
 
-vi.mock("next/dynamic", () => ({
-  default: () => function HostedLoginMethodDialog(props: Record<string, unknown>) {
+vi.mock("@/src/components/settings/hosted-login-method-dialog", () => ({
+  HostedLoginMethodEditor: function HostedLoginMethodEditor(props: Record<string, unknown>) {
     mocks.loginMethodProps = props;
     return createElement("div", { "data-login-method-editor": props.method, "data-presentation": props.presentation }, "Connect account");
   },

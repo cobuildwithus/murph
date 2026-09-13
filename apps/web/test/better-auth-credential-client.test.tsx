@@ -248,3 +248,49 @@ test("inline phone setup renders the actual input with no dialog heading or inte
   expect(rendered.container.textContent).not.toContain("Checking your login methods");
   await rendered.cleanup();
 });
+
+
+test("inline phone stays visible while settings load and waits before sending a code", async () => {
+  mocks.realContact = true;
+  let resolve!: (value: unknown) => void;
+  const state = new Promise((done) => { resolve = done; });
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => url === "/api/settings/login-methods" ? state : { ok: true, initialEnrollmentAllowed: true });
+  const rendered = await renderClientComponent(createElement(HostedLoginMethodEditor, { method: "phone", operation: "set", presentation: "inline", onOpenChange: mocks.close }));
+  expect(rendered.container.querySelector('input[type="tel"]')).not.toBeNull();
+  expect(rendered.container.textContent).not.toContain("Checking");
+  expect(rendered.container.querySelector(".animate-spin")).toBeNull();
+  let sending!: Promise<void>;
+  await act(async () => { sending = mocks.contact!.onSend("+12025550195", new AbortController().signal); });
+  expect(mocks.request.mock.calls.some(([input]) => input.url.endsWith("otp/send"))).toBe(false);
+  await act(async () => {
+    resolve({ ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialMessagingSetupAllowed: true });
+    await sending;
+  });
+  expect(mocks.request.mock.calls.filter(([input]) => input.url.endsWith("otp/send"))).toHaveLength(1);
+  expect(mocks.sign).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
+test.each([false, true])("inline Telegram renders before settings and respects unmount=%s before forwarding proof", async (unmount) => {
+  let resolve!: (value: unknown) => void;
+  const state = new Promise((done) => { resolve = done; });
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => {
+    if (url === "/api/settings/login-methods") return state;
+    if (url.endsWith("telegram/prepare")) return { change: { method: "telegram", operation: "set", expectedIdentity: null, value: "735009" }, challenge: null };
+    return { ok: true, initialEnrollmentAllowed: true };
+  });
+  const rendered = await renderClientComponent(createElement(HostedLoginMethodEditor, { method: "telegram", operation: "set", presentation: "inline", onOpenChange: mocks.close }));
+  expect(mocks.telegram?.label).toBe("Connect Telegram");
+  let saving!: Promise<unknown>;
+  await act(async () => { saving = mocks.telegram!.onProof("synthetic-token", new AbortController().signal).catch((error) => error); });
+  expect(mocks.request.mock.calls.some(([input]) => input.url.endsWith("telegram/prepare"))).toBe(false);
+  if (unmount) await rendered.rerender(createElement("div", null, "Closed"));
+  await act(async () => {
+    resolve({ ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialMessagingSetupAllowed: true });
+    await saving;
+  });
+  expect(mocks.request.mock.calls.filter(([input]) => input.url.endsWith("telegram/verify"))).toHaveLength(unmount ? 0 : 1);
+  expect(mocks.sign).not.toHaveBeenCalled();
+  expect(mocks.saved).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});

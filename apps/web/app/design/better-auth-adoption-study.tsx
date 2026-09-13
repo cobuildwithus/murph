@@ -1,9 +1,6 @@
 "use client";
 
-import { HostedContactChannelChoice } from "@/src/components/hosted-onboarding/hosted-contact-channel-choice";
-import { HostedContactCodeForm } from "@/src/components/hosted-onboarding/hosted-contact-code-form";
-import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
-import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
+import { JoinInviteMessagingSetupIsland } from "@/src/components/hosted-onboarding/join-invite-islands";
 import { HostedFirstPartyAuthPanel } from "@/src/components/hosted-onboarding/hosted-first-party-auth-panel";
 import { HostedLoginMethodSettingsView } from "@/src/components/settings/hosted-login-method-settings";
 import { HostedSignupReferralLinkButtonView } from "@/src/components/settings/hosted-signup-referral-link-button";
@@ -52,10 +49,7 @@ export function BetterAuthAdoptionStudy() {
     </div>
     <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="messaging">
       <h3 className="mb-4 font-serif text-xl">How should Murph reach you?</h3>
-      <HostedContactChannelChoice
-        phone={<HostedContactCodeForm method="phone" autoSubmit verifyLabel="Verify phone" onSend={async () => {}} onVerify={async () => {}} />}
-        telegram={<HostedInlineAuthButton icon={<TelegramIcon className="h-5 w-5" />} onClick={() => {}}>Connect Telegram</HostedInlineAuthButton>}
-      />
+      <JoinInviteMessagingSetupIsland />
     </div>
     <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="recovery">
       <h3 className="mb-4 font-serif text-xl">Security</h3>

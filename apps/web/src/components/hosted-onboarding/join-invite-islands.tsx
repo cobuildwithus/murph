@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
+import { HostedLoginMethodEditor } from "../settings/hosted-login-method-dialog";
 import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
 import { ArrowRightIcon } from "lucide-react";
 
@@ -168,8 +168,6 @@ export function JoinInviteSignOutButtonIsland({
     </Button>
   );
 }
-
-const HostedLoginMethodEditor = dynamic(() => import("../settings/hosted-login-method-dialog").then((module) => module.HostedLoginMethodEditor), { ssr: false });
 
 export function JoinInviteMessagingSetupIsland() {
   return <HostedContactChannelChoice
