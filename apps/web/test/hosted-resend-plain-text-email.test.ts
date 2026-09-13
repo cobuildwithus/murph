@@ -87,10 +87,10 @@ describe("hosted Resend plain-text email sender", () => {
       expect(payload).toEqual({
         from: "Murph <auth@example.test>", to: ["member@example.test"],
         subject: content.subject, text: content.text, html: content.html,
-        attachments: [{
-          content: content.attachments[0]?.content,
-          content_type: "image/png", content_id: "murph-logo", filename: "murph-logo.png",
-        }],
+        attachments: content.attachments.map((attachment) => ({
+          content: attachment.content, content_type: "image/png",
+          content_id: attachment.contentId, filename: attachment.filename,
+        })),
       });
       expect(payload.text).toContain("012345");
       expect(payload.html).toContain(">012345</span>");

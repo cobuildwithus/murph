@@ -9,6 +9,11 @@ import { InitialPasskeySetupView } from "@/src/components/settings/hosted-passke
 import { HostedVerificationCodeStep } from "@/src/components/hosted-onboarding/hosted-verification-code-step";
 import { ApprovalPasskeyStatus } from "@/src/components/settings/approval-passkey-status";
 
+import { hostedAuthCodeEmail } from "@/src/lib/better-auth/code-email";
+
+const exampleEmail = hostedAuthCodeEmail("012345");
+const emailPreview = exampleEmail.attachments.reduce((html, attachment) => html.replace(`cid:${attachment.contentId}\"`, `data:${attachment.contentType};base64,${attachment.content}\"`), exampleEmail.html);
+
 const verifiedAt = "2026-09-09T12:00:00Z";
 
 export function BetterAuthAdoptionStudy() {
@@ -50,6 +55,9 @@ export function BetterAuthAdoptionStudy() {
     <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="messaging">
       <h3 className="mb-4 font-serif text-xl">How should Murph reach you?</h3>
       <JoinInviteMessagingSetupIsland />
+    </div>
+    <div className="overflow-hidden rounded-2xl border border-border" data-auth-study="code-email">
+      <iframe title="Sign-in code email" srcDoc={emailPreview} sandbox="" className="h-[650px] w-full border-0" />
     </div>
     <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="recovery">
       <h3 className="mb-4 font-serif text-xl">Security</h3>

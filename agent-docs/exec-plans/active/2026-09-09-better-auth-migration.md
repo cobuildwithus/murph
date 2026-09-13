@@ -657,3 +657,12 @@ activation and the broader live-auth qualification remain incomplete.
 - Proof: focused client tests and the composed onboarding browser journey cover popup cleanup, channel-choice visibility, and retaining the verified form during navigation. No server authorization or credential rules change.
 - Changelog: covered by the existing unshipped `sign-in-and-approval-recovery` entry.
 - Product UX: Ready. Fifty focused client cases and two Chromium journeys pass; pending Telegram and post-verification phone screenshots inspected. Typecheck, ESLint and complexity pass; no new complexity hotspots. Frontend-only completion exemption applies.
+
+
+## Email appearance follow-up
+
+- Outcome: retain the sign-in email layout with readable light and dark appearances and transparent brand logos.
+- Reaches: the shared code-email payload and its sandboxed component-catalog preview; sign-in authority and provider transport are unchanged.
+- Proof: 12 existing Resend transport cases, Web typecheck, changed-file ESLint, and complexity checks pass. Eight direct browser render checks cover Chromium/WebKit, light/dark, and phone/desktop widths with actual template HTML and embedded PNGs. Correct colors, one visible logo, six-digit code, heading typography, and absence of horizontal overflow were checked; representative screenshots were inspected.
+- Product UX: Ready for Preview. Actual mail-client delivery on the new candidate remains a separate check; browser evidence does not prove every client's email transformations.
+- Review: presentation-only follow-up uses the final ReviewGPT exemption; the prior sensitive-rule review remains applicable. Existing unshipped adoption changelog entry covers the adjustment.
