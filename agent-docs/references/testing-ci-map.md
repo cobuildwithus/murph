@@ -633,6 +633,16 @@ one successful direct automation call, and one exact record reference.
 
 ### Codex tool input contracts and CLI upgrades
 
+Automation cron authoring is covered by
+`assistant-automation-model-input-schema.test.ts` and
+`assistant-dynamic-tool-failure-boundary.test.ts`: combined calendar-day and
+weekday restrictions are rejected before the owner port, with repair guidance;
+canonical cron semantics and non-schedule legacy edits remain supported.
+Focused live proof uses
+`-- --test 'changes a finite calendar reminder to weekdays while preserving its cutoff'`
+and verifies one inspected, versioned edit, a next occurrence after the weekend,
+the preserved expiration, and a truthful confirmation.
+
 The tool-contract suite inventories all exported and route-only registrations
 (currently 56) across eager native, deferred native, and code mode. It compares
 complete canonical JSON from the actual provider boundary and separately checks
