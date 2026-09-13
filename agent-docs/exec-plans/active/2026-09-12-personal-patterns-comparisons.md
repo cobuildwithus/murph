@@ -123,3 +123,26 @@ assistant-engine and Web typechecks pass. Complexity guard passes with no change
 source above 20. The hover proof now polls the actual text-color transition;
 Frog entry `20260912232006-goal-source-hover` records this stale CI assertion.
 Parent review and privacy readback passed. Round 2 and exact-head CI remain pending.
+
+## Round 2 disposition and remediation
+
+ReviewGPT validated the original provenance correction at
+`67180145784475d5fc7247087d617d722cf2f8a0`, then identified one review-induced
+Journal regression. Accepted and reproduced through persisted Oura overnight
+and nap records: raw nap observations displaced the selected overnight deep and
+REM metrics. The correction changes one existing call argument: Journal receives
+`defaultProjectedVault`, while Patterns keeps the full canonical input. No new
+abstraction, state owner, filtering policy, or public field is introduced.
+
+The new persisted regression failed before the fix and passes afterward. It
+preserves selected overnight deep/REM, keeps the nap event, and excludes hidden
+observation records from both Journal and replica entities. The five-observation
+Junction sauna fixture now checks factor recognition with a neutral direction,
+consistent with the new repetition floor; no production threshold was relaxed.
+
+The focused query/Journal/replica/comparison suites pass 59 tests. The Junction
+import/replay suite passes 2 tests. Query and vault-usecases typechecks pass.
+The existing Patterns source-change and positive/negative histories still pass.
+The user authorized continued remediation and review until no findings remain;
+subsequent accepted findings do not need another resume pause. Product UX and
+parent candidate review are Ready. Final round 3 and new-head CI remain pending.

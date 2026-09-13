@@ -3,7 +3,7 @@
 Last verified: 2026-09-12
 
 Runtime and Browser Vault derive pattern evidence from the same full canonical
-source loader, including raw wearable observations. Public query summaries and
+source loader, including raw wearable observations. Public query summaries, Journal, and
 replica entities retain their visibility filters; source provenance stays inside
 the calculation. Runtime Patterns rebuilds the needed metric evidence from this
 local snapshot instead of reading the stripped SQLite display summaries.
