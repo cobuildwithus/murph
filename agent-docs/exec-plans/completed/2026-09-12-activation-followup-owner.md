@@ -1,6 +1,6 @@
 # Give foreground replies priority over onboarding follow-up setup
 
-Status: active
+Status: completed
 Created: 2026-09-12
 Updated: 2026-09-12
 
@@ -95,7 +95,7 @@ preemption until that bounded operation finishes.
   its unreachable non-finite schedule fallback was deleted. Callback absence is
   normalized at repeatedly checked owner boundaries. No new durable owner.
 - Architecture readback and docs drift pass. Web typecheck and all 10 changelog rendering tests pass; final PR
-  review/CI remain pending. The changelog uses the existing archive component;
+  CI remains a delivery gate. The changelog uses the existing archive component;
   content-only presentation proof follows the changelog owner's exception.
 
 ## Candidate review
@@ -109,3 +109,29 @@ The change promises priority, not an absolute typing-time bound or immediate
 post-reply setup completion. Broader workspace-phase refactoring is outside this
 proven activation boundary. Product UX: Ready on local deterministic evidence.
 
+
+## Review and handoff
+
+PR: https://github.com/cobuildwithus/murph/pull/3381
+Reviewed candidate: `1438bd4d7f98926bfab41c1176fcc7e8f8d39ef6`.
+
+Round 1 completed with PASS: zero qualifying bugs or material complexity-collapse
+findings, zero accepted findings, and no remediation or second round required.
+The Vonneumann lane selected GPT-6 Pro; captured model metadata confirms
+`gpt-6-pro` and binds the saved response hash to the exact accepted turn. Capture
+completed after more than ten minutes, exceeding the three-minute minimum.
+The response addresses the actual activation, source/cursor, route, retry,
+restore, welcome, and callback paths and confirms the full snapshot metadata.
+The original attachment was automatically removed after capture. Repackaging
+metadata from the unchanged candidate/body confirms round 1, sensitive full
+snapshot scope, 18 changed paths, the original head/anchor, and empty remediation
+deltas. This was local metadata verification, not a second model request.
+
+Parent final review agrees with the result. Production source has a net deletion
+of 160 lines; no new persistent state or owner was introduced. Current-base
+merge-tree is clean. Required CI is progressing; an initial Temporal status came
+from a canceled hygiene run and has been superseded by pending proof after the
+successful exact-head hygiene run. The final plan-only commit must pass its own
+required CI before the PR task is reported complete. No merge or production
+mutation is part of this PR-opening task. Keep the open PR worktree.
+Completed: 2026-09-12
