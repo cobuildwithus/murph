@@ -97,3 +97,29 @@ its existing graded-identity policy; proactive-message-specific thresholds and
 sleep-metric identity deduplication are not changed in this implementation.
 The finite synthetic calibration checks product heuristics and does not claim
 formal error control or validate unknown real-world confounders.
+
+## Round 1 disposition and remediation
+
+ReviewGPT checked `8c4e223929c6590cf0b60714f322b3c2ce2ca84c` and found that
+runtime display summaries lose source provenance required by the new control
+qualification. Accepted; user resumed remediation. A persisted canonical
+regression also proved that the default source filter removed raw wearable
+observations before both consumers could calculate coverage. Runtime and
+Browser Vault now reuse the full canonical replica source loader; public summary
+stripping and replica entity visibility remain intact. This adds a full local
+canonical read and metric projection on a fresh runtime Patterns query, replacing
+the SQLite display reads. No database/network call or new state owner is added.
+
+Persisted Junction histories now produce equal nonzero graded reports in both
+consumers, source changes stay flat, and hidden observations stay outside public
+replica entities. An established notification ledger does not skip the newly
+qualified identity. The demo now supplies actual daily coverage and sufficient
+repeated history; sparse caffeine and short self-logged training stay neutral.
+
+Focused remediation proof: 77 query tests, 22 notification eligibility tests,
+24 hosted replica tests, 9 development persona tests, 3 generation contract tests,
+and the focused Chromium goal-source hover test pass. Query, contracts,
+assistant-engine and Web typechecks pass. Complexity guard passes with no changed
+source above 20. The hover proof now polls the actual text-color transition;
+Frog entry `20260912232006-goal-source-hover` records this stale CI assertion.
+Parent review and privacy readback passed. Round 2 and exact-head CI remain pending.

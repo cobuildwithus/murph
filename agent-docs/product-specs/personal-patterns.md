@@ -2,6 +2,12 @@
 
 Last verified: 2026-09-12
 
+Runtime and Browser Vault derive pattern evidence from the same full canonical
+source loader, including raw wearable observations. Public query summaries and
+replica entities retain their visibility filters; source provenance stays inside
+the calculation. Runtime Patterns rebuilds the needed metric evidence from this
+local snapshot instead of reading the stripped SQLite display summaries.
+
 ## Product boundary
 
 Personal Patterns finds links between a member's context and a later sleep,
@@ -216,8 +222,9 @@ Cards with only neutral measures use a compact header with a plain
 Measures that still need data are omitted from mobile cards. `Show more`
 reveals the remaining report factors. The report keeps at most 100 sorted
 factors to bound Browser Vault size and calculation work. The page requires at
-least two recorded factor days and two independent
-comparison cases on both sides of each displayed result. Activities (including
+least two recorded factor days and two contributing dates on each side of a
+displayed result. Directional grading separately requires repeated independent
+episodes. Activities (including
 mixed activity factors) must have a recorded session within three calendar months
 of the report date, inclusive; month-end cutoffs clamp to the last day of the
 cutoff month. This uses the factor's latest observed date, even when that session

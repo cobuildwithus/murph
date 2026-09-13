@@ -196,6 +196,10 @@ function buildPersonaFixture(
       );
     }
 
+    if (personaId === "oura") {
+      entities.push(observationEntity(personaId, date, "steps", 5_000, "count"));
+    }
+
     if (offset % 7 === 2) {
       entities.push(
         activityEntity(
@@ -221,7 +225,7 @@ function buildPersonaFixture(
   };
 
   if (personaId !== "active" && personaId !== "new") {
-    for (let offset = 83; offset >= 0; offset -= 1) {
+    for (let offset = personaId === "oura" ? 167 : 83; offset >= 0; offset -= 1) {
       addSleepDay(offset);
     }
   }
@@ -923,11 +927,11 @@ function buildOuraPersonaActivityDates(
   asOfDate: string,
 ): PatternedActivityDates {
   return {
-    cycling: scheduledDates(asOfDate, 4, 80, 12),
+    cycling: scheduledDates(asOfDate, 4, 144, 10),
     hiking: scheduledDates(asOfDate, 12, 75, 21),
-    running: scheduledDates(asOfDate, 9, 79, 14),
-    strength: scheduledDates(asOfDate, 3, 80, 10),
-    tennis: scheduledDates(asOfDate, 6, 76, 14),
+    running: scheduledDates(asOfDate, 9, 149, 10),
+    strength: scheduledDates(asOfDate, 3, 143, 10),
+    tennis: scheduledDates(asOfDate, 6, 146, 14),
   };
 }
 
@@ -1010,7 +1014,11 @@ function activityEntity(
         }
       : {};
   return eventEntity({
-    attributes: { activityType, durationMinutes, source, ...providerDetails },
+    attributes: {
+      activityType, durationMinutes, ...providerDetails,
+      source: source === "oura" || source === "whoop" ? "device" : source,
+      externalRef: { system: source, resourceType: "workouts", resourceId: `${personaId}_${activityType}_${date}` },
+    },
     date,
     id: `${personaId}_${activityType}_${date}`,
     kind: "activity_session",

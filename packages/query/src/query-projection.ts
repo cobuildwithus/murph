@@ -20,6 +20,7 @@ import type {
 } from "./query-projection-types.ts";
 import { isDefaultProjectedQueryEntity } from "./query-visibility.ts";
 import {
+  buildWearableSummaryBundle,
   explainWearableDriftFromBundle,
   summarizeWearableActivityFromBundle,
   summarizeWearableBodyStateFromBundle,
@@ -100,7 +101,7 @@ import {
   buildPersonalPatternReportFromWearableBundleAndMetricPoints,
   type PersonalPatternReport,
 } from "./personal-patterns.ts";
-import { readBrowserVaultPersonalPatternVocabulary } from "./browser-replica/source.ts";
+import { readBrowserVaultReplicaSource } from "./browser-replica/source.ts";
 
 export type {
   QueryCanonicalEntityFilters,
@@ -317,19 +318,11 @@ export async function buildPersonalPatternReportRuntime(
   vaultRoot: string,
   options: { asOf?: Date | string; windowDays?: number } = {},
 ): Promise<PersonalPatternReport> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const snapshot = readStoredVaultSource(location);
-  const vault = createVaultReadModel({
-    entities: snapshot.entities,
-    metadata: snapshot.metadata,
-    vaultRoot,
-  });
-  const wearableBundle = readStoredPublicWearableSummaryBundle(location, {});
-  const metricPoints = listStoredMetricPoints(
-    location,
-    normalizeMetricPointFilters({ limit: null }),
-  );
-  const vocabulary = await readBrowserVaultPersonalPatternVocabulary(vaultRoot);
+  // Pattern inference needs raw same-source observations, which the public
+  // query projection deliberately omits. Share the replica's canonical input.
+  const { vault, metricPoints, personalPatternVocabulary: vocabulary } =
+    await readBrowserVaultReplicaSource(vaultRoot);
+  const wearableBundle = buildWearableSummaryBundle(vault);
   return buildPersonalPatternReportFromWearableBundleAndMetricPoints(
     vault,
     wearableBundle,

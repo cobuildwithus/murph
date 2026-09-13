@@ -40,9 +40,9 @@ export async function readBrowserVaultReplicaSource(
   await yieldToBrowserVaultSourceCancellation(options.signal);
   const metricPoints = buildMetricProjection(sourceVault).metricPoints;
   await yieldToBrowserVaultSourceCancellation(options.signal);
-  const vault = createDefaultProjectedVault(sourceVault);
-
-  return { metricPoints, personalPatternVocabulary, vault };
+  // Keep raw wearable evidence until derived calculations finish. Replica
+  // serialization applies its own default entity visibility filter.
+  return { metricPoints, personalPatternVocabulary, vault: sourceVault };
 }
 
 export async function readBrowserVaultPersonalPatternVocabulary(

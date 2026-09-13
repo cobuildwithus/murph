@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
+import { readBrowserVaultReplicaSource } from "../src/browser-replica/source.ts";
+import { createBrowserVaultReplica, parseBrowserVaultReplica } from "../src/browser.ts";
+import { buildPersonalPatternReportRuntime, rebuildQueryProjection } from "../src/query-projection.ts";
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { createVaultReadModel } from "../src/read-model.ts";
 import { buildPersonalPatternReport } from "../src/personal-patterns.ts";
@@ -55,6 +62,56 @@ test("covered repeated positive and negative associations survive the production
     assert.equal(cell.deltaPercent, effect * 2);
     assert.equal(cell.comparisonDays, new Set(cell.comparisonDates).size);
     assert.equal(cell.exposedDays, new Set(cell.exposedDates).size);
+  }
+});
+
+test("persisted Junction provenance gives runtime and Browser Vault the same qualified comparisons", async () => {
+  for (const changedSource of [false, true]) {
+    const fixture = history();
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-pattern-provenance-"));
+    const events = fixture.events.map((entry) => ({
+      ...entry.attributes,
+      schemaVersion: "murph.event.v1",
+      id: `evt_${entry.entityId}`,
+      kind: entry.kind,
+      dayKey: entry.date,
+      occurredAt: entry.occurredAt,
+      recordedAt: entry.occurredAt,
+      title: "Synthetic comparison evidence",
+      ...(entry.kind === "observation" ? { observationGrain: "daily-summary" } : {}),
+      dataOrigin: {
+        version: 1, aggregatorProvider: "junction", sourceProviderSlug: "oura", sourceType: "ring",
+        sourceInstanceId: changedSource && entry.date! >= addDays(fixture.asOf, -21) ? "synthetic-ring-b" : "synthetic-ring-a",
+      },
+      externalRef: { system: "junction", resourceType: "junction-oura-summary", resourceId: entry.entityId },
+    }));
+    try {
+      await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+      await writeFile(path.join(vaultRoot, "vault.json"), JSON.stringify({
+        createdAt: "2026-03-01T00:00:00Z", formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        timezone: "UTC", title: "Synthetic source comparison", vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4P",
+      }));
+      await writeFile(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
+        events.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+      await rebuildQueryProjection(vaultRoot);
+      const runtime = await buildPersonalPatternReportRuntime(vaultRoot, { asOf: fixture.asOf });
+      const source = await readBrowserVaultReplicaSource(vaultRoot);
+      const replica = await createBrowserVaultReplica({
+        ...source, generatedAt: `${fixture.asOf}T12:00:00Z`, sourceBundleHash: "a".repeat(64),
+      });
+      const browser = parseBrowserVaultReplica(replica).personalPatterns;
+      assert.ok(browser);
+      assert.equal(source.vault.entities.length, events.length);
+      assert.ok(replica.entities.every((entry) => entry.kind !== "observation"));
+      const cell = browser.cells.find((entry) => entry.outcomeId === "hrv");
+      assert.ok(cell);
+      assert.equal(cell.direction, changedSource ? "flat" : "higher");
+      assert.equal(cell.grade, changedSource ? null : "B");
+      if (!changedSource) assert.ok(cell.comparisonDays >= 6);
+      assert.deepEqual(runtime, browser);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
   }
 });
 
