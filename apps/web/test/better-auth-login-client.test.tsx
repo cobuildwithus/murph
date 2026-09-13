@@ -132,6 +132,15 @@ test("an unconfirmed login does not use a pre-existing session or fall back to a
   expect(rendered!.container.textContent).not.toContain("You’re signed in");
 });
 
+test("offers the Telegram proof button directly beside phone entry", async () => {
+  await render();
+  expect(mocks.contact!.method).toBe("phone");
+  expect(mocks.telegram).toMatchObject({ purpose: "login", label: "Telegram" });
+  await act(async () => { await mocks.telegram!.onProof("synthetic-id-token", new AbortController().signal); });
+  expect(mocks.request.mock.calls.map(([input]) => input.url)).toEqual(["/api/auth/telegram/verify", "/api/auth/complete"]);
+  expect(mocks.completed).toHaveBeenCalledOnce();
+});
+
 test("Telegram signs in through the same consent and product completion owner", async () => {
   await render({ methods: ["telegram"] });
   expect(mocks.telegram!.purpose).toBe("login");

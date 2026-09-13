@@ -34,6 +34,13 @@ describe("verified Telegram login identity", () => {
       .rejects.toMatchObject({ code: "AUTH_TELEGRAM_INVALID" });
   });
 
+  it("reports only a bounded verification reason without provider claims", async () => {
+    await expect(verifyHostedTelegramIdToken({ token: await token({ aud: "private-provider-value" }), nonce, clientId: "123456789" }, keys))
+      .rejects.toMatchObject({ code: "AUTH_TELEGRAM_INVALID", details: { code: "telegram_claim_aud" } });
+    await expect(verifyHostedTelegramIdToken({ token: await token({ nonce: "untrusted-nonce" }), nonce, clientId: "123456789" }, keys))
+      .rejects.toMatchObject({ details: { code: "telegram_nonce_mismatch" } });
+  });
+
   it("rejects a token signed by another key", async () => {
     const pair = await generateKeyPair("ES256");
     const wrongKeys = createLocalJWKSet({ keys: [{ ...await exportJWK(pair.publicKey), kid: "synthetic-key" }] });

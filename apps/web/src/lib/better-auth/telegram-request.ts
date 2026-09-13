@@ -47,7 +47,7 @@ function readNonce(request: Request): string {
   const matches = (request.headers.get("cookie") ?? "").split(";").map((cookie) => cookie.trim())
     .filter((cookie) => cookie.startsWith(`${nonceCookieName()}=`));
   const nonce = matches.length === 1 ? matches[0].slice(nonceCookieName().length + 1) : "";
-  if (!noncePattern.test(nonce)) throw invalidLogin();
+  if (!noncePattern.test(nonce)) throw invalidLogin("nonce_cookie");
   return nonce;
 }
 
@@ -74,12 +74,12 @@ export async function readHostedTelegramProof(input: { request: Request; token: 
   const nonce = readNonce(input.request);
   const where = [{ field: "identifier", value: identifier(nonce) }];
   const pending = await hostedAuthAdapter(input.prisma)({}).findOne<AuthRecord>({ model: "verification", where });
-  if (!pending || pending.value !== input.binding || !(pending.expiresAt instanceof Date) || pending.expiresAt <= new Date()) throw invalidLogin();
+  if (!pending || pending.value !== input.binding || !(pending.expiresAt instanceof Date) || pending.expiresAt <= new Date()) throw invalidLogin("pending_proof");
   const verified = await verifyHostedTelegramIdToken({ token: input.token, nonce, clientId: requireHostedTelegramClientId() });
   return { verified, async consume(tx: Prisma.TransactionClient) {
     const consumed = await hostedAuthTransactionAdapter(input.prisma, tx, {}).consumeOne<AuthRecord>({ model: "verification", where });
     if (!consumed || JSON.stringify(consumed) !== JSON.stringify(pending) || !(consumed.expiresAt instanceof Date)
-      || consumed.expiresAt <= new Date() || verified.expiresAt <= new Date()) throw invalidLogin();
+      || consumed.expiresAt <= new Date() || verified.expiresAt <= new Date()) throw invalidLogin("proof_consumption");
   } };
 }
 
@@ -114,6 +114,6 @@ export async function verifyHostedTelegramLogin(request: Request): Promise<Respo
   });
 }
 
-function invalidLogin() {
-  return hostedOnboardingError({ code: "AUTH_TELEGRAM_INVALID", httpStatus: 401, message: "Telegram verification expired. Try again." });
+function invalidLogin(reason: "request" | "nonce_cookie" | "pending_proof" | "proof_consumption" = "request") {
+  return hostedOnboardingError({ code: "AUTH_TELEGRAM_INVALID", httpStatus: 401, message: "Telegram sign-in could not be verified. Try again.", details: { code: `telegram_${reason}` } });
 }

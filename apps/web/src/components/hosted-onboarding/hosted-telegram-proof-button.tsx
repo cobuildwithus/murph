@@ -50,10 +50,11 @@ export function HostedTelegramProofButton({ purpose, onProof, label = "Continue 
   useEffect(() => {
     const controller = new AbortController();
     current.current = controller;
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]);
     const start = purpose === "login" ? "/api/auth/telegram/start" : "/api/settings/login-methods/telegram/start";
     void Promise.all([
       loadTelegramLogin(),
-      requestHostedOnboardingJson<{ ok: true; nonce: string; clientId: string }>({ url: start, method: "POST", payload: {}, signal: controller.signal }),
+      requestHostedOnboardingJson<{ ok: true; nonce: string; clientId: string }>({ url: start, method: "POST", payload: {}, signal }),
     ]).then(([api, proof]) => {
       if (controller.signal.aborted) return;
       const clientId = Number(proof.clientId);
@@ -62,7 +63,7 @@ export function HostedTelegramProofButton({ purpose, onProof, label = "Continue 
       }
       setReady({ api, clientId, nonce: proof.nonce, expiresAt: Date.now() + 240_000 });
     }).catch((caught: unknown) => {
-      if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Telegram could not start. Try again.");
+      if (!controller.signal.aborted) setError(signal.aborted ? "Telegram could not start. Try again." : caught instanceof Error ? caught.message : "Telegram could not start. Try again.");
     });
     return () => { controller.abort(); };
   }, [attempt, purpose]);
@@ -115,7 +116,7 @@ export function HostedTelegramProofButton({ purpose, onProof, label = "Continue 
       <HostedInlineAuthButton icon={<TelegramIcon className="h-5 w-5" />} onClick={retry}>Try Telegram again</HostedInlineAuthButton>
     </> : <HostedInlineAuthButton busy={!ready || pending} disabled={!ready || pending} onClick={open}
       icon={!ready || pending ? <Spinner aria-hidden="true" /> : <TelegramIcon className="h-5 w-5" />}>
-      {pending ? "Waiting for Telegram..." : ready ? label : "Preparing Telegram..."}
+      {pending ? "Waiting for Telegram..." : label}
     </HostedInlineAuthButton>}
     {pending && !error ? <Button type="button" variant="ghost" size="lg" className="w-full text-muted-foreground hover:text-foreground" onClick={retry}>Cancel</Button> : null}
   </div>;

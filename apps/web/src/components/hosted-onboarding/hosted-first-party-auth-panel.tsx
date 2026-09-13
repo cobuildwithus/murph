@@ -3,7 +3,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Phone } from "lucide-react";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
-import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 import { Button } from "@/src/components/ui/button";
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -131,14 +130,16 @@ export function HostedFirstPartyAuthPanel({
           <span className="h-px flex-1 bg-border" />
         </div>
         <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
-          {(["telegram", "phone", "email"] as const).filter((entry) => methods.includes(entry) && entry !== method).map((entry) => <HostedInlineAuthButton
+          {(["telegram", "phone", "email"] as const).filter((entry) => methods.includes(entry) && entry !== method).map((entry) => entry === "telegram" ? <HostedTelegramProofButton
+            key={entry} purpose="login" label="Telegram"
+            onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)}
+          /> : <HostedInlineAuthButton
             key={entry}
             onClick={() => { setMethod(entry); setError(null); }}
             icon={entry === "phone" ? <Phone aria-hidden="true" className="h-5 w-5" />
-              : entry === "email" ? <EmailIcon className="h-5 w-5" />
-                : <TelegramIcon className="h-5 w-5" />}
+              : <EmailIcon className="h-5 w-5" />}
           >
-            {entry === "phone" ? "Phone" : entry === "email" ? "Email" : "Telegram"}
+            {entry === "phone" ? "Phone" : "Email"}
           </HostedInlineAuthButton>)}
         </div>
       </> : null}

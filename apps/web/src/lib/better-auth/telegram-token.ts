@@ -1,6 +1,6 @@
 import "server-only";
-import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { createRemoteJWKSet, jwtVerify, errors, type JWTVerifyGetKey } from "jose";
+import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 
 const issuer = "https://oauth.telegram.org";
 const keys = createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`), { timeoutDuration: 5_000 });
@@ -14,7 +14,7 @@ export function requireHostedTelegramClientId(): string {
 export async function verifyHostedTelegramIdToken(input: {
   token: string; nonce: string; clientId: string;
 }, keyResolver: JWTVerifyGetKey = keys) {
-  if (input.token.length > 8_192 || !/^[A-Za-z0-9_-]{43}$/u.test(input.nonce)) throw invalidToken();
+  if (input.token.length > 8_192 || !/^[A-Za-z0-9_-]{43}$/u.test(input.nonce)) throw invalidToken("input");
   try {
     const { payload } = await jwtVerify(input.token, keyResolver, {
       issuer, audience: input.clientId, algorithms: ["RS256", "ES256"],
@@ -22,18 +22,25 @@ export async function verifyHostedTelegramIdToken(input: {
     });
     // OIDC sub and Telegram's Bot API user ID are different identifiers. Only
     // the verified profile id preserves the canonical messaging/login binding.
-    if (payload.nonce !== input.nonce || typeof payload.id !== "number"
+    if (payload.nonce !== input.nonce) throw invalidToken("nonce_mismatch");
+    if (typeof payload.id !== "number"
       || !Number.isSafeInteger(payload.id) || payload.id <= 0
-      || typeof payload.iat !== "number" || typeof payload.exp !== "number") throw invalidToken();
+      || typeof payload.iat !== "number" || typeof payload.exp !== "number") throw invalidToken("profile");
     const authenticatedAt = new Date(payload.iat * 1_000);
     const expiresAt = new Date(payload.exp * 1_000);
-    if (!Number.isFinite(authenticatedAt.getTime()) || !Number.isFinite(expiresAt.getTime())) throw invalidToken();
+    if (!Number.isFinite(authenticatedAt.getTime()) || !Number.isFinite(expiresAt.getTime())) throw invalidToken("timestamp");
     return { telegramUserId: String(payload.id), authenticatedAt, expiresAt };
-  } catch {
-    throw invalidToken();
+  } catch (error) {
+    if (error instanceof errors.JWTClaimValidationFailed) {
+      const claim = ["iss", "aud", "iat", "exp", "nonce"].includes(error.claim) ? error.claim : "other";
+      throw invalidToken(`claim_${claim}`);
+    }
+    if (error instanceof errors.JOSEError) throw invalidToken(error.code);
+    if (isHostedOnboardingError(error)) throw error;
+    throw invalidToken("verification_unavailable");
   }
 }
 
-function invalidToken() {
-  return hostedOnboardingError({ code: "AUTH_TELEGRAM_INVALID", httpStatus: 401, message: "Telegram verification expired. Try again." });
+function invalidToken(reason: string) {
+  return hostedOnboardingError({ code: "AUTH_TELEGRAM_INVALID", httpStatus: 401, message: "Telegram sign-in could not be verified. Try again.", details: { code: `telegram_${reason}` } });
 }

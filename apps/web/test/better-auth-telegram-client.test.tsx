@@ -93,3 +93,17 @@ test("server preparation failure is retryable without opening the provider", asy
   await click("Continue with Telegram");
   expect(mocks.auth).toHaveBeenCalledOnce();
 });
+
+
+test("prepares before the click and keeps the action label during a slow start", async () => {
+  let resolve!: (value: unknown) => void;
+  mocks.request.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  await render();
+  const button = rendered!.container.querySelector("button");
+  expect(button!.textContent).toBe("Continue with Telegram");
+  expect(button!.disabled).toBe(true);
+  expect(mocks.auth).not.toHaveBeenCalled();
+  await act(async () => { resolve({ ok: true, nonce: "n".repeat(43), clientId: "123456789" }); });
+  await click("Continue with Telegram");
+  expect(mocks.auth).toHaveBeenCalledOnce();
+});
