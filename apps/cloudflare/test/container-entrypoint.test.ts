@@ -909,7 +909,9 @@ describe("startHostedContainerEntrypoint", () => {
     await invocationReady.promise;
     expect(observedRuntime.shutdownSignal?.aborted).toBe(false);
     process.emit("SIGTERM", "SIGTERM");
+    process.emit("SIGTERM", "SIGTERM");
     expect(observedRuntime.shutdownSignal?.aborted).toBe(true);
+    expect(exit).not.toHaveBeenCalled();
 
     const lateWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       body: JSON.stringify({
@@ -922,6 +924,7 @@ describe("startHostedContainerEntrypoint", () => {
       },
       method: "POST",
     });
+    expect(exit).not.toHaveBeenCalled();
     releaseInvocation.resolve();
     const invocationResponse = await invocation;
 

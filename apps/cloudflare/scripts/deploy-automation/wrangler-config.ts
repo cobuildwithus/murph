@@ -13,7 +13,8 @@ const DEFAULT_DEPLOY_ROOT = path.resolve(
   "..",
   "..",
 );
-const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 300;
+// Connection age is not the checkpoint deadline; SIGTERM draining protects accepted work.
+const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
 const DEPLOY_SMOKE_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
 const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100] as const;
 const DEVICE_WEBHOOK_QUEUE_SUFFIX = "device-webhooks";
