@@ -72,6 +72,8 @@ const ERROR_CATEGORIES = new Map<string, ToolErrorCategory>([
   ['exercise_not_found', 'not_found'],
   ['exercise_catalog_unavailable', 'unavailable'],
   ['exercise_catalog_invalid', 'invalid_result'],
+  ['memory_not_found', 'not_found'],
+  ['memory_document_invalid', 'invalid_result'],
   ['automation_not_found', 'not_found'],
   ['knowledge_page_not_found', 'not_found'],
   ['ENOENT', 'not_found'],

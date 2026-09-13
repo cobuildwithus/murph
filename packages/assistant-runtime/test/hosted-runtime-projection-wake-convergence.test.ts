@@ -24,6 +24,7 @@ import {
   enqueueDeviceSyncSystemMailboxItemForTest,
   removeTempRoot,
   runHostedWorkspaceRuntimeJobInProcess,
+  stagePendingLinqAssistantInputForMailboxItem,
   writeMailboxImportStateFile,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import { createEmptyHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
@@ -153,10 +154,15 @@ test.each(scenarios)(
               artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
               return { snapshotRef: snapshot.snapshotRef };
             },
-            async importItem() {
-              throw new Error("The completion was already imported and checkpointed.");
+            async importItem({ item }) {
+              assert.equal(item.lane, "conversation", "Previously imported system work must not repeat.");
+              const assistantInputId = await stagePendingLinqAssistantInputForMailboxItem({ item, vaultRoot });
+              events.push("foreground.imported");
+              return { assistantInputId, status: "imported" };
             },
             async runAssistantPhase() {
+              assert.equal(events.filter((event) => event === "foreground.imported").length, 1,
+                "Import the qualified conversation exactly once before foreground admission.");
               assert.equal(wake, "conversation after empty");
               assert.equal(wakeChecks, 2, "Reuse the prefetched conversation batch for handoff.");
               releaseDelivery.resolve();

@@ -959,8 +959,12 @@ foreground priority. A default request behind `system_mailbox`, including
 an authenticated Web-direct request, wakes the exact active child with the
 requested default mode. An accepted wake retains that child's fence and lets
 its runtime qualify actual conversation input before serving foreground in
-place. If the exact child has already settled, the existing inactive-fence
-path may start a replacement. A `system_mailbox` request behind an active
+place. Promotion consumes the conversation batch that qualified the handoff;
+it must not reuse the invocation's earlier system-only import or depend on a
+second wake/refetch. When independent completion races a wake, the waiter joins
+its consumed notification and qualifies it before declaring completion; failure
+retains an accepted notification for the existing recovery owner. If the exact
+child has already settled, the existing inactive-fence path may start a replacement. A `system_mailbox` request behind an active
 default owner sends a normal wake to that exact child, preserving its default
 mode and fence. It sends no
 requested mode handoff and never interrupts foreground work. Wake acceptance

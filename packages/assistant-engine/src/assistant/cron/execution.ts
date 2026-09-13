@@ -71,8 +71,8 @@ import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
 import { canSkipManagedJournalConnectedContext } from '../journal-connected-context-eligibility.js'
-import { canSkipManagedAutomaticMealCloseout } from '../automatic-meal-closeout-eligibility.js'
 import { canSkipManagedPersonalPatterns } from '../personal-patterns-eligibility.js'
+import { canSkipManagedAutomaticMealCloseout } from '../automatic-meal-closeout-eligibility.js'
 import {
   buildAssistantLinqDeliveryPosturePrompt,
 } from '../linq-delivery-posture.js'
@@ -2088,17 +2088,6 @@ async function runAssistantCronAutomationPreconditions(input: {
     lifecycleSkipReason = 'Journal connected context has no connected accounts or existing ledger.'
   }
   if (lifecycleSkipReason === null
-    && await canSkipManagedAutomaticMealCloseout({
-      automationId: input.source.automationId,
-      instructions: input.source.instructions,
-      occurrenceAt: input.occurrenceAt,
-      signal: input.signal,
-      timeZone: input.source.timeZone,
-      vaultRoot: input.vault,
-    })) {
-    lifecycleSkipReason = 'No captured meals are awaiting closeout.'
-  }
-  if (lifecycleSkipReason === null
     && input.trigger === 'scheduled' && input.consecutiveFailures === 0
     && await canSkipManagedPersonalPatterns({
       automationId: input.source.automationId,
@@ -2109,6 +2098,16 @@ async function runAssistantCronAutomationPreconditions(input: {
       vaultRoot: input.vault,
     })) {
     lifecycleSkipReason = 'Personal Patterns factors, results, and grades are already reviewed.'
+  }
+  if (lifecycleSkipReason === null && input.trigger === 'scheduled'
+    && await canSkipManagedAutomaticMealCloseout({
+      automationId: input.source.automationId,
+      occurrenceAt: input.occurrenceAt,
+      signal: input.signal,
+      timeZone: input.source.timeZone,
+      vaultRoot: input.vault,
+    })) {
+    lifecycleSkipReason = 'No captured meals are awaiting closeout.'
   }
   return lifecycleSkipReason
 }

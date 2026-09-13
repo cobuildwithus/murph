@@ -13,6 +13,10 @@ service restart/retry proof lives in
 
 ## Purpose
 
+Empty automatic meal closeout admission is owned by `ARCHITECTURE.md`;
+canonical queue, scheduler, and focused real-Codex proof are indexed in
+`agent-docs/references/testing-ci-map.md`.
+
 Manual device refresh admission during retained history retries, one-shot
 provider job creation and recovery compatibility are owned by
 `agent-docs/RELIABILITY.md` and the hosted runtime protocol reference.
@@ -49,7 +53,8 @@ first-pending evidence) are specified in
 Automation edit schema discovery and attended progress guidance are owned by
 `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`. Real Codex native-schema and
 declaration preservation, independent schema/runtime structural admission parity,
-versioned edits, nutrition/personalization inputs, and quick-versus-long progress proof is indexed in `agent-docs/references/testing-ci-map.md`.
+versioned edits, finite weekday cron authoring, nutrition/personalization inputs,
+and quick-versus-long progress proof is indexed in `agent-docs/references/testing-ci-map.md`.
 `agent-docs/product-specs/bring-your-own-inference.md` owns complete custom-provider
 tool-description transport and its existing byte/count bounds.
 
@@ -69,6 +74,10 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 
 The completed canary authority diagnostic plan is
 [`2026-09-13-canary-authority-reason-telemetry.md`](exec-plans/completed/2026-09-13-canary-authority-reason-telemetry.md).
+
+Foreground promotion batch reuse and completion/wake race preservation are owned
+by `agent-docs/references/hosted-runtime-protocol.md`; focused admission, import
+overlap, and recovery proof is indexed in `agent-docs/references/testing-ci-map.md`.
 
 ## Canonical Docs
 

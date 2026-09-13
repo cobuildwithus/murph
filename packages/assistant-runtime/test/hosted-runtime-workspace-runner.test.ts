@@ -11395,6 +11395,51 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
 // pass is a held model stand-in and device HTTP is synthetic. Cross-process projection coherence is a separate query
 // owner requirement: these reads intentionally start after the commit settles.
 describe("foreground device ingestion", () => {
+  test.each(["foreground", "empty", "failed"] as const)("preserves a wake consumed alongside independent completion (%s)", async (scenario) => {
+    const fixture = await createForegroundDeviceFixture();
+    const completion = createDeferred<void>();
+    const wakeSignal = createCoalescingRuntimeWakeSignal();
+    const onWake = vi.fn(async () => scenario === "foreground");
+    const owner = createHostedWorkspaceSystemWork({
+      preparation: fixture.ownerInput,
+      runnerInput: {
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_completion_race", expectedWorkspaceVersion: "0",
+          leaseGeneration: "1", nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() { throw new Error("Completion race does not import mailbox items."); },
+        limitPerLane: 1,
+        platform: fixture.platform,
+        requestId: "request_synthetic_completion_race",
+        vaultRoot: fixture.vaultRoot,
+        workspace: fixture.workspace,
+      },
+      onCompleted() { throw new Error("Completion race does not prepare new work."); },
+      onFailure(error) { throw error; },
+      settleOwnedMutations: () => completion.promise,
+    });
+    try {
+      const waiting = owner.waitForCompletion(wakeSignal, onWake);
+      const failure = new Error("Synthetic independent completion failure.");
+      if (scenario === "failed") completion.reject(failure);
+      else completion.resolve();
+      wakeSignal.notify({ notifiedAtEpochMs: Date.parse(TEST_NOW), requestedProcessingMode: "default" });
+      if (scenario === "failed") {
+        await assert.rejects(waiting, (error) => error === failure);
+        assert.equal(onWake.mock.calls.length, 0);
+        assert.equal(wakeSignal.consumePending()?.requestedProcessingMode, "default");
+      } else {
+        assert.equal(await waiting, scenario === "foreground");
+        assert.equal(onWake.mock.calls.length, 1);
+        assert.equal(wakeSignal.consumePending(), null);
+      }
+    } finally {
+      completion.resolve();
+      await fixture.cleanup();
+    }
+  });
+
   test("preserves live receipt capacity throughout a system-work pass", async () => {
     const fixture = await createForegroundDeviceFixture();
     let receiptCapacityReached = false;

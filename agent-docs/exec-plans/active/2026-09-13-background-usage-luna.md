@@ -6,7 +6,7 @@ Updated: 2026-09-13
 
 ## Goal
 
-- Ship the immediate source-supported background usage reductions: deterministic empty-meal admission and Luna for managed Journal passes. The broader deterministic Journal design remains deferred.
+- Ship the immediate source-supported background usage reductions: bounded canonical meal selection and Luna for managed Journal passes. The broader deterministic Journal design remains deferred.
 
 ## Success criteria
 
@@ -17,7 +17,7 @@ Updated: 2026-09-13
 
 ## Scope
 
-- In scope: Journal morning/afternoon Luna routing, bounded empty-meal selection and cron admission, owner docs, synthetic tests and changelog.
+- In scope: Journal morning/afternoon Luna routing, SQL-bounded meal selection for the existing empty-work gate and closeout CLI, owner docs, synthetic tests and changelog.
 - Deferred: model-free Journal reconciliation, bounded classification-only Luna, and typed fixed reminders. Existing connected-source collection and free-form ledgers do not provide the typed complete-evidence and correction contracts needed to claim those paths are safely deterministic.
 - Out of scope: production mutations, merge/deploy, unrelated model preferences, populated meal interpretation, weekly synthesis and unrelated product policies.
 
@@ -66,3 +66,8 @@ Updated: 2026-09-13
 - Implemented the narrow routing patch and deterministic empty-meal admission. All 321 focused assistant tests, the 10,000-meal query test, two existing closeout CLI regressions, and affected query/vault-usecases/assistant-engine typechecks passed. Real Luna journeys and completion gates are in progress. No production changes.
 
 - Emitted assistant-engine build, 10 changelog tests, and complexity guard passed. Default-subscription Luna journeys failed authentication before provider actions; authorized alternate-home validation is in progress. Final review and CI remain pending.
+
+- Base reconciliation: #3402 independently landed the empty-meal cron gate while this task was open. Reused that gate and its stronger scheduled-only, read-failure retry tests unchanged, removing our duplicate gate and tests. This PR now adds bounded SQL selection and Luna routing on top.
+- Live notice passed on an authorized alternate subscription. Calendar proof had a stale event-end timing assertion and email proof counted CLI help as a write. Corrected only these fixture assertions using the existing help classifier and exact promised hour-after-event instant; rerunning on the same subscription.
+
+- After base reconciliation: 325 focused assistant tests, one large-selection query test, two closeout CLI regressions, and all three affected typechecks pass. The source gate and cron lifecycle match the current base; only SQL selection changes beneath them.

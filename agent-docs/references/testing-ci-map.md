@@ -2,7 +2,24 @@
 
 Last verified: 2026-09-11
 
+Foreground promotion regression proof lives in the assistant-runtime entrypoint
+system-preemption suite: a conversation arriving during device completion or
+checkpointing is imported from its qualified batch before assistant admission,
+without a second conversation fetch. The workspace-runner suite covers concurrent
+completion/wake acceptance, empty-hint qualification, and retained wakes on failed
+completion. The concurrent-device-import integration suite proves reply delivery
+while downloads remain held and subsequent canonical import/acknowledgment.
+
 ## Current Repo Checks
+
+Automatic meal closeout admission is covered by
+`packages/assistant-engine/test/automatic-meal-closeout-eligibility.test.ts`
+and `assistant-cron-runtime.test.ts`: empty and manual-only queues suppress
+model entry, retained historical photos and same-occurrence removal revisions
+remain eligible, occurrence-local dates exclude later captures, and read errors
+retry without losing the original occurrence. The focused real-Codex journey
+`keeps historical automatic meal closeout silent through empty-queue preflight`
+combines canonical eligibility with production-instruction cleanup and silence.
 
 The canary outcome suite controls Date.now relative to its replica fixture
 timestamp and restores it after each case. An explicit clock advance proves the production
@@ -632,6 +649,16 @@ the member journey with synthetic health data and requires one condition read,
 one successful direct automation call, and one exact record reference.
 
 ### Codex tool input contracts and CLI upgrades
+
+Automation cron authoring is covered by
+`assistant-automation-model-input-schema.test.ts` and
+`assistant-dynamic-tool-failure-boundary.test.ts`: combined calendar-day and
+weekday restrictions are rejected before the owner port, with repair guidance;
+canonical cron semantics and non-schedule legacy edits remain supported.
+Focused live proof uses
+`-- --test 'changes a finite calendar reminder to weekdays while preserving its cutoff'`
+and verifies one inspected, versioned edit, a next occurrence after the weekend,
+the preserved expiration, and a truthful confirmation.
 
 The tool-contract suite inventories all exported and route-only registrations
 (currently 56) across eager native, deferred native, and code mode. It compares

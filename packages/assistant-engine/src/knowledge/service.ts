@@ -2,6 +2,8 @@ import { access, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import {
   canonicalPathResource,
+  isEventLedgerLogicalPath,
+  resolveEventLedgerShardSource,
   withCanonicalResourceLocks,
 } from '@murphai/core'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
@@ -1076,11 +1078,26 @@ async function knowledgeReadableFileExists(
 ): Promise<boolean> {
   try {
     const absolutePath = await resolveAssistantVaultPath(vaultRoot, candidatePath, 'file path')
-    await access(absolutePath)
-    const stats = await stat(absolutePath)
-    return stats.isFile()
+    await assertKnowledgeFileReadable(vaultRoot, absolutePath)
+    return true
   } catch {
     return false
+  }
+}
+
+async function assertKnowledgeFileReadable(vaultRoot: string, absolutePath: string): Promise<void> {
+  const relativePath = toVaultRelativePath(vaultRoot, absolutePath)
+  let sourceAbsolutePath = absolutePath
+  if (isEventLedgerLogicalPath(relativePath)) {
+    const source = await resolveEventLedgerShardSource(vaultRoot, relativePath)
+    if (source && source.sourcePath !== relativePath) {
+      sourceAbsolutePath = await resolveAssistantVaultPath(vaultRoot, source.sourcePath, 'file path')
+    }
+  }
+  await access(sourceAbsolutePath)
+  const stats = await stat(sourceAbsolutePath)
+  if (!stats.isFile()) {
+    throw new Error('Path is not a file.')
   }
 }
 
@@ -1096,10 +1113,7 @@ async function normalizeKnowledgeSourcePaths(
     assertKnowledgeSourcePathAllowed(relativePath)
 
     try {
-      const stats = await stat(absolutePath)
-      if (!stats.isFile()) {
-        throw new Error('Path is not a file.')
-      }
+      await assertKnowledgeFileReadable(vaultRoot, absolutePath)
     } catch (error) {
       throw new VaultCliError(
         'knowledge_source_unreadable',

@@ -6,7 +6,7 @@
     "kind": "improvement",
     "priority": 2,
     "title": "Less usage for background checks",
-    "summary": "Daily meal checks skip AI processing when no closeout work is pending, and scheduled Journal checks use a lower-cost model.",
+    "summary": "Scheduled Journal checks use a lower-cost model, and nightly meal checks select pending work without loading the full meal history.",
     "details": "Murph still processes pending meal photos and finishes interrupted closeouts.",
     "relevanceTags": ["journal", "meals", "usage"],
     "sourcePullRequests": [3405]

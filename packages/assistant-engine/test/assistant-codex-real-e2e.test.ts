@@ -6,6 +6,7 @@ import { importClinicalFhirSnapshot } from '@murphai/vault-usecases/clinical-rec
 import { executeClinicalDocumentExtraction } from '../src/clinical-document-extraction.ts'
 import * as clinicalExtractionCodex from '../src/assistant-codex.ts'
 import { parsePersonalPatternNotificationLedger } from '../src/assistant/personal-patterns-eligibility.js'
+import { canSkipManagedAutomaticMealCloseout } from '../src/assistant/automatic-meal-closeout-eligibility.js'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
   ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
@@ -13,6 +14,7 @@ import {
   renderAssistantHostedImageCompletionSystemText,
 } from '../src/assistant/hosted-image-completion.js'
 import { getAssistantCronAutomationInspection } from '../src/assistant/cron/inspection.js'
+import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.js'
 import { appendAssistantCronRun } from '../src/assistant/cron/store.js'
 import { WORKFLOW_SKILL_REFERENCES } from './support/workflow-skill-policy.js'
 import { execFile } from 'node:child_process'
@@ -23,6 +25,7 @@ import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { brotliCompressSync } from 'node:zlib'
 
 import {
   MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
@@ -110,7 +113,7 @@ import {
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { upsertKnowledgePage } from '../src/knowledge/service.ts'
+import { getKnowledgePage, upsertKnowledgePage } from '../src/knowledge/service.ts'
 import {
   markAssistantContextSnapshotDirty,
   readAssistantContextSnapshotPrompt,
@@ -3083,6 +3086,35 @@ describe('real Codex live fixture contracts', () => {
       }
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
+    }
+  })
+
+  it('keeps automatic meal closeout fixture help read-only', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'automatic-meal-help-'))
+    try {
+      const binDirectory = path.join(root, 'bin')
+      const stateFile = path.join(root, 'state')
+      await writeFile(stateFile, 'initial\n')
+      await materializeAutomaticMealCloseoutVaultCli({
+        binDirectory, commandLogPath: path.join(root, 'commands'),
+        photoRelativePath: 'raw/meals/capture.jpg', retrySucceeds: true,
+        failFirstEdit: false, stateFile,
+      })
+      const cli = path.join(binDirectory, 'vault-cli')
+      for (const command of ['edit', 'remove-photo']) {
+        for (const flag of ['--help', '-h']) {
+          expect((await execFileAsync(cli, ['meal', command, flag])).stdout).toContain('Usage:')
+          expect(await readFile(stateFile, 'utf8')).toBe('initial\n')
+        }
+      }
+      await execFileAsync(cli, ['meal', 'edit', 'meal_fixture', '--note', 'Synthetic observation'])
+      expect(await readFile(stateFile, 'utf8')).toBe('enriched\n')
+      await execFileAsync(cli, ['meal', 'remove-photo', '--help'])
+      expect(await readFile(stateFile, 'utf8')).toBe('enriched\n')
+      await execFileAsync(cli, ['meal', 'remove-photo', 'meal_fixture'])
+      expect(await readFile(stateFile, 'utf8')).toBe('removed\n')
+    } finally {
+      await removeRealCodexTemporaryPath(root)
     }
   })
 
@@ -14170,7 +14202,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
                 effectiveTimeZone: 'Europe/Warsaw',
                 lookupId: 'automation_calendar_tennis_followup',
                 occurrenceProjection: {
-                  nextOccurrenceAt: '2026-08-31T17:00:00.000Z',
+                  nextOccurrenceAt: '2026-08-31T18:00:00.000Z',
                   status: 'resolved' as const,
                 },
                 routeBinding: 'current_conversation',
@@ -14285,7 +14317,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         .split('\n')
         .filter(Boolean)
       const journalWrites = vaultCommands.filter((command) =>
-        command.includes('event note add')
+        command.includes('event note add') && !isRecordedVaultHelpCommand(command)
       )
       expect(journalWrites).toHaveLength(1)
       expect(journalWrites[0]).toMatch(/tennis/iu)
@@ -14299,8 +14331,11 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         action: 'save',
         schedule: { kind: 'at' },
       })
-      expect(JSON.stringify(followupRequest.schedule)).toMatch(
-        /19:00|17:00/iu,
+      // The event ends at 19:00 Warsaw: one hour after it is 20:00
+      // local / 18:00Z. Comparing instants also accepts equivalent offsets.
+      if (followupRequest.schedule?.kind !== 'at') throw new Error('Expected a one-shot follow-up.')
+      expect(Date.parse(followupRequest.schedule.at)).toBe(
+        Date.parse('2026-08-31T19:00:00+02:00') + 60 * 60 * 1_000,
       )
       expect(await readFile(ledgerCapturePath, 'utf8')).toContain(
         'calendar_evt_tennis',
@@ -14506,7 +14541,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         .split('\n')
         .filter(Boolean)
       const journalWrites = vaultCommands.filter((command) =>
-        command.includes('event note add')
+        command.includes('event note add') && !isRecordedVaultHelpCommand(command)
       )
       expect(journalWrites).toHaveLength(1)
       expect(journalWrites[0]).toMatch(/Lisbon/iu)
@@ -14649,7 +14684,7 @@ describeRealCodex(
 })
 
 describeRealCodex('real Codex research scout ongoing interest e2e', () => {
-  it('shares relevant learning without an open decision and suppresses repeated research', async () => {
+  it('saves research with compressed ledger sources and suppresses repeated research', async () => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.automationId === MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -14664,6 +14699,24 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
           await writeFile(path.join(binDirectory, 'calls.jsonl'), '')
           await writeFile(path.join(binDirectory, 'retrievals.jsonl'), '')
           const finding = 'A synthetic randomized human study found that resistance training with one arm also improved strength in the untrained arm. This suggests some strength adaptation transfers through the nervous system rather than being confined to the practiced muscles. It does not establish injury prevention or a need to change training.'
+          await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+          const sourcePath = 'ledger/events/2024/2024-01.jsonl'
+          const sourceAbsolutePath = path.join(workingDirectory, sourcePath)
+          await mkdir(path.dirname(sourceAbsolutePath), { recursive: true })
+          await writeFile(sourceAbsolutePath, '{"synthetic":true}\n')
+          await upsertKnowledgePage({
+            vault: workingDirectory,
+            slug: 'weekly-health-research-scout',
+            title: 'Weekly health research scout',
+            body: repeated ? finding : 'No previous research findings.',
+            sourcePaths: [sourcePath],
+          })
+          await writeFile(`${sourceAbsolutePath}.br`, brotliCompressSync('{"synthetic":true}\n'))
+          await rm(sourceAbsolutePath)
+          const originalPage = await getKnowledgePage({
+            vault: workingDirectory,
+            slug: 'weekly-health-research-scout',
+          })
           const context = {
             summary: 'The member has an ongoing interest in resistance training and how strength develops, stated three months ago and never withdrawn. There is no current experiment, symptom, recent change, open question, or decision. They enjoy explanations and do not want extra tasks. No recent unsolicited health note is waiting for a reply.',
           }
@@ -14683,7 +14736,6 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
               publishedDate: '2026-07-01',
               text: finding,
             }] } }] },
-            ledger: { page: { body: repeated ? finding : '', markdown: repeated ? finding : '' } },
           }
           await writeFile(path.join(binDirectory, 'fixture.json'), JSON.stringify(fixture))
           await writeFile(path.join(binDirectory, 'vault-cli'), [
@@ -14706,17 +14758,15 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
             "  fs.appendFileSync(path.join(__dirname, 'retrievals.jsonl'), JSON.stringify(parsed.data) + String.fromCharCode(10));",
             "  fs.writeFileSync(path.join(__dirname, 'payload.json'), body);",
             '  console.log(JSON.stringify(fixture.research));',
-            "} else if (args[0] === 'knowledge' && args[1] === 'show') console.log(JSON.stringify(fixture.ledger));",
-            "else if (args[0] === 'knowledge' && args[1] === 'append-section') {",
-            "  const body = option('--body');",
-            "  if (!body || !args[3]) { console.error('Expected append-section <slug> <heading> --body <markdown>'); process.exit(64); }",
-            "  fixture.ledger.page.body += String.fromCharCode(10) + args[3] + String.fromCharCode(10) + body;",
-            '  fixture.ledger.page.markdown = fixture.ledger.page.body;',
-            "  fs.appendFileSync(path.join(__dirname, 'writes.jsonl'), JSON.stringify({ slug: args[2], body }) + String.fromCharCode(10));",
-            "  fs.writeFileSync(path.join(__dirname, 'fixture.json'), JSON.stringify(fixture));",
-            '  console.log(JSON.stringify(fixture.ledger));',
+            "} else if (args[0] === 'knowledge') {",
+            "  const { spawnSync } = require('node:child_process');",
+            "  const result = spawnSync(process.execPath, ['--import', process.env.RESEARCH_FIXTURE_LOADER, process.env.RESEARCH_FIXTURE_CLI, ...args, '--vault', path.dirname(__dirname)], { encoding: 'utf8', env: process.env });",
+            "  process.stdout.write(result.stdout ?? '');",
+            "  process.stderr.write(result.stderr ?? '');",
+            "  if (result.error || result.status !== 0) process.exit(result.status ?? 1);",
+            "  if (args[1] === 'append-section') fs.appendFileSync(path.join(__dirname, 'writes.jsonl'), JSON.stringify({ slug: args[2] }) + String.fromCharCode(10));",
             '}',
-            "else if ((args[0] === 'knowledge' && ['index', 'show-index', 'list'].includes(args[1])) || ['goal', 'memory', 'list', 'search', 'experiment', 'wearables'].includes(args[0])) console.log(JSON.stringify(fixture.context));",
+            "else if (['goal', 'memory', 'list', 'search', 'experiment', 'wearables'].includes(args[0])) console.log(JSON.stringify(fixture.context));",
             "else { console.error('Unsupported synthetic command'); process.exit(64); }",
           ].join('\n'), { mode: 0o700 })
           const result = await executeRealCodexAppServerTurn({
@@ -14733,6 +14783,9 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
               ...config.env,
               EXA_API_KEY: 'synthetic-fixture-only',
               RESEARCH_FIXTURE_RESOLVER: fileURLToPath(new URL('../package.json', import.meta.url)),
+              RESEARCH_FIXTURE_LOADER: HABITAT_VOICE_E2E_TSX_LOADER,
+              RESEARCH_FIXTURE_CLI: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+              TSX_TSCONFIG_PATH: path.resolve(path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
             },
             model: config.model,
             modelProvider: config.modelProvider,
@@ -14757,7 +14810,7 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
             .trim().split('\n').filter(Boolean)
           const writesPath = path.join(binDirectory, 'writes.jsonl')
           const writes = existsSync(writesPath)
-            ? (await readFile(writesPath, 'utf8')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as { slug: string; body: string })
+            ? (await readFile(writesPath, 'utf8')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as { slug: string })
             : []
           console.info('[research-scout effects]', JSON.stringify({
             cliCallCount: calls.length, retrievalCount: retrievals.length, writeCount: writes.length,
@@ -14766,9 +14819,15 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
           const payload = JSON.parse(await readFile(path.join(binDirectory, 'payload.json'), 'utf8'))
           expect(researchScoutBatchPayloadSchema.safeParse(payload)).toMatchObject({ success: true })
           expect(writes).toHaveLength(repeated ? 0 : 1)
+          const saved = await getKnowledgePage({ vault: workingDirectory, slug: 'weekly-health-research-scout' })
+          expect(saved.page.sourcePaths).toContain(sourcePath)
+          expect(existsSync(sourceAbsolutePath)).toBe(false)
           if (!repeated) {
             expect(writes[0]?.slug).toBe('weekly-health-research-scout')
-            expect(writes[0]?.body).toContain('https://example.org/synthetic-resistance-trial')
+            expect(saved.page.body).toContain('https://example.org/synthetic-resistance-trial')
+            expect(saved.page.body).toContain('No previous research findings.')
+          } else {
+            expect(saved.page.markdown).toBe(originalPage.page.markdown)
           }
           const finishCalls = actions.filter((action) => action.kind === 'dynamic'
             && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
@@ -24999,6 +25058,107 @@ describeRealCodex('real Codex automation edit progress e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex weekday automation authoring e2e', () => {
+  it('changes a finite calendar reminder to weekdays while preserving its cutoff', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-weekday-automation-e2e-'))
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const current = {
+      automationId: 'automation_stretch', lookupId: 'stretch-break',
+      title: 'Stretch break', instructions: 'Take a stretch break.',
+      contextReferences: [], effectiveTimeZone: 'America/New_York',
+      occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: '2026-10-10T18:00:00.000Z' },
+      schedule: { kind: 'cron' as const, expression: '0 14 9-15 10 *', timeZone: 'America/New_York' },
+      status: 'active' as const, updatedAt: '2026-10-09T16:00:00.000Z',
+    }
+    let activeUntil: string | null = '2026-10-16T00:00:00-04:00'
+    let savedSchedule = current.schedule
+    const fixture = createVersionedAutomationPatchFixture({
+      current,
+      patch(request, record) {
+        if (request.schedule?.kind !== 'cron') throw new Error('Expected a weekday recurrence.')
+        expect(request.status).toBeUndefined()
+        expect(request.instructions).toBeUndefined()
+        expect(request.retargetToCurrentConversation).toBeUndefined()
+        savedSchedule = { ...request.schedule, timeZone: request.schedule.timeZone ?? record.effectiveTimeZone! }
+        if (request.activeUntil !== undefined) activeUntil = request.activeUntil
+        return {
+          ...record, schedule: savedSchedule, updatedAt: '2026-10-09T19:01:00.000Z',
+          occurrenceProjection: {
+            status: 'resolved',
+            nextOccurrenceAt: computeAssistantCronNextRunAt(savedSchedule, new Date('2026-10-09T19:00:00.000Z')),
+          },
+        }
+      },
+    })
+    try {
+      await mkdir(binDirectory, { recursive: true })
+      const inventory = { ok: true, data: {
+        compact: true, count: 1, totalCount: 1, nextCursor: null,
+        items: [{ ...current, activeUntil }],
+      } }
+      const executable = path.join(binDirectory, 'vault-cli')
+      await writeFile(executable, [
+        '#!/bin/sh', 'set -eu', 'case "$*" in',
+        `  automation\\ list*) printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(inventory))} ;;`,
+        '  *) echo "Only read-only automation list is available in this synthetic fixture." >&2; exit 2 ;;',
+        'esac',
+      ].join('\n') + '\n')
+      await chmod(executable, 0o755)
+      const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex'
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand, codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: 'Read-only inventory: vault-cli automation list --compact --format json. Use the automation tool for hosted inspections and writes.',
+          assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: false,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, assistantContextSnapshotPrompt: null,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-10-09',
+          currentInstant: '2026-10-09T19:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false, ordinaryInboundTurn: true, turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [MURPH_AUTOMATION_TOOL],
+        env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        fixtureBinDirectory: binDirectory,
+        hostedToolContext: {
+          automationTool: { request: fixture.request },
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+          sendVaultFile: async () => { throw new Error('Unexpected file send.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Change my stretch-break reminder to weekdays only. Keep 2 pm New York time and its existing October 15 end date.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const automationCalls = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'dynamic' && action.tool === MURPH_AUTOMATION_TOOL.name)
+      const reply = result.finalMessage.trim()
+      process.stdout.write('[weekday-automation-live] ' + JSON.stringify({
+        reply, schedule: savedSchedule, activeUntil, actions: fixture.requests.map((request) => request.action),
+      }) + '\n')
+      expect(fixture.requests.map((request) => request.action)).toEqual(['inspect', 'patch'])
+      expect(automationCalls).toHaveLength(2)
+      expect(automationCalls.every((action) => action.kind === 'dynamic' && action.success)).toBe(true)
+      expect(readDynamicToolAttempts(result.jsonEvents).filter((attempt) => attempt.tool === MURPH_AUTOMATION_TOOL.name)).toHaveLength(2)
+      expect(savedSchedule.timeZone).toBe('America/New_York')
+      expect(computeAssistantCronNextRunAt(savedSchedule, new Date('2026-10-09T19:00:00.000Z')))
+        .toBe('2026-10-12T18:00:00.000Z')
+      expect(activeUntil).not.toBeNull()
+      expect(new Date(activeUntil!).toISOString()).toBe('2026-10-16T04:00:00.000Z')
+      expect(reply).toMatch(/weekday|Monday.*Friday|Mon.*Fri/iu)
+      expect(reply).toMatch(/2\s*(?::00)?\s*p\.?m\.?/iu)
+      expect(reply).not.toMatch(/queued|expectedUpdatedAt|schema|cron|unable|failed|couldn.t/iu)
+      expect(result.runtimeIssueInputs).toEqual([])
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex proactive progress e2e', () => {
   it(
     'sends one early update before a multi-source recovery overview',
@@ -30058,7 +30218,7 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
     }
   })
 
-  it('keeps historical automatic meal closeout silent', {
+  it('keeps historical automatic meal closeout silent through empty-queue preflight', {
     timeout: 900_000,
   }, async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -30107,6 +30267,22 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
         }),
         writeFile(stateFile, 'initial\n', 'utf8'),
       ])
+
+      const admissionVault = path.join(workingDirectory, 'admission-vault')
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: admissionVault })
+      const admission = {
+        automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.automationId,
+        occurrenceAt: '2026-08-28T01:00:00.000Z',
+        timeZone: 'America/New_York',
+        vaultRoot: admissionVault,
+      }
+      expect(await canSkipManagedAutomaticMealCloseout(admission)).toBe(true)
+      await addMeal({
+        vaultRoot: admissionVault, source: 'device', photoPath,
+        occurredAt: '2026-08-24T16:00:00.000Z',
+        externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'historical-preflight' },
+      })
+      expect(await canSkipManagedAutomaticMealCloseout(admission)).toBe(false)
 
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: true,
@@ -30160,6 +30336,7 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
         `[historical-automatic-meal-closeout-e2e] ${JSON.stringify({
           cardAttached: result.responseCard !== null,
           commandCount: commands.length,
+          commands: commands.map((command) => command.replaceAll(workingDirectory, '<FIXTURE_ROOT>')),
           decision: decision.kind,
           scenario: 'historical-only',
         })}\n`,
@@ -30924,6 +31101,13 @@ async function materializeAutomaticMealCloseoutVaultCli(input: {
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
       `state="$(cat ${quoteNutritionShellLiteral(input.stateFile)})"`,
+      'for argument in "$@"; do',
+      '  case "$argument" in',
+      '    --help|-h)',
+      `      ${emit('Usage: vault-cli meal edit <id> [--note <text>] [--ingredient <text> ...] [--format json]; vault-cli meal remove-photo <id> [--format json]')}`,
+      '      exit 0 ;;',
+      '  esac',
+      'done',
       'case "$*" in',
       `  meal\\ closeout-work\\ *) ${emit(mealList)} ;;`,
       `  meal\\ list\\ *) ${emit(mealList)} ;;`,
