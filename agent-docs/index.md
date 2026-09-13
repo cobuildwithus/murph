@@ -13,6 +13,10 @@ service restart/retry proof lives in
 
 ## Purpose
 
+Empty automatic meal closeout admission is owned by `ARCHITECTURE.md`;
+canonical queue, scheduler, and focused real-Codex proof are indexed in
+`agent-docs/references/testing-ci-map.md`.
+
 Manual device refresh admission during retained history retries, one-shot
 provider job creation and recovery compatibility are owned by
 `agent-docs/RELIABILITY.md` and the hosted runtime protocol reference.

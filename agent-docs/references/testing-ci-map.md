@@ -12,6 +12,15 @@ while downloads remain held and subsequent canonical import/acknowledgment.
 
 ## Current Repo Checks
 
+Automatic meal closeout admission is covered by
+`packages/assistant-engine/test/automatic-meal-closeout-eligibility.test.ts`
+and `assistant-cron-runtime.test.ts`: empty and manual-only queues suppress
+model entry, retained historical photos and same-occurrence removal revisions
+remain eligible, occurrence-local dates exclude later captures, and read errors
+retry without losing the original occurrence. The focused real-Codex journey
+`keeps historical automatic meal closeout silent through empty-queue preflight`
+combines canonical eligibility with production-instruction cleanup and silence.
+
 The canary outcome suite controls Date.now relative to its replica fixture
 timestamp and restores it after each case. An explicit clock advance proves the production
 24-hour expiry check still rejects a matching but expired replica. Run this
