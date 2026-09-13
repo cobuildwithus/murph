@@ -56,7 +56,16 @@ authorization. After a relevant revision reaches public `main`,
 wire proof for that exact public commit against the then-current private
 `main` and live reader set. Its `Temporal Web production admission` job must be
 configured as a Vercel production Deployment Check so a completed build cannot
-move production domains before the proof succeeds. The controller re-reads
+move production domains before the proof succeeds. The workflow also publishes
+an explicit pending commit status and a final status derived from the completed
+admission job. Only success becomes a successful status; failure, cancellation,
+and skipped proof fail closed. The proof attempt must match the current workflow
+attempt, so retrying only a failed finalizer cannot reuse historical admission.
+Both notifications use the exact `github.sha`
+and the existing check context, with the ordinary job-scoped GitHub token's
+`statuses: write` permission. The finalizer has no checkout or private credential.
+This repairs missed imported-check completion without a second admission owner
+or Vercel promotion authority. The controller re-reads
 both public and private `main` before accepting the result, while the private
 workflow independently re-reads the complete reader set. Every `main` commit
 must create its managed Vercel candidate, and the Git integration is the only

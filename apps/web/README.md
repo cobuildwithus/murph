@@ -2220,6 +2220,16 @@ artifact itself. Deploy the private ancestry-aware consumer before this public
 controller. Verify one candidate reaches production while a later merge is still
 being checked, then verify a delayed older check cannot replace a newer release.
 
+Admission explicitly publishes the `Temporal Web production admission` commit
+status for the exact candidate SHA: pending before proof, then success only after
+the entire admission job succeeds. A dependent finalizer publishes failure for
+failed, canceled, or skipped admission. This delivers the final result through
+Vercel's supported commit-status channel when its imported GitHub check remains
+running after job completion. Status publication failures fail their job; they
+never authorize promotion or disable the configured Deployment Check. The
+finalizer requires proof from the same workflow attempt: rerun the whole
+admission workflow after notification failure, not only its publishing job.
+
 Do not deploy production from the local CLI, promote an existing deployment,
 use Instant Rollback, or force-promote past a Deployment Check. Those paths do
 not create fresh compatibility evidence against current private `main` and live
