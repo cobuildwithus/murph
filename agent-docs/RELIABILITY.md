@@ -2219,8 +2219,15 @@ Last verified: 2026-09-04
   Linq and Telegram acceptance milestones stay asynchronous. The engine's
   existing turn handle retains the original provider acceptance timestamp for
   the initial accepted-input journal and subsequent pre-provider or live-steered
-  admissions. Its readiness promise covers admission before or after typing
-  starts, without an import-time sample or a foreground telemetry wait. Failed
+  admissions. Eligible, unconsumed Linq attachments may start that same session
+  after durable input staging, while model admission still waits for settled
+  evidence. The existing per-chat claim retains one preparation handle; the
+  validated turn takes it only through the same provider-fetch authority,
+  rebinding cancellation without another start or a reset session budget.
+  Import failure cancels only an unclaimed preparation. Provider acceptance,
+  never staging or a claimed target alone, supplies the retained timestamp.
+  Its readiness promise covers admission before or after typing starts without
+  a foreground telemetry wait. Telegram keeps turn-owned start. Failed
   starts and stopped, aborted, expired or failed provider handles supply no new
   evidence. Linq's existing provider cooldown is unchanged. Signup's
   early Web typing hint is also retained, so neither produces a missing-typing

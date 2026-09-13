@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-13",
+  "order": 110,
+  "item": {
+    "id": "earlier-attachment-typing",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Typing starts sooner for attachments",
+    "summary": "Murph can show typing while preparing an image or voice memo you send over iMessage.",
+    "details": "Replies still wait until the attachment is ready, so Murph can use its contents.",
+    "relevanceTags": [
+      "messaging",
+      "attachments"
+    ],
+    "sourcePullRequests": []
+  }
+}

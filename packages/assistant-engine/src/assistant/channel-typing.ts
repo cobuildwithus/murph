@@ -72,7 +72,7 @@ export function startAssistantChannelTypingIndicator(input: {
         return null
       }
 
-      acceptedAt = new Date().toISOString()
+      acceptedAt = indicator.acceptedAt ?? new Date().toISOString()
       activeIndicator = indicator
       return indicator
     })
