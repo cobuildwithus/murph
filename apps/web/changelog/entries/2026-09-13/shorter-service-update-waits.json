@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-13",
+  "order": 100,
+  "item": {
+    "id": "shorter-service-update-waits",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting during service updates",
+    "summary": "Removed an extra waiting period during service updates so Murph can return to handling new conversations sooner.",
+    "details": "The existing checks for saving and recovering ongoing work remain in place. Brief delays can still occur during an update.",
+    "relevanceTags": ["conversations", "reliability"],
+    "sourcePullRequests": [3404]
+  }
+}

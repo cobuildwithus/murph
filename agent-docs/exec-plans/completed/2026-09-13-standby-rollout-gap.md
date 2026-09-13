@@ -1,6 +1,6 @@
 # Shorten deployment standby unavailability
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -59,8 +59,10 @@ assistant prompt, provider input, or user action is intended.
 
 1. ReviewGPT investigation with guarded current source: complete.
 2. Parent assessment and minimal implementation: complete.
-3. Focused verification and complexity review: passed; changelog preparation pending.
-4. Scoped commit, PR, final ReviewGPT and required CI: in progress.
+3. Focused verification, complexity review, docs and changelog: complete.
+4. Implementation complete in PR #3404; exact-head final ReviewGPT and required
+   CI completion are tracked in the PR before handoff. Production deployment
+   and measured rollout timing remain outside this implementation plan.
 
 ## Decisions
 
@@ -83,7 +85,12 @@ assistant prompt, provider input, or user action is intended.
 - Cloudflare typecheck passed.
 - Complexity diff passed: maximum 5 unchanged, no hotspots above 20.
 - Documentation drift passed.
-- Changelog tests and Web typecheck are required before final candidate review.
+- Changelog archive: 10 tests passed; Web typecheck passed.
+- Documentation gardening passed with zero issues.
+- The documented app-directory changelog test command found no tests; the
+  repository-root invocation passed after fragment generation. Existing Frog
+  entries already track this discovery-path problem; no duplicate was created.
 - Broad verification and final ReviewGPT belong to the exact pushed PR head.
 - Actual native rollout duration and hosted checkpoint/recovery observation
   remain post-deployment evidence; deployment is outside this task.
+Completed: 2026-09-13
