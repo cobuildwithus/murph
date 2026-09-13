@@ -3966,13 +3966,31 @@ Once the initial source hash finishes, the deferred result and
 log retain the existing numeric source file-count and byte-total summary; before
 then both remain zero.
 
-These additions reuse `Date.now()` and the existing single phase log. They add
-no database or provider call, telemetry backend, metric owner, sampling system,
-or retention change, and only update an in-memory closed step marker at the
-existing stage boundaries. The event never includes paths, filenames, source
-hashes, content, messages, prompts, transcripts, health values, member or
-workspace identifiers, credentials, provider payloads, raw errors, or
-distinctive private scenarios.
+When a source operation spans the effective deadline, the timeout result also
+carries optional `sourceReadAtDeadline: { step, elapsedMs }`. The same done event
+adds `details.browserVaultRefreshSourceReadStep` and
+`details.browserVaultRefreshSourceReadStepElapsedMs`. The closed source labels
+are `canonical_source_read` (`readVaultSourceStrict`), `read_model_construction`
+(`createVaultReadModel`), `personal_pattern_vocabulary_read`, `metric_projection`
+(`buildMetricProjection`), and `default_entity_projection`. Source elapsed time
+is a bounded, finite, non-negative integer measured through the first operation
+boundary at or after the deadline, or through timeout observation while active.
+The effective deadline includes an earlier caller deadline, not just the
+configured timeout. A synchronous overrun is retained even if later operations
+finish before the timer runs; this attribution need not equal the broad step
+current when the timer fires. Gaps and cancellation yields have no active source
+operation and are not attributed to a later operation. Missing observation or
+a deadline outside source operations omits both fields, not a guessed label.
+
+`readBrowserVaultReplicaSource` exposes synchronous, best-effort `onSourceStep`
+boundaries through `@murphai/query/browser-replica-server`; null marks completion.
+Throwing observers do not change results or cancellation. Timing remains owned
+by the existing refresh cancellation owner using `Date.now()` and the single
+phase log. No await, I/O, timer, deadline enforcement, retry, publication,
+selection policy, persisted state, or monitoring owner is added or changed.
+The event never includes paths, filenames, source hashes, content, messages,
+prompts, transcripts, health values, member or workspace identifiers,
+credentials, provider payloads, raw errors, or distinctive private scenarios.
 
 A later bounded post-deploy natural-traffic query filters
 `details.browserVaultRefreshStatus = deferred_timeout`, aggregates counts and
