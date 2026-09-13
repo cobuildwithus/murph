@@ -1,6 +1,6 @@
 # Distinguish slow Browser Vault source-read stages
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -94,5 +94,25 @@ refresh results, foreground priority, cancellation, and publication authority.
   applied source/test/owner-doc hunks reverse-check against ReviewGPT's patch.
 
 - Both affected package builds pass, including emitted public query declarations
-  and the consuming runtime package. Candidate review is Ready; final external
-  review and exact-head CI remain pending.
+  and the consuming runtime package. Parent candidate and final review pass.
+
+## Completion evidence
+
+- Final ReviewGPT round 1 passes on PR #3393 at
+  `77280e17d1d1b73faca343c049b5081bb83d5465` with no qualifying Critical,
+  High, or Complexity Collapse findings. Captured model metadata verifies
+  `gpt-6-pro`; response SHA-256 is
+  `c2107fbd47f3392b9332d9ab2fecfb1f45dec02670b49b063f7ade6b7987b629`.
+  Parent final inspection agrees; no accepted findings remain.
+- The final commit closes this plan and updates its index entry only. Production
+  source, tests, and the diagnostic contract remain byte-identical to the
+  externally reviewed candidate. Explanatory closeout does not need another
+  substantive review under the review loop's documented exemption.
+- Required exact-head CI remains a merge gate. The automation's separate
+  telemetry-only release authority requires a fresh serving-baseline check,
+  canonical protected gradual deployment with all predeploy gates, deployed
+  revision and fleet verification, and a read-only natural-traffic check.
+- Production evidence has not yet established the expensive operation or
+  performance recovery. The existing automation report retains the safe query
+  and unresolved findings for follow-up; no replay or recovery is authorized.
+Completed: 2026-09-13
