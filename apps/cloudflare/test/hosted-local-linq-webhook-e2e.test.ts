@@ -515,12 +515,14 @@ describe("hosted local Linq webhook e2e", () => {
     });
     const firstGroupEvent = buildHostedLinqInboundEvent(userId, chatId, {
       eventId: `evt_group_isolation_owner_${userId}`,
+      // Unknown webhook audience must be resolved before personal admission.
+      isGroup: null,
       messageId: `msg_group_isolation_owner_${userId}`,
       text: firstGroupText,
     });
     expect(
       ((firstGroupEvent.data as { chat?: { is_group?: boolean } }).chat?.is_group),
-    ).toBe(false);
+    ).toBeUndefined();
 
     const firstGroupResponse = await postSignedLinqWebhook(firstGroupEvent);
     expect(firstGroupResponse.status).toBe(202);
@@ -641,7 +643,8 @@ describe("hosted local Linq webhook e2e", () => {
       chatId,
       {
         eventId: `evt_group_isolation_guest_${userId}`,
-        isGroup: true,
+        // The established group route must override a stale direct flag.
+        isGroup: false,
         messageId: `msg_group_isolation_guest_${userId}`,
         recipientUserId: userId,
         text: guestGroupText,
@@ -649,7 +652,7 @@ describe("hosted local Linq webhook e2e", () => {
     );
     expect(
       ((guestEvent.data as { chat?: { is_group?: boolean } }).chat?.is_group),
-    ).toBe(true);
+    ).toBe(false);
     const guestResponse = await postSignedLinqWebhook(guestEvent);
     expect(guestResponse.status).toBe(202);
     await expect(guestResponse.json()).resolves.toMatchObject({
