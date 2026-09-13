@@ -1,6 +1,6 @@
 # Memory read failure diagnostics
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -96,3 +96,4 @@ Warm old readers or a reader rollback lose specificity only, not timing/usage
 validity. No authority rollback floor or protocol migration is introduced. Parent
 owns rollout and any subsequent aggregate-only check; no production cause or
 post-deploy outcome is claimed by this patch. Leave this plan active for that handoff.
+Completed: 2026-09-13
