@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
-import { Button } from "@/src/components/ui/button";
 import { SettingsStatusLine } from "@/src/components/settings/connected-account-card";
 import { requestHostedOnboardingJson } from "./client-api";
 
@@ -161,6 +160,5 @@ export function HostedTelegramProofButton({ purpose, onProof, onErrorChange, lab
       icon={<TelegramIcon className="h-5 w-5" />}>
       {label}
     </HostedInlineAuthButton>}
-    {pending && !error ? <Button type="button" variant="ghost" size="lg" className="w-full text-muted-foreground hover:text-foreground" onClick={retry}>Cancel</Button> : null}
   </div>;
 }

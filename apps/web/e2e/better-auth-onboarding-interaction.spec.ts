@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/settings/login-methods/telegram/start", (route) => route.fulfill({ json: { ok: true, nonce: "n".repeat(43), clientId: "123456789" } }));
 });
 
-test("an early Telegram click reuses its window after preparation outlasts the click gesture", async ({ page, context }) => {
+test("an early Telegram click reuses its window after preparation outlasts the click gesture", async ({ page, context }, testInfo) => {
   let release!: () => void;
   const prepared = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/auth/telegram/start", async (route) => {
@@ -45,7 +45,11 @@ test("an early Telegram click reuses its window after preparation outlasts the c
   await expect(popup).toHaveURL(/\/telegram-browser-proof$/u);
   expect(context.pages()).toHaveLength(2);
   await expect(telegram.locator(".animate-spin")).toHaveCount(0);
-  await phone.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(phone.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
+  await phone.screenshot({ path: testInfo.outputPath("telegram-pending.png") });
+  await page.route("**/api/auth/otp/send", (route) => route.fulfill({ json: { ok: true } }));
+  await phone.locator('input[type="tel"]').fill("2025550195");
+  await phone.getByRole("button", { name: "Send verification code" }).click();
   await expect.poll(() => popup.isClosed()).toBe(true);
 });
 
@@ -86,6 +90,20 @@ test("real messaging setup renders immediately while settings are delayed at des
   release();
   await expect.poll(() => sends).toBe(1);
   await expect(setup.getByText(/We texted the latest code/u)).toBeVisible();
+  await expect(setup.getByText("Connect Telegram", { exact: true })).toHaveCount(0);
+  await expect(setup.getByText("OR", { exact: true })).toHaveCount(0);
+  await setup.screenshot({ path: testInfo.outputPath("phone-verification.png") });
+  await setup.getByRole("button", { name: "Use a different number" }).click();
+  await expect(setup.getByText("Connect Telegram", { exact: true })).toBeVisible();
+  await expect(setup.getByText("OR", { exact: true })).toBeVisible();
+  await page.route("**/api/settings/login-methods/otp/verify", (route) => route.fulfill({ json: { ok: true } }));
+  await setup.getByRole("button", { name: "Send verification code" }).click();
+  await setup.locator('input[autocomplete="one-time-code"]').fill("123456");
+  await expect(setup.locator("[inert]")).toHaveCount(1);
+  await expect(setup.getByText("Your account is updated.")).toHaveCount(0);
+  await expect(setup.getByRole("button", { name: "Done", exact: true })).toHaveCount(0);
+  await expect(setup.locator('input[autocomplete="one-time-code"]')).toBeVisible();
+  await setup.screenshot({ path: testInfo.outputPath("phone-verified.png") });
   await expect(setup.getByText("Set up a passkey")).toHaveCount(0);
 
 });

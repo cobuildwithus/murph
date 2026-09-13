@@ -41,14 +41,14 @@ test("opens synchronously from a click with the server nonce and forwards only t
 });
 
 test("credential changes start a distinct purpose and cancellation cannot forward a late token", async () => {
-  await render("credential");
+  const view = await render("credential");
   expect(mocks.request).toHaveBeenCalledWith(expect.objectContaining({ url: "/api/settings/login-methods/telegram/start" }));
   await click("Continue with Telegram");
-  await click("Cancel");
+  await view.rerender(createElement("button", null, "Closed"));
   expect(mocks.close).toHaveBeenCalledOnce();
   await finish({ id_token: "late-synthetic-token" });
   expect(mocks.proof).not.toHaveBeenCalled();
-  expect(mocks.request).toHaveBeenCalledTimes(2);
+  expect(mocks.request).toHaveBeenCalledOnce();
 });
 
 test("provider cancellation permits a fresh attempt and never claims login", async () => {
@@ -145,7 +145,7 @@ test("an early click reserves the provider window and continues once without a s
   expect(popup.close).toHaveBeenCalledOnce();
 });
 
-test.each(["cancel", "unmount", "close"])("%s during preparation cannot open a late provider window", async (action) => {
+test.each(["unmount", "close"])("%s during preparation cannot open a late provider window", async (action) => {
   let resolve!: (value: unknown) => void;
   mocks.request.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
   const view = await render();
@@ -154,7 +154,6 @@ test.each(["cancel", "unmount", "close"])("%s during preparation cannot open a l
   Object.defineProperty(popup, "closed", { value: false, writable: true, configurable: true });
   vi.spyOn(view.window, "open").mockReturnValue(popup);
   await click("Continue with Telegram");
-  if (action === "cancel") await click("Cancel");
   if (action === "unmount") await view.rerender(createElement("button", null, "Closed"));
   if (action === "close") popup.closed = true;
   await act(async () => { resolve({ ok: true, nonce: "n".repeat(43), clientId: "123456789" }); });

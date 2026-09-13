@@ -24,12 +24,13 @@ function allowsInitialMessagingSetup(state: MethodResponse | null, method: Hoste
     && !state.requiresLogin && state.initialMessagingSetupAllowed === true;
 }
 
-export function HostedLoginMethodEditor({ method, operation, onOpenChange, onSaved, presentation = "dialog" }: {
+export function HostedLoginMethodEditor({ method, operation, onOpenChange, onSaved, onActiveChange, presentation = "dialog" }: {
   presentation?: "dialog" | "inline";
   method: HostedCredentialChange["method"];
   operation: HostedCredentialChange["operation"];
   onOpenChange: (open: boolean) => void;
   onSaved?: () => void;
+  onActiveChange?: (active: boolean) => void;
 }) {
   const router = useRouter();
   const { openAuthDialog } = useAuth();
@@ -51,6 +52,7 @@ export function HostedLoginMethodEditor({ method, operation, onOpenChange, onSav
   const label = method === "telegram" ? "Telegram" : method;
   const needsInitialPasskey = initialPasskeyNeeded && !initialMessagingSetup;
   const verifyLabel = initialMessagingSetup ? "Verify phone" : "Approve and save";
+  const showSavedConfirmation = saved && presentation === "dialog";
 
   useEffect(() => {
     const controller = new AbortController();
@@ -117,7 +119,7 @@ export function HostedLoginMethodEditor({ method, operation, onOpenChange, onSav
 
   function renderContent() {
     let content;
-    if (saved) content = <>
+    if (showSavedConfirmation) content = <>
       <SettingsStatusLine message={operation === "remove" ? `${label === "Telegram" ? label : "Your " + label} was removed.` : "Your account is updated."} tone="success" />
       <Button type="button" onClick={() => onOpenChange(false)}>Done</Button>
     </>;
@@ -151,7 +153,7 @@ export function HostedLoginMethodEditor({ method, operation, onOpenChange, onSav
       if (prepared.challenge === null) await commit(prepared.change, { idToken }, signal);
       else setTelegram({ ...prepared, idToken });
     }} />;
-    else content = <HostedContactCodeForm method={method} autoSubmit={initialMessagingSetup} verifyLabel={verifyLabel}
+    else content = <HostedContactCodeForm method={method} onActiveChange={onActiveChange} autoSubmit={initialMessagingSetup} verifyLabel={verifyLabel}
       onSend={async (value, signal) => {
         await readActionMethods(signal);
         const result = await requestHostedOnboardingJson<{ ok: true }>({ url: "/api/settings/login-methods/otp/send", payload: { change: change(value) }, signal });
@@ -162,7 +164,7 @@ export function HostedLoginMethodEditor({ method, operation, onOpenChange, onSav
     return content;
   }
 
-  const body = <div className="flex flex-col gap-4">{renderContent()}{error && !saved ? <>
+  const body = <div className="flex flex-col gap-4" inert={presentation === "inline" && saved}>{renderContent()}{error && !saved ? <>
     <SettingsStatusLine message={error} tone="destructive" />
     {!methods ? <Button type="button" variant="outline" onClick={() => { setError(null); setAttempt((value) => value + 1); }}>Try again</Button> : null}
   </> : null}</div>;

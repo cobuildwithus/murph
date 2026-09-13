@@ -170,9 +170,10 @@ export function JoinInviteSignOutButtonIsland({
 }
 
 export function JoinInviteMessagingSetupIsland() {
+  const [phoneActive, setPhoneActive] = useState(false);
   return <HostedContactChannelChoice
-    phone={<HostedLoginMethodEditor method="phone" operation="set" presentation="inline" onOpenChange={() => {}} />}
-    telegram={<HostedLoginMethodEditor method="telegram" operation="set" presentation="inline" onOpenChange={() => {}} />}
+    phone={<HostedLoginMethodEditor method="phone" operation="set" presentation="inline" onOpenChange={() => {}} onActiveChange={setPhoneActive} />}
+    telegram={phoneActive ? null : <HostedLoginMethodEditor method="telegram" operation="set" presentation="inline" onOpenChange={() => {}} />}
   />;
 }
 

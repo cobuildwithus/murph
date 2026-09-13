@@ -246,6 +246,11 @@ test("inline phone setup renders the actual input with no dialog heading or inte
   expect(rendered.container.textContent).not.toContain("Add phone");
   expect(rendered.container.textContent).not.toContain("Connect phone");
   expect(rendered.container.textContent).not.toContain("Checking your login methods");
+  await act(async () => { await mocks.contact!.onVerify("+12025550195", "123456", new AbortController().signal); });
+  expect(mocks.refresh).toHaveBeenCalledOnce();
+  expect(rendered.container.querySelector('input[type="tel"]')).not.toBeNull();
+  expect(rendered.container.textContent).not.toContain("Your account is updated.");
+  expect(rendered.container.querySelector("[inert]")).not.toBeNull();
   await rendered.cleanup();
 });
 

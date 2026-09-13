@@ -649,3 +649,11 @@ activation and the broader live-auth qualification remain incomplete.
 - Cause: inline setup reused the Settings reader gate, and its client-only import plus empty pending branch withheld both controls until two requests completed. The earlier design study composed presentation controls separately and did not exercise that gate.
 - Correction: render the actual inline editor on the server and while settings load; actions await the existing reader result before using the unchanged mutation/approval endpoints. Bound the background reads and retain retry on failure. The design study now mounts the production onboarding island directly.
 - Proof: 37 credential/join client cases pass, including delayed reads and unmount before proof forwarding. Two Chromium journeys pass; the composed setup has controls in server HTML and at desktop/mobile widths before the settings reply, and an early send continues once after the reply. Web typecheck, lint, and complexity pass. Authentication rules and persistence are unchanged; this frontend-only loading correction uses the final-review exemption, retaining round 7 as the sensitive-rule review.
+
+### Onboarding action continuity
+
+- Outcome: keep the selected channel flow stable through provider verification and onward navigation.
+- Reaches: Telegram popup entry, phone code entry and return to channel selection, and successful inline connection. Settings retains its completion acknowledgement.
+- Proof: focused client tests and the composed onboarding browser journey cover popup cleanup, channel-choice visibility, and retaining the verified form during navigation. No server authorization or credential rules change.
+- Changelog: covered by the existing unshipped `sign-in-and-approval-recovery` entry.
+- Product UX: Ready. Fifty focused client cases and two Chromium journeys pass; pending Telegram and post-verification phone screenshots inspected. Typecheck, ESLint and complexity pass; no new complexity hotspots. Frontend-only completion exemption applies.
