@@ -52,7 +52,6 @@ export function cliTimingFailureStage(value: unknown): CliFailureTiming["stage"]
 // New names require consumer-first admission here; until then they become other.
 // The CLI test compares this vocabulary to the real registered command tree.
 const commandGroups: Readonly<Record<string, string>> = {
-  "age": "calculate|calculate-bundle|evidence|inputs|model-cards|preview|preview-view|report|scaffold",
   "allergy": "import-json|list|save|scaffold|show",
   "assertion": "import-json|payload-schema|save|scaffold",
   "assistant": "ask|chat|deliver|doctor|onboarding complete|onboarding reopen|onboarding resume-context|onboarding status|run|self-target clear|self-target list|self-target set|self-target show|session list|session show|status|stop",

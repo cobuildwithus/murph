@@ -33,9 +33,6 @@ const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([
   'requestId',
   'vault',
 ])
-const assistantCliSurfaceBootstrapIgnoredCommandFamilies = new Set([
-  'age',
-])
 const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
   'assistant ask',
   'assistant chat',
@@ -330,9 +327,6 @@ function normalizeAssistantCliManifestCommands(
     if (
       name.length === 0 ||
       seenCommandNames.has(name) ||
-      assistantCliSurfaceBootstrapIgnoredCommandFamilies.has(
-        readAssistantCliCommandFamily(name),
-      ) ||
       assistantCliSurfaceBootstrapIgnoredCommandNames.has(name) ||
       assistantCliSurfaceRetiredCommandNames.has(name)
     ) {
