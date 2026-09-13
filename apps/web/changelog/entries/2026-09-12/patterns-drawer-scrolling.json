@@ -9,7 +9,7 @@
     "summary": "Pattern details scroll without a blank area covering the comparison evidence.",
     "details": "The result heading and close button stay visible as you scroll through comparison dates and supporting details.",
     "relevanceTags": ["patterns"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [3386],
     "tryIt": { "label": "View patterns", "href": "/patterns" }
   }
 }
