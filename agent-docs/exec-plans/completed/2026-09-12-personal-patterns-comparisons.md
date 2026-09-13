@@ -1,8 +1,8 @@
 # Improve comparable evidence behind Personal Patterns
 
-Status: active
+Status: completed
 Created: 2026-09-12
-Updated: 2026-09-12
+Updated: 2026-09-13
 
 ## Goal and invariants
 
@@ -159,3 +159,26 @@ included in the next full review and focused source/timeout verification.
 Post-reconciliation proof passes: 24 source-manifest/Journal-source/Patterns tests,
 31 hosted replica tests including operation-timeout attribution, and query plus
 assistant-runtime typechecks. Complexity and task-diff privacy checks pass.
+
+
+## Final review and closure
+
+Round 3 returned PASS on `539746d09c05d6cd5846a147d37328bce8bffd85`.
+The full-snapshot review independently confirmed both earlier findings resolved,
+including the source diagnostic reconciliation; no accepted findings remain.
+Exact-head attachment, ancestry, response hash, completion marker, and gpt-6-pro
+model evidence were validated. The substantive review took more than 6 minutes.
+Response SHA256: `3c304c06978a0086e748bc0761e9c1742f8e8bbcebf8bdd5cb806a73b95ebcec`.
+The reviewer inspected persisted integration proof and independently ran the
+matcher oracle; local execution of the composed regression suites is recorded
+above. No rendered UI claim is made by the external reviewer.
+
+Parent final review is complete: the original comparable-evidence outcome remains
+intact, the Journal correction restores the existing visibility boundary, and
+reconciliation adds no state or replacement machinery. All three required GitHub
+checks passed on the reviewed source head. Broader CI was still running without
+failures at closure; final-head status remains a PR completion gate and will be
+recorded in the PR evidence. This final commit only archives explanatory evidence
+and changes no production behavior, so the resolved review remains applicable.
+No production mutation, merge, or deployment is included in this task.
+Completed: 2026-09-13
