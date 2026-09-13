@@ -113,10 +113,10 @@ export function HostedTelegramProofButton({ purpose, onProof, label = "Continue 
   return <div className="flex flex-col gap-3">
     {error ? <>
       <SettingsStatusLine message={error} tone="destructive" />
-      <HostedInlineAuthButton icon={<TelegramIcon className="h-5 w-5" />} onClick={retry}>Try Telegram again</HostedInlineAuthButton>
+      <HostedInlineAuthButton icon={<TelegramIcon className="h-5 w-5" />} onClick={retry}>Try again</HostedInlineAuthButton>
     </> : <HostedInlineAuthButton busy={!ready || pending} disabled={!ready || pending} onClick={open}
       icon={!ready || pending ? <Spinner aria-hidden="true" /> : <TelegramIcon className="h-5 w-5" />}>
-      {pending ? "Waiting for Telegram..." : label}
+      {label}
     </HostedInlineAuthButton>}
     {pending && !error ? <Button type="button" variant="ghost" size="lg" className="w-full text-muted-foreground hover:text-foreground" onClick={retry}>Cancel</Button> : null}
   </div>;

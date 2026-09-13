@@ -57,7 +57,7 @@ test("provider cancellation permits a fresh attempt and never claims login", asy
   await finish({ error: "popup_closed" });
   expect(mocks.proof).not.toHaveBeenCalled();
   expect(rendered!.container.textContent).toContain("was canceled");
-  await click("Try Telegram again");
+  await click("Try again");
   expect(mocks.request).toHaveBeenCalledTimes(2);
   expect(rendered!.container.textContent).toContain("Continue with Telegram");
 });
@@ -71,7 +71,7 @@ test("a blocked popup has a bounded recovery state", async () => {
   expect(mocks.close).toHaveBeenCalledOnce();
   await finish({ id_token: "late-synthetic-token" });
   expect(mocks.proof).not.toHaveBeenCalled();
-  await click("Try Telegram again");
+  await click("Try again");
   expect(rendered!.container.textContent).toContain("Continue with Telegram");
 });
 
@@ -89,7 +89,7 @@ test("server preparation failure is retryable without opening the provider", asy
   await render();
   expect(mocks.auth).not.toHaveBeenCalled();
   expect(rendered!.container.textContent).toContain("temporarily unavailable");
-  await click("Try Telegram again");
+  await click("Try again");
   await click("Continue with Telegram");
   expect(mocks.auth).toHaveBeenCalledOnce();
 });
