@@ -23,6 +23,7 @@ import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { brotliCompressSync } from 'node:zlib'
 
 import {
   MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
@@ -110,7 +111,7 @@ import {
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { upsertKnowledgePage } from '../src/knowledge/service.ts'
+import { getKnowledgePage, upsertKnowledgePage } from '../src/knowledge/service.ts'
 import {
   markAssistantContextSnapshotDirty,
   readAssistantContextSnapshotPrompt,
@@ -14645,7 +14646,7 @@ describeRealCodex(
 })
 
 describeRealCodex('real Codex research scout ongoing interest e2e', () => {
-  it('shares relevant learning without an open decision and suppresses repeated research', async () => {
+  it('saves research with compressed ledger sources and suppresses repeated research', async () => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.automationId === MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -14660,6 +14661,24 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
           await writeFile(path.join(binDirectory, 'calls.jsonl'), '')
           await writeFile(path.join(binDirectory, 'retrievals.jsonl'), '')
           const finding = 'A synthetic randomized human study found that resistance training with one arm also improved strength in the untrained arm. This suggests some strength adaptation transfers through the nervous system rather than being confined to the practiced muscles. It does not establish injury prevention or a need to change training.'
+          await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+          const sourcePath = 'ledger/events/2024/2024-01.jsonl'
+          const sourceAbsolutePath = path.join(workingDirectory, sourcePath)
+          await mkdir(path.dirname(sourceAbsolutePath), { recursive: true })
+          await writeFile(sourceAbsolutePath, '{"synthetic":true}\n')
+          await upsertKnowledgePage({
+            vault: workingDirectory,
+            slug: 'weekly-health-research-scout',
+            title: 'Weekly health research scout',
+            body: repeated ? finding : 'No previous research findings.',
+            sourcePaths: [sourcePath],
+          })
+          await writeFile(`${sourceAbsolutePath}.br`, brotliCompressSync('{"synthetic":true}\n'))
+          await rm(sourceAbsolutePath)
+          const originalPage = await getKnowledgePage({
+            vault: workingDirectory,
+            slug: 'weekly-health-research-scout',
+          })
           const context = {
             summary: 'The member has an ongoing interest in resistance training and how strength develops, stated three months ago and never withdrawn. There is no current experiment, symptom, recent change, open question, or decision. They enjoy explanations and do not want extra tasks. No recent unsolicited health note is waiting for a reply.',
           }
@@ -14679,7 +14698,6 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
               publishedDate: '2026-07-01',
               text: finding,
             }] } }] },
-            ledger: { page: { body: repeated ? finding : '', markdown: repeated ? finding : '' } },
           }
           await writeFile(path.join(binDirectory, 'fixture.json'), JSON.stringify(fixture))
           await writeFile(path.join(binDirectory, 'vault-cli'), [
@@ -14702,17 +14720,15 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
             "  fs.appendFileSync(path.join(__dirname, 'retrievals.jsonl'), JSON.stringify(parsed.data) + String.fromCharCode(10));",
             "  fs.writeFileSync(path.join(__dirname, 'payload.json'), body);",
             '  console.log(JSON.stringify(fixture.research));',
-            "} else if (args[0] === 'knowledge' && args[1] === 'show') console.log(JSON.stringify(fixture.ledger));",
-            "else if (args[0] === 'knowledge' && args[1] === 'append-section') {",
-            "  const body = option('--body');",
-            "  if (!body || !args[3]) { console.error('Expected append-section <slug> <heading> --body <markdown>'); process.exit(64); }",
-            "  fixture.ledger.page.body += String.fromCharCode(10) + args[3] + String.fromCharCode(10) + body;",
-            '  fixture.ledger.page.markdown = fixture.ledger.page.body;',
-            "  fs.appendFileSync(path.join(__dirname, 'writes.jsonl'), JSON.stringify({ slug: args[2], body }) + String.fromCharCode(10));",
-            "  fs.writeFileSync(path.join(__dirname, 'fixture.json'), JSON.stringify(fixture));",
-            '  console.log(JSON.stringify(fixture.ledger));',
+            "} else if (args[0] === 'knowledge') {",
+            "  const { spawnSync } = require('node:child_process');",
+            "  const result = spawnSync(process.execPath, ['--import', process.env.RESEARCH_FIXTURE_LOADER, process.env.RESEARCH_FIXTURE_CLI, ...args, '--vault', path.dirname(__dirname)], { encoding: 'utf8', env: process.env });",
+            "  process.stdout.write(result.stdout ?? '');",
+            "  process.stderr.write(result.stderr ?? '');",
+            "  if (result.error || result.status !== 0) process.exit(result.status ?? 1);",
+            "  if (args[1] === 'append-section') fs.appendFileSync(path.join(__dirname, 'writes.jsonl'), JSON.stringify({ slug: args[2] }) + String.fromCharCode(10));",
             '}',
-            "else if ((args[0] === 'knowledge' && ['index', 'show-index', 'list'].includes(args[1])) || ['goal', 'memory', 'list', 'search', 'experiment', 'wearables'].includes(args[0])) console.log(JSON.stringify(fixture.context));",
+            "else if (['goal', 'memory', 'list', 'search', 'experiment', 'wearables'].includes(args[0])) console.log(JSON.stringify(fixture.context));",
             "else { console.error('Unsupported synthetic command'); process.exit(64); }",
           ].join('\n'), { mode: 0o700 })
           const result = await executeRealCodexAppServerTurn({
@@ -14729,6 +14745,9 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
               ...config.env,
               EXA_API_KEY: 'synthetic-fixture-only',
               RESEARCH_FIXTURE_RESOLVER: fileURLToPath(new URL('../package.json', import.meta.url)),
+              RESEARCH_FIXTURE_LOADER: HABITAT_VOICE_E2E_TSX_LOADER,
+              RESEARCH_FIXTURE_CLI: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+              TSX_TSCONFIG_PATH: path.resolve(path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
             },
             model: config.model,
             modelProvider: config.modelProvider,
@@ -14753,7 +14772,7 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
             .trim().split('\n').filter(Boolean)
           const writesPath = path.join(binDirectory, 'writes.jsonl')
           const writes = existsSync(writesPath)
-            ? (await readFile(writesPath, 'utf8')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as { slug: string; body: string })
+            ? (await readFile(writesPath, 'utf8')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as { slug: string })
             : []
           console.info('[research-scout effects]', JSON.stringify({
             cliCallCount: calls.length, retrievalCount: retrievals.length, writeCount: writes.length,
@@ -14762,9 +14781,15 @@ describeRealCodex('real Codex research scout ongoing interest e2e', () => {
           const payload = JSON.parse(await readFile(path.join(binDirectory, 'payload.json'), 'utf8'))
           expect(researchScoutBatchPayloadSchema.safeParse(payload)).toMatchObject({ success: true })
           expect(writes).toHaveLength(repeated ? 0 : 1)
+          const saved = await getKnowledgePage({ vault: workingDirectory, slug: 'weekly-health-research-scout' })
+          expect(saved.page.sourcePaths).toContain(sourcePath)
+          expect(existsSync(sourceAbsolutePath)).toBe(false)
           if (!repeated) {
             expect(writes[0]?.slug).toBe('weekly-health-research-scout')
-            expect(writes[0]?.body).toContain('https://example.org/synthetic-resistance-trial')
+            expect(saved.page.body).toContain('https://example.org/synthetic-resistance-trial')
+            expect(saved.page.body).toContain('No previous research findings.')
+          } else {
+            expect(saved.page.markdown).toBe(originalPage.page.markdown)
           }
           const finishCalls = actions.filter((action) => action.kind === 'dynamic'
             && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
