@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { compileToolInputSchema } from './support/tool-input-schema-validation.ts'
 import { automationDeviceActivitySourceValues } from '@murphai/contracts'
 
+import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
+import { buildAssistantSystemPromptLayers } from '../src/assistant/system-prompt.ts'
+
 import {
   MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
   MURPH_AUTOMATION_TOOL,
@@ -116,6 +119,79 @@ describe('automation model input schema', () => {
     expect([...new Set(cases.filter((entry) => entry.accepted).map((entry) => entry.args.action))].sort())
       .toEqual(actions.sort())
   })
+
+  it.each(['direct', 'group'] as const)(
+    'composes finite weekday guidance into both save and patch schedules (%s)',
+    (conversationScope) => {
+      const tools = resolveMurphDynamicTools({
+        automationAvailable: true,
+        groupSharedReadAvailable: conversationScope === 'group',
+        progressUpdateMode: conversationScope,
+      })
+      const tool = tools.find((candidate) => candidate.name === MURPH_AUTOMATION_TOOL.name)
+      expect(tool).toBe(MURPH_AUTOMATION_TOOL)
+      if (!tool) throw new Error('Expected the composed automation contract.')
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null,
+        assistantHostedAutomationAvailable: true,
+        assistantProgressUpdatesAvailable: false,
+        channel: 'linq',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope,
+        currentInstant: '2032-04-09T21:00:00.000Z',
+        currentLocalDate: '2032-04-09',
+        currentTimeZone: 'America/New_York',
+        hostedRuntime: true,
+        modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false,
+        ordinaryInboundTurn: true,
+      })
+      expect(layers.stableRouteCapabilityPrompt).toContain('murph.automation')
+      const guidance = ['save', 'patch'].map((action) => {
+        const properties = asObject(actionContract(tool.inputSchema, action).properties)
+        expect(properties).not.toHaveProperty('activeFrom')
+        return asObject(properties.schedule).description
+      })
+      expect(guidance[0]).toBe(guidance[1])
+      for (const description of guidance) {
+        expect(description).toContain('day-of-month/day-of-week OR semantics')
+        expect(description).toContain('either match runs, not their intersection (AND)')
+        expect(description).toContain('"<minute> <hour> * * 1-5"')
+        expect(description).toContain('wildcard day-of-month and month')
+        expect(description).toContain('activeUntil for a finite end cutoff instead of cron date restrictions')
+        expect(description).toContain('preserve the existing activeUntil unless the user changes it')
+        expect(description).toContain('Intentional OR schedules remain valid')
+        expect(description).toContain('exclusive end boundary, not a start date')
+        expect(description).toContain('existing supported mechanism or explain the limitation')
+        expect(description).toContain('never invent activeFrom or start early')
+      }
+      // The shared schedule description owns this guidance. Neither the generic
+      // tool prose nor the route prompts should restate it or contradict it.
+      expect(collectKeys(tool.inputSchema, 'description').filter((value) => value === guidance[0]))
+        .toHaveLength(2)
+      const composedInstructions = [
+        tool.description, layers.staticCacheableCorePrompt,
+        layers.stableRouteCapabilityPrompt, layers.threadContextPrompt,
+        layers.dynamicTurnContextPrompt,
+      ].join('\n')
+      expect(composedInstructions).not.toContain(guidance[0])
+      expect(composedInstructions).not.toMatch(/day-of-month.{0,80}(?:AND semantics|must both match)/iu)
+      expect(composedInstructions).not.toMatch(/(?:use|set|pass) activeFrom/iu)
+    },
+  )
+
+  it.each(['save', 'patch'] as const)(
+    'continues admitting intentional cron OR schedules on %s',
+    (action) => {
+      const schedule = { kind: 'cron', expression: '20 16 9-19 4 1-5', timeZone: 'America/New_York' }
+      const args = action === 'save'
+        ? { action, title: 'Movement cue', instructions: 'Stand and stretch.', schedule, activeUntil: '2032-04-20T04:00:00.000Z' }
+        : { action, lookup: 'automation_synthetic', expectedUpdatedAt: '2032-04-09T21:00:00.000Z', schedule }
+      expect(advertisesInput(args)).toBe(true)
+      expect(readAutomationDynamicToolRequest({ arguments: args, tool: MURPH_AUTOMATION_TOOL.name }))
+        .toMatchObject({ kind: 'automation', request: args })
+    },
+  )
 
   it('advertises the canonical device source enum in runtime and model schemas', () => {
     for (const schema of [MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA, MURPH_AUTOMATION_TOOL.inputSchema]) {

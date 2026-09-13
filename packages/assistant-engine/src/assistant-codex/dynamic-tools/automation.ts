@@ -207,7 +207,9 @@ const automationDynamicToolScheduleSchema = z.union([
   automationScheduleDailyLocalSchema,
   automationScheduleDeviceActivitySchema,
   automationLocalAtScheduleSchema,
-])
+]).describe(
+  'Cron uses standard day-of-month/day-of-week OR semantics: when both are restricted, either match runs, not their intersection (AND). For weekday-only reminders, use "<minute> <hour> * * 1-5" with wildcard day-of-month and month, and activeUntil for a finite end cutoff instead of cron date restrictions. When patching to weekdays, replace date-restricted fields with those wildcards and preserve the existing activeUntil unless the user changes it. Intentional OR schedules remain valid. activeUntil is an exclusive end boundary, not a start date. For a future start, use an existing supported mechanism or explain the limitation; never invent activeFrom or start early.',
+)
 
 function validateAutomationSupportOwnershipPair(
   value: {

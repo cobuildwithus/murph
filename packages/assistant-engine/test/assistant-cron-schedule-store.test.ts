@@ -168,6 +168,27 @@ describe('assistant cron schedule helpers', () => {
     )
   })
 
+  it('preserves intentional day-of-month/day-of-week OR while wildcard dates exclude weekends', () => {
+    const timeZone = 'America/New_York'
+    const afterFriday = new Date('2032-04-09T21:00:00.000Z')
+    const intentionalOr = '20 16 9-19 4 1-5'
+    // Saturday qualifies through day-of-month alone, even with weekdays restricted.
+    expect(findNextAssistantCronOccurrence(intentionalOr, afterFriday, timeZone))
+      .toBe('2032-04-10T20:20:00.000Z')
+    // Tuesday outside 9-19 qualifies through day-of-week alone.
+    expect(findNextAssistantCronOccurrence(intentionalOr, new Date('2032-04-19T21:00:00.000Z'), timeZone))
+      .toBe('2032-04-20T20:20:00.000Z')
+    // The month field remains a restriction; OR does not include it.
+    expect(findNextAssistantCronOccurrence(intentionalOr, new Date('2032-04-30T21:00:00.000Z'), timeZone))
+      .toBe('2033-04-01T20:20:00.000Z')
+    expect(findNextAssistantCronOccurrence('20 16 9-19 4 *', afterFriday, timeZone))
+      .toBe('2032-04-10T20:20:00.000Z')
+    expect(findNextAssistantCronOccurrence('20 16 * * 1-5', afterFriday, timeZone))
+      .toBe('2032-04-12T20:20:00.000Z')
+    expect(findNextAssistantCronOccurrence('20 16 * * 1-5', new Date('2032-04-30T21:00:00.000Z'), timeZone))
+      .toBe('2032-05-03T20:20:00.000Z')
+  })
+
   it('computes deterministic next-run timestamps across schedule kinds', () => {
     const after = new Date('2026-04-08T08:29:30.500Z')
 

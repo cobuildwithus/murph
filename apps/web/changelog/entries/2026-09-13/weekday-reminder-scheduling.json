@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-13",
+  "order": 100,
+  "item": {
+    "id": "weekday-reminder-scheduling",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable weekday reminders",
+    "summary": "Murph handles weekday-only reminder schedules more accurately when you create or update them.",
+    "details": "A finite reminder can keep its end date while excluding weekends. This improves new setup and requested edits; existing saved schedules are not automatically rewritten.",
+    "relevanceTags": [
+      "reminders",
+      "scheduling"
+    ],
+    "sourcePullRequests": []
+  }
+}

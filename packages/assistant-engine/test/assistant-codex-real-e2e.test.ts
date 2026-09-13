@@ -15,6 +15,7 @@ import {
 } from '../src/assistant/hosted-image-completion.js'
 import { getAssistantCronAutomationInspection } from '../src/assistant/cron/inspection.js'
 import { appendAssistantCronRun } from '../src/assistant/cron/store.js'
+import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.ts'
 import { WORKFLOW_SKILL_REFERENCES } from './support/workflow-skill-policy.js'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -52,6 +53,7 @@ import {
   listAutomations,
   listWorkoutFormats,
   listWriteOperationMetadataPaths,
+  patchAutomation,
   readHabitatAspect,
   readMemoryDocument,
   readPreferencesDocument,
@@ -63,6 +65,7 @@ import {
   upsertHabitatAspect,
   upsertMemory,
   upsertRegimen,
+  type AutomationRecord,
 } from '@murphai/core'
 import {
   buildHostedExecutionGroupContextHandoffInstructions,
@@ -249,6 +252,7 @@ import {
   listCanonicalAssistantCronRecords,
   projectCanonicalAssistantCronJob,
   resolveCanonicalAssistantCronJobId,
+  resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection,
 } from '../src/assistant/cron/canonical-jobs.ts'
 import {
   createAssistantCronCanonicalRuntimeRecord,
@@ -28270,6 +28274,266 @@ describe('recurring meal-tracking setup ordering matcher', () => {
     expect(order.automaticIndex).toBeGreaterThan(order.manualIndex)
     expect(order.automaticLeads).toBe(false)
   })
+})
+
+describeRealCodex('real Codex finite weekday automation e2e', () => {
+  it.each([
+    { scenario: 'creates a finite weekday movement reminder in direct chat', scope: 'direct', action: 'save' },
+    { scenario: 'patches a date-restricted daily movement reminder to weekdays in group chat', scope: 'group', action: 'patch' },
+  ] as const)('$scenario', async ({ scenario, scope, action }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-finite-weekday-e2e-'))
+    const vaultRoot = path.join(workingDirectory, 'vault')
+    const now = new Date('2032-04-09T21:00:00.000Z') // Friday, after the requested local time.
+    const timeZone = 'America/New_York'
+    const activeUntil = '2032-04-20T04:00:00.000Z' // Exclusive: midnight starting April 20.
+    const route = {
+      channel: 'linq' as const,
+      deliveryTarget: `synthetic_movement_${scope}`,
+      identityId: null,
+      participantId: null,
+      threadId: `synthetic_movement_${scope}`,
+      threadIsDirect: scope === 'direct',
+    }
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    const forbiddenEffects: string[] = []
+    const forbidEffect = (name: string): never => {
+      forbiddenEffects.push(name)
+      throw new Error(`Unexpected synthetic journey effect: ${name}`)
+    }
+    let writes = 0
+    let inspectedUpdatedAt: string | null = null
+
+    try {
+      await initializeVault({ timezone: timeZone, vaultRoot })
+      const initial = action === 'patch' ? (await upsertAutomation({
+        activeUntil,
+        continuityPolicy: 'preserve',
+        status: 'active',
+        assistantTargetOverride: { model: 'gpt-5.6-luna' },
+        instructions: 'Remind this group to stand up and stretch.',
+        now: new Date('2032-04-08T18:00:00.000Z'),
+        route,
+        schedule: { kind: 'cron', expression: '20 16 9-19 4 *', timeZone },
+        title: 'Afternoon movement',
+        vaultRoot,
+      })).record : null
+      let current: AutomationRecord | null = initial
+      let expectedVault = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const currentSource = async () => {
+        if (!current) throw new Error('Expected a saved synthetic automation.')
+        const source = findCanonicalAssistantCronRecordInList(
+          await listCanonicalAssistantCronRecords(vaultRoot), current.automationId,
+        )
+        if (!source || source.kind !== 'automation') throw new Error('Expected the canonical automation source.')
+        return source
+      }
+      const inspection = async () => {
+        const source = await currentSource()
+        const projection = resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection(
+          source, createAssistantCronCanonicalRuntimeRecord({ jobId: source.automationId, now: now.toISOString() }), now,
+        )
+        expect(projection.verified).toBe(true)
+        return {
+          automationId: source.automationId,
+          contextReferences: source.contextReferences,
+          effectiveTimeZone: source.timeZone,
+          instructions: source.instructions,
+          lookupId: source.slug,
+          occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: projection.nextOccurrenceAt },
+          schedule: source.schedule,
+          status: source.status,
+          title: source.title,
+          updatedAt: source.updatedAt,
+        }
+      }
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null,
+        assistantHostedAutomationAvailable: true,
+        assistantProgressUpdatesAvailable: false,
+        channel: 'linq',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope,
+        currentInstant: now.toISOString(),
+        currentLocalDate: '2032-04-09',
+        currentTimeZone: timeZone,
+        hostedRuntime: true,
+        modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false,
+        ordinaryInboundTurn: true,
+      })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        configOverrides: [
+          'features.shell_tool=false', 'features.apps=false',
+          'features.multi_agent=false', 'features.multi_agent_v2=false',
+          'web_search="disabled"',
+        ],
+        developerInstructions: [
+          layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt,
+        ].join('\n\n'),
+        dynamicTools: [MURPH_AUTOMATION_TOOL],
+        env: config.env,
+        fetchImpl: async () => forbidEffect('fetch'),
+        publicInternetFetch: async () => forbidEffect('public-fetch'),
+        groupConversation: scope === 'group',
+        hostedToolContext: {
+          automationTool: {
+            request: async (request) => {
+              requests.push(request)
+              expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(expectedVault)
+              if (request.action === 'inspect') {
+                expect(action).toBe('patch')
+                expect(requests).toHaveLength(1)
+                expect(request.lookup).toBe(initial?.automationId)
+                current = await showAutomation({ automationId: request.lookup, vaultRoot })
+                if (!current) throw new Error('Expected the current synthetic record.')
+                inspectedUpdatedAt = current.updatedAt
+                return { action: 'inspect', ...await inspection(), routeBinding: 'preserved' }
+              }
+              expect(request.action).toBe(action)
+              expect(writes).toBe(0)
+              if (request.action === 'save') {
+                expect(requests).toHaveLength(1)
+                expect(current).toBeNull()
+                expect(request).not.toHaveProperty('slug')
+                expect(request).not.toHaveProperty('supportSeriesId')
+                if (typeof request.activeUntil !== 'string') throw new Error('Expected a finite cutoff.')
+                expect(Date.parse(request.activeUntil)).toBe(Date.parse(activeUntil))
+                expect(request.schedule).toMatchObject({ kind: 'cron', timeZone })
+                expect(request.instructions).toMatch(/stand|stretch/iu)
+                expect(request.assistantTargetOverride?.model).toMatch(/^gpt-5\.6-(?:luna|terra)$/u)
+                const { action: _action, ...fields } = request
+                current = (await upsertAutomation({
+                  ...fields,
+                  continuityPolicy: fields.continuityPolicy ?? 'preserve',
+                  status: fields.status ?? 'active',
+                  contextReferences: fields.contextReferences ? [...fields.contextReferences] : undefined,
+                  tags: fields.tags ? [...fields.tags] : undefined,
+                  createOnly: true,
+                  now,
+                  route,
+                  vaultRoot,
+                })).record
+              } else if (request.action === 'patch') {
+                expect(requests).toHaveLength(2)
+                expect(inspectedUpdatedAt).not.toBeNull()
+                expect(request.expectedUpdatedAt).toBe(inspectedUpdatedAt)
+                expect(request.lookup).toBe(initial?.automationId)
+                // A timing-only edit must neither clear the cutoff nor rewrite
+                // instructions, model, status, identity, or audience.
+                expect(Object.keys(request).filter((key) => key !== 'activeUntil').sort())
+                  .toEqual(['action', 'expectedUpdatedAt', 'lookup', 'schedule'])
+                if (request.activeUntil !== undefined) {
+                  expect(typeof request.activeUntil).toBe('string')
+                  expect(Date.parse(request.activeUntil ?? '')).toBe(Date.parse(activeUntil))
+                }
+                current = (await patchAutomation({
+                  lookup: request.lookup,
+                  expectedUpdatedAt: request.expectedUpdatedAt,
+                  activeUntil: request.activeUntil,
+                  schedule: request.schedule,
+                  now,
+                  vaultRoot,
+                })).record
+              } else {
+                return forbidEffect(`automation:${request.action}`)
+              }
+              writes += 1
+              expectedVault = await snapshotRealCodexCanonicalVault(vaultRoot)
+              return {
+                action: request.action, ...await inspection(), created: request.action === 'save',
+                routeBinding: request.action === 'save' ? 'current_conversation' : 'preserved',
+              }
+            },
+          },
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => ({
+            conversationId: route.threadId, recipientKey: route.deliveryTarget, returnContactKind: 'text',
+          }),
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => forbidEffect('send-vault-file'),
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          layers.dynamicTurnContextPrompt,
+          initial
+            ? `Murph, change our afternoon movement reminder (${initial.automationId}) from daily to weekdays only. Keep 4:20 PM New York time, the existing stop at midnight starting April 20, 2032, and delivery in this group. Save the timing change now.`
+            : 'Starting now, remind me here on weekdays at 4:20 PM New York time to stand up and stretch. End the reminders at midnight at the start of April 20, 2032. Save it now.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[finite-weekday-automation] ${JSON.stringify({ scenario, reply })}\n`)
+      const expectedActions = action === 'save' ? ['save'] : ['inspect', 'patch']
+      expect(requests.map((request) => request.action)).toEqual(expectedActions)
+      expect(writes).toBe(1)
+      const attempts = readDynamicToolAttempts(result.jsonEvents)
+      expect(attempts.map((attempt) => [attempt.tool, attempt.argumentsValue.action]))
+        .toEqual(expectedActions.map((value) => [MURPH_AUTOMATION_TOOL.name, value]))
+      if (initial) expect(attempts[1]?.argumentsValue.expectedUpdatedAt).toBe(initial.updatedAt)
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(actions.filter((entry) => entry.kind === 'command')).toEqual([])
+      expect(actions.filter((entry) => entry.kind === 'dynamic')).toMatchObject(
+        expectedActions.map(() => ({ tool: MURPH_AUTOMATION_TOOL.name, success: true })),
+      )
+      expect(forbiddenEffects).toEqual([])
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(result.responseMedia ?? []).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(expectedVault)
+      const records = await listAutomations({ vaultRoot })
+      expect(records.count).toBe(1)
+      const source = await currentSource()
+      const stored = await showAutomation({ automationId: source.automationId, vaultRoot })
+      expect(stored).toMatchObject({ route, status: 'active', updatedAt: now.toISOString() })
+      expect(Date.parse(stored?.activeUntil ?? '')).toBe(Date.parse(activeUntil))
+      if (initial) {
+        expect(Date.parse(stored?.activeUntil ?? '')).toBe(Date.parse(initial.activeUntil ?? ''))
+        expect(stored).toMatchObject({
+          automationId: initial.automationId, slug: initial.slug, instructions: initial.instructions,
+          assistantTargetOverride: initial.assistantTargetOverride, title: initial.title,
+          contextReferences: initial.contextReferences, continuityPolicy: initial.continuityPolicy,
+          tags: initial.tags, createdAt: initial.createdAt,
+        })
+      }
+      expect(source.schedule.kind).toBe('cron')
+      if (source.schedule.kind !== 'cron') throw new Error('Expected a weekday cron recurrence.')
+      expect(source.schedule.timeZone).toBe(timeZone)
+      expect(source.schedule.expression.trim().split(/\s+/u).slice(0, 4)).toEqual(['20', '16', '*', '*'])
+      const runtime = createAssistantCronCanonicalRuntimeRecord({ jobId: source.automationId, now: now.toISOString() })
+      let after = now
+      for (const day of ['12', '13', '14', '15', '16', '19']) {
+        const occurrenceAt = `2032-04-${day}T20:20:00.000Z`
+        expect(computeAssistantCronNextRunAt(source.schedule, after)).toBe(occurrenceAt)
+        expect(resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection(source, runtime, after))
+          .toEqual({ nextOccurrenceAt: occurrenceAt, unverifiedReason: null, verified: true })
+        runtime.state.lastSucceededAt = occurrenceAt
+        after = new Date(occurrenceAt)
+      }
+      // Cron itself remains recurring; the real canonical projection, not a
+      // fixture's hand-written filter, suppresses the first post-cutoff weekday.
+      expect(computeAssistantCronNextRunAt(source.schedule, after)).toBe('2032-04-20T20:20:00.000Z')
+      for (const instant of [after, new Date(activeUntil)]) {
+        expect(resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection(source, runtime, instant))
+          .toEqual({ nextOccurrenceAt: null, unverifiedReason: null, verified: true })
+      }
+      expect(reply).toMatch(/weekdays?|mon(?:day)?\s*(?:[-–—]|through|to)\s*fri(?:day)?/iu)
+      expect(reply).toMatch(/4:20\s*p\.?m\.?|16:20/iu)
+      expect(reply).toMatch(/(?:Apr(?:il)?\.?\s+(?:19|20)|(?:19|20)\s+April|2032-04-(?:19|20))/iu)
+      expect(reply).toMatch(/saved|set|scheduled|updated|changed|done|remind/iu)
+      expect(reply).not.toMatch(/every day|including weekends|also on weekends|activeFrom|cron|day-of-month|expectedUpdatedAt|\?/iu)
+      expect(reply.split(/\s+/u).length).toBeLessThanOrEqual(90)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
 })
 
 describeRealCodex('real Codex recurring meal-tracking setup e2e', () => {
