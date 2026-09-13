@@ -990,13 +990,16 @@ limits, and local proof distinctions are owned by
   bypasses, and runs that projection through its native quiescence E2E.
   Its synthetic old-history fixture fails if the ownership patch is applied
   unconditionally during replay.
-- The dedicated manual-only
+- The explicitly selected
   `linq-reminder-device-sync-non-starvation` hosted-local scenario is the
   cross-owner regression gate for recurring automation fairness during a
   device-sync backlog. It admits 113 distinct valid Junction resources, holds
   the first receipt-bounded positive device pass at the existing publication
   barrier, then releases that barrier only after the recurring Linq reminder
-  is due. Its admission observer binds the accepted wake's runtime attempt and
+  is due. Before that positive pass, completed or yielded zero-job passes release
+  and re-arm the barrier within the same reminder deadline; failed, unavailable,
+  superseded, malformed, or indefinitely empty observations cannot satisfy proof.
+  Its admission observer binds the accepted wake's runtime attempt and
   requires exactly one owner across the full 30-second window, including a
   helper-started or already active owner. Focused fake-clock tests in
   `apps/cloudflare/test/helpers/hosted-local-runtime-admission-window.test.ts`

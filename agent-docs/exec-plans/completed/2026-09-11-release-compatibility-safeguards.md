@@ -1,6 +1,6 @@
 # Verify incident recovery and enforce cross-plane release compatibility
 
-Status: active
+Status: completed
 Created: 2026-09-11
 Updated: 2026-09-12
 
@@ -183,8 +183,12 @@ Updated: 2026-09-12
   Requested source inputs alone are not proof of the source a workflow executed.
 - The private selection preserves the existing five production-core receipt names.
   Its local verification, preliminary specialist review, and final external review
-  passed with valid tool attestations. The actual selected Telegram journey passed. Complete full integration remains
-  held for a separate Linq fixture prerequisite before private selection can merge.
+  passed with valid tool attestations. The actual selected Telegram journey passed
+  in three protected full runs. The final full integration passed all fourteen
+  scenario lanes and the final aggregate. After the prior current-revision
+  production admission passed, private selection #140 merged first and public
+  requirement #3350 merged afterward. Both retained their reviewed heads and
+  passing required checks; no production proof was invalidated by that sequence.
 - Full integration found a second fixture mismatch after the separately merged
   signed-direct Linq ingress change. Its current contract trusts explicit signed
   directness unless durable group ownership contradicts it. The older composed
@@ -192,7 +196,20 @@ Updated: 2026-09-12
   uses absent directness for initial canonical group discovery, then a conflicting
   direct flag for a guest after group-route creation. It retains every mailbox,
   private-context and provider-delivery outcome assertion. Existing planner and
-  fixture-builder suites pass; complete hosted proof remains required.
+  fixture-builder suites pass. Required CI passed, the correction merged, and
+  the actual protected Linq webhook lane subsequently passed all nine tests.
+- The next full run passed thirteen scenario lanes but exposed an overstrict
+  fairness checkpoint observer. Production permits a completed pass with zero
+  processed jobs; the observer accepted only yielded empty passes. PR #3387
+  accepts both legal intermediate outcomes while retaining the positive-pass
+  target, original deadline, single admission, exactly-once reminder, durable
+  unfinished backlog, and eventual full-drain assertions. A fifteen-case replay
+  executes the actual observer and production classifier, reproduces the old
+  failure, and preserves failure/deadline rejection. Required CI passed and the
+  correction merged. A new protected full run on the reviewed private selection
+  passed all fourteen scenario lanes and the aggregate. The completed runner
+  build confirms the merged public correction. The available failed-run artifacts
+  do not establish why that particular empty pass occurred.
 - Test registration, selection, successful setup and downstream completion are
   separate facts. The final testing owner documents each gate and its trigger,
   including the distinction between private full integration and public
@@ -203,15 +220,36 @@ Updated: 2026-09-12
   ref; do not modify unrelated shared fetch configuration.
 - The temporarily interrupted checks for PRs #3341, #3339, and #3342 were
   restored by their owners. All required checks pass and the PRs have merged.
-- The fixture's new Frog entry is task-owned and must be included with this final
-  plan-bearing completion commit. The plan remains active until the remaining
-  recovery, cross-repository proof, and completion work is finished.
+- The task-owned Telegram and Linq Frog entries were committed with their owning
+  changes; the existing fairness entry was updated and committed with PR #3387.
+  All executable follow-ups have merged and the cross-repository proof is complete.
 
 ## Verification
 
 - Recovery: protected workflow job receipts, canonical production alias/deployment
   metadata, exact live Worker/container provenance, bounded fresh failure searches,
   and positive completion/ingestion observations.
-- Prevention: focused tests invoking production admission/parser owners with synthetic
-  old/new combinations, applicable typechecks, complexity and document guards, then
-  required CI and independent review. Select exact commands after locating the owner.
+- Prevention: 72 Cloudflare admission tests, 14 Web protocol tests, 75 release
+  controller tests, applicable typechecks, shared build, workspace boundaries,
+  complexity and document guards passed before #3349 merged with required CI
+  and final independent review.
+- Selection: all seven public cross-repository coverage tests and all sixteen
+  private planner tests passed. The private verification suite and applicable
+  independent reviews passed. Public #3350 passed all four required checks and
+  final review before its normal protected merge.
+- Composed outcome: the final protected full run passed all fourteen scenario
+  lanes and the final aggregate against the exact reviewed private selection
+  and public source containing all three fixture prerequisites. This includes
+  actual direct/group scheduled Telegram delivery, Linq isolation and reminder
+  progress during device backlog. The fifteen-case source replay separately
+  covers legal empty device passes and failure/deadline rejection.
+- Production: the compatible Web is promoted; protected container releases have
+  converged. Repeated bounded observations show accepted processing summaries
+  and no recurrence of the two established protocol errors. Natural outbox sends
+  do not bind every historical scheduled intent to a provider receipt. Expired
+  reminders were not replayed; the vendor check synchronization cause remains
+  unproved.
+- Completion: temporarily interrupted unrelated CI was restored; all executable
+  follow-ups merged. This explanatory closeout uses document checks and parent
+  review; its final required CI and merge receipt remain recorded on the PR.
+Completed: 2026-09-12
