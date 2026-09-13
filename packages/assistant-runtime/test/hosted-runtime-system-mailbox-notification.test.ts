@@ -4774,7 +4774,7 @@ describe("hosted system mailbox notification execution context", () => {
   });
 
   it.each([
-    "epoch", "manual", "jobs", "scopes", "revoke", "unknown_reason", "attempted", "recording", "disconnect",
+    "epoch", "jobs", "scopes", "revoke", "unknown_reason", "attempted", "recording", "disconnect",
     "reauthorization", "connected", "future_schedule", "equal_schedule", "undated_schedule", "unbound_owner", "other_connection",
   ].flatMap((boundary) => [false, true].map((deferred) => ({ boundary, deferred }))))(
     "preserves $boundary work when a retained device owner admits hints (deferred: $deferred)", async ({ boundary, deferred }) => {
@@ -4791,7 +4791,6 @@ describe("hosted system mailbox notification execution context", () => {
       occurredAt: FIXED_NOW, provider: "junction", reason: "webhook_hint", userId: "member_123",
     });
     if (boundary === "epoch") candidate.expectedConnectedAt = "2026-04-02T00:00:00.000Z";
-    if (boundary === "manual") { candidate.reason = "reconcile_due"; candidate.hint = { reason: "manual_reconcile" }; }
     if (boundary === "jobs") candidate.hint = { jobs: [{ kind: "resource", dedupeKey: "synthetic-distinct-job" }] };
     if (boundary === "scopes") candidate.hint = { reason: "companion_health_metadata", scopes: [] };
     if (boundary === "revoke") candidate.hint = { reason: "companion_hrv_rmssd", revokeWarning: { code: "synthetic_warning", message: "Synthetic warning" } };

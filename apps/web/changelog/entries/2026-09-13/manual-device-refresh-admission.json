@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-13",
+  "order": 100,
+  "item": {
+    "id": "manual-device-refresh-admission",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Manual device refreshes can run sooner",
+    "summary": "A requested device refresh can run while older history imports wait to retry.",
+    "details": "Previously queued history keeps its original retry schedule while the requested refresh runs.",
+    "relevanceTags": ["devices"],
+    "sourcePullRequests": []
+  }
+}

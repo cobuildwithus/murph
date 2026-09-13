@@ -13,6 +13,10 @@ service restart/retry proof lives in
 
 ## Purpose
 
+Manual device refresh admission during retained history retries, one-shot
+provider job creation and recovery compatibility are owned by
+`agent-docs/RELIABILITY.md` and the hosted runtime protocol reference.
+
 Verification inventory, composed diff routing, cold stale-invocation coverage and
 UTC PostgreSQL connection proof are indexed in
 `agent-docs/references/testing-ci-map.md`.

@@ -47,6 +47,12 @@ function connected(id = "source-connected", seq = "2"): HostedSystemMailboxPendi
   } } };
 }
 
+function manual(id = "manual-refresh", seq = "2"): HostedSystemMailboxPendingItem {
+  const item = hint(id, seq);
+  return { ...item, wake: { ...item.wake, reason: "reconcile_due",
+    hint: { reason: "manual_reconcile", occurredAt: NOW } } };
+}
+
 function covered(pending: readonly HostedSystemMailboxPendingItem[]) {
   return [...projectHostedDeviceHintCoverage({ now: NOW, pending })].map(([id, value]) => ({
     id, hints: [...value.coveredHintIds], schedules: [...value.coveredScheduleIds],
@@ -54,6 +60,25 @@ function covered(pending: readonly HostedSystemMailboxPendingItem[]) {
 }
 
 describe("retained device hint coverage", () => {
+  it("admits a manual refresh without waiting for retained history jobs", () => {
+    const retained = owner();
+    const request = manual();
+    const state = { pending: [retained, request] };
+    const before = structuredClone(state);
+    const coverage = projectHostedDeviceHintCoverage({ now: NOW, pending: state.pending });
+    expect(findHostedRunnableSystemMailboxItem({
+      allowedRouteActions: ["run-device-sync-wake"],
+      continuationItemIds: new Set([retained.itemId]), coverage,
+      eligibleDeviceHintIds: projectHostedEligibleDeviceHintIds({ state }), now: NOW, state,
+    })?.itemId).toBe(retained.itemId);
+    expect([...coverage.get(retained.itemId)!.coveredHintIds]).toEqual([request.itemId]);
+    expect(coverage.get(retained.itemId)?.admittedWake?.hint).toEqual({
+      ...(retained.wake.kind === "device-sync.wake" ? retained.wake.hint : {}),
+      reason: "manual_reconcile_pending",
+    });
+    expect(state).toEqual(before);
+  });
+
   it("admits new same-epoch connection jobs while older history waits for retry", () => {
     const retained = owner();
     const connection = connected();
@@ -86,6 +111,45 @@ describe("retained device hint coverage", () => {
     expect([...coverage!.coveredScheduleIds]).toEqual([]);
     expect(coverage?.admittedWake?.hint?.jobs?.map((job) => job.dedupeKey))
       .toEqual(["synthetic_retained_job", "synthetic-source-connected", "synthetic-another-source"]);
+  });
+
+  it("preserves one manual intent alongside connection jobs and dirty work", () => {
+    const pending = [owner(), manual(), connected("new-source", "3"), manual("refresh-again", "4"), hint("dirty", "5")];
+    const coverage = projectHostedDeviceHintCoverage({ now: NOW, pending }).get("owner");
+    expect([...coverage!.coveredHintIds]).toEqual(["manual-refresh", "new-source", "refresh-again", "dirty"]);
+    expect([...coverage!.coveredScheduleIds]).toEqual([]);
+    expect(coverage?.admittedWake?.hint?.reason).toBe("manual_reconcile_pending");
+    expect(coverage?.admittedWake?.hint?.jobs?.map((job) => job.dedupeKey))
+      .toEqual(["synthetic_retained_job", "synthetic-new-source"]);
+  });
+
+  it.each([
+    "epoch", "member", "provider", "connection", "sequence", "missing-sequence",
+    "dedupe", "attempted", "recording", "future", "retry", "jobs", "scopes", "filtered",
+  ])("preserves a %s manual request barrier and the following suffix", (boundary) => {
+    const retained = owner();
+    const request = manual();
+    if (request.wake.kind !== "device-sync.wake") throw new Error("Invalid synthetic manual wake");
+    if (boundary === "epoch") request.wake.expectedConnectedAt = LATER;
+    if (boundary === "member") request.wake.userId = "another_synthetic_member";
+    if (boundary === "provider") request.wake.provider = "oura";
+    if (boundary === "connection") request.wake.connectionId = "another_connection";
+    if (boundary === "sequence") request.mailboxLaneSeq = "1";
+    if (boundary === "missing-sequence") request.mailboxLaneSeq = null;
+    if (boundary === "dedupe") request.mailboxDedupeKey = "synthetic_mismatch";
+    if (boundary === "attempted") request.attemptCount = 1;
+    if (boundary === "recording") request.status = "recording";
+    if (boundary === "future") request.wake.occurredAt = LATER;
+    if (boundary === "retry") request.nextAttemptAt = LATER;
+    if (boundary === "jobs") request.wake.hint = { ...request.wake.hint, jobs: [{ kind: "reconcile" }] };
+    if (boundary === "scopes") request.wake.hint = { ...request.wake.hint, scopes: [] };
+    const pending = [retained, request, hint("after", "3", request.wake.connectionId ?? undefined)];
+    const coverage = projectHostedDeviceHintCoverage({
+      now: NOW, pending,
+      ...(boundary === "filtered" ? { eligibleItemIds: new Set(["owner", "after"]) } : {}),
+    }).get("owner");
+    expect([...coverage!.coveredHintIds]).toEqual([]);
+    expect(coverage?.admittedWake).toBeUndefined();
   });
 
   it.each([

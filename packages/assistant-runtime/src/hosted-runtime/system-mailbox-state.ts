@@ -758,7 +758,8 @@ export function projectHostedEligibleDeviceHintIds(input: {
 }): ReadonlySet<string> {
   return new Set(input.state.pending.filter((item) =>
     item.wake.kind === "device-sync.wake"
-    && (item.wake.reason === "webhook_hint" || item.wake.reason === "connected")
+    && (item.wake.reason === "webhook_hint" || item.wake.reason === "connected"
+      || isHostedManualDeviceReconcileRequest(item.wake))
     && systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions ?? null)
     && (input.allowedWakeKinds == null || input.allowedWakeKinds.includes(item.wake.kind))
     && (input.eligibleItemIds === undefined || input.eligibleItemIds.has(item.itemId))
@@ -877,7 +878,7 @@ export function projectHostedDeviceHintCoverage(input: {
     const active = activeByConnection.get(connectionId);
     if (!active) continue;
     const admittedWake = input.eligibleItemIds === undefined || input.eligibleItemIds.has(item.itemId)
-      ? admitHostedDeviceConnectionJobs(active.owner, item, input.now)
+      ? admitHostedDeviceSyncWork(active.owner, item, input.now)
       : null;
     if (admittedWake) {
       active.owner = { ...active.owner, wake: admittedWake };
@@ -899,13 +900,20 @@ export function projectHostedDeviceHintCoverage(input: {
   return coverage;
 }
 
-function isHostedPendingDeviceConnectionWork(
+function isHostedManualDeviceReconcileRequest(wake: HostedExecutionSystemWake): boolean {
+  return wake.kind === "device-sync.wake" && wake.reason === "reconcile_due"
+    && wake.hint?.reason === "manual_reconcile"
+    && Object.keys(wake.hint).every((key) => ["reason", "occurredAt"].includes(key));
+}
+
+function isHostedPendingDeviceWork(
   owner: HostedDeviceHintCoverageOwner,
   item: HostedSystemMailboxPendingItem,
   now: string,
 ): item is HostedDeviceHintCoverageOwner {
   const wake = item.wake;
-  return wake.kind === "device-sync.wake" && wake.reason === "connected"
+  return wake.kind === "device-sync.wake"
+    && (wake.reason === "connected" || isHostedManualDeviceReconcileRequest(wake))
     && item.routeAction === "run-device-sync-wake" && item.status === "pending"
     && item.attemptCount === 0 && item.postCheckpointRecord === null
     && item.deviceSyncContinuationOwner !== true && item.mailboxLaneSeq !== null
@@ -915,17 +923,23 @@ function isHostedPendingDeviceConnectionWork(
     && wake.expectedConnectedAt === owner.wake.expectedConnectedAt
     && Date.parse(wake.occurredAt) <= Date.parse(now)
     && systemMailboxItemIsDue(item, now)
-    && Object.keys(wake.hint ?? {}).every((key) =>
-      ["jobs", "scopes", "nextReconcileAt", "occurredAt"].includes(key));
+    && (isHostedManualDeviceReconcileRequest(wake)
+      || Object.keys(wake.hint ?? {}).every((key) =>
+        ["jobs", "scopes", "nextReconcileAt", "occurredAt"].includes(key)));
 }
 
-function admitHostedDeviceConnectionJobs(
+function admitHostedDeviceSyncWork(
   owner: HostedDeviceHintCoverageOwner,
   item: HostedSystemMailboxPendingItem,
   now: string,
 ): HostedDeviceHintCoverageOwner["wake"] | null {
-  if (!isHostedPendingDeviceConnectionWork(owner, item, now)) return null;
+  if (!isHostedPendingDeviceWork(owner, item, now)) return null;
   const wake = item.wake;
+  if (isHostedManualDeviceReconcileRequest(wake)) {
+    // Preserve the request across preemption before hydration. The service
+    // creates provider-specific manual jobs after restoring the exact retries.
+    return { ...owner.wake, hint: { ...owner.wake.hint, reason: "manual_reconcile_pending" } };
+  }
   const existing = owner.wake.hint?.jobs ?? [];
   const incoming = wake.hint?.jobs ?? [];
   // Explicit identities survive transfer to another event; retained retries
