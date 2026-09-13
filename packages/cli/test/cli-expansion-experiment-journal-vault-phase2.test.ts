@@ -472,14 +472,17 @@ test.sequential('custom experiment start explains the required primary outcome b
   }
 })
 
-test.sequential('experiment start maps option parses to bounded factual fields', async () => {
+test.sequential('experiment start preserves option-error precedence and bounded factual fields', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-option-repair-'))
+  const services = createIntegratedVaultServices()
+  const startSpy = vi.spyOn(services.core, 'startExperiment')
+  const run = (args: string[]) => runSliceCli(args, { services })
   const privateDirection = 'private-direction-marker'
   const privateOutcomeKey = 'private-primary-marker'
 
   try {
-    await runSliceCli(['init', '--vault', vaultRoot])
-    const invalidDirection = await runSliceCli([
+    await run(['init', '--vault', vaultRoot])
+    const invalidDirection = await run([
       'experiment',
       'start',
       'direction-repair',
@@ -493,10 +496,12 @@ test.sequential('experiment start maps option parses to bounded factual fields',
       'biomarker:direction-repair',
       '--expected-direction',
       `biomarker:direction-repair=${privateDirection}`,
+      '--schedule-cron',
+      '0 18 * * *',
       '--vault',
       vaultRoot,
     ])
-    const invalidOutcome = await runSliceCli([
+    const invalidOutcome = await run([
       'experiment',
       'start',
       'outcome-repair',
@@ -534,8 +539,9 @@ test.sequential('experiment start maps option parses to bounded factual fields',
       assert.equal(JSON.stringify(result).includes(vaultRoot), false)
     }
 
+    assert.equal(startSpy.mock.calls.length, 0)
     for (const slug of ['direction-repair', 'outcome-repair']) {
-      const shown = await runSliceCli([
+      const shown = await run([
         'experiment',
         'show',
         slug,
@@ -543,8 +549,10 @@ test.sequential('experiment start maps option parses to bounded factual fields',
         vaultRoot,
       ])
       assert.equal(shown.ok, false)
+      assert.equal(shown.error.code, 'not_found')
     }
   } finally {
+    startSpy.mockRestore()
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
@@ -1856,6 +1864,11 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       'biomarker:sleep-efficiency',
       'biomarker:deep-sleep-minutes',
     ])
+    assert.equal('desiredDirection' in analysisPlan, false)
+    assert.deepEqual(analysisPlan.expectedDirections, [
+      { biomarkerKey: 'biomarker:morning-blood-pressure', direction: 'decrease' },
+      { biomarkerKey: 'biomarker:sleep-efficiency', direction: 'increase' },
+    ])
     const onboarding = requireRecord(experimentData.onboarding, 'onboarding')
     assert.equal(onboarding.completedAt, '2026-04-30T15:00:00.000Z')
     const setupAnswers = requireRecord(onboarding.setupAnswers, 'onboarding.setupAnswers')
@@ -1968,6 +1981,112 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       throw new Error('Rejected draft start must not persist an experiment.')
     }
     assert.equal(draftAlcoholShown.error.code, 'not_found')
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('experiment start composes protocol overrides without conflating direction defaults', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-composition-'))
+
+  try {
+    assert.equal((await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'UTC'])).ok, true)
+    const protocolOptions = [
+      '--from-protocol', 'finnish-sauna',
+      '--status', 'planned',
+      '--intervention-start', '2026-05-01',
+      '--vault', vaultRoot,
+    ]
+    const legacyStarted = await runSliceCli([
+      'experiment', 'start', 'signal-overrides', ...protocolOptions,
+      '--primary-biomarker-key', 'biomarker:sleep-efficiency',
+      '--secondary-biomarker-key', ' biomarker:blood-oxygen-spo2 ',
+      '--secondary-biomarker-key', 'biomarker:morning-blood-pressure',
+      '--secondary-biomarker-key', 'biomarker:sleep-efficiency',
+      '--secondary-biomarker-key', 'biomarker:blood-oxygen-spo2',
+      '--secondary-biomarker-key', 'biomarker:SyntheticContext',
+      '--expected-direction', 'biomarker:blood-oxygen-spo2=decrease',
+      '--baseline-start', '2026-04-01',
+      '--baseline-end', '2026-04-14',
+      '--baseline-days', '0',
+      '--sessions-per-week', '0',
+      '--target-sessions', '0',
+      '--minimum-useful-sessions', '0',
+      '--session-field', 'session_date',
+      '--confounder-field', 'synthetic_context',
+      '--stop-condition', 'Stop the synthetic session.',
+      '--no-reminders-enabled',
+      '--no-weekly-digest-enabled',
+    ])
+    assert.equal(legacyStarted.ok, true, legacyStarted.ok ? undefined : legacyStarted.error.message)
+
+    const legacyShown = await runSliceCli<{ entity: { data: Record<string, unknown> } }>([
+      'experiment', 'show', 'signal-overrides', '--vault', vaultRoot,
+    ])
+    const legacyData = requireData(legacyShown).entity.data
+    const legacyAnalysis = requireRecord(legacyData.analysisPlan, 'legacy analysisPlan')
+    assert.equal(legacyAnalysis.primaryBiomarkerKey, 'biomarker:sleep-efficiency')
+    assert.equal('primaryOutcome' in legacyAnalysis, false)
+    assert.deepEqual(legacyAnalysis.secondaryBiomarkerKeys, [
+      'biomarker:blood-oxygen-spo2',
+      'biomarker:morning-blood-pressure',
+      'biomarker:SyntheticContext',
+    ])
+    // Explicit expected directions replace the list, not the primary's desired default.
+    assert.equal(legacyAnalysis.desiredDirection, 'increase')
+    assert.deepEqual(legacyAnalysis.expectedDirections, [
+      { biomarkerKey: 'biomarker:blood-oxygen-spo2', direction: 'decrease' },
+    ])
+    const runPlan = requireRecord(legacyData.runPlan, 'runPlan')
+    assert.equal('baselineStart' in runPlan, false)
+    assert.equal('baselineEnd' in runPlan, false)
+    assert.equal(runPlan.interventionStart, '2026-05-01')
+    assert.equal(runPlan.interventionEnd, '2026-05-14')
+    assert.equal(runPlan.sessionsPerWeek, 0)
+    assert.equal(runPlan.targetSessions, 0)
+    assert.equal(runPlan.minimumUsefulSessions, 0)
+    assert.deepEqual(runPlan.logging, {
+      sessionFields: ['session_date'],
+      confounderFields: ['synthetic_context'],
+    })
+    assert.deepEqual(runPlan.stopConditions, ['Stop the synthetic session.'])
+    assert.equal('onboarding' in legacyData, false)
+    assert.deepEqual(legacyData.assistantSupport, {
+      remindersEnabled: false,
+      weeklyDigestEnabled: false,
+    })
+
+    const outcomeStarted = await runSliceCli([
+      'experiment', 'start', 'outcome-overrides', ...protocolOptions,
+      '--primary-outcome-key', 'biomarker:morning-blood-pressure',
+      '--secondary-biomarker-key', 'biomarker:sleep-efficiency',
+      '--secondary-biomarker-key', 'biomarker:blood-oxygen-spo2',
+      '--secondary-biomarker-key', 'biomarker:morning-blood-pressure',
+      '--desired-direction', 'stabilize',
+    ])
+    assert.equal(outcomeStarted.ok, true, outcomeStarted.ok ? undefined : outcomeStarted.error.message)
+    const outcomeShown = await runSliceCli<{ entity: { data: Record<string, unknown> } }>([
+      'experiment', 'show', 'outcome-overrides', '--vault', vaultRoot,
+    ])
+    const outcomeData = requireData(outcomeShown).entity.data
+    const outcomeAnalysis = requireRecord(outcomeData.analysisPlan, 'outcome analysisPlan')
+    const primaryOutcome = requireRecord(outcomeAnalysis.primaryOutcome, 'primaryOutcome')
+    assert.equal(primaryOutcome.key, 'biomarker:morning-blood-pressure')
+    assert.equal(primaryOutcome.kind, 'metric')
+    assert.equal('primaryBiomarkerKey' in outcomeAnalysis, false)
+    assert.deepEqual(outcomeAnalysis.secondaryBiomarkerKeys, [
+      'biomarker:sleep-efficiency',
+      'biomarker:blood-oxygen-spo2',
+    ])
+    // The independent desired override must not replace the protocol's expected signals.
+    assert.equal(outcomeAnalysis.desiredDirection, 'stabilize')
+    assert.deepEqual(outcomeAnalysis.expectedDirections, [
+      { biomarkerKey: 'biomarker:morning-blood-pressure', direction: 'decrease' },
+      { biomarkerKey: 'biomarker:sleep-efficiency', direction: 'increase' },
+      { biomarkerKey: 'biomarker:blood-oxygen-spo2', direction: 'stabilize' },
+    ])
+    assert.equal('onboarding' in outcomeData, false)
+    assert.deepEqual(outcomeData.assistantSupport, {})
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
