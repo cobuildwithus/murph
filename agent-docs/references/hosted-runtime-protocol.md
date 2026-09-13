@@ -2332,8 +2332,15 @@ Scheduled-job completion diagnostics expose `retryScheduled` after the cron
 owner finalizes durable runtime state. Web prefixes that field as
 `failureRetryScheduled` in persisted redacted log details. Personal Patterns
 operator email ignores failed events unless this field is explicitly `false`;
-missing fields from an older runtime stay quiet, while occurrence-expired
-events remain terminal. Every terminal event for one scheduled occurrence uses
+missing fields from an older runtime stay quiet. Explicit provider usage-limit
+failures stay quiet too. Occurrence-expired events remain terminal, but Web
+suppresses their operator email when retained `runtime.ai_usage_gate` observations
+establish a platform usage pause at the occurrence or before expiry detection.
+These Web-owned observations use the existing `assistant.automation_detail` event
+with type `runtime.ai_usage_gate`, carry only time and a usage-limited boolean, survive
+an allowance reset under normal diagnostic retention, and never change runtime
+admission. Missing history preserves the ordinary alert. The alert callback uses
+its authenticated member identity for the bounded lookup before coalescing. Every terminal event for one scheduled occurrence uses
 one member-independent email body and Resend idempotency key, so concurrent
 member failures coalesce without a new alert queue or persistence owner.
 The generic email describes either expiry or terminal failure without asserting
