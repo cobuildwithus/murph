@@ -145,9 +145,9 @@ function buildPersonaFixture(
         personaId,
         source,
         date,
-        personaId === "whoop" ? "recovery-score" : "readiness-score",
+        "readiness-score",
         readiness,
-        "%",
+        "score",
       ),
       metricPoint(
         personaId,

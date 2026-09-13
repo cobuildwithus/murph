@@ -135,7 +135,8 @@ test("Whoop persona exposes provider-specific sleep and recovery outcomes", asyn
     .flatMap((day) => day.events)
     .find((event) => event.kind === "sleep");
   assert.ok(sleep);
-  assert.notEqual(sleep.metrics.recoveryScore, null);
+  // Metric points use the canonical readiness key for provider recovery scores.
+  assert.notEqual(sleep.metrics.recoveryScore ?? sleep.metrics.readinessScore, null);
   assert.notEqual(sleep.metrics.deepSleepMinutes, null);
   assert.notEqual(sleep.metrics.spo2Percent, null);
 
