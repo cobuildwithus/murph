@@ -2607,8 +2607,11 @@ revalidates access and identity and prevents duplicate capacity claims.
 Active ingress encryption roots, plus active control roots for phone routing
 writes, are prepared before the short database transaction. Line reservation
 and mailbox append commit together, then runtime is signaled.
-No connection creates a second activation or onboarding follow-up. The founder
-email remains a signup-only side effect, not a delayed email-link greeting.
+No connection creates a second activation or onboarding follow-up. The separate
+founder email retains its existing signup and later email-link behavior: the
+settings path requires an active account younger than fourteen days and no
+prior send attempt. Its existing best-effort provider call and dedupe owner
+remain independent of Murph channel greetings.
 
 At execution, canonical direct channel welcomes inspect the existing imported
 conversation watermark. No prior conversation input preserves the exact signup

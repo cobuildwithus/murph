@@ -5,6 +5,7 @@ import {
   sendHostedSignupWelcomeEmail,
   sendHostedSignupWelcomeEmailForMemberBestEffort,
   sendHostedSignupWelcomeEmailForMember,
+  sendHostedSignupWelcomeEmailForRecentMember,
 } from "@/src/lib/hosted-onboarding/signup-welcome-email";
 
 const mocks = vi.hoisted(() => ({
@@ -361,6 +362,69 @@ describe("hosted signup welcome email", () => {
       providerMessageId: "resend_email_123",
       status: "sent",
     });
+  });
+
+  it("sends for recently created members when email is linked after signup", async () => {
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const payload = JSON.parse(String(init?.body));
+      expect(payload.text).toContain(
+        "Email Murph at mail@mail.withmurph.ai. Murph will send a private reply within a few minutes so you can start the conversation securely. If it does not arrive, resend your email.",
+      );
+
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "member@example.com",
+      },
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForRecentMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+      now: new Date("2026-05-14T23:59:59.999Z"),
+    })).resolves.toEqual({
+      providerMessageId: "resend_email_123",
+      status: "sent",
+    });
+
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prisma,
+    });
+  });
+
+  it("skips later email-link sends for accounts that are not less than two weeks old", async () => {
+    const fetchMock: typeof fetch = async () => {
+      throw new Error("fetch should not be called");
+    };
+
+    await expect(sendHostedSignupWelcomeEmailForRecentMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+      now: new Date("2026-05-15T00:00:00.000Z"),
+    })).resolves.toEqual({
+      reason: "member_too_old",
+      status: "skipped",
+    });
+
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
   });
 
   it("uses the unverified Stripe checkout email when no verified email is linked yet", async () => {

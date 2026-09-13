@@ -20,6 +20,10 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "@/src/lib/hosted-onboarding/shared";
+import {
+  HostedSignupWelcomeEmailError,
+  sendHostedSignupWelcomeEmailForRecentMember,
+} from "@/src/lib/hosted-onboarding/signup-welcome-email";
 import { ensureHostedMemberChannelWelcome } from "@/src/lib/hosted-onboarding/channel-welcome";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -85,6 +89,10 @@ export const POST = withJsonError(async (request: Request) => {
       sourceType: "settings.email.sync",
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  await sendSettingsEmailSyncWelcomeEmailBestEffort({
+    memberId: auth.member.id,
+    prisma,
+  });
   await ensureHostedMemberChannelWelcome({
     channel: "email",
     memberId: auth.member.id,
@@ -116,6 +124,29 @@ async function signalHostedMailboxAppendBestEffort(input: {
     });
   } catch {
     // Settings sync should not fail if the best-effort runtime wake is unavailable.
+  }
+}
+
+async function sendSettingsEmailSyncWelcomeEmailBestEffort(input: {
+  memberId: string;
+  prisma: ReturnType<typeof getPrisma>;
+}): Promise<void> {
+  try {
+    await sendHostedSignupWelcomeEmailForRecentMember({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    console.warn("Hosted signup welcome email send failed after settings email sync.", {
+      ...(error instanceof HostedSignupWelcomeEmailError
+        ? {
+            errorCode: error.code,
+            providerStatus: error.providerStatus,
+          }
+        : {
+            errorName: error instanceof Error ? error.name : "UnknownError",
+          }),
+    });
   }
 }
 

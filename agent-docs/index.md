@@ -59,7 +59,7 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
-| `ARCHITECTURE.md` | Current runtime architecture, including hosted media identity, reference-only preservation, checkpoint cleanup, receipt recovery, clinical document enrichment, and retired member shell-hint transport. | Current runtime architecture | High | 2026-09-11 |
+| `ARCHITECTURE.md` | Current runtime architecture, including hosted media identity, reference-only preservation, checkpoint cleanup, receipt recovery, clinical document enrichment, retired member shell-hint transport, and separate founder-email eligibility alongside Murph channel greetings. | Current runtime architecture | High | 2026-09-12 |
 | `agent-docs/ARCHITECTURE_GUIDANCE.md` | Architecture planning guidance. | Architecture planning guidance | High | 2026-08-24 |
 | `PRODUCT.md` | Strategic design context: register, users, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
 | `DESIGN.md` | Visual design system. | Visual design system | High | 2026-07-22 |
