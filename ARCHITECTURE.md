@@ -2621,7 +2621,21 @@ non-identifying success response. A consented fresh companion activation with a
 verified phone may enter the canonical signup-welcome path. Exact-member
 binding, signup idempotency, home-line health, and proactive capacity remain
 owned by the existing starter enrollment, line reservation, and welcome
-services.
+services. Activation and later verified phone/email connections share one
+channel-welcome producer contract: one mailbox and outbox key per member,
+channel, and destination identity. Activation queues both available channels
+in its transaction. Later connection, authenticated completion, and companion
+admission reuse those keys; ordinary authenticated Web entry also repairs
+missing phone routing before projecting contact actions. The member lock
+revalidates access and identity and prevents duplicate capacity claims.
+Active ingress encryption roots, plus active control roots for phone routing
+writes, are prepared before the short database transaction. Line reservation
+and mailbox append commit together, then runtime is signaled.
+No connection creates a second activation or onboarding follow-up. The separate
+founder email retains its existing signup and later email-link behavior: the
+settings path requires an active account younger than fourteen days and no
+prior send attempt. Its existing best-effort provider call and dedupe owner
+remain independent of Murph channel greetings.
 
 At execution, canonical direct channel welcomes inspect the existing imported
 conversation watermark. No prior conversation input preserves the exact signup
@@ -2640,8 +2654,13 @@ before Web emits destination-scoped keys; old keys remain valid. Reverting the
 reader after new keys are emitted is not a safe standalone rollback.
 
 Exhausted proactive capacity does not block activation: Web still
-assigns an eligible home line without a proactive welcome, preserving the
-inbound-first messaging path. If no line is currently assignable, activation
+assigns an eligible home line without a proactive text welcome, preserving the
+inbound-first messaging path. An existing eligible assigned number stays fixed
+while proactive capacity is exhausted; verified phone changes clear old-phone
+chat authority while preserving that number and email-based iMessage bindings.
+The assigned number remains available to native
+onboarding's Text Murph action and contact card; exhausting proactive capacity
+does not remove those entry points. If no line is currently assignable, activation
 still succeeds without assigning a line. A later provider-attested direct
 message from the exact active member may bind the contacted managed line when
 the existing reply-egress policy permits it, even when that line is in the

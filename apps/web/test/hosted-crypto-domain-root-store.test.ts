@@ -3276,6 +3276,96 @@ test("hosted Privy member creation provisions the control root before private id
   );
 });
 
+test.each([false, true])("phone channel welcome prepares real routing and mailbox crypto before its transaction (quota full: %s)", async (quotaFull) => {
+  const { tx, decryptMetrics } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithFreshHostedDomainRootUnwrapCache, areHostedDomainRootProviderCallsDisabled } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const { ensureHostedMemberChannelWelcome } = await import("../src/lib/hosted-onboarding/channel-welcome");
+  const { createHostedPhoneLookupKey } = await import("../src/lib/hosted-onboarding/contact-privacy");
+  const { encryptHostedLinqLinePhoneNumber } = await import("../src/lib/hosted-onboarding/linq-line-phone-codec");
+  const memberId = "member-test-channel-root-preparation";
+  const phone = "+15550001001";
+  const line = "+15550001002";
+  for (const domain of ["control", "ingress"] as const) {
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain, prisma: tx.prisma, userId: memberId, reason: "test.channel-root",
+    });
+  }
+  const identity = await buildHostedMemberIdentityPrivateColumns({
+    memberId, phoneNumber: phone, prisma: tx.prisma, privyUserId: null,
+    signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null, signupPhoneNumber: null,
+  });
+  const member = {
+    id: memberId, billingStatus: HostedBillingStatus.active, suspendedAt: null,
+    createdAt: new Date(), updatedAt: new Date(), billingRef: null, emailAuthorization: null,
+    routing: null, threadContainer: null, accountGroupMemberships: [], assistantProviderPreference: null,
+    identity: { ...identity, memberId, phoneLookupKey: createHostedPhoneLookupKey(phone), phoneNumberVerifiedAt: new Date() },
+  };
+  const routingWrite = vi.fn(async (_input: { create: { linqRecipientPhoneEncrypted: string } }) => {
+    expect(areHostedDomainRootProviderCallsDisabled()).toBe(true);
+    return {};
+  });
+  const claimQuota = vi.fn(async () => ({ count: 1 }));
+  const readEnvelope = tx.prisma.$queryRaw.bind(tx.prisma);
+  let mailboxCiphertext: string | null = null;
+  let kmsBeforeTransaction = -1;
+  // Keep the real root-store, cache, member decryption, route writer and mailbox
+  // encryption. Only SQL persistence and the existing fixture's KMS are synthetic.
+  const prisma = Object.assign(tx.prisma, {
+    hostedMember: { findUnique: vi.fn(async () => member) },
+    hostedMemberRouting: { findUnique: vi.fn(async () => null), groupBy: vi.fn(async () => []), upsert: routingWrite },
+    hostedThreadRoute: { groupBy: vi.fn(async () => []) },
+    hostedMailboxItem: { findUnique: vi.fn(async () => null) },
+    hostedWorkspace: { upsert: vi.fn(async () => ({})) },
+    hostedLinqLine: {
+      findMany: vi.fn(async () => [{ phoneNumberLookupKey: createHostedPhoneLookupKey(line),
+        phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(line), phoneNumberHint: "*** test",
+        assignmentWeight: 100, maxNewConversationsPerDay: 1,
+        proactiveConversationCount: quotaFull ? 1 : 0,
+        proactiveConversationDayUtc: new Date(new Date().toISOString().slice(0, 10)) }]),
+      updateMany: claimQuota,
+    },
+    $queryRaw: async (...args: Parameters<Prisma.TransactionClient["$queryRaw"]>) => {
+      const query = args[0] as TemplateStringsArray;
+      const sql = Array.isArray(query) ? query.join("?") : "";
+      if (sql.includes("INSERT INTO hosted_mailbox_lane_counter")) return [{ seq: 1n }];
+      if (sql.includes("INSERT INTO hosted_mailbox_item")) {
+        expect(areHostedDomainRootProviderCallsDisabled()).toBe(true);
+        mailboxCiphertext = String(args[12]);
+        // Stop at the external persistence boundary after real mailbox encryption.
+        throw new Error("synthetic mailbox persistence unavailable");
+      }
+      return readEnvelope(...args);
+    },
+    $transaction: async (run: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+      kmsBeforeTransaction = decryptMetrics.calls.length;
+      try {
+        return await run(prisma);
+      } finally {
+        expect(decryptMetrics.calls.length).toBe(kmsBeforeTransaction);
+      }
+    },
+  });
+  decryptMetrics.calls.length = 0;
+  await runWithFreshHostedDomainRootUnwrapCache(async () => {
+    const run = ensureHostedMemberChannelWelcome({ channel: "linq", memberId, prisma: prisma as never });
+    if (quotaFull) {
+      await expect(run).resolves.toBeUndefined();
+      expect(claimQuota).not.toHaveBeenCalled();
+      expect(mailboxCiphertext).toBeNull();
+    } else {
+      await expect(run).rejects.toThrow("synthetic mailbox persistence unavailable");
+      expect(claimQuota).toHaveBeenCalledOnce();
+      expect(parseSerializedHostedSecureBoxEnvelope(String(mailboxCiphertext)).domain).toBe("ingress");
+    }
+    expect(routingWrite).toHaveBeenCalledOnce();
+    expect(parseSerializedHostedSecureBoxEnvelope(routingWrite.mock.calls[0]![0].create.linqRecipientPhoneEncrypted).domain)
+      .toBe("control");
+    expect(kmsBeforeTransaction).toBe(2);
+  });
+});
+
 async function createHostedWebCryptoTransactionFixture(
   createTransaction: () => HostedCryptoTestTransaction = createCapturingTransaction,
 ): Promise<{
