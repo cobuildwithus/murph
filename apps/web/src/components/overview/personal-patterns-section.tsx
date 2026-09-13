@@ -1065,23 +1065,20 @@ function PatternResultDetails({
   const drawerRef = useRef<HTMLDivElement>(null);
   const Title = card ? DrawerTitle : PopoverTitle;
   const Description = card ? DrawerDescription : PopoverDescription;
-  const content = (
-    <>
-      <div className={cn("flex flex-col gap-1.5", card && "pr-10")}>
-        {eyebrow ? (
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
-            {eyebrow}
-          </p>
-        ) : null}
-        <Title className={cn("font-serif font-semibold", card ? "text-2xl leading-8" : "text-lg leading-6")}>
-          {title}
-        </Title>
-        <Description className={cn("text-xs leading-5 text-muted-foreground", !showDescription && "sr-only")}>
-          {description}
-        </Description>
-      </div>
-      {children}
-    </>
+  const header = (
+    <div className={cn("flex flex-col gap-1.5", card && "pr-10")}>
+      {eyebrow ? (
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
+          {eyebrow}
+        </p>
+      ) : null}
+      <Title className={cn("font-serif font-semibold", card ? "text-2xl leading-8" : "text-lg leading-6")}>
+        {title}
+      </Title>
+      <Description className={cn("text-xs leading-5 text-muted-foreground", !showDescription && "sr-only")}>
+        {description}
+      </Description>
+    </div>
   );
 
   if (card) {
@@ -1095,16 +1092,25 @@ function PatternResultDetails({
             event.preventDefault();
             drawerRef.current?.focus();
           }}
-          className="overflow-y-auto overscroll-contain outline-none data-[vaul-drawer-direction=bottom]:max-h-[85dvh] data-[vaul-drawer-direction=bottom]:rounded-t-2xl"
+          className="overflow-hidden outline-none data-[vaul-drawer-direction=bottom]:max-h-[85dvh] data-[vaul-drawer-direction=bottom]:rounded-t-2xl"
         >
           <DrawerClose asChild>
             <Button variant="ghost" size="icon" className="absolute right-3 top-5 size-11" aria-label="Close pattern details">
               <X aria-hidden="true" />
             </Button>
           </DrawerClose>
-          <div className="flex flex-col gap-5 px-6 pt-5 pb-[max(env(safe-area-inset-bottom),1.5rem)]">
-            {content}
+          <div className={cn("shrink-0 px-6 pt-5", !children && "pb-[max(env(safe-area-inset-bottom),1.5rem)]")}>
+            {header}
           </div>
+          {children ? (
+            // Keep scrolling off Vaul's shell: its ::after background extension
+            // otherwise scrolls over the evidence and creates blank overflow.
+            <div className="min-h-0 overflow-y-auto overscroll-contain">
+              <div className="flex flex-col gap-5 px-6 pt-5 pb-[max(env(safe-area-inset-bottom),1.5rem)]">
+                {children}
+              </div>
+            </div>
+          ) : null}
         </DrawerContent>
       </Drawer>
     );
@@ -1128,7 +1134,8 @@ function PatternResultDetails({
         side="right"
         sideOffset={10}
       >
-        {content}
+        {header}
+        {children}
       </PopoverContent>
     </Popover>
   );
