@@ -75,7 +75,7 @@ import { ensureHostedMemberChannelWelcome } from "@/src/lib/hosted-onboarding/ch
 const handlerPrismaClients = vi.hoisted(() => [] as PrismaClient[]);
 const channelWelcomeTestHooks = vi.hoisted(() => ({
   signal: vi.fn(),
-  unwrap: vi.fn(async () => ({ rootKey: new Uint8Array(32) })),
+  unwrap: vi.fn(async (_input: { domain: string }) => ({ rootKey: new Uint8Array(32) })),
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -982,11 +982,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const allPrepared = createDeferred();
       const preparationTimeout = setTimeout(() => allPrepared.resolve(), 5_000);
       let prepared = 0;
-      channelWelcomeTestHooks.unwrap.mockImplementation(async () => {
-        prepared += 1;
-        if (prepared === callers.length) allPrepared.resolve();
-        await allPrepared.promise;
-        expect(prepared).toBe(callers.length);
+      channelWelcomeTestHooks.unwrap.mockImplementation(async ({ domain }: { domain: string }) => {
+        if (domain === "ingress") {
+          prepared += 1;
+          if (prepared === callers.length) allPrepared.resolve();
+          await allPrepared.promise;
+          expect(prepared).toBe(callers.length);
+        }
         return { rootKey: new Uint8Array(32) };
       });
       channelWelcomeTestHooks.signal.mockClear();
