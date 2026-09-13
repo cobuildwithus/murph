@@ -75,7 +75,8 @@ describe('assistant execution prompt contract', () => {
       channel: 'linq',
     }).prompt
 
-    expect(prompt).toContain('existing private direct Murph conversation')
+    expect(prompt).toContain('a private direct Murph conversation')
+    expect(prompt).toContain('This is an output-only turn. Do not call tools')
     expect(prompt).toContain('bounded committed private conversation history')
     expect(prompt).toContain('The platform owns delivery')
     expect(prompt).toContain('"kind":"send_message"')

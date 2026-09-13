@@ -4,6 +4,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
+  ensureHostedMemberChannelWelcome: vi.fn(),
   getPrisma: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   prepareHostedMemberVerifiedEmailReplyAlias: vi.fn(),
@@ -19,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   signalHostedMailboxAppendRuntime: vi.fn(),
   syncHostedMemberVerifiedEmailAuthorization: vi.fn(),
   upsertHostedMemberEmailAuthorization: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/channel-welcome", () => ({
+  ensureHostedMemberChannelWelcome: mocks.ensureHostedMemberChannelWelcome,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -95,6 +100,7 @@ describe("settings email sync route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.ensureHostedMemberChannelWelcome.mockResolvedValue(undefined);
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.prismaClient.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback(mocks.prismaClient)
@@ -199,6 +205,11 @@ describe("settings email sync route", () => {
       memberId: "member_123",
       prisma: mocks.prismaClient,
     });
+    expect(mocks.ensureHostedMemberChannelWelcome).toHaveBeenCalledWith({
+      channel: "email",
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_channels_email_123",
@@ -253,6 +264,8 @@ describe("settings email sync route", () => {
       verifiedAt: new Date("2025-03-27T08:30:00.000Z"),
     });
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForRecentMember).toHaveBeenCalledTimes(1);
+    expect(mocks.ensureHostedMemberChannelWelcome).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       emailAddress: "user@example.com",
@@ -309,7 +322,22 @@ describe("settings email sync route", () => {
         errorName: "Error",
       },
     );
+    expect(mocks.ensureHostedMemberChannelWelcome).toHaveBeenCalledTimes(1);
     warnSpy.mockRestore();
+  });
+
+  it("surfaces a durable outreach enqueue failure so saving can safely retry", async () => {
+    mocks.ensureHostedMemberChannelWelcome.mockRejectedValueOnce(new Error("Synthetic mailbox unavailable"));
+    const request = () => new Request("https://join.example.test/api/settings/email/sync", {
+      headers: SAME_ORIGIN_HEADERS, method: "POST",
+    });
+    const failed = await settingsEmailSyncRoute.POST(request());
+    expect(failed.status).toBe(500);
+    expect(mocks.syncHostedMemberVerifiedEmailAuthorization).toHaveBeenCalledTimes(1);
+    const retry = await settingsEmailSyncRoute.POST(request());
+    expect(retry.status).toBe(200);
+    expect(mocks.ensureHostedMemberChannelWelcome).toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedSignupWelcomeEmailForRecentMember).toHaveBeenCalledTimes(2);
   });
 
   it("rejects sync attempts when the cookie-backed Privy session no longer maps to a hosted member", async () => {

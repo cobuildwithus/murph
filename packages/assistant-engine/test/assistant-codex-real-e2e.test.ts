@@ -65,6 +65,7 @@ import {
 import {
   buildHostedExecutionGroupContextHandoffInstructions,
   buildHostedMemberSignupWelcomeInstructions,
+  buildHostedMemberPhoneWelcomeDeliveryIdentity,
 } from '@murphai/hosted-execution'
 import {
   buildMurphHostedPermissionProfileTomlLines,
@@ -9389,6 +9390,167 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     360_000,
   )
 
+  it.each(['accept', 'decline'] as const)(
+    'respects the wearable update schedule offer: %s',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wearable-schedule-e2e-'))
+      const fixture = createVersionedAutomationPatchFixture({
+        current: {
+          automationId: 'automation-sleep-summary', lookupId: 'daily-sleep-summary', effectiveTimeZone: 'America/Chicago',
+          occurrenceProjection: { nextOccurrenceAt: '2026-07-30T14:00:00.000Z', status: 'resolved' },
+          schedule: { kind: 'dailyLocal', localTime: '09:00', timeZone: 'America/Chicago' },
+          status: 'active', updatedAt: '2026-07-28T12:00:00.000Z',
+        },
+        patch: (request, current) => {
+          if (!request.schedule) throw new Error('Expected a schedule-only patch.')
+          return { ...current, schedule: request.schedule, updatedAt: '2026-07-29T14:10:00.000Z',
+            occurrenceProjection: { nextOccurrenceAt: '2026-07-30T14:30:00.000Z', status: 'resolved' },
+          }
+        },
+      })
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+          developerInstructions: buildHostedGroupStatusDeveloperInstructions('families', true),
+          dynamicTools: [MURPH_AUTOMATION_TOOL], env: config.env, groupConversation: true,
+          hostedToolContext: {
+            automationTool: { request: fixture.request }, computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => { throw new Error('Unavailable in synthetic journey.'); }, vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: [
+            'Conversation context: The daily group sleep report is automation-sleep-summary, also listed as daily-sleep-summary.',
+            'Murph previously offered: Some sleep results are still pending. Shall I send future daily reports half an hour later?',
+            scenario === 'accept' ? 'Current message from the automation creator: Yes, move it half an hour later going forward.' : 'Current message from the automation creator: No, keep the usual time.',
+          ].join('\n'),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const reply = result.finalMessage.trim()
+        process.stdout.write(`[wearable-schedule-e2e] ${JSON.stringify({ scenario, reply, actions: fixture.requests.map((request) => request.action) })}\n`)
+        if (scenario === 'accept') {
+          expect(fixture.requests.map((request) => request.action)).toEqual(['inspect', 'patch'])
+          const patch = fixture.requests[1]
+          expect(patch).toMatchObject({ action: 'patch', expectedUpdatedAt: '2026-07-28T12:00:00.000Z' })
+          if (patch?.action !== 'patch' || !patch.schedule) throw new Error('Expected a versioned schedule patch.')
+          expect(Object.keys(patch).sort()).toEqual(['action', 'expectedUpdatedAt', 'lookup', 'schedule'])
+          expect([undefined, 'America/Chicago']).toContain(patch.schedule.kind === 'dailyLocal' || patch.schedule.kind === 'cron' ? patch.schedule.timeZone : 'invalid')
+          if (patch.schedule.kind === 'dailyLocal') expect(patch.schedule.localTime).toBe('09:30')
+          else if (patch.schedule.kind === 'cron') expect(patch.schedule.expression).toBe('30 9 * * *')
+          else throw new Error('Expected the same daily recurrence.')
+          expect(reply).toMatch(/9:30/iu)
+          expect(reply).toMatch(/central|chicago/iu)
+          expect(reply).not.toMatch(/\?/u)
+        } else {
+          expect(fixture.requests.filter((request) => request.action !== 'inspect')).toHaveLength(0)
+          expect(reply).not.toMatch(/moved|rescheduled|30 minutes later|9:30/iu)
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 360_000,
+  )
+
+  it.each(['available', 'missing', 'unavailable', 'previously_declined', 'usual_complete', 'usual_missing', 'unknown_history'] as const)(
+    'handles wearable freshness recovery in a scheduled group update: %s',
+    async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wearable-freshness-e2e-'))
+      const sharedRequests: unknown[] = []
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions('group', 'shared_read', 'linq', true),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL, MURPH_AUTOMATION_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot }, groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false, currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+            automationTool: { request: async (request) => { automationRequests.push(request); throw new Error('No schedule change has been authorized.'); } },
+            groupSharedReader: { request: async (request) => {
+              sharedRequests.push(request)
+              return {
+                status: 'ok', requestedProjectionScopeKeys: ['sleep-duration-days.v0'],
+                freshness: { checkedAt: '2026-08-05T13:04:00.000Z', refreshStatus: scenario === 'unavailable' ? 'unavailable' : 'requested' },
+                members: (scenario.startsWith('usual_') ? ['Rowan', 'Quinn', 'Sage', 'Avery'] : ['Rowan', 'Quinn']).map((displayName, index) => {
+                  const available = scenario === 'available' || index === 0 || (scenario === 'usual_complete' && index < 3)
+                  const unknown = scenario === 'unknown_history' && index === 1
+                  const dates = [...(index < 3 && !unknown ? ['2026-08-04'] : []), ...(available ? ['2026-08-05'] : [])]
+                  return {
+                    displayName, currentTurnHandles: [], memberId: `member_freshness_${index}`, participantId: `participant_freshness_${index}`,
+                    projections: [{ projectionScope: { projectionKind: 'sleep-duration-days.v0' }, projectionScopeKey: 'sleep-duration-days.v0',
+                      grantStatus: 'granted', dataStatus: dates.length ? 'available' : 'missing',
+                      grantedAt: unknown ? '2026-08-05T00:00:00.000Z' : '2026-07-01T00:00:00.000Z',
+                      records: dates.map((date) => ({ recordKey: date, occurredAt: `${date}T00:00:00.000Z`,
+                        data: { date, metricKey: 'total-sleep-minutes', value: 420 + index * 15, unit: 'minutes' },
+                      })),
+                    }],
+                  }
+                }),
+              } satisfies AssistantHostedGroupSharedReadResponse
+            } },
+            sendVaultFile: async () => { throw new Error('Unavailable in synthetic journey.'); }, vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: [
+            'Scheduled group automation: daily-sleep-summary. Runs every day at 09:00 America/New_York.',
+            'Recipe: Share today’s sleep duration for everyone. Keep it short.',
+            ...(scenario === 'previously_declined' ? ['Recent conversation: The report creator declined the offered later time and asked to keep the usual schedule.'] : []),
+          ].join('\n'),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected the scheduled report.')
+        const reply = renderMarkdownMessageText(decision.text).text
+        process.stdout.write(`[wearable-freshness-e2e] ${JSON.stringify({ scenario, reply })}\n`)
+        expect(sharedRequests).toEqual([{
+          projectionScopes: [{ projectionKind: 'sleep-duration-days.v0' }],
+          freshness: [{ projectionScopeKey: 'sleep-duration-days.v0', date: '2026-08-05' }],
+        }])
+        expect(automationRequests).toHaveLength(0)
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(1)
+        expect(reply).toMatch(/Rowan/iu)
+        expect(reply).toMatch(/7(?:h| hours?)/iu)
+        expect(reply).not.toMatch(/reconnect|connect your|enable sharing|permission|0h|zero sleep|successfully synced|already moved|schedule (?:has been|was) changed/iu)
+        if (scenario === 'available') {
+          expect(reply).toMatch(/Quinn/iu)
+          expect(reply).toMatch(/7(?:h| hours?).*15/iu)
+          expect(reply).not.toMatch(/30 minutes|hasn.t arrived|not arrived|missing/iu)
+        } else {
+          expect(reply).toMatch(/Quinn/iu)
+          if (scenario !== 'usual_complete') expect(reply).toMatch(/9:04/iu)
+          if (scenario === 'previously_declined' || scenario === 'usual_complete' || scenario === 'unknown_history') {
+            expect(reply).not.toMatch(/30(?:[- ]|\s*)min|half an hour|9:30|\?/iu)
+          } else {
+            expect(reply).toMatch(/30(?:[- ]|\s*)min|half an hour|9:30/iu)
+            expect(reply).toMatch(/\?/u)
+          }
+          expect(reply).not.toMatch(/Quinn[^\n]{0,40}0(?:h| hours?)/iu)
+          if (scenario.startsWith('usual_')) {
+            expect(reply).toMatch(/Sage/iu)
+            expect(reply).toMatch(/Avery/iu)
+            expect(reply).not.toMatch(/Avery[^\n]{0,55}(?:late|hasn.t arrived|disconnected|waiting)/iu)
+            if (scenario === 'usual_complete') {
+              expect(reply).toMatch(/7(?:h| hours?).*15/iu)
+              expect(reply).toMatch(/7(?:h| hours?).*30/iu)
+            } else {
+              expect(reply).not.toMatch(/Quinn[^\n]{0,40}7(?:h| hours?)|Sage[^\n]{0,40}7(?:h| hours?)/iu)
+            }
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 360_000,
+  )
+
   it(
     'keeps four-person scheduled sleep and steps reports in separate participant rows',
     async () => {
@@ -16526,7 +16688,7 @@ describeRealCodex('real Codex personal email audience e2e', () => {
 })
 
 describeRealCodex('real Codex direct email signup welcome e2e', () => {
-  it('delivers the exact activation welcome through the production notification turn', async () => {
+  it.each([true, false])('queues one signup welcome on each channel regardless of delivery order: emailFirst=%s', async (emailFirst) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-direct-email-signup-welcome-e2e-'),
@@ -16552,7 +16714,7 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
         timezone: 'America/New_York',
         vaultRoot: workingDirectory,
       })
-      const result = await sendAssistantNotificationLocal({
+      const notificationInput = {
         actorId: null,
         bindingDeliveryTarget: 'member@example.test',
         channel: 'email',
@@ -16585,13 +16747,48 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
         turnTrigger: 'manual-deliver',
         vault: workingDirectory,
         workingDirectory,
-      })
+      } satisfies Parameters<typeof sendAssistantNotificationLocal>[0]
+      const phoneKey = buildHostedMemberPhoneWelcomeDeliveryIdentity('synthetic-member')
+      const phoneInput = {
+        ...notificationInput,
+        actorId: 'synthetic-phone-actor',
+        bindingDeliveryTarget: '+12025550123',
+        channel: 'linq',
+        deliveryKind: 'participant' as const,
+        deliverySource: { kind: 'linq' as const, fromPhoneNumber: '+12025550124' },
+        deliveryTarget: null,
+        deliveryDedupeToken: phoneKey,
+        deliveryIdempotencyKey: phoneKey,
+        identityId: 'synthetic-phone-identity',
+      }
+      const first = await sendAssistantNotificationLocal(emailFirst ? notificationInput : phoneInput)
+      const second = await sendAssistantNotificationLocal(emailFirst ? phoneInput : notificationInput)
+      const result = emailFirst ? first : second
+      const phoneWelcome = emailFirst ? second : first
+      const emailReplay = await sendAssistantNotificationLocal(notificationInput)
+      expect(emailReplay.deliveryOutcome).toMatchObject({ kind: 'queued' })
+      if (result.deliveryOutcome?.kind !== 'queued') {
+        throw new Error('Expected the original email welcome to be queued.')
+      }
+      expect(emailReplay.deliveryOutcome).toMatchObject({ intentId: result.deliveryOutcome.intentId })
+      const replay = await sendAssistantNotificationLocal(phoneInput)
+      expect(phoneWelcome.response).toBe(welcomeText)
+      expect(phoneWelcome.deliveryOutcome?.kind).toBe('queued')
+      expect(replay.deliveryOutcome).toMatchObject({ kind: 'queued' })
+      expect(replay.response).toBe(welcomeText)
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(2)
+      expect(intents.map((intent) => intent.channel).sort()).toEqual(['email', 'linq'])
+      expect(new Set(intents.map((intent) => intent.deliveryIdempotencyKey)).size).toBe(2)
 
       process.stdout.write(
         `[real-codex direct email signup welcome] ${JSON.stringify({
           decision: result.decision.kind,
           delivery: result.deliveryOutcome?.kind ?? null,
           reply: result.response,
+          phoneReply: phoneWelcome.response,
+          queuedMessages: intents.length,
+          emailFirst,
         })}\n`,
       )
       expect(result.decision).toMatchObject({
@@ -16605,6 +16802,79 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
         workingDirectory,
         ...config.temporaryPaths,
       ])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex connected channel greeting e2e', () => {
+  it.each(['email', 'linq'] as const)('greets a new channel contextually after private conversation on %s', async (originalChannel) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-connected-channel-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const welcomeText = 'Welcome to Murph. What would you like help with first?'
+      const common = {
+        deliveryDispatchMode: 'queue-only' as const,
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-member', userEnvKeys: [] } },
+        firstContactPolicy: { markSeenOnDeliveryAccepted: true },
+        instructions: buildHostedMemberSignupWelcomeInstructions(welcomeText),
+        responsePolicy: { kind: 'require_send_exact_text' as const, text: welcomeText },
+        threadId: null, threadIsDirect: true,
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver' as const, vault: workingDirectory, workingDirectory,
+      }
+      const emailInput = {
+        ...common, actorId: null, bindingDeliveryTarget: 'member@example.test', channel: 'email',
+        deliveryTarget: 'member@example.test', identityId: 'synthetic-email-identity',
+        deliveryDedupeToken: 'signup-welcome:synthetic-member',
+        deliveryIdempotencyKey: 'signup-welcome:synthetic-member',
+      }
+      const phoneKey = buildHostedMemberPhoneWelcomeDeliveryIdentity('synthetic-member')
+      const phoneInput = {
+        ...common, actorId: 'synthetic-phone-actor', bindingDeliveryTarget: '+12025550123', channel: 'linq',
+        deliveryKind: 'participant' as const, deliveryTarget: null,
+        deliverySource: { kind: 'linq' as const, fromPhoneNumber: '+12025550124' },
+        identityId: 'synthetic-phone-identity', deliveryDedupeToken: phoneKey, deliveryIdempotencyKey: phoneKey,
+      }
+      const originalInput = originalChannel === 'email' ? emailInput : phoneInput
+      const nextInput = originalChannel === 'email' ? phoneInput : emailInput
+      const original = await sendAssistantNotificationLocal(originalInput)
+      const at = new Date(Date.now() - 60_000).toISOString()
+      await appendAssistantTranscriptEntries(workingDirectory, original.session.sessionId, [
+        { kind: 'user', createdAt: at, text: 'I am planning an easy weekend walk by the lake. I already know how Murph works.' },
+        { kind: 'assistant', createdAt: at, text: 'That sounds like a lovely plan. Keep the route easy and enjoy the lake.' },
+      ])
+      const events: unknown[] = []
+      let providerRequests = 0
+      const contextualInput = {
+        ...nextInput, connectedChannelGreeting: true,
+        onProviderRequestStarted: () => { providerRequests += 1 },
+        onTraceEvent: (event: { rawEvent: unknown }) => { events.push(event.rawEvent) },
+      }
+      const greeting = await sendAssistantNotificationLocal(contextualInput)
+      const replay = await sendAssistantNotificationLocal(contextualInput)
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(providerRequests).toBe(1)
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      expect(intents).toHaveLength(2)
+      expect(intents.map((intent) => intent.channel).sort()).toEqual(['email', 'linq'])
+      expect(greeting.deliveryOutcome?.kind).toBe('queued')
+      expect(replay.response).toBe(greeting.response)
+      const reply = greeting.response ?? ''
+      process.stdout.write(`[real-codex connected channel greeting] ${JSON.stringify({ originalChannel, reply, providerRequests, intents: intents.length })}\n`)
+      expect(reply.length).toBeGreaterThan(5)
+      expect(reply.length).toBeLessThan(500)
+      expect(reply).not.toMatch(/welcome to murph|help with first|onboard|sign.?up|operator|queue|notification|this channel|i(?: am|'m) murph|saved|scheduled/iu)
+      expect(reply).not.toBe(welcomeText)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }
   }, 360_000)
 })
@@ -36957,9 +37227,11 @@ function buildScheduledAutomationDeveloperInstructions(
     | 'shared_read'
     | 'none' = 'families',
   channel: 'email' | 'linq' = 'linq',
+  assistantHostedAutomationAvailable = false,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
+    assistantHostedAutomationAvailable,
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
@@ -37224,9 +37496,11 @@ function buildHostedGroupStatusDeveloperInstructions(
     | 'families'
     | 'shared_read'
     | 'none' = 'families',
+  assistantHostedAutomationAvailable = false,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
+    assistantHostedAutomationAvailable,
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],

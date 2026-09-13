@@ -30,6 +30,9 @@ import type {
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedMemberSignupWelcomeInstructions,
+  buildHostedMemberSignupWelcomeNotificationWake,
+  buildHostedMemberChannelWelcomeDeliveryIdentity,
+  isHostedMemberSignupWelcomeDeliveryIdentity,
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -41,6 +44,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { emitHostedAssistantContextTraceLog } from "../context-diagnostics.ts";
+import { readHostedMailboxImportState } from "../mailbox-state.ts";
 import type { HostedRuntimeEffectsPort } from "../platform.ts";
 import { HOSTED_ASSISTANT_WAKE_REASON } from "../wake-candidates.ts";
 import {
@@ -279,8 +283,8 @@ export async function executeHostedMemberActivatedWake(input: {
   let notificationDecisionKind: string | null = null;
 
   try {
-    const notificationResult = await sendAssistantNotification(
-      buildMemberActivationSignupWelcomeNotificationInput(
+    const notificationResult = await sendAssistantNotification({
+      ...buildMemberActivationSignupWelcomeNotificationInput(
         input.wake,
         input.executionContext,
         input.vaultRoot,
@@ -290,7 +294,17 @@ export async function executeHostedMemberActivatedWake(input: {
           redactedLogEntries.push(entry);
         },
       ),
-    );
+      ...await resolveHostedConnectedChannelGreetingPolicy({
+        executionContext: input.executionContext,
+        vaultRoot: input.vaultRoot,
+        wake: buildHostedMemberSignupWelcomeNotificationWake({
+          memberId: input.wake.userId,
+          occurredAt: input.wake.occurredAt,
+          route: signupWelcome.route,
+          text: signupWelcome.text,
+        }),
+      }),
+    });
     notificationDecisionKind = notificationResult?.decision.kind ?? null;
   } catch (error) {
     redactedLogEntries.push(
@@ -357,8 +371,8 @@ export async function executeHostedAssistantNotificationWake(input: {
   const operatorTask = requireHostedOperatorMessageNotification(input.wake);
 
   try {
-    const notificationResult = await sendAssistantNotification(
-      buildAssistantNotificationInput(
+    const notificationResult = await sendAssistantNotification({
+      ...buildAssistantNotificationInput(
         input.wake,
         input.executionContext,
         effectsPort,
@@ -370,7 +384,8 @@ export async function executeHostedAssistantNotificationWake(input: {
           redactedLogEntries.push(entry);
         },
       ),
-    );
+      ...await resolveHostedConnectedChannelGreetingPolicy(input),
+    });
     notificationDecisionKind = notificationResult?.decision.kind ?? null;
     const deliveryOutcome = notificationResult?.deliveryOutcome ?? null;
     const deliveryIntentId =
@@ -1297,13 +1312,48 @@ function isHostedThreadRouteEgressUnauthorizedError(error: unknown): boolean {
 function isHostedSignupWelcomeNotification(
   wake: HostedExecutionAssistantNotificationRequestedWake,
 ): boolean {
-  const signupWelcomeToken = `signup-welcome:${wake.userId}`;
   return (
     wake.notification.responsePolicy?.kind === "require_send_exact_text"
     && wake.notification.firstContact?.markSeenOnDeliveryAccepted === true
-    && wake.notification.deliveryDedupeToken === signupWelcomeToken
-    && wake.notification.deliveryIdempotencyKey === signupWelcomeToken
+    && isHostedMemberSignupWelcomeDeliveryIdentity(wake.notification.deliveryIdempotencyKey, wake.userId)
+    && wake.notification.deliveryDedupeToken === wake.notification.deliveryIdempotencyKey
   );
+}
+
+function isHostedConnectedChannelWelcome(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+  context: AssistantExecutionContext,
+): boolean {
+  const notification = wake.notification;
+  const route = notification.route;
+  if (!isHostedSignupWelcomeNotification(wake)
+    || context.hosted?.memberId !== wake.userId
+    || route.threadIsDirect !== true
+    || (route.channel !== "email" && route.channel !== "linq")
+    || notification.notificationPromptProfile != null
+    || notification.operatorTask != null
+    || notification.groupContextHandoff != null
+    || notification.privateAssistantAskCompletion != null
+    || notification.externalThreadRouteAuthority != null) return false;
+  const key = notification.deliveryIdempotencyKey;
+  return key === `signup-welcome:${wake.userId}`
+    || key === `signup-welcome:${wake.userId}:linq` && route.channel === "linq"
+    || route.identityId !== null && key === buildHostedMemberChannelWelcomeDeliveryIdentity({
+      memberId: wake.userId,
+      channel: route.channel,
+      destinationLookupKey: route.identityId,
+    });
+}
+
+async function resolveHostedConnectedChannelGreetingPolicy(input: {
+  wake: HostedExecutionAssistantNotificationRequestedWake;
+  executionContext: AssistantExecutionContext;
+  vaultRoot: string;
+}): Promise<Pick<AssistantNotificationInput, "connectedChannelGreeting">> {
+  if (!isHostedConnectedChannelWelcome(input.wake, input.executionContext)) return {};
+  const state = await readHostedMailboxImportState({ vaultRoot: input.vaultRoot });
+  return BigInt(state.watermarks.conversation) > 0n
+    ? { connectedChannelGreeting: true } : {};
 }
 
 function isHostedTelegramSignupWelcomeNotification(

@@ -3576,13 +3576,13 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.reconcileMurphManagedOnboardingFollowup).not.toHaveBeenCalled();
   });
 
-  it("fails canonical signup welcome notification errors so the mailbox can retry", async () => {
+  it.each(["signup-welcome:member_123", "signup-welcome:member_123:linq"])("fails canonical signup welcome notification errors so the mailbox can retry: %s", async (welcomeKey) => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_signup_failure",
       memberId: "member_123",
       notification: {
-        deliveryDedupeToken: "signup-welcome:member_123",
-        deliveryIdempotencyKey: "signup-welcome:member_123",
+        deliveryDedupeToken: welcomeKey,
+        deliveryIdempotencyKey: welcomeKey,
         firstContact: {
           markSeenOnDeliveryAccepted: true,
         },

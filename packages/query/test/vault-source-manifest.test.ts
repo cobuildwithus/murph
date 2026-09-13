@@ -16,6 +16,12 @@ import {
   readVaultSourceStrict,
 } from "../src/vault-source.ts";
 
+import {
+  readBrowserVaultReplicaSource,
+  readBrowserVaultReplicaVault,
+  type BrowserVaultReplicaSourceStep,
+} from "../src/browser-replica-server.ts";
+
 const tempRoots: string[] = [];
 
 async function createTempVaultRoot(): Promise<string> {
@@ -288,4 +294,68 @@ test("Brotli event archives enter the source manifest and canonical query reads"
   assert.deepEqual((await listCanonicalSourceManifest(vaultRoot)).map((entry) => entry.relativePath), [relativePath]);
   const snapshot = await readVaultSourceStrict(vaultRoot);
   assert.ok(snapshot.entities.some((entity) => entity.entityId === "evt_brotli_synthetic"));
+});
+
+
+test.each([false, true])("replica source observation preserves results (populated: %s)", async (populated) => {
+  const vaultRoot = await createTempVaultRoot();
+  if (populated) {
+    await writeVaultFile(vaultRoot, VAULT_LAYOUT.coreDocument, "---\ntitle: Core\n---\n# Core\n");
+  }
+  const expected = await readBrowserVaultReplicaSource(vaultRoot);
+  const steps: (BrowserVaultReplicaSourceStep | null)[] = [];
+  const observed = await readBrowserVaultReplicaSource(vaultRoot, {
+    onSourceStep: (step) => { steps.push(step); },
+    signal: new AbortController().signal,
+  });
+  assert.deepEqual(steps, [
+    "canonical_source_read", null,
+    "read_model_construction", null,
+    "personal_pattern_vocabulary_read", null,
+    "metric_projection", null,
+  ]);
+  assert.deepEqual(observed, expected);
+  assert.deepEqual(observed.vault, await readBrowserVaultReplicaVault(vaultRoot));
+  assert.equal(observed.personalPatternVocabulary, null);
+  assert.deepEqual(await readBrowserVaultReplicaSource(vaultRoot, {
+    onSourceStep() { throw new Error("Synthetic observer failure."); },
+  }), expected);
+});
+
+test("replica source observation does not start work after an existing abort", async () => {
+  const vaultRoot = await createTempVaultRoot();
+  const controller = new AbortController();
+  const reason = new DOMException("Synthetic cancellation.", "AbortError");
+  controller.abort(reason);
+  const steps: (BrowserVaultReplicaSourceStep | null)[] = [];
+  await assert.rejects(readBrowserVaultReplicaSource(vaultRoot, {
+    onSourceStep: (step) => { steps.push(step); },
+    signal: controller.signal,
+  }), (error: unknown) => error === reason);
+  assert.deepEqual(steps, []);
+});
+
+test.each([
+  "canonical_source_read",
+  "personal_pattern_vocabulary_read",
+  "metric_projection",
+] as const)("replica source retains cancellation after %s", async (cancelAfter) => {
+  const vaultRoot = await createTempVaultRoot();
+  const controller = new AbortController();
+  const reason = new DOMException("Synthetic cancellation.", "AbortError");
+  let activeStep: BrowserVaultReplicaSourceStep | null = null;
+  const started: BrowserVaultReplicaSourceStep[] = [];
+  await assert.rejects(readBrowserVaultReplicaSource(vaultRoot, {
+    onSourceStep(step) {
+      if (step === null && activeStep === cancelAfter) {
+        controller.abort(reason);
+      }
+      if (step !== null) {
+        started.push(step);
+      }
+      activeStep = step;
+    },
+    signal: controller.signal,
+  }), (error: unknown) => error === reason);
+  assert.equal(started.at(-1), cancelAfter);
 });

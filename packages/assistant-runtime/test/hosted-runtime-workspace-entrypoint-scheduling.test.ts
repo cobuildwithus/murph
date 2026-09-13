@@ -3071,9 +3071,12 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       expectedWorkspaceVersion: "1",
       label: "post-checkpoint with earlier future assistant work",
     },
-  ])(
-    "preserves continuation priority in the $label path when forced browser-vault refresh maintenance times out",
-    async ({ assistantWakeAt, checkpointed, expectedWorkspaceVersion, label }) => {
+  ].flatMap((scenario) => [false, true].map((withSourceReadTiming) => ({
+    ...scenario,
+    withSourceReadTiming,
+  }))))(
+    "preserves continuation priority in the $label path when forced browser-vault refresh maintenance times out (source timing: $withSourceReadTiming)",
+    async ({ assistantWakeAt, checkpointed, expectedWorkspaceVersion, label, withSourceReadTiming }) => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
       const attemptId = `attempt_synthetic_browser_vault_marker_force_${label}`;
       const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -3083,8 +3086,12 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
       const retryAt = new Date(Date.parse(TEST_NOW) + 60_000).toISOString();
 
+      const sourceReadAtDeadline = withSourceReadTiming
+        ? { step: "read_model_construction" as const, elapsedMs: 11_000 }
+        : undefined;
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockResolvedValueOnce({
+        ...(sourceReadAtDeadline ? { sourceReadAtDeadline } : {}),
         attempt: "initial",
         configuredTimeoutMs: 30_000,
         currentStepElapsedMs: 12_000,
@@ -3179,6 +3186,10 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           browserVaultRefreshConfiguredTimeoutMs: 30_000,
           browserVaultRefreshCurrentStepElapsedMs: 12_000,
           browserVaultRefreshElapsedMs: 30_000,
+          ...(sourceReadAtDeadline ? {
+            browserVaultRefreshSourceReadStep: "read_model_construction",
+            browserVaultRefreshSourceReadStepElapsedMs: 11_000,
+          } : {}),
           browserVaultRefreshStage: "replica_write",
           browserVaultRefreshStatus: "deferred_timeout",
           browserVaultRefreshStep: "replica_write",

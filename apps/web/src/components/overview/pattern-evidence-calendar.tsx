@@ -17,10 +17,9 @@ export function PatternEvidenceCalendar({ report, cell, factorLabel, defaultOpen
   const factor = factorLabel.toLocaleLowerCase();
   const confirmed = cell.comparisonBasis === "confirmed_absence";
   const comparisonLabel = confirmed ? `Without ${factor}` : "Not recorded";
-  const warning = !confirmed ? <p className="text-xs leading-5 text-muted-foreground">No {factor} record doesn&apos;t mean no {factor}.</p> : null;
-  if (!evidence) return warning;
+  if (!evidence) return null;
   const description = (day: (typeof evidence.days)[number]) => {
-    const label = day.exposed && day.comparison ? "Both groups" : day.exposed ? factorLabel : day.comparison ? comparisonLabel : "No comparison date shown";
+    const label = day.exposed && day.comparison ? "Both groups" : day.exposed ? factorLabel : day.comparison ? comparisonLabel : "No comparison recorded";
     return `${new Date(day.date + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })} · ${label}`;
   };
   const selectedDay = evidence.days.find((day) => day.date === selected);
@@ -34,7 +33,10 @@ export function PatternEvidenceCalendar({ report, cell, factorLabel, defaultOpen
   return (
     <details open={defaultOpen || undefined} className="group/evidence min-w-0">
       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-sm text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
-        Days compared
+        <span className="flex flex-wrap items-baseline gap-x-3">
+          Days compared
+          {evidence.hasMissingDates ? <span className="text-xs font-normal text-muted-foreground">Partial dates</span> : null}
+        </span>
         <ChevronDown aria-hidden="true" className="size-4 transition-transform group-open/evidence:rotate-180 motion-reduce:transition-none" />
       </summary>
       <div className="space-y-4 pt-3">
@@ -71,8 +73,6 @@ export function PatternEvidenceCalendar({ report, cell, factorLabel, defaultOpen
           <span className="inline-flex items-center gap-2"><span aria-hidden="true" className={mark(false, true)} />{comparisonLabel}</span>
         </div>
         <div role="status" className="text-xs text-foreground">{selectedDay ? description(selectedDay) : null}</div>
-        {evidence.hasMissingDates ? <p className="text-xs text-muted-foreground">Some dates unavailable</p> : null}
-        {warning}
       </div>
     </details>
   );

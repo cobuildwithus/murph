@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   completeHostedPrivyVerification: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   ensureHostedStarterUsageEnrollment: vi.fn(),
+  ensureHostedMemberPhoneWelcome: vi.fn(),
+  ensureHostedMemberChannelWelcome: vi.fn(),
   getPrisma: vi.fn(),
   nativeAuth: vi.fn(),
   completion: vi.fn(),
@@ -28,6 +30,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/better-auth/native-auth", () => ({ readHostedNativeMemberAuth: mocks.nativeAuth }));
 vi.mock("@/src/lib/better-auth/record-crypto", () => ({ openAuthRecord: mocks.openAuthRecord }));
 vi.mock("@/src/lib/hosted-onboarding/authentication-completion", () => ({ readHostedAuthenticationCompletion: mocks.completion }));
+
+vi.mock("@/src/lib/hosted-onboarding/channel-welcome", () => ({ ensureHostedMemberChannelWelcome: mocks.ensureHostedMemberChannelWelcome }));
+vi.mock("@/src/lib/hosted-onboarding/phone-welcome", () => ({
+  ensureHostedMemberPhoneWelcome: mocks.ensureHostedMemberPhoneWelcome,
+}));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
@@ -211,6 +218,7 @@ describe("native companion hosted member admission", () => {
     mocks.nativeAuth.mockResolvedValue({ kind: "legacy", member: member(HostedBillingStatus.active) });
     expect((await admissionRoute.POST(admissionRequest())).status).toBe(200);
     expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({ memberId: "member_native", prisma });
+    expect(mocks.ensureHostedMemberPhoneWelcome).not.toHaveBeenCalled();
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
     expect(mocks.completion).not.toHaveBeenCalled();
@@ -309,6 +317,10 @@ describe("native companion hosted member admission", () => {
       prisma,
     });
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberPhoneWelcome).toHaveBeenCalledExactlyOnceWith({
+      memberId: activeMember.id,
+      prisma,
+    });
     expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
     expect(mocks.retryPendingHostedStarterUsageActivationRuntimeWake)
       .toHaveBeenCalledWith({

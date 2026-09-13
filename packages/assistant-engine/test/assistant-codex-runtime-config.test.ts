@@ -1218,10 +1218,10 @@ describe('assistant codex runtime', () => {
     expect(groupSharedRead).toHaveBeenCalledTimes(2)
     expect(groupSharedRead).toHaveBeenNthCalledWith(1, {
       projectionScopes: [{ projectionKind: 'steps-days.v0' }],
-    })
+    }, { signal: expect.any(AbortSignal) })
     expect(groupSharedRead).toHaveBeenNthCalledWith(2, {
       projectionScopes: [{ projectionKind: 'steps-days.v0' }],
-    })
+    }, { signal: expect.any(AbortSignal) })
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
   })
 

@@ -73,6 +73,52 @@ describe("hosted-onboarding member-identity-service", () => {
     clearHostedOnboardingEnvCache();
   });
 
+  it.each(["changed", "unchanged", "unverified", "migrated"])(
+    "retires old phone chat authority only after an authorized verified phone change: %s",
+    async (scenario) => {
+      const storedIdentity = await makeStoredIdentity({ privyUserId: "did:privy:user_123" });
+      const oldPhone = "+15551234567";
+      const newPhone = scenario === "unchanged" ? oldPhone : "+15551234568";
+      if (scenario === "unverified") storedIdentity.phoneNumberVerifiedAt = null;
+      const identityUpsert = vi.fn(async ({ create, update }: {
+        create: Record<string, unknown>; update: Record<string, unknown>;
+      }) => ({ ...create, ...update }));
+      const clearRouting = vi.fn().mockResolvedValue({ count: 1 });
+      const prisma = asRootPrisma({
+        $queryRaw: vi.fn().mockResolvedValue([]),
+        hostedMember: { findUnique: vi.fn().mockResolvedValue(makeMember()) },
+        hostedMemberIdentity: { findUnique: vi.fn().mockResolvedValue(storedIdentity), upsert: identityUpsert },
+        hostedMemberRouting: { updateMany: clearRouting },
+        hostedAuthRecord: { findUnique: vi.fn().mockResolvedValue(scenario === "migrated" ? { id: "member_123" } : null) },
+      });
+      const reconcile = reconcileHostedPrivyIdentityOnMember({
+        identity: makeIdentity({ phone: { number: newPhone, verifiedAt: 1743933600 } }),
+        member: makeMember(), now: NOW, prisma: prisma as never,
+      });
+      if (scenario === "migrated") {
+        await expect(reconcile).rejects.toMatchObject({ code: "AUTHORITY_MIGRATED" });
+        expect(identityUpsert).not.toHaveBeenCalled();
+      } else {
+        await expect(reconcile).resolves.toMatchObject({ id: "member_123" });
+      }
+      if (scenario === "changed") {
+        expect(clearRouting).toHaveBeenCalledTimes(2);
+        expect(identityUpsert.mock.invocationCallOrder[0]).toBeLessThan(clearRouting.mock.invocationCallOrder[0]!);
+        expect(clearRouting).toHaveBeenCalledWith(expect.objectContaining({
+          where: expect.objectContaining({ memberId: "member_123" }),
+          data: expect.objectContaining({ linqChatLookupKey: null, linqParticipantContactLookupKey: null }),
+        }));
+        for (const [query] of clearRouting.mock.calls) {
+          expect(query.data).not.toHaveProperty("linqRecipientPhoneEncrypted");
+          expect(query.data).not.toHaveProperty("linqRecipientPhoneLookupKey");
+          expect(query.data).not.toHaveProperty("linqHomeLineAssignedAt");
+        }
+      } else {
+        expect(clearRouting).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it("locks and re-reads the current member before reconciling a Privy identity", async () => {
     const lockedMember = makeMember({
       suspendedAt: null,
@@ -1004,7 +1050,7 @@ async function makeStoredIdentity(input: {
       memberId: "member_123",
       value: "+15551234567",
     }),
-    phoneNumberVerifiedAt: NOW,
+    phoneNumberVerifiedAt: NOW as Date | null,
     privyUserIdEncrypted: await encryptHostedWebNullableString({
       field: "hosted-member-identity.privy-user-id",
       memberId: "member_123",

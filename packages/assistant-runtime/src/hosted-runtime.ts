@@ -7757,6 +7757,13 @@ function buildHostedBrowserVaultRefreshLogDetails(
           browserVaultRefreshElapsedMs: refresh.refreshElapsedMs,
           browserVaultRefreshStage: refresh.refreshStage,
           browserVaultRefreshStep: refresh.refreshStep,
+          ...(refresh.sourceReadAtDeadline
+            ? {
+                browserVaultRefreshSourceReadStep: refresh.sourceReadAtDeadline.step,
+                browserVaultRefreshSourceReadStepElapsedMs:
+                  refresh.sourceReadAtDeadline.elapsedMs,
+              }
+            : {}),
         }
       : {}),
     ...("source" in refresh

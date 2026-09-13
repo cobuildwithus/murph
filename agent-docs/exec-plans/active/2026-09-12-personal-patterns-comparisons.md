@@ -146,3 +146,16 @@ The existing Patterns source-change and positive/negative histories still pass.
 The user authorized continued remediation and review until no findings remain;
 subsequent accepted findings do not need another resume pause. Product UX and
 parent candidate review are Ready. Final round 3 and new-head CI remain pending.
+
+
+Base reconciliation before round 3: the latest main added source-operation
+observability. Preserve its callback, cancellation, and deadline attribution,
+while retaining the full source return required by Patterns. The removed default
+entity projection no longer runs in this loader, so remove its obsolete diagnostic
+label and corresponding test case rather than report a fictitious operation.
+Journal and public entity filtering still run in the replica builder. This is
+included in the next full review and focused source/timeout verification.
+
+Post-reconciliation proof passes: 24 source-manifest/Journal-source/Patterns tests,
+31 hosted replica tests including operation-timeout attribution, and query plus
+assistant-runtime typechecks. Complexity and task-diff privacy checks pass.

@@ -337,6 +337,58 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     },
   )
 
+  it.skipIf(process.env.MURPH_MEASURE_WEARABLE_INPUT !== '1').each(['direct', 'group'] as const)(
+    'wearable recovery: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true,
+        automationAvailable: true,
+        personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group',
+        groupPermissionOfferAvailable: scope === 'group',
+        imageGenerationAvailable: false,
+        progressUpdatesAvailable: true,
+        progressUpdateMode: scope,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantProgressUpdatesAvailable: true, channel: 'linq',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-10-14',
+        currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: scope === 'direct',
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        turnTrigger: scope === 'group' ? 'automation-cron' : null,
+        scheduledOccurrenceAt: scope === 'group' ? '2026-10-14T16:00:00.000Z' : null,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      stub.captureProviderRequestDiagnostics({ completeInput: true })
+      stub.queue({ text: CONTRACT_CAPTURE_DONE })
+      await executeCodexAppServerTurn({
+        ...scenario.turnInput, dynamicTools: tools,
+        developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
+        prompt: [layers.dynamicTurnContextPrompt, 'Summarize today’s sleep.'].join('\n\n'),
+        env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+      })
+      const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+      assert.ok(captured)
+      const body = readRecord(JSON.parse(captured.json))
+      assert.ok(body)
+      delete body.prompt_cache_key
+      process.stdout.write('[wearable-input-proof] ' + JSON.stringify({
+        scope, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+        registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+        instructionsUtf8Bytes: Buffer.byteLength([layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt, layers.dynamicTurnContextPrompt].join('\n\n')),
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured.',
+        exclusions: ['prompt_cache_key'],
+      }) + '\n')
+    },
+  )
+
   it('renders actionable automation edit types in real Codex code-mode discovery', { timeout: 180_000 }, async () => {
     const [observed] = await observeContracts([MURPH_AUTOMATION_TOOL], 'code-only')
     assert.ok(observed)

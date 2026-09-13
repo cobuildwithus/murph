@@ -1639,7 +1639,7 @@ test("Web production admission runs only for exact public main", async () => {
     ),
     "utf8",
   );
-  const admissionJob = workflow.slice(workflow.indexOf("jobs:\n  admission:"));
+  const admissionJob = workflow.slice(workflow.indexOf("jobs:\n  admission:"), workflow.indexOf("\n  publish-status:"));
   const checkoutIndex = admissionJob.indexOf("name: Check out exact public main revision");
   const setupIndex = admissionJob.indexOf("name: Setup Node");
   const fixtureIndex = admissionJob.indexOf("name: Execute exact production wire projection");
@@ -1670,6 +1670,7 @@ test("Web production admission runs only for exact public main", async () => {
   assert.doesNotMatch(admissionJob, /\n    needs:/u);
   assert.doesNotMatch(workflow, /\n  producer:|upload-artifact|download-artifact/u);
   assert.ok(checkoutIndex >= 0);
+  assert.ok(admissionJob.indexOf("name: Publish pending Web admission status") < checkoutIndex);
   assert.ok(setupIndex > checkoutIndex);
   assert.ok(fixtureIndex > setupIndex);
   assert.ok(tokenIndex > fixtureIndex);
@@ -1682,6 +1683,59 @@ test("Web production admission runs only for exact public main", async () => {
     admissionJob,
     /--fixtures "\$\{RUNNER_TEMP\}\/temporal-compatibility-producer-fixtures\.json"/u,
   );
+});
+
+test("Web admission publishes the exact completed proof result to Vercel's status channel", async () => {
+  const workflow = await readFile(path.join(REPO_ROOT, ".github/workflows/temporal-web-deployment-admission.yml"), "utf8");
+  const publisher = workflow.slice(workflow.indexOf("\n  publish-status:"));
+  assert.match(publisher, /needs: admission\n    if: \$\{\{ always\(\) \}\}/u);
+  assert.match(publisher, /ADMISSION_RESULT: \$\{\{ needs\.admission\.result \}\}/u);
+  assert.match(publisher, /ADMISSION_ATTEMPT: \$\{\{ needs\.admission\.outputs\.attempt \}\}/u);
+  assert.match(workflow, /attempt: \$\{\{ steps\.pending\.outputs\.attempt \}\}/u);
+  assert.match(publisher, /permissions:\n      statuses: write/u);
+  assert.doesNotMatch(publisher, /checkout|secrets\.|create-github-app-token|continue-on-error/u);
+  const tempDir = await mkdtemp(path.join(tmpdir(), "web-admission-status-"));
+  try {
+    await writeFile(path.join(tempDir, "gh"), '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$GH_CAPTURE"\nexit "${GH_EXIT_CODE:-0}"\n', { mode: 0o755 });
+    for (const [step, admissionResult, admissionAttempt, expectedState] of [
+      ["pending", "", "2", "pending"],
+      ["final", "success", "2", "success"],
+      ["final", "failure", "2", "failure"],
+      ["final", "cancelled", "2", "failure"],
+      ["final", "skipped", "2", "failure"],
+      ["final", "", "2", "failure"],
+      ["final", "success", "1", "failure"],
+      ["final", "success", "", "failure"],
+    ]) {
+      const script = extractWorkflowStepScript(workflow, `Publish ${step} Web admission status`);
+      const capturePath = path.join(tempDir, "gh.args");
+      const env = {
+        ...process.env,
+        PATH: `${tempDir}:${process.env.PATH ?? ""}`,
+        GH_CAPTURE: capturePath,
+        GITHUB_REPOSITORY: "example/repository",
+        GITHUB_SHA: PUBLIC_SHA,
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "2",
+        GITHUB_OUTPUT: path.join(tempDir, "outputs"),
+        GITHUB_SERVER_URL: "https://github.example.test",
+        ADMISSION_RESULT: admissionResult,
+        ADMISSION_ATTEMPT: admissionAttempt,
+      };
+      const result = spawnSync("bash", ["-c", script], { env, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      const args = (await readFile(capturePath, "utf8")).trimEnd().split("\n");
+      assert.ok(args.includes(`repos/example/repository/statuses/${PUBLIC_SHA}`));
+      assert.ok(args.includes(`state=${expectedState}`));
+      assert.ok(args.includes("context=Temporal Web production admission"));
+      assert.ok(args.includes("target_url=https://github.example.test/example/repository/actions/runs/123"));
+      assert.equal(spawnSync("bash", ["-c", script], {
+        env: { ...env, GH_EXIT_CODE: "1" }, encoding: "utf8",
+      }).status, 1, "status delivery failure must fail the publishing job");
+    }
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
 test("Repo Hygiene owns the focused controller contract test", async () => {

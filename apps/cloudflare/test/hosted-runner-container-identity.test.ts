@@ -1642,17 +1642,22 @@ describe("hosted runner container identity", () => {
         standbyAllocationReason: "claim_failed",
       });
 
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
     let finishLateClaim: ((result: HostedStandbyClaimResult) => void) | undefined;
     const timedOutClaim = vi.fn<HostedStandbyCoordinatorStubLike["claimReadyStandby"]>(
       async () => await new Promise<HostedStandbyClaimResult>((resolve) => { finishLateClaim = resolve; }),
     );
     const timedOutController = createController(timedOutClaim);
-    await expect(timedOutController.controller.ensureForUser({
+    const timedOutStart = timedOutController.controller.ensureForUser({
       orchestration: { triggeredByWebDirect: true },
       orchestrationAttemptId:
         "web-ingress-88888888-8888-4888-8888-888888888888",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
+    });
+    await vi.waitFor(() => expect(timedOutClaim).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(HOSTED_STANDBY_CLAIM_TIMEOUT_MS);
+    await expect(timedOutStart).resolves.toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
     });
@@ -1663,13 +1668,11 @@ describe("hosted runner container identity", () => {
         standbyAllocationOutcome: "fallback",
         standbyAllocationReason: "claim_timed_out",
       });
-    // Date.now() can trail the timeout clock by one millisecond at the boundary.
     expect(
       timedOutController.invocationService.invokedInputs[0]?.orchestration
         ?.standbyAllocationElapsedMs,
-    ).toBeGreaterThanOrEqual(HOSTED_STANDBY_CLAIM_TIMEOUT_MS - 1);
-    // Make this settlement late on the wall clock as well as the timeout clock.
-    vi.spyOn(Date, "now").mockReturnValue(timedOutClaim.mock.calls[0]![0].deadlineAtEpochMs + 1);
+    ).toBe(HOSTED_STANDBY_CLAIM_TIMEOUT_MS);
+    vi.setSystemTime(timedOutClaim.mock.calls[0]![0].deadlineAtEpochMs + 1);
     finishLateClaim?.({ outcome: "claimed", slotName: "runner--v-release_1--0123456789abcdef0123456789abcdef" });
     await vi.waitFor(() => expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({

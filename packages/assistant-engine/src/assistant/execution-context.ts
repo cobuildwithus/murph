@@ -438,6 +438,7 @@ export interface AssistantHostedGroupParticipantDisplayNameReader {
 export interface AssistantHostedGroupSharedReader {
   request(
     request: AssistantHostedGroupSharedReadRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<AssistantHostedGroupSharedReadResponse>
 }
 
