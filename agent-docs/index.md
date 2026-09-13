@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Admission of new connection jobs during retained device history retries is
+owned by `agent-docs/RELIABILITY.md`; the existing mailbox claim preserves one
+continuation and exact job backoff across preemption and restoration.
+
 Last verified: 2026-09-11
 
 Bounded Junction full-history batching, exact scalar continuation, and
