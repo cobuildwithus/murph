@@ -10,7 +10,7 @@ import { getPrisma } from "../prisma";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { assertHostedBetterAuthIssuanceEnabled } from "./config";
 import { hostedAuthRequestIp } from "./admission";
-import { HOSTED_CREDENTIAL_CHANGE_KIND, parseHostedCredentialChange, prepareHostedCredentialChange, readHostedInitialPhoneSetupAllowed, readHostedLoginMethods } from "./credential-change";
+import { HOSTED_CREDENTIAL_CHANGE_KIND, parseHostedCredentialChange, prepareHostedCredentialChange, readHostedInitialMessagingSetupAllowed, readHostedLoginMethods } from "./credential-change";
 import { commitHostedCredentialOtp, sendHostedCredentialOtp } from "./credential-otp";
 import { hostedAuthDelivery } from "./delivery";
 import { hostedAuthRateLimitStorage } from "./rate-limit";
@@ -35,8 +35,8 @@ export async function readHostedLoginMethodsRequest(request: Request): Promise<R
   if (!session.authProof) return jsonOk({ ok: true, requiresLogin: true });
   const prisma = getPrisma();
   const current = await readHostedLoginMethods(prisma, session.member.id);
-  const initialPhoneSetupAllowed = await readHostedInitialPhoneSetupAllowed(prisma, session, current);
-  return jsonOk({ ok: true, methods: current.methods, initialPhoneSetupAllowed });
+  const initialMessagingSetupAllowed = await readHostedInitialMessagingSetupAllowed(prisma, session, current);
+  return jsonOk({ ok: true, methods: current.methods, initialMessagingSetupAllowed });
 }
 
 export async function changeHostedLoginMethodRequest(request: Request, operation: Operation): Promise<Response> {
@@ -61,7 +61,7 @@ export async function changeHostedLoginMethodRequest(request: Request, operation
     const prepared = await prepareHostedCredentialChange({ change, session, request, prisma,
       ...((operation === "verify" || operation === "remove") ? { authorization: body.authorization } : {}),
     });
-    if (operation === "verify" && body.authorization === undefined && !prepared.initialPhoneSetup) throw invalidRequest();
+    if (operation === "verify" && body.authorization === undefined && !prepared.initialMessagingSetup) throw invalidRequest();
     if (operation === "challenge") return jsonOk(await createSensitiveActionChallenge({
       bindingHash: prepared.bindingHash, kind: HOSTED_CREDENTIAL_CHANGE_KIND, memberId: session.member.id, prisma,
     }));

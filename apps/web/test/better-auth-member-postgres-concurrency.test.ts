@@ -248,7 +248,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
         .map((value) => `arl_${authLookupKey("verification", "rate-limit", value)}`);
       await f.prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: limits } } });
       try {
-        expect((await (await loginMethods(request({}))).json()).initialPhoneSetupAllowed).toBe(true);
+        expect((await (await loginMethods(request({}))).json()).initialMessagingSetupAllowed).toBe(true);
         expect((await sendCredentialCode(request({ change }))).status).toBe(200);
         const code = provider.codes.get(change.value!)!;
         expect(code).toMatch(/^\d{6}$/u);
@@ -268,7 +268,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect((await readHostedMemberIdentity(f))?.phoneNumber).toBe(f.change.value);
     const state = await (await loginMethods(f.request({}))).json();
     expect(state.methods.phone).toBe(f.change.value);
-    expect(state.initialPhoneSetupAllowed).toBe(false);
+    expect(state.initialMessagingSetupAllowed).toBe(false);
     expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
     expect((await getHostedAppSessionFromRequest(f.request({})))?.member.id).toBe(f.memberId);
     expect((await verifyCredentialCode(f.request({ change: f.change, code: f.code }))).status).toBe(409);

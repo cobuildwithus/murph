@@ -633,3 +633,12 @@ activation and the broader live-auth qualification remain incomplete.
 - Load: eligibility adds two bounded point reads in parallel before the operation and repeats them under the existing member lock; the settings reader performs those two reads only for an otherwise eligible email-only identity. No new storage or provider calls. Existing OTP delivery/checks stay outside the database transaction.
 - Changelog: the existing sign-in-and-approval-recovery entry covers this unshipped auth adoption follow-up.
 - Status: locally ready; hosted replay, final review, and exact-head CI pending.
+
+
+### Follow-up: direct messaging setup and quiet Telegram preparation
+
+- Product UX: Ready locally. Email-first onboarding renders the existing phone code form and Telegram action directly on the channel page. Settings keeps its account-change dialog; the intermediate loading sentence is removed.
+- Initial messaging setup generalizes the existing first-phone exception to Telegram. A fresh primary email login, no established messaging or approval state, signed session-bound Telegram proof, and transactional revalidation remain required. Replacement, removal, established protection, and other browser sessions do not qualify.
+- Telegram preparation runs without disabling or animating the initial button. An early click reserves the SDK's named popup synchronously, then continues automatically; cancellation, unmount, blocked windows, duplicate clicks, and stale preparation have focused coverage.
+- Verification: 60 client/journey cases, 84 composed PostgreSQL cases, Web typecheck, focused lint, and complexity guard pass. Two Chromium journeys pass, including popup reuse after transient activation expires and inspected desktop/mobile messaging renders. Provider calls in browser proof are synthetic; live account verification is separate.
+- Hosted readback confirmed one active Telegram-connected member with completed onboarding and workspace creation before the authorized Preview reset. The reset preserved schema and line configuration and returned zero member/auth/session records. No production data was changed.

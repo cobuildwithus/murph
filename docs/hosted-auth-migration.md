@@ -203,14 +203,17 @@ encoded as a JSON number or a canonical decimal string; it never substitutes
 the OIDC `sub`. Verification binds that numeric identity and nonce to this member and
 session, with a distinct purpose from login. No library catch-all is exposed.
 
-First phone setup for an email-only first-party member needs fresh primary
-login (within five minutes) and the new phone's code, without passkey enrollment.
+First messaging setup for an email-only first-party member needs fresh primary
+login (within five minutes) and either the new phone's code or a verified,
+session-bound Telegram token, without passkey enrollment.
 The server requires no canonical phone, Telegram login, legacy binding, or
 approval aggregate. It rechecks eligibility, freshness,
-and the original session under the member lock before consuming phone proof and
-writing both identities. Any established approval state keeps the normal approval
+and the original session under the member lock in the transaction that consumes
+channel proof and writes both identities. Any established approval state keeps the normal approval
 path; stale primary proof requires signing in again. No other credential operation
-uses this exception. The reader's eligibility flag controls presentation only.
+uses this exception. The reader's eligibility flag controls presentation only. Onboarding renders the
+phone form and Telegram connection action directly on the channel page; Settings
+retains dialogs for account changes.
 
 Proof, canonical contact/routing writes, encrypted login records, approval
 acceptance and the durable channel wake commit together. Delivery, crypto

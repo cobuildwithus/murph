@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
-import { Spinner } from "@/src/components/ui/spinner";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { Button } from "@/src/components/ui/button";
 import { SettingsStatusLine } from "@/src/components/settings/connected-account-card";
@@ -36,6 +35,26 @@ function loadTelegramLogin(): Promise<TelegramLogin> {
   return scriptLoad;
 }
 
+interface PreparedTelegramLogin {
+  api: TelegramLogin;
+  clientId: number;
+  nonce: string;
+  expiresAt: number;
+}
+
+async function prepareTelegramLogin(purpose: "login" | "credential", signal: AbortSignal): Promise<PreparedTelegramLogin> {
+  const start = purpose === "login" ? "/api/auth/telegram/start" : "/api/settings/login-methods/telegram/start";
+  const [api, proof] = await Promise.all([
+    loadTelegramLogin(),
+    requestHostedOnboardingJson<{ ok: true; nonce: string; clientId: string }>({ url: start, method: "POST", payload: {}, signal }),
+  ]);
+  const clientId = Number(proof.clientId);
+  if (proof.ok !== true || !Number.isSafeInteger(clientId) || clientId <= 0 || !/^[A-Za-z0-9_-]{43}$/u.test(proof.nonce)) {
+    throw new Error("Telegram could not start. Try again.");
+  }
+  return { api, clientId, nonce: proof.nonce, expiresAt: Date.now() + 240_000 };
+}
+
 export function HostedTelegramProofButton({ purpose, onProof, onErrorChange, label = "Continue with Telegram" }: {
   purpose: "login" | "credential";
   onProof: (idToken: string, signal: AbortSignal) => Promise<void>;
@@ -43,7 +62,9 @@ export function HostedTelegramProofButton({ purpose, onProof, onErrorChange, lab
   onErrorChange?: (error: string | null) => void;
 }) {
   const [attempt, setAttempt] = useState(0);
-  const [ready, setReady] = useState<{ api: TelegramLogin; clientId: number; nonce: string; expiresAt: number } | null>(null);
+  const ready = useRef<PreparedTelegramLogin | null>(null);
+  const preparation = useRef<Promise<PreparedTelegramLogin> | null>(null);
+  const opening = useRef(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const current = useRef<AbortController | null>(null);
@@ -57,17 +78,10 @@ export function HostedTelegramProofButton({ purpose, onProof, onErrorChange, lab
     const controller = new AbortController();
     current.current = controller;
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]);
-    const start = purpose === "login" ? "/api/auth/telegram/start" : "/api/settings/login-methods/telegram/start";
-    void Promise.all([
-      loadTelegramLogin(),
-      requestHostedOnboardingJson<{ ok: true; nonce: string; clientId: string }>({ url: start, method: "POST", payload: {}, signal }),
-    ]).then(([api, proof]) => {
-      if (controller.signal.aborted) return;
-      const clientId = Number(proof.clientId);
-      if (proof.ok !== true || !Number.isSafeInteger(clientId) || clientId <= 0 || !/^[A-Za-z0-9_-]{43}$/u.test(proof.nonce)) {
-        throw new Error("Telegram could not start. Try again.");
-      }
-      setReady({ api, clientId, nonce: proof.nonce, expiresAt: Date.now() + 240_000 });
+    const task = prepareTelegramLogin(purpose, signal);
+    preparation.current = task;
+    void task.then((prepared) => {
+      if (!controller.signal.aborted) ready.current = prepared;
     }).catch((caught: unknown) => {
       if (!controller.signal.aborted) setError(signal.aborted ? "Telegram could not start. Try again." : caught instanceof Error ? caught.message : "Telegram could not start. Try again.");
     });
@@ -76,16 +90,18 @@ export function HostedTelegramProofButton({ purpose, onProof, onErrorChange, lab
 
   function retry() {
     current.current?.abort();
-    setReady(null); setPending(false); setError(null); setAttempt((value) => value + 1);
+    ready.current = null; opening.current = false; setPending(false); setError(null); setAttempt((value) => value + 1);
   }
 
   function open() {
-    if (!ready || pending) return;
-    if (ready.expiresAt <= Date.now()) { retry(); return; }
+    if (opening.current) return;
     cancelActivePopup?.();
     const controller = current.current;
     if (!controller || controller.signal.aborted) return;
+    opening.current = true;
     setPending(true); setError(null);
+    let reservedPopup: Window | null = null;
+    let api: TelegramLogin | null = null;
     let completed = false;
     const cancel = () => {
       setError("Another Telegram sign-in was opened. Try again here when it finishes.");
@@ -97,31 +113,52 @@ export function HostedTelegramProofButton({ purpose, onProof, onErrorChange, lab
     }, 120_000);
     const cleanup = () => {
       clearTimeout(timeout);
-      if (cancelActivePopup === cancel) { cancelActivePopup = null; ready.api.close(); }
+      if (cancelActivePopup === cancel) { cancelActivePopup = null; api?.close(); reservedPopup?.close(); }
     };
     controller.signal.addEventListener("abort", cleanup, { once: true });
-    try { ready.api.auth({ client_id: ready.clientId, nonce: ready.nonce, scope: ["profile", "write"] }, (result) => {
-      if (completed || controller.signal.aborted) return;
-      completed = true;
+    const launch = (prepared: PreparedTelegramLogin) => {
+      if (controller.signal.aborted) return;
+      if (reservedPopup?.closed) throw new Error("Telegram sign-in was canceled. Try again.");
+      api = prepared.api;
+      api.auth({ client_id: prepared.clientId, nonce: prepared.nonce, scope: ["profile", "write"] }, (result) => {
+        if (completed || controller.signal.aborted) return;
+        completed = true;
+        cleanup();
+        const token: unknown = result && typeof result === "object" ? Reflect.get(result, "id_token") : null;
+        void (async () => {
+          if (typeof token !== "string" || token.length === 0 || token.length > 8_192) throw new Error("Telegram sign-in was canceled. Try again.");
+          await onProof(token, controller.signal);
+        })().catch(fail).finally(() => {
+          if (!controller.signal.aborted) { opening.current = false; setPending(false); ready.current = null; preparation.current = null; }
+        });
+      });
+    };
+    const fail = (caught: unknown) => {
       cleanup();
-      const token: unknown = result && typeof result === "object" ? Reflect.get(result, "id_token") : null;
-      void (async () => {
-        if (typeof token !== "string" || token.length === 0 || token.length > 8_192) throw new Error("Telegram sign-in was canceled. Try again.");
-        await onProof(token, controller.signal);
-      })().catch((caught: unknown) => {
-        if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Telegram could not be verified. Try again.");
-      }).finally(() => { if (!controller.signal.aborted) { setPending(false); setReady(null); } });
-    }); } catch {
-      cleanup(); setPending(false); setError("Telegram could not open. Try again.");
-    }
+      if (controller.signal.aborted) return;
+      opening.current = false; setPending(false);
+      setError(caught instanceof Error ? caught.message : "Telegram could not open. Try again.");
+    };
+    try {
+      if (ready.current && ready.current.expiresAt > Date.now()) { launch(ready.current); return; }
+      // Reserve the SDK's named popup during the click, before any await.
+      // Its later window.open reuses this window without another user gesture.
+      reservedPopup = window.open("about:blank", "telegram_oidc_login", "popup,width=550,height=650");
+      if (!reservedPopup) throw new Error("Allow the Telegram sign-in window to open, then try again.");
+      if (ready.current || !preparation.current) {
+        preparation.current = prepareTelegramLogin(purpose, AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]));
+      }
+      void preparation.current?.then(launch).catch(fail);
+    } catch (caught) { fail(caught); }
+
   }
 
   return <div className="flex flex-col gap-3">
     {error ? <>
       {!onErrorChange ? <SettingsStatusLine message={error} tone="destructive" /> : null}
       <HostedInlineAuthButton icon={<TelegramIcon className="h-5 w-5" />} onClick={retry}>Try again</HostedInlineAuthButton>
-    </> : <HostedInlineAuthButton busy={!ready || pending} disabled={!ready || pending} onClick={open}
-      icon={!ready || pending ? <Spinner aria-hidden="true" /> : <TelegramIcon className="h-5 w-5" />}>
+    </> : <HostedInlineAuthButton busy={pending} disabled={pending} onClick={open}
+      icon={<TelegramIcon className="h-5 w-5" />}>
       {label}
     </HostedInlineAuthButton>}
     {pending && !error ? <Button type="button" variant="ghost" size="lg" className="w-full text-muted-foreground hover:text-foreground" onClick={retry}>Cancel</Button> : null}

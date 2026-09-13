@@ -17,9 +17,10 @@ import { SettingsStatusLine } from "./connected-account-card";
 import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 
 type Methods = Record<HostedCredentialChange["method"], string | null>;
-type MethodResponse = { ok: true; methods: Methods; initialPhoneSetupAllowed?: boolean; requiresLogin?: false } | { ok: true; requiresLogin: true };
+type MethodResponse = { ok: true; methods: Methods; initialMessagingSetupAllowed?: boolean; requiresLogin?: false } | { ok: true; requiresLogin: true };
 
-export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSaved }: {
+export function HostedLoginMethodEditor({ method, operation, onOpenChange, onSaved, presentation = "dialog" }: {
+  presentation?: "dialog" | "inline";
   method: HostedCredentialChange["method"];
   operation: HostedCredentialChange["operation"];
   onOpenChange: (open: boolean) => void;
@@ -37,14 +38,14 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSav
   const [attempt, setAttempt] = useState(0);
   const inFlight = useRef(false);
   const mounted = useRef(true);
-  const [telegram, setTelegram] = useState<{ idToken: string; change: HostedCredentialChange; challenge: SensitiveActionChallengeResponse } | null>(null);
+  const [telegram, setTelegram] = useState<{ idToken: string; change: HostedCredentialChange; challenge: SensitiveActionChallengeResponse | null } | null>(null);
   const methods = current && !current.requiresLogin ? current.methods : null;
   const previous = methods?.[method] ?? null;
-  const initialPhoneSetup = method === "phone" && operation === "set" && previous === null
-    && current !== null && !current.requiresLogin && current.initialPhoneSetupAllowed === true;
+  const initialMessagingSetup = method !== "email" && operation === "set"
+    && current !== null && !current.requiresLogin && current.initialMessagingSetupAllowed === true;
   const label = method === "telegram" ? "Telegram" : method;
-  const needsInitialPasskey = initialPasskeyNeeded && !initialPhoneSetup;
-  const verifyLabel = initialPhoneSetup ? "Verify phone" : "Approve and save";
+  const needsInitialPasskey = initialPasskeyNeeded && !initialMessagingSetup;
+  const verifyLabel = initialMessagingSetup ? "Verify phone" : "Approve and save";
 
   useEffect(() => {
     const controller = new AbortController();
@@ -69,7 +70,7 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSav
     if (inFlight.current) return;
     inFlight.current = true; setPending(true); setError(null);
     try {
-      const challenge = initialPhoneSetup ? null : telegram?.challenge ?? await requestHostedOnboardingJson<SensitiveActionChallengeResponse>({
+      const challenge = initialMessagingSetup ? null : telegram?.challenge ?? await requestHostedOnboardingJson<SensitiveActionChallengeResponse>({
         url: "/api/settings/login-methods/challenge", payload: { change: selected }, signal,
       });
       if (signal?.aborted || !mounted.current) return;
@@ -113,7 +114,7 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSav
       <InitialPasskeySetupView enrollmentEnabled {...enrollment} onEnroll={() => void enrollment.enroll()} />
     </>;
     else if (!methods) content = error ? <Button type="button" variant="outline" onClick={() => { setError(null); setAttempt((value) => value + 1); }}>Try again</Button>
-      : <p role="status" className="text-sm text-muted-foreground">Checking your login methods...</p>;
+      : null;
     else if (operation === "remove") content = <>
       <p className="break-words text-sm">{method === "phone" && previous ? formatMaskedPhoneNumber(previous) : method === "email" ? previous : "Your connected Telegram account"}</p>
       {Object.values(methods).filter(Boolean).length <= 1 ? <p className="text-sm text-muted-foreground">Add another login method before removing this one.</p>
@@ -123,16 +124,18 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSav
       <p className="text-sm text-muted-foreground">Telegram is verified. Approve this account change with your passkey.</p>
       <Button type="button" disabled={pending} onClick={() => void submitChange(telegram.change, { idToken: telegram.idToken })}>{pending ? "Saving..." : "Approve and save"}</Button>
       <Button type="button" variant="ghost" disabled={pending} onClick={() => { setTelegram(null); setError(null); }}>Use another Telegram account</Button>
-    </> : <HostedTelegramProofButton purpose="credential" onProof={async (idToken, signal) => {
-      const prepared = await requestHostedOnboardingJson<{ change: HostedCredentialChange; challenge: SensitiveActionChallengeResponse }>({
+    </> : <HostedTelegramProofButton purpose="credential" label="Connect Telegram" onProof={async (idToken, signal) => {
+      const prepared = await requestHostedOnboardingJson<{ change: HostedCredentialChange; challenge: SensitiveActionChallengeResponse | null }>({
         url: "/api/settings/login-methods/telegram/prepare", payload: { idToken }, signal,
       });
       if (prepared.change.method !== "telegram" || prepared.change.operation !== "set" || prepared.change.expectedIdentity !== previous) {
         throw new Error("Your Telegram connection changed. Reopen Settings and try again.");
       }
-      if (!signal.aborted) setTelegram({ ...prepared, idToken });
+      if (signal.aborted) return;
+      if (initialMessagingSetup && prepared.challenge === null) await commit(prepared.change, { idToken }, signal);
+      else setTelegram({ ...prepared, idToken });
     }} />;
-    else content = <HostedContactCodeForm method={method} autoSubmit={initialPhoneSetup} verifyLabel={verifyLabel}
+    else content = <HostedContactCodeForm method={method} autoSubmit={initialMessagingSetup} verifyLabel={verifyLabel}
       onSend={async (value, signal) => {
         const result = await requestHostedOnboardingJson<{ ok: true }>({ url: "/api/settings/login-methods/otp/send", payload: { change: change(value) }, signal });
         if (result.ok !== true) throw new Error("The code could not be sent. Try again.");
@@ -142,6 +145,8 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSav
     return content;
   }
 
+  const body = <div className="flex flex-col gap-4">{renderContent()}{error && !saved ? <SettingsStatusLine message={error} tone="destructive" /> : null}</div>;
+  if (presentation === "inline") return body;
   return <Dialog open onOpenChange={onOpenChange}>
     <DialogContent className="max-w-[min(30rem,calc(100vw-2rem))] gap-6 border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[30rem] md:p-8">
       <DialogHeader className="gap-2 pr-10">
@@ -150,7 +155,9 @@ export function HostedLoginMethodDialog({ method, operation, onOpenChange, onSav
           This changes where you can sign in and message Murph. Other sessions will be signed out; this browser stays signed in.
         </DialogDescription>}
       </DialogHeader>
-      <div className="flex flex-col gap-4">{renderContent()}{error && !saved ? <SettingsStatusLine message={error} tone="destructive" /> : null}</div>
+      {body}
     </DialogContent>
   </Dialog>;
 }
+
+export { HostedLoginMethodEditor as HostedLoginMethodDialog };

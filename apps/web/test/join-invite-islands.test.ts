@@ -42,7 +42,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/dynamic", () => ({
   default: () => function HostedLoginMethodDialog(props: Record<string, unknown>) {
     mocks.loginMethodProps = props;
-    return createElement("div", { "data-login-method-dialog": "true" }, "Connect account");
+    return createElement("div", { "data-login-method-editor": props.method, "data-presentation": props.presentation }, "Connect account");
   },
 }));
 
@@ -599,20 +599,11 @@ test("JoinInviteStatusRefreshIsland surfaces refresh failures with a retry actio
   await cleanup();
 });
 
-test("messaging setup connects in place and closes after confirmed connection", async () => {
-  mocks.loginMethodProps = null;
-  const { cleanup, container, window } = await renderClientComponent(createElement(JoinInviteMessagingSetupIsland));
+test("messaging setup mounts both editors inline without an extra dialog or Settings detour", async () => {
+  const { cleanup, container } = await renderClientComponent(createElement(JoinInviteMessagingSetupIsland), { requireButton: false });
   expect(container.querySelector('a[href="/settings/accounts"]')).toBeNull();
-  expect(container.textContent).toContain("Connect phone");
-  expect(container.textContent).toContain("Connect Telegram");
-  expect(container.textContent).not.toContain("I’ve connected");
-  const connect = [...container.querySelectorAll("button")].find((button) => button.textContent === "Connect phone");
-  await act(async () => { connect!.dispatchEvent(new window.Event("click", { bubbles: true })); });
-  await vi.waitFor(() => expect(mocks.loginMethodProps).toMatchObject({ method: "phone", operation: "set" }));
-  expect(mocks.refresh).not.toHaveBeenCalled();
-  await act(async () => { (mocks.loginMethodProps!.onSaved as () => void)(); });
-  expect(mocks.refresh).not.toHaveBeenCalled();
-  expect(container.querySelector('[data-login-method-dialog]')).toBeNull();
+  expect(container.querySelector('[data-login-method-editor="phone"]')?.getAttribute("data-presentation")).toBe("inline");
+  expect(container.querySelector('[data-login-method-editor="telegram"]')?.getAttribute("data-presentation")).toBe("inline");
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   await cleanup();
 });

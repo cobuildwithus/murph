@@ -24,6 +24,7 @@ import { upsertHostedMemberIdentity } from "../src/lib/hosted-onboarding/hosted-
 import { claimHostedSignupReferralLink, issueHostedSignupReferralLink } from "../src/lib/hosted-growth/signup-referral";
 import { prepareHostedAuthTelegramMember } from "../src/lib/better-auth/telegram-member";
 import { commitHostedAuthSession } from "../src/lib/better-auth/verified-session";
+import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
 import { authLookupKey, openAuthRecord } from "../src/lib/better-auth/record-crypto";
 import { POST as startCredential } from "../app/api/settings/login-methods/telegram/start/route";
 import { POST as prepareCredential } from "../app/api/settings/login-methods/telegram/prepare/route";
@@ -100,7 +101,7 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
   const finish = (flow: Awaited<ReturnType<typeof begin>>, extra: Record<string, unknown> = {}) =>
     verify(request("/api/auth/telegram/verify", { idToken: flow.idToken, ...extra }, flow.cookie));
 
-  async function credentialMember() {
+  async function credentialMember(withApproval = true) {
     const prisma = getPrisma();
     const contact = createHostedLinqParticipantContact({ kind: "email", value: `telegram-settings-${randomUUID()}@example.test` });
     if (!contact) throw new Error("Invalid synthetic email");
@@ -114,12 +115,15 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     };
     const member = await login();
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "true");
-    const initial = await (await initialPasskeyOptions(request("/api/settings/approval-passkeys/initial-options", {}, member.cookie))).json();
     const key = authenticator("synthetic Telegram settings", baseURL);
-    expect((await registerPasskey(request("/api/settings/approval-passkeys/register", {
-      initialToken: initial.token, response: key.registration(true, initial.options.challenge),
-    }, member.cookie))).status).toBe(200);
-    return { ...member, login, approve(challenge: { message: string; token: string }) {
+    const enroll = async () => {
+      const initial = await (await initialPasskeyOptions(request("/api/settings/approval-passkeys/initial-options", {}, member.cookie))).json();
+      expect((await registerPasskey(request("/api/settings/approval-passkeys/register", {
+        initialToken: initial.token, response: key.registration(true, initial.options.challenge),
+      }, member.cookie))).status).toBe(200);
+    };
+    if (withApproval) await enroll();
+    return { ...member, login, enroll, approve(challenge: { message: string; token: string }) {
       return { method: "passkey", token: challenge.token, assertion: key.assertion({ counter: 0, customMessage: challenge.message }) };
     } };
   }
@@ -143,6 +147,53 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     expect(result, `Telegram prepare status ${response.status}`).toHaveProperty("challenge.token");
     return { idToken: flow.idToken, change: result.change, authorization: member.approve(result.challenge) };
   }
+
+  it("links the first Telegram account after email without a passkey and rejects replay and replacement", async () => {
+    const prisma = getPrisma(); const member = await credentialMember(false);
+    const flow = await beginCredential(member);
+    const response = await prepareCredential(request("/api/settings/login-methods/telegram/prepare", { idToken: flow.idToken }, flow.cookie));
+    expect(response.status).toBe(200);
+    const prepared = await response.json();
+    expect(prepared.challenge).toBeNull();
+    const completion = { change: prepared.change, idToken: flow.idToken };
+    expect((await verifyCredential(request("/api/settings/login-methods/telegram/verify", completion, flow.cookie))).status).toBe(200);
+    expect((await readHostedLoginMethods(prisma, member.memberId)).methods.telegram).toBe(flow.id);
+    expect((await readHostedMemberRoutingState({ memberId: member.memberId, prisma }))?.telegramUserId).toBe(flow.id);
+    expect((await prepareHostedAuthTelegramMember({ prisma, telegramUserId: flow.id })).memberId).toBe(member.memberId);
+    expect(await prisma.hostedMemberApprovalCredentials.count({ where: { memberId: member.memberId } })).toBe(0);
+    expect((await getHostedAppSessionFromRequest(request("/home", {}, member.cookie)))?.member.id).toBe(member.memberId);
+    expect((await verifyCredential(request("/api/settings/login-methods/telegram/verify", completion, flow.cookie))).status).toBe(401);
+    const replacement = await beginCredential(member);
+    const replacementChange = { ...prepared.change, expectedIdentity: flow.id, value: replacement.id };
+    expect((await verifyCredential(request("/api/settings/login-methods/telegram/verify", { change: replacementChange, idToken: replacement.idToken }, replacement.cookie))).status).toBe(400);
+  });
+
+  it.each(["stale", "exchanged", "future", "revoked", "protected", "other-session"] as const)("rejects initial Telegram linking after %s authority", async (kind) => {
+    const prisma = getPrisma(); const member = await credentialMember(false); const flow = await beginCredential(member);
+    const prepared = await (await prepareCredential(request("/api/settings/login-methods/telegram/prepare", { idToken: flow.idToken }, flow.cookie))).json();
+    expect(prepared.challenge).toBeNull();
+    const session = await getHostedAppSessionFromRequest(request("/home", {}, member.cookie));
+    expect(session).not.toBeNull();
+    let cookie = flow.cookie;
+    if (kind === "protected") await member.enroll();
+    else if (kind === "other-session") cookie = `${(await member.login()).cookie}; ${flow.nonceCookie}`;
+    else if (kind === "revoked") await prisma.hostedAuthRecord.delete({ where: { model_id: { model: "session", id: session!.sessionId } } });
+    else await hostedAuthAdapter(prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
+      model: "session", where: [{ field: "id", value: session!.sessionId }],
+      update: { primaryAuthenticatedAt: kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -6 : 6) * 60_000) },
+    });
+    const response = await verifyCredential(request("/api/settings/login-methods/telegram/verify", { change: prepared.change, idToken: flow.idToken }, cookie));
+    expect([400, 401, 403]).toContain(response.status);
+    expect((await readHostedLoginMethods(prisma, member.memberId)).methods.telegram).toBeNull();
+  });
+
+  it("commits one concurrent initial Telegram connection", async () => {
+    const member = await credentialMember(false); const flow = await beginCredential(member);
+    const prepared = await (await prepareCredential(request("/api/settings/login-methods/telegram/prepare", { idToken: flow.idToken }, flow.cookie))).json();
+    const responses = await Promise.all([1, 2].map(() => verifyCredential(request("/api/settings/login-methods/telegram/verify", { change: prepared.change, idToken: flow.idToken }, flow.cookie))));
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    expect((await readHostedLoginMethods(getPrisma(), member.memberId)).methods.telegram).toBe(flow.id);
+  });
 
   it("adds and removes Telegram through current-session approval with canonical readback", async () => {
     const prisma = getPrisma(); const member = await credentialMember(); const other = await member.login();

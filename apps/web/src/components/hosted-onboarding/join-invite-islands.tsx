@@ -3,9 +3,6 @@
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { Phone } from "lucide-react";
-import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
-import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
 import { ArrowRightIcon } from "lucide-react";
 
@@ -172,22 +169,12 @@ export function JoinInviteSignOutButtonIsland({
   );
 }
 
-const HostedLoginMethodDialog = dynamic(() => import("../settings/hosted-login-method-dialog").then((module) => module.HostedLoginMethodDialog), { ssr: false });
+const HostedLoginMethodEditor = dynamic(() => import("../settings/hosted-login-method-dialog").then((module) => module.HostedLoginMethodEditor), { ssr: false });
 
 export function JoinInviteMessagingSetupIsland() {
-  const [method, setMethod] = useState<"phone" | "telegram" | null>(null);
-  return <>
-    <JoinInviteMessagingSetupView onSelect={setMethod} />
-    {method ? <HostedLoginMethodDialog method={method} operation="set"
-      onOpenChange={(open) => { if (!open) setMethod(null); }}
-      onSaved={() => setMethod(null)} /> : null}
-  </>;
-}
-
-export function JoinInviteMessagingSetupView({ onSelect }: { onSelect: (method: "phone" | "telegram") => void }) {
   return <HostedContactChannelChoice
-    phone={<Button type="button" size="xl" className="w-full" onClick={() => onSelect("phone")}><Phone aria-hidden="true" />Connect phone</Button>}
-    telegram={<HostedInlineAuthButton icon={<TelegramIcon className="h-5 w-5" />} onClick={() => onSelect("telegram")}>Connect Telegram</HostedInlineAuthButton>}
+    phone={<HostedLoginMethodEditor method="phone" operation="set" presentation="inline" onOpenChange={() => {}} />}
+    telegram={<HostedLoginMethodEditor method="telegram" operation="set" presentation="inline" onOpenChange={() => {}} />}
   />;
 }
 

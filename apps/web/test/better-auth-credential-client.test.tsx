@@ -31,7 +31,7 @@ vi.mock("@/src/components/ui/dialog", () => {
   const wrap = ({ children }: { children?: ReactNode }) => createElement("div", null, children);
   return { Dialog: wrap, DialogContent: wrap, DialogDescription: wrap, DialogHeader: wrap, DialogTitle: wrap };
 });
-import { HostedLoginMethodDialog } from "@/src/components/settings/hosted-login-method-dialog";
+import { HostedLoginMethodDialog, HostedLoginMethodEditor } from "@/src/components/settings/hosted-login-method-dialog";
 
 const methods = { email: "member@example.test", phone: null, telegram: "735001" };
 const challenge = { token: "synthetic-challenge", message: "Approve the selected change", expiresAt: "2099-01-01T00:00:00Z" };
@@ -193,7 +193,7 @@ test("initial passkey setup stays in the connection dialog and resumes the selec
 test("first phone setup uses the code form without enrolling or signing a passkey", async () => {
   mocks.realContact = true;
   mocks.request.mockImplementation(async ({ url }: { url: string }) => url === "/api/settings/login-methods"
-    ? { ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialPhoneSetupAllowed: true }
+    ? { ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialMessagingSetupAllowed: true }
     : { ok: true, initialEnrollmentAllowed: true });
   const rendered = await render("phone");
   expect(mocks.contact?.method).toBe("phone");
@@ -211,5 +211,40 @@ test("first phone setup uses the code form without enrolling or signing a passke
   expect(mocks.request.mock.calls.some(([input]) => input.url.endsWith("/challenge"))).toBe(false);
   expect(mocks.saved).toHaveBeenCalledOnce();
   expect(mocks.refresh).toHaveBeenCalledOnce();
+  await rendered.cleanup();
+});
+
+
+test("first Telegram connection saves immediately after provider proof without passkey setup", async () => {
+  const selected = { method: "telegram", operation: "set", expectedIdentity: null, value: "735009" };
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => {
+    if (url === "/api/settings/login-methods") return { ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialMessagingSetupAllowed: true };
+    if (url.endsWith("telegram/prepare")) return { change: selected, challenge: null };
+    return { ok: true, initialEnrollmentAllowed: true };
+  });
+  const rendered = await render("telegram");
+  expect(rendered.container.textContent).not.toContain("Set up a passkey");
+  expect(mocks.telegram?.label).toBe("Connect Telegram");
+  const signal = new AbortController().signal;
+  await act(async () => { await mocks.telegram!.onProof("synthetic-token", signal); });
+  expect(mocks.request).toHaveBeenLastCalledWith(expect.objectContaining({ url: "/api/settings/login-methods/telegram/verify", payload: { change: selected, idToken: "synthetic-token", authorization: undefined } }));
+  expect(mocks.enroll).not.toHaveBeenCalled();
+  expect(mocks.sign).not.toHaveBeenCalled();
+  expect(mocks.saved).toHaveBeenCalledOnce();
+  await rendered.cleanup();
+});
+
+test("inline phone setup renders the actual input with no dialog heading or intermediate action", async () => {
+  mocks.realContact = true;
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => url === "/api/settings/login-methods"
+    ? { ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialMessagingSetupAllowed: true }
+    : { ok: true, initialEnrollmentAllowed: true });
+  const rendered = await renderClientComponent(createElement(HostedLoginMethodEditor, {
+    method: "phone", operation: "set", presentation: "inline", onOpenChange: mocks.close,
+  }));
+  expect(rendered.container.querySelector('input[type="tel"]')).not.toBeNull();
+  expect(rendered.container.textContent).not.toContain("Add phone");
+  expect(rendered.container.textContent).not.toContain("Connect phone");
+  expect(rendered.container.textContent).not.toContain("Checking your login methods");
   await rendered.cleanup();
 });
