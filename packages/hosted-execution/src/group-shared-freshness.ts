@@ -1,6 +1,7 @@
 import type {
   HostedRuntimeGroupSharedFreshnessRequirement,
   HostedRuntimeGroupSharedMember,
+  HostedRuntimeGroupSharedProjection,
   HostedRuntimeGroupSharedReadResult,
 } from "./runtime-control.ts";
 import {
@@ -54,20 +55,42 @@ export function hostedGroupMemberHasMissingWearableDates(
   member: HostedRuntimeGroupSharedMember,
   requirements: readonly HostedRuntimeGroupSharedFreshnessRequirement[],
 ): boolean {
-  return requirements.some((requirement) => {
-    const projection = member.projections.find((entry) =>
-      entry.projectionScopeKey === requirement.projectionScopeKey
-    );
-    return projection?.grantStatus === "granted"
-      && !projection.records.some((record) => "date" in record.data && record.data.date === requirement.date);
-  });
+  return member.projections.some((projection) =>
+    getHostedGroupWearableReportingGaps(projection, requirements).length > 0
+  );
 }
 
-export function hostedGroupSharedHasMissingWearableDates(
+/** Derived only from currently shared records and grant age, never private device state. */
+export function getHostedGroupWearableReportingGaps(
+  projection: HostedRuntimeGroupSharedProjection,
+  requirements: readonly HostedRuntimeGroupSharedFreshnessRequirement[],
+) {
+  if (projection.grantStatus !== "granted") return [];
+  return requirements.filter((requirement) =>
+    requirement.projectionScopeKey === projection.projectionScopeKey
+      && !projection.records.some((record) => "date" in record.data && record.data.date === requirement.date)
+  ).map(({ date }) => ({ date, reportingHistory: classifyMissingWearableDate(projection, date) }));
+}
+
+function classifyMissingWearableDate(projection: HostedRuntimeGroupSharedProjection, date: string) {
+  const windowStart = Date.parse(date) - 7 * 86_400_000;
+  const hasRecentRecord = projection.records.some((record) => {
+    const recordDate = "date" in record.data && typeof record.data.date === "string" ? record.data.date : "";
+    return Date.parse(recordDate) >= windowStart && recordDate < date;
+  });
+  if (hasRecentRecord) return "recent_reporting" as const;
+  // First projections and new/legacy grants lack evidence of an established absence.
+  if (projection.dataStatus === "pending" || !projection.grantedAt
+    || !(Date.parse(projection.grantedAt) < windowStart)) return "unknown_history" as const;
+  return "no_recent_reporting" as const;
+}
+
+export function hostedGroupSharedNeedsWearableRecovery(
   result: HostedRuntimeGroupSharedReadResult,
   requirements: readonly HostedRuntimeGroupSharedFreshnessRequirement[],
 ): boolean {
   return result.status === "ok" && result.members.some((member) =>
-    hostedGroupMemberHasMissingWearableDates(member, requirements)
+    member.projections.some((projection) => getHostedGroupWearableReportingGaps(projection, requirements)
+      .some((gap) => gap.reportingHistory !== "no_recent_reporting"))
   );
 }

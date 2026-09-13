@@ -497,7 +497,7 @@ not an upstream upload or completed provider refresh. `refreshStatus=requested`
 means a wake was accepted; `not_needed` means no granted requested date was
 missing; `unavailable` means the refresh could not be confirmed. The runtime
 requests sync once per tool call, then performs ordinary reads at fifteen-second
-intervals while requested dates remain missing: up to fifteen seconds in a
+intervals while recoverable requested dates remain missing: up to fifteen seconds in a
 foreground turn and five minutes in a scheduled group turn, subject to the
 invocation's cancellation signal and existing transport deadlines. Every reread
 uses current authority. Older producers rejecting the additive request receive
@@ -506,9 +506,21 @@ Read-only detached schemas and group email reads do not expose freshness.
 The runtime also rejects freshness unless its trusted caller explicitly enables
 it; ordinary email reads and detached consultations retain read-only readers.
 
+Recovery derives each missing scope/date from the current shared snapshot.
+A record in the seven preceding calendar days means `recent_reporting`; an older
+grant with no record in that window means `no_recent_reporting`. Pending, new,
+or legacy grants without sufficient age evidence remain `unknown_history`.
+This is evidence of shared reporting only, never a device-connection diagnosis.
+The runtime waits for recent or unknown gaps; established nonreporters do not
+extend the wait after those gaps resolve. Web still makes its single bounded
+sync request for eligible missing sources, so returning contributors can recover.
+The assistant adapter adds these derived `reportingGaps` to each dated projection
+only for freshness requests. It introduces no Web transport field or history store.
+
 Scheduled missing-sleep replies include available results and the actual shared
-check time in the known schedule timezone, then may offer a thirty-minute delay
-for future recurring updates. Only an authorized affirmative reply changes the
+check time in the known schedule timezone. Only a missing current sleep date with
+recent reporting evidence may trigger a thirty-minute delay offer; unknown or
+long-absent reporters alone do not justify moving the group schedule. Only an authorized affirmative reply changes the
 existing automation through canonical inspect and versioned patch; timezone,
 recurrence, content and destination remain owned by that automation.
 

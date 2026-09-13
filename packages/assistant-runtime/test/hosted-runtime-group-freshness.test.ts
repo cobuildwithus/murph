@@ -77,3 +77,40 @@ describe("bounded shared wearable recovery", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 });
+
+
+function mixedResponse(recentArrived: boolean): HostedRuntimeGroupToolResponse {
+  const base = response();
+  if (base.action !== "read_shared" || base.result.status !== "ok") throw new Error("Expected shared response");
+  const member = base.result.members[0]!;
+  const original = member.projections[0]!;
+  return { action: "read_shared", result: { ...base.result, members: [0, 1, 2, 3].map((index) => ({
+    ...member, memberId: `member_${index}`, participantId: `participant_${index}`,
+    projections: [{ ...original, grantedAt: "2026-07-01T00:00:00.000Z", records: index === 3 ? []
+      : ["2026-08-03", ...(index === 0 || recentArrived ? ["2026-08-04"] : [])].map((date) => ({
+        recordKey: date, occurredAt: `${date}T00:00:00.000Z`, data: { date, metricKey: "total-sleep-minutes", value: 435, unit: "minutes" },
+      })) }],
+  })) } };
+}
+
+describe("mixed reporting history recovery", () => {
+  it("does not wait for an established nonreporter when recent contributors are complete", async () => {
+    const current = mixedResponse(true);
+    const request = vi.fn().mockResolvedValue(current);
+    const result = await createHostedGroupSharedReader({ groupToolPort: { request }, freshnessWaitMs: 300_000 }).request(input);
+    if (current.action !== "read_shared") throw new Error("Expected read response");
+    expect(result).toEqual(current.result);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(delay).not.toHaveBeenCalled();
+  });
+  it("waits for unexpectedly missing contributors and stops when they arrive despite an ongoing absence", async () => {
+    const request = vi.fn().mockResolvedValueOnce(mixedResponse(false)).mockResolvedValueOnce(mixedResponse(true));
+    const result = await createHostedGroupSharedReader({ groupToolPort: { request }, freshnessWaitMs: 300_000 }).request(input);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(delay).toHaveBeenCalledExactlyOnceWith(15_000, undefined, { signal: undefined });
+    expect(result).toMatchObject({ freshness: { checkedAt: "2026-08-04T14:20:15.000Z" } });
+    if (result.status !== "ok") throw new Error("Expected shared results");
+    expect(result.members.slice(0, 3).every((member) => member.projections[0]?.records.some((record) => "date" in record.data && record.data.date === "2026-08-04"))).toBe(true);
+    expect(result.members[3]?.projections[0]?.records).toEqual([]);
+  });
+});

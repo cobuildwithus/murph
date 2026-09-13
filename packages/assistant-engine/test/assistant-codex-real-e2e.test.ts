@@ -9355,7 +9355,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     }, 360_000,
   )
 
-  it.each(['available', 'missing', 'unavailable', 'previously_declined'] as const)(
+  it.each(['available', 'missing', 'unavailable', 'previously_declined', 'usual_complete', 'usual_missing', 'unknown_history'] as const)(
     'handles wearable freshness recovery in a scheduled group update: %s',
     async (scenario) => {
       const config = await resolveRealCodexE2eConfig()
@@ -9380,15 +9380,21 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               return {
                 status: 'ok', requestedProjectionScopeKeys: ['sleep-duration-days.v0'],
                 freshness: { checkedAt: '2026-08-05T13:04:00.000Z', refreshStatus: scenario === 'unavailable' ? 'unavailable' : 'requested' },
-                members: ['Rowan', 'Quinn'].map((displayName, index) => ({
-                  displayName, currentTurnHandles: [], memberId: `member_freshness_${index}`, participantId: `participant_freshness_${index}`,
-                  projections: [{ projectionScope: { projectionKind: 'sleep-duration-days.v0' }, projectionScopeKey: 'sleep-duration-days.v0',
-                    grantStatus: 'granted', dataStatus: scenario === 'available' || index === 0 ? 'available' : 'missing',
-                    records: scenario === 'available' || index === 0 ? [{ recordKey: '2026-08-05', occurredAt: '2026-08-05T00:00:00.000Z',
-                      data: { date: '2026-08-05', metricKey: 'total-sleep-minutes', value: 420 + index * 15, unit: 'minutes' },
-                    }] : [],
-                  }],
-                })),
+                members: (scenario.startsWith('usual_') ? ['Rowan', 'Quinn', 'Sage', 'Avery'] : ['Rowan', 'Quinn']).map((displayName, index) => {
+                  const available = scenario === 'available' || index === 0 || (scenario === 'usual_complete' && index < 3)
+                  const unknown = scenario === 'unknown_history' && index === 1
+                  const dates = [...(index < 3 && !unknown ? ['2026-08-04'] : []), ...(available ? ['2026-08-05'] : [])]
+                  return {
+                    displayName, currentTurnHandles: [], memberId: `member_freshness_${index}`, participantId: `participant_freshness_${index}`,
+                    projections: [{ projectionScope: { projectionKind: 'sleep-duration-days.v0' }, projectionScopeKey: 'sleep-duration-days.v0',
+                      grantStatus: 'granted', dataStatus: dates.length ? 'available' : 'missing',
+                      grantedAt: unknown ? '2026-08-05T00:00:00.000Z' : '2026-07-01T00:00:00.000Z',
+                      records: dates.map((date) => ({ recordKey: date, occurredAt: `${date}T00:00:00.000Z`,
+                        data: { date, metricKey: 'total-sleep-minutes', value: 420 + index * 15, unit: 'minutes' },
+                      })),
+                    }],
+                  }
+                }),
               } satisfies AssistantHostedGroupSharedReadResponse
             } },
             sendVaultFile: async () => { throw new Error('Unavailable in synthetic journey.'); }, vaultFileSendAvailable: false,
@@ -9421,14 +9427,25 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           expect(reply).not.toMatch(/30 minutes|hasn.t arrived|not arrived|missing/iu)
         } else {
           expect(reply).toMatch(/Quinn/iu)
-          expect(reply).toMatch(/9:04/iu)
-          if (scenario === 'previously_declined') {
+          if (scenario !== 'usual_complete') expect(reply).toMatch(/9:04/iu)
+          if (scenario === 'previously_declined' || scenario === 'usual_complete' || scenario === 'unknown_history') {
             expect(reply).not.toMatch(/30(?:[- ]|\s*)min|half an hour|9:30|\?/iu)
           } else {
             expect(reply).toMatch(/30(?:[- ]|\s*)min|half an hour|9:30/iu)
             expect(reply).toMatch(/\?/u)
           }
           expect(reply).not.toMatch(/Quinn[^\n]{0,40}0(?:h| hours?)/iu)
+          if (scenario.startsWith('usual_')) {
+            expect(reply).toMatch(/Sage/iu)
+            expect(reply).toMatch(/Avery/iu)
+            expect(reply).not.toMatch(/Avery[^\n]{0,55}(?:late|hasn.t arrived|disconnected|waiting)/iu)
+            if (scenario === 'usual_complete') {
+              expect(reply).toMatch(/7(?:h| hours?).*15/iu)
+              expect(reply).toMatch(/7(?:h| hours?).*30/iu)
+            } else {
+              expect(reply).not.toMatch(/Quinn[^\n]{0,40}7(?:h| hours?)|Sage[^\n]{0,40}7(?:h| hours?)/iu)
+            }
+          }
         }
       } finally {
         await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])

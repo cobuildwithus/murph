@@ -4007,5 +4007,6 @@ export function isHostedRetiredMailboxKind(
 export {
   parseHostedGroupSharedFreshnessRequirements,
   hostedGroupMemberHasMissingWearableDates,
-  hostedGroupSharedHasMissingWearableDates,
+  hostedGroupSharedNeedsWearableRecovery,
+  getHostedGroupWearableReportingGaps,
 } from "./group-shared-freshness.ts";

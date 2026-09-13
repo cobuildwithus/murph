@@ -1421,6 +1421,35 @@ describe("murph.group dynamic tool", () => {
     );
   });
 
+  it("attaches reporting history to its own projection without inventing device state", async () => {
+    const projectionScopes = [{ projectionKind: "sleep-duration-days.v0" as const }];
+    const freshness = [{ projectionScopeKey: "sleep-duration-days.v0", date: "2026-08-04" }];
+    const groupSharedReadRequest = vi.fn(async () => ({
+      status: "ok" as const, requestedProjectionScopeKeys: ["sleep-duration-days.v0"],
+      members: ["recent", "absent", "new"].map((kind, index) => ({
+        displayName: `Reporter ${index}`, participantId: `participant_${index}`, memberId: `member_${index}`, currentTurnHandles: [],
+        projections: [{ projectionScope: projectionScopes[0]!, projectionScopeKey: "sleep-duration-days.v0",
+          grantStatus: "granted" as const, dataStatus: "available" as const,
+          grantedAt: kind === "new" ? "2026-08-03T00:00:00.000Z" : "2026-07-01T00:00:00.000Z",
+          records: kind === "recent" ? [{ recordKey: "previous", occurredAt: "2026-08-03T00:00:00.000Z",
+            data: { date: "2026-08-03", metricKey: "total-sleep-minutes", value: 435, unit: "minutes" } }] : [],
+        }],
+      })),
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({ action: "read_shared", projectionScopes, freshness }));
+    if (!request) throw new Error("Expected shared read");
+    const result = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, hostedToolContext: createGroupHostedToolContext({ groupSharedReadRequest, groupToolAvailable: false }),
+      nextUsageOrdinal: () => 1, progressDelivery: null, request, vaultRoot: null,
+    });
+    expect(readGroupToolPayload(result)).toMatchObject({ result: { members: ["recent_reporting", "no_recent_reporting", "unknown_history"].map((reportingHistory, index) => ({
+      participantId: `participant_${index}`, projections: { "sleep-duration-days.v0": {
+        reportingGaps: [{ date: "2026-08-04", reportingHistory }],
+      } },
+    })) } });
+    expect(JSON.stringify(readGroupToolPayload(result))).not.toMatch(/disconnected|connectionId/);
+  });
+
   it("preserves wearable freshness through parsing, execution, and the model result", async () => {
     const freshness = [{ projectionScopeKey: "sleep-duration-days.v0", date: "2026-08-04" }];
     const projectionScopes = [{ projectionKind: "sleep-duration-days.v0" as const }];

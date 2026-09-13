@@ -42,6 +42,7 @@ import {
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
   parseHostedGroupSharedFreshnessRequirements,
+  getHostedGroupWearableReportingGaps,
   HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
@@ -131,6 +132,7 @@ import {
   type AssistantHostedGroupSharedMember,
   type AssistantHostedGroupSharedProjection,
   type AssistantHostedGroupSharedReadResponse,
+  type AssistantHostedGroupSharedReadRequest,
   type AssistantHostedGroupSharedReader,
   type AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
@@ -4481,6 +4483,7 @@ function groupSharedWorkoutsModelProjection(
 
 function groupSharedModelResult(
   result: AssistantHostedGroupSharedReadResponse,
+  requirements?: AssistantHostedGroupSharedReadRequest['freshness'],
 ) {
   if (result.status === 'unavailable') {
     return {
@@ -4516,6 +4519,7 @@ function groupSharedModelResult(
             ? { grantedAt: projection.grantedAt }
             : {}),
           records: projection.records,
+          ...(requirements ? { reportingGaps: getHostedGroupWearableReportingGaps(projection, requirements) } : {}),
           status: groupSharedProjectionStatus(projection),
         },
       ])),
@@ -4947,7 +4951,7 @@ async function executeGroupSharedRead(input: {
       projectionScopes: input.request.projectionScopes,
       ...(input.request.freshness ? { freshness: input.request.freshness } : {}),
     }, ...(input.abortSignal ? [{ signal: input.abortSignal }] : []))
-    const modelResult = groupSharedModelResultText(groupSharedModelResult(result))
+    const modelResult = groupSharedModelResultText(groupSharedModelResult(result, input.request.freshness))
     recordGroupSharedReadProof({
       capacityPartial: modelResult.capacityPartial,
       result,

@@ -10,7 +10,7 @@ import {
   type AssistantHostedGroupSharedReader,
 } from "@murphai/assistant-engine";
 import {
-  hostedGroupSharedHasMissingWearableDates,
+  hostedGroupSharedNeedsWearableRecovery,
   parseHostedGroupSharedFreshnessRequirements,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -161,7 +161,7 @@ async function readSharedGroupWithFreshness(input: {
   if (!requirements) return result;
   while (result.status === "ok"
     && result.freshness?.refreshStatus === "requested"
-    && hostedGroupSharedHasMissingWearableDates(result, requirements)
+    && hostedGroupSharedNeedsWearableRecovery(result, requirements)
     && Date.now() < deadline) {
     await delay(Math.min(15_000, deadline - Date.now()), undefined, { signal });
     signal?.throwIfAborted();
