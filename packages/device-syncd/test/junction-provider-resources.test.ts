@@ -3684,7 +3684,10 @@ test("Junction mixed temporal and sparse backfills keep separate day owners", as
   const secondTimeseriesRequests = firstRequests
     .filter((url) => url.includes("/v2/timeseries/"))
     .map((url) => new URL(url));
-  assert.equal(secondTimeseriesRequests.length, 1);
+  assert.equal(secondTimeseriesRequests.length, 16);
+  assert.equal(new Set(secondTimeseriesRequests.map((url) =>
+    url.searchParams.get("start_date")
+  )).size, 16);
   assert.equal(
     secondTimeseriesRequests[0]?.pathname,
     "/v2/timeseries/junction-user-1/blood_oxygen/grouped",
@@ -3696,7 +3699,7 @@ test("Junction mixed temporal and sparse backfills keep separate day owners", as
   );
   assert.equal(
     secondResult.scheduledJobs?.[0]?.payload?.timeseriesCursor,
-    "2026-01-02T00:00:00.000Z",
+    "2026-01-17T00:00:00.000Z",
   );
 
   firstRequests.length = 0;

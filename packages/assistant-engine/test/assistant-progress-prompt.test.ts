@@ -50,16 +50,16 @@ describe('assistant progress prompt contract', () => {
       'Background work does not trigger progress by itself',
     )
     expect(prompt).toContain(
-      'A single routine daily-card read alone does not trigger progress',
+      'Routine meal capture and daily nutrition summaries are one short workflow',
     )
     expect(prompt).toContain(
-      'Skip it within ordinary latency',
+      'Do not send a progress update for those steps or before the card',
     )
     expect(prompt).toContain(
-      'for an expected delay, send one outcome-focused update before slow work',
+      'Only genuinely extended recovery beyond that routine workflow can justify an outcome-focused update',
     )
     expect(prompt).toContain(
-      'Never narrate safety, totals, estimates, or target resolution',
+      'never narrate safety, totals, estimates or target resolution',
     )
     expect(prompt).toContain(
       'For work likely to finish within about a minute, send at most one update',

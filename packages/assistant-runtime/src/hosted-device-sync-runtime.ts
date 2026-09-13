@@ -1962,28 +1962,45 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     update.sources = sources;
   }
 
-  if (input.account.status === "disconnected") {
-    if (baselineConnection?.status !== "disconnected") {
-      update.connection = {
-        ...(update.connection ?? {}),
-        status: "disconnected",
-      };
+  const disconnected = input.account.status === "disconnected";
+  const setupPhase = disconnected ? null : input.account.setupPhase ?? null;
+  const setupExpiresAt = disconnected ? null : input.account.setupExpiresAt ?? null;
+  const connection: NonNullable<HostedDeviceSyncRuntimeConnectionUpdate["connection"]> = {};
+
+  if (input.account.status !== baselineConnection?.status) {
+    connection.status = input.account.status;
+  }
+  if (setupPhase !== (baselineConnection?.setupPhase ?? null)) {
+    connection.setupPhase = setupPhase;
+  }
+  if (setupExpiresAt !== (baselineConnection?.setupExpiresAt ?? null)) {
+    connection.setupExpiresAt = setupExpiresAt;
+  }
+
+  if (!disconnected) {
+    if (input.account.displayName !== (baselineConnection?.displayName ?? null)) {
+      connection.displayName = input.account.displayName ?? null;
+    }
+    if (!equalStringArrays(input.account.scopes, baselineConnection?.scopes ?? [])) {
+      connection.scopes = [...input.account.scopes];
     }
 
-    if ((baselineConnection?.setupPhase ?? null) !== null) {
-      update.connection = {
-        ...(update.connection ?? {}),
-        setupPhase: null,
-      };
+    // A local marker only proves SQLite enqueue committed. Publish it only from
+    // an incoming retained wake: that wake and its exact remaining jobs already
+    // survived the workspace checkpoint. Before then, retain Web's marker.
+    const baselineMetadata = baselineConnection?.metadata ?? {};
+    const metadata = projectHostedCheckpointedConnectionMetadata(
+      input.account.metadata, baselineMetadata, input.checkpointedTemporalSweepKey, input.checkpointedReconcileProof,
+    );
+    if (!equalJsonRecords(metadata, baselineMetadata)) {
+      connection.metadata = metadata;
     }
+  }
+  if (Object.keys(connection).length > 0) {
+    update.connection = connection;
+  }
 
-    if ((baselineConnection?.setupExpiresAt ?? null) !== null) {
-      update.connection = {
-        ...(update.connection ?? {}),
-        setupExpiresAt: null,
-      };
-    }
-
+  if (disconnected) {
     if (baselineTokenBundle !== null) {
       update.observedTokenVersion = input.observedTokenVersion;
       assignHostedDeviceSyncRuntimeCredentialUpdate(update, {
@@ -2006,55 +2023,6 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     );
 
     return hasHostedDeviceSyncRuntimeConnectionUpdateChanges(update) ? update : null;
-  }
-
-  if (input.account.status !== baselineConnection?.status) {
-    update.connection = {
-      ...(update.connection ?? {}),
-      status: input.account.status,
-    };
-  }
-
-  if ((input.account.setupPhase ?? null) !== (baselineConnection?.setupPhase ?? null)) {
-    update.connection = {
-      ...(update.connection ?? {}),
-      setupPhase: input.account.setupPhase ?? null,
-    };
-  }
-
-  if ((input.account.setupExpiresAt ?? null) !== (baselineConnection?.setupExpiresAt ?? null)) {
-    update.connection = {
-      ...(update.connection ?? {}),
-      setupExpiresAt: input.account.setupExpiresAt ?? null,
-    };
-  }
-
-  if (input.account.displayName !== (baselineConnection?.displayName ?? null)) {
-    update.connection = {
-      ...(update.connection ?? {}),
-      displayName: input.account.displayName ?? null,
-    };
-  }
-
-  if (!equalStringArrays(input.account.scopes, baselineConnection?.scopes ?? [])) {
-    update.connection = {
-      ...(update.connection ?? {}),
-      scopes: [...input.account.scopes],
-    };
-  }
-
-  // A local marker only proves SQLite enqueue committed. Publish it only from
-  // an incoming retained wake: that wake and its exact remaining jobs already
-  // survived the workspace checkpoint. Before then, retain Web's marker.
-  const baselineMetadata = baselineConnection?.metadata ?? {};
-  const metadata = projectHostedCheckpointedConnectionMetadata(
-    input.account.metadata, baselineMetadata, input.checkpointedTemporalSweepKey, input.checkpointedReconcileProof,
-  );
-  if (!equalJsonRecords(metadata, baselineMetadata)) {
-    update.connection = {
-      ...(update.connection ?? {}),
-      metadata,
-    };
   }
 
   assignCanonicalNextReconcileAtUpdate(update, {

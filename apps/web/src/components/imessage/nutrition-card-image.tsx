@@ -1,5 +1,6 @@
 import {
   nutritionCardGoalStatusLabels,
+  isTotalsOnlyDailyNutritionResponseCard,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
   type NutritionCardGoalSnapshot,
@@ -57,6 +58,7 @@ export function NutritionCardImage({
   logoSrc?: string;
 }) {
   const v2 = isNutritionCardV2(card) ? card : null;
+  const totalsOnly = isTotalsOnlyDailyNutritionResponseCard(card);
   const metrics: NutritionMetricPresentation[] = [
     {
       goal: v2?.goals.proteinGrams,
@@ -150,11 +152,27 @@ export function NutritionCardImage({
         </div>
       </div>
 
-      <CalorieRing
+      {!totalsOnly && <CalorieRing
         cardMealCount={card.mealCount}
         metric={calorieMetric}
         goal={calorieGoal}
-      />
+      />}
+      {totalsOnly && <div data-nutrition-totals-only="true" style={{
+        position: "absolute", top: 38, left: 200, right: 45,
+        display: "flex", flexDirection: "column", gap: 8,
+        color: COLOR.secondary, fontSize: 40, lineHeight: 1.25,
+      }}>
+        <div style={{ display: "flex" }}>{Object.values(card.totals).some((metric) => metric.total === null || metric.mealCount < card.mealCount) ? 'Partial estimates' : 'Estimated'} · logged so far</div>
+        <div style={{ display: "flex" }}>
+          {card.localDate} · {card.mealCount} logged {card.mealCount === 1 ? "meal" : "meals"}
+        </div>
+      </div>}
+      {totalsOnly && <div style={{
+        position: "absolute", top: 310, left: 45, right: 45,
+        display: "flex", color: COLOR.secondary, fontSize: 36,
+      }}>
+        Logged records may not include everything eaten.
+      </div>}
 
       <div
         style={{

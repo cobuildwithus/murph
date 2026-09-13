@@ -2081,7 +2081,7 @@ The post-drain credential-shape constraint is itself a database rollback floor b
 
 `apps/cloudflare` encrypts each staged JPEG into a private per-user R2 object. Object deletion derives the user-namespaced R2 path directly and does not require the user's encryption context to remain available. The metadata-only `meal-photo.captured` mailbox item wakes `packages/assistant-runtime`, which verifies the object's length and digest, imports one idempotent photo-only meal through `packages/core`, and schedules object deletion only after the workspace checkpoint succeeds. The R2 lifecycle rule makes staged meal-photo objects eligible for asynchronous deletion at 31 days, one day beyond mailbox recovery retention; successful imports still delete staging immediately after the checkpoint, and 31 days is not a guaranteed physical-deletion deadline. Neither the enrollment row nor R2 is canonical meal truth; the member's encrypted hosted workspace remains the canonical record.
 
-That same canonical import ensures one ordinary Murph-managed automation for the member at 9:00pm local time; meal capture has no second automation opt-in and no meal-specific scheduler. Enrollment requires an existing active private iMessage or Telegram thread or a verified email target so that postcondition is deliverable, and each accepted upload carries that Web-resolved direct route in its private mailbox envelope. The first import uses the envelope route to create the automation, while later imports idempotently reuse the same automation record without another service lookup. A direct email occurrence re-resolves the bound member's current verified address through the existing signed Web-control boundary immediately before provider work, so replacement or revocation never leaves the saved address as delivery authority. Reconciliation authorizes runnable conversation or model work normally even when system lag is also present; a blocked model wake can still admit the existing import-only system mode. System-only import checkpoints the ordinary cron wake created by canonical import and then runs the ordinary post-checkpoint staging cleanup. An accepted meal capture is member-wide engagement under the existing 28-day automation policy, equivalent to a direct inbound interaction, so ordinary due automations may resume; AI-usage authorization remains unchanged. At runtime the ordinary automation agent reads one bounded batch of same-occurrence retry evidence followed by the oldest captures that still retain photos. Every selected capture remains inspection, enrichment or observation, read-back, and privacy-cleanup work. Only captures from the scheduled occurrence local date may contribute to member-visible output; historical-only work ends silently after cleanup, and mixed work excludes every historical capture from the current-date result. Eligible current-date work includes supported calorie and macro totals by default while still suppressing numbers in eating-disorder-risk, intuitive-eating, or number-sensitive contexts, and invokes the automatic-capture-only `meal remove-photo` command. Its first eligible closeout may also create and explain one paused daily-nutrition proposal after the prompt-owned known-context suitability rule and Goal reads pass and the stable managed Goal slug is proven absent; that Goal becomes the existing one-time marker, and later scheduled turns never create, change, or automatically repeat the proposal. Activation remains interactive. The retained photos are the only work queue. A no-photo meal whose removal revision was recorded at or after the current scheduled occurrence remains part of that occurrence's retry, preventing a mid-turn provider or partial-cleanup failure from losing the closeout without adding another state owner. `packages/core` owns the audited mutation: it preserves structured meal truth, replaces retained JPEG bytes with a privacy tombstone, updates the raw manifest atomically, and rejects non-capture meals or changed evidence.
+That same canonical import ensures one ordinary Murph-managed automation for the member at 9:00pm local time; meal capture has no second automation opt-in and no meal-specific scheduler. Enrollment requires an existing active private iMessage or Telegram thread or a verified email target so that postcondition is deliverable, and each accepted upload carries that Web-resolved direct route in its private mailbox envelope. The first import uses the envelope route to create the automation, while later imports idempotently reuse the same automation record without another service lookup. A direct email occurrence re-resolves the bound member's current verified address through the existing signed Web-control boundary immediately before provider work, so replacement or revocation never leaves the saved address as delivery authority. Reconciliation authorizes runnable conversation or model work normally even when system lag is also present; a blocked model wake can still admit the existing import-only system mode. System-only import checkpoints the ordinary cron wake created by canonical import and then runs the ordinary post-checkpoint staging cleanup. An accepted meal capture is member-wide engagement under the existing 28-day automation policy, equivalent to a direct inbound interaction, so ordinary due automations may resume; AI-usage authorization remains unchanged. At runtime the ordinary automation agent reads one bounded batch of same-occurrence retry evidence followed by the oldest captures that still retain photos. Every selected capture remains inspection, enrichment or observation, read-back, and privacy-cleanup work. Only captures from the scheduled occurrence local date may contribute to member-visible output; historical-only work ends silently after cleanup, and mixed work excludes every historical capture from the current-date result. Eligible current-date work includes supported calorie and macro totals by default while still suppressing numbers in eating-disorder-risk, intuitive-eating, or number-sensitive contexts, and invokes the automatic-capture-only `meal remove-photo` command. An eligible closeout uses the same complete logged-so-far totals-only card when accepted targets are missing. Scheduled work never derives, proposes, changes, repeats, or activates goals; explicit interactive target-setting remains the sole proposal owner. The retained photos are the only work queue. A no-photo meal whose removal revision was recorded at or after the current scheduled occurrence remains part of that occurrence's retry, preventing a mid-turn provider or partial-cleanup failure from losing the closeout without adding another state owner. `packages/core` owns the audited mutation: it preserves structured meal truth, replaces retained JPEG bytes with a privacy tombstone, updates the raw manifest atomically, and rejects non-capture meals or changed evidence.
 
 ### Clinical Records retrieval
 
@@ -2412,7 +2412,9 @@ private-direct scheduled turns, and the managed meal closeout share this one
 attachment tool. Scheduled use requires saved instructions that explicitly
 request a card; occurrence authority alone is not card intent. Because a card
 replaces the whole final response, it is only
-eligible when the card alone completely satisfies the current request. New
+eligible when the card alone completely satisfies the current request. The sole
+nutrition exception is a fixed first totals-only introduction frozen inside the
+same outbound effect, never arbitrary analysis or a second send. New
 accepted input in the same live turn invalidates an earlier card-only decision,
 and attachment is rejected after the delivery context advances. Every
 card copies the immediately preceding single-date canonical meal-totals read.
@@ -2423,8 +2425,18 @@ than values that would require conversion or invented authority. Query owns
 date windows, point compatibility, the existing calorie floor, and the narrow
 complete historical bundle display exception; prompts retain health
 suitability, card intent, meal recovery, and explicit proposal acceptance.
-Ordinary totals reads keep their existing shape. No new state or mutation owner
-is introduced, and any subsequent meal or Goal mutation requires a fresh read.
+Ordinary totals reads keep their existing shape. Fresh V2 authoring accepts
+exactly all five null goals or all five compatible accepted snapshots; mixed
+nullable historical readers remain unchanged. `missing` selects totals-only,
+including a compatible subset; conflict, incompatible and capacity stay text-only.
+An ordinary private meal reply, including a reply to a scheduled check-in, has
+card intent but never target-setting or unrelated-meal repair authority. Explicit
+summaries retain informed partial-data recovery. Complete records are not proof
+that everything eaten was logged. See `agent-docs/product-specs/nutrition-totals-card.md`.
+No new state or mutation owner is introduced, and any subsequent meal or Goal
+mutation requires a fresh read. The optional fixed introduction uses canonical
+memory/instructions; the outbox writes its Context note only after confirmed
+sending, using existing confirmation retry, not at attachment or staging.
 Both versions use the same deterministic text fallback, Linq capability
 boundary, and existing outbox idempotency lifecycle. Hosted inbound routing
 keeps the opaque conversation locator used for continuity separate from the
@@ -2434,11 +2446,13 @@ existing direct Linq chat owns native-card delivery without a reverse map or a
 new-chat workaround. Same-route inputs accepted during the live turn may update
 the reply message, reaction capability, and delivery idempotency inputs, but do
 not recreate the explicit-target override or replace the turn's thread binding.
-Linq explicitly requests interactive transcript rendering. A recipient with
+Linq requests static presentation (`interactive:false`) for all-null V2 nutrition
+cards so an unchanged external Swift reader cannot add a goal ring or placeholders.
+All other existing cards retain interactive transcript rendering. A recipient with
 the shipping Messages extension sees the extension-owned SwiftUI balloon; a
 recipient without it, including Messages on macOS, sees a provider-owned static
 layout with a generated image that mirrors the same compact native presentation.
-Nutrition images retain the calorie ring and metric row while remaining
+Goal-aware nutrition images retain the calorie ring and metric row while remaining
 rectangular so the provider owns the outer mask. The installed Messages
 extension retains its native icon and interactive identity. The provider
 request omits the optional App Store id, so app-absent static cards receive no
@@ -2448,8 +2462,11 @@ Their concise native caption keeps only the date and meal count instead of
 repeating visible totals or target amounts. The static default mirrors the
 native visible hierarchy without repeated direction labels; the safe text
 recovery retains the complete status meaning outside the bitmap.
-Null, incomplete, and unavailable goal states retain a neutral ring, and a
-short subcaption appears only when some totals are partial. Compact-table
+Goal-aware null, incomplete, and unavailable goal states retain a neutral ring.
+Totals-only images omit the ring entirely and label the selected date, logged meal
+coverage, estimated/logged-so-far values, and the not-every-meal caveat without
+target judgments. Their subcaption carries the fixed optional introduction or
+coverage wording; goal-aware subcaptions still appear only for partial totals. Compact-table
 images retain the table grid or workout progress and exercise rows without a
 large empty icon gutter. Their compact grid typography keeps short comparisons
 under one shared header, while stacked generic fields place each measured
@@ -2459,8 +2476,9 @@ chrome adds derived progress. Neither repeats the raster's rows or sets.
 Complete semantic text remains available through the deterministic text
 renderer and value-free recovery fallback.
 The nutrition image derives a quantitative calorie arc only from a complete
-total and an assessed non-null goal; V1, partial, null-goal, and
-unavailable-status snapshots retain only the neutral ring track. The extension
+total and an assessed non-null goal; V1 and goal-aware partial, null-calorie-goal,
+and unavailable-status snapshots retain only the neutral ring track. All-null
+V2 totals-only snapshots have no ring. The extension
 URL keeps the immutable V1, V2, V3, V4, or V5 snapshot in a bounded Base64URL
 fragment that the extension decodes offline. The static image URL carries that
 same bounded presentation envelope in one queryless path so the Web image route
@@ -2617,9 +2635,15 @@ welcome Linq instant-start share one transition. Telegram activation remains
 silent; when no bot thread exists yet, the persisted onboarding start is the
 durable pending fact and managed-automation reconciliation uses the first later
 deliverable direct route. That delayed seed stays anchored to the activation
-window and becomes a no-op after its cutoff. Activation seed failures retry
-through the activation mailbox, while later-route failures reuse the existing
-bounded managed-setup wake ladder. Canonical slug idempotency and onboarding
+window and becomes a no-op after its cutoff. The managed reconciler forwards its
+route-validation profile to that canonical seed, including hosted delivery
+rules. Activation seed failures retry through the activation mailbox, while
+later-route failures reuse the existing bounded managed-setup wake ladder.
+A missing route is currently a no-op, not a scheduled retry. Activation seeding
+therefore remains necessary until the existing route and maintenance owners
+establish a no-inbound continuation for a pristine, silent activation; an
+onboarding start alone does not create a deliverable automation or a wake.
+Canonical slug idempotency and onboarding
 state preserve completed or archived follow-ups as closed. No delivery receipt,
 channel-specific state, queue, or scheduler is another enrollment owner.
 The automation has at most one low-pressure opportunity on
@@ -2765,6 +2789,17 @@ event type and time, live/test mode, and the opaque Stripe event id. It never
 reads or includes member/customer identity, contact details, checkout contents,
 or raw provider payloads.
 
+Linq `message.received` audience selection uses the verified provider payload and
+canonical thread ownership, not an HTTP refresh on every direct message. An
+explicit `chat.is_group: false` is direct only when no durable group route was
+observed. A signed group flag or an existing group route selects the group
+container; the planner repeats the route lookup under the chat ownership lock,
+so a group route committed after preparation also wins before private-member
+admission. Missing or unrecognized directness still requires the bounded chat
+summary lookup: a member/home binding identifies an owner, not an audience.
+New group setup retains roster reads for participant and setup authority; those
+reads are not ordinary direct-message classification.
+
 Hosted thread routing prepares thread-container domain envelopes, delivery-route
 ciphertext, and mailbox ingress roots before the planner transaction.
 Telegram sender authority and Linq pending-contact authority resolve
@@ -2778,9 +2813,14 @@ or authority lock. When an opted-in speculative batch fails during envelope
 metadata lookup or verification, it retains that same rejection for every
 affected uncached root reference. A later mixed cached-and-uncached request
 observes cached failures before starting new metadata or provider work.
-Established Linq direct messages resolve only a narrow blind-index/member-id
-target and unwrap the mailbox-payload ingress root; established Linq and
-Telegram group routes also retain the exact observed delivery-route ciphertext,
+Established Linq direct messages resolve a blind-index/member-id target and
+prepare the required control and mailbox ingress roots plus the observed routing
+snapshot before `BEGIN`. They do not load or compare a full private identity
+snapshot unless Family acceptance/replay consumes it. The transaction still
+locks identity authority, repeats blind identity/home ownership lookups, and
+revalidates member, route snapshot, access, and root authority. Preparation is
+not an authorization cache. Established Linq and Telegram group routes also
+retain the exact observed delivery-route ciphertext,
 prewarm both the active control root used for replacement sealing and any
 decrypt-only control root named by that ciphertext, and prewarm the mailbox
 root. For an eligible unbound group, Web generates the
@@ -3480,6 +3520,19 @@ window to a well-formed past-or-near-present range. The shared Exa
 research-scout request recipe, query shape, and structured-output schema live
 in `@murphai/contracts` so local CLI and hosted Worker validation cannot drift.
 
+The CLI's `fetchExaResearchScoutBatchCandidates` validates all input before
+starting at most two independent lanes at once (four lanes maximum). Each call
+still traverses the existing request validator and hosted per-operation
+authorization, with its own 60-second deadline, caller abort, and no retry.
+Results retain input order and the full provider envelopes. The first observed
+lane failure closes admission, cancels siblings, and joins every worker before
+rethrowing that original typed failure; caller abort also closes admission and
+never returns partial success. A pre-aborted batch makes no request. Unlike the
+old serial failure path, up to two already-authorized calls can overlap;
+cancellation does not undo provider work or guarantee reversal of its cost.
+Single-scout behavior is unchanged. The synthetic baseline/current comparator
+is `scripts/benchmark-research-scout-batch.mjs`.
+
 Hosted Linq typing-start events are verified, parsed strictly, and acknowledged
 without scheduling member lookup or runtime work. Current Web no longer sends
 member-specific shell-prewarm hints from typing, message routing, or instant
@@ -3488,15 +3541,20 @@ and its UserRunner and RunnerContainer RPC compatibility methods are removed.
 Older Web's best-effort helper treats that response as an optional hint failure.
 The inventory coordinator owns speculative preparation;
 normal admitted execution remains the only member-binding path. The Temporal
-mailbox signal remains the durable wake authority for hosted runtime work. For a
-committed known-checkpoint Linq message, Web first verifies the checkpoint owner
-and canonical participant-aware live access as part of the unconditional
-Temporal pointer signal. Assistant Ask request and completion handlers likewise
-append their encrypted mailbox item before signaling Temporal. Only after
-Temporal accepts the applicable durable signal does Web
-start one best-effort direct `ensure-processing` request to Cloudflare (Vercel
-OIDC, fire and forget, with at most one bounded retry and no mailbox payload). Access denial, expiry,
-or Temporal acceptance failure starts no direct wake. The direct request exists
+mailbox signal remains the durable wake authority for hosted runtime work.
+`handoffHostedMailboxWake` owns the shared Linq, Telegram, and Assistant Ask
+request/completion handoff after their encrypted mailbox append. The signal
+owner validates the expected owner and uses either the caller's current committed
+checkpoint (whose transaction proved admission/workspace authority) or the
+checkpoint reread and workspace admission required by replay. Only after that
+owner starts the Temporal request does the handoff overlap acknowledgement with
+a payloadless best-effort direct `ensure-processing` request to Cloudflare
+(Vercel OIDC, with at most one bounded retry). Pre-dispatch denial or expiry starts
+no hint. A later acknowledgement failure preserves the already-authorized hint
+but still rejects the handoff; it does not turn direct acceptance into durable
+success. Existing post-append caller handling and Temporal mailbox recovery remain
+unchanged. The webhook wrapper owns latency traces, not a second wake protocol.
+The direct request exists
 only to cut wake latency and may be dropped at any time with no correctness
 impact: accepted Linq reply delivery stamps the exact mailbox item with
 `consumedAt`, while Assistant Ask has deterministic request/completion identity,

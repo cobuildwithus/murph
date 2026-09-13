@@ -2302,6 +2302,155 @@ describe("workout-import", () => {
     });
   });
 
+  test("assembles later partial evidence before comparing corrected units during expansion", async () => {
+    await withTempDir(async (tempDir) => {
+      await initializeVault({
+        vaultRoot: tempDir,
+        title: "Workout Partial Evidence Test Vault",
+        timezone: "UTC",
+      });
+      const header = "Workout Name,Date,Start Time,Duration,Exercise Name,Set Order,Weight,Reps,Distance Km";
+      const firstRow = "Carry,2026-04-09,10:00,30,Carry,1,40,8,1.5";
+      const secondRow = "Carry,2026-04-10,10:00,30,Carry,1,50,8,2";
+      const newRow = "Carry,2026-04-08,10:00,30,Carry,1,60,8,3";
+      const firstPath = path.join(tempDir, "first.csv");
+      const partialPath = path.join(tempDir, "partial.csv");
+      const expandedPath = path.join(tempDir, "expanded.csv");
+      await writeFile(firstPath, [header, firstRow].join("\n"), "utf8");
+      await writeFile(partialPath, [header, secondRow, firstRow].join("\n"), "utf8");
+      const expandedText = [header, firstRow, newRow, secondRow].join("\n");
+      await writeFile(expandedPath, expandedText, "utf8");
+      // The two-session snapshot sorts first but attaches only the second session.
+      // The later raw candidate is needed to complete its canonical mapping.
+      const generatedIds = [
+        "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+      ];
+      const workoutImportModule = (await importWithMocks(
+        "../src/usecases/workout-import.ts",
+        {
+          "../src/runtime-import.js": () => ({
+            loadRuntimeModule: vi.fn(async (specifier: string) => {
+              if (specifier === "@murphai/core") return coreRuntime;
+              if (specifier === "@murphai/importers") return importersRuntime;
+              if (specifier === "@murphai/runtime-state") {
+                return { generateUlid: () => generatedIds.shift()! };
+              }
+              throw new Error("Unexpected runtime module.");
+            }),
+          }),
+        },
+      )) as typeof import("../src/usecases/workout-import.ts");
+      const importCsv = (file: string, weightUnit: "lb" | "kg", correctUnits = false) =>
+        workoutImportModule.importWorkoutCsv({
+          vault: tempDir,
+          file,
+          source: "strong",
+          weightUnit,
+          correctUnits,
+        });
+
+      const first = await importCsv(firstPath, "lb");
+      const partial = await importCsv(partialPath, "lb");
+      assert.equal(first.createdCount, 1);
+      assert.equal(partial.createdCount, 1);
+      assert.equal(partial.skippedExistingCount, 1);
+      const firstId = first.lookupIds[0];
+      const secondId = partial.lookupIds[0];
+      assert.ok(firstId);
+      assert.ok(secondId);
+      assert.ok(first.rawFile);
+      assert.ok(partial.rawFile);
+      assert.ok(partial.rawFile.localeCompare(first.rawFile) < 0);
+      await editEventRecord({
+        vault: tempDir,
+        lookup: firstId,
+        entityLabel: "workout session",
+        expectedKinds: ["activity_session"],
+        set: [
+          "distanceKm=9",
+          "workout.exercises.0.sets.0.distanceMeters=9000",
+          'tags=["member-edit"]',
+        ],
+      });
+      const corrected = await importCsv(partialPath, "kg", true);
+      assert.equal(corrected.createdCount, 0);
+      assert.equal(corrected.supersededCount, 2);
+      assert.deepEqual(corrected.lookupIds, [secondId, firstId]);
+      assert.equal(corrected.rawStored, false);
+
+      const attachments = await coreRuntime.findEventsByRawRefs({
+        vaultRoot: tempDir,
+        rawRefs: [partial.rawFile, first.rawFile],
+        resourceType: "workout-session",
+      });
+      assert.deepEqual(attachments.map((matches) => matches.map((match) => match.latest.id)), [
+        [secondId],
+        [firstId],
+      ]);
+      const plan = importersRuntime.planWorkoutCsvImport({
+        text: expandedText,
+        timeZone: "UTC",
+        source: "strong",
+        weightUnit: "kg",
+      });
+      const readRecords = () => Promise.all(plan.sessions.map((session) =>
+        coreRuntime.findEventByExternalRef({
+          vaultRoot: tempDir,
+          system: "strong",
+          resourceType: "workout-session",
+          resourceId: session.sourceWorkoutId,
+        })));
+      const before = await readRecords();
+      assert.deepEqual(before.map((record) => record?.id), [firstId, undefined, secondId]);
+      const ledgerFile = first.ledgerFiles[0];
+      assert.ok(ledgerFile);
+      const rowsBefore = await coreRuntime.readJsonlRecords({
+        vaultRoot: tempDir,
+        relativePath: ledgerFile,
+      });
+
+      const expanded = await importCsv(expandedPath, "kg");
+      assert.equal(expanded.createdCount, 1);
+      assert.equal(expanded.supersededCount, 0);
+      assert.equal(expanded.skippedExistingCount, 2);
+      assert.equal(expanded.receivedCount, 3);
+      assert.equal(expanded.lookupIds.length, 1);
+      const after = await readRecords();
+      assert.deepEqual(after.map((record) => record?.id), [firstId, expanded.lookupIds[0], secondId]);
+      assert.deepEqual(after[0], before[0]);
+      assert.deepEqual(after[2], before[2]);
+      const retained = after[0];
+      assert.ok(retained && retained.kind === "activity_session");
+      assert.equal(retained.workout.exercises[0]?.sets[0]?.weightUnit, "kg");
+      assert.equal(retained.distanceKm, 9);
+      assert.equal(retained.workout.exercises[0]?.sets[0]?.distanceMeters, 9000);
+      assert.deepEqual(retained.tags, ["member-edit"]);
+      const rowsAfter = await coreRuntime.readJsonlRecords({
+        vaultRoot: tempDir,
+        relativePath: ledgerFile,
+      });
+      assert.equal(rowsAfter.length, rowsBefore.length + 1);
+
+      const auditRowsAfter = await countAuditRows(tempDir);
+      const rawFilesAfter = await coreRuntime.walkVaultFiles(tempDir, "raw/workouts");
+      const replay = await importCsv(expandedPath, "kg");
+      assert.equal(replay.importedCount, 0);
+      assert.equal(replay.skippedExistingCount, 3);
+      assert.equal(replay.rawStored, false);
+      assert.deepEqual(await readRecords(), after);
+      assert.equal(await countAuditRows(tempDir), auditRowsAfter);
+      assert.deepEqual(await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"), rawFilesAfter);
+      assert.deepEqual(await coreRuntime.readJsonlRecords({
+        vaultRoot: tempDir,
+        relativePath: ledgerFile,
+      }), rowsAfter);
+    });
+  });
+
   test("treats an all-tombstoned equivalent workout snapshot as a no-op", async () => {
     await withTempDir(async (tempDir) => {
       await initializeVault({

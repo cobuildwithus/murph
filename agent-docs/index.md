@@ -2,6 +2,11 @@
 
 Last verified: 2026-09-11
 
+Bounded Junction full-history batching, exact scalar continuation, and
+foreground yield are owned by `agent-docs/RELIABILITY.md`; provider and durable
+service restart/retry proof lives in
+`packages/device-syncd/test/junction-full-backfill-progress.test.ts`.
+
 ## Purpose
 
 Verification inventory, composed diff routing, cold stale-invocation coverage and
@@ -95,6 +100,8 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 | `agent-docs/compliance/vendor-health-data-addendum.md` | Vendor clause library and procurement checklist for providers that process identifiable health data or health-context metadata. | Vendor health-data contracting | High | 2026-04-29 |
 | `agent-docs/compliance/health-data-tracking-and-ads-rule.md` | Hard rule and review checklist for analytics, telemetry, ad pixels, attribution, and marketing tools on health-data surfaces. | Health-data tracking policy | High | 2026-04-29 |
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-16 |
+| `agent-docs/product-specs/nutrition-totals-card.md` | Logged-so-far nutrition cards without mandatory targets; invitation evidence, recovery, and native skew. | Nutrition card product spec | High | 2026-09-11 |
+| `agent-docs/exec-plans/completed/2026-09-11-nutrition-totals-card.md` | Completed implementation, assistant proof and review for optional-goal daily cards. | Completed execution plan | High | 2026-09-11 |
 | `agent-docs/product-specs/imessage-workout-tracking.md` | iMessage workout product spec and chat-only routine access. | iMessage workout product spec | High | 2026-09-08 |
 | `agent-docs/product-specs/bring-your-own-inference.md` | Personal custom inference contract covering verified member-owned endpoints, settings without runner wakes, mailbox revision handoff, explicit selection, no silent fallback, privacy, metering, and recovery. | Hosted assistant/custom inference product spec | High | 2026-07-31 |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated measured-biomarker navigation over preserved private lab history. | Biomarkers product spec | High | 2026-07-20 |
@@ -166,12 +173,11 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 | `agent-docs/research/2026-07-10-junction-labs-commerce-and-fulfillment.md` | Point-in-time Junction lab-ordering research and phased product, commerce, fulfillment, result-import, and launch-gate proposal. | Research and future planning artifact | Medium | 2026-07-10 |
 | `agent-docs/research/2026-09-11-junction-historical-sweep-efficiency.md` | Official Junction webhook/history contracts, daily safety-sweep rationale, targeted refreshes, and validation gaps. | Research and future planning artifact | Medium | 2026-09-11 |
 | `agent-docs/research/2026-06-25-imessage-line-flag-evidence.md` | Point-in-time redacted evidence note for the 2026-06-25 iMessage line flag investigation. | Investigation artifact | Medium | 2026-06-26 |
-| `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules. | Murph Age research workflow | High | 2026-05-09 |
 | `agent-docs/operations/agent-workflow-routing.md` | Task scope, authority, checkout, commits, and instruction ownership. | Agent workflow routing | High | 2026-09-11 |
 | `agent-docs/operations/product-ux.md` | Product UX workflow. | Product UX workflow | High | 2026-08-31 |
 | `agent-docs/operations/live-provider-canaries.md` | Fresh native, Linq, Stripe and Garmin provider outcomes; GitHub dispatch, protected execution, exact receipts and cross-repository rollout. | Live provider proof | High | 2026-09-10 |
 | `agent-docs/operations/native-android-hosted-e2e.md` | Native Android verification operations. | Native Android verification operations | High | 2026-09-01 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, Draft-before-push readiness, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, remote browser health readiness, wearable browser failure evidence captured before cleanup, and HTTP/destination validation before persisted connection assertions. Wearable stage forwarding and numeric host progress. | Verification policy | High | 2026-09-11 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, Draft-before-push readiness, CI compiler memory and production-build proof, independent worktree build outputs, verified remote-tracking base refresh, authorized base reconciliation with bounded conflict resolution, Temporal integration build/process-shard proof, remote browser health readiness, wearable browser failure evidence captured before cleanup, and HTTP/destination validation before persisted connection assertions. Wearable stage forwarding, numeric host progress, and bounded Actions notice retention. | Verification policy | High | 2026-09-11 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Database critical-section reliability. | Database critical-section reliability | High | 2026-08-09 |
 | `agent-docs/operations/typescript-verification-performance.md` | Verification performance policy. | Verification performance policy | Medium | 2026-07-29 |
 | `agent-docs/operations/completion-workflow.md` | Parent-owned completion evidence, final ReviewGPT eligibility and recovery before the first valid review, verified-base mergeability, and Draft-before-push ordering; specialist passes are retired. | Completion workflow | High | 2026-09-11 |
@@ -190,6 +196,7 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
 | `agent-docs/exec-plans/completed/2026-09-09-bundled-cli-query-timing-owner.md` | Exact-leaf runner bundle correction and proof handoff; actual assembled validation and parent evidence pending. | Historical implementation evidence | Low | 2026-09-09 |
 | `agent-docs/exec-plans/completed/2026-09-10-billing-browser-hydration.md` | Real React and Chromium proof for billing control replacement during hydration; provider outcome checks remain owned by the protected live matrix. | Historical implementation evidence | Low | 2026-09-10 |
+| `agent-docs/exec-plans/completed/2026-09-11-research-scout-batch-concurrency.md` | Local two-lane scout scheduling implementation and synthetic proof handoff; parent source-suite, benchmark, and reply verification pending. | Historical implementation evidence | Low | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-12-reply-wake-latency.md` | Migration-only foreground completion, retained background reconciliation, focused source proof, and production latency evidence gaps. | Historical implementation evidence | Low | 2026-09-12 |
 | `agent-docs/exec-plans/completed/2026-09-12-foreground-maintenance-deletion.md` | Removal of foreground route housekeeping and the interim migration-only mode; background and idle migration remain authoritative. | Historical implementation evidence | Low | 2026-09-12 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |

@@ -23,6 +23,7 @@ export type CliTimingOutcome = "ok" | "error" | "unknown";
 export const CLI_TIMING_MAX_FAILURES = 8;
 export const CLI_TIMING_FAILURE_CODES = [
   "unknown", "invalid_option", "invalid_payload", "VALIDATION_ERROR", "VAULT_INVALID_INPUT",
+  "exercise_not_found", "exercise_catalog_unavailable", "exercise_catalog_invalid",
   "not_found", "conflict", "permission_denied", "invalid_path", "storage_unavailable",
   "knowledge_page_not_found", "knowledge_page_conflict", "knowledge_duplicate_slug", "knowledge_page_invalid",
   "QUERY_SOURCE_INVALID", "query_source_invalid", "unsupported_format",
@@ -51,7 +52,6 @@ export function cliTimingFailureStage(value: unknown): CliFailureTiming["stage"]
 // New names require consumer-first admission here; until then they become other.
 // The CLI test compares this vocabulary to the real registered command tree.
 const commandGroups: Readonly<Record<string, string>> = {
-  "age": "calculate|calculate-bundle|evidence|inputs|model-cards|preview|preview-view|report|scaffold",
   "allergy": "import-json|list|save|scaffold|show",
   "assertion": "import-json|payload-schema|save|scaffold",
   "assistant": "ask|chat|deliver|doctor|onboarding complete|onboarding reopen|onboarding resume-context|onboarding status|run|self-target clear|self-target list|self-target set|self-target show|session list|session show|status|stop",

@@ -156,8 +156,8 @@ test('natural sender bounds the datagram and accounts for trimmed command summar
   const originalClock = process.hrtime.bigint
   let clock = originalClock()
   process.hrtime.bigint = () => clock
-  const commands = ['goal list', 'family list', 'memory show', 'age calculate',
-    'age evidence', 'age inputs', 'allergy list', 'allergy show', 'audit list',
+  const commands = ['goal list', 'family list', 'memory show', 'provider list',
+    'capture show', 'event list', 'allergy list', 'allergy show', 'audit list',
     'audit show', 'audit tail', 'automation list', 'condition list', 'capture list',
     'food list', 'meal list']
   try {

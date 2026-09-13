@@ -28,6 +28,7 @@ import type {
 import { buildAutomationSupportSeriesTag } from '@murphai/contracts'
 import {
   createExperiment,
+  readMemoryDocument,
   initializeVault,
   loadVault,
   patchAutomation,
@@ -45,6 +46,7 @@ import { readMaterializedExportPackReceipt } from '@murphai/vault-usecases/expor
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   renderAssistantResponseCardText,
+  DAILY_NUTRITION_OPTIONAL_GOALS_INTRO,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import {
@@ -137,6 +139,7 @@ import {
 } from '../src/outbound-channel.ts'
 import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 import { ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS } from '../src/assistant/outbox/retry-policy.ts'
+import { NUTRITION_GOAL_INVITATION_SENT_MEMORY, resolveDailyNutritionIntroduction } from '../src/assistant/nutrition-card-introduction.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 import {
   onboardingFollowupPredecessorDefinitions,
@@ -2077,6 +2080,64 @@ describe('assistant outbox runtime', () => {
     ).toHaveLength(1)
   })
 
+  it('records the totals-only invitation after confirmation, not staging or a confirmation failure, without resending', async () => {
+    const { vaultRoot } = await createInitializedAssistantVault('nutrition-intro-confirmation-')
+    const card = { ...NUTRITION_RESPONSE_CARD, goals: {
+      calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null,
+    } }
+    const message = renderAssistantResponseCardText(card, DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
+    const before = await readMemoryDocument(vaultRoot)
+    const intent = await createAssistantOutboxIntent({ card, channel: 'linq',
+      message, sessionId: 'intro-session', threadId: 'intro-thread', threadIsDirect: true,
+      turnId: 'intro-turn', dedupeToken: 'intro-effect', vault: vaultRoot })
+    expect(intent.message).toBe(message)
+    expect(await readMemoryDocument(vaultRoot)).toMatchObject({ exists: before.exists, records: before.records })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({ channel: 'linq', providerMessageId: 'intro-sent',
+        target: 'intro-thread', targetKind: 'thread' }),
+      deliveryDeduplicated: false, deliveryTransportIdempotent: true,
+      outboxIntentId: null, session: undefined,
+    })
+    const confirm = vi.fn().mockRejectedValueOnce(new Error('confirmation temporarily unavailable')).mockResolvedValue(undefined)
+    const dispatchHooks = { requiresTerminalConfirmation: () => true, confirmTerminalIntent: confirm }
+    const pending = await dispatchAssistantOutboxIntent({ force: true, intentId: intent.intentId, vault: vaultRoot, dispatchHooks })
+    expect(pending.intent.status).toBe('retryable')
+    expect(pending.intent.delivery).not.toBeNull()
+    expect(await readMemoryDocument(vaultRoot)).toMatchObject({ exists: before.exists, records: before.records })
+    const sent = await dispatchAssistantOutboxIntent({ force: true, intentId: intent.intentId, vault: vaultRoot, dispatchHooks })
+    expect(sent.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+    expect((await readMemoryDocument(vaultRoot)).records.some((record) => record.text === NUTRITION_GOAL_INVITATION_SENT_MEMORY)).toBe(true)
+    expect(await resolveDailyNutritionIntroduction({ card, message: DAILY_NUTRITION_OPTIONAL_GOALS_INTRO, vault: vaultRoot })).toBeNull()
+    // Recreating the frozen effect remains the same intent even after the note.
+    const replay = await createAssistantOutboxIntent({ card, channel: 'linq',
+      message, sessionId: 'intro-session', threadId: 'intro-thread', threadIsDirect: true,
+      turnId: 'intro-turn', dedupeToken: 'intro-effect', vault: vaultRoot })
+    expect(replay.intentId).toBe(intent.intentId)
+  })
+
+  it.each([
+    { code: 'ASSISTANT_TELEGRAM_DELIVERY_FAILED', deliveryMayHaveSucceeded: false, status: 'failed' },
+    { code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS', deliveryMayHaveSucceeded: true, status: 'abandoned' },
+  ])('does not record the nutrition invitation for $status delivery', async ({ code, deliveryMayHaveSucceeded, status }) => {
+    const { vaultRoot } = await createInitializedAssistantVault('nutrition-intro-failed-')
+    const card = { ...NUTRITION_RESPONSE_CARD, goals: {
+      calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null,
+    } }
+    const before = await readMemoryDocument(vaultRoot)
+    const intent = await createAssistantOutboxIntent({ card, channel: 'telegram',
+      message: renderAssistantResponseCardText(card, DAILY_NUTRITION_OPTIONAL_GOALS_INTRO),
+      sessionId: 'intro-failed-session', threadId: '12345', threadIsDirect: true,
+      turnId: 'intro-failed-turn', vault: vaultRoot })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('Synthetic delivery failure'), { code, deliveryMayHaveSucceeded }),
+    )
+    const result = await dispatchAssistantOutboxIntent({ force: true, intentId: intent.intentId, vault: vaultRoot })
+    expect(result.intent.status).toBe(status)
+    expect(await readMemoryDocument(vaultRoot)).toMatchObject({ exists: before.exists, records: before.records })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
   it('persists and dispatches response cards through the existing outbox owner', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-card-')
     const rendered = renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD)
@@ -2362,17 +2423,24 @@ describe('assistant outbox runtime', () => {
     })
   })
 
-  it('persists one text-only fallback identity before acceptance and reuses it after restart', async () => {
-    const { vaultRoot } = await createAssistantVault(
+  it.each(['goal-aware', 'totals-only'] as const)('persists one %s text fallback identity before acceptance and reuses it after restart', async (mode) => {
+    const { vaultRoot } = await createInitializedAssistantVault(
       'assistant-outbox-card-fallback-restart-',
     )
+    const card = mode === 'goal-aware' ? NUTRITION_RESPONSE_CARD : {
+      ...NUTRITION_RESPONSE_CARD,
+      goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null },
+    }
+    const message = renderAssistantResponseCardText(card,
+      mode === 'totals-only' ? DAILY_NUTRITION_OPTIONAL_GOALS_INTRO : null)
+    const memoryBefore = await readMemoryDocument(vaultRoot)
     const intent = await createAssistantOutboxIntent({
       actorId: '+15550001',
-      card: NUTRITION_RESPONSE_CARD,
+      card,
       channel: 'linq',
       dedupeToken: 'stable-card-fallback-restart',
       deliverySource: TEST_LINQ_DELIVERY_SOURCE,
-      message: 'ignored model prose',
+      message,
       sessionId: 'session-card-fallback-restart',
       threadId: 'thread-card-fallback-restart',
       threadIsDirect: true,
@@ -2413,7 +2481,7 @@ describe('assistant outbox runtime', () => {
     await useActualOutboundDeliveryImplementation()
     sendLinq.mockImplementationOnce(async (request) => {
       expect(request).toMatchObject({
-        card: NUTRITION_RESPONSE_CARD,
+        card,
         idempotencyKey: originalIdempotencyKey,
       })
       const delivered = await sendLinqMessage(request, {
@@ -2458,6 +2526,8 @@ describe('assistant outbox runtime', () => {
       status: 'sending',
     })
 
+    expect(await readMemoryDocument(vaultRoot)).toMatchObject({ exists: memoryBefore.exists, records: memoryBefore.records })
+
     sendLinq.mockImplementationOnce(async (request) => {
       return await sendLinqMessage(request, {
         env: {
@@ -2478,7 +2548,7 @@ describe('assistant outbox runtime', () => {
     expect(sendLinq).toHaveBeenCalledTimes(2)
     expect(sendLinq.mock.calls[1]?.[0]).toMatchObject({
       idempotencyKey: fallbackIdempotencyKey,
-      message: renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD),
+      message,
     })
     expect(sendLinq.mock.calls[1]?.[0]).not.toHaveProperty('card')
     expect(providerRequests).toHaveLength(4)
@@ -2498,6 +2568,11 @@ describe('assistant outbox runtime', () => {
         providerMessageId: 'linq-card-fallback-text',
       },
     })
+    const sentMemory = await readMemoryDocument(vaultRoot)
+    expect(sentMemory.records.some((record) => record.text === NUTRITION_GOAL_INVITATION_SENT_MEMORY))
+      .toBe(mode === 'totals-only')
+    if (mode === 'goal-aware') expect(sentMemory).toMatchObject({ exists: memoryBefore.exists, records: memoryBefore.records })
+
   })
 
   it('terminalizes an exhausted private Linq attachment upload without a new reservation', async () => {
