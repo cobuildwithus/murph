@@ -1494,24 +1494,48 @@ function getObservedDaysLevel(days: number): number {
 export function selectVisiblePatternReport(
   report: PersonalPatternReport,
 ): PersonalPatternReport {
-  const outcomes = report.outcomes.filter((outcome) =>
-    report.factors.some((factor) => {
-      const cell = findPatternCell(report, factor.id, outcome.id);
-      return (
-        cell !== undefined &&
-        cell.stage !== "insufficient" &&
-        cell.stage !== "no_clear_pattern"
-      );
-    }),
+  const cutoff = new Date(`${report.asOfDate}T00:00:00Z`);
+  const day = cutoff.getUTCDate();
+  cutoff.setUTCDate(1);
+  cutoff.setUTCMonth(cutoff.getUTCMonth() - 3);
+  const lastDay = new Date(
+    Date.UTC(cutoff.getUTCFullYear(), cutoff.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  cutoff.setUTCDate(Math.min(day, lastDay));
+  const cutoffDate = cutoff.toISOString().slice(0, 10);
+  const eligibleFactors = report.factors.filter((factor) => {
+    if (factor.observedDays < 2) return false;
+    if (factor.kind === "intervention") return true;
+    // Older replicas contain only matched exposure dates, which still prove a session.
+    const latest = factor.lastObservedDate ?? report.cells
+      .filter((cell) => cell.factorId === factor.id)
+      .flatMap((cell) => cell.lastExposedDate ? [cell.lastExposedDate] : [])
+      .sort()
+      .at(-1);
+    return latest !== undefined &&
+      latest >= cutoffDate && latest <= report.asOfDate;
+  });
+  const eligibleIds = new Set(eligibleFactors.map((factor) => factor.id));
+  const cells = report.cells.filter((cell) =>
+    eligibleIds.has(cell.factorId) &&
+    cell.exposedDays >= 2 && cell.comparisonDays >= 2,
   );
-  const factors = report.factors.filter((factor) =>
-    outcomes.some((outcome) => {
-      const cell = findPatternCell(report, factor.id, outcome.id);
-      return cell !== undefined && cell.stage !== "insufficient";
-    }),
+  const outcomes = report.outcomes.filter((outcome) =>
+    cells.some((cell) =>
+      cell.outcomeId === outcome.id &&
+      cell.stage !== "insufficient" && cell.stage !== "no_clear_pattern",
+    ),
+  );
+  const factors = eligibleFactors.filter((factor) =>
+    outcomes.some((outcome) =>
+      cells.some((cell) =>
+        cell.factorId === factor.id &&
+        cell.outcomeId === outcome.id && cell.stage !== "insufficient",
+      ),
+    ),
   );
 
-  return { ...report, factors, outcomes };
+  return { ...report, cells, factors, outcomes };
 }
 
 function describePlainResult({

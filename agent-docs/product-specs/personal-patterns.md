@@ -162,10 +162,18 @@ Cards with only neutral measures use a compact header with a plain
 `No clear changes` status; their coverage bars remain tappable.
 Measures that still need data are omitted from mobile cards. `Show more`
 reveals the remaining report factors. The report keeps at most 100 sorted
-factors to bound Browser Vault size and calculation work. A recognized factor
-stays visible when it has no suitable comparison day. Its desktop cells explain that
-Murph needs more comparable data. Observations can appear with grade E. The
-page shows the evidence count, comparison basis, date range, and the factor and
+factors to bound Browser Vault size and calculation work. The page requires at
+least two recorded factor days and two independent
+comparison cases on both sides of each displayed result. Activities (including
+mixed activity factors) must have a recorded session within three calendar months
+of the report date, inclusive; month-end cutoffs clamp to the last day of the
+cutoff month. This uses the factor's latest observed date, even when that session
+has no matched outcome. Legacy replicas use their latest matched exposure date
+as conservative evidence of recency. Filtering happens before the 15-factor
+limit and Show more; hidden history remains in Journal. A factor with no eligible
+comparison is omitted. Grade E remains available in the underlying report, but
+one-case observations do not appear on this page. The page shows the evidence
+count, comparison basis, date range, and the factor and
 comparison dates needed to inspect the result.
 
 An empty report says that Murph needs more comparable data. The page does not
