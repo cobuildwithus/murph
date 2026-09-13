@@ -19,3 +19,12 @@ Compare the failed Release Web tests (2/4) job in PR #3104 with `pnpm --dir apps
 ## Context
 
 An unrelated runner lifecycle simplification was delayed by this test failure. Preserve the probe and two-request assertions when improving its asynchronous waiting; do not add retries to production behavior.
+
+## Follow-up: experiment deep-link probe
+
+PR #3347 reproduced the same native-decompression timing boundary locally in
+`experiment deep links load core and metrics index before exact run-card bucket follow-up`.
+The shared helper already uses a real asynchronous deadline, but this probe still
+asserted loaded state after four microtask flushes. Reuse that helper for the
+observable loaded state, retaining the exact state and two-request assertions.
+The correction is isolated to test waiting; production behavior is unchanged.

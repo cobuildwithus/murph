@@ -706,6 +706,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
     : null;
   const sharedScopedExecutionContext = scopeHostedGroupSharedReaderToAssistantOperation({
     executionContext: input.executionContext,
+    freshnessWaitMs: input.groupEmailIngress ? undefined : 15_000,
     groupSharedReadAvailable: input.groupSharedReadAvailable,
     groupToolPort: scopedGroupToolPort,
   });
@@ -745,6 +746,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
 
 function scopeHostedGroupSharedReaderToAssistantOperation(input: {
   executionContext: AssistantExecutionContext;
+  freshnessWaitMs?: number;
   groupSharedReadAvailable: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
 }): AssistantExecutionContext {
@@ -763,6 +765,7 @@ function scopeHostedGroupSharedReaderToAssistantOperation(input: {
         ? {
             groupSharedReader: createHostedGroupSharedReader({
               groupToolPort: input.groupToolPort,
+              freshnessWaitMs: input.freshnessWaitMs,
             }),
           }
         : {}),
@@ -808,10 +811,11 @@ function createHostedScheduledGroupTools(input: {
   let permissionOfferAttempted = false;
   const unobservedGroupSharedReader = createHostedGroupSharedReader({
     groupToolPort: input.groupToolPort,
+    freshnessWaitMs: 5 * 60_000,
   });
   const groupSharedReader: AssistantHostedGroupSharedReader = {
-    async request(request) {
-      const result = await unobservedGroupSharedReader.request(request);
+    async request(request, context) {
+      const result = await unobservedGroupSharedReader.request(request, context);
       if (result.status !== "ok") {
         observedNotGrantedScopeKeys.clear();
         return result;
@@ -2287,14 +2291,11 @@ export async function runHostedWorkspaceAssistantPhase(
           result: timedForegroundAssistantResult,
         }),
       );
-      const result = await withHostedAutoReplyRouteMaintenanceAfterDelivery({
+      const result = withPostForegroundMemberMaintenanceAfterCheckpoint({
+        executionContext,
         input,
-        result: withPostForegroundMemberMaintenanceAfterCheckpoint({
-          executionContext,
-          input,
-          result: foregroundResult,
-          wake,
-        }),
+        result: foregroundResult,
+        wake,
       });
       if (providerCleanupPlan.stateQueued && !result.progressed) {
         return {
@@ -4840,7 +4841,9 @@ async function prepareForegroundSystemMailboxSelection(
     runtime: phaseInput.runtime,
     runtimeEnv: phaseInput.runtimeEnv,
     signal: phaseInput.signal ?? null,
-    shouldYieldBackgroundMaintenance: null,
+    shouldYieldBackgroundMaintenance: hasExclusiveSelection
+      ? phaseInput.shouldYieldBackgroundMaintenance ?? null
+      : null,
     vaultRoot: phaseInput.restored.vaultRoot,
   });
   let foregroundCausalPreparation = hasExclusiveSelection
@@ -5316,8 +5319,8 @@ async function runSystemMailboxMaintenancePhase(
             phaseInput.shouldYieldBackgroundMaintenance ?? null,
           vaultRoot: phaseInput.restored.vaultRoot,
         }));
-  const shouldYieldAfterSystemMailboxPreparation = !hasExclusiveSelection
-    && phaseInput.shouldYieldBackgroundMaintenance?.() === true;
+  const shouldYieldAfterSystemMailboxPreparation =
+    phaseInput.shouldYieldBackgroundMaintenance?.() === true;
   const foregroundCausalPreparationSelected =
     systemMailboxPreparation !== null
     && isForegroundCausalSystemMailboxPreparation(systemMailboxPreparation);

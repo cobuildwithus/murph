@@ -54,7 +54,7 @@ import {
   isHostedRetainedDeviceScheduledAdmission,
   mergeHostedSystemMailboxRollbackItems,
   projectHostedDeviceHintCoverage,
-  projectHostedEligibleDirtyHintIds,
+  projectHostedEligibleDeviceHintIds,
   selectHostedModelFreeSystemMailboxItems,
   projectHostedSystemMailboxRetainedDeviceWakeAdmission,
   readHostedSystemMailboxContinuationItemIds,
@@ -398,12 +398,12 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           eligibleItemIds.has(item.itemId)
         ),
       };
-      const coverage = projectHostedDeviceHintCoverage({ now: startedAt, pending: state.pending });
-      const eligibleDirtyHintIds = projectHostedEligibleDirtyHintIds({ eligibleItemIds, state });
+      const coverage = projectHostedDeviceHintCoverage({ eligibleItemIds, now: startedAt, pending: state.pending });
+      const eligibleDeviceHintIds = projectHostedEligibleDeviceHintIds({ eligibleItemIds, state });
       const pending = findHostedRunnableSystemMailboxItem({
         allowedRouteActions: input.allowedRouteActions ?? null,
         pendingOnly: input.pendingOnly,
-        continuationItemIds, coverage, eligibleDirtyHintIds,
+        continuationItemIds, coverage, eligibleDeviceHintIds,
         now: startedAt,
         state: selectionState,
       });
@@ -432,9 +432,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         };
       }
 
+      const admittedWake = coverage.get(pending.itemId)?.admittedWake;
       const collapsed = collapseConsecutiveHostedBrowserVaultRefreshItems({
         pending: state.pending.filter((item) => !coverage.get(pending.itemId)?.coveredHintIds.has(item.itemId)),
-        selected: pending,
+        selected: admittedWake ? { ...pending, wake: admittedWake } : pending,
       });
 
       if (
@@ -745,6 +746,7 @@ function resolveHostedSystemMailboxPreparedItemRetryWakeReason(
 const HOSTED_RESUMABLE_BACKGROUND_SYSTEM_ACTIONS: ReadonlySet<HostedSystemMailboxRouteAction> = new Set([
   "run-device-sync-wake",
   "apply-clinical-enrichment",
+  "apply-member-activation",
 ]);
 
 function isHostedResumableBackgroundSystemAction(action: HostedSystemMailboxRouteAction): boolean {
@@ -1492,9 +1494,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     signal: input.signal,
     ...(input.shouldYieldBackgroundMaintenance
       ? {
-          shouldYieldAssistantAskCompletion: input.shouldYieldBackgroundMaintenance,
-          shouldYieldClinicalRecords: input.shouldYieldBackgroundMaintenance,
-          shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance,
+          shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
         }
       : {}),
     sourceMailboxItemId: input.pendingItem.itemId,

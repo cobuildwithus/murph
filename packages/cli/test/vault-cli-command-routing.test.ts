@@ -506,7 +506,6 @@ for (const root of ['init', 'validate', 'vault'] as const) {
 }
 
 const intentionallyFullOnlyRootCommandReasons = {
-  age: 'Murph Age imports model/readiness surfaces and is not a common onboarding path.',
   audit: 'Audit commands are operator/maintenance oriented and can keep full discovery.',
   document: 'Document import/show/list is not part of the optimized onboarding path.',
   export: 'Export is an occasional full-vault operator path.',

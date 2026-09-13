@@ -52,6 +52,11 @@ import {
 } from "@murphai/importers/device-providers/junction-resources";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
+import {
+  appendJunctionReconcileRecords, beginJunctionReconcileDigest, encodeJunctionReconcileProof,
+  hashJunctionReconcileValue, readJunctionReconcileProof,
+  type JunctionReconcileProof,
+} from "../junction-reconcile-proof.ts";
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
 import type { JunctionDeviceSyncJobPayloads } from "../config/provider-manifests.ts";
 import { JunctionTimeseriesProgressError } from "../junction-timeseries-progress.ts";
@@ -83,7 +88,7 @@ import {
   type JunctionHistoricalBackfillEvidenceResource,
   type JunctionHistoricalBackfillStatus,
 } from "../junction-historical-backfill-progress.ts";
-import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH, JUNCTION_TEMPORAL_SWEEP_METADATA_KEY } from "../metadata.ts";
+import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH, JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, JUNCTION_RECONCILE_PROOF_METADATA_KEY } from "../metadata.ts";
 import {
   buildDeviceSyncSourceCanonicalCoverageBoundaryKey,
   buildDeviceSyncSourceCanonicalCoverageFinalizedAtKey,
@@ -168,6 +173,7 @@ import type {
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceJobExecutor,
+  ScheduledReconcileProbeResult,
   DeviceSyncProvider,
   DeviceSyncProviderRequestCandidateAliasSource,
   DeviceSyncRestDiagnosticContext,
@@ -631,7 +637,10 @@ const TIMESERIES_CHUNK_MS = 24 * 60 * 60_000;
 // starting canonical day owners until the outer deadline. One claimed job may
 // start at most 16 such owners; resource record/cardinality limits and the
 // client's collection attempt, page, and timeout limits remain the inner bound.
-const JUNCTION_HISTORICAL_RESOURCE_JOB_MAX_OWNER_UNITS = 16;
+const JUNCTION_JOB_MAX_OWNER_UNITS = 16;
+// Stop starting cheap full-job units after five seconds. Each unit retains its
+// existing request bounds and the worker's foreground/abort deadline.
+const JUNCTION_FULL_JOB_TIMESERIES_BATCH_MS = 5_000;
 // A date-only provider query can contain source-local records from UTC-12.
 // Delay calendar-day ownership until that date has closed in every admitted
 // civil offset instead of treating UTC midnight as globally complete.
@@ -1111,6 +1120,193 @@ export function createJunctionDeviceSyncProvider(
       ],
       nextReconcileAt,
     };
+  }
+
+  function reconcileProbeEligibility(account: StoredDeviceSyncAccount, now: string): string | null {
+    if (account.status !== "active" || account.credential.kind !== "provider_config") return "connection_ineligible";
+    if (!account.sources?.length) return "sources_missing";
+    if (summaryResources.includes("profile") && !hasCheckedJunctionProfileSummary(account.metadata)) return "profile_due";
+    if (shouldImportClosedTimeseriesForReconcile(account.lastSyncCompletedAt, floorUtcDayTimestamp(now))) return "daily_repair_due";
+    if (createScheduledJobs(account, now).jobs.length !== 1) return "history_or_recovery_due";
+    return null;
+  }
+
+  function reconcileProofBinding(
+    account: DeviceSyncAccount | StoredDeviceSyncAccount,
+    providers: readonly JunctionProviderConnection[],
+  ): string {
+    return hashJunctionReconcileValue(config.clientUserIdSecret, [
+      "junction-reconcile-v1", runtimeConfig, reconcileDays, config.environment,
+      config.region, config.apiBaseUrl ?? null, account.connectedAt,
+      account.externalAccountId,
+      (account.sources ?? []).map((source) => [
+        source.sourceProviderSlug, source.status,
+        source.firstSeenAt, source.lifecycleEpoch, source.lastErrorCode,
+      ]).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+      providers.map((provider) => [
+        provider.id, provider.slug, mapJunctionSourceStatus(provider.status),
+        provider.origin, provider.source, provider.resourceAvailability,
+      ]).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+    ]);
+  }
+
+  function beginReconcileProof(
+    context: ProviderJobContext, job: DeviceSyncJobRecord,
+    providers: readonly JunctionProviderConnection[],
+  ): JunctionReconcileProof | null {
+    if (job.kind !== "reconcile" || job.payload.sourceProviderSlug
+      || !context.vaultTimeZone
+      || !isCurrentScheduledClosedWindow(resolveJobWindow(job, context.now, reconcileDays), context.now, reconcileDays)
+      || (summaryResources.includes("profile") && !hasCheckedJunctionProfileSummary(context.account.metadata))
+      || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, floorUtcDayTimestamp(context.now))) return null;
+    const binding = reconcileProofBinding(context.account, providers);
+    if (job.payload.summaryResourceCursor || job.payload.summaryPhaseComplete) {
+      const prior = readJunctionReconcileProof(job.payload.reconcileProof);
+      return prior && prior.binding === binding && prior.timeZone === context.vaultTimeZone
+        && prior.validUntil > context.now ? prior : null;
+    }
+    const utcEnd = Date.parse(floorUtcDayTimestamp(context.now)) + TIMESERIES_CHUNK_MS;
+    const globalEnd = Date.parse(floorUtcDayTimestamp(new Date(Date.parse(context.now)
+      - JUNCTION_PROVIDER_CALENDAR_DAY_CLOSE_LAG_MS).toISOString()))
+      + TIMESERIES_CHUNK_MS + JUNCTION_PROVIDER_CALENDAR_DAY_CLOSE_LAG_MS;
+    const localEnd = resolveVaultLocalDayWindow(toLocalDayKey(context.now, context.vaultTimeZone), context.vaultTimeZone)?.windowEnd;
+    const latestAuthoritativeDay = latestAuthoritativeVaultDayKey(context.now, context.vaultTimeZone);
+    if (!localEnd || !latestAuthoritativeDay) return null;
+    const nextAuthorityWindow = resolveVaultLocalDayWindow(addIsoDateDays(latestAuthoritativeDay, 1), context.vaultTimeZone);
+    if (!nextAuthorityWindow) return null;
+    // Fixed elapsed closure lag can cross a DST offset transition before the
+    // next local midnight. Preserve that earlier repair eligibility too.
+    const nextAuthorityAt = Date.parse(nextAuthorityWindow.windowEnd) + JUNCTION_TEMPORAL_AUTHORITY_LAG_MS;
+    const proof = {
+      binding, timeZone: context.vaultTimeZone,
+      windowStart: resolveCurrentSummaryWindow(context.now, reconcileDays).windowStart,
+      validUntil: new Date(Math.min(utcEnd, globalEnd, Date.parse(localEnd), nextAuthorityAt)).toISOString(),
+    };
+    return { ...proof, digest: beginJunctionReconcileDigest(config.clientUserIdSecret, proof) };
+  }
+
+  function appendReconcileSnapshots(
+    proof: JunctionReconcileProof, category: string, snapshots: Record<string, unknown[]>,
+  ): JunctionReconcileProof {
+    let digest = proof.digest;
+    for (const resource of Object.keys(snapshots)) {
+      if (resource === JUNCTION_PROFILE_SUMMARY_RESOURCE) continue;
+      digest = appendJunctionReconcileRecords(config.clientUserIdSecret, digest, `${category}:${resource}`, snapshots[resource] ?? []);
+    }
+    return { ...proof, digest };
+  }
+
+  function resolveReconcileSummaryWindow(
+    now: string, proof: JunctionReconcileProof | null, current: boolean,
+    window: { windowStart: string; windowEnd: string },
+  ) {
+    if (proof) return { windowStart: proof.windowStart, windowEnd: now };
+    return current ? resolveCurrentSummaryWindow(now, reconcileDays) : window;
+  }
+
+  function appendUnboundedReconcileSummaries(
+    proof: JunctionReconcileProof | null, summaryPhaseComplete: boolean,
+    summaries: Record<string, unknown[]>,
+  ): JunctionReconcileProof | null {
+    if (!proof || summaryPhaseComplete) return proof;
+    for (const unit of buildReconcileSummaryResourceUnits(summaryResources)) {
+      proof = appendReconcileSnapshots(proof, "summary", Object.fromEntries(
+        unit.filter((resource) => resource !== JUNCTION_PROFILE_SUMMARY_RESOURCE)
+          .map((resource) => [resource, summaries[resource] ?? []]),
+      ));
+    }
+    return proof;
+  }
+
+  function buildReconcileProofMetadata(
+    proof: JunctionReconcileProof | null, skipped: readonly JunctionSkippedOptionalResource[],
+  ): Record<string, unknown> {
+    return proof && skipped.length === 0
+      ? { [JUNCTION_RECONCILE_PROOF_METADATA_KEY]: encodeJunctionReconcileProof(proof) }
+      : {};
+  }
+
+  // Same collection readers as ingestion; this context cannot write sources or
+  // canonical records. A failed/partial collection is never unchanged evidence.
+  async function probeScheduledReconcile(
+    account: StoredDeviceSyncAccount, now: string, options: { signal?: AbortSignal } = {},
+  ): Promise<ScheduledReconcileProbeResult> {
+    const startedAt = performance.now();
+    let requestCount = 0;
+    let recordCount = 0;
+    let responseBytes = 0;
+    const finish = (outcome: ScheduledReconcileProbeResult["outcome"], reason: string): ScheduledReconcileProbeResult => ({
+      outcome, reason, requestCount, recordCount, responseBytes,
+      elapsedMs: Math.max(0, performance.now() - startedAt),
+      ...(outcome === "unchanged" ? { nextReconcileAt: resolveJunctionNextReconcileAt(account, now, addMilliseconds(now, reconcileIntervalMs)) } : {}),
+    });
+    const baseline = readJunctionReconcileProof(account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY]);
+    if (!baseline) return finish("ineligible", "baseline_missing");
+    if (baseline.validUntil <= now) return finish("ineligible", "baseline_expired");
+    const ineligible = reconcileProbeEligibility(account, now);
+    if (ineligible) return finish("ineligible", ineligible);
+    if (account.credential.kind !== "provider_config") return finish("ineligible", "connection_ineligible");
+    const observe = (records: readonly unknown[]) => {
+      recordCount += records.length;
+      responseBytes += Buffer.byteLength(JSON.stringify(records));
+    };
+    const forbidden = async (): Promise<never> => { throw new Error("Read-only Junction probe cannot mutate state."); };
+    const context: ProviderJobContext = {
+      account: { ...account, credential: account.credential }, now,
+      vaultTimeZone: baseline.timeZone, signal: options.signal,
+      connectionSourceAdmissionMode: "listed_only",
+      importSnapshot: forbidden, refreshAccountTokens: forbidden,
+      logger: {}, recordProviderRequestTiming: () => { requestCount += 1; },
+    };
+    const skipped: JunctionSkippedOptionalResource[] = [];
+    try {
+      requestCount += 1;
+      const providers = await client.listUserProviders(account.externalAccountId, {
+        collectionWorkLimit: JUNCTION_FULL_JOB_INVENTORY_COLLECTION_WORK_LIMIT,
+        signal: options.signal,
+      });
+      observe(providers);
+      const binding = reconcileProofBinding(account, providers);
+      if (binding !== baseline.binding) return finish("changed", "authority_or_inventory_changed");
+      let proof = { ...baseline, digest: beginJunctionReconcileDigest(config.clientUserIdSecret, baseline) };
+      const units = buildReconcileSummaryResourceUnits(summaryResources.filter((resource) => resource !== JUNCTION_PROFILE_SUMMARY_RESOURCE));
+      // Two independent units at a time; digest order remains the runtime order.
+      for (let offset = 0; offset < units.length; offset += 2) {
+        const fetchedUnits = await Promise.allSettled(units.slice(offset, offset + 2).map(async (unit) => {
+          const snapshots: Record<string, unknown[]> = {};
+          for (const resource of unit) {
+            const records = await fetchOptionalJunctionResourceRecords(context, "summary", resource, skipped, () => client.listSummary({
+              collectionWorkLimit: JUNCTION_FULL_JOB_SUMMARY_COLLECTION_WORK_LIMIT,
+              dateQueryFormat: "datetime", requireStructurallyCompleteCollection: true, resource, signal: options.signal,
+              userId: account.externalAccountId, windowStart: baseline.windowStart, windowEnd: now,
+            }));
+            observe(records);
+            snapshots[resource] = records;
+          }
+          return snapshots;
+        }));
+        for (const fetched of fetchedUnits) {
+          if (fetched.status === "rejected") throw fetched.reason;
+          proof = appendReconcileSnapshots(proof, "summary", fetched.value);
+        }
+      }
+      const hourlyWindow = resolveLatestGloballyClosedProviderDayWindow(
+        floorUtcDayTimestamp(subtractDays(now, reconcileDays)), floorUtcDayTimestamp(now), now,
+      );
+      const dailyResources = timeseriesResources.filter((resource) => JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource));
+      if (hourlyWindow && dailyResources.length > 0) {
+        const snapshots = await fetchTimeseriesSnapshots(context, hourlyWindow.windowStart, hourlyWindow.windowEnd, skipped, dailyResources, null, {
+          collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT, dateQueryFormat: "date",
+          requireStructurallyCompleteCollection: true,
+        });
+        for (const records of Object.values(snapshots)) observe(records);
+        proof = appendReconcileSnapshots(proof, "timeseries", snapshots);
+      }
+      if (skipped.length > 0) return finish("ineligible", "resource_unavailable");
+      return proof.digest === baseline.digest ? finish("unchanged", "content_unchanged") : finish("changed", "content_changed");
+    } catch {
+      return finish("ineligible", options.signal?.aborted ? "probe_timeout" : "provider_error");
+    }
   }
 
   function buildScheduledExtendedTimeseriesBackfillJobs(
@@ -1610,9 +1806,8 @@ export function createJunctionDeviceSyncProvider(
 
     const isCurrentSummaryReconcile =
       job.kind === "reconcile" && isCurrentScheduledClosedWindow(window, context.now, reconcileDays);
-    const summaryWindow = isCurrentSummaryReconcile
-      ? resolveCurrentSummaryWindow(context.now, reconcileDays)
-      : window;
+    let reconcileProof = beginReconcileProof(context, job, listedSourceProviders);
+    const summaryWindow = resolveReconcileSummaryWindow(context.now, reconcileProof, isCurrentSummaryReconcile, window);
     const summaryDateQueryFormat: JunctionDateQueryFormat =
       job.kind === "reconcile" && !isCurrentSummaryReconcile && isFullUtcDayWindow(summaryWindow)
         ? "date"
@@ -1624,6 +1819,7 @@ export function createJunctionDeviceSyncProvider(
     ) {
       const boundedSummaryResult = await executeBoundedSummaryReconcile({
         context,
+        reconcileProof,
         dateQueryFormat: summaryDateQueryFormat,
         job,
         skippedOptionalResources,
@@ -1729,6 +1925,7 @@ export function createJunctionDeviceSyncProvider(
         context.now,
       );
     }
+    reconcileProof = appendUnboundedReconcileSummaries(reconcileProof, summaryPhaseComplete, summaries);
     const historicalProviderRecordsSeen = sourceProviderSlug !== null
       && (
         job.payload.historicalProviderRecordsSeen === true
@@ -1784,6 +1981,11 @@ export function createJunctionDeviceSyncProvider(
         skippedOptionalResources,
         dailyTimeseriesResources,
         sourceProviderSlug,
+        undefined,
+        undefined,
+        (snapshots) => {
+          if (reconcileProof) reconcileProof = appendReconcileSnapshots(reconcileProof, "timeseries", snapshots);
+        },
       );
       if (timeseriesImport.yieldedAt) {
         return withJunctionSkippedResourceMetadata(
@@ -2017,7 +2219,10 @@ export function createJunctionDeviceSyncProvider(
           ...(historicalProofStillCurrent ? backfillFollowUp : {}),
           nextReconcileAt,
         },
-        profileMetadataPatch,
+        {
+          ...profileMetadataPatch,
+          ...buildReconcileProofMetadata(reconcileProof, skippedOptionalResources),
+        },
       ),
       skippedOptionalResources,
     );
@@ -4098,6 +4303,7 @@ export function createJunctionDeviceSyncProvider(
 
   async function executeBoundedSummaryReconcile(input: {
     context: ProviderJobContext;
+    reconcileProof: JunctionReconcileProof | null;
     dateQueryFormat: JunctionDateQueryFormat;
     job: DeviceSyncJobRecord;
     skippedOptionalResources: JunctionSkippedOptionalResource[];
@@ -4111,17 +4317,7 @@ export function createJunctionDeviceSyncProvider(
     const eligibleResources = summaryResources.filter((resource) =>
       !isJunctionProfileSummaryResource(resource) || !profileAlreadyChecked
     );
-    const eligibleUnits = eligibleResources.reduce<string[][]>((units, resource) => {
-      if (resource === "sleep_cycle" && eligibleResources.includes("sleep")) {
-        return units;
-      }
-      units.push(
-        resource === "sleep" && eligibleResources.includes("sleep_cycle")
-          ? ["sleep", "sleep_cycle"]
-          : [resource],
-      );
-      return units;
-    }, []);
+    const eligibleUnits = buildReconcileSummaryResourceUnits(eligibleResources);
     const requestedCursor = normalizeString(input.job.payload.summaryResourceCursor);
     const cursorIndex = requestedCursor
       ? eligibleUnits.findIndex((unit) => unit.includes(requestedCursor))
@@ -4198,6 +4394,9 @@ export function createJunctionDeviceSyncProvider(
       kind: "reconcile",
       payload: {
         ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+        ...(input.reconcileProof && input.skippedOptionalResources.length === 0 ? {
+          reconcileProof: encodeJunctionReconcileProof(appendReconcileSnapshots(input.reconcileProof, "summary", summaries)),
+        } : {}),
         ...(nextResource
           ? { summaryResourceCursor: nextResource }
           : { summaryPhaseComplete: true }),
@@ -4703,6 +4902,7 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug?: string | null,
     emptySparseCalendarSource?: Omit<ProviderSparseCalendarTarget, "dayKey">,
     historicalResourceJobWorkBudget?: JunctionHistoricalResourceJobWorkBudget,
+    onFetchedSnapshot: (snapshots: Record<string, unknown[]>) => void = () => {},
   ): Promise<JunctionTimeseriesImportResult> {
     const requestedResources = resources ?? timeseriesResources;
     const globallyClosedEndMs = resolveGloballyClosedProviderDayEnd(windowEnd, context.now);
@@ -4745,6 +4945,7 @@ export function createJunctionDeviceSyncProvider(
           requireStructurallyCompleteCollection: Boolean(emptySparseCalendarSource),
         },
       );
+      onFetchedSnapshot(timeseries);
       if (
         emptySparseCalendarSource
         && skippedOptionalResources.length > skippedResourceCountBeforeFetch
@@ -4973,6 +5174,61 @@ export function createJunctionDeviceSyncProvider(
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     completedWorkoutStreamIdentities: ReadonlySet<string>,
   ): Promise<ProviderJobResult> {
+    const startedAt = Date.now();
+    let emptySourceFence: JunctionSourceLifecycleFence | null = null;
+    const deferEmptySourceCheck = job.kind === "reconcile"
+      && !normalizeProviderSlug(job.payload.sourceProviderSlug)
+      ? (fence: JunctionSourceLifecycleFence) => { emptySourceFence ??= fence; }
+      : undefined;
+    let currentJob = job;
+    for (let units = 1; ; units += 1) {
+      const result = await executeFullJobTimeseriesContinuationUnit(
+        context,
+        currentJob,
+        skippedOptionalResources,
+        completedWorkoutStreamIdentities,
+        deferEmptySourceCheck,
+      );
+      const next = result.scheduledJobs?.[0];
+      if (
+        units >= JUNCTION_JOB_MAX_OWNER_UNITS
+        || Date.now() - startedAt >= JUNCTION_FULL_JOB_TIMESERIES_BATCH_MS
+        || context.shouldYield?.()
+        || context.signal?.aborted
+        || result.scheduledJobs?.length !== 1
+        || !next?.payload
+        || next.kind !== currentJob.kind
+        || next.payload.timeseriesResourceCursor === "workout_stream"
+        || next.payload.timeseriesResourceCursor !== currentJob.payload.timeseriesResourceCursor
+        || next.payload.timeseriesCursor === currentJob.payload.timeseriesCursor
+        || (next.availableAt && Date.parse(next.availableAt) > Date.parse(context.now))
+      ) {
+        // Empty windows made no canonical writes. Validate the bounded batch
+        // before its scalar continuation or terminal progress can be saved.
+        if (
+          emptySourceFence
+          && !isJunctionSourceLifecycleFenceCurrent(
+            emptySourceFence,
+            await readJunctionImportSources(context),
+          )
+        ) {
+          throw junctionTimeseriesSourceLifecycleSuperseded();
+        }
+        return result;
+      }
+      // Only the existing scalar suffix advances. Canonical writes remain one
+      // complete day at a time; an interrupted job can replay them idempotently.
+      currentJob = { ...currentJob, payload: next.payload };
+    }
+  }
+
+  async function executeFullJobTimeseriesContinuationUnit(
+    context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+    completedWorkoutStreamIdentities: ReadonlySet<string>,
+    deferEmptySourceCheck?: (fence: JunctionSourceLifecycleFence) => void,
+  ): Promise<ProviderJobResult> {
     const window = resolveJobWindow(
       job,
       context.now,
@@ -5142,6 +5398,7 @@ export function createJunctionDeviceSyncProvider(
             collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT,
             context,
             dateQueryFormat: timeseriesWindowHours === 1 ? "datetime" : "date",
+            deferEmptySourceCheck,
             resource,
             skippedOptionalResources,
             sourceProviderSlug,
@@ -5207,6 +5464,7 @@ export function createJunctionDeviceSyncProvider(
     authorizedLocalDay?: { dayKey: string; timeZone: string };
     context: ProviderJobContext;
     dateQueryFormat: JunctionDateQueryFormat;
+    deferEmptySourceCheck?: (fence: JunctionSourceLifecycleFence) => void;
     resource: string;
     collectionWorkLimit?: JunctionCollectionWorkLimit;
     skippedOptionalResources: JunctionSkippedOptionalResource[];
@@ -5274,16 +5532,13 @@ export function createJunctionDeviceSyncProvider(
       };
     }
 
-    const currentSources = sourceLifecycleFence || records.length > 0 || input.authorizedLocalDay
-      ? await readJunctionImportSources(input.context)
-      : input.context.account.sources ?? [];
-    if (
-      sourceLifecycleFence
-      && !isJunctionSourceLifecycleFenceCurrent(sourceLifecycleFence, currentSources)
-    ) {
-      throw junctionTimeseriesSourceLifecycleSuperseded();
-    }
-    if (records.length === 0 && !input.authorizedLocalDay) {
+    const currentSources = await readJunctionTimeseriesImportSources({
+      context: input.context,
+      deferEmptySourceCheck: input.deferEmptySourceCheck,
+      hasCanonicalWork: records.length > 0 || Boolean(input.authorizedLocalDay),
+      sourceLifecycleFence,
+    });
+    if (!currentSources) {
       return {
         historicalProviderRecordsSeen: providerRecordsSeen,
         historicalRecordsSeen: false,
@@ -6239,6 +6494,7 @@ export function createJunctionDeviceSyncProvider(
     },
     jobExecutor: {
       createScheduledJobs,
+      probeScheduledReconcile,
       executeJob,
       createPassExecutor(): DeviceJobExecutor {
         const passInventories = new Map<string, readonly JunctionProviderConnection[]>();
@@ -8380,6 +8636,31 @@ async function readJunctionImportSources(
   return context.listConnectionSources
     ? await context.listConnectionSources()
     : context.account.sources ?? [];
+}
+
+async function readJunctionTimeseriesImportSources(input: {
+  context: ProviderJobContext;
+  deferEmptySourceCheck?: (fence: JunctionSourceLifecycleFence) => void;
+  hasCanonicalWork: boolean;
+  sourceLifecycleFence: JunctionSourceLifecycleFence | null;
+}): Promise<readonly JunctionImportAdmissionSource[] | null> {
+  if (!input.hasCanonicalWork) {
+    if (!input.sourceLifecycleFence) {
+      return null;
+    }
+    if (input.deferEmptySourceCheck) {
+      input.deferEmptySourceCheck(input.sourceLifecycleFence);
+      return null;
+    }
+  }
+  const sources = await readJunctionImportSources(input.context);
+  if (
+    input.sourceLifecycleFence
+    && !isJunctionSourceLifecycleFenceCurrent(input.sourceLifecycleFence, sources)
+  ) {
+    throw junctionTimeseriesSourceLifecycleSuperseded();
+  }
+  return input.hasCanonicalWork ? sources : null;
 }
 
 async function prepareJunctionImportSnapshot(
@@ -11747,7 +12028,7 @@ function tryStartJunctionHistoricalResourceJobOwnerUnit(
   }
   if (
     budget.startedOwnerUnits
-      >= JUNCTION_HISTORICAL_RESOURCE_JOB_MAX_OWNER_UNITS
+      >= JUNCTION_JOB_MAX_OWNER_UNITS
   ) {
     return false;
   }
@@ -13751,4 +14032,11 @@ function base32UrlEncode(input: Buffer): string {
   }
 
   return output;
+}
+
+function buildReconcileSummaryResourceUnits(resources: readonly string[]): string[][] {
+  return resources.flatMap((resource) => {
+    if (resource === "sleep_cycle" && resources.includes("sleep")) return [];
+    return [resource === "sleep" && resources.includes("sleep_cycle") ? ["sleep", "sleep_cycle"] : [resource]];
+  });
 }

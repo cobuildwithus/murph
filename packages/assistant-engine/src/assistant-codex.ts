@@ -1,3 +1,4 @@
+import { resolveDailyNutritionIntroduction } from './assistant/nutrition-card-introduction.js'
 import {
   completeDynamicToolFailureDiagnostics,
   createDynamicToolFailureIssue,
@@ -841,14 +842,15 @@ function renderCodexResponseCardPresentation(input: {
   card: AssistantResponseCard | null
   cardTextFallback: CompactTableWorkoutResponseCardV1 | null
   omitCardTracking: boolean
+  nutritionIntroduction?: string | null
 }): { message: string; transcript: string } | null {
   if (input.card) {
-    const message = renderAssistantResponseCardText(input.card)
+    const message = renderAssistantResponseCardText(input.card, input.nutritionIntroduction)
     return {
       message,
       transcript: input.omitCardTracking
-        ? message
-        : renderAssistantResponseCardTranscriptText(input.card),
+        ? renderAssistantResponseCardText(input.card)
+        : renderAssistantResponseCardTranscriptText(input.card, input.nutritionIntroduction),
     }
   }
   if (input.cardTextFallback) {
@@ -861,6 +863,7 @@ function renderCodexResponseCardPresentation(input: {
 }
 
 function buildCodexFinalResponsePresentation(input: {
+  nutritionIntroduction: string | null
   modelMessage: string
   media: readonly AssistantResponseMedia[]
   card: AssistantResponseCard | null
@@ -875,6 +878,7 @@ function buildCodexFinalResponsePresentation(input: {
     card: input.card,
     cardTextFallback: input.cardTextFallback,
     omitCardTracking: hasRequiredClarifications,
+    nutritionIntroduction: input.nutritionIntroduction,
   })
   const semanticMessage = renderedCard?.message ?? input.modelMessage
   const requiredMessage =
@@ -6348,12 +6352,18 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
+  const nutritionIntroduction = await resolveDailyNutritionIntroduction({
+    card: finalResponseCard,
+    message: modelFinalMessage,
+    vault: input.vaultRoot,
+  })
   const {
     finalMessage,
     transcriptMessage,
     responseCard: deliveredFinalResponseCard,
   } = buildCodexFinalResponsePresentation({
     modelMessage: modelFinalMessage,
+    nutritionIntroduction,
     media: finalResponseMedia,
     card: finalResponseCard,
     cardTextFallback: finalResponseCardTextFallback,

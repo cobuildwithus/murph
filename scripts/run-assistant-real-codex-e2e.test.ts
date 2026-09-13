@@ -152,6 +152,7 @@ describe('assistant real Codex local runner', () => {
       '--config',
       'vitest.config.ts',
       '--no-coverage',
+      '--reporter=default',
       'test/assistant-codex-real-e2e.test.ts',
       '--testNamePattern',
       '^real Codex adaptive wearable saves \\(10 days\\)$',

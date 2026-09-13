@@ -3582,7 +3582,7 @@ describe("hosted system mailbox notification execution context", () => {
       assert.equal(prepared?.status, "processed");
       expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
         expect.objectContaining({
-          shouldYieldDeviceSync: shouldYieldBackgroundMaintenance,
+          shouldYieldBackgroundMaintenance,
           sourceMailboxItemId: "mailbox_item_system_device_sync",
           wake: expect.objectContaining({
             kind: "device-sync.wake",

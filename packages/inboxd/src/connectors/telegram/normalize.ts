@@ -249,6 +249,38 @@ interface TelegramAttachmentSpec {
   fileName: string | null;
 }
 
+type DefaultTelegramAttachmentKind = Exclude<HostedTelegramAttachmentInput["kind"], "document">;
+
+const TELEGRAM_ATTACHMENT_DEFAULTS: Record<DefaultTelegramAttachmentKind, {
+  kind: InboundAttachment["kind"];
+  mime: string | null;
+  prefix: string;
+  extension: string;
+}> = {
+  photo: { kind: "image", mime: "image/jpeg", prefix: "photo", extension: "jpg" },
+  audio: { kind: "audio", mime: "audio/mpeg", prefix: "audio", extension: "bin" },
+  voice: { kind: "audio", mime: "audio/ogg", prefix: "voice", extension: "ogg" },
+  video: { kind: "video", mime: "video/mp4", prefix: "video", extension: "mp4" },
+  video_note: { kind: "video", mime: "video/mp4", prefix: "video-note", extension: "mp4" },
+  animation: { kind: "video", mime: "video/mp4", prefix: "animation", extension: "mp4" },
+  sticker: { kind: "image", mime: null, prefix: "sticker", extension: "webp" },
+};
+
+function buildDefaultTelegramAttachmentSpec(
+  file: TelegramFileBase,
+  kind: DefaultTelegramAttachmentKind,
+  fileNameId = file.file_unique_id ?? file.file_id,
+): TelegramAttachmentSpec {
+  const defaults = TELEGRAM_ATTACHMENT_DEFAULTS[kind];
+  return {
+    file,
+    kind: defaults.kind,
+    mime: normalizeTextValue(file.mime_type ?? null) ?? defaults.mime,
+    fileName: normalizeTextValue(file.file_name ?? null)
+      ?? `${defaults.prefix}-${fileNameId}.${defaults.extension}`,
+  };
+}
+
 function collectAttachmentSpecs(message: TelegramMessageLike): TelegramAttachmentSpec[] {
   const specs: TelegramAttachmentSpec[] = [];
   const photo = selectLargestPhoto(message.photo ?? []);
@@ -263,6 +295,7 @@ function collectAttachmentSpecs(message: TelegramMessageLike): TelegramAttachmen
   }
 
   if (message.document) {
+    // Native document inference deliberately uses the untrimmed provider fields.
     specs.push({
       file: message.document,
       kind: inferAttachmentKind(message.document.mime_type ?? null, message.document.file_name ?? null, "document"),
@@ -271,58 +304,11 @@ function collectAttachmentSpecs(message: TelegramMessageLike): TelegramAttachmen
     });
   }
 
-  if (message.audio) {
-    specs.push({
-      file: message.audio,
-      kind: "audio",
-      mime: normalizeTextValue(message.audio.mime_type ?? null) ?? "audio/mpeg",
-      fileName: normalizeTextValue(message.audio.file_name ?? null) ?? `audio-${message.audio.file_unique_id ?? message.audio.file_id}.bin`,
-    });
-  }
-
-  if (message.voice) {
-    specs.push({
-      file: message.voice,
-      kind: "audio",
-      mime: normalizeTextValue(message.voice.mime_type ?? null) ?? "audio/ogg",
-      fileName: normalizeTextValue(message.voice.file_name ?? null) ?? `voice-${message.voice.file_unique_id ?? message.voice.file_id}.ogg`,
-    });
-  }
-
-  if (message.video) {
-    specs.push({
-      file: message.video,
-      kind: "video",
-      mime: normalizeTextValue(message.video.mime_type ?? null) ?? "video/mp4",
-      fileName: normalizeTextValue(message.video.file_name ?? null) ?? `video-${message.video.file_unique_id ?? message.video.file_id}.mp4`,
-    });
-  }
-
-  if (message.video_note) {
-    specs.push({
-      file: message.video_note,
-      kind: "video",
-      mime: normalizeTextValue(message.video_note.mime_type ?? null) ?? "video/mp4",
-      fileName: normalizeTextValue(message.video_note.file_name ?? null) ?? `video-note-${message.video_note.file_unique_id ?? message.video_note.file_id}.mp4`,
-    });
-  }
-
-  if (message.animation) {
-    specs.push({
-      file: message.animation,
-      kind: "video",
-      mime: normalizeTextValue(message.animation.mime_type ?? null) ?? "video/mp4",
-      fileName: normalizeTextValue(message.animation.file_name ?? null) ?? `animation-${message.animation.file_unique_id ?? message.animation.file_id}.mp4`,
-    });
-  }
-
-  if (message.sticker) {
-    specs.push({
-      file: message.sticker,
-      kind: "image",
-      mime: normalizeTextValue(message.sticker.mime_type ?? null),
-      fileName: normalizeTextValue(message.sticker.file_name ?? null) ?? `sticker-${message.sticker.file_unique_id ?? message.sticker.file_id}.webp`,
-    });
+  for (const kind of ["audio", "voice", "video", "video_note", "animation", "sticker"] as const) {
+    const file = message[kind];
+    if (file) {
+      specs.push(buildDefaultTelegramAttachmentSpec(file, kind));
+    }
   }
 
   return specs;
@@ -441,75 +427,24 @@ function inferAttachmentKind(
 function buildHostedTelegramAttachmentSpec(
   attachment: HostedTelegramAttachmentInput,
 ): TelegramAttachmentSpec {
-  switch (attachment.kind) {
-    case "photo":
-      return {
-        file: toHostedTelegramFileBase(attachment),
-        fileName: normalizeTextValue(attachment.fileName ?? null)
-          ?? `photo-${attachment.fileUniqueId ?? attachment.fileId}.jpg`,
-        kind: "image",
-        mime: normalizeTextValue(attachment.mimeType ?? null) ?? "image/jpeg",
-      };
-    case "document":
-      return {
-        file: toHostedTelegramFileBase(attachment),
-        fileName: normalizeTextValue(attachment.fileName ?? null),
-        kind: inferAttachmentKind(
-          normalizeTextValue(attachment.mimeType ?? null),
-          normalizeTextValue(attachment.fileName ?? null),
-          "document",
-        ),
-        mime: normalizeTextValue(attachment.mimeType ?? null),
-      };
-    case "audio":
-      return {
-        file: toHostedTelegramFileBase(attachment),
-        fileName: normalizeTextValue(attachment.fileName ?? null)
-          ?? `audio-${attachment.fileUniqueId ?? attachment.fileId}.bin`,
-        kind: "audio",
-        mime: normalizeTextValue(attachment.mimeType ?? null) ?? "audio/mpeg",
-      };
-    case "voice":
-      return {
-        file: toHostedTelegramFileBase(attachment),
-        fileName: normalizeTextValue(attachment.fileName ?? null)
-          ?? `voice-${attachment.fileUniqueId ?? attachment.fileId}.ogg`,
-        kind: "audio",
-        mime: normalizeTextValue(attachment.mimeType ?? null) ?? "audio/ogg",
-      };
-    case "video":
-      return {
-        file: toHostedTelegramFileBase(attachment),
-        fileName: normalizeTextValue(attachment.fileName ?? null)
-          ?? `video-${attachment.fileUniqueId ?? attachment.fileId}.mp4`,
-        kind: "video",
-        mime: normalizeTextValue(attachment.mimeType ?? null) ?? "video/mp4",
-      };
-    case "video_note":
-      return {
-        file: toHostedTelegramFileBase(attachment),
-        fileName: normalizeTextValue(attachment.fileName ?? null)
-          ?? `video-note-${attachment.fileUniqueId ?? attachment.fileId}.mp4`,
-        kind: "video",
-        mime: normalizeTextValue(attachment.mimeType ?? null) ?? "video/mp4",
-      };
-    case "animation":
-      return {
-        file: toHostedTelegramFileBase(attachment),
-        fileName: normalizeTextValue(attachment.fileName ?? null)
-          ?? `animation-${attachment.fileUniqueId ?? attachment.fileId}.mp4`,
-        kind: "video",
-        mime: normalizeTextValue(attachment.mimeType ?? null) ?? "video/mp4",
-      };
-    case "sticker":
-      return {
-        file: toHostedTelegramFileBase(attachment),
-        fileName: normalizeTextValue(attachment.fileName ?? null)
-          ?? `sticker-${attachment.fileUniqueId ?? attachment.fileId}.webp`,
-        kind: "image",
-        mime: normalizeTextValue(attachment.mimeType ?? null),
-      };
+  const file = toHostedTelegramFileBase(attachment);
+  if (attachment.kind === "document") {
+    const mime = file.mime_type ?? null;
+    const fileName = file.file_name ?? null;
+    return {
+      file,
+      fileName,
+      kind: inferAttachmentKind(mime, fileName, "document"),
+      mime,
+    };
   }
+
+  // Names use the original nullish ID, not the normalized external identity.
+  return buildDefaultTelegramAttachmentSpec(
+    file,
+    attachment.kind,
+    attachment.fileUniqueId ?? attachment.fileId,
+  );
 }
 
 function toHostedTelegramFileBase(

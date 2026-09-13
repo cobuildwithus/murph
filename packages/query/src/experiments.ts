@@ -1069,6 +1069,8 @@ function buildCoverageSummary(input: {
   const wearableProviders = normalizeDataCoverageProviderList(
     [...input.summariesByDate.values()].flatMap((summary) => summary?.providers ?? []),
   );
+  const isReviewPhase =
+    input.progressPhase === "review_due" || input.progressPhase === "completed";
 
   if (primaryOutcome?.kind === "structured_review") {
     const evidence = summarizeExperimentOutcomeEvidencePlan(
@@ -1079,43 +1081,73 @@ function buildCoverageSummary(input: {
         observedThrough: input.asOf,
       },
     );
-    const primaryMetricDaysAvailable =
-      evidence.baseline.observedCount + evidence.followup.observedCount;
-    const status: ExperimentCoverageStatus =
-      evidence.reviewReady &&
-        (input.progressPhase === "review_due" || input.progressPhase === "completed")
-        ? "ready_for_review"
-        : primaryMetricDaysAvailable > 0
-          ? "partial"
-          : "insufficient";
-
     return {
       activityProviders,
-      baselineDaysAvailable: evidence.baseline.observedCount,
-      interventionDaysAvailable: evidence.followup.observedCount,
-      primaryBiomarkerKey: primaryOutcome.key,
-      primaryMetricDaysAvailable,
-      status,
+      ...buildStructuredReviewCoverage(primaryOutcome.key, evidence, isReviewPhase),
       wearableProviders,
     };
   }
 
+  const metricCoverage = summarizeNumericMetricCoverage(input, isReviewPhase);
+  return {
+    activityProviders,
+    baselineDaysAvailable: input.baselineDaysAvailable,
+    interventionDaysAvailable: input.interventionDaysAvailable,
+    primaryBiomarkerKey: primaryOutcome?.key ?? input.primarySignal?.biomarkerKey ?? null,
+    ...metricCoverage,
+    wearableProviders,
+  };
+}
+
+function buildStructuredReviewCoverage(
+  primaryBiomarkerKey: string,
+  evidence: ExperimentOutcomeEvidencePlanSummary,
+  isReviewPhase: boolean,
+): Omit<ExperimentProgressSummary["dataCoverage"], "activityProviders" | "wearableProviders"> {
   const primaryMetricDaysAvailable =
-    (input.primarySignal?.baselineDayCount ?? 0) +
-    (input.primarySignal?.interventionDayCount ?? 0);
+    evidence.baseline.observedCount + evidence.followup.observedCount;
+  const status: ExperimentCoverageStatus =
+    evidence.reviewReady && isReviewPhase
+      ? "ready_for_review"
+      : primaryMetricDaysAvailable > 0
+        ? "partial"
+        : "insufficient";
+
+  return {
+    baselineDaysAvailable: evidence.baseline.observedCount,
+    interventionDaysAvailable: evidence.followup.observedCount,
+    primaryBiomarkerKey,
+    primaryMetricDaysAvailable,
+    status,
+  };
+}
+
+function summarizeNumericMetricCoverage(
+  input: {
+    frontmatter: ExperimentFrontmatter;
+    primarySignal: ExperimentMetricResult | null;
+    signals: readonly ExperimentMetricResult[];
+    summariesByDate: Map<string, WearableDaySummary | null>;
+  },
+  isReviewPhase: boolean,
+): Pick<
+  ExperimentProgressSummary["dataCoverage"],
+  "primaryMetricDaysAvailable" | "status"
+> {
+  const baselineDayCount = input.primarySignal?.baselineDayCount ?? 0;
+  const interventionDayCount = input.primarySignal?.interventionDayCount ?? 0;
+  const primaryMetricDaysAvailable = baselineDayCount + interventionDayCount;
   const anySignalMetricData = input.signals.some(
     (signal) => signal.baselineDayCount + signal.interventionDayCount > 0,
   );
   const anyWearableSummaryData = [...input.summariesByDate.values()].some(
     (summary) => summary !== null && summary.providers.length > 0,
   );
-  let status: ExperimentCoverageStatus = "insufficient";
-
   const hasCompleteMetricWindow = hasAnalysisMetricWindow(input.frontmatter);
-  const hasPointMeasurementData =
-    hasObservedPrimaryPointMeasurementWindow(input.frontmatter) &&
-    (input.primarySignal?.baselineDayCount ?? 0) >= 1 &&
-    (input.primarySignal?.interventionDayCount ?? 0) >= 1;
+  const minimumReviewDays = hasObservedPrimaryPointMeasurementWindow(input.frontmatter)
+    ? 1
+    : 3;
+  let status: ExperimentCoverageStatus;
 
   if (
     input.primarySignal !== null &&
@@ -1127,20 +1159,12 @@ function buildCoverageSummary(input: {
   ) {
     status = "no_wearable_data";
   } else if (
-    hasPointMeasurementData &&
-    (input.progressPhase === "review_due" || input.progressPhase === "completed")
+    isReviewPhase &&
+    baselineDayCount >= minimumReviewDays &&
+    interventionDayCount >= minimumReviewDays
   ) {
     status = "ready_for_review";
-  } else if (
-    (input.progressPhase === "review_due" || input.progressPhase === "completed") &&
-    (input.primarySignal?.baselineDayCount ?? 0) >= 3 &&
-    (input.primarySignal?.interventionDayCount ?? 0) >= 3
-  ) {
-    status = "ready_for_review";
-  } else if (
-    (input.primarySignal?.baselineDayCount ?? 0) >= 3 &&
-    (input.primarySignal?.interventionDayCount ?? 0) >= 2
-  ) {
+  } else if (baselineDayCount >= 3 && interventionDayCount >= 2) {
     status = "sufficient_for_progress";
   } else if (primaryMetricDaysAvailable > 0 || anySignalMetricData) {
     status = "partial";
@@ -1148,15 +1172,7 @@ function buildCoverageSummary(input: {
     status = "insufficient";
   }
 
-  return {
-    activityProviders,
-    baselineDaysAvailable: input.baselineDaysAvailable,
-    interventionDaysAvailable: input.interventionDaysAvailable,
-    primaryBiomarkerKey: primaryOutcome?.key ?? input.primarySignal?.biomarkerKey ?? null,
-    primaryMetricDaysAvailable,
-    status,
-    wearableProviders,
-  };
+  return { primaryMetricDaysAvailable, status };
 }
 
 function buildActivityProviderCoverage(vault: VaultReadModel, asOf: string): string[] {

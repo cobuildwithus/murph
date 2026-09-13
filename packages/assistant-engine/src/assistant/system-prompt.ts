@@ -42,6 +42,7 @@ import {
 } from "./generated-delivery-files.js";
 import {
   ASSISTANT_GROUP_SHARED_FRESHNESS_INSTRUCTION,
+  ASSISTANT_GROUP_WEARABLE_RECOVERY_INSTRUCTION,
 } from "./group-shared-freshness.js";
 import {
   formatAssistantPromptInstant,
@@ -1000,7 +1001,7 @@ function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): strin
       ? input.assistantContextSnapshotPrompt ?? null
       : null,
     scheduledOccurrenceContext
-      ? buildAssistantExecutionContextText()
+      ? buildAssistantExecutionContextText(conversationScope)
       : null,
     scheduledOccurrenceContext,
     scheduledOccurrenceContext
@@ -1795,7 +1796,7 @@ Otherwise, keep the reply natural and direct.`;
 
   const telegramRichMessageGuidance =
     normalizedChannel === 'telegram'
-      ? `For Telegram, prefer a Rich Message when structure makes the answer easier to read or use. Good candidates include steps, lists, plans, schedules, comparisons, multi-part instructions, and exercise guidance. This applies in direct and group conversations. Normal conversation can remain ordinary text, even when it needs several paragraphs. Treat the available card tools as presentation options and examples, not exclusive content owners. Choose a specialized card when it fits, or compose a generic Rich Message when a custom or mixed layout is clearer. For exercise guidance, include useful catalog images when they are available and help explain the movement; images are optional. A card must carry the complete answer and replaces final text. Presentation never bypasses the canonical reads, writes, or safety rules for nutrition and tracked workouts. Text styling alone is not a Rich Message.`
+      ? `For Telegram, prefer a Rich Message when structure makes the answer easier to read or use. Good candidates include steps, lists, plans, schedules, comparisons, multi-part instructions, and exercise guidance. This applies in direct and group conversations. Normal conversation can remain ordinary text, even when it needs several paragraphs. Treat the available card tools as presentation options and examples, not exclusive content owners. Choose a specialized card when it fits, or compose a generic Rich Message when a custom or mixed layout is clearer. For exercise guidance, include useful catalog images when they are available and help explain the movement; images are optional. A card must carry the complete answer and replaces final text; only the fixed first totals-only nutrition introduction may accompany it inside that same response. Presentation never bypasses the canonical reads, writes, or safety rules for nutrition and tracked workouts. Text styling alone is not a Rich Message.`
       : ''
   const textStyleGuidance = normalizedChannel === 'linq' || normalizedChannel === 'telegram'
     ? `For Linq/iMessage and Telegram, native text styles are supported by the delivery layer. For ordinary text messages, prefer plain text. Use bold, italic, underline, or strikethrough only when it materially improves comprehension or scannability, and keep styling to short labels or key phrases.
@@ -1837,12 +1838,12 @@ function buildAssistantUserFacingLinkSelfCheckText(
 - Raw URLs only when the URL is an action link, the deliverable, or the user asked for links.${conversationScope === "group" ? " In a group, also verify that the destination is group-owned, is the requested canonical public Murph iOS App Store listing, or is an explicitly supported, clearly labeled per-person enrollment flow; never send a personal account page as a room setting." : conversationScope === "unverified-external" ? " For an unverified external audience, never send a personal account, settings, billing, device, or authorization URL." : ""}`;
 }
 
-function buildAssistantExecutionContextText(): string {
+function buildAssistantExecutionContextText(conversationScope: AssistantConversationScope): string {
   return `Execution context:
 - This turn was triggered by an existing scheduled automation run.
 - The automation already exists and is active.
 - Treat the user prompt as the execution instructions for this scheduled run.
-- Saved notes about changing, pausing, or stopping an automation are operating instructions, not routine message copy. A statement that the recipient can adjust or pause updates does not request that sentence in the message. Do not echo or paraphrase those statements in a routine notification. Include control wording only when the task explicitly asks to include that wording, a requested review needs a decision, or the current engine-supplied cadence policy calls for a question. Preserve concrete stop conditions.
+- Saved notes about changing, pausing, or stopping an automation are operating instructions, not routine message copy. A statement that the recipient can adjust or pause updates does not request that sentence in the message. Do not echo or paraphrase those statements in a routine notification. Include control wording only when the task explicitly asks to include that wording, a requested review needs a decision, or the current engine-supplied cadence policy calls for a question. Preserve concrete stop conditions.${conversationScope === "group" ? `\n- ${ASSISTANT_GROUP_WEARABLE_RECOVERY_INSTRUCTION}` : ""}
 - Context before questions applies to every automation, including one-shots, recurring reminders, check-ins, and managed jobs. It takes precedence over saved wording such as "only say" or "ask exactly", and over instructions to send a cue normally.
 - Before asking, check the available recent conversation, including member reports, shared media, and assistant acknowledgments. If the answer may already be in retained context or relevant canonical records, make a bounded, targeted read before asking the member to repeat it; do not audit unrelated history or require a tool read when the supplied context already answers the question.
 - Do not ask for information already supplied or discussed sufficiently to answer the current question. Match the person, subject, and relevant local date or occurrence; distinguish a plan from a completed action and an earlier occurrence from the current one. If only part is known, use it and ask only for a still-useful missing detail within the agreed purpose. Do not restart a generic questionnaire or invent a follow-up to justify sending.

@@ -46,6 +46,9 @@ It does not own canonical health-data import, token authority, or canonical host
 - disconnect, pairing, and other hosted operational control flows
 - the signed internal runtime snapshot, runtime apply, dirty-state fetch/pending/ack, and connect-target link routes consumed by hosted execution
 - validation and durable mailbox handoff for hosted manual reconcile requests
+- bounded ordinary Junction content preflight against checkpoint-confirmed
+  imported fingerprints, with current authority/idle-work revalidation and a
+  cadence-only CAS; see the [ingestion owner](../agent-docs/operations/device-sync-ingestion-invariants.md#hosted-scheduled-content-preflight)
 
 `apps/web` must not:
 

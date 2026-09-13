@@ -30,6 +30,8 @@ test("pattern cards show available comparisons on phones and retain result detai
   const populated = study.locator("section[aria-labelledby]");
   const mobile = populated.locator('[data-patterns-layout="mobile"]');
   await expect(mobile).toBeVisible();
+  await expect(populated.getByText("Single session", { exact: true })).toHaveCount(0);
+  await expect(populated.getByText("Inactive activity", { exact: true })).toHaveCount(0);
   await expect(mobile.locator("li")).toHaveCount(15);
   await expect(mobile.locator("select")).toHaveCount(0);
   const running = mobile.locator('[data-pattern-factor-row="running"]');

@@ -817,6 +817,7 @@ export async function sendLinqMessage(
             card,
             chatId: target,
             idempotencyKey,
+            companionMessage: input.message,
           },
           {
             env,
