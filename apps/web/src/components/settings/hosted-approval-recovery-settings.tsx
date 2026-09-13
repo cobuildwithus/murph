@@ -11,20 +11,20 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import { SettingsStatusLine } from "./connected-account-card";
+import { ApprovalPasskeyStatus } from "./approval-passkey-status";
 
 type Mode = "rotate" | "recover";
 const ROOT = "/api/settings/approval-passkeys";
 
 export function HostedApprovalRecoverySettings({ enabled }: { enabled: boolean }) {
   const [mode, setMode] = useState<Mode | null>(null);
-  return <div className="flex flex-col gap-3 pb-4">
-    <p className="text-sm leading-relaxed text-muted-foreground">Save a recovery key somewhere safe in case you lose access to your passkey.</p>
-    <div className="flex flex-wrap gap-2">
-      <Button type="button" variant="outline" disabled={!enabled} onClick={() => setMode("rotate")}>Save a recovery key</Button>
-      <Button type="button" variant="ghost" disabled={!enabled} onClick={() => setMode("recover")}>Use a recovery key</Button>
-    </div>
+  return <>
+    <ApprovalPasskeyStatus action={<div className="flex flex-wrap justify-end gap-1">
+      <Button type="button" size="sm" variant="ghost" aria-label="Save a recovery key" disabled={!enabled} onClick={() => setMode("rotate")}>Save key</Button>
+      <Button type="button" size="sm" variant="ghost" aria-label="Use a recovery key" disabled={!enabled} onClick={() => setMode("recover")}>Use key</Button>
+    </div>} />
     {mode ? <ApprovalRecoveryDialog mode={mode} onClose={() => setMode(null)} /> : null}
-  </div>;
+  </>;
 }
 
 export function ApprovalRecoveryDialog({ mode, onClose }: { mode: Mode; onClose: () => void }) {
@@ -80,17 +80,29 @@ export function ApprovalRecoveryDialog({ mode, onClose }: { mode: Mode; onClose:
 
   async function copyKey() {
     if (!savedKey) return;
-    try { await navigator.clipboard.writeText(savedKey); setCopied(true); }
+    try { await navigator.clipboard.writeText(savedKey); setCopied(true); setError(null); }
     catch { setError("Select and copy the key above, then save it somewhere safe."); }
+  }
+
+  function downloadKey() {
+    if (!savedKey) return;
+    const url = URL.createObjectURL(new Blob([savedKey + "\n"], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url; link.download = "murph-recovery-key.txt";
+    document.body.append(link);
+    link.click(); link.remove();
+    URL.revokeObjectURL(url);
   }
 
   function content() {
     if (savedKey) return <>
-      <p className="text-sm text-muted-foreground">This key is shown only once. Store it in a safe place separate from your passkey. Anyone with this key and access to your sign-in can replace your passkey.</p>
-      <Label htmlFor="approval-saved-recovery-key">Recovery key</Label>
+      <Label htmlFor="approval-saved-recovery-key" className="sr-only">Recovery key</Label>
       <Input id="approval-saved-recovery-key" value={savedKey} readOnly autoComplete="off" spellCheck={false} className="font-mono" />
-      <Button type="button" variant="outline" onClick={() => void copyKey()}>{copied ? "Copied" : "Copy key"}</Button>
-      <Button type="button" onClick={close}>Done</Button>
+      <div className="flex items-center gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={() => void copyKey()}>{copied ? "Copied" : "Copy key"}</Button>
+        <Button type="button" size="sm" variant="outline" onClick={downloadKey}>Download key</Button>
+        <Button type="button" size="sm" className="ml-auto" onClick={close}>Done</Button>
+      </div>
     </>;
     if (recovered) return <>
       <SettingsStatusLine message="Your passkey is replaced. Other devices need to sign in again. Save a new recovery key for next time." tone="success" />
@@ -98,10 +110,9 @@ export function ApprovalRecoveryDialog({ mode, onClose }: { mode: Mode; onClose:
     </>;
     return <>
       {mode === "recover" ? <>
-        <p className="text-sm text-muted-foreground">Use the key you saved earlier to create a new passkey. This replaces all previous approval passkeys and signs out your other devices.</p>
         <Label htmlFor="approval-recovery-key">Saved recovery key</Label>
         <Input id="approval-recovery-key" type="password" value={key} onChange={(event) => setKey(event.target.value)} autoComplete="off" autoFocus spellCheck={false} disabled={pending} />
-      </> : <p className="text-sm text-muted-foreground">Approve with your passkey, then save the new key. This replaces any recovery key you created before. Keep this page open until you have saved it.</p>}
+      </> : null}
       <Button type="button" disabled={pending || (mode === "recover" && !key.trim())} onClick={() => void submit()}>
         {pending ? "Working…" : mode === "recover" ? "Replace passkey" : "Create recovery key"}
       </Button>
@@ -109,9 +120,13 @@ export function ApprovalRecoveryDialog({ mode, onClose }: { mode: Mode; onClose:
   }
 
   return <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
-    <DialogContent className="sm:max-w-md">
-      <DialogHeader><DialogTitle>{mode === "recover" ? "Recover your passkey" : "Save a recovery key"}</DialogTitle>
-        <DialogDescription>Your recovery key protects approval access if you lose your passkey.</DialogDescription></DialogHeader>
+    <DialogContent>
+      <DialogHeader><DialogTitle>{mode === "recover" ? "Recover your passkey" : savedKey ? "Save your recovery key" : "Create a recovery key"}</DialogTitle>
+        <DialogDescription>{savedKey
+          ? "This key is shown only once. Save it somewhere private, separate from your passkey."
+          : mode === "recover"
+            ? "Using your key replaces all previous passkeys and signs out your other devices."
+            : "A backup if you lose your passkey. Creating a new key replaces any previous recovery key."}</DialogDescription></DialogHeader>
       <div className="flex flex-col gap-3">{content()}{error ? <SettingsStatusLine message={error} tone="destructive" /> : null}</div>
     </DialogContent>
   </Dialog>;

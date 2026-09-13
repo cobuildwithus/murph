@@ -7,7 +7,6 @@ import { HostedSignupReferralLinkButtonView } from "@/src/components/settings/ho
 import { HostedApprovalRecoverySettings } from "@/src/components/settings/hosted-approval-recovery-settings";
 import { InitialPasskeySetupView } from "@/src/components/settings/hosted-passkey-settings";
 import { HostedVerificationCodeStep } from "@/src/components/hosted-onboarding/hosted-verification-code-step";
-import { ApprovalPasskeyStatus } from "@/src/components/settings/approval-passkey-status";
 
 import { hostedAuthCodeEmail } from "@/src/lib/better-auth/code-email";
 
@@ -61,7 +60,6 @@ export function BetterAuthAdoptionStudy() {
     </div>
     <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="recovery">
       <h3 className="mb-4 font-serif text-xl">Security</h3>
-      <ApprovalPasskeyStatus />
       <HostedApprovalRecoverySettings enabled />
     </div>
   </div>;

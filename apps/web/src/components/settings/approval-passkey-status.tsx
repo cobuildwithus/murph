@@ -1,18 +1,16 @@
 "use client";
 
 import { Fingerprint } from "lucide-react";
+import type { ReactNode } from "react";
 import { Button } from "@/src/components/ui/button";
 import { SettingsStatusLine } from "./connected-account-card";
+import { SettingsRow } from "./settings-row";
 
-export function ApprovalPasskeyStatus() {
+export function ApprovalPasskeyStatus({ action }: { action?: ReactNode }) {
   return (
-    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 py-4 first:pt-0 last:pb-0">
-      <Fingerprint className="size-[18px] shrink-0 text-primary" strokeWidth={1.6} aria-hidden="true" />
-      <div className="min-w-0">
-        <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">Passkey</span>
-        <p className="break-words font-serif text-base tracking-tight text-foreground">Enabled</p>
-      </div>
-    </div>
+    <SettingsRow label="Passkey" value="Enabled" action={action}
+      icon={<Fingerprint className="size-[18px] shrink-0 text-primary" strokeWidth={1.6} aria-hidden="true" />}
+    />
   );
 }
 

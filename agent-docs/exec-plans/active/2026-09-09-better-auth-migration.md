@@ -666,3 +666,10 @@ activation and the broader live-auth qualification remain incomplete.
 - Proof: 12 existing Resend transport cases, Web typecheck, changed-file ESLint, and complexity checks pass. Eight direct browser render checks cover Chromium/WebKit, light/dark, and phone/desktop widths with actual template HTML and embedded PNGs. Correct colors, one visible logo, six-digit code, heading typography, and absence of horizontal overflow were checked; representative screenshots were inspected.
 - Product UX: Ready for Preview. Actual mail-client delivery on the new candidate remains a separate check; browser evidence does not prove every client's email transformations.
 - Review: presentation-only follow-up uses the final ReviewGPT exemption; the prior sensitive-rule review remains applicable. Existing unshipped adoption changelog entry covers the adjustment.
+
+## Recovery presentation follow-up
+
+- Outcome: passkey recovery actions share the compact Settings row and button variants. Create, save, and use dialogs retain one concise explanation; the saved key can be copied or downloaded as a plain-text file.
+- Boundary: downloads use a local Blob and a neutral filename. No new endpoint, persisted browser state, key issuance, authentication, or recovery rule is introduced.
+- Product UX: Ready for Preview. Eleven existing client cases pass, including stale-primary recovery requiring login and canceled WebAuthn. Two composed Chromium journeys cover phone/desktop creation, exact clipboard and downloaded-file contents, retained dialog state, completion, and recovery entry. Synthetic screenshots were inspected; backend proof is mocked in these browser journeys.
+- Verification: Web typecheck, changed-file ESLint, diff checks, and complexity pass; no new hotspots. The existing unshipped adoption changelog covers this follow-up. Frontend interaction exemption retains the earlier sensitive-rule review.

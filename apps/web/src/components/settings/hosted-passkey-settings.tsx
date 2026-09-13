@@ -27,7 +27,7 @@ export function HostedPasskeySettings({
   }
 
   if (secureApprovalStatus.method === "passkey") {
-    return <><ApprovalPasskeyStatus /><HostedApprovalRecoverySettings enabled={enrollmentEnabled} /></>;
+    return <HostedApprovalRecoverySettings enabled={enrollmentEnabled} />;
   }
   if (secureApprovalStatus.method === "initial") return <InitialPasskeySetup enrollmentEnabled={enrollmentEnabled} />;
   return <PasskeySetup enrollmentEnabled={enrollmentEnabled} secureApprovalStatus={secureApprovalStatus} />;

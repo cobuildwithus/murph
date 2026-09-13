@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
@@ -20,6 +20,68 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/*", (route) => ["127.0.0.1", "localhost"].includes(new URL(route.request().url()).hostname)
     ? route.continue() : route.abort());
 });
+
+for (const width of [390, 1280]) {
+  test(`recovery key copy and download stay in the dialog at ${width}px`, async ({ page, context }) => {
+    test.setTimeout(180_000);
+    await page.setViewportSize({ width, height: 900 });
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    // Synthetic provider proof; the actual dialog, clipboard and file download run in Chromium.
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator.credentials, "get", { value: async () => ({
+        id: "synthetic-passkey", rawId: new Uint8Array([1]).buffer, type: "public-key",
+        response: {
+          authenticatorData: new Uint8Array([1]).buffer, clientDataJSON: new Uint8Array([1]).buffer,
+          signature: new Uint8Array([1]).buffer, userHandle: null,
+        },
+        getClientExtensionResults: () => ({}),
+      }) });
+    });
+    const key = Buffer.alloc(32, 7).toString("base64url");
+    let mutations = 0;
+    await page.route("**/api/settings/sensitive-action-challenge", (route) => {
+      mutations += 1;
+      return route.fulfill({ json: { token: "synthetic-challenge" } });
+    });
+    await page.route("**/api/settings/approval-passkeys/authenticate", (route) => {
+      mutations += 1;
+      return route.fulfill({ json: { method: "passkey", options: { challenge: "c3ludGhldGlj", rpId: "localhost" } } });
+    });
+    await page.route("**/api/settings/approval-passkeys/recovery-key", (route) => {
+      mutations += 1;
+      return route.fulfill({ json: { key } });
+    });
+    await page.goto("/design?tab=components", { waitUntil: "load", timeout: 90_000 });
+    const study = page.locator("#better-auth-adoption");
+    await study.evaluate((element) => element.removeAttribute("inert"));
+    const panel = study.locator('[data-auth-study="recovery"]');
+    await capture(page, panel, `recovery-actions-${width}`);
+    await panel.getByRole("button", { name: "Save a recovery key", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Create a recovery key" })).toBeVisible();
+    await capture(page, dialog, `recovery-create-${width}`);
+    await dialog.getByRole("button", { name: "Create recovery key", exact: true }).click();
+    await expect(dialog.getByLabel("Recovery key", { exact: true })).toHaveValue(key);
+    expect(mutations).toBe(3);
+    await dialog.getByRole("button", { name: "Copy key", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(key);
+    const downloading = page.waitForEvent("download");
+    await dialog.getByRole("button", { name: "Download key", exact: true }).click();
+    const download = await downloading;
+    expect(download.suggestedFilename()).toBe("murph-recovery-key.txt");
+    expect(await readFile((await download.path())!, "utf8")).toBe(key + "\n");
+    await expect(dialog.getByRole("heading", { name: "Save your recovery key" })).toBeVisible();
+    expect(mutations).toBe(3);
+    expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await capture(page, dialog, `recovery-saved-${width}`);
+    await dialog.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await panel.getByRole("button", { name: "Use a recovery key", exact: true }).click();
+    await expect(dialog.getByLabel("Saved recovery key", { exact: true })).toBeVisible();
+    await capture(page, dialog, `recovery-use-${width}`);
+  });
+}
 
 for (const [method, width] of [["phone", 390], ["email", 390], ["phone", 1280], ["email", 1280]] as const) {
   test(`${method} at ${width}px login keeps confirmed authentication through a product-loading retry`, async ({ page }) => {
