@@ -36,6 +36,7 @@ import {
   runInboxMediaRetention,
   runInboxEnvelopeMigration,
   runInboxTextRetention,
+  type InboxEnvelopeMigrationResult,
   type InboxMediaRetentionMaterializeResult,
   type InboxMediaRetentionResult,
   type InboxTextRetentionResult,
@@ -64,7 +65,20 @@ export {
 // lower threshold. Keep both below the hosted Codex auto-compact ceiling so
 // idle shutdown can compact large-but-below-ceiling threads before the next
 // wake pays the full resend cost.
+// Interruptions yield promptly to foreground work and retain the short retry.
 export const HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS = 5 * 60 * 1000;
+// A failed cleanup must allow the runner's idle window to expire. Retry on the
+// hourly recovery cadence; ordinary idle maintenance can recover sooner.
+export const HOSTED_INBOX_RETENTION_FAILURE_RETRY_DELAY_MS = 60 * 60 * 1000;
+const HOSTED_INBOX_RETENTION_BLOCKED_RECHECK_MS = 24 * 60 * 60 * 1000;
+
+export interface HostedInboxRetentionIssue {
+  stage: "pending_inputs" | "transcripts" | "media" | "generated_images" | "envelope_migration" | "text";
+  outcome: "failed" | "blocked";
+  errorCode?: string;
+  legacyCapturesSkipped?: number;
+  migrationBlockerCount?: number;
+}
 
 type HostedIdleMaintenanceWake = {
   nextWakeAt?: string;
@@ -107,6 +121,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   protectedStoredPaths?: readonly string[];
   providerName: string | null;
   recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
+  reportRetentionIssue?: ((issue: HostedInboxRetentionIssue) => Promise<void>) | null;
   resolveAssistantSessionId: ((codexThreadId: string) => Promise<string | null>) | null;
   shutdownSignal: AbortSignal | null;
   vaultRoot?: string | null;
@@ -140,6 +155,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     let retentionWake: HostedIdleMaintenanceWake = {};
     if (input.vaultRoot) {
       const vaultRoot = input.vaultRoot;
+      let retentionStage: HostedInboxRetentionIssue["stage"] = "pending_inputs";
       try {
         const pendingInputRetention =
           await runHostedPendingAssistantInputContentRetention({
@@ -149,6 +165,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         retentionWake = resolveAssistantTranscriptRetentionWake(
           pendingInputRetention.nextEligibleAt,
         );
+        retentionStage = "transcripts";
         const transcriptRetention =
           await runAssistantTranscriptContentRetention({
             signal: abortController.signal,
@@ -160,6 +177,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             transcriptRetention.nextEligibleAt,
           ),
         );
+        retentionStage = "media";
         const retentionResult = await runInboxMediaRetention({
           materializeCandidatePaths: input.materializeRetentionCandidatePaths ?? undefined,
           ...(input.pendingWork ? { maxAttachments: 1 } : {}),
@@ -173,6 +191,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           retentionWake,
           resolveInboxMediaRetentionWake(retentionResult),
         );
+        retentionStage = "generated_images";
         const generatedImageRetentionMaxCaptures =
           input.generatedImageRetentionMaxCaptures === undefined
             ? input.pendingWork ? 1 : undefined
@@ -210,21 +229,21 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             resolveGeneratedImageRetentionWake(generatedImageRetention),
           );
         }
+        retentionStage = "envelope_migration";
         const envelopeMigration = await runInboxEnvelopeMigration({
           apply: true,
           ...(input.pendingWork ? { maxFiles: 1 } : {}),
           signal: abortController.signal,
           vaultRoot: input.vaultRoot,
         });
-        if (envelopeMigration.hasMore) {
-          retentionWake = mergeInboxRetentionWakes(
-            retentionWake,
-            resolveInboxMediaRetentionImmediateWake(),
-          );
-        }
+        retentionWake = mergeInboxRetentionWakes(
+          retentionWake,
+          resolveInboxEnvelopeMigrationWake(envelopeMigration),
+        );
         // Text retention runs after the media pass and shares its wake pointer:
         // both expire inbound content on the same 14-day clock, so a second
         // pointer would only create two schedules to keep in agreement.
+        retentionStage = "text";
         const textRetentionResult = await runInboxTextRetention({
           ...(input.pendingWork ? { maxCaptures: 1 } : {}),
           signal: abortController.signal,
@@ -234,6 +253,11 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           retentionWake,
           resolveInboxTextRetentionWake(textRetentionResult),
         );
+        await reportBlockedInboxMigration({
+          report: input.reportRetentionIssue,
+          legacyCapturesSkipped: textRetentionResult.legacyCapturesSkipped,
+          migrationBlockerCount: envelopeMigration.blockerCount,
+        });
       } catch (error) {
         if (isInboxRetentionAbortError(error, abortController.signal)) {
           return buildInterruptedMaintenanceOutcome({
@@ -250,8 +274,16 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         emitInboxMediaRetentionFailureLog({
           error,
           memberId: input.memberId,
+          stage: retentionStage,
         });
-        retentionWake = resolveInboxMediaRetentionFailureWake();
+        await reportRetentionIssueBestEffort(
+          input.reportRetentionIssue,
+          buildInboxRetentionFailureIssue(error, retentionStage),
+        );
+        retentionWake = mergeInboxRetentionWakes(
+          retentionWake,
+          resolveInboxMediaRetentionFailureWake(HOSTED_INBOX_RETENTION_FAILURE_RETRY_DELAY_MS),
+        );
       }
     }
     if (abortController.signal.aborted) {
@@ -652,6 +684,15 @@ function isInboxRetentionAbortError(
     );
 }
 
+function resolveInboxEnvelopeMigrationWake(
+  result: InboxEnvelopeMigrationResult,
+): HostedIdleMaintenanceWake {
+  if (result.blockerCount > 0) {
+    return resolveInboxMediaRetentionFailureWake(HOSTED_INBOX_RETENTION_BLOCKED_RECHECK_MS);
+  }
+  return result.hasMore ? resolveInboxMediaRetentionImmediateWake() : {};
+}
+
 function resolveInboxTextRetentionWake(
   result: InboxTextRetentionResult,
 ): HostedIdleMaintenanceWake {
@@ -659,18 +700,15 @@ function resolveInboxTextRetentionWake(
     return resolveInboxMediaRetentionImmediateWake();
   }
 
-  if (result.nextEligibleAt) {
-    return {
-      nextWakeAt: result.nextEligibleAt,
-      nextWakeReason: "inbox_media_retention",
-    };
-  }
-
-  if (result.legacyCapturesSkipped > 0) {
-    return resolveInboxMediaRetentionFailureWake();
-  }
-
-  return {};
+  // Migration has already run. Legacy rows left behind cannot become actionable
+  // merely by repeating the same pass, so use the existing blocked-media cadence.
+  // Keep an earlier real content expiry even when migration is blocked.
+  return mergeInboxRetentionWakes(
+    resolveAssistantTranscriptRetentionWake(result.nextEligibleAt),
+    result.legacyCapturesSkipped > 0
+      ? resolveInboxMediaRetentionFailureWake(HOSTED_INBOX_RETENTION_BLOCKED_RECHECK_MS)
+      : {},
+  );
 }
 
 function resolveGeneratedImageRetentionWake(
@@ -709,9 +747,50 @@ function mergeInboxRetentionWakes(
   return Date.parse(right.nextWakeAt) < Date.parse(left.nextWakeAt) ? right : left;
 }
 
-function resolveInboxMediaRetentionFailureWake(): HostedIdleMaintenanceWake {
+function buildInboxRetentionFailureIssue(
+  error: unknown,
+  stage: HostedInboxRetentionIssue["stage"],
+): HostedInboxRetentionIssue {
+  const errorCode = buildHostedExecutionSafeErrorDiagnostics(error)?.errorCode;
   return {
-    nextWakeAt: new Date(Date.now() + HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS).toISOString(),
+    stage,
+    outcome: "failed",
+    ...(typeof errorCode === "string" ? { errorCode } : {}),
+  };
+}
+
+async function reportBlockedInboxMigration(input: {
+  report: ((issue: HostedInboxRetentionIssue) => Promise<void>) | null | undefined;
+  legacyCapturesSkipped: number;
+  migrationBlockerCount: number;
+}): Promise<void> {
+  if (input.legacyCapturesSkipped === 0 && input.migrationBlockerCount === 0) {
+    return;
+  }
+  await reportRetentionIssueBestEffort(input.report, {
+    stage: "envelope_migration",
+    outcome: "blocked",
+    legacyCapturesSkipped: input.legacyCapturesSkipped,
+    migrationBlockerCount: input.migrationBlockerCount,
+  });
+}
+
+async function reportRetentionIssueBestEffort(
+  report: ((issue: HostedInboxRetentionIssue) => Promise<void>) | null | undefined,
+  issue: HostedInboxRetentionIssue,
+): Promise<void> {
+  try {
+    await report?.(issue);
+  } catch {
+    // Diagnostics are never checkpoint or cleanup authority.
+  }
+}
+
+function resolveInboxMediaRetentionFailureWake(
+  delayMs = HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS,
+): HostedIdleMaintenanceWake {
+  return {
+    nextWakeAt: new Date(Date.now() + delayMs).toISOString(),
     nextWakeReason: "inbox_media_retention",
   };
 }
@@ -719,12 +798,14 @@ function resolveInboxMediaRetentionFailureWake(): HostedIdleMaintenanceWake {
 function emitInboxMediaRetentionFailureLog(input: {
   error: unknown;
   memberId: string;
+  stage: HostedInboxRetentionIssue["stage"];
 }): void {
   const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
   emitHostedExecutionStructuredLog({
     component: "runtime",
     details: {
       failureCode: "inbox_media_retention_failed",
+      retentionStage: input.stage,
       ...(typeof diagnostics?.errorCode === "string"
         ? { failureErrorCode: diagnostics.errorCode }
         : {}),

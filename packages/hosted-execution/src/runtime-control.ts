@@ -868,6 +868,8 @@ export interface HostedMailboxFetchResponse {
   // Web supplies this invocation-lifecycle fact on every fetch, including empty
   // batches. Deploy Web before a runner that consumes it.
   assistantProvider: HostedAssistantProvider;
+  // Selected custom route identity; null means managed. Older Web omits it.
+  assistantCustomInferenceRevision?: number | null;
   // Optional for deploy-window compatibility. Web emits this only for an
   // allowed conversation batch whose current effective capacity is low.
   conversationUsageStatus?: "low" | null;
@@ -1406,8 +1408,21 @@ export interface HostedRuntimeGroupChatParticipant {
   ownerAdvisoryName?: string;
 }
 
+export interface HostedRuntimeGroupSharedFreshnessRequirement {
+  projectionScopeKey: string;
+  date: string;
+}
+
+export interface HostedRuntimeGroupSharedFreshness {
+  /** Time of the successful shared-snapshot read, not a provider upload time. */
+  checkedAt: string;
+  refreshStatus: "requested" | "unavailable" | "not_needed";
+}
+
 export interface HostedRuntimeGroupSharedReadRequest {
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
+  /** Only missing, currently consented wearable dates can request existing sync work. */
+  freshness?: readonly HostedRuntimeGroupSharedFreshnessRequirement[];
 }
 
 export type HostedRuntimeGroupSharedRecord = Pick<
@@ -1444,6 +1459,7 @@ export interface HostedRuntimeGroupSharedMember {
 
 export type HostedRuntimeGroupSharedReadResult =
   | {
+      freshness?: HostedRuntimeGroupSharedFreshness;
       members: readonly HostedRuntimeGroupSharedMember[];
       requestedProjectionScopeKeys: readonly string[];
       status: "ok";
@@ -3618,6 +3634,37 @@ export interface HostedBrowserVaultReplicaPublishResponse {
   workspace: HostedWorkspaceState | null;
 }
 
+export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_PATH =
+  "/api/internal/hosted-runtime/protocol-admission";
+export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND =
+  "hosted_runtime_web_protocol_admission";
+export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION = 1;
+export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_MAX_BYTES = 16 * 1024;
+
+export interface HostedRuntimeWebProtocolAdmission {
+  kind: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND;
+  schemaVersion: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION;
+  nonce: string;
+  runtimeLogEventCodes: readonly string[];
+  threadRouteAuthority: { direct: unknown; group: unknown };
+}
+
+// A synthetic wire message, not a log write. Exercise every producer enum value
+// through the deployed consumer's actual parser rather than a capability label.
+export function buildHostedRuntimeLogProtocolProbe(
+  eventCode: HostedRuntimeLogEventCode,
+): HostedRuntimeLogRequest {
+  return { entries: [{
+    at: "2000-01-01T00:00:00.000Z",
+    component: "runner",
+    errorCode: "SYNTHETIC_PROTOCOL_PROBE",
+    redactedJson: { safeErrorMessage: "Synthetic protocol admission probe." },
+    eventCode,
+    level: "info",
+    phase: "invoke",
+  }] };
+}
+
 export const HOSTED_RUNTIME_LOG_LEVELS = [
   "debug",
   "info",
@@ -3717,6 +3764,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.started",
   "runner.web_control_preflight_rejected",
   "runtime.invocation_finished",
+  "runtime.retention_issue",
   "workspace.codex_home_snapshot",
 ] as const;
 
@@ -3955,3 +4003,10 @@ export function isHostedRetiredMailboxKind(
 ): value is HostedRetiredMailboxKind {
   return HOSTED_RETIRED_MAILBOX_KINDS.some((kind) => kind === value);
 }
+
+export {
+  parseHostedGroupSharedFreshnessRequirements,
+  hostedGroupMemberHasMissingWearableDates,
+  hostedGroupSharedNeedsWearableRecovery,
+  getHostedGroupWearableReportingGaps,
+} from "./group-shared-freshness.ts";

@@ -157,7 +157,7 @@ test("first provider-filtered read rebuilds carried v25 underscore provider rows
       readOnly: true,
     });
     try {
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 26);
+      assert.ok(QUERY_PROJECTION_SQLITE_VERSION >= 26);
       assert.equal(
         readSqliteRuntimeUserVersion(rebuiltDatabase),
         QUERY_PROJECTION_SQLITE_VERSION,

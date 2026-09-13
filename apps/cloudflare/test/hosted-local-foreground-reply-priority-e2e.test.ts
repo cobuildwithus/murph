@@ -77,6 +77,12 @@ import type {
 } from "../src/hosted-local-test/foreground-priority-ordering.ts";
 import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.ts";
 import {
+  hasImportedHostedSystemWakeStorm,
+  hasSuccessfulHostedSystemContinuation,
+  type HostedSystemContinuationLog,
+  hostedOrderingSeqAtLeast,
+} from "./helpers/hosted-local-mailbox-progress.ts";
+import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
@@ -214,225 +220,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     linqStub = null;
   }, 120_000);
 
-  it("aborts and replaces generic model-free system work for a signed foreground reply", async () => {
-    // Production maintains the memberless standby before member traffic arrives.
-    // Establish that real precondition before starting the deliberately heavy
-    // system-mailbox runtime so the local machine does not provision both
-    // container roles concurrently.
-    const readyStandbySlotNames = await waitForReadyStandbySlots();
-    await seedProbe(systemMailboxProbe);
-    const stagedMealPhoto = await stageMealPhotoForProbe(systemMailboxProbe);
-    const stagedEnvironmentVoice = await stageEnvironmentVoiceForProbe(
-      systemMailboxProbe,
-    );
-    const systemWakes = buildEverySystemWake(
-      systemMailboxProbe,
-      stagedMealPhoto,
-      stagedEnvironmentVoice,
-    );
-    expect(systemWakes.map((wake) => wake.kind).sort()).toEqual(
-      HOSTED_EXECUTION_WAKE_KINDS
-        .filter((kind) =>
-          kind !== "conversation.message"
-          && kind !== "environment-interview.completed"
-        )
-        .sort(),
-    );
-    const deviceSyncWake = systemWakes.find((wake) =>
-      wake.kind === "device-sync.wake"
-    );
-    if (!deviceSyncWake) {
-      throw new Error("The foreground-priority wake storm omitted device maintenance.");
-    }
-
-    const appended = [];
-    for (const wake of systemWakes) {
-      appended.push(await appendHostedExecutionWakeForTest({
-        environment: requireScenario().runtimeEnv,
-        wake,
-      }));
-    }
-    expect(appended.every((result) => result.inserted)).toBe(true);
-
-    requireScenario().queueAssistantResponses(
-      ["Background system notification acknowledged."],
-      { matchInputContains: "Priority-gate background notification." },
-    );
-    await armForegroundPriorityOrderingObservation({
-      mode: "canonical",
-      scenario: requireScenario(),
-      userId: systemMailboxProbe.userId,
-    });
-    const latestAppend = appended.at(-1);
-    if (!latestAppend) {
-      throw new Error("The foreground-priority system wake storm was empty.");
-    }
-    await signalTemporalRuntime(systemMailboxProbe.userId, {
-      kind: "mailbox_appended",
-      lane: "system",
-      laneSeq: latestAppend.wake.seq,
-      mailboxItemId: latestAppend.wake.id,
-    });
-    const systemFence = await waitForSystemWakeStormCanonicalCommit(
-      systemMailboxProbe.userId,
-      latestAppend.wake.seq,
-      systemWakes.length,
-    );
-    // Background work must leave every observed pristine slot unclaimed.
-    await expect(waitForReadyStandbySlots(readyStandbySlotNames)).resolves
-      .toEqual(expect.arrayContaining(readyStandbySlotNames));
-    const inboundText = "Reply while the full system mailbox is active.";
-    const replyText = "Foreground reply won over the full system mailbox.";
-    const providerRequestBaseline = countAssistantProviderInputs(inboundText);
-    const recoveryEvidenceStartedAt = new Date();
-    const providerStartObservations: Array<{
-      activeFence: Awaited<ReturnType<typeof readActiveRuntimeFenceForTest>>;
-      deviceMailboxItem: Awaited<ReturnType<typeof readHostedMailboxItemForTest>>;
-      systemLane: {
-        importedSeq: string;
-        lag: string;
-        maxSeq: string;
-      } | null;
-    }> = [];
-    let latencyMs = Number.POSITIVE_INFINITY;
-    let orderingBarrierReleased = false;
-    try {
-      const foregroundReply = sendInboundAndRequirePromptReply({
-        identity: systemMailboxProbe,
-        inboundText,
-        label: "system mailbox exact replacement",
-        onAssistantProviderStart: async () => {
-          const [activeFence, status, deviceMailboxItem] =
-            await Promise.all([
-              readActiveRuntimeFenceForTest(systemMailboxProbe.userId),
-              requireScenario().harness.readUserStatus(
-                systemMailboxProbe.userId,
-              ),
-              readHostedMailboxItemForTest({
-                dedupeKey: deviceSyncWake.eventId,
-                environment: requireScenario().runtimeEnv,
-                userId: systemMailboxProbe.userId,
-              }),
-            ]);
-          const systemLane = status.mailboxLag.find((lane) =>
-            lane.lane === "system"
-          );
-          providerStartObservations.push({
-            activeFence,
-            deviceMailboxItem,
-            systemLane: systemLane
-              ? {
-                  importedSeq: systemLane.importedSeq,
-                  lag: systemLane.lag,
-                  maxSeq: systemLane.maxSeq,
-                }
-              : null,
-          });
-        },
-        replyText,
-      });
-
-      await waitForConversationMailboxLag(systemMailboxProbe.userId);
-      await requireSystemOwnerPreservedWhileCanonicalAckHeld({
-        inboundText,
-        providerRequestBaseline,
-        systemAttemptId: systemFence.attemptId,
-        userId: systemMailboxProbe.userId,
-      });
-      // The foreground starts under a new fence after the background owner
-      // settles. It may retain the same member-bound warm target or claim an
-      // observed pristine slot; durable handoff evidence covers either path.
-      await expect(releaseForegroundPriorityOrderingBarrier({
-        scenario: requireScenario(),
-        userId: systemMailboxProbe.userId,
-      })).resolves.toEqual({ ok: true, released: true });
-      orderingBarrierReleased = true;
-
-      latencyMs = await foregroundReply;
-
-      expect(providerStartObservations).toHaveLength(1);
-      const providerStart = providerStartObservations[0];
-      if (!providerStart?.activeFence) {
-        throw new Error(await requireScenario().buildFailureMessage(
-          systemMailboxProbe.userId,
-          ["Assistant provider started without an active runtime write fence."],
-        ));
-      }
-      expect(providerStart.activeFence.processingMode).toBe("default");
-      expect(providerStart.activeFence.attemptId).not.toBe(
-        systemFence.attemptId,
-      );
-      expect([systemFence.runnerContainerName, ...readyStandbySlotNames]).toContain(
-        providerStart.activeFence.runnerContainerName,
-      );
-      if (providerStart.activeFence.runnerContainerName === systemFence.runnerContainerName) {
-        await expect(waitForReadyStandbySlots(readyStandbySlotNames)).resolves
-          .toEqual(expect.arrayContaining(readyStandbySlotNames));
-      }
-      if (!providerStart.systemLane) {
-        throw new Error(await requireScenario().buildFailureMessage(
-          systemMailboxProbe.userId,
-          ["Assistant provider started without persisted system-mailbox lag."],
-        ));
-      }
-      expect(providerStart.systemLane.maxSeq).toBe(latestAppend.wake.seq);
-      expect(providerStart.systemLane.lag).toBe("0");
-      expect(providerStart.systemLane.importedSeq).toBe(latestAppend.wake.seq);
-      expect(providerStart.deviceMailboxItem).toMatchObject({
-        consumedAt: null,
-        dedupeKey: deviceSyncWake.eventId,
-        kind: "device-sync.wake",
-        lane: "system",
-      });
-
-      for (const wake of systemWakes) {
-        await expect(readHostedMailboxItemForTest({
-          dedupeKey: wake.eventId,
-          environment: requireScenario().runtimeEnv,
-          userId: systemMailboxProbe.userId,
-        })).resolves.toMatchObject({
-          dedupeKey: wake.eventId,
-          kind: wake.kind,
-          lane: "system",
-        });
-      }
-      await assertExactlyOneAcceptedReplyAfterBoundary({
-        identity: systemMailboxProbe,
-        label: "system mailbox exact replacement",
-        replyText,
-      });
-      expect(countAssistantProviderInputs(inboundText)).toBe(
-        providerRequestBaseline + 1,
-      );
-
-      // Do not manufacture a second system pointer. The existing durable
-      // mailbox/Temporal continuation must recover the yielded device/system
-      // work under a non-overlapping invocation and advance the frontier.
-      await requireSystemWakeStormPreserved(
-        systemMailboxProbe.userId,
-        latestAppend.wake.seq,
-        {
-          expectedWakeKinds: systemWakes.map((wake) => wake.kind),
-          preemptedAttemptId: systemFence.attemptId,
-          recoveryEvidenceStartedAt,
-        },
-      );
-    } finally {
-      if (!orderingBarrierReleased) {
-        await releaseForegroundPriorityOrderingBarrier({
-          scenario: requireScenario(),
-          userId: systemMailboxProbe.userId,
-        }).catch(() => undefined);
-      }
-      await clearForegroundPriorityOrderingObservation(
-        requireScenario(),
-        systemMailboxProbe.userId,
-      ).catch(() => undefined);
-    }
-
-    writeLatencyProof("system_mailbox", latencyMs);
-  }, 300_000);
-
+  // This suite shares its provider stub. Keep the exact provider-count proof
+  // before other members seed background work that can call the same stub later.
   it("drains queued Environment work after the active foreground turn", async () => {
     await seedProbe(environmentHandoffProbe);
     const baselineStatus = await requireScenario().harness.readUserStatus(
@@ -534,6 +323,217 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     expect(requireScenario().assistantProviderRequests).toHaveLength(
       providerRequestBaseline + 1,
     );
+  }, 300_000);
+
+  it("retains the authorized foreground owner and preserves durable system continuation", async () => {
+    // Production maintains the memberless standby before member traffic arrives.
+    // Establish that real precondition before starting the deliberately heavy
+    // system-mailbox runtime so the local machine does not provision both
+    // container roles concurrently.
+    const readyStandbySlotNames = await waitForReadyStandbySlots();
+    await seedProbe(systemMailboxProbe);
+    const stagedMealPhoto = await stageMealPhotoForProbe(systemMailboxProbe);
+    const stagedEnvironmentVoice = await stageEnvironmentVoiceForProbe(
+      systemMailboxProbe,
+    );
+    const systemWakes = buildEverySystemWake(
+      systemMailboxProbe,
+      stagedMealPhoto,
+      stagedEnvironmentVoice,
+    );
+    expect(systemWakes.map((wake) => wake.kind).sort()).toEqual(
+      HOSTED_EXECUTION_WAKE_KINDS
+        .filter((kind) =>
+          kind !== "conversation.message"
+          && kind !== "environment-interview.completed"
+        )
+        .sort(),
+    );
+    const deviceSyncWake = systemWakes.find((wake) =>
+      wake.kind === "device-sync.wake"
+    );
+    if (!deviceSyncWake) {
+      throw new Error("The foreground-priority wake storm omitted device maintenance.");
+    }
+
+    const appended = [];
+    for (const wake of systemWakes) {
+      appended.push(await appendHostedExecutionWakeForTest({
+        environment: requireScenario().runtimeEnv,
+        wake,
+      }));
+    }
+    expect(appended.every((result) => result.inserted)).toBe(true);
+
+    requireScenario().queueAssistantResponses(
+      ["Background system notification acknowledged."],
+      { matchInputContains: "Priority-gate background notification." },
+    );
+    await armForegroundPriorityOrderingObservation({
+      mode: "canonical",
+      scenario: requireScenario(),
+      userId: systemMailboxProbe.userId,
+    });
+    const latestAppend = appended.at(-1);
+    if (!latestAppend) {
+      throw new Error("The foreground-priority system wake storm was empty.");
+    }
+    await signalTemporalRuntime(systemMailboxProbe.userId, {
+      kind: "mailbox_appended",
+      lane: "system",
+      laneSeq: latestAppend.wake.seq,
+      mailboxItemId: latestAppend.wake.id,
+    });
+    const systemFence = await waitForSystemWakeStormCanonicalCommit(
+      systemMailboxProbe.userId,
+      latestAppend.wake.seq,
+      systemWakes.length,
+    );
+    // Background work must leave every observed pristine slot unclaimed.
+    await expect(waitForReadyStandbySlots(readyStandbySlotNames)).resolves
+      .toEqual(expect.arrayContaining(readyStandbySlotNames));
+    const inboundText = "Reply while the full system mailbox is active.";
+    const replyText = "Foreground reply continued on the authorized runtime.";
+    const providerRequestBaseline = countAssistantProviderInputs(inboundText);
+    const providerStartObservations: Array<{
+      providerStartedAt: Date;
+      activeFence: Awaited<ReturnType<typeof readActiveRuntimeFenceForTest>>;
+      deviceMailboxItem: Awaited<ReturnType<typeof readHostedMailboxItemForTest>>;
+      systemLane: {
+        importedSeq: string;
+        lag: string;
+        maxSeq: string;
+      } | null;
+    }> = [];
+    let latencyMs = Number.POSITIVE_INFINITY;
+    let orderingBarrierReleased = false;
+    try {
+      const foregroundReply = sendInboundAndRequirePromptReply({
+        identity: systemMailboxProbe,
+        inboundText,
+        label: "system mailbox foreground continuation",
+        onAssistantProviderStart: async () => {
+          const providerStartedAt = new Date();
+          const [activeFence, status, deviceMailboxItem] =
+            await Promise.all([
+              readActiveRuntimeFenceForTest(systemMailboxProbe.userId),
+              requireScenario().harness.readUserStatus(
+                systemMailboxProbe.userId,
+              ),
+              readHostedMailboxItemForTest({
+                dedupeKey: deviceSyncWake.eventId,
+                environment: requireScenario().runtimeEnv,
+                userId: systemMailboxProbe.userId,
+              }),
+            ]);
+          const systemLane = status.mailboxLag.find((lane) =>
+            lane.lane === "system"
+          );
+          providerStartObservations.push({
+            providerStartedAt,
+            activeFence,
+            deviceMailboxItem,
+            systemLane: systemLane
+              ? {
+                  importedSeq: systemLane.importedSeq,
+                  lag: systemLane.lag,
+                  maxSeq: systemLane.maxSeq,
+                }
+              : null,
+          });
+        },
+        replyText,
+      });
+
+      await waitForConversationMailboxLag(systemMailboxProbe.userId);
+      await requireSystemOwnerPreservedWhileCanonicalAckHeld({
+        inboundText,
+        providerRequestBaseline,
+        systemAttemptId: systemFence.attemptId,
+        userId: systemMailboxProbe.userId,
+      });
+      // This owner already has foreground authority. After its canonical
+      // acknowledgement settles, foreground input continues on the same fence
+      // and target without claiming a pristine standby slot.
+      await expect(releaseForegroundPriorityOrderingBarrier({
+        scenario: requireScenario(),
+        userId: systemMailboxProbe.userId,
+      })).resolves.toEqual({ ok: true, released: true });
+      orderingBarrierReleased = true;
+
+      latencyMs = await foregroundReply;
+
+      expect(providerStartObservations).toHaveLength(1);
+      const providerStart = providerStartObservations[0];
+      if (!providerStart?.activeFence) {
+        throw new Error(await requireScenario().buildFailureMessage(
+          systemMailboxProbe.userId,
+          ["Assistant provider started without an active runtime write fence."],
+        ));
+      }
+      expect(providerStart.activeFence).toEqual(systemFence);
+      await expect(waitForReadyStandbySlots(readyStandbySlotNames)).resolves
+        .toEqual(expect.arrayContaining(readyStandbySlotNames));
+      if (!providerStart.systemLane) {
+        throw new Error(await requireScenario().buildFailureMessage(
+          systemMailboxProbe.userId,
+          ["Assistant provider started without persisted system-mailbox lag."],
+        ));
+      }
+      expect(providerStart.systemLane.maxSeq).toBe(latestAppend.wake.seq);
+      expect(providerStart.systemLane.lag).toBe("0");
+      expect(providerStart.systemLane.importedSeq).toBe(latestAppend.wake.seq);
+      expect(providerStart.deviceMailboxItem).toMatchObject({
+        consumedAt: null,
+        dedupeKey: deviceSyncWake.eventId,
+        kind: "device-sync.wake",
+        lane: "system",
+      });
+
+      for (const wake of systemWakes) {
+        await expect(readHostedMailboxItemForTest({
+          dedupeKey: wake.eventId,
+          environment: requireScenario().runtimeEnv,
+          userId: systemMailboxProbe.userId,
+        })).resolves.toMatchObject({
+          dedupeKey: wake.eventId,
+          kind: wake.kind,
+          lane: "system",
+        });
+      }
+      await assertExactlyOneAcceptedReplyAfterBoundary({
+        identity: systemMailboxProbe,
+        label: "system mailbox foreground continuation",
+        replyText,
+      });
+      expect(countAssistantProviderInputs(inboundText)).toBe(
+        providerRequestBaseline + 1,
+      );
+
+      // After foreground delivery, durable system work must continue even if
+      // the original owner settles or completion events advance the frontier.
+      await requireSystemWakeStormPreserved(
+        systemMailboxProbe.userId,
+        latestAppend.wake.seq,
+        {
+          expectedWakeKinds: systemWakes.map((wake) => wake.kind),
+          recoveryEvidenceStartedAt: providerStart.providerStartedAt,
+        },
+      );
+    } finally {
+      if (!orderingBarrierReleased) {
+        await releaseForegroundPriorityOrderingBarrier({
+          scenario: requireScenario(),
+          userId: systemMailboxProbe.userId,
+        }).catch(() => undefined);
+      }
+      await clearForegroundPriorityOrderingObservation(
+        requireScenario(),
+        systemMailboxProbe.userId,
+      ).catch(() => undefined);
+    }
+
+    writeLatencyProof("system_mailbox", latencyMs);
   }, 300_000);
 
   it("replies promptly while retention-only work owns the runner", async () => {
@@ -2293,20 +2293,6 @@ async function waitForAcceptedReplyInScenario(input: {
   ]));
 }
 
-function hostedOrderingSeqAtLeast(
-  value: string | null | undefined,
-  floor: string,
-): boolean {
-  if (
-    typeof value !== "string"
-    || !/^(?:0|[1-9][0-9]*)$/u.test(value)
-    || !/^(?:0|[1-9][0-9]*)$/u.test(floor)
-  ) {
-    return false;
-  }
-  return BigInt(value) >= BigInt(floor);
-}
-
 async function sendInboundAndRequirePromptReply(input: {
   identity: ProbeIdentity;
   inboundText: string;
@@ -2835,26 +2821,23 @@ async function requireSystemWakeStormPreserved(
   expectedImportedSeq: string,
   input: {
     expectedWakeKinds: readonly string[];
-    preemptedAttemptId: string;
     recoveryEvidenceStartedAt: Date;
   },
 ): Promise<void> {
   const deadlineAt = Date.now() + 60_000;
   let lastStatus = await requireScenario().harness.readUserStatus(userId);
-  let lastRecoveryLogs: Array<{
-    attemptId: string | null;
-    redactedJson: Record<string, unknown> | null;
-  }> = [];
+  let lastRecoveryLogs: HostedSystemContinuationLog[] = [];
 
   while (Date.now() < deadlineAt) {
     lastStatus = await requireScenario().harness.readUserStatus(userId);
     const systemLane = lastStatus.mailboxLag.find((lane) => lane.lane === "system");
     const redactedStatus = lastStatus.workspace?.redactedStatus;
     if (
-      systemLane?.importedSeq === expectedImportedSeq
-      && systemLane.lag === "0"
-      && redactedStatus?.hostedMailboxSystemImportedSeq === expectedImportedSeq
-      && redactedStatus.hostedMailboxRetryableBlockedCount === 0
+      hasImportedHostedSystemWakeStorm({
+        expectedImportedSeq,
+        redactedStatus,
+        systemLane,
+      })
     ) {
       lastRecoveryLogs = (await listHostedRuntimeLogsForTest({
         environment: requireScenario().runtimeEnv,
@@ -2864,20 +2847,15 @@ async function requireSystemWakeStormPreserved(
       }))
         .filter((entry) => entry.eventCode === "mailbox.system_processed")
         .map((entry) => ({
+          at: entry.at,
           attemptId: entry.attemptId,
+          eventCode: entry.eventCode,
           redactedJson: entry.redactedJson,
         }));
-      const recoveredSystemContinuation = lastRecoveryLogs.some((entry) => {
-        const wakeKind = entry.redactedJson?.wakeKind;
-        return entry.attemptId !== null
-          && entry.attemptId !== input.preemptedAttemptId
-          && typeof wakeKind === "string"
-          && input.expectedWakeKinds.includes(wakeKind)
-          && (
-            entry.redactedJson?.status === "processed"
-            || entry.redactedJson?.status === "recorded"
-          )
-          && (entry.redactedJson?.recordFailed ?? 0) === 0;
+      const recoveredSystemContinuation = hasSuccessfulHostedSystemContinuation({
+        expectedWakeKinds: input.expectedWakeKinds,
+        logs: lastRecoveryLogs,
+        providerStartedAt: input.recoveryEvidenceStartedAt,
       });
       if (recoveredSystemContinuation) {
         return;
@@ -2887,8 +2865,7 @@ async function requireSystemWakeStormPreserved(
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Foreground reply succeeded, but seeded system work did not continue under a replacement attempt.",
-    `preempted system attempt id: ${input.preemptedAttemptId}`,
+    "Foreground reply succeeded, but seeded system work did not continue after provider start.",
     `expected imported sequence: ${expectedImportedSeq}`,
     `expected wake kinds: ${JSON.stringify(input.expectedWakeKinds)}`,
     `recovery logs: ${JSON.stringify(lastRecoveryLogs)}`,
@@ -3186,6 +3163,13 @@ function buildEverySystemWake(
       runId: `clinical_run_priority_${runId}`,
       userId: identity.userId,
     }),
+    {
+      eventId: `clinical-records.enrichment-requested:priority:${runId}`,
+      jobId: createHash("sha256").update(`clinical-enrichment:priority:${runId}`).digest("hex"),
+      kind: "clinical-records.enrichment-requested",
+      occurredAt: requestedAt,
+      userId: identity.userId,
+    },
     buildHostedExecutionDailyMetricReportedWake({
       date: requestedAt.slice(0, 10),
       eventId: `health.daily-metric.reported:priority:${runId}`,

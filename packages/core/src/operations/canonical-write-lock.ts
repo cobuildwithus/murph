@@ -11,7 +11,7 @@ import {
   isProcessRunning,
 } from "@murphai/runtime-state/node";
 
-import { VaultError } from "../errors.ts";
+import { VaultError, type CanonicalWriteLockErrorDetails } from "../errors.ts";
 import { normalizeVaultRoot, resolveVaultPath } from "../path-safety.ts";
 import { toIsoTimestamp } from "../time.ts";
 import { isErrnoException, isPlainRecord } from "../types.ts";
@@ -84,6 +84,7 @@ function buildCanonicalWriteLockedError(
   inspection: Exclude<CanonicalWriteLockInspection, { state: "unlocked" }>,
 ): VaultError {
   return new VaultError("CANONICAL_WRITE_LOCKED", toLockFailureMessage(inspection), {
+    lockState: inspection.state,
     relativePath: inspection.relativePath,
     metadata: inspection.metadata
       ? {
@@ -93,7 +94,7 @@ function buildCanonicalWriteLockedError(
           host: inspection.metadata.host,
         }
       : null,
-  });
+  } satisfies CanonicalWriteLockErrorDetails);
 }
 
 function isCanonicalWriteLockMetadata(value: unknown): value is CanonicalWriteLockMetadata {

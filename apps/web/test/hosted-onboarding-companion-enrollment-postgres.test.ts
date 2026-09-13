@@ -76,10 +76,10 @@ describe.skipIf(!runPostgresProof)(
       },
       {
         expectedMailboxCount: 1,
-        expectedRoute: false,
+        expectedRoute: true,
         expectedWelcomeCount: 0,
         lineState: "at_cap" as const,
-        name: "activates route-less when the available line is at its proactive cap",
+        name: "keeps a text route without a welcome when the available line is at its proactive cap",
       },
     ])("$name and replays without duplicate state or email", async (scenario) => {
       if (!databaseUrl) {

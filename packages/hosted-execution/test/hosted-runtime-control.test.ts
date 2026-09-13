@@ -932,6 +932,26 @@ describe("hosted runtime control contracts", () => {
       ],
       userId: "member_123",
     });
+    for (const revision of [null, 1, 3]) {
+      expect(parseHostedMailboxFetchResponse({
+        assistantProvider: "openai",
+        assistantCustomInferenceRevision: revision,
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        items: [],
+        maxSeqByLane: [],
+        userId: "member_123",
+      }).assistantCustomInferenceRevision).toBe(revision);
+    }
+    for (const revision of [0, -1, 1.5, "3"]) {
+      expect(() => parseHostedMailboxFetchResponse({
+        assistantProvider: "openai",
+        assistantCustomInferenceRevision: revision,
+        fetchedAt: "2026-04-26T00:00:02.000Z",
+        items: [],
+        maxSeqByLane: [],
+        userId: "member_123",
+      })).toThrow();
+    }
     expect(parseHostedMailboxFetchResponse({
       assistantProvider: "venice",
       fetchedAt: "2026-04-26T00:00:02.000Z",

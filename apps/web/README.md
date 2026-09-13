@@ -1741,18 +1741,25 @@ and database pressure. Connection failure logs expose only fixed
 operation/source labels, retry attempt and disposition, the configured pool
 limit, and numeric pre-attempt and post-failure pool counts.
 
-That module permits one jittered retry only for ambiguous transient failures
-that prove the database did no work. A `pool_checkout_timeout` means the
-statement never reached Postgres. A `connection_establishment_timeout` means
-the driver failed while opening the physical connection. A
-`transaction_start_timeout` is Prisma's
-`P2028` raised before it invokes the transaction callback. When the local pool
-is already full or has waiters, either failure is returned immediately as
-backpressure instead of re-entering the same queue. `P2028` also covers
-transactions that opened and later expired; the wrapper tracks callback entry
-and never replays a transaction that may have run. Failures that may have
-reached Postgres, such as closed connections, TLS faults, or an unreachable
-host, are reported and rethrown untouched.
+That module permits one jittered retry when replay cannot duplicate an effect.
+A `pool_checkout_timeout` means the statement never reached Postgres. A
+`connection_establishment_timeout` means the driver failed while opening the
+physical connection. A `transaction_start_timeout` is Prisma's `P2028` raised
+before it invokes the transaction callback. Closed connections, including pg's
+plain `Connection terminated unexpectedly` error, also permit one retry for
+standalone model reads or interactive transaction setup before callback entry.
+The model-read allowlist excludes raw SQL, which may have effects even through a
+query API. The existing public transaction wrapper carries an async scope so
+reads inside interactive or batch transactions do not independently retry a
+closed connection or escape their transaction's failure boundary. Batch
+transactions and potentially dispatched writes do not replay disconnects.
+
+When the local pool is already full or has waiters, failures return immediately
+as backpressure instead of re-entering the same queue. The wrapper tracks
+callback entry and never replays an interactive transaction that may have run,
+including a failure during commit. TLS faults, unreachable hosts, and unrelated
+errors remain terminal. Diagnostics use the existing bounded error traversal
+and fixed category labels without recording error messages or connection fields.
 
 Pool pressure is reported before it becomes a failure. `Hosted web database pool
 pressure.` logs the same total, idle, and waiting counts when the pool is full
@@ -2202,7 +2209,16 @@ The Vercel Git integration is the only production deployment owner. Every
 commit pushed to `main` creates one managed production candidate; no
 repository ignore command may suppress that candidate. The candidate remains
 off the production domains until its configured Deployment Checks, including
-`Temporal Web production admission`, pass for that exact current commit.
+`Temporal Web production admission`, pass for that exact candidate commit. Required main checks retain independent
+SHA-scoped proof. Web admission finishes its active candidate and keeps only the
+newest waiting run, using GitHub's existing concurrency group. Public main may
+advance during proof: both controllers require the tested SHA to remain an
+ancestor of the observed protected-main tip. Private main and live Temporal
+reader/routing/target freshness remain required. Vercel's managed Git integration
+continues to own production ordering and promotion; admission never promotes an
+artifact itself. Deploy the private ancestry-aware consumer before this public
+controller. Verify one candidate reaches production while a later merge is still
+being checked, then verify a delayed older check cannot replace a newer release.
 
 Do not deploy production from the local CLI, promote an existing deployment,
 use Instant Rollback, or force-promote past a Deployment Check. Those paths do

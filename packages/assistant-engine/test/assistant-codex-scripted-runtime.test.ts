@@ -7433,7 +7433,10 @@ if (!tool) {
     ] as const
     const completeNutritionCard = cards[2]
 
-    for (const card of cards) {
+    for (const card of [...cards, {
+      ...completeNutritionCard,
+      goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null },
+    }]) {
       const scenario = await prepareScriptedTurnScenario()
       scenario.stub.captureProviderRequestDiagnostics()
       scenario.stub.queue(
@@ -7495,16 +7498,6 @@ if (!tool) {
           proteinGrams: { total: 70, mealCount: 2 },
           carbsGrams: { total: 80, mealCount: 2 },
           fatGrams: { total: 30, mealCount: 2 },
-        },
-      },
-      {
-        ...completeNutritionCard,
-        goals: {
-          calories: null,
-          proteinGrams: null,
-          carbsGrams: null,
-          fatGrams: null,
-          fiberGrams: null,
         },
       },
       ...([

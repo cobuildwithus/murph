@@ -31,7 +31,10 @@ type PostgreSqlExplainPlanNode = {
 describe.skipIf(!runPostgresProof)(
   "hosted runtime latency candidate query",
   () => {
-    it("uses indexed candidate branches before exact hydration under dominant stale history", async () => {
+    it.each([
+      { fixture: "small correctness fixture", staleRows: 1 },
+      { fixture: "dominant stale history", staleRows: 50_000 },
+    ])("hydrates candidate branches under $fixture", async ({ staleRows }) => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const now = new Date("2026-08-12T16:00:00.000Z");
       const windowStart = new Date(now.getTime() - 24 * 60 * 60_000);
@@ -112,14 +115,14 @@ describe.skipIf(!runPostgresProof)(
               'stale-member-' || ordinal,
               ${staleAt},
               NULL
-            FROM generate_series(1, 50000) AS ordinal
+            FROM generate_series(1, ${staleRows}) AS ordinal
           `);
           await tx.$executeRaw(Prisma.sql`
             INSERT INTO hosted_linq_delivery (id, accepted_at)
             SELECT
               'stale-delivery-' || ordinal,
               ${staleAt}
-            FROM generate_series(1, 50000) AS ordinal
+            FROM generate_series(1, ${staleRows}) AS ordinal
           `);
           await tx.$executeRaw(Prisma.sql`
             INSERT INTO hosted_ingress_latency_trace (
@@ -141,7 +144,7 @@ describe.skipIf(!runPostgresProof)(
               ${staleAt},
               ${staleAt},
               'stale-delivery-' || ordinal
-            FROM generate_series(1, 50000) AS ordinal
+            FROM generate_series(1, ${staleRows}) AS ordinal
           `);
 
           const historicalAcceptedAt = new Date(
@@ -262,6 +265,9 @@ describe.skipIf(!runPostgresProof)(
             unresolvedReplyCount: 3,
           });
 
+          // The small case proves correctness without the plan and cap stress work.
+          if (staleRows === 1) return;
+
           const planRows = await tx.$queryRaw<Array<{
             "QUERY PLAN": unknown;
           }>>(Prisma.sql`
@@ -334,7 +340,7 @@ describe.skipIf(!runPostgresProof)(
           });
         }, {
           maxWait: 5_000,
-          timeout: 120_000,
+          timeout: staleRows === 1 ? 30_000 : 120_000,
         });
       } finally {
         await prisma.$disconnect();

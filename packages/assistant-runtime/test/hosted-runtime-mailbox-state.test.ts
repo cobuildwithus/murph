@@ -19,7 +19,7 @@ import {
   resolveHostedSystemMailboxProgress,
   resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxWakeCandidates,
-  setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
+  setHostedDeviceSyncMaintenanceMailboxWakeAt,
   updateHostedSystemMailboxPendingItem,
   updateHostedSystemMailboxState,
   type HostedSystemMailboxPendingItem,
@@ -597,7 +597,7 @@ describe("hosted runtime system mailbox state", () => {
 
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
     try {
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: "2026-04-08T00:00:30.000Z",
         userId: "member_123",
         vaultRoot,
@@ -1452,7 +1452,7 @@ describe("hosted runtime system mailbox state", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 
     try {
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: "2026-04-08T00:00:00.000Z",
         now: () => "2026-04-07T23:59:30.000Z",
         userId: "member_123",
@@ -1473,7 +1473,7 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       });
 
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: "2026-04-08T00:00:30.000Z",
         now: () => "2026-04-08T00:00:00.000Z",
         userId: "member_123",
@@ -1542,7 +1542,7 @@ describe("hosted runtime system mailbox state", () => {
     const dueAt = "2026-04-08T00:00:00.000Z";
 
     try {
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: dueAt,
         now: () => "2026-04-07T23:59:30.000Z",
         userId: "member_123",
@@ -1671,7 +1671,7 @@ describe("hosted runtime system mailbox state", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 
     try {
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: "2026-04-08T00:00:00.000Z",
         now: () => "2026-04-07T23:59:30.000Z",
         userId: "member_123",
@@ -1692,7 +1692,7 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       });
 
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: null,
         now: () => "2026-04-08T00:00:00.000Z",
         userId: "member_123",
@@ -1742,7 +1742,7 @@ describe("hosted runtime system mailbox state", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 
     try {
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: "2026-04-08T00:00:30.000Z",
         now: () => "2026-04-08T00:00:00.000Z",
         userId: "member_123",
@@ -1751,7 +1751,7 @@ describe("hosted runtime system mailbox state", () => {
       const [firstSuccessor] = await readDenseRawRetentionMailboxItems(vaultRoot);
       expect(firstSuccessor).toBeDefined();
 
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: "2026-04-08T00:01:00.000Z",
         now: () => "2026-04-08T00:00:30.000Z",
         userId: "member_123",

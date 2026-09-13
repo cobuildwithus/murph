@@ -24,6 +24,7 @@ import {
   HostedSignupWelcomeEmailError,
   sendHostedSignupWelcomeEmailForRecentMember,
 } from "@/src/lib/hosted-onboarding/signup-welcome-email";
+import { ensureHostedMemberChannelWelcome } from "@/src/lib/hosted-onboarding/channel-welcome";
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
@@ -89,6 +90,11 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   await sendSettingsEmailSyncWelcomeEmailBestEffort({
+    memberId: auth.member.id,
+    prisma,
+  });
+  await ensureHostedMemberChannelWelcome({
+    channel: "email",
     memberId: auth.member.id,
     prisma,
   });

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -712,6 +713,13 @@ afterEach(async () => {
   );
 });
 
+test("progress uses current metrics without building the search cache", async () => {
+  const vault = await createExperimentMetricProjectionVault();
+  const progress = await showExperimentProgress({ vault, lookup: "sleep-efficiency", asOf: "2026-06-06" });
+  assert.equal(progress.progress.adherence.completedSessions, 3);
+  assert.equal(existsSync(path.join(vault, ".runtime/projections/query.sqlite")), false);
+});
+
 test("experiment progress usecases read metrics from the query metric projection", async () => {
   const vaultRoot = await createExperimentMetricProjectionVault();
 
@@ -809,6 +817,7 @@ test("experiment progress cards stay available when biomarker direction assets a
       vault: vaultRoot,
     });
 
+    assert.equal(existsSync(path.join(vaultRoot, ".runtime/projections/query.sqlite")), false);
     assert.equal(result.card.movers.length, 1);
     assert.equal(result.card.movers[0]?.sentiment, "neutral");
     assert.equal(

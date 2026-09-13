@@ -3,6 +3,7 @@ import {
   createConnectionSource,
   createEmptyJunctionBackfillProvider,
   createJob,
+  createJobFromInput,
   createJunctionJobContext,
   createJunctionProvider,
   createJunctionSvixWebhook,
@@ -1497,7 +1498,9 @@ test("Junction polling updates source projection and imports bounded summary/tim
     }),
   );
 
+  assert.equal(typeof result.metadataPatch?.junctionTemporalSweepV1, "string");
   assert.deepEqual(result.metadataPatch, {
+    junctionTemporalSweepV1: result.metadataPatch?.junctionTemporalSweepV1,
     junctionHistoricalBackfillStatus: "coverage_v3_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
@@ -2178,6 +2181,19 @@ test("Junction polling skips optional unavailable resource collections", async (
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
+  const temporalChildren = initialResult.scheduledJobs?.filter((job) =>
+    job.payload?.temporalAuthorityTimeZone
+  ) ?? [];
+  for (const child of temporalChildren.filter((job) =>
+    job.payload?.windowStart === temporalChildren[0]?.payload?.windowStart
+  )) {
+    const execution = executeJunctionJob(provider, context, createJobFromInput(child));
+    if (child.payload?.resource === "stress_level") {
+      await assert.rejects(execution);
+    } else {
+      await execution;
+    }
+  }
   const result = await executeFullJobTimeseriesContinuations({
     context,
     initialResult,
@@ -2247,11 +2263,12 @@ test("Junction polling skips optional unavailable resource collections", async (
     ],
   );
   assert.deepEqual(result.metadataPatch, {
+    junctionTemporalSweepV1: initialResult.metadataPatch?.junctionTemporalSweepV1,
     junctionProfileSummaryCheckedAt: "2026-04-04T00:00:00.000Z",
     junctionProfileSummaryNormalizationRevision: 2,
-    junctionSkippedResourceTotal: 13,
+    junctionSkippedResourceTotal: 12,
     junctionSkippedSummaryTotal: 5,
-    junctionSkippedTimeseriesTotal: 8,
+    junctionSkippedTimeseriesTotal: 7,
     junctionSkippedResourceJobCount: 1,
     junctionSkippedResourceLastAt: "2026-04-04T00:00:00.000Z",
     junctionSkippedResourceLast: "timeseries.stress_level.422.unsupported",

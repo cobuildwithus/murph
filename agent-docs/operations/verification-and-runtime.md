@@ -55,6 +55,21 @@ should run `gh pr ready <number>` only after focused local proof and the parent
 candidate review are complete, the exact pushed head is the intended merge
 candidate, and no PR-specific edit is already known. That Ready event starts
 the expensive workflows automatically.
+
+Before pushing a new head to an existing owned PR, explicitly mark it Draft
+and make the push conditional on that command succeeding. From the PR's owned
+branch, use `gh pr ready <number> --undo && git push origin HEAD` (substitute the
+verified PR remote when it is not `origin`). This ordering applies to remediation,
+base reconciliation, and final plan-closeout commits as well as routine edits.
+After the push succeeds, verify the remote head and re-establish the candidate
+conditions above before running `gh pr ready <number>`.
+
+Do not rely on the delayed controller to mark Draft before calling Ready. If
+Ready is called while the PR still appears ready, it emits no new readiness
+event; the delayed reset can then leave the candidate Draft with no expensive
+CI run. If a head was already pushed while Ready, first allow its reset to
+complete, confirm the same head is Draft, and then mark it Ready after verification.
+
 The expensive pull-request workflows admit only non-draft `opened` or
 `reopened` events and `ready_for_review`; they do not run expensive proof on
 `synchronize`. A synchronize event that occurred while the PR was ready records
@@ -76,15 +91,16 @@ populating `workflow_run.pull_requests`. Zero, ambiguous, or mismatched
 resolutions fail closed before the sole draft mutation. A
 synchronize event that occurred while the PR was already draft produces no
 consumable receipt, so delayed handling cannot undo a newer Ready action on the
-unchanged SHA. After a later push returns the PR to draft, re-establish the
-candidate conditions above before marking it Ready again to prove the new exact
-head. A skipped job is not exact-head success, and required check names remain
-bound to the jobs that actually execute the proof.
+unchanged SHA. A skipped job is not exact-head success, and required check names
+remain bound to the jobs that actually execute the proof.
 
 `PR Evidence` intentionally remains lightweight on `synchronize` so policy and
 rendered-evidence metadata stay current. `Pull Request Head Change` also runs on
 `synchronize`, but owns only the event-time-ready read-only receipt consumed by
-the draft-reset controller. Main-branch push CI is unchanged.
+the draft-reset controller. Required main-branch proof uses SHA-scoped concurrency:
+merging another commit cannot cancel a candidate's tests. PR proof continues to
+supersede by PR number. The separate Web admission group finishes its active run
+and retains only the newest pending candidate.
 
 Eligible Markdown-only pull requests keep the same protected PR and required
 context owners while replacing runtime-heavy proof with narrowly scoped positive
@@ -126,7 +142,7 @@ while the documentation job remains skipped.
 
 The Markdown-only classifier is a pull-request CI optimization only. Production
 Web does not reuse it: every `main` commit must create a managed Vercel
-production candidate so the exact-main Deployment Check always has a matching
+production candidate so the exact-candidate Deployment Check always has a matching
 artifact to admit. `apps/web/vercel.json` therefore has no ignore command and
 enables Git deployment only for `main`.
 
@@ -435,6 +451,15 @@ pnpm --dir packages/hosted-local-harness exec vitest run \
   test/junction-wearable-canary-workflow.test.ts
 ```
 
+Before starting the live wearable Vitest child, the E2E suite builds Web through
+`pnpm --dir apps/web build:hosted-local`. This uses the existing production build
+memory limits and synthetic smoke environment, with the same isolated smoke
+output suffix consumed by the harness's production-start selector. Compilation
+finishes before Web, Worker, Temporal, storage, and browser processes run
+together. Provider login and Junction/Kernel credentials remain restricted to
+the isolated test child. A failed build stops the suite before that child starts.
+Ordinary hermetic suites retain their existing preparation path.
+
 The private executor must expose and smoke-check the exact workspace Codex CLI installed
 by the frozen root dependency graph before hosted-local model-catalog
 preparation. That workspace pin currently matches the independently owned
@@ -473,13 +498,39 @@ checkbox, and frame counts so a protected-main run can distinguish an
 unchanged action surface from same-route DOM progression without exposing
 provider content. The runner re-reads the route after collecting those counts;
 if Garmin departs during that asynchronous sample, the current route wins over
-the stale pre-sample observation and the callback proof continues. After the
-persisted-state reload, the runner waits for the page load boundary before
-clicking Disconnect so server-rendered state cannot outrun its client handler.
+the stale pre-sample observation and the callback proof continues. Before each
+persisted-state assertion, the runner requires a successful HTTP response and the expected same-origin `/connect` destination. Initial navigation
+and reload have distinct failure stages; HTTP errors report only their numeric
+status and redirects use a fixed message. Neither can pass through matching
+markup or be hidden by the full connection-state wait. After the persisted-state
+reload, the runner waits for the page load boundary before clicking Disconnect
+so server-rendered state cannot outrun its client handler.
+Authorization-click failures retain the fixed action and timeout category,
+plus allowlisted host-family and route categories sampled before and after the
+click. The runner captures the original stage and diagnostic message before
+browser cleanup; cleanup cannot replace that evidence with a closed-page
+location. These diagnostics contain no raw URL, provider page text, or screenshot.
 Changes to the checkbox count or availability, the exact `Save` count or state,
 or the paired progression markers fail closed; unrelated negative actions and
 links are not part of the selection gate. The CI boundary keeps manual
 authorization disabled and challenge handling fail-closed.
+The browser also emits fixed execution-stage messages through its existing stdout
+pipe. The parent forwards only complete messages from the harness-owned closed
+vocabulary, including browser cleanup substeps; raw child output remains buffered.
+While a live wearable scenario runs, the parent reports numeric host CPU
+parallelism, one-minute load, and available/free/total memory every 30 seconds and stops
+that heartbeat after scenario cleanup. In GitHub Actions it also emits up to ten
+notice annotations containing the last validated stage, elapsed seconds, and the
+same numeric measurements. The first sample is immediate, then every four
+minutes or sooner when available memory falls below half its last annotated
+value. This respects the runner's per-step notice limit and makes bounded
+progress available separately from the final log archive. These observations cannot satisfy or
+replace connection, canonical-data, or cleanup proof. They contain no page,
+provider, account, URL, or environment content. Focused progress/privacy proof:
+`pnpm --dir packages/hosted-local-harness exec vitest run --config vitest.config.ts
+--no-coverage test/wearable-progress.test.ts` plus the existing Web wearable
+browser suite, whose pending-cleanup case requires progress before browser exit.
+
 The profile can reuse a still-valid Garmin session, while an expired session
 falls back to the dedicated login. See
 Kernel's [SSH tunnel](https://www.kernel.sh/docs/browsers/ssh),

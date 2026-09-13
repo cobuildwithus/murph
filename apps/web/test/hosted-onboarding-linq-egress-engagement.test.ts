@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { buildHostedMemberChannelWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
 import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
@@ -135,7 +136,9 @@ describe("hosted Linq egress authority", () => {
     );
   });
 
-  it("allows explicit signup welcome first contact for the bound runtime user", async () => {
+  it.each(["signup-welcome:member-1", "signup-welcome:member-1:linq", buildHostedMemberChannelWelcomeDeliveryIdentity({
+    memberId: "member-1", channel: "linq", destinationLookupKey: "synthetic-phone-identity",
+  })])("allows explicit signup welcome first contact for the bound runtime user: %s", async (welcomeKey) => {
     const prisma = createPrismaStub({
       identityPhone: "+15550100001",
       homeLinePhone: "+15550100099",
@@ -144,7 +147,7 @@ describe("hosted Linq egress authority", () => {
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: false,
       fromPhoneNumber: "+15550100099",
-      idempotencyKey: "signup-welcome:member-1",
+      idempotencyKey: welcomeKey,
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "+15550100001",
@@ -168,11 +171,13 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
   });
 
-  it("rejects first contact without signup-welcome authority", async () => {
+  it.each(["signup-welcome:member-2", buildHostedMemberChannelWelcomeDeliveryIdentity({
+    memberId: "member-2", channel: "linq", destinationLookupKey: "synthetic-phone-identity",
+  })])("rejects first contact without signup-welcome authority: %s", async (welcomeKey) => {
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: false,
       fromPhoneNumber: "+15550100099",
-      idempotencyKey: "signup-welcome:member-2",
+      idempotencyKey: welcomeKey,
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(createPrismaStub({
         identityPhone: "+15550100001",
@@ -184,6 +189,19 @@ describe("hosted Linq egress authority", () => {
       code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
       httpStatus: 403,
     });
+  });
+
+  it("rejects a destination welcome sent from a different assigned line", async () => {
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: false, fromPhoneNumber: "+15550100098", memberId: "member-1",
+      idempotencyKey: buildHostedMemberChannelWelcomeDeliveryIdentity({
+        memberId: "member-1", channel: "linq", destinationLookupKey: "synthetic-phone-identity",
+      }),
+      prisma: asRuntimeEngagementPrisma(createPrismaStub({
+        identityPhone: "+15550100001", homeLinePhone: "+15550100099",
+      })),
+      target: "+15550100001", targetKind: "participant",
+    })).rejects.toMatchObject({ code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH", httpStatus: 403 });
   });
 
   it("rejects participant sends without signup-welcome idempotency even when identity and source line match", async () => {

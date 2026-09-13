@@ -12,9 +12,6 @@ const ROOT_FAST_PATH_FILES = new Set([
   "AGENTS.md",
   "ARCHITECTURE.md",
   "README.md",
-  "package.json",
-  "tsconfig.json",
-  "vitest.config.ts",
 ]);
 const ROOT_FAST_PATH_DIRS = new Set([
   "agent-docs",
@@ -23,6 +20,9 @@ const ROOT_FAST_PATH_DIRS = new Set([
   "scripts",
 ]);
 const ROOT_GLOBAL_FILES = new Set([
+  "package.json",
+  "tsconfig.json",
+  "vitest.config.ts",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
 ]);
@@ -45,10 +45,6 @@ function isRepoInternalFastPathFile(filePath) {
     return true;
   }
 
-  if (/^tsconfig\.[^.]+\.json$/u.test(path.posix.basename(filePath))) {
-    return true;
-  }
-
   return (
     filePath.startsWith("agent-docs/")
     || filePath.startsWith("config/")
@@ -57,8 +53,12 @@ function isRepoInternalFastPathFile(filePath) {
   );
 }
 
+function isGlobalRootFile(filePath) {
+  return ROOT_GLOBAL_FILES.has(filePath) || /^tsconfig\.[^.]+\.json$/u.test(filePath);
+}
+
 function isCliArtifactSensitiveFile(filePath) {
-  return ROOT_GLOBAL_FILES.has(filePath) || CLI_ARTIFACT_SENSITIVE_FILES.has(filePath);
+  return isGlobalRootFile(filePath) || CLI_ARTIFACT_SENSITIVE_FILES.has(filePath);
 }
 
 function workspaceDirFromFile(filePath) {
@@ -184,7 +184,7 @@ async function buildDiffScopeSummary(explicitChangedFiles) {
 
     nonWorkspaceFiles.push(filePath);
 
-    if (ROOT_GLOBAL_FILES.has(filePath)) {
+    if (isGlobalRootFile(filePath)) {
       globalRootChange = true;
     }
   }
@@ -227,8 +227,11 @@ async function buildDiffScopeSummary(explicitChangedFiles) {
     .filter((metadata) => metadata !== undefined)
     .sort((left, right) => left.dir.localeCompare(right.dir));
   const runVerifyCli = changedFiles.some((filePath) => isCliArtifactSensitiveFile(filePath));
+  const runFixtureSmoke = changedFiles.some((filePath) =>
+    isGlobalRootFile(filePath) || filePath.startsWith("e2e/smoke/")
+  );
   const runRepoToolsTests = changedFiles.some((filePath) =>
-    filePath.startsWith("config/") || filePath.startsWith("scripts/")
+    isGlobalRootFile(filePath) || filePath.startsWith("config/") || filePath.startsWith("scripts/")
   );
   const typecheckDirs = [];
   const testDirs = [];
@@ -270,6 +273,7 @@ async function buildDiffScopeSummary(explicitChangedFiles) {
     noChanges: changedFiles.length === 0,
     nonWorkspaceFiles: uniqueSorted(nonWorkspaceFiles),
     repoInternalFastPath,
+    runFixtureSmoke,
     runRepoToolsTests,
     runVerifyCli,
     testDirs: uniqueSorted(testDirs),
@@ -302,6 +306,7 @@ function printShellSummary(summary) {
   printShellScalar("diff_repo_internal_fast_path", summary.repoInternalFastPath ? "1" : "0");
   printShellScalar("diff_global_root_change", summary.globalRootChange ? "1" : "0");
   printShellScalar("diff_has_non_workspace_files", summary.hasNonWorkspaceFiles ? "1" : "0");
+  printShellScalar("diff_run_fixture_smoke", summary.runFixtureSmoke ? "1" : "0");
   printShellScalar("diff_run_verify_cli", summary.runVerifyCli ? "1" : "0");
   printShellScalar("diff_run_repo_tools_tests", summary.runRepoToolsTests ? "1" : "0");
   printShellArray("diff_changed_files", summary.changedFiles);

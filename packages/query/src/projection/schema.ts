@@ -24,7 +24,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 24: Store bounded per-workout stream features in wearable activity summaries.
 // 25: Omit audit rows and unused indexes from rebuilt query stores.
 // 26: Rebuild wearable provider rows after public query slug canonicalization.
-export const QUERY_PROJECTION_SQLITE_VERSION = 26;
+// 27: Rebuild goal targets through the canonical target schema.
+export const QUERY_PROJECTION_SQLITE_VERSION = 27;
 
 export interface QueryProjectionLocation {
   absolutePath: string;

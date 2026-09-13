@@ -20,6 +20,17 @@ Member private phone fields remain encrypted through the hosted member secure-bo
 
 The provider inventory client intentionally stays on the existing web-owned Linq HTTP boundary instead of adding a second SDK/client surface for one read-only operation. Its parser is pinned to the documented `phone_numbers[].phone_number`, `phone_numbers[].id`, and `phone_numbers[].reputation.status` / `reputation.reason` shape, with `health_status` accepted only as the documented deprecated status alias.
 
+Inventory replacement prepares at most 250 lines once, before opening any
+database transaction. The existing Serializable owner attempts the complete
+atomic replacement at most three times, recognizing both Prisma-wrapped
+statement conflicts and direct adapter SQLSTATE conflicts at commit. A retry
+waits 50–250 milliseconds after rollback, outside the transaction, so the two
+possible waits add at most 500 milliseconds without changing the default
+transaction timeout. Cancellation interrupts the wait and is checked before
+each new attempt. Unrecognized errors remain terminal; retries do not refetch
+the provider snapshot or repeat crypto preparation. Callers supplying their own
+transaction retain responsibility for retrying that entire transaction.
+
 ## Deploy Order
 
 1. Stop before any production migration, deployment, rollback freeze, dry run,

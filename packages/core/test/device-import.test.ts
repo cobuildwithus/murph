@@ -8493,6 +8493,32 @@ test("importDeviceBatch retains member edits while advancing provider siblings a
     && event.externalRef?.version === "2026-06-12T09:00:00.000Z"
     && eventObservationValue(event) === 3
   ));
+
+  // Advancing only the provider version must use the same revision ordering
+  // without replacing the member's correction or inventing another event.
+  const unchangedContent = buildInput({
+    editedValue: 3,
+    importedAt: "2026-06-13T10:00:00.000Z",
+    siblingValue: 12,
+    version: "2026-06-13T09:00:00.000Z",
+  });
+  assert.equal((await importDeviceBatch(unchangedContent)).applied, true);
+  const advancedRows = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  assert.deepEqual(
+    advancedRows.filter((event) => event.id === edited.id).slice(-2).map((event) => ({
+      source: event.source,
+      revision: event.lifecycle?.revision,
+      value: eventObservationValue(event),
+    })),
+    [
+      { source: "device", revision: 7, value: 3 },
+      { source: "manual", revision: 8, value: 7 },
+    ],
+  );
+  assert.equal(collapseEventSpines(advancedRows).length, 2);
+  const beforeReplay = await snapshotVaultFiles(vaultRoot);
+  assert.equal((await importDeviceBatch(unchangedContent)).applied, false);
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
 });
 
 test("importDeviceBatch scopes no-id Junction profile predecessor claims to one source instance", async () => {

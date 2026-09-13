@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-13",
+  "order": 100,
+  "item": {
+    "id": "connected-source-sync-admission",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "New device connections can sync sooner",
+    "summary": "Connecting another source under the same provider no longer has to wait for older history retries.",
+    "details": "Previously queued history keeps its place and retry schedule while the new connection starts syncing.",
+    "relevanceTags": ["devices"],
+    "sourcePullRequests": [3388]
+  }
+}

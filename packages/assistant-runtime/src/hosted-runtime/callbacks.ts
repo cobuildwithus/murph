@@ -21,6 +21,7 @@ import {
   HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
   HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
   sanitizeHostedExecutionStructuredLogDetails,
+  isHostedMemberSignupWelcomeDeliveryIdentity,
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
@@ -1018,6 +1019,19 @@ function isHostedReviewedAssistantAskFallbackPayload(input: {
     && (input.media?.length ?? 0) === 0;
 }
 
+async function supersedeHostedAssistantAskCompletionAndRetry(input: {
+  intentId: string;
+  now: Date;
+  vaultRoot: string;
+}): Promise<never> {
+  await persistHostedAssistantAskFallbackSupersession(input);
+  throw new VaultCliError(
+    "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
+    "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
+    { retryable: true },
+  );
+}
+
 async function persistHostedAssistantAskFallbackSupersession(input: {
   intentId: string;
   now: Date;
@@ -1209,12 +1223,33 @@ function hostedDirectEmailReplySupersedesSignupWelcome(
   reply: HostedAssistantDeliveryPayload,
   welcome: HostedAssistantDeliveryPayload,
 ): boolean {
-  // The vault is already scoped to one member. Direct email therefore identifies
-  // the same conversation even when a recovered welcome has no provider thread yet.
+  // Legacy welcomes predate destination identity. New welcomes must not be
+  // suppressed by a conversation held on a different, previously linked email.
   return reply.channel?.trim() === "email"
     && welcome.channel?.trim() === "email"
     && reply.threadIsDirect === true
-    && welcome.threadIsDirect === true;
+    && welcome.threadIsDirect === true
+    && hostedEmailWelcomeSharesRecipient(reply, welcome);
+}
+
+function isHostedDestinationEmailWelcome(payload: HostedAssistantDeliveryPayload): boolean {
+  return /^signup-welcome:[^:]+:email:[a-f0-9]{64}$/u.test(payload.idempotencyKey);
+}
+
+function hostedEmailWelcomeSharesRecipient(
+  reply: HostedAssistantDeliveryPayload,
+  welcome: HostedAssistantDeliveryPayload,
+): boolean {
+  if (!isHostedDestinationEmailWelcome(welcome)) return true;
+  const recipient = readHostedDirectEmailTargetRecipient(welcome);
+  return recipient !== null && recipient === readHostedDirectEmailTargetRecipient(reply);
+}
+
+function readHostedDirectEmailTargetRecipient(payload: HostedAssistantDeliveryPayload): string | null {
+  const target = payload.explicitTarget ?? payload.bindingDeliveryTarget;
+  const thread = parseHostedEmailThreadTarget(target);
+  const recipient = thread ? thread.to.length === 1 ? thread.to[0] : null : target;
+  return recipient?.trim().toLowerCase() || null;
 }
 
 function hostedAssistantReplyTargetsSignupWelcomeRecipient(
@@ -1258,14 +1293,7 @@ function isHostedSignupWelcomeDeliveryPayload(
 function isHostedSignupWelcomeDeliveryIdempotencyKey(
   idempotencyKey: string | null | undefined,
 ): boolean {
-  const normalized = idempotencyKey?.trim() ?? "";
-  if (!normalized.startsWith(HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX)) {
-    return false;
-  }
-  const tokenTarget = normalized.slice(
-    HOSTED_SIGNUP_WELCOME_DELIVERY_IDEMPOTENCY_PREFIX.length,
-  );
-  return tokenTarget.length > 0 && !tokenTarget.includes(":");
+  return isHostedMemberSignupWelcomeDeliveryIdentity(idempotencyKey);
 }
 
 function hostedAssistantDeliveryRecipientKeysOverlap(
@@ -2654,20 +2682,13 @@ function isHostedLinqProviderOutcomeAmbiguous(error: unknown): boolean {
       method === "POST"
       && error.context.failureStage === "http"
       && typeof status === "number"
-      && status >= 200
-      && status <= 299
     ) {
-      return true;
-    }
-    if (
-      method === "POST"
-      && error.context.failureStage === "http"
-      && typeof status === "number"
-      && status >= 400
-      && status <= 499
-      && status !== 408
-    ) {
-      return false;
+      if (status >= 200 && status <= 299) {
+        return true;
+      }
+      if (status >= 400 && status <= 499 && status !== 408) {
+        return false;
+      }
     }
   }
   if (
@@ -2795,18 +2816,14 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     ? input.intent
     : null;
   const authority = input.intent?.externalThreadRouteAuthority ?? null;
-  if (
-    !authority
-    && !reviewedCompletion
-    && (
-      payload.threadIsDirect === true
-      || !input.intent?.automationAuthority
-    )
-  ) {
-    return null;
-  }
   if (!authority) {
-    if (!input.intent?.automationAuthority && !reviewedCompletion) {
+    if (
+      !reviewedCompletion
+      && (
+        payload.threadIsDirect === true
+        || !input.intent?.automationAuthority
+      )
+    ) {
       return null;
     }
     throw new VaultCliError(
@@ -2888,16 +2905,11 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
         { retryable: false },
       );
     }
-    await persistHostedAssistantAskFallbackSupersession({
+    await supersedeHostedAssistantAskCompletionAndRetry({
       intentId: reviewedCompletion.intentId,
       now: new Date(),
       vaultRoot: input.vaultRoot,
     });
-    throw new VaultCliError(
-      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-      { retryable: true },
-    );
   }
   return target;
 }
@@ -2942,6 +2954,13 @@ async function resolveHostedDirectEmailRecipientAtProviderEntry(input: {
       "Hosted direct email delivery requires current verified-email authority before provider work.",
       { retryable: true },
     ));
+  }
+  if (isHostedSignupWelcomeDeliveryPayload(payload)
+    && readHostedDirectEmailTargetRecipient(payload) !== recipient.toLowerCase()) {
+    throw markHostedDeliveryPreProvider(Object.assign(new VaultCliError(
+      "ASSISTANT_CHANNEL_WELCOME_DESTINATION_CHANGED",
+      "Channel welcome destination is no longer the current verified email.",
+    ), { retryable: false }));
   }
   if (input.targetKind === "explicit") {
     return recipient;
@@ -4841,16 +4860,11 @@ function createHostedAssistantLinqSendDependency(input: {
                 { retryable: true },
               );
             }
-            await persistHostedAssistantAskFallbackSupersession({
+            await supersedeHostedAssistantAskCompletionAndRetry({
               intentId: input.intentId,
               now: new Date(),
               vaultRoot: input.vaultRoot,
             });
-            throw new VaultCliError(
-              "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-              "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-              { retryable: true },
-            );
           }
           providerAttempt = {
             attemptedAt: new Date(),
@@ -5126,16 +5140,11 @@ async function prepareHostedReviewedAssistantAskProviderEntry(input: {
     (currentContainsFallbackText && !currentIsFallback)
     || (requestContainsFallbackText && !requestIsFallback)
   ) {
-    await persistHostedAssistantAskFallbackSupersession({
+    await supersedeHostedAssistantAskCompletionAndRetry({
       intentId: input.intentId,
       now: input.now,
       vaultRoot: input.vaultRoot,
     });
-    throw new VaultCliError(
-      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-      { retryable: true },
-    );
   }
   if (current.message !== input.message) {
     throw new VaultCliError(
@@ -5147,16 +5156,11 @@ async function prepareHostedReviewedAssistantAskProviderEntry(input: {
     );
   }
   if (!currentIsFallback && Date.parse(expiresAt) <= input.now.getTime()) {
-    await persistHostedAssistantAskFallbackSupersession({
+    await supersedeHostedAssistantAskCompletionAndRetry({
       intentId: input.intentId,
       now: input.now,
       vaultRoot: input.vaultRoot,
     });
-    throw new VaultCliError(
-      "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
-      "Reviewed Assistant Ask completion changed to its safe fallback before provider delivery.",
-      { retryable: true },
-    );
   }
   return expiresAt;
 }

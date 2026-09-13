@@ -303,7 +303,7 @@ describe("murph.group dynamic tool", () => {
         "question",
       ],
       group_data: [
-        "action", "audience", "confidence", "date", "displayName", "factIndex",
+        "action", "audience", "confidence", "date", "displayName", "factIndex", "freshness",
         "grantId", "message_ref", "metric", "note", "noteType", "permissionText",
         "privateQuestion", "projectionScopes", "standaloneLink", "title", "unit", "value",
       ],
@@ -394,7 +394,7 @@ describe("murph.group dynamic tool", () => {
       Object.keys(
         MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.inputSchema.properties,
       ),
-    ).toEqual(["action", "projectionScopes"]);
+    ).toEqual(["action", "freshness", "projectionScopes"]);
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description.length)
       .toBeLessThanOrEqual(350);
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description)
@@ -811,18 +811,21 @@ describe("murph.group dynamic tool", () => {
     expect(readGroupToolPayload(result)).toEqual(response);
   });
 
-  it.each([
-    ["no message ref", undefined],
-    ["a ref outside the accepted input set", EARLIER_ASSISTANT_INPUT_ID],
-  ])("rejects a group signup link with %s", async (_case, messageRef) => {
+  it.each(
+    ["create_signup_referral_link", "read_usage_referral"].flatMap((action) => [
+      { action, label: "no message ref", messageRef: undefined, authorizerCalls: 0 },
+      { action, label: "a ref outside the accepted input set", messageRef: EARLIER_ASSISTANT_INPUT_ID, authorizerCalls: 0 },
+      { action, label: "an accepted ref without participant authority", messageRef: FRESH_ASSISTANT_INPUT_ID, authorizerCalls: 1 },
+    ]),
+  )("rejects $action with $label", async ({ action, messageRef, authorizerCalls }) => {
     const request = readMurphDynamicToolRequest(groupToolCall({
-      action: "create_signup_referral_link",
+      action,
       ...(messageRef ? { message_ref: messageRef } : {}),
     }));
     if (!request || request.kind !== "group") {
       throw new Error("Expected signup referral request.");
     }
-    const authorizeAcceptedMessageTarget = vi.fn();
+    const authorizeAcceptedMessageTarget = vi.fn(async () => null);
     const groupRequest = vi.fn<GroupToolRequest>();
 
     const result = await executeMurphDynamicToolRequest({
@@ -848,7 +851,13 @@ describe("murph.group dynamic tool", () => {
     });
 
     expect(result.rpcResult.success).toBe(false);
-    expect(authorizeAcceptedMessageTarget).not.toHaveBeenCalled();
+    expect(result.rpcResult.contentItems).toEqual([{
+      type: "inputText",
+      text: action === "create_signup_referral_link"
+        ? "group signup referral links require the exact accepted Message ref from the requesting participant"
+        : "group usage options require the exact accepted Message ref from the requesting participant",
+    }]);
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledTimes(authorizerCalls);
     expect(groupRequest).not.toHaveBeenCalled();
   });
 
@@ -1410,6 +1419,60 @@ describe("murph.group dynamic tool", () => {
     expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
       "unverifiedOwnerContactLabel",
     );
+  });
+
+  it("attaches reporting history to its own projection without inventing device state", async () => {
+    const projectionScopes = [{ projectionKind: "sleep-duration-days.v0" as const }];
+    const freshness = [{ projectionScopeKey: "sleep-duration-days.v0", date: "2026-08-04" }];
+    const groupSharedReadRequest = vi.fn(async () => ({
+      status: "ok" as const, requestedProjectionScopeKeys: ["sleep-duration-days.v0"],
+      members: ["recent", "absent", "new"].map((kind, index) => ({
+        displayName: `Reporter ${index}`, participantId: `participant_${index}`, memberId: `member_${index}`, currentTurnHandles: [],
+        projections: [{ projectionScope: projectionScopes[0]!, projectionScopeKey: "sleep-duration-days.v0",
+          grantStatus: "granted" as const, dataStatus: "available" as const,
+          grantedAt: kind === "new" ? "2026-08-03T00:00:00.000Z" : "2026-07-01T00:00:00.000Z",
+          records: kind === "recent" ? [{ recordKey: "previous", occurredAt: "2026-08-03T00:00:00.000Z",
+            data: { date: "2026-08-03", metricKey: "total-sleep-minutes", value: 435, unit: "minutes" } }] : [],
+        }],
+      })),
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({ action: "read_shared", projectionScopes, freshness }));
+    if (!request) throw new Error("Expected shared read");
+    const result = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, hostedToolContext: createGroupHostedToolContext({ groupSharedReadRequest, groupToolAvailable: false }),
+      nextUsageOrdinal: () => 1, progressDelivery: null, request, vaultRoot: null,
+    });
+    expect(readGroupToolPayload(result)).toMatchObject({ result: { members: ["recent_reporting", "no_recent_reporting", "unknown_history"].map((reportingHistory, index) => ({
+      participantId: `participant_${index}`, projections: { "sleep-duration-days.v0": {
+        reportingGaps: [{ date: "2026-08-04", reportingHistory }],
+      } },
+    })) } });
+    expect(JSON.stringify(readGroupToolPayload(result))).not.toMatch(/disconnected|connectionId/);
+  });
+
+  it("preserves wearable freshness through parsing, execution, and the model result", async () => {
+    const freshness = [{ projectionScopeKey: "sleep-duration-days.v0", date: "2026-08-04" }];
+    const projectionScopes = [{ projectionKind: "sleep-duration-days.v0" as const }];
+    const metadata = { checkedAt: "2026-08-04T14:20:00.000Z", refreshStatus: "requested" as const };
+    const request = readMurphDynamicToolRequest(groupToolCall({ action: "read_shared", projectionScopes, freshness }));
+    expect(request).toMatchObject({ kind: "group", request: { freshness } });
+    if (!request || request.kind !== "group") throw new Error("Expected group read.");
+    const groupSharedReadRequest = vi.fn(async () => ({ status: "ok" as const, members: [], requestedProjectionScopeKeys: ["sleep-duration-days.v0"], freshness: metadata }));
+    const result = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, hostedToolContext: createGroupHostedToolContext({ groupSharedReadRequest, groupToolAvailable: false }),
+      nextUsageOrdinal: () => 1, progressDelivery: null, request, vaultRoot: null,
+    });
+    expect(groupSharedReadRequest).toHaveBeenCalledWith({ projectionScopes, freshness });
+    expect(readGroupToolPayload(result)).toMatchObject({ result: { freshness: metadata } });
+    expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.inputSchema.properties).toHaveProperty("freshness");
+    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties).not.toHaveProperty("freshness");
+    for (const invalid of [
+      { audience: "group_email", freshness },
+      { freshness: [{ ...freshness[0], date: "2026-02-30" }] },
+      { freshness: [{ ...freshness[0], projectionScopeKey: "steps-days.v0" }] },
+    ]) {
+      expect(readMurphDynamicToolRequest(groupToolCall({ action: "read_shared", projectionScopes, ...invalid }))).not.toMatchObject({ kind: "group" });
+    }
   });
 
   it("parses a bounded exact shared-data read without model-supplied authority", () => {

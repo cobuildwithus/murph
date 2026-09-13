@@ -140,7 +140,7 @@ export function noteCliTimingFailure(error: unknown): void {
 }
 
 // Incur may call process.exit before an outer finally executes. Observe the
-// authoritative code, then delegate unchanged; unflushed datagrams can be lost.
+// authoritative code, then delegate unchanged; transport remains best-effort.
 export function isCliTimingActive(): boolean {
   const invocation = invocations.getStore();
   return !!invocation && !invocation.closed && !invocation.collection.closed;
@@ -202,9 +202,10 @@ function finishInvocation(invocation: Invocation): void {
   }] });
 }
 
-/** One loopback datagram per naturally completed subprocess; no await, filesystem,
- * result-channel output, retry or keepalive. Bind early so normal final sends can
- * reach the kernel before process exit. Missing/failed transport is a no-op.
+/** One loopback datagram per subprocess; no await, filesystem, result-channel
+ * output, retry or keepalive. Fixed synchronous lookup lets native bind/send
+ * reach the kernel even immediately before process.exit. Delivery is still
+ * best-effort (including native send-buffer pressure); exits never wait on it.
  */
 function createCliTimingSender(): ((report: CliTiming) => void) | null {
   const endpoint = process.env[CLI_TIMING_ENDPOINT_ENV];
@@ -213,10 +214,15 @@ function createCliTimingSender(): ((report: CliTiming) => void) | null {
   const startedUs = Number(process.hrtime.bigint() / 1_000n);
   let socket: Socket;
   try {
-    socket = createSocket("udp4");
+    socket = createSocket({ type: "udp4",
+      // Even numeric addresses use asynchronous dns.lookup by default. Both
+      // endpoints are source-owned IPv4 loopback; no DNS work is necessary.
+      lookup: (_hostname, _options, callback) => callback(null, "127.0.0.1", 4),
+    });
     socket.unref();
     socket.on("error", () => { try { socket.close(); } catch {} });
-    socket.bind(0, "127.0.0.1");
+    // Avoid cluster's asynchronous shared-handle bind as well.
+    socket.bind({ port: 0, address: "127.0.0.1", exclusive: true });
   } catch { return null; }
   let sent = false;
   return (source) => {

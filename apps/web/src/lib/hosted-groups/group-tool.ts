@@ -1,5 +1,7 @@
 import "server-only";
 
+import { readHostedGroupSharedDataWithFreshness } from "./shared-freshness";
+
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type {
   HostedExecutionAcceptedGroupMessageParticipant,
@@ -141,7 +143,6 @@ import {
   readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx,
   readHostedGroupMembershipsForMember,
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId,
-  readHostedGroupSharedDataByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
   type HostedGroupSummary,
@@ -661,9 +662,10 @@ export async function handleHostedRuntimeGroupTool(
     try {
       return {
         action: "read_shared",
-        result: await readHostedGroupSharedDataByRuntimeMemberId({
+        result: await readHostedGroupSharedDataWithFreshness({
           linqSenderHandles: input.request.linqSenderHandles ?? [],
           projectionScopes: input.request.projectionScopes,
+          freshness: input.request.freshness,
           telegramSenderHandles: input.request.telegramSenderHandles ?? [],
           runtimeMemberId: input.memberId,
         }),

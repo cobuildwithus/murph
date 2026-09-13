@@ -1,6 +1,6 @@
 # Data Model Seams
 
-Last verified: 2026-04-20
+Last verified: 2026-09-10
 
 ## Implemented in this patch
 
@@ -46,8 +46,7 @@ This patch aliases the core type to the contract type instead of keeping a secon
 
 **Why this is simpler:** the write model no longer has two nominal owners for the same persisted record shape.
 
-**Main refactor risk:** `packages/core/src/assessment/storage.ts` still partially reconstructs the record around `assessmentResponseSchema` instead of letting the contract parser own the full persisted object.
-If that cleanup is attempted later, do it after confirming there is no persisted data depending on the looser `relatedIds` handling there.
+New assessment writes now validate the complete normalized record through `assessmentResponseSchema`, including related IDs. Historical ledger reads use a schema-derived read profile that retains the previously accepted arbitrary string links and ignores unknown fields; that profile never authorizes new writes or rewrites append-only evidence. Both paths retain the same core-owned validation error. Tests cover strict writes, raw/manifest/audit roundtrips, and historical read compatibility.
 
 
 ### 4. Keep assistant CLI contract ownership in operator-config
@@ -514,3 +513,10 @@ Web composes event ids or source-specific reason mapping around those builders, 
 The event model is not being restated independently in web, Cloudflare, and assistant-runtime.
 
 **Main failure mode if changed poorly:** moving event construction or parsing back into web or assistant-runtime would recreate the exact parallel-representation drift that other review findings are trying to remove.
+
+
+### 25. Keep goal target interpretation with the canonical schema
+
+`packages/query/src/metrics/goals.ts` uses the contracts-owned `goalMetricTargetSchema` for complete target, evaluation, and selection-policy parsing. The adapter only supplies omitted legacy identity/kind fields and normalizes metric aliases; invalid targets are omitted without silently replacing their evaluation or policy. SQLite target extraction and browser progress use that same adapter. Health metrics retains its dependency-free computation interface.
+
+The existing SQLite projection version and browser replica generation advance when interpretation changes so unchanged canonical goals can rebuild stale results. No canonical schema migration or new persistence owner is required. Focused proof covers policy/default parity, invalid bounds and policies, legacy adaptation, SQLite/browser target parity, and rebuilding carried SQLite targets without changing the goal document.

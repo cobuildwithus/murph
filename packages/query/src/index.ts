@@ -683,3 +683,8 @@ export async function summarizeWearableSourceHealthRuntime(
 export * from "./scheduled-logs.ts";
 
 export { resolveMealNutritionGoals, type MealNutritionGoalContext, type NutritionTargetResolution } from "./meal-nutrition-goals.ts";
+
+export async function readExperimentQuerySource(vaultRoot: string) {
+  const mod = await import("./experiment-query-source.ts");
+  return mod.readExperimentQuerySource(vaultRoot);
+}

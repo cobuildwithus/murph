@@ -1,3 +1,4 @@
+import { nutritionCardAttachmentGuidance } from '../assistant/nutrition-card-introduction.js'
 import { parseDynamicToolArguments } from './dynamic-tools/dynamic-tool-wrapper.js'
 import {
   completeDynamicToolFailureDiagnostics,
@@ -41,6 +42,8 @@ import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
+  parseHostedGroupSharedFreshnessRequirements,
+  getHostedGroupWearableReportingGaps,
   HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
@@ -130,6 +133,7 @@ import {
   type AssistantHostedGroupSharedMember,
   type AssistantHostedGroupSharedProjection,
   type AssistantHostedGroupSharedReadResponse,
+  type AssistantHostedGroupSharedReadRequest,
   type AssistantHostedGroupSharedReader,
   type AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
@@ -742,6 +746,10 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .object({
       action: z.literal('read_shared'),
       audience: z.literal('group_email').optional(),
+      freshness: z.array(z.object({
+        projectionScopeKey: z.string().min(1).max(191),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+      }).strict()).min(1).max(21).optional(),
       projectionScopes: z
         .array(groupVaultShareProjectionScopeSchema)
         .min(1)
@@ -755,6 +763,16 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         ),
     })
     .strict()
+    .refine((request) => {
+      if (request.freshness === undefined) return true
+      if (request.audience !== undefined) return false
+      try {
+        parseHostedGroupSharedFreshnessRequirements(request.freshness, request.projectionScopes)
+        return true
+      } catch {
+        return false
+      }
+    }, { message: 'freshness requires exact requested wearable scopes and dates in an ordinary shared read', path: ['freshness'] })
     .refine(
       (request) =>
         request.audience === 'group_email'
@@ -1280,6 +1298,7 @@ type MurphGroupToolRequest =
     >
   | {
       action: 'read_shared'
+      freshness?: readonly { projectionScopeKey: string; date: string }[]
       audience?: 'group_email'
       projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
     }
@@ -3367,7 +3386,7 @@ async function dispatchMurphDynamicToolRequest(
         vaultRoot: input.vaultRoot ?? null,
       })
       return {
-        ...toolTextResult(true, 'response card attached'),
+        ...toolTextResult(true, nutritionCardAttachmentGuidance(card)),
         responseCardPatch: { card },
       }
     }
@@ -4465,6 +4484,7 @@ function groupSharedWorkoutsModelProjection(
 
 function groupSharedModelResult(
   result: AssistantHostedGroupSharedReadResponse,
+  requirements?: AssistantHostedGroupSharedReadRequest['freshness'],
 ) {
   if (result.status === 'unavailable') {
     return {
@@ -4480,6 +4500,7 @@ function groupSharedModelResult(
     }
   }
   return {
+    ...(result.freshness ? { freshness: result.freshness } : {}),
     members: result.members.map((member) => ({
       // Empty handles and a null name carried no information but were
       // serialized for every member on every read.
@@ -4499,6 +4520,7 @@ function groupSharedModelResult(
             ? { grantedAt: projection.grantedAt }
             : {}),
           records: projection.records,
+          ...(requirements ? { reportingGaps: getHostedGroupWearableReportingGaps(projection, requirements) } : {}),
           status: groupSharedProjectionStatus(projection),
         },
       ])),
@@ -4912,6 +4934,7 @@ function groupAccessOfferModelResult(response: GroupAccessOfferHostResponse) {
 }
 
 async function executeGroupSharedRead(input: {
+  abortSignal?: AbortSignal | null
   hostedToolContext: AssistantHostedToolContext | null
   request: Extract<MurphGroupToolRequest, { action: 'read_shared' }>
   turnState: MurphGroupSharedReadTurnState | null
@@ -4927,8 +4950,9 @@ async function executeGroupSharedRead(input: {
   try {
     const result = await groupSharedReader.request({
       projectionScopes: input.request.projectionScopes,
-    })
-    const modelResult = groupSharedModelResultText(groupSharedModelResult(result))
+      ...(input.request.freshness ? { freshness: input.request.freshness } : {}),
+    }, ...(input.abortSignal ? [{ signal: input.abortSignal }] : []))
+    const modelResult = groupSharedModelResultText(groupSharedModelResult(result, input.request.freshness))
     recordGroupSharedReadProof({
       capacityPartial: modelResult.capacityPartial,
       result,
@@ -4938,7 +4962,8 @@ async function executeGroupSharedRead(input: {
       true,
       modelResult.text,
     )
-  } catch {
+  } catch (error) {
+    if (input.abortSignal?.aborted) throw error;
     if (input.turnState) {
       input.turnState.invalid = true
     }
@@ -5169,6 +5194,263 @@ function resolveGroupJournalHostRequest(
   }
 }
 
+type PreparedGroupAvatar = {
+  request: HostedRuntimeGroupToolRequest;
+  usageDraft: AssistantProviderUsageDraft | null;
+  generatedAvatarCapture: {
+    savedCaptureId: string | null;
+    savedImageRef: string;
+  } | null;
+};
+
+async function prepareGroupAvatarToolRequest(
+  input: Omit<ExecuteGroupToolInput, "request"> & {
+    request: Extract<MurphGroupToolRequest, {
+      action: "share_contact_card" | "set_chat_avatar";
+      avatar: unknown;
+    }>;
+  },
+  groupTool: NonNullable<AssistantHostedToolContext["groupTool"]>,
+): Promise<PreparedGroupAvatar | MurphDynamicToolExecutionResult> {
+  let contactCardShareKey: string | null = null;
+  if (input.request.action === "share_contact_card") {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null;
+    if (
+      userActionScope?.conversationScope !== "direct" ||
+      userActionScope.acceptedInputIds.length === 0
+    ) {
+      return toolTextResult(
+        false,
+        "personalized contact cards require a fresh user request in a personal direct conversation",
+        'authority_rejected',
+      );
+    }
+    // Refuse a route that can never carry the attachment before paying for
+    // generation, capture, and publication. The post-generation binding below
+    // still owns the authoritative thread.
+    const routeStatus = groupTool.directAttachmentRouteStatus?.() ?? null;
+    if (routeStatus && routeStatus.status !== "ok") {
+      return toolTextResult(
+        true,
+        safeToolPayloadText({
+          action: "share_contact_card",
+          result: routeStatus,
+        }),
+      );
+    }
+    contactCardShareKey = userActionScope.acceptedInputIds.at(-1) ?? null;
+    if (!contactCardShareKey) {
+      return toolTextResult(
+        false,
+        "personalized contact cards require fresh user-sourced input for this turn",
+        'authority_rejected',
+      );
+    }
+  } else {
+    let preflight: Extract<
+      HostedRuntimeGroupToolResponse,
+      { action: "preflight_set_chat_avatar" }
+    >;
+    try {
+      const preflightRequest = { action: "preflight_set_chat_avatar" } as const;
+      const preflightResult = input.abortSignal
+        ? await groupTool.request(preflightRequest, {
+            signal: input.abortSignal,
+          })
+        : await groupTool.request(preflightRequest);
+      if (preflightResult.action !== "preflight_set_chat_avatar") {
+        return groupAvatarUnavailableToolResult(
+          "group_avatar_preflight_unavailable",
+        );
+      }
+      preflight = preflightResult;
+    } catch {
+      return groupAvatarUnavailableToolResult(
+        "group_avatar_preflight_unavailable",
+      );
+    }
+    if (preflight.result.status !== "ok") {
+      return toolTextResult(
+        true,
+        safeToolPayloadText({
+          action: "set_chat_avatar",
+          result: preflight.result,
+        }),
+      );
+    }
+  }
+  const prepared = await prepareGroupAvatarRuntimeRequest({
+    abortSignal: input.abortSignal,
+    // Contact-card replays keep the accepted-input identity; group avatar
+    // requests retain their tool-call identity.
+    captureRequestId: contactCardShareKey ?? input.toolCallId,
+    captureScope: contactCardShareKey !== null
+      ? "contact-card-avatar"
+      : "group-avatar",
+    env: input.env,
+    fetchImpl: input.fetchImpl,
+    hostedToolContext: input.hostedToolContext,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    nextUsageOrdinal: input.nextUsageOrdinal,
+    request: { action: "set_chat_avatar", avatar: input.request.avatar },
+    vaultRoot: input.vaultRoot,
+  });
+  if (!prepared.rpcSuccess) {
+    return {
+      ...toolFailureMetadata(prepared),
+      rpcResult: {
+        contentItems: [{ text: prepared.rpcText, type: "inputText" }],
+        success: false,
+      },
+      usageDraft: prepared.usageDraft ?? null,
+    };
+  }
+  const request: HostedRuntimeGroupToolRequest = contactCardShareKey !== null
+    ? {
+        action: "share_contact_card",
+        contactCardImageUrl: prepared.request.groupChatIconUrl,
+        contactCardShareKey,
+      }
+    : prepared.request;
+  const usageDraft = prepared.usageDraft ?? null;
+  const generatedAvatarCapture = prepared.savedImageRef
+    ? {
+        savedCaptureId: prepared.savedCaptureId ?? null,
+        savedImageRef: prepared.savedImageRef,
+      }
+    : null;
+  return { request, usageDraft, generatedAvatarCapture };
+}
+
+async function prepareCurrentSenderGroupAsk(
+  input: Omit<ExecuteGroupToolInput, "request"> & {
+    request: Extract<MurphGroupToolRequest, { action: "ask_current_sender" }>;
+  },
+): Promise<MurphDynamicToolExecutionResult | {
+  request: HostedRuntimeGroupToolRequest;
+  currentSenderGroupPreviewSent: boolean;
+}> {
+  let currentSenderGroupPreviewSent = false;
+  const userActionScope =
+    input.hostedToolContext?.currentUserActionScope?.() ?? null;
+  if (
+    userActionScope?.conversationScope !== "group" ||
+    !userActionScope.acceptedInputIds.includes(input.request.messageRef)
+  ) {
+    return toolTextResult(
+      false,
+      "current-sender request requires the selected accepted message in this group turn",
+      'authority_rejected',
+    );
+  }
+  const decisionByMessageRef =
+    input.groupSharedReadTurnState?.currentSenderDecisionByMessageRef;
+  if (!decisionByMessageRef) {
+    return toolTextResult(
+      false,
+      "current-sender decision authority is unavailable for this turn",
+      'authority_rejected',
+    );
+  }
+  const decision = currentSenderTurnDecisionForGroupRequest(input.request);
+  const claim = decisionByMessageRef.get(input.request.messageRef);
+  if (!claim) {
+    return toolTextResult(
+      false,
+      "current-sender decision was not claimed at server request intake",
+      'authority_rejected',
+    );
+  }
+  if (claim.decision !== decision) {
+    return toolTextResult(
+      false,
+      "current-sender request conflicts with an earlier decision for this Message",
+      'conflict',
+    );
+  }
+  if (input.request.audience === "group" && claim.groupNotice === null) {
+    claim.groupNotice = sendCurrentSenderGroupNotice({
+      deliveryContextOrdinal: input.deliveryContextOrdinal,
+      messageRef: input.request.messageRef,
+      progressDelivery: input.progressDelivery,
+    });
+  }
+  if (input.request.audience === "group") {
+    const previewSent = claim.groupNotice ? await claim.groupNotice : false;
+    if (!previewSent) {
+      return toolTextResult(
+        false,
+        "group sharing is unavailable because the required advance notice could not be delivered",
+        'unavailable',
+      );
+    }
+    currentSenderGroupPreviewSent = true;
+  }
+  const request: HostedRuntimeGroupToolRequest = {
+    action: "ask_current_sender",
+    ...(input.request.audience === undefined
+      ? {}
+      : { audience: input.request.audience }),
+    mode: input.request.mode,
+    origin: {
+      assistantInputId: input.request.messageRef,
+      kind: "accepted_input",
+      sessionId: userActionScope.originSessionId,
+    },
+  };
+  return { request, currentSenderGroupPreviewSent };
+}
+
+async function prepareGroupReferralRequest(
+  input: Omit<ExecuteGroupToolInput, "request"> & {
+    request: Extract<MurphGroupToolRequest, {
+      action: "create_signup_referral_link" | "read_usage_referral";
+    }>;
+  },
+): Promise<HostedRuntimeGroupToolRequest | MurphDynamicToolExecutionResult> {
+  const userActionScope =
+    input.hostedToolContext?.currentUserActionScope?.() ?? null;
+  if (input.request.action === "create_signup_referral_link") {
+    if (!userActionScope || userActionScope.acceptedInputIds.length === 0) {
+      return toolTextResult(
+        false,
+        "signup referral links require a fresh explicit user request",
+        'authority_rejected',
+      );
+    }
+    if (userActionScope.conversationScope === "direct") {
+      return { action: "create_signup_referral_link" };
+    }
+    if (userActionScope.conversationScope !== "group") {
+      return toolTextResult(
+        false,
+        "signup referral links require a verified direct or group request",
+        'authority_rejected',
+      );
+    }
+  } else if (userActionScope?.conversationScope !== "group") {
+    return { action: "read_usage_referral" };
+  }
+
+  const messageRef = input.request.messageRef;
+  const rejectionText = input.request.action === "create_signup_referral_link"
+    ? "group signup referral links require the exact accepted Message ref from the requesting participant"
+    : "group usage options require the exact accepted Message ref from the requesting participant";
+  if (!messageRef || !userActionScope.acceptedInputIds.includes(messageRef)) {
+    return toolTextResult(false, rejectionText, 'authority_rejected');
+  }
+  const participant = await authorizeDynamicToolParticipant({
+    authorizer: input.authorizeAcceptedMessageTarget,
+    deliveryContextOrdinal: input.deliveryContextOrdinal,
+    messageRef,
+  });
+  if (!participant) {
+    return toolTextResult(false, rejectionText, 'authority_rejected');
+  }
+  return { action: input.request.action, participant };
+}
+
 async function executeGroupTool(
   input: ExecuteGroupToolInput,
 ): Promise<MurphDynamicToolExecutionResult> {
@@ -5184,6 +5466,7 @@ async function executeGroupTool(
       });
     }
     return executeGroupSharedRead({
+      abortSignal: input.abortSignal,
       hostedToolContext: input.hostedToolContext,
       request: input.request,
       turnState: input.groupSharedReadTurnState,
@@ -5224,10 +5507,7 @@ async function executeGroupTool(
 
   let request: HostedRuntimeGroupToolRequest;
   let usageDraft: AssistantProviderUsageDraft | null = null;
-  let generatedAvatarCapture: {
-    savedCaptureId: string | null;
-    savedImageRef: string;
-  } | null = null;
+  let generatedAvatarCapture: PreparedGroupAvatar["generatedAvatarCapture"] = null;
   const journalResolution = resolveGroupJournalHostRequest(input);
   if (journalResolution.kind === "result") {
     return journalResolution.result;
@@ -5259,114 +5539,14 @@ async function executeGroupTool(
     isPreparedContactCardRequest(input.request) ||
     isPreparedGroupAvatarRequest(input.request)
   ) {
-    let contactCardShareKey: string | null = null;
-    if (input.request.action === "share_contact_card") {
-      const userActionScope =
-        input.hostedToolContext?.currentUserActionScope?.() ?? null;
-      if (
-        userActionScope?.conversationScope !== "direct" ||
-        userActionScope.acceptedInputIds.length === 0
-      ) {
-        return toolTextResult(
-          false,
-          "personalized contact cards require a fresh user request in a personal direct conversation",
-          'authority_rejected',
-        );
-      }
-      // Refuse a route that can never carry the attachment before paying for
-      // generation, capture, and publication. The post-generation binding below
-      // still owns the authoritative thread.
-      const routeStatus = groupTool.directAttachmentRouteStatus?.() ?? null;
-      if (routeStatus && routeStatus.status !== "ok") {
-        return toolTextResult(
-          true,
-          safeToolPayloadText({
-            action: "share_contact_card",
-            result: routeStatus,
-          }),
-        );
-      }
-      contactCardShareKey = userActionScope.acceptedInputIds.at(-1) ?? null;
-      if (!contactCardShareKey) {
-        return toolTextResult(
-          false,
-          "personalized contact cards require fresh user-sourced input for this turn",
-          'authority_rejected',
-        );
-      }
-    } else {
-      let preflight: Extract<
-        HostedRuntimeGroupToolResponse,
-        { action: "preflight_set_chat_avatar" }
-      >;
-      try {
-        const preflightRequest = { action: "preflight_set_chat_avatar" } as const;
-        const preflightResult = input.abortSignal
-          ? await groupTool.request(preflightRequest, {
-              signal: input.abortSignal,
-            })
-          : await groupTool.request(preflightRequest);
-        if (preflightResult.action !== "preflight_set_chat_avatar") {
-          return groupAvatarUnavailableToolResult(
-            "group_avatar_preflight_unavailable",
-          );
-        }
-        preflight = preflightResult;
-      } catch {
-        return groupAvatarUnavailableToolResult(
-          "group_avatar_preflight_unavailable",
-        );
-      }
-      if (preflight.result.status !== "ok") {
-        return toolTextResult(
-          true,
-          safeToolPayloadText({
-            action: "set_chat_avatar",
-            result: preflight.result,
-          }),
-        );
-      }
+    const prepared = await prepareGroupAvatarToolRequest(
+      { ...input, request: input.request },
+      groupTool,
+    );
+    if ("rpcResult" in prepared) {
+      return prepared;
     }
-    const prepared = await prepareGroupAvatarRuntimeRequest({
-      abortSignal: input.abortSignal,
-      // Contact-card replays keep the accepted-input identity; group avatar
-      // requests retain their tool-call identity.
-      captureRequestId: contactCardShareKey ?? input.toolCallId,
-      captureScope: contactCardShareKey !== null
-        ? "contact-card-avatar"
-        : "group-avatar",
-      env: input.env,
-      fetchImpl: input.fetchImpl,
-      hostedToolContext: input.hostedToolContext,
-      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
-      nextUsageOrdinal: input.nextUsageOrdinal,
-      request: { action: "set_chat_avatar", avatar: input.request.avatar },
-      vaultRoot: input.vaultRoot,
-    });
-    if (!prepared.rpcSuccess) {
-      return {
-        ...toolFailureMetadata(prepared),
-        rpcResult: {
-          contentItems: [{ text: prepared.rpcText, type: "inputText" }],
-          success: false,
-        },
-        usageDraft: prepared.usageDraft ?? null,
-      };
-    }
-    request = contactCardShareKey !== null
-      ? {
-          action: "share_contact_card",
-          contactCardImageUrl: prepared.request.groupChatIconUrl,
-          contactCardShareKey,
-        }
-      : prepared.request;
-    usageDraft = prepared.usageDraft ?? null;
-    generatedAvatarCapture = prepared.savedImageRef
-      ? {
-          savedCaptureId: prepared.savedCaptureId ?? null,
-          savedImageRef: prepared.savedImageRef,
-        }
-      : null;
+    ({ request, usageDraft, generatedAvatarCapture } = prepared);
   } else if (
     input.request.action === "ask" || input.request.action === "handoff"
   ) {
@@ -5403,73 +5583,14 @@ async function executeGroupTool(
           originAssistantInputId,
         };
   } else if (input.request.action === "ask_current_sender") {
-    const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null;
-    if (
-      userActionScope?.conversationScope !== "group" ||
-      !userActionScope.acceptedInputIds.includes(input.request.messageRef)
-    ) {
-      return toolTextResult(
-        false,
-        "current-sender request requires the selected accepted message in this group turn",
-        'authority_rejected',
-      );
+    const prepared = await prepareCurrentSenderGroupAsk({
+      ...input,
+      request: input.request,
+    });
+    if ("rpcResult" in prepared) {
+      return prepared;
     }
-    const decisionByMessageRef =
-      input.groupSharedReadTurnState?.currentSenderDecisionByMessageRef;
-    if (!decisionByMessageRef) {
-      return toolTextResult(
-        false,
-        "current-sender decision authority is unavailable for this turn",
-        'authority_rejected',
-      );
-    }
-    const decision = currentSenderTurnDecisionForGroupRequest(input.request);
-    const claim = decisionByMessageRef.get(input.request.messageRef);
-    if (!claim) {
-      return toolTextResult(
-        false,
-        "current-sender decision was not claimed at server request intake",
-        'authority_rejected',
-      );
-    }
-    if (claim.decision !== decision) {
-      return toolTextResult(
-        false,
-        "current-sender request conflicts with an earlier decision for this Message",
-        'conflict',
-      );
-    }
-    if (input.request.audience === "group" && claim.groupNotice === null) {
-      claim.groupNotice = sendCurrentSenderGroupNotice({
-        deliveryContextOrdinal: input.deliveryContextOrdinal,
-        messageRef: input.request.messageRef,
-        progressDelivery: input.progressDelivery,
-      });
-    }
-    if (input.request.audience === "group") {
-      const previewSent = claim.groupNotice ? await claim.groupNotice : false;
-      if (!previewSent) {
-        return toolTextResult(
-          false,
-          "group sharing is unavailable because the required advance notice could not be delivered",
-          'unavailable',
-        );
-      }
-      currentSenderGroupPreviewSent = true;
-    }
-    request = {
-      action: "ask_current_sender",
-      ...(input.request.audience === undefined
-        ? {}
-        : { audience: input.request.audience }),
-      mode: input.request.mode,
-      origin: {
-        assistantInputId: input.request.messageRef,
-        kind: "accepted_input",
-        sessionId: userActionScope.originSessionId,
-      },
-    };
+    ({ request, currentSenderGroupPreviewSent } = prepared);
   } else if (input.request.action === "ask_member") {
     if (!invocationScope) {
       return toolTextResult(
@@ -5531,87 +5652,18 @@ async function executeGroupTool(
             originAssistantInputId,
           }
         : input.request;
-  } else if (input.request.action === "create_signup_referral_link") {
-    const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null;
-    if (!userActionScope || userActionScope.acceptedInputIds.length === 0) {
-      return toolTextResult(
-        false,
-        "signup referral links require a fresh explicit user request",
-        'authority_rejected',
-      );
+  } else if (
+    input.request.action === "create_signup_referral_link" ||
+    input.request.action === "read_usage_referral"
+  ) {
+    const prepared = await prepareGroupReferralRequest({
+      ...input,
+      request: input.request,
+    });
+    if ("rpcResult" in prepared) {
+      return prepared;
     }
-    if (userActionScope.conversationScope === "direct") {
-      request = { action: "create_signup_referral_link" };
-    } else if (userActionScope.conversationScope === "group") {
-      const messageRef = input.request.messageRef;
-      if (
-        !messageRef ||
-        !userActionScope.acceptedInputIds.includes(messageRef)
-      ) {
-        return toolTextResult(
-          false,
-          "group signup referral links require the exact accepted Message ref from the requesting participant",
-          'authority_rejected',
-        );
-      }
-      const participant = await authorizeDynamicToolParticipant({
-        authorizer: input.authorizeAcceptedMessageTarget,
-        deliveryContextOrdinal: input.deliveryContextOrdinal,
-        messageRef,
-      });
-      if (!participant) {
-        return toolTextResult(
-          false,
-          "group signup referral links require the exact accepted Message ref from the requesting participant",
-          'authority_rejected',
-        );
-      }
-      request = {
-        action: "create_signup_referral_link",
-        participant,
-      };
-    } else {
-      return toolTextResult(
-        false,
-        "signup referral links require a verified direct or group request",
-        'authority_rejected',
-      );
-    }
-  } else if (input.request.action === "read_usage_referral") {
-    const userActionScope =
-      input.hostedToolContext?.currentUserActionScope?.() ?? null;
-    if (userActionScope?.conversationScope !== "group") {
-      request = { action: "read_usage_referral" };
-    } else {
-      const messageRef = input.request.messageRef;
-      if (
-        !messageRef ||
-        !userActionScope.acceptedInputIds.includes(messageRef)
-      ) {
-        return toolTextResult(
-          false,
-          "group usage options require the exact accepted Message ref from the requesting participant",
-          'authority_rejected',
-        );
-      }
-      const participant = await authorizeDynamicToolParticipant({
-        authorizer: input.authorizeAcceptedMessageTarget,
-        deliveryContextOrdinal: input.deliveryContextOrdinal,
-        messageRef,
-      });
-      if (!participant) {
-        return toolTextResult(
-          false,
-          "group usage options require the exact accepted Message ref from the requesting participant",
-          'authority_rejected',
-        );
-      }
-      request = {
-        action: "read_usage_referral",
-        participant,
-      };
-    }
+    request = prepared;
   } else if (input.request.action === "revoke_own_email_share") {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null;
@@ -7440,16 +7492,7 @@ function parseGroupArguments(
     return { ok: true, request: currentSenderRequest };
   }
   if (parsed.args.action === "read_shared") {
-    return {
-      ok: true,
-      request: {
-        action: "read_shared",
-        ...(parsed.args.audience === undefined
-          ? {}
-          : { audience: parsed.args.audience }),
-        projectionScopes: parsed.args.projectionScopes,
-      },
-    };
+    return { ok: true, request: parsed.args };
   }
   if (parsed.args.action === "send_email") {
     return { ok: true, request: parsed.args };

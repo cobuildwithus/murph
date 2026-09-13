@@ -160,16 +160,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     );
     expect(outboxLogIndex).toBeGreaterThanOrEqual(0);
     expect(finishLogIndex).toBeGreaterThan(outboxLogIndex);
-    expect(
-      mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.maintainAssistantAutoReplyRouteState.mock.invocationCallOrder[0] ?? 0,
-    );
-    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledWith({
-      shouldYield: shouldYieldBackgroundMaintenance,
-      signal: backgroundMaintenanceController.signal,
-      vault: "/tmp/murph-vault",
-    });
+    expect(mocks.maintainAssistantAutoReplyRouteState).not.toHaveBeenCalled();
   });
 
   it("waits for optional product feedback only after a queue-only foreground reply is sent", async () => {
@@ -3088,8 +3079,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       vaultRoot: "/tmp/murph-vault",
     });
     expect(callOrder).toEqual([
-      "pending-index-read",
       "delivery-terminalized",
+      "pending-index-read",
       "pending-index-read-follow-up",
     ]);
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(2);
@@ -4954,7 +4945,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       now: () => "2026-04-27T00:09:00.000Z",
     }));
 
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested", "assistant.ask.completed"],
+      }),
+    );
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
@@ -5036,7 +5032,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         signal: expect.any(AbortSignal),
       }),
     );
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested", "assistant.ask.completed"],
+      }),
+    );
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expectAssistantLaneCallWithoutDeviceSyncOptions({
       freshAssistantInputIds: ["ain_00000000000000000000000000000001"],

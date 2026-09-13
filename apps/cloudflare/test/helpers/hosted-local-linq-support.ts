@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   createServer,
@@ -62,6 +62,48 @@ const linqAttachmentDownloadBasePath = "/attachment-downloads";
 const hostedLocalLinqObservedRequestWaitTimeoutMs = 180_000;
 const hostedLocalRunnerProviderHost = "host.docker.internal";
 export const HOSTED_LOCAL_LINQ_API_TOKEN = "linq-local-test-token";
+export async function postHostedLocalLinqWebhook(input: {
+  event: Record<string, unknown>;
+  secret: string;
+  webBaseUrl: string;
+}): Promise<Response> {
+  const body = JSON.stringify(input.event);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = createHmac("sha256", input.secret)
+    .update(`${timestamp}.${body}`)
+    .digest("hex");
+  const request: RequestInit = {
+    body,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "x-webhook-signature": `sha256=${signature}`,
+      "x-webhook-timestamp": timestamp,
+    },
+    method: "POST",
+  };
+  const send = () => fetch(
+    `${input.webBaseUrl}/api/hosted-onboarding/linq/webhook`,
+    request,
+  );
+  const response = await send();
+  if (response.status !== 503) return response;
+
+  const payload: unknown = await response.clone().json().catch(() => null);
+  const error = typeof payload === "object" && payload !== null && "error" in payload
+    ? payload.error
+    : null;
+  if (
+    typeof error !== "object" || error === null
+    || !("code" in error) || error.code !== "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED"
+    || !("retryable" in error) || error.retryable !== true
+  ) {
+    return response;
+  }
+  // A concurrent route update can exhaust the handler's preparation retry.
+  // Redeliver the identical signed event once; persistent failures remain visible.
+  return send();
+}
+
 // Linq's production client makes three attempts for retry-safe POSTs. The
 // controls span that provider-local loop so one logical send fails. The
 // post-accept control hides acceptance; only the actual provider idempotency

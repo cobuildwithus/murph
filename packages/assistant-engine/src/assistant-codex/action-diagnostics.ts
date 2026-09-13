@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer'
+import { cliTimingFailureCode, cliTimingFailureStage, type CliFailureTiming } from '@murphai/runtime-state/cli-timing'
 
 import { classifyToolFailureCode, type ToolErrorCategory, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 
@@ -8,10 +9,11 @@ import type {
 } from '../assistant/issue-reporting.js'
 import type {
   CodexCommandFamily,
+  CodexCommandAttribution,
 } from './command-family.js'
 import {
   resolveCodexCommandFamily,
-  resolveCodexVaultCliCommandArgv,
+  resolveCodexCommandAttribution,
 } from './command-family.js'
 import {
   isCodexActionStructurallyFailed,
@@ -57,8 +59,7 @@ type BytesBucket =
   | '10_100kb'
   | 'gt_100kb'
 
-type TrackedCommandDiagnostic = {
-  vaultCli: boolean
+type TrackedCommandDiagnostic = CodexCommandAttribution & {
   commandOrdinal: number
   commandFamily: CodexCommandFamily
 }
@@ -147,8 +148,7 @@ export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueT
     normalizedEvent: CodexNormalizedEvent,
   ): TrackedCommandDiagnostic => ({
     commandOrdinal: nextCommandOrdinal(),
-    commandFamily: resolveDiagnosticCommandFamily(normalizedEvent),
-    vaultCli: isVaultCliCommandEvent(normalizedEvent),
+    ...resolveDiagnosticCommand(normalizedEvent),
   })
 
   return {
@@ -205,10 +205,7 @@ export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueT
         ? {
             commandOrdinal:
               startedDiagnostic?.commandOrdinal ?? nextCommandOrdinal(),
-            commandFamily: resolveDiagnosticCommandFamily(
-              input.normalizedEvent,
-            ),
-            vaultCli: isVaultCliCommandEvent(input.normalizedEvent),
+            ...resolveDiagnosticCommand(input.normalizedEvent),
           }
         : startedDiagnostic ?? nextCommandDiagnostic(input.normalizedEvent)
       const exitCode = readCommandExitCode({
@@ -615,6 +612,9 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
           ? {
               commandFamily: input.commandDiagnostic.commandFamily,
               commandOrdinal: input.commandDiagnostic.commandOrdinal,
+              commandAttribution: input.commandDiagnostic.commandAttribution,
+              ...(input.commandDiagnostic.vaultCliCommand
+                ? { vaultCliCommand: input.commandDiagnostic.vaultCliCommand } : {}),
               ...commandFailureCategory(input.commandDiagnostic, item),
               ...(input.commandDiagnostic.commandFamily === 'search'
                 ? { recoveredAfterFailure: false }
@@ -651,35 +651,54 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
   }
 }
 
-function readVaultCliErrorCategory(
+type VaultCliFailure = {
+  category: ToolErrorCategory
+  attribution: 'recognized' | 'unknown_code' | 'missing_output' | 'oversized_output' | 'unstructured_output'
+  code?: CliFailureTiming['code']
+  stage?: CliFailureTiming['stage']
+}
+
+function readVaultCliFailure(
   item: Record<string, unknown> | null,
-): ToolErrorCategory {
+): VaultCliFailure {
   const output = readFirstString(item?.aggregatedOutput, item?.aggregated_output)
+  if (output === null || output.length === 0) {
+    return { category: 'unknown', attribution: 'missing_output' }
+  }
   if (
-    output === null
-    || output.length > VAULT_CLI_ERROR_OUTPUT_MAX_BYTES
+    output.length > VAULT_CLI_ERROR_OUTPUT_MAX_BYTES
     || Buffer.byteLength(output, 'utf8') > VAULT_CLI_ERROR_OUTPUT_MAX_BYTES
   ) {
-    return 'unknown'
+    return { category: 'unknown', attribution: 'oversized_output' }
   }
 
   try {
     // CLI entry/formatting owns both direct and --full-output JSON envelopes.
     // Parse the entire bounded output, never an excerpt or nested error prose.
     const envelope = asRecord(JSON.parse(output))
-    const error = envelope?.ok === false
+    if (envelope === null) {
+      return { category: 'unknown', attribution: 'unstructured_output' }
+    }
+    const error = envelope.ok === false
       ? asRecord(envelope.error)
-      : envelope?.ok === undefined && envelope?.error === undefined ? envelope : null
+      : envelope.ok === undefined && envelope.error === undefined ? envelope : null
     if (
       typeof error?.code !== 'string'
       || typeof error.message !== 'string'
       || (error.retryable !== undefined && typeof error.retryable !== 'boolean')
     ) {
-      return 'unknown'
+      return { category: 'unknown', attribution: 'unstructured_output' }
     }
-    return classifyToolFailureCode(error.code, error.stage)
+    const code = cliTimingFailureCode(error.code)
+    const stage = cliTimingFailureStage(error.stage)
+    return {
+      category: classifyToolFailureCode(error.code, error.stage),
+      attribution: code === 'unknown' ? 'unknown_code' : 'recognized',
+      ...(code === 'unknown' ? {} : { code }),
+      ...(stage === 'unknown' ? {} : { stage }),
+    }
   } catch {
-    return 'unknown'
+    return { category: 'unknown', attribution: 'unstructured_output' }
   }
 }
 
@@ -700,17 +719,23 @@ function completedActionFailureDiagnostic(
 function commandFailureCategory(
   command: TrackedCommandDiagnostic,
   item: Record<string, unknown> | null,
-): Record<string, ToolErrorCategory> {
+): Record<string, string> {
   if (!command.vaultCli) return {}
-  const category = readVaultCliErrorCategory(item)
-  return { errorCategory: category, vaultCliErrorCategory: category }
+  const failure = readVaultCliFailure(item)
+  return {
+    errorCategory: failure.category,
+    vaultCliErrorCategory: failure.category,
+    vaultCliErrorAttribution: failure.attribution,
+    ...(failure.code ? { vaultCliErrorCode: failure.code } : {}),
+    ...(failure.stage ? { vaultCliErrorStage: failure.stage } : {}),
+  }
 }
 
-function isVaultCliCommandEvent(event: CodexNormalizedEvent): boolean {
-  return event.kind === 'status_item' && resolveCodexVaultCliCommandArgv({
-    allowKnownShellWrapper: true,
-    commandLabel: event.commandLabel,
-  }) !== null
+function resolveDiagnosticCommand(event: CodexNormalizedEvent) {
+  const commandFamily = resolveDiagnosticCommandFamily(event)
+  return { commandFamily, ...resolveCodexCommandAttribution({
+    commandLabel: event.kind === 'status_item' ? event.commandLabel : null,
+  }) }
 }
 
 function resolveDiagnosticCommandFamily(

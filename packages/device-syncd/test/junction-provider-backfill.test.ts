@@ -17,6 +17,7 @@ import {
   executeFullJobTimeseriesContinuations,
   executeJunctionFullJob,
   executeJunctionJob,
+  executeTemporalAuthorityChildren,
   resolveJunctionTarget,
 } from "./junction-provider.harness.ts";
 
@@ -134,7 +135,7 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
     },
   });
 
-  await executeJunctionJob(
+  const narrowResult = await executeJunctionJob(
     provider,
     createJunctionJobContext({
       account: createAccount({
@@ -198,14 +199,12 @@ test("Junction provider keeps hourly fidelity catch-up narrow and daily correcti
   );
   assert.deepEqual(
     narrowTimeseriesWindows.filter(([start, end]) => start !== end),
-    [
-      ["2026-04-01T00:00:00.000Z", "2026-04-02T00:00:00.000Z"],
-      ["2026-04-01T00:00:00.000Z", "2026-04-02T00:00:00.000Z"],
-    ],
+    [],
   );
   assert.equal(profileSearchParams.has("start_date"), false);
   assert.equal(profileSearchParams.has("end_date"), false);
-  assert.equal(importedSnapshots.length, 3);
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(narrowResult.scheduledJobs?.filter((job) => job.payload?.temporalAuthorityTimeZone).length, 14);
 
   requests.length = 0;
   importedSnapshots.length = 0;
@@ -321,6 +320,8 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
+  assert.equal(importedSnapshots.length, 0, "The root queues complete-day authority without inline imports.");
+  await executeTemporalAuthorityChildren({ context, initialResult, provider });
   await executeFullJobTimeseriesContinuations({ context, initialResult, provider });
 
   const requestedTimeseriesResources = requests
@@ -338,7 +339,7 @@ test("Junction omitted timeseries config uses the code-owned defaults", async ()
     [...new Set(requestedTimeseriesResources)].sort(),
     [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
   );
-  assert.equal(importedSnapshots.length, 2);
+  assert.equal(importedSnapshots.length, 14);
 });
 
 test("Junction programmatic timeseries overrides fetch exactly the requested resources", async () => {
@@ -572,11 +573,11 @@ test("Junction page-heavy timeseries adapt to a smaller complete window before t
     context,
     createJobFromInput(hourlyContinuation),
   );
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 48);
   assert.equal(importedSnapshots.length, 1);
   assert.deepEqual(hourlyResult.scheduledJobs?.[0]?.payload, {
     emptyBackfillAttempts: 1,
-    timeseriesCursor: "2026-04-02T01:00:00.000Z",
+    timeseriesCursor: "2026-04-02T16:00:00.000Z",
     timeseriesResourceCursor: "heartrate",
     timeseriesWindowHours: 1,
     windowEnd: "2026-04-03T00:00:00.000Z",
@@ -715,12 +716,8 @@ test("Junction cancellation retains the deterministic timeseries continuation", 
     context,
     createJobFromInput(continuation, 1),
   );
-  assert.deepEqual(retryResult.scheduledJobs?.[0]?.payload, {
-    timeseriesCursor: "2026-04-02T00:00:00.000Z",
-    timeseriesResourceCursor: "hrv",
-    windowEnd: "2026-04-03T00:00:00.000Z",
-    windowStart: "2026-04-01T00:00:00.000Z",
-  });
+  assert.equal(retryResult.scheduledJobs, undefined);
+  assert.equal(requests.filter((url) => url.includes("/v2/timeseries/")).length, 3);
   assert.equal(
     requests.filter((url) => url.includes("/v2/user/providers/")).length,
     1,

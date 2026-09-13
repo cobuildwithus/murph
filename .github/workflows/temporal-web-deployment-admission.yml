@@ -7,7 +7,7 @@ on:
 
 # Vercel must configure the admission job below as a production Deployment
 # Check. The build may complete while this workflow runs, but the production
-# domains must not move until this exact-main compatibility proof succeeds.
+# domains must not move until this exact-candidate compatibility proof succeeds.
 # Its protected environment also owns the non-secret digest of the production
 # Temporal target expected by the private release proof.
 permissions:
@@ -15,7 +15,8 @@ permissions:
 
 concurrency:
   group: temporal-web-deployment-admission
-  cancel-in-progress: true
+  # Finish the active candidate; coalesce waiting pushes to the newest run.
+  cancel-in-progress: false
 
 jobs:
   admission:

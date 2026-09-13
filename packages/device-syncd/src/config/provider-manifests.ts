@@ -194,6 +194,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   reconcile: {
     payload: {
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      reconcileProof: stringJobField({ includeInHostedHint: true }),
       summaryPhaseComplete: booleanJobField({ includeInHostedHint: true }),
       summaryResourceCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),

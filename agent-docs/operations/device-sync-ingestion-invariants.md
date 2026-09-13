@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-08-20
+Last verified: 2026-09-12
 
 ## Purpose
 
@@ -23,9 +23,11 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
 ## Invariants
 
 1. **Pull is a floor, not a fallback.** The scheduled `reconcile`/`backfill`
-   pass fires on cadence unconditionally. It is the sole owner of source
-   projection (`projectJunctionSources`), so `last_seen_at` stays fresh even
-   when only direct imports are happening. Non-floor completions may move
+   pass remains due on cadence independently of webhook traffic. Hosted Web
+   may finish an unchanged check using the checkpointed content preflight below.
+   The runtime floor remains the sole owner of source projection
+   (`projectJunctionSources`); a Web preflight does not claim an import or advance
+   `last_seen_at`. Non-floor completions may move
    `nextReconcileAt` only *earlier* (min-only clamp), never later; a stream of
    webhooks can never starve or defer the floor. Projection does not own source
    admission: it rereads the live source rows and does not mutate a
@@ -42,8 +44,9 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
 2. **Push delivers early; pull guarantees eventually; neither disables the
    other.** A webhook that carries a parseable payload imports inline (early,
    no fetch). The floor still runs later and refetches the same window. Because
-   the merge is idempotent (invariant 4), this overlap is free — so there is no
-   exclusivity logic deciding which path "wins."
+   the merge is idempotent (invariant 4), this overlap is safe, but still costs
+   provider reads and execution. Webhook execution never consults a polling
+   fingerprint to decide whether to import.
 
 3. **Unknown input degrades to fetch, never to silence.** Any webhook branch
    that has "nothing to import right now" — empty payload, unknown
@@ -312,31 +315,39 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    bounds, and precise partial windows do not manufacture instants with the
    worker process timezone. Generic account completion does not satisfy this
    resource-specific proof. For temporal resources, the configured reconcile
-   horizon is clamped to `1..14` authoritative local days. A scheduled
-   reconcile imports the newest eligible day immediately and enqueues each
-   older resource/day coordinate on the existing durable device-job queue,
-   newest day first. Queued or running rows remain the retry and deduplication
-   owner across restart. Succeeded rows remain execution history, not permanent
-   completion proof, because a later scheduled pull can observe newly admitted
-   sources or newly available provider data. Enqueueing any temporal child
-   sweeps every terminal row in the account's temporal dedupe namespace inside
-   the same transaction, so retained terminal history stays bounded by the
-   current horizon even as coordinates roll out of it or the vault timezone
-   changes. Failed, dead, or yielded work never
-   grants day authority, and any terminal row may be recreated by a later
-   reconcile. A failed, unavailable, or yielded immediate
-   resource becomes the same stable resource/day job ahead of the older
-   backlog; a retryable failure does not block an independent temporal sibling.
-   Temporal resource/day children never advance generic account completion.
-   Generic completion is account activity state, not complete-resource or
-   complete-floor coverage, so it never gates ordinary reconcile collection.
-   When a parent also retains ordinary work, its one durable ordinary reconcile
-   follow-up preserves that work without becoming a separate coverage ledger.
-   With two temporal resources, one reconcile therefore performs at most two
-   immediate one-day collections and normally schedules at most 26 older
-   one-resource/one-day jobs. If both immediate resources require durable
-   continuation, the queue bound is 28 resource/day jobs across the full
-   14-day horizon plus at most one ordinary reconcile follow-up, for 29
+   horizon is clamped to `1..14` authoritative local days. Reconciliation queues
+   the whole horizon newest first, with no inline temporal collection. The
+   provider-owned `junctionTemporalSweepV1` metadata hash covers the newest
+   eligible day, timezone, resources, horizon, and stable provider roster and
+   availability. Equivalent hourly passes skip the broad sweep; a changed scope
+   schedules it again. This scheduling marker and its children commit atomically
+   through existing local job completion. Hosted SQLite is excluded from workspace
+   snapshots: the existing retained wake carries the marker with its exact jobs.
+   Control-plane publication keeps the previous marker until an incoming retained
+   wake or the post-checkpoint completion fence proves durable recovery. A crash
+   before checkpoint replays the original root; a cold restore after checkpoint
+   recovers both queued work and suppression under the existing connection epoch.
+   Warm hydration marks a differing local sweep hash as unpublished progress so
+   the accepted comparison baseline remains the actual Web metadata, including
+   after an applied control update loses its transport response.
+   Missing or unrecognized metadata schedules safely. The marker is never health
+   completeness or source authority, and ordinary reconciliation is unchanged.
+   Oxygen/stress data-event execution also schedules affected local days within
+   the rolling feature horizon, plus up to three days awaiting the existing
+   24-hour lag. These future jobs become available only after day end plus lag.
+   An event batch cannot grant day authority: its child fetches the entire day.
+   Existing account execution fencing orders an event received during a fetch
+   after that fetch; enqueue then recreates a terminal day job. Queued/running
+   coordinates coalesce bursts and retain retries through restart. Daily safety
+   sweeps repair missed events and late provider changes. Data outside this
+   feature horizon retains ordinary ingestion rather than expanding temporal
+   recovery indefinitely.
+   Enqueueing any temporal child sweeps terminal rows in that account's temporal
+   namespace inside the same transaction, keeping retained execution history
+   bounded. Succeeded and dead rows can be recreated, while failed, dead, or
+   yielded work never grants authority. Temporal children never advance generic
+   account completion or suppress ordinary collection. Each full sweep schedules
+   at most 28 resource/day jobs plus one ordinary reconcile follow-up, for 29
    serialized rows. Each child performs at most one canonical import transaction,
    while the provider transport independently caps the collection at 100 pages
    and 25,000 records with no more than three attempts for each page request.
@@ -635,6 +646,60 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    flight, `DISCONNECT_IN_PROGRESS` still rejects runtime connection, local
    state, credential, source, and heartbeat mutations under the connection
    lock, without cancelling already accepted credential-free import work.
+
+## Hosted scheduled content preflight
+
+Only the ordinary global due sweep can avoid a container wake using
+`junctionReconcileProofV1`. The provider computes a keyed digest over actual
+summary records, the latest globally closed calendar-day collections normally
+pulled hourly, configuration, provider inventory, and admitted source lifecycle
+facts. Object key and outer collection ordering are ignored; values and nested
+array ordering remain significant. Counts, newest timestamps, and Junction
+introspection never prove absence of changes. No raw provider records are stored
+in control metadata or telemetry.
+
+A bounded scalar proof carries its original rolling summary start, expiry,
+source/configuration binding, digest, and vault timezone. Summary continuations
+carry partial proof in their existing job payload. Only successful completion
+of all ordinary summary/calendar work can write the final local metadata. Web
+publication is withheld until the existing checkpointed wake/completion fence
+proves durable recovery. Warm hydration retains unpublished progress without
+turning it into a hosted baseline; old continuations lacking proof still import.
+
+Web refetches the same summary start through current time, retaining older rows
+rather than shrinking the comparison window. It uses complete collection
+responses and existing calendar filtering. Proof expires at the earliest next
+UTC midnight, global provider-day closure, vault-local midnight, or the next
+fixed-lag temporal-authority boundary across an offset transition. The digest
+also binds the original start, expiry, and timezone, so edited scope cannot
+reuse matching record evidence. Expiry and
+pending scheduler-owned history/recovery cause ordinary execution. New config,
+source lifecycle, or provider inventory changes also require the runtime. A
+future change to comparison/normalization semantics must advance the binding
+version; daily repair remains the independent recovery floor.
+
+The sweeper admits at most five preflights, each with a 20-second provider budget,
+two simultaneous summary units, and existing collection page limits. Web checks
+current member access, consent, connection/source state, dirty payloads, mailbox
+counters, and checkpoint continuation frontier before provider egress and again
+before a cadence-only compare-and-set. Existing member/connection, mailbox
+append, and workspace locks serialize the final decision; provider and securebox
+work stay outside transactions. Missing proof/authority, accepted work, failed or
+incomplete reads, exhausted probe budget, and failed CAS keep the ordinary wake.
+The recovery route intentionally reaches the existing provider registry only
+through this preflight; other control-plane routes and recovery paths retain
+their provider-free package graph. Continuation proof is declared in both the
+provider manifest and the generic hosted job-hint reader's closed field set.
+Changed results use the existing durable scheduled wake and canonical importer;
+that path intentionally refetches instead of adding another payload store.
+
+The sweeper's `preflight` aggregate reports attempted/eligible comparisons,
+reasons, avoided wakes, logical collection reads, decoded record count/bytes,
+provider elapsed time, and outcomes by last-webhook-age bucket. `avoidedWakes`
+counts only successful cadence CAS, not observed equality, cold starts, or
+billing savings. Compare complete unchanged/changed results within each age
+bucket before changing cadence; track timeout, history, missing/expired proof,
+and budget exclusions separately. Pull frequency is unchanged by this feature.
 
 ## Consequences for changes
 

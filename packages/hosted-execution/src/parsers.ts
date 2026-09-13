@@ -231,6 +231,10 @@ export {
   parseHostedWorkspaceState,
 } from "./parsers/runtime-control.ts";
 export {
+  assertHostedRuntimeWebProtocolAdmission,
+  parseHostedExternalThreadRouteAuthorityResponse,
+} from "./parsers/runtime-protocol.ts";
+export {
   parseHostedRuntimeLogEntry,
   parseHostedRuntimeRedactedJson,
   parseHostedRuntimeLogRequest,
