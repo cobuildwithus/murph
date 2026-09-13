@@ -9,6 +9,6 @@
     "summary": "A requested device refresh can run while older history imports wait to retry.",
     "details": "Previously queued history keeps its original retry schedule while the requested refresh runs.",
     "relevanceTags": ["devices"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3397]
   }
 }
