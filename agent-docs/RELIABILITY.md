@@ -2096,6 +2096,13 @@ Last verified: 2026-09-04
   adaptation, workout-stream continuation, or future retry returns to the
   existing queue. The scalar suffix survives restart; failure within a batch
   may replay its bounded canonical prefix through the idempotent importer.
+  Unscoped reconcile batches consolidate lifecycle checks for empty,
+  non-authoritative timeseries windows into one fresh source read before
+  returning any terminal or continuation progress. Nonempty imports retain
+  their fresh checks. Missing or reconnected sources and unavailable final
+  reads fail closed; no source authority is cached across executions. Backfill,
+  source-scoped work, and authoritative empty-day replacements retain their
+  existing checks.
   `summaryResourceCursor`,
   `summaryPhaseComplete`, `timeseriesCursor`, and `timeseriesResourceCursor`
   identify the next complete unit without changing job dedupe identity. The
