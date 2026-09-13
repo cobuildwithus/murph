@@ -5,6 +5,8 @@ import { createHash } from "node:crypto";
 import { readHostedOperationalAlertEmailConfig } from "../hosted-onboarding/operational-alert-email-config";
 import { sendHostedResendPlainTextEmail } from "../hosted-onboarding/resend-plain-text-email";
 
+import { findHostedUsageLimitedPersonalPatternsOccurrences } from "./usage-gate";
+
 const PERSONAL_PATTERNS_AUTOMATION_SLUG = "personal-patterns-update";
 
 type HostedPersonalPatternsRunAlertEntry = {
@@ -15,6 +17,8 @@ type HostedPersonalPatternsRunAlertEntry = {
 
 type HostedPersonalPatternsRunAlert = {
   occurrenceAt: string;
+  observedAt: string;
+  expired: boolean;
 };
 
 export type HostedPersonalPatternsRunAlertOutcome =
@@ -30,19 +34,12 @@ export function hasHostedPersonalPatternsRunAlert(
 
 export async function sendHostedPersonalPatternsRunAlerts(input: {
   entries: readonly HostedPersonalPatternsRunAlertEntry[];
+  userId: string;
   env?: Readonly<Record<string, string | undefined>>;
   sendEmail?: typeof sendHostedResendPlainTextEmail;
 }): Promise<HostedPersonalPatternsRunAlertOutcome> {
-  const occurrenceTimes = [
-    ...new Set(
-      input.entries
-        .flatMap(readPersonalPatternsRunAlert)
-        .map((alert) => alert.occurrenceAt),
-    ),
-  ];
-  if (occurrenceTimes.length === 0) {
-    return "unrelated";
-  }
+  const alerts = input.entries.flatMap(readPersonalPatternsRunAlert);
+  if (alerts.length === 0) return "unrelated";
 
   const emailConfig = readHostedOperationalAlertEmailConfig(
     input.env ?? process.env,
@@ -50,6 +47,21 @@ export async function sendHostedPersonalPatternsRunAlerts(input: {
   if (!emailConfig) {
     return "not_configured";
   }
+
+  let usageLimited = new Set<string>();
+  try {
+    usageLimited = await findHostedUsageLimitedPersonalPatternsOccurrences({
+      userId: input.userId,
+      occurrences: alerts.filter((alert) => alert.expired),
+    });
+  } catch {
+    // Missing diagnostic evidence must not hide an operational failure.
+    console.warn("Personal Patterns usage-pause evidence could not be read.");
+  }
+  const occurrenceTimes = [...new Set(alerts
+    .filter((alert) => !alert.expired || !usageLimited.has(alert.occurrenceAt))
+    .map((alert) => alert.occurrenceAt))];
+  if (occurrenceTimes.length === 0) return "unrelated";
 
   let firstFailure: unknown = null;
   for (const occurrenceAt of occurrenceTimes) {
@@ -120,22 +132,20 @@ function readPersonalPatternsRunAlert(
 
   const eventType = readString(details, "type");
   if (eventType === "cron.occurrence.expired") {
-    return [{
-      occurrenceAt,
-    }];
+    return [{ occurrenceAt, observedAt: entry.at, expired: true }];
   }
 
   if (
     eventType !== "cron.job.completed"
     || readString(details, "failureRunOutcome") !== "failed"
     || readBoolean(details, "failureRetryScheduled") !== false
+    || entry.errorCode === "ASSISTANT_CODEX_USAGE_LIMIT"
+    || readString(details, "failureErrorCode") === "ASSISTANT_CODEX_USAGE_LIMIT"
   ) {
     return [];
   }
 
-  return [{
-    occurrenceAt,
-  }];
+  return [{ occurrenceAt, observedAt: entry.at, expired: false }];
 }
 
 function readRecord(value: unknown): object | null {
