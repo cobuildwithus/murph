@@ -9,6 +9,6 @@
     "summary": "Daily meal checks skip AI processing when no closeout work is pending, and scheduled Journal checks use a lower-cost model.",
     "details": "Murph still processes pending meal photos and finishes interrupted closeouts.",
     "relevanceTags": ["journal", "meals", "usage"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3405]
   }
 }
