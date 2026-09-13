@@ -127,21 +127,32 @@ Last verified: 2026-09-04
   published replica and no pending conversation input, then checks canonical
   goal and distinct-ID counts. A reply alone cannot satisfy this outcome gate.
   Exceptional outcome reads emit at most one best-effort Web `console.warn` with
-  the fixed message `Hosted Linq production canary outcome read failed.` and only
+  the fixed message `Hosted Linq production canary outcome read failed.` and
   a request-local `stage`: `member_lookup` selects the fixed identity;
   `initial_authority` / `final_authority` distinguish the two access checks;
   `initial_readiness` / `final_readiness` cover the local pending-input,
   workspace/freshness and post-decryption race checks (including identity recheck);
   `control_configuration`, `key_generation`, `session_request`, `session_parsing`,
   `decryption`, and `goal_counting` identify their respective existing operations.
-  Stages identify where execution failed, not the exception's cause. Added
-  successful/not-ready work is only literal assignments; diagnostic allocation
-  and emission are failure-only. Exceptions, identifiers, refs, keys, payloads and
-  goal contents are never inspected for or included in this diagnostic. Logging
-  failure still yields the unchanged generic 503. For a bounded natural-traffic
-  query, filter the last 24 hours of Web logs by that exact message and return
-  only counts grouped by these eleven stages; do not invoke extra canaries,
-  poll the endpoint, retry, wake or refresh to collect evidence.
+  Stages identify where execution failed, not the exception's cause. Only
+  `initial_authority` / `final_authority` add the closed `authorityFailureReason`:
+  `access_required`, `member_suspended`, `consent_required`, or `other`. Inspection
+  is strictly limited to a guarded local `HostedOnboardingError` instance check
+  and exact `code` matching against `HOSTED_ACCESS_REQUIRED`,
+  `HOSTED_MEMBER_SUSPENDED`, and `HOSTED_CONSENT_REQUIRED`. Foreign/lookalike and
+  unknown errors, or failures during classification, yield `other`, which narrows
+  no cause and does not imply a database failure. Non-authority exceptions remain
+  completely uninspected. Raw errors, messages, stacks, causes, details,
+  identifiers, refs, keys, payloads and goal contents remain excluded. Existing
+  successful/not-ready paths and their literal stage assignments are unchanged;
+  diagnostic allocation and emission remain failure-only. The
+  four-value reason only refines two of the eleven stages; logging volume stays
+  at most one warning per failed read. Classification or logging failure still
+  yields the unchanged generic 503, with no API or authorization change. For a
+  bounded natural-traffic query, filter the last 24 hours of Web logs by that
+  exact message and return only counts grouped by stage and, at authority stages,
+  the closed reason; do not invoke extra canaries, poll the endpoint, retry, wake
+  or refresh to collect evidence.
 - Protected native iOS and Android hosted E2E controllers run staggered every
   six hours and execute each admitted journey even when the same revision
   previously passed. Provider behavior can change independently of source.

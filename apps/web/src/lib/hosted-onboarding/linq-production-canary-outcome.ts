@@ -11,7 +11,7 @@ import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-e
 import { readHostedMailboxLatestPendingConversationItem } from "@/src/lib/hosted-mailbox/store";
 import { readHostedWorkspace, readHostedWorkspaceBrowserVaultSourceStateHash } from "@/src/lib/hosted-workspace/store";
 
-import { hostedOnboardingError } from "./errors";
+import { HostedOnboardingError, hostedOnboardingError } from "./errors";
 import { readHostedLinqProductionCanaryMemberId } from "./linq-production-canary";
 import { LINQ_PRODUCTION_CANARY_GOAL_TITLE, type LinqProductionCanaryOutcome } from "./linq-production-canary-contract";
 import type { HostedOnboardingReadClient } from "./shared";
@@ -115,10 +115,12 @@ export async function readHostedLinqProductionCanaryOutcome(input: {
         entity.recordClass === "bank" && entity.kind === "goal" && isContractId(entity.id, "goal"))
         .map((entity) => entity.id)).size,
     };
-  } catch {
-    // Never inspect the exception: decryption/control failures can contain private data.
+  } catch (error) {
+    // Only authority failures are classified; all other exceptions stay untouched.
     try {
-      console.warn("Hosted Linq production canary outcome read failed.", { stage });
+      console.warn("Hosted Linq production canary outcome read failed.", {
+        stage, ...readAuthorityFailureDiagnostic(stage, error),
+      });
     } catch {
       // Diagnostic failure must not replace the generic unavailable error.
     }
@@ -128,4 +130,22 @@ export async function readHostedLinqProductionCanaryOutcome(input: {
       message: "The production canary outcome is unavailable.",
     });
   }
+}
+
+function readAuthorityFailureDiagnostic(stage: string, error: unknown): {
+  authorityFailureReason: "access_required" | "member_suspended" | "consent_required" | "other";
+} | undefined {
+  if (stage !== "initial_authority" && stage !== "final_authority") return undefined;
+  try {
+    if (error instanceof HostedOnboardingError) {
+      switch (error.code) {
+        case "HOSTED_ACCESS_REQUIRED": return { authorityFailureReason: "access_required" };
+        case "HOSTED_MEMBER_SUSPENDED": return { authorityFailureReason: "member_suspended" };
+        case "HOSTED_CONSENT_REQUIRED": return { authorityFailureReason: "consent_required" };
+      }
+    }
+  } catch {
+    // Hostile prototype/code access must not prevent the warning or generic 503.
+  }
+  return { authorityFailureReason: "other" };
 }

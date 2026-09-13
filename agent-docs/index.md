@@ -63,6 +63,9 @@ ancestry admission as documented in `operations/verification-and-runtime.md`,
 `references/hosted-temporal-orchestration.md`, `SECURITY.md`, and
 `../apps/web/README.md`. Vercel remains the managed Git promotion owner.
 
+The active canary authority diagnostic plan is
+[`2026-09-13-canary-authority-reason-telemetry.md`](exec-plans/active/2026-09-13-canary-authority-reason-telemetry.md).
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

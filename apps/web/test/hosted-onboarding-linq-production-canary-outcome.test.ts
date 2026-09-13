@@ -22,6 +22,7 @@ vi.mock("@/src/lib/hosted-workspace/store", async (importOriginal) => ({
   readHostedWorkspace: mocks.workspace,
 }));
 
+import * as browserVaultLoader from "@/src/lib/browser-vault/loader";
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonError } from "@/src/lib/hosted-onboarding/http";
 import { LINQ_PRODUCTION_CANARY_GOAL_TITLE } from "@/src/lib/hosted-onboarding/linq-production-canary-contract";
@@ -152,7 +153,6 @@ describe("production canary canonical outcome observer", () => {
 
   it.each([
     { stage: "member_lookup", reads: 1, fail: (error: Error) => mocks.memberId.mockRejectedValueOnce(error) },
-    { stage: "initial_authority", reads: 2, fail: (error: Error) => mocks.authority.mockRejectedValueOnce(error) },
     { stage: "initial_readiness", reads: 3, fail: (error: Error) => mocks.pending.mockRejectedValueOnce(error) },
     { stage: "initial_readiness", reads: 4, fail: (error: Error) => mocks.workspace.mockRejectedValueOnce(error) },
     { stage: "control_configuration", reads: 5, fail: () => mocks.control.mockReturnValueOnce(null) },
@@ -166,7 +166,6 @@ describe("production canary canonical outcome observer", () => {
     { stage: "final_readiness", reads: 9, fail: (error: Error, workspace: HostedWorkspaceRecord) =>
       mocks.workspace.mockResolvedValueOnce(workspace).mockRejectedValueOnce(error) },
     { stage: "final_readiness", reads: 10, fail: (error: Error) => mocks.memberId.mockResolvedValueOnce(memberId).mockRejectedValueOnce(error) },
-    { stage: "final_authority", reads: 11, fail: (error: Error) => mocks.authority.mockResolvedValueOnce(undefined).mockRejectedValueOnce(error) },
   ])("logs only $stage on failure after $reads operations, without retrying", async ({ stage, reads, fail }) => {
     const workspace = await installEncryptedReplica([goal()]);
     const privateError = new Error("synthetic-private-message", { cause: new Error("synthetic-private-cause") });
@@ -179,6 +178,94 @@ describe("production canary canonical outcome observer", () => {
     await expectUnavailable(error);
     expect(JSON.stringify([vi.mocked(console.warn).mock.calls, vi.mocked(console.error).mock.calls]))
       .not.toContain("synthetic-private");
+  });
+
+  describe.each([
+    { stage: "initial_authority", reads: 2 },
+    { stage: "final_authority", reads: 11 },
+  ])("$stage diagnostics", ({ stage, reads }) => {
+    beforeEach(async () => {
+      await installEncryptedReplica([goal()]);
+      if (stage === "final_authority") mocks.authority.mockResolvedValueOnce(undefined);
+    });
+
+    it.each([
+      { code: "HOSTED_ACCESS_REQUIRED", reason: "access_required" },
+      { code: "HOSTED_MEMBER_SUSPENDED", reason: "member_suspended" },
+      { code: "HOSTED_CONSENT_REQUIRED", reason: "consent_required" },
+      { code: "synthetic-private-code", reason: "other" },
+    ])("classifies local $code as $reason without reading private fields", async ({ code, reason }) => {
+      const rejection = new HostedOnboardingError({
+        code, httpStatus: 403, message: "synthetic-private-message",
+        cause: new Error("synthetic-private-cause"), details: { payload: "synthetic-private-details" },
+      });
+      const inspect = vi.fn(() => { throw new Error("synthetic-private-inspection"); });
+      for (const key of ["name", "message", "stack", "cause", "details"]) {
+        Object.defineProperty(rejection, key, { get: inspect });
+      }
+      mocks.authority.mockRejectedValueOnce(rejection);
+      const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+      expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage, authorityFailureReason: reason });
+      expect(console.error).not.toHaveBeenCalled();
+      expectReadOrder(readOrder.slice(0, reads));
+      await expectUnavailable(error);
+      expect(inspect).not.toHaveBeenCalled();
+      expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+    });
+
+    it.each([
+      { failure: "database error", create: () => new Error("synthetic-private-database", { cause: "synthetic-private-cause" }) },
+      { failure: "lookalike object", create: () => ({ code: "HOSTED_ACCESS_REQUIRED", message: "synthetic-private-message" }) },
+      { failure: "foreign error class", create: () => new (class HostedOnboardingError extends Error {
+        readonly code = "HOSTED_MEMBER_SUSPENDED";
+      })("synthetic-private-message") },
+      { failure: "lookalike code getter", create: (inspect: () => never) =>
+        Object.defineProperty({}, "code", { get: inspect }) },
+      { failure: "non-string local code", create: (inspect: () => never) =>
+        Object.defineProperty(new HostedOnboardingError({
+          code: "HOSTED_CONSENT_REQUIRED", httpStatus: 403, message: "synthetic-private-message",
+        }), "code", { value: { [Symbol.toPrimitive]: inspect } }) },
+    ])("reports other for a $failure", async ({ create }) => {
+      const inspect = vi.fn(() => { throw new Error("synthetic-private-inspection"); });
+      mocks.authority.mockRejectedValueOnce(create(inspect));
+      const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+      expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage, authorityFailureReason: "other" });
+      expect(console.error).not.toHaveBeenCalled();
+      expectReadOrder(readOrder.slice(0, reads));
+      await expectUnavailable(error);
+      expect(inspect).not.toHaveBeenCalled();
+      expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+    });
+
+    it.each(["prototype", "code"] as const)("falls back to other when %s inspection throws", async (boundary) => {
+      const rejection = new HostedOnboardingError({
+        code: "HOSTED_CONSENT_REQUIRED", httpStatus: 403, message: "synthetic-private-message",
+      });
+      const inspect = vi.fn(() => { throw new Error("synthetic-private-inspection"); });
+      mocks.authority.mockRejectedValueOnce(boundary === "prototype"
+        ? new Proxy(rejection, { getPrototypeOf: inspect })
+        : Object.defineProperty(rejection, "code", { get: inspect }));
+      const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+      expect(inspect).toHaveBeenCalledTimes(1);
+      expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage, authorityFailureReason: "other" });
+      expect(console.error).not.toHaveBeenCalled();
+      expectReadOrder(readOrder.slice(0, reads));
+      await expectUnavailable(error);
+      expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+    });
+
+    it("preserves the generic 503 when logging a policy outcome throws", async () => {
+      mocks.authority.mockRejectedValueOnce(new HostedOnboardingError({
+        code: "HOSTED_ACCESS_REQUIRED", httpStatus: 403, message: "synthetic-private-message",
+      }));
+      vi.mocked(console.warn).mockImplementation(() => { throw new Error("synthetic-private-logger"); });
+      const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+      expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage, authorityFailureReason: "access_required" });
+      expect(console.error).not.toHaveBeenCalled();
+      expectReadOrder(readOrder.slice(0, reads));
+      await expectUnavailable(error);
+      expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+    });
   });
 
   it.each([
@@ -199,15 +286,17 @@ describe("production canary canonical outcome observer", () => {
     expect(console.error).not.toHaveBeenCalled();
   });
 
-  it("never reads or enumerates the caught exception", async () => {
+  it.each(["session_request", "decryption"] as const)("never inspects a caught %s exception", async (stage) => {
     await installEncryptedReplica([goal()]);
     const inspect = vi.fn(() => { throw new Error("synthetic-private-inspection"); });
-    mocks.session.mockRejectedValueOnce(new Proxy(new Error("synthetic-private-message"), {
-      get: inspect, ownKeys: inspect, getOwnPropertyDescriptor: inspect,
-    }));
+    const rejection = new Proxy(new Error("synthetic-private-message"), {
+      get: inspect, ownKeys: inspect, getOwnPropertyDescriptor: inspect, getPrototypeOf: inspect,
+    });
+    if (stage === "session_request") mocks.session.mockRejectedValueOnce(rejection);
+    else vi.spyOn(browserVaultLoader, "decodeReadyBrowserVaultSession").mockRejectedValueOnce(rejection);
     const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
     expect(inspect).not.toHaveBeenCalled();
-    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage: "session_request" });
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage });
     expectReadOrder(readOrder.slice(0, 7));
     await expectUnavailable(error);
     expect(inspect).not.toHaveBeenCalled();
@@ -236,7 +325,7 @@ describe("production canary canonical outcome observer", () => {
     const firstError = await first;
     expect(vi.mocked(console.warn).mock.calls).toEqual([
       [diagnosticMessage, { stage: "session_request" }],
-      [diagnosticMessage, { stage: "initial_authority" }],
+      [diagnosticMessage, { stage: "initial_authority", authorityFailureReason: "other" }],
     ]);
     expectReadOrder(["memberId", "memberId", "authority", "authority", "pending", "workspace", "control", "keys", "session"]);
     await expectUnavailable(firstError);
@@ -260,6 +349,7 @@ async function expectUnavailable(error: unknown): Promise<void> {
     cause: undefined, details: undefined, retryable: false,
   });
   expect(error).not.toHaveProperty("stage");
+  expect(error).not.toHaveProperty("authorityFailureReason");
   const response = jsonError(error);
   expect(response.status).toBe(503);
   expect(response.headers.get("cache-control")).toBe("no-store");
