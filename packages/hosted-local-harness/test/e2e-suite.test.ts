@@ -796,6 +796,12 @@ describe("hosted-local E2E suite preparation", () => {
       .map(([call]) => call)
       .filter((call) => call.args.includes("vitest"));
     expect(vitestCalls).toHaveLength(1);
+    const calls = runForegroundCommand.mock.calls.map(([call]) => call);
+    const buildIndex = calls.findIndex((call) => call.args.includes("build:hosted-local"));
+    expect(buildIndex).toBeGreaterThan(-1);
+    expect(buildIndex).toBeLessThan(calls.findIndex((call) => call.args.includes("vitest")));
+    expect(calls[buildIndex]?.env.NEXT_DIST_DIR_MODE).toBe("smoke");
+    expect(calls[buildIndex]?.env.NEXT_DIST_DIR_SUFFIX).toBe(vitestCalls[0]?.env.NEXT_DIST_DIR_SUFFIX);
     expect(vitestCalls[0]?.env).toEqual(expect.objectContaining(liveValues));
     expect(vitestCalls[0]?.env.MURPH_E2E_OURA_PASSWORD).toBeUndefined();
     expect(JSON.stringify(vitestCalls[0]?.env)).not.toContain(retiredOuraPassword);
@@ -819,6 +825,42 @@ describe("hosted-local E2E suite preparation", () => {
         expect(cleanupInput.env[key]).toBeUndefined();
       }
     }
+  });
+
+  test("waits for the wearable Web build before admitting the full-stack test", async () => {
+    let finishBuild: () => void = () => {};
+    const build = new Promise<void>((resolve) => {
+      finishBuild = resolve;
+    });
+    runForegroundCommand.mockImplementation(async (call) => {
+      if (call.args.includes("build:hosted-local")) {
+        await build;
+      }
+    });
+    const suite = runHostedLocalE2eSuite({
+      env: { MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1" },
+      scenario: "device-connect",
+    });
+    await vi.waitFor(() => expect(runForegroundCommand.mock.calls.some(
+      ([call]) => call.args.includes("build:hosted-local"),
+    )).toBe(true));
+    expect(runForegroundCommand.mock.calls.some(([call]) => call.args.includes("vitest"))).toBe(false);
+    finishBuild();
+    await suite;
+    expect(runForegroundCommand.mock.calls.some(([call]) => call.args.includes("vitest"))).toBe(true);
+  });
+
+  test("fails before the wearable test if production Web compilation fails", async () => {
+    runForegroundCommand.mockImplementation(async (call) => {
+      if (call.args.includes("build:hosted-local")) {
+        throw new Error("synthetic Web build failure");
+      }
+    });
+    await expect(runHostedLocalE2eSuite({
+      env: { MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1" },
+      scenario: "device-connect",
+    })).rejects.toThrow("synthetic Web build failure");
+    expect(runForegroundCommand.mock.calls.some(([call]) => call.args.includes("vitest"))).toBe(false);
   });
 
   test("rejects a live wearable run before preparation unless device-connect is isolated", async () => {
