@@ -36,6 +36,14 @@ for (const width of [390, 1280]) {
         },
         getClientExtensionResults: () => ({}),
       }) });
+      Object.defineProperty(navigator.credentials, "create", { value: async () => ({
+        id: "synthetic-new-passkey", rawId: new Uint8Array([2]).buffer, type: "public-key",
+        response: {
+          attestationObject: new Uint8Array([2]).buffer, clientDataJSON: new Uint8Array([2]).buffer,
+          getTransports: () => ["internal"],
+        },
+        getClientExtensionResults: () => ({}),
+      }) });
     });
     const key = Buffer.alloc(32, 7).toString("base64url");
     let mutations = 0;
@@ -50,6 +58,18 @@ for (const width of [390, 1280]) {
     await page.route("**/api/settings/approval-passkeys/recovery-key", (route) => {
       mutations += 1;
       return route.fulfill({ json: { key } });
+    });
+    await page.route("**/api/settings/approval-passkeys/recovery/options", (route) => {
+      mutations += 1;
+      return route.fulfill({ json: { token: "synthetic-recovery", options: {
+        challenge: "c3ludGhldGlj", rp: { id: "localhost", name: "Murph" },
+        user: { id: "bWVtYmVy", name: "member@example.test", displayName: "Synthetic member" },
+        pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+      } } });
+    });
+    await page.route("**/api/settings/approval-passkeys/recovery/register", (route) => {
+      mutations += 1;
+      return route.fulfill({ json: { recovered: true } });
     });
     await page.goto("/design?tab=components", { waitUntil: "load", timeout: 90_000 });
     const study = page.locator("#better-auth-adoption");
@@ -91,6 +111,17 @@ for (const width of [390, 1280]) {
     expect(mutations).toBe(3);
     await dialog.getByRole("button", { name: "Use a recovery key", exact: true }).click();
     await expect(dialog.getByLabel("Saved recovery key", { exact: true })).toHaveValue("");
+    await dialog.getByLabel("Saved recovery key", { exact: true }).fill(key);
+    await dialog.getByRole("button", { name: "Replace passkey", exact: true }).click();
+    await expect(dialog.getByRole("heading", { name: "Passkey recovered", exact: true })).toBeVisible();
+    await expect(dialog.getByText("Your new passkey is ready. Other devices have been signed out.", { exact: true })).toBeVisible();
+    await expect(dialog.getByLabel("Saved recovery key", { exact: true })).toHaveCount(0);
+    expect(mutations).toBe(5);
+    await capture(page, dialog, `recovery-success-${width}`);
+    await dialog.getByRole("button", { name: "Create recovery key", exact: true }).click();
+    await expect(dialog.getByRole("heading", { name: "Save your recovery key", exact: true })).toBeVisible();
+    await expect(dialog.getByLabel("Recovery key", { exact: true })).toHaveValue(key);
+    expect(mutations).toBe(8);
   });
 }
 

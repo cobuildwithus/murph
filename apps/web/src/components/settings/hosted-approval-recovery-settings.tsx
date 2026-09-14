@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { CircleCheck } from "lucide-react";
 import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { HostedOnboardingApiError, requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
@@ -42,12 +43,12 @@ export function ApprovalRecoveryDialog({ onClose }: { onClose: () => void }) {
 
   function close() { inFlight.current?.abort(); onClose(); }
 
-  async function submit() {
+  async function submit(action: Mode) {
     if (inFlight.current) return;
     const controller = new AbortController();
     inFlight.current = controller; setPending(true); setError(null);
     try {
-      if (mode === "rotate") {
+      if (action === "rotate") {
         const authorization = await authorize("approval.recovery-key.rotate");
         if (controller.signal.aborted) return;
         const result = await requestHostedOnboardingJson<{ key: string }>({ url: `${ROOT}/recovery-key`, payload: { authorization }, signal: controller.signal });
@@ -105,15 +106,16 @@ export function ApprovalRecoveryDialog({ onClose }: { onClose: () => void }) {
       <Button type="button" size="xl" onClick={close}>Done</Button>
     </>;
     if (recovered) return <>
-      <SettingsStatusLine message="Your passkey is replaced. Other devices need to sign in again. Save a new recovery key for next time." tone="success" />
-      <Button type="button" size="xl" onClick={close}>Done</Button>
+      <p className="text-sm text-muted-foreground">Save a new recovery key for next time. The one you used is no longer valid.</p>
+      <Button type="button" size="xl" disabled={pending} onClick={() => void submit("rotate")}>{pending ? "Working…" : "Create recovery key"}</Button>
+      <Button type="button" size="lg" variant="ghost" onClick={close}>Done</Button>
     </>;
     return <>
       {mode === "recover" ? <>
         <Label htmlFor="approval-recovery-key">Saved recovery key</Label>
         <Input id="approval-recovery-key" inputSize="xl" type="password" value={key} onChange={(event) => setKey(event.target.value)} autoComplete="off" autoFocus spellCheck={false} disabled={pending} />
       </> : null}
-      <Button type="button" size="xl" disabled={pending || (mode === "recover" && !key.trim())} onClick={() => void submit()}>
+      <Button type="button" size="xl" disabled={pending || (mode === "recover" && !key.trim())} onClick={() => void submit(mode)}>
         {pending ? "Working…" : mode === "recover" ? "Replace passkey" : "Create recovery key"}
       </Button>
       {mode === "rotate"
@@ -124,12 +126,16 @@ export function ApprovalRecoveryDialog({ onClose }: { onClose: () => void }) {
 
   return <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
     <DialogContent className="max-w-[min(30rem,calc(100vw-2rem))] gap-6 border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[30rem] md:p-8">
-      <DialogHeader className="gap-2 pr-10"><DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal text-popover-foreground">{mode === "recover" ? "Recover your passkey" : savedKey ? "Save your recovery key" : "Recovery key"}</DialogTitle>
+      <DialogHeader className="gap-2 pr-10" aria-live="polite" aria-atomic="true">
+        {recovered && !savedKey ? <CircleCheck className="mb-2 size-8 text-primary" strokeWidth={1.6} aria-hidden="true" /> : null}
+        <DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal text-popover-foreground">{savedKey ? "Save your recovery key" : recovered ? "Passkey recovered" : mode === "recover" ? "Recover your passkey" : "Recovery key"}</DialogTitle>
         <DialogDescription className="max-w-[34ch] text-base/7 text-muted-foreground">{savedKey
           ? "This key is shown only once. Save it somewhere private, separate from your passkey."
-          : mode === "recover"
-            ? "Using your key replaces all previous passkeys and signs out your other devices."
-            : "A backup if you lose your passkey. Creating a new key replaces any previous recovery key."}</DialogDescription></DialogHeader>
+          : recovered
+            ? "Your new passkey is ready. Other devices have been signed out."
+            : mode === "recover"
+              ? "Using your key replaces all previous passkeys and signs out your other devices."
+              : "A backup if you lose your passkey. Creating a new key replaces any previous recovery key."}</DialogDescription></DialogHeader>
       <div className="flex flex-col gap-4">{content()}{error ? <SettingsStatusLine message={error} tone="destructive" /> : null}</div>
     </DialogContent>
   </Dialog>;

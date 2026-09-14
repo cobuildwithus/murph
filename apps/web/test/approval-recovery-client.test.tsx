@@ -75,6 +75,13 @@ test("recovery requires an explicit replacement and the newly created WebAuthn p
   expect(mocks.refresh).toHaveBeenCalledOnce();
   expect(rendered.container.querySelector("#approval-recovery-key")).toBeNull();
   expect(rendered.container.textContent).toContain("Save a new recovery key");
+  expect(rendered.container.textContent).toContain("Passkey recovered");
+  expect(rendered.container.textContent).not.toContain("Using your key replaces");
+  await click(rendered, "Create recovery key");
+  expect(mocks.authorize).toHaveBeenCalledWith("approval.recovery-key.rotate");
+  expect(mocks.register).toHaveBeenCalledOnce();
+  expect(rendered.container.querySelector<HTMLInputElement>("#approval-saved-recovery-key")?.value).toBe(key);
+  expect(rendered.container.textContent).toContain("Save your recovery key");
   await rendered.cleanup();
 });
 
@@ -87,6 +94,22 @@ test("closing during WebAuthn prevents a late registration from replacing the fa
   expect(mocks.close).toHaveBeenCalledOnce();
   expect(mocks.request).toHaveBeenCalledTimes(1);
   expect(mocks.refresh).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
+test("canceling a new backup approval preserves the completed recovery", async () => {
+  const rendered = await render("recover");
+  await click(rendered, "Replace passkey");
+  mocks.authorize.mockRejectedValue(new Error("Passkey approval canceled."));
+  await click(rendered, "Create recovery key");
+  expect(rendered.container.textContent).toContain("Passkey recovered");
+  expect(rendered.container.textContent).toContain("Passkey approval canceled.");
+  expect(rendered.container.querySelector("#approval-saved-recovery-key")).toBeNull();
+  expect(mocks.request).toHaveBeenCalledTimes(2);
+  expect(mocks.register).toHaveBeenCalledOnce();
+  expect(mocks.close).not.toHaveBeenCalled();
+  await click(rendered, "Done");
+  expect(mocks.close).toHaveBeenCalledOnce();
   await rendered.cleanup();
 });
 
@@ -120,7 +143,7 @@ test("a lost commit response refreshes canonical state without retry or false su
   await click(rendered, "Replace passkey");
   expect(mocks.request).toHaveBeenCalledTimes(2);
   expect(mocks.refresh).toHaveBeenCalledOnce();
-  expect(rendered.container.textContent).not.toContain("Your passkey is replaced.");
+  expect(rendered.container.textContent).not.toContain("Passkey recovered");
   expect(rendered.container.textContent).toContain("Refresh Settings.");
   await rendered.cleanup();
 });
