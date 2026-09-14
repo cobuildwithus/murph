@@ -1459,6 +1459,82 @@ function markHostedAutomationOccurrenceProjectionUnavailable(
   };
 }
 
+function buildHostedPhaseOptionalTools(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+) {
+  return {
+    ...(input.runtime.platform.familyPlanToolPort
+      ? { familyPlanTool: input.runtime.platform.familyPlanToolPort }
+      : {}),
+    ...(input.runtime.platform.labsToolPort
+      ? { labsTool: input.runtime.platform.labsToolPort }
+      : {}),
+    ...(input.runtime.platform.assistantPersonalizationToolPort
+      ? {
+          personalizationTool:
+            input.runtime.platform.assistantPersonalizationToolPort,
+        }
+      : {}),
+    ...(input.runtime.platform.planUsageToolPort
+      ? { planUsageTool: input.runtime.platform.planUsageToolPort }
+      : {}),
+    ...(input.runtime.platform.imessageContactToolPort
+      ? { imessageContactTool: input.runtime.platform.imessageContactToolPort }
+      : {}),
+    ...(input.runtime.platform.privateImageUrlPublisher
+      ? {
+          privateImageUrlPublisher:
+            input.runtime.platform.privateImageUrlPublisher,
+        }
+      : {}),
+    ...(input.runtime.platform.subscriptionToolPort
+      ? { subscriptionTool: input.runtime.platform.subscriptionToolPort }
+      : {}),
+    ...(input.materializeWorkspaceArtifacts
+      ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }
+      : {}),
+    ...(input.imageGenerationLauncher
+      ? { imageGenerationLauncher: input.imageGenerationLauncher }
+      : {}),
+    ...(input.persistGeneratedImageCapture
+      ? {
+          persistGeneratedImageCapture:
+            input.persistGeneratedImageCapture,
+        }
+      : {}),
+  };
+}
+
+async function runForegroundCausalMailboxMaintenance(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>,
+  usageRecorder: NonNullable<NonNullable<AssistantExecutionContext["hosted"]>["usageRecorder"]> | null,
+): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
+  const systemMailboxMaintenance = await runSystemMailboxMaintenancePhase({
+    executionContext: {
+      hosted: {
+        memberId: input.request.userId,
+        releaseSha: input.runtimeIssueProvenance?.releaseSha ?? null,
+        runtimeAttemptId: input.request.attemptId,
+        runtimeName: input.runtimeIssueProvenance?.runtimeName ?? null,
+        ...(usageRecorder ? { usageRecorder } : {}),
+        userEnvKeys: Object.keys(input.runtime.userEnv),
+      },
+    },
+    hasFreshConversationInput: false,
+    input,
+    pendingAssistantInputWakeAt: null,
+    wake,
+  });
+  if (!systemMailboxMaintenance.result) {
+    return withHostedRuntimeWakeCandidate({
+      result: { progressed: false },
+      wake: createExistingHostedAssistantWorkspaceWakeCandidate(input),
+    });
+  }
+  return systemMailboxMaintenance.result;
+}
+
 export async function runHostedWorkspaceAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
@@ -1492,29 +1568,7 @@ export async function runHostedWorkspaceAssistantPhase(
       : null;
   if (input.foregroundCausalOnly === true) {
     try {
-      const systemMailboxMaintenance = await runSystemMailboxMaintenancePhase({
-        executionContext: {
-          hosted: {
-            memberId: input.request.userId,
-            releaseSha: input.runtimeIssueProvenance?.releaseSha ?? null,
-            runtimeAttemptId: input.request.attemptId,
-            runtimeName: input.runtimeIssueProvenance?.runtimeName ?? null,
-            ...(usageRecorder ? { usageRecorder } : {}),
-            userEnvKeys: Object.keys(input.runtime.userEnv),
-          },
-        },
-        hasFreshConversationInput: false,
-        input,
-        pendingAssistantInputWakeAt: null,
-        wake,
-      });
-      if (!systemMailboxMaintenance.result) {
-        return withHostedRuntimeWakeCandidate({
-          result: { progressed: false },
-          wake: createExistingHostedAssistantWorkspaceWakeCandidate(input),
-        });
-      }
-      return systemMailboxMaintenance.result;
+      return await runForegroundCausalMailboxMaintenance(input, wake, usageRecorder);
     } finally {
       releaseChannelAbortRelay();
       channelAbortController.abort();
@@ -1609,45 +1663,7 @@ export async function runHostedWorkspaceAssistantPhase(
         }),
         deviceConnectProviders,
         ...(deviceTool ? { deviceTool } : {}),
-        ...(input.runtime.platform.familyPlanToolPort
-          ? { familyPlanTool: input.runtime.platform.familyPlanToolPort }
-          : {}),
-        ...(input.runtime.platform.labsToolPort
-          ? { labsTool: input.runtime.platform.labsToolPort }
-          : {}),
-        ...(input.runtime.platform.assistantPersonalizationToolPort
-          ? {
-              personalizationTool:
-                input.runtime.platform.assistantPersonalizationToolPort,
-            }
-          : {}),
-        ...(input.runtime.platform.planUsageToolPort
-          ? { planUsageTool: input.runtime.platform.planUsageToolPort }
-          : {}),
-        ...(input.runtime.platform.imessageContactToolPort
-          ? { imessageContactTool: input.runtime.platform.imessageContactToolPort }
-          : {}),
-        ...(input.runtime.platform.privateImageUrlPublisher
-          ? {
-              privateImageUrlPublisher:
-                input.runtime.platform.privateImageUrlPublisher,
-            }
-          : {}),
-        ...(input.runtime.platform.subscriptionToolPort
-          ? { subscriptionTool: input.runtime.platform.subscriptionToolPort }
-          : {}),
-        ...(input.materializeWorkspaceArtifacts
-          ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }
-          : {}),
-        ...(input.imageGenerationLauncher
-          ? { imageGenerationLauncher: input.imageGenerationLauncher }
-          : {}),
-        ...(input.persistGeneratedImageCapture
-          ? {
-              persistGeneratedImageCapture:
-                input.persistGeneratedImageCapture,
-            }
-          : {}),
+        ...buildHostedPhaseOptionalTools(input),
         ...(input.runtime.platform.productFeedbackPort
           ? {
               productFeedbackCandidateSink: {
