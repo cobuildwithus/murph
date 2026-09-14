@@ -309,6 +309,14 @@ Last verified: 2026-09-04
   attempt. Preparation/provider/KMS failure starts zero transactions, and the
   in-transaction mailbox unwrap must be a scoped-cache hit that cannot perform
   provider or KMS work.
+- Domain-root candidate preparation reads one active-envelope metadata snapshot
+  for the requested domains (at most four). The existing crypto owner privately
+  associates it with the prepared candidates, so control/ingress preparation
+  needs one metadata query rather than discovery plus two envelope reads.
+  Snapshot envelopes still pass ordinary binding and signature verification;
+  request-scoped unwrap reuse and zeroization remain unchanged. The snapshot
+  grants no transaction authority: root locks and live active-root revalidation
+  remain mandatory, and rotation or candidate races retain fresh preparation.
 - Starter enrollment prepares every missing domain-root candidate and prewarms
   the exact control and ingress roots before `BEGIN`, keeping the same
   request-scoped unwrap cache through activation. The enrollment transaction

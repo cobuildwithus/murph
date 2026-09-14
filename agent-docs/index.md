@@ -79,6 +79,10 @@ Foreground promotion batch reuse and completion/wake race preservation are owned
 by `agent-docs/references/hosted-runtime-protocol.md`; focused admission, import
 overlap, and recovery proof is indexed in `agent-docs/references/testing-ci-map.md`.
 
+Active crypto-root preparation reuses one bounded metadata snapshot while
+preserving locked authority revalidation; its contract is owned by
+`agent-docs/RELIABILITY.md` and proof by the hosted crypto domain-root tests.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
