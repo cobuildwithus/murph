@@ -49,9 +49,9 @@ export function ImessageNutritionCardStudy() {
           Daily nutrition card
         </h3>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Totals-only cards show estimated nutrition logged so far, without a
-          goal ring or target judgments. The second specimen preserves historical
-          goal-aware rendering. Both use the production static renderer and
+          Totals-only cards keep the native calorie and macro layout, without
+          repeated explanatory copy, a goal ring, or target judgments. The second
+          specimen preserves historical goal-aware rendering. Both use the production static renderer and
           canonical Murph mark; Messages supplies the outer mask.
         </p>
       </div>

@@ -818,7 +818,7 @@ describe('assistant response cards', () => {
       },
     }
     expect(buildLinqIMessageAppLayout(card)).toEqual({
-      caption: '2026-07-28 · 3 logged meals',
+      caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(card),
       subcaption: 'Some nutrition estimates were partial.',
     })
@@ -897,9 +897,11 @@ describe('assistant response cards', () => {
       image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2),
     })
     expect(proteinGoalLayout).not.toHaveProperty('subcaption')
-    expect(completeNoGoalsLayout).toMatchObject({
-      caption: '2026-07-28 · 3 logged meals',
-      subcaption: 'Estimated nutrition logged so far; not necessarily everything eaten.',
+    expect(completeNoGoalsLayout).toEqual({
+      caption: 'Jul 28 · 3 meals',
+      image_url: expect.stringMatching(
+        /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+      ),
     })
     expect(directionalGoalsLayout).not.toHaveProperty('subcaption')
     expect(decodeAppCardImageUrl(proteinGoalLayout.image_url ?? '')).toEqual({
@@ -916,7 +918,7 @@ describe('assistant response cards', () => {
       },
     })
     expect(partialLayout).toEqual({
-      caption: '2026-07-28 · 4 logged meals',
+      caption: 'Jul 28 · 4 meals',
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
@@ -977,7 +979,7 @@ describe('totals-only daily nutrition', () => {
     }
     expect(readDailyNutritionIntroduction(COMPLETE_CARD_V2, intro)).toBeNull()
     expect(readDailyNutritionIntroduction(COMPLETE_CARD, intro)).toBeNull()
-    expect(buildLinqIMessageAppLayout(card).subcaption).not.toContain('Goal setup')
+    expect(buildLinqIMessageAppLayout(card)).not.toHaveProperty('subcaption')
   })
 
   it('keeps explicit partial data unknown rather than zero and does not offer setup on it', () => {

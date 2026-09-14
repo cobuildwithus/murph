@@ -12,9 +12,12 @@ daily summaries and eligible managed closeouts use the same presentation.
 Targets are optional. A summary never derives, proposes, accepts, activates,
 changes, or abandons a Goal. A meal reply or silence never accepts goals.
 
-Totals-only says **estimated / logged so far**, shows the selected date and
-logged meal count, and explains that logged records may not include everything
-eaten. It has no goal ring, target judgment colors, or unavailable-target
+Totals-only cards show calories and macros in the same compact hierarchy as
+the native card. The iMessage image has no explanatory header or disclaimer;
+its provider caption shows only the short date and meal count. A subcaption
+appears only for actual partial totals or the selected fixed introduction.
+The semantic text and Telegram details retain estimated/logged coverage.
+Totals-only has no goal ring, target judgment colors, or unavailable-target
 placeholders. A missing nutrient is unknown, not zero. Equal coverage counts
 prove complete stored records, not complete capture of the member's day.
 
@@ -107,7 +110,9 @@ retries of one intent from creating a second send.
 
 ## Channel presentation, privacy and skew
 
-Text, Telegram Rich Message, and the Web static image share totals-only meaning.
+Text, Telegram Rich Message, and the Web static image share the same totals.
+The static image keeps only the mark, calories, and macros; coverage explanations
+belong to semantic text and Telegram details rather than repeated bitmap copy.
 Telegram omits the Daily goals section and includes date, estimated/logged-so-far
 coverage and the fixed introduction when selected. The production `/design`
 nutrition study includes a synthetic lentil-lunch totals-only card beside the
