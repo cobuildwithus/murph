@@ -31,3 +31,13 @@ Effort: Patch. Synthetic direct duplicate replay should retain chat/mailbox iden
 - Complexity guard passes: debt257 and maximum89 unchanged. The corrected admission helper adds no branch; the nine existing file hotspots are outside this projection and remain out of scope.
 
 - Web typecheck passes with the documented narrow Prisma test fixture. Transport/card suites103, changelog10, and focused Linq249 tests pass. Candidate review confirms the sole production edit retains an existing request-local field, authority and legacy wake repair; read receipt remains one guarded request with10-second timeout and no SDK retry. Product UX: Ready within synthetic proof.
+
+## Completion evidence
+Final ReviewGPT: PASS on immutable first-reviewed head99571f33579c41f3ad6fbc853e06e4340b412478. Verified gpt-6-pro, exact accepted turn and response hash05cb69ea92bbb96d001bc5dd4bb0bc1c80ade59706482208491e2a4fd2a999ec,306 seconds elapsed. Full snapshot/round metadata and archive consistency matched; no qualifying findings. Parent final review: PASS.
+
+PR3434 is Ready; both CLI checks and the hosted Stripe boundary passed on the reviewed head, with release aggregation still pending. This documentation-only closeout requires fresh exact-head CI before completion. Source, tests and changelog remain identical to the reviewed candidate. Fresh main48ee5d3e931794b190fb58d3bf6195cb22c277b2 matched the remote, with clean merge-treeffe90a21ce4d3d970c290530e4e65f5a9a2b5afc. Record later gate receipts in PR/memory; this completed plan is immutable.
+
+The earlier optional implementation request retains its original capture owner; inspect its eventual output before the final report. The authorized tiny correction and independent final review already establish the implementation. Keep the open PR worktree and leave the functional fix for human merge. No production merge, release, replay, message or data/config mutation occurred.
+Status: completed
+Updated: 2026-09-14
+Completed: 2026-09-14
