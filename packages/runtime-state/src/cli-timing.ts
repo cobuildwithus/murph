@@ -27,6 +27,7 @@ export const CLI_TIMING_FAILURE_CODES = [
   "memory_not_found", "memory_document_invalid",
   "not_found", "conflict", "permission_denied", "invalid_path", "storage_unavailable",
   "knowledge_page_not_found", "knowledge_page_conflict", "knowledge_duplicate_slug", "knowledge_page_invalid",
+  "knowledge_source_unreadable", "knowledge_invalid_source_path", "knowledge_invalid_library_slug",
   "QUERY_SOURCE_INVALID", "query_source_invalid", "unsupported_format",
   "ENOENT", "EACCES", "EPERM", "EISDIR", "ENOTDIR", "ENOSPC", "EPIPE",
   "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ABORT_ERR",
@@ -40,12 +41,89 @@ export interface CliFailureTiming {
   code: typeof CLI_TIMING_FAILURE_CODES[number];
   stage: typeof CLI_TIMING_FAILURE_STAGES[number];
   count: number;
+  validation?: CliValidationDiagnostic;
 }
 export function cliTimingFailureCode(value: unknown): CliFailureTiming["code"] {
   return CLI_TIMING_FAILURE_CODES.find((code) => code === value) ?? "unknown";
 }
 export function cliTimingFailureStage(value: unknown): CliFailureTiming["stage"] {
   return CLI_TIMING_FAILURE_STAGES.find((stage) => stage === value) ?? "unknown";
+}
+
+
+// Only these command schemas own these exact top-level names. No path parsing,
+// coercion, array-index admission or prefix matching belongs in telemetry.
+const validationFields = [
+  ["food search-labels", ["query", "limit"]],
+  ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks",
+    "relatedSlug", "librarySlug", "sourcePath"]],
+  ["knowledge append-section", ["slug", "heading", "body", "title", "position", "sourcePath"]],
+] as const;
+const validationCodes = [
+  "invalid_type", "too_big", "too_small", "invalid_format", "not_multiple_of",
+  "unrecognized_keys", "invalid_union", "invalid_key", "invalid_element", "invalid_value", "custom",
+] as const;
+export const CLI_TIMING_MAX_VALIDATION_ISSUES = 8;
+export interface CliValidationDiagnostic {
+  field: typeof validationFields[number][1][number];
+  code: typeof validationCodes[number];
+  /** Absent means not supplied, never inferred from code/message/received. */
+  missing?: boolean;
+}
+
+/** Never invoke accessors, walk prototypes/causes or retain the source object. */
+export function readCliTimingOwnData(value: unknown, key: string): unknown {
+  try {
+    if (typeof value !== "object" || value === null) return undefined;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && Object.hasOwn(descriptor, "value") ? descriptor.value : undefined;
+  } catch { return undefined; }
+}
+
+function selectValidationDiagnostic(
+  fields: readonly CliValidationDiagnostic["field"][], value: unknown, fieldKey: "field" | "path",
+): CliValidationDiagnostic | undefined {
+  if (!record(value)) return undefined;
+  const rawField = readCliTimingOwnData(value, fieldKey);
+  const rawCode = readCliTimingOwnData(value, "code");
+  const missing = readCliTimingOwnData(value, "missing");
+  const field = fields.find((candidate) => candidate === rawField);
+  const code = validationCodes.find((candidate) => candidate === rawCode);
+  if (!field || !code || (missing !== undefined && typeof missing !== "boolean")) return undefined;
+  return { field, code, ...(typeof missing === "boolean" ? { missing } : {}) };
+}
+
+/** Optional failure properties shared by original-error, bounded-envelope and
+ * wire consumers. Unknown/malformed evidence is absent independently of accounting.
+ */
+export function cliTimingValidationFailure(
+  command: unknown, code: unknown, source: unknown, property: "publicIssues" | "fieldErrors" | "validation",
+): Pick<CliFailureTiming, "validation"> {
+  try {
+    if (code !== "VALIDATION_ERROR") return {};
+    const fields = validationFields.find(([name]) => name === command)?.[1];
+    if (!fields) return {};
+    const value = readCliTimingOwnData(source, property);
+    let validation: CliValidationDiagnostic | undefined;
+    if (property === "validation") {
+      validation = selectValidationDiagnostic(fields, value, "field");
+    } else {
+      if (!Array.isArray(value)) return {};
+      const length = readCliTimingOwnData(value, "length");
+      if (!integer(length)) return {};
+      for (let index = 0; index < Math.min(length, CLI_TIMING_MAX_VALIDATION_ISSUES); index += 1) {
+        validation = selectValidationDiagnostic(fields, readCliTimingOwnData(value, String(index)), "path");
+        if (validation) break;
+      }
+    }
+    return validation ? { validation } : {};
+  } catch { return {}; }
+}
+
+function sameFailureVariant(left: CliFailureTiming, right: CliFailureTiming): boolean {
+  return left.code === right.code && left.stage === right.stage &&
+    left.validation?.field === right.validation?.field && left.validation?.code === right.validation?.code &&
+    left.validation?.missing === right.validation?.missing;
 }
 
 
@@ -193,34 +271,36 @@ type CommandFailures = Pick<CliCommandTiming, "failures" | "droppedFailures">;
 
 /** Optional diagnostics fail independently of otherwise-valid timing/accounting. */
 function normalizeCommandFailures(command: {
-  outcome?: unknown; calls?: unknown; failures?: unknown; droppedFailures?: unknown;
+  command?: unknown; outcome?: unknown; calls?: unknown; failures?: unknown; droppedFailures?: unknown;
 }): CommandFailures {
   try {
-    if (command.outcome === "ok") return {};
-    const input = command.failures;
-    const dropped = command.droppedFailures ?? 0;
-    const calls = command.calls;
+    if (readCliTimingOwnData(command, "outcome") === "ok") return {};
+    const input = readCliTimingOwnData(command, "failures");
+    const dropped = readCliTimingOwnData(command, "droppedFailures") ?? 0;
+    const calls = readCliTimingOwnData(command, "calls");
     const entries = input === undefined ? [] : input;
     if (!Array.isArray(entries) || !integer(dropped) || !integer(calls) || dropped > calls) return {};
-    const length = entries.length;
+    const length = readCliTimingOwnData(entries, "length");
     if (!integer(length) || length > CLI_TIMING_MAX_FAILURES) return {};
     const failures: CliFailureTiming[] = [];
     let observations = dropped;
     // Bound indexed reads; do not trust a supplied array iterator or reread a
     // property after validation (accessors could return a different value).
     for (let index = 0; index < length; index += 1) {
-      const entry = record(entries[index]);
+      const entry = record(readCliTimingOwnData(entries, String(index)));
       if (!entry) return {};
-      const count = entry.count;
+      const count = readCliTimingOwnData(entry, "count");
       if (!integer(count) || count < 1) return {};
       observations += count;
       // Nonnegative integer counts stay safe while bounded by the safe call count.
       if (observations > calls) return {};
-      const code = cliTimingFailureCode(entry.code);
-      const stage = cliTimingFailureStage(entry.stage);
-      const current = failures.find((item) => item.code === code && item.stage === stage);
+      const code = cliTimingFailureCode(readCliTimingOwnData(entry, "code"));
+      const stage = cliTimingFailureStage(readCliTimingOwnData(entry, "stage"));
+      const failure: CliFailureTiming = { code, stage, count,
+        ...cliTimingValidationFailure(readCliTimingOwnData(command, "command"), code, entry, "validation") };
+      const current = failures.find((item) => sameFailureVariant(item, failure));
       if (current) current.count += count;
-      else failures.push({ code, stage, count });
+      else failures.push(failure);
     }
     return { ...(failures.length ? { failures } : {}), ...(dropped ? { droppedFailures: dropped } : {}) };
   } catch { return {}; }
@@ -298,7 +378,7 @@ function mergeCommandFailures(current: CliCommandTiming | undefined, incoming: C
   const failures = left.failures ?? [];
   let dropped = (left.droppedFailures ?? 0) + (right.droppedFailures ?? 0);
   for (const entry of right.failures ?? []) {
-    const existing = failures.find((item) => item.code === entry.code && item.stage === entry.stage);
+    const existing = failures.find((item) => sameFailureVariant(item, entry));
     if (existing) existing.count += entry.count;
     else if (failures.length < CLI_TIMING_MAX_FAILURES) failures.push(entry);
     else dropped += entry.count;

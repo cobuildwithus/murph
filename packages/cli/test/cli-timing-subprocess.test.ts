@@ -10,7 +10,7 @@ import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { test } from 'vitest'
 import { createEmptyMemoryDocument, memoryDocumentRelativePath, renderMemoryDocument, upsertMemoryRecord } from '@murphai/contracts'
-import { normalizeCliTiming, type CliTiming } from '@murphai/runtime-state/cli-timing'
+import { CLI_TIMING_MAX_REPORT_BYTES, normalizeCliTiming, type CliTiming, type CliValidationDiagnostic } from '@murphai/runtime-state/cli-timing'
 import { syntheticOats } from './fixtures/food-label-response.ts'
 
 const root = fileURLToPath(new URL('../../..', import.meta.url))
@@ -71,6 +71,7 @@ async function isolated(run: (directory: string, invoke: (
         assert.equal(messages.length, timed ? 1 : 0, 'exactly one report per real CLI subprocess')
         let timing: CliTiming | null = null
         if (timed) {
+          assert.ok(Buffer.byteLength(messages[0]!) <= CLI_TIMING_MAX_REPORT_BYTES)
           const envelope = JSON.parse(messages[0]!)
           assert.equal(envelope.key, key)
           timing = normalizeCliTiming(envelope.timing)
@@ -85,10 +86,12 @@ async function isolated(run: (directory: string, invoke: (
   } finally { await rm(directory, { recursive: true, force: true }) }
 }
 
-type Case = { name: string; argv: string[]; command: string; code?: string; field?: string; requests?: number }
+type Case = { name: string; argv: string[]; command: string; code?: string; field?: string;
+  validation?: CliValidationDiagnostic; requests?: number }
 const cases: Case[] = [
-  { name: 'food limit validation before provider access', argv: ['food', 'search-labels', 'synthetic oats', '--limit', '51'],
-    command: 'food search-labels', code: 'VALIDATION_ERROR', field: 'limit' },
+  { name: 'food limit validation before provider access', argv: ['food', 'search-labels', 'synthetic oats', '--limit', '999'],
+    command: 'food search-labels', code: 'VALIDATION_ERROR', field: 'limit',
+    validation: { field: 'limit', code: 'too_big', missing: false } },
   { name: 'exercise invalid kind', argv: ['exercise', 'list', '--kind', 'synthetic-invalid'],
     command: 'exercise list', code: 'VALIDATION_ERROR', field: 'kind' },
   { name: 'exercise missing lookup', argv: ['exercise', 'show', 'synthetic-no-such-exercise'],
@@ -97,6 +100,18 @@ const cases: Case[] = [
     command: 'exercise list' },
   { name: 'successful fake-provider food lookup', argv: ['food', 'search-labels', 'synthetic oats', '--limit', '1'],
     command: 'food search-labels', requests: 1 },
+  { name: 'food missing query', argv: ['food', 'search-labels'],
+    command: 'food search-labels', code: 'VALIDATION_ERROR', field: 'query',
+    validation: { field: 'query', code: 'invalid_type', missing: true } },
+  { name: 'knowledge upsert missing body', argv: ['knowledge', 'upsert'],
+    command: 'knowledge upsert', code: 'VALIDATION_ERROR', field: 'body',
+    validation: { field: 'body', code: 'invalid_type', missing: true } },
+  { name: 'knowledge upsert invalid slug', argv: ['knowledge', 'upsert', '--body', 'SYNTHETIC_HEALTH_HISTORY', '--slug', 'SYNTHETIC_INVALID_SLUG!'],
+    command: 'knowledge upsert', code: 'VALIDATION_ERROR', field: 'slug',
+    validation: { field: 'slug', code: 'invalid_format', missing: false } },
+  { name: 'knowledge append missing heading', argv: ['knowledge', 'append-section', 'synthetic-page', '--body', 'SYNTHETIC_HEALTH_HISTORY'],
+    command: 'knowledge append-section', code: 'VALIDATION_ERROR', field: 'heading',
+    validation: { field: 'heading', code: 'invalid_type', missing: true } },
 ]
 
 for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => {
@@ -112,7 +127,12 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
       assert.equal(typeof output.message, 'string')
       if (sample.field) {
         assert.ok(output.fieldErrors.some((error: { path: string }) =>
-          error.path === sample.field || error.path.startsWith(`${sample.field}.`)))
+          error.path === sample.field))
+        if (sample.validation) {
+          const issue = output.fieldErrors.find((entry: { path: string }) => entry.path === sample.field)
+          assert.equal(issue.code, sample.validation.code)
+          assert.equal(issue.missing, sample.validation.missing)
+        }
       } else {
         assert.equal(output.message, 'No public exercise catalog item matched "synthetic-no-such-exercise".')
       }
@@ -130,7 +150,8 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
     assert.equal(commands[0]!.outcome, sample.code ? 'error' : 'ok')
     assert.equal(commands[0]!.calls, 1)
     assert.deepEqual(commands[0]!.failures, sample.code
-      ? [{ code: sample.code, stage: sample.field ? 'validation' : 'unknown', count: 1 }] : undefined)
+      ? [{ code: sample.code, stage: sample.field ? 'validation' : 'unknown', count: 1,
+          ...(sample.validation ? { validation: sample.validation } : {}) }] : undefined)
   })
 }, 90_000)
 

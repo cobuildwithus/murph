@@ -3,7 +3,7 @@ import { createSocket, type Socket } from "node:dgram";
 import {
   CLI_TIMING_ENDPOINT_ENV, addCliPhaseSample, cliTimingCommand, CLI_TIMING_MAX_REPORT_BYTES, CLI_TIMING_MAX_SPANS,
   emptyCliTiming, incrementCliTimingDrop, mergeCliTiming, normalizeCliTiming,
-  cliTimingFailureCode, cliTimingFailureStage, type CliFailureTiming,
+  cliTimingFailureCode, cliTimingFailureStage, cliTimingValidationFailure, readCliTimingOwnData as ownData, type CliFailureTiming,
   type CliPhaseTiming, type CliTiming, type CliTimingOutcome, type CliTimingPhase,
 } from "../cli-timing.ts";
 
@@ -110,15 +110,6 @@ export async function withCliTiming<T>(
   });
 }
 
-// Read only own data properties: never run getters, walk prototypes/causes or
-// keep the original error/context. A hostile proxy cannot replace the throw.
-function ownData(value: unknown, key: string): unknown {
-  try {
-    if (typeof value !== "object" || value === null) return undefined;
-    return Object.getOwnPropertyDescriptor(value, key)?.value;
-  } catch { return undefined; }
-}
-
 /** The bridge observes original typed errors before Incur projection. Later
  * dispatch/exit catches only provide a fallback; one invocation contributes at
  * most one observation, regardless of rethrows, wrapping or object reuse.
@@ -136,7 +127,8 @@ export function noteCliTimingFailure(error: unknown): void {
     name === "ZodError" ? "invalid_payload" : undefined);
   const stage = ownData(ownData(error, "context"), "stage") ?? ownData(error, "stage") ??
     (validation ? "validation" : undefined);
-  invocation.failure = { code: cliTimingFailureCode(code), stage: cliTimingFailureStage(stage), count: 1 };
+  invocation.failure = { code: cliTimingFailureCode(code), stage: cliTimingFailureStage(stage), count: 1,
+    ...cliTimingValidationFailure(invocation.command, code, error, "publicIssues") };
 }
 
 // Incur may call process.exit before an outer finally executes. Observe the

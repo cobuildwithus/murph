@@ -859,7 +859,7 @@ bounds describe the retained samples, not the complete population.
 ### Finite CLI failure counts (optional, same timing identity)
 
 Each non-successful invocation from a new producer contributes at most one
-`failures: [{ code, stage, count }]` observation inside its existing
+`failures: [{ code, stage, count, validation? }]` observation inside its existing
 command/outcome entry. For example, a synthetic `experiment session log` throw
 with code `invalid_payload` and context stage `validation` produces that exact
 pair with count 1. A successful invocation has no failure fields. An observed
@@ -874,9 +874,10 @@ CLI/knowledge codes, fixed validation types and selected Node/transport codes;
 other values collapse to `unknown`. Capture reads only own data properties for
 `code`, `context.stage`, direct `stage`, and (when code is absent) three exact
 validation type names. It does not call getters, enumerate objects, inspect
-messages/field errors, follow prototypes/causes, or retain original errors or
-contexts. Code-only observations are diagnostic hints, not authorization or a
-claim that a reported stage is independently verified. Existing dynamic-tool
+messages, arguments or result output, follow prototypes/causes, or retain original
+errors or contexts. The optional schema detail below reads only bounded own
+`publicIssues` data at that same original-error seam. Code-only observations are
+diagnostic hints, not authorization or a claim that a reported stage is independently verified. Existing dynamic-tool
 finite stage/reason/category diagnostics remain separate.
 
 Memory read diagnostics admit exactly `memory_not_found` and
@@ -890,6 +891,42 @@ variants remain `unknown`. This only classifies existing errors; it does not
 change output, exit status, model-visible recovery guidance, reads, writes or
 retries. Messages, source paths, record ids and values never enter this vocabulary.
 
+Knowledge source diagnostics additionally admit exactly
+`knowledge_source_unreadable` (`unavailable`), `knowledge_invalid_source_path`
+(`invalid_input`), and `knowledge_invalid_library_slug` (`invalid_input`). These
+are existing service errors, not new validation or source behavior. Unreadable
+source does not prove corruption; invalid source/library references do not
+establish why the caller supplied them. No stage is inferred when absent.
+Unfamiliar codes and lookalikes still normalize to `unknown`.
+
+#### Optional schema-validation detail
+
+For `VALIDATION_ERROR` only, `validation: { field, code, missing? }` is one finite
+selected issue, never another failure observation. `cliTimingValidationFailure`
+in the portable owner selects the first admissible issue within the first **8**
+own array entries. It reads `publicIssues` on the original error, `fieldErrors`
+in the assistant's existing complete **16 KiB** error envelope, or `validation`
+on the timing wire. All reads use own data descriptors; getters, prototypes,
+causes, iterators and arbitrary nested paths are not consulted. Only exact full
+static field names are admitted:
+
+- `food search-labels`: query, limit.
+- `knowledge upsert`: body, slug, title, pageType, status, clearLibraryLinks,
+  relatedSlug, librarySlug, sourcePath.
+- `knowledge append-section`: slug, heading, body, title, position, sourcePath.
+
+Issue codes use the closed standard vocabulary in `CliValidationDiagnostic`;
+`missing` is retained only when explicitly boolean. Absent is not false, and
+neither is inferred from a message, expected/received type or value. Array paths,
+indices, prefixes, substrings, lookalikes and unknown/malformed details are
+omitted. No original path, message, value, argument or source object is retained.
+The assistant requires positive registered-command attribution and adds only
+`vaultCliValidationField`, `vaultCliValidationCode`, and optional boolean
+`vaultCliValidationMissing` to existing issue metadata. Success has no diagnostic.
+The producer never parses stdout or argv; command attribution and categories
+otherwise remain unchanged. Synthetic probes establish information loss, **not**
+the behavioral root cause of actual member argument errors.
+
 The existing Incur error bridge observes ordinary handler throws **before** its
 public error projection can discard typed fields. Dispatch and invocation
 catches provide a fallback only: first observation wins, with no per-catch
@@ -898,13 +935,15 @@ retain their own scopes; the container is not an additional failure sample.
 Stop-on-error and the existing rejection of nested batch before child entry are
 unchanged. An unentered child has no invented diagnostic.
 
-There are at most **8 code/stage pairs per command/outcome**, within the existing
-32-command limit. Additional distinct pairs increment optional `droppedFailures`
-by their observation count; repeats of already-retained pairs still aggregate.
+There are at most **8 failure variants per command/outcome**, within the existing
+32-command limit. Identity is code/stage plus optional validation field/code/missing,
+including absence versus explicit false. Additional distinct variants increment
+optional `droppedFailures` by their observation count; retained variants still aggregate.
 `sum(failures.count) + droppedFailures <= calls`. These are safe positive counts
 (or a safe nonnegative drop count), not extra CLI calls. Malformed optional
 failure details are removed independently, retaining valid timing and usage.
-Unknown future codes/stages normalize to constants; resulting duplicate pairs
+Malformed optional validation alone never removes valid code/stage/count evidence.
+Unknown future codes/stages normalize to constants; identical normalized variants
 coalesce. Old entries without these fields remain unchanged, including mixed
 old/new merges: missing old detail is **not** backfilled with fabricated unknown
 observations. Counts can therefore cover fewer than the entry's error calls.
@@ -948,13 +987,14 @@ actual pre-change owners; the older `MURPH_CLI_TIMING_COMPAT_BASE` test remains 
 separate, pre-timing rollout proof.
 
 Additional failure codes on the same `murph.cli-timing.v1` schema, including the
-two memory read codes, also roll out **reader before writer**: first update the
+two memory read codes and three knowledge source codes, and optional validation
+detail also roll out **reader before writer**: first update the
 portable normalizer in downstream Web/hosted usage and engine/profile consumers
 and the assistant category reader, then update CLI producers. Warm older
-failure-aware readers normalize unfamiliar codes to `unknown` and coalesce equal
-code/stage pairs while retaining command identity, outcomes, calls, phases and
-report counts. New readers still accept old reports without failure details and
-cannot recover classifications already collapsed by old writers. A reader
+failure-aware readers normalize unfamiliar codes to `unknown`, discard unknown
+validation metadata and coalesce equal code/stage pairs while retaining command
+identity, outcomes, calls, phases and report counts. New readers still accept old
+reports without failure details and cannot recover classifications already collapsed by old writers. A reader
 rollback loses diagnostic specificity, not valid timing or usage accounting;
 no protocol bump or coordinated pause is needed. The history-backed runtime-state
 test uses `MURPH_CLI_MEMORY_FAILURE_COMPAT_BASE` to load the actual pre-admission
@@ -966,8 +1006,9 @@ not replaced with a copy of the old parser or a current-reader round trip.
 Run on the **primary usage database** after compatible consumers and producers
 are present. This query caps input at 10,000 usage rows over 72 hours and output
 at 50 finite command/code/stage groups. It uses existing turn IDs only internally
-for aggregation; no IDs or private content are returned. The maximum observed
-count per turn/pair avoids adding repeated provider-request/profile snapshots;
+for aggregation; no IDs or private content are returned. Sum validation variants
+within each command summary before taking the maximum count per turn/code/stage
+to avoid adding repeated provider-request/profile snapshots;
 `observed_failures_lower_bound` is conservative, not an exact all-attempt total.
 A row-cap hit requires a narrower fixed window before making coverage claims.
 
@@ -989,11 +1030,15 @@ WITH rows AS MATERIALIZED (
     AND c ->> 'outcome' = 'error'
 ), per_turn AS (
   SELECT turn_id, c ->> 'command' AS command,
-         f ->> 'code' AS code, f ->> 'stage' AS stage,
-         max((f ->> 'count')::numeric) AS observations
+         f.code, f.stage, max(f.observations) AS observations
   FROM commands
-  CROSS JOIN LATERAL jsonb_array_elements(c -> 'failures') f
-  GROUP BY turn_id, c ->> 'command', f ->> 'code', f ->> 'stage'
+  CROSS JOIN LATERAL (
+    SELECT e ->> 'code' AS code, e ->> 'stage' AS stage,
+           sum((e ->> 'count')::numeric) AS observations
+    FROM jsonb_array_elements(c -> 'failures') e
+    GROUP BY e ->> 'code', e ->> 'stage'
+  ) f
+  GROUP BY turn_id, c ->> 'command', f.code, f.stage
 )
 SELECT command, code, stage, count(*) AS independent_turns,
        sum(observations) AS observed_failures_lower_bound,

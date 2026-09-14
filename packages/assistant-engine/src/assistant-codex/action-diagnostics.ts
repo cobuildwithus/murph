@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { cliTimingFailureCode, cliTimingFailureStage, type CliFailureTiming } from '@murphai/runtime-state/cli-timing'
+import { cliTimingFailureCode, cliTimingFailureStage, cliTimingValidationFailure, type CliFailureTiming } from '@murphai/runtime-state/cli-timing'
 
 import { classifyToolFailureCode, type ToolErrorCategory, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 
@@ -656,10 +656,12 @@ type VaultCliFailure = {
   attribution: 'recognized' | 'unknown_code' | 'missing_output' | 'oversized_output' | 'unstructured_output'
   code?: CliFailureTiming['code']
   stage?: CliFailureTiming['stage']
+  validation?: CliFailureTiming['validation']
 }
 
 function readVaultCliFailure(
   item: Record<string, unknown> | null,
+  command: string | undefined,
 ): VaultCliFailure {
   const output = readFirstString(item?.aggregatedOutput, item?.aggregated_output)
   if (output === null || output.length === 0) {
@@ -696,6 +698,7 @@ function readVaultCliFailure(
       attribution: code === 'unknown' ? 'unknown_code' : 'recognized',
       ...(code === 'unknown' ? {} : { code }),
       ...(stage === 'unknown' ? {} : { stage }),
+      ...cliTimingValidationFailure(command, code, error, 'fieldErrors'),
     }
   } catch {
     return { category: 'unknown', attribution: 'unstructured_output' }
@@ -719,15 +722,21 @@ function completedActionFailureDiagnostic(
 function commandFailureCategory(
   command: TrackedCommandDiagnostic,
   item: Record<string, unknown> | null,
-): Record<string, string> {
+): Record<string, string | boolean> {
   if (!command.vaultCli) return {}
-  const failure = readVaultCliFailure(item)
+  const failure = readVaultCliFailure(item,
+    command.commandAttribution === 'recognized' ? command.vaultCliCommand : undefined)
   return {
     errorCategory: failure.category,
     vaultCliErrorCategory: failure.category,
     vaultCliErrorAttribution: failure.attribution,
     ...(failure.code ? { vaultCliErrorCode: failure.code } : {}),
     ...(failure.stage ? { vaultCliErrorStage: failure.stage } : {}),
+    ...(failure.validation ? {
+      vaultCliValidationField: failure.validation.field,
+      vaultCliValidationCode: failure.validation.code,
+      ...(failure.validation.missing === undefined ? {} : { vaultCliValidationMissing: failure.validation.missing }),
+    } : {}),
   }
 }
 
