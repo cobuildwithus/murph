@@ -37,7 +37,9 @@ category opt-out in the ledger. Confirm briefly. Do not disconnect the account.
 ## Calendar pass
 
 Use only active `googlecalendar` or `outlook` accounts marked `notice-sent`.
-Read only the next 36 hours. Search each exact account and calendar separately.
+Read only the next 36 hours. When the engine supplies `timeMin` and `timeMax`,
+copy those UTC instants exactly instead of calculating offsets or dates.
+Search each exact account and calendar separately.
 Do not combine identities or infer that a calendar belongs to another account.
 
 Include training, matches, races, sauna, recovery sessions, long travel,

@@ -17,7 +17,7 @@ Updated: 2026-09-13
 
 ## Scope
 
-- In scope: Journal morning/afternoon Luna routing, SQL-bounded meal selection for the existing empty-work gate and closeout CLI, owner docs, synthetic tests and changelog.
+- In scope: Journal morning/afternoon Luna routing, SQL-bounded meal selection for the existing empty-work gate and closeout CLI, host-computed Journal calendar bounds, owner docs, synthetic tests and changelog.
 - Deferred: model-free Journal reconciliation, bounded classification-only Luna, and typed fixed reminders. Existing connected-source collection and free-form ledgers do not provide the typed complete-evidence and correction contracts needed to claim those paths are safely deterministic.
 - Out of scope: production mutations, merge/deploy, unrelated model preferences, populated meal interpretation, weekly synthesis and unrelated product policies.
 
@@ -77,10 +77,13 @@ Updated: 2026-09-13
 
 - Production-aligned live runs returned send decisions for routine captures, exposing a gap between the skill finish rule and the existing silent-save product contract. Replaced that ambiguous finish rule with explicit silent-save behavior while preserving notices, necessary clarification, and unresolved due check-ins. Focused prompt proof and the latest typecheck pass; the two affected live cases are rerunning.
 
-## Current handoff
+## Current verification
 
-- Draft PR: https://github.com/cobuildwithus/murph/pull/3405
-- Product UX: Hold. Final Luna notice and email journeys pass their required effects, privacy, and valid delivery decisions. The strict calendar journey stays quiet and saves one eligible plan, but creates zero required follow-up automations; it fails the exact-one-follow-up assertion. Do not weaken this assertion or mark the model swap ready.
-- Deterministic proof is green: 325 assistant owner tests, seven connected-app prompt tests, one 10,000-meal selection test, two closeout CLI tests, ten changelog tests, affected typechecks, emitted build, and complexity guard.
-- Final ReviewGPT has not started because focused live proof has not passed. Required ready-state CI is also outstanding. The PR remains draft and has not been merged or deployed.
-- Next work: replace the remaining free-form Journal effect planning with bounded, host-owned collection/reconciliation and scheduling, preserving the source and private-ledger contracts; then rerun the strict calendar journey before readiness and final review. The larger deterministic rewrite is unfinished.
+- PR: https://github.com/cobuildwithus/murph/pull/3405
+- Earlier calendar failures did not establish a production model failure: the fixture declared scheduled automation unavailable despite exposing its port, and its CLI fabricated success for invalid writes. The previous recommendation to require a full deterministic rewrite before completing this PR was unsupported by that evidence.
+- Corrected capability declarations, login-shell fixture setup, and canonical CLI effects. The deterministic contract proves ledger readback across the CLI boundary, actual note creation, help without mutation, and rejection of unknown commands. Current assistant typecheck and complexity guard pass.
+- Luna high on local subscription passes the new-account notice, excluded pre-feature baseline, global opt-out, calendar capture and grouped email travel scenarios. Assertions inspect canonical notes, ledger pages, hosted automation records, exact follow-up timing and linkage, privacy, and scheduled delivery decisions. The afternoon repeat preserved plan and follow-up identity but exposed a 38-hour provider window. The cron host now supplies exact 36-hour UTC bounds from the scheduled occurrence; focused offset/DST and composed cron tests pass. The strict live morning/afternoon replay now passes both exact windows, the linked reminder time, preserved identities, privacy, and silent decisions. Product UX: Ready for the scoped change.
+- These are synthetic provider responses with real local effects. The agent still performs multiple tool steps and can recover from rejected arguments; this evidence is neither a deterministic Journal redesign nor a measured dollar-savings claim.
+- Existing owner, query, closeout, prompt, changelog and emitted-build proof remains green. Parent candidate review passes the final bounded-time correction. Final ReviewGPT and required ready-state CI remain outstanding. No merge or deployment.
+
+- Final candidate proof: all five Luna scenarios (six turns) pass; 308 focused managed/cron/prompt tests, the canonical CLI fixture contract, current assistant typecheck/build and complexity guard pass. The two complete ordinary direct/group provider-input captures remain exactly 167221/153260 UTF-8 bytes, matching baseline; no exact model tokenizer is configured. Final review and CI are next.

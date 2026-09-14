@@ -226,6 +226,7 @@ import type {
   AssistantUsageRecorder,
 } from '../src/assistant/execution-context.ts'
 import {
+  buildMurphManagedJournalCalendarWindowInstructions,
   resolveMurphManagedAutomationSeed,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
   MURPH_MANAGED_AUTOMATIONS,
@@ -2588,6 +2589,25 @@ describe('onboarding policy read detection', () => {
 })
 
 describe('real Codex live fixture contracts', () => {
+  it('aligns Journal automation instructions with its port and uses real canonical CLI writes', async () => {
+    const prompt = buildWeeklyHealthInsightDeveloperInstructions({ hostedAutomationAvailable: true })
+    expect(prompt).toContain('Scheduled automation changes for this conversation are available')
+    expect(prompt).not.toContain('Scheduled automation changes are unavailable')
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-journal-cli-contract-'))
+    try {
+      const binDirectory = path.join(root, 'bin')
+      await materializeJournalConnectedContextVaultCli({ binDirectory, vaultRoot: root })
+      const cli = (args: string[]) => execFileAsync(path.join(binDirectory, 'vault-cli'), args, { timeout: 60_000 })
+      const ledger = JSON.parse((await cli(['knowledge', 'show', 'journal-connected-context', '--format', 'json'])).stdout)
+      expect(JSON.stringify(ledger)).toContain('calendar_old')
+      await cli(['event', 'note', 'add', '--help'])
+      expect((await readVaultRawTolerant(root)).events).toEqual([])
+      await expect(cli(['nonexistent-journal-command'])).rejects.toThrow()
+      await cli(['event', 'note', 'add', '--title', 'Synthetic training', '--note', 'One hour of tennis.', '--note-type', 'journal-plan', '--tag', 'planned', '--occurred-at', '2026-08-31T16:00:00Z', '--format', 'json'])
+      expect((await readVaultRawTolerant(root)).events).toMatchObject([{ kind: 'note', attributes: { noteType: 'journal-plan' } }])
+    } finally { await removeRealCodexTemporaryPath(root) }
+  }, 120_000)
+
   it('uses production Responses websocket configuration for canonical provider journeys', () => {
     const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-5.6-terra', modelProvider: 'openai-env', productionTransport: true })
     expect(toml).toContain('wire_api = "responses"')
@@ -14015,7 +14035,12 @@ describeRealCodex('real Codex Personal Patterns vocabulary normalization e2e', (
 })
 
 describeRealCodex('real Codex Journal connected account notice e2e', () => {
-  it('notices a new calendar before reading its events', async () => {
+  it.each([
+    { name: 'notices a new calendar before reading its events', accountId: 'calendar_new', notice: true, ledgerText: undefined },
+    { name: 'keeps a pre-feature baseline account excluded', accountId: 'calendar_old', notice: false, ledgerText: undefined },
+    { name: 'respects a global opt-out without reading provider content', accountId: 'calendar_ready', notice: false,
+      ledgerText: '# Journal connected context\n\nGlobal opt-out: all automatic Journal capture is disabled.\n\n- account: calendar_ready\n  toolkit: googlecalendar\n  state: notice-sent' },
+  ])('$name', async (scenario) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.slug === 'journal-connected-context-morning',
@@ -14029,19 +14054,11 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
 
     try {
       const binDirectory = path.join(workingDirectory, 'bin')
-      const skillsRoot = path.join(workingDirectory, 'skills')
-      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
-      await Promise.all([
-        materializeAssistantSkill({ skillsRoot, slug: 'connected-apps' }),
-        materializeAssistantSkill({
-          skillsRoot,
-          slug: 'journal-connected-context',
-        }),
-        materializeJournalConnectedContextVaultCli({
-          binDirectory,
-          ledgerCapturePath,
-        }),
-      ])
+      await materializeJournalConnectedContextVaultCli({
+        binDirectory,
+        vaultRoot: workingDirectory,
+        ledgerText: scenario.ledgerText,
+      })
       const connectedAppRequests: Array<{ operation: string }> = []
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: false,
@@ -14050,6 +14067,11 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
         codexCommand:
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
+        fixtureBinDirectory: binDirectory,
+        abortSignal: AbortSignal.timeout(600_000),
+        onProgress: (event) => {
+          if (event.kind !== 'reasoning') process.stdout.write(`[journal-progress] ${JSON.stringify({ kind: event.kind, state: event.state, label: event.safeLabel })}\n`)
+        },
         developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
           currentLocalDate: '2026-08-31',
           currentTimeZone: 'Europe/Warsaw',
@@ -14062,7 +14084,7 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
         ],
         env: {
           ...config.env,
-          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
           PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         },
         hostedToolContext: {
@@ -14078,8 +14100,8 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
                   accounts: [
                     {
                       alias: 'Personal',
-                      connectedAt: '2026-08-31T05:30:00.000Z',
-                      id: 'calendar_new',
+                      connectedAt: scenario.notice ? '2026-08-31T05:30:00.000Z' : '2026-08-30T05:30:00.000Z',
+                      id: scenario.accountId,
                       status: 'ACTIVE',
                       toolkit: 'googlecalendar',
                     },
@@ -14110,11 +14132,16 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
         workingDirectory,
       })
 
-      expect(parseAssistantNotificationDecision(result.finalMessage).kind).toBe('send_message')
-      expect(connectedAppRequests).toEqual([{ operation: 'manage' }])
-      expect(await readFile(ledgerCapturePath, 'utf8')).toContain('calendar_new')
-      expect(result.finalMessage).toMatch(/calendar|Journal/iu)
-      expect(result.finalMessage).toMatch(/stop|opt out|turn off/iu)
+      expect(parseAssistantNotificationDecision(result.finalMessage).kind).toBe(scenario.notice ? 'send_message' : 'skip')
+      expect(connectedAppRequests.every(request => request.operation === 'manage')).toBe(true)
+      expect((await readVaultRawTolerant(workingDirectory)).events).toEqual([])
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+      expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toContain(scenario.accountId)
+      if (scenario.notice) {
+        expect(connectedAppRequests).toEqual([{ operation: 'manage' }])
+        expect(result.finalMessage).toMatch(/calendar|Journal/iu)
+        expect(result.finalMessage).toMatch(/stop|opt out|turn off/iu)
+      }
       process.stdout.write(
         `[journal-connected-notice-e2e] ${JSON.stringify({
           finalMessage: result.finalMessage,
@@ -14131,7 +14158,7 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
 })
 
 describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
-  it('saves a clear training plan and excludes medical and private events', async () => {
+  it('saves one private training plan and linked follow-up, then deduplicates the afternoon pass', async () => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.slug === 'journal-connected-context-morning',
@@ -14145,44 +14172,41 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
 
     try {
       const binDirectory = path.join(workingDirectory, 'bin')
-      const skillsRoot = path.join(workingDirectory, 'skills')
-      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
       const commandLogPath = path.join(workingDirectory, 'vault-commands.txt')
-      await Promise.all([
-        materializeAssistantSkill({ skillsRoot, slug: 'connected-apps' }),
-        materializeAssistantSkill({
-          skillsRoot,
-          slug: 'journal-connected-context',
-        }),
-        materializeJournalConnectedContextVaultCli({
-          binDirectory,
-          commandLogPath,
-          ledgerCapturePath,
-          ledgerText: [
-            '# Journal connected context',
-            '',
-            '- account: calendar_ready',
-            '  toolkit: googlecalendar',
-            '  state: notice-sent',
-          ].join('\n'),
-        }),
-      ])
+      await materializeJournalConnectedContextVaultCli({
+        binDirectory,
+        commandLogPath,
+        vaultRoot: workingDirectory,
+        ledgerText: [
+          '# Journal connected context',
+          '',
+          '- account: calendar_ready',
+          '  toolkit: googlecalendar',
+          '  state: notice-sent',
+        ].join('\n'),
+      })
       const connectedAppRequests: Array<{
         input: Record<string, unknown>
         operation: string
       }> = []
       const automationRequests: AssistantHostedAutomationToolRequest[] = []
-      const result = await executeRealCodexAppServerTurn({
+      const runTurn = (afternoon: boolean) => executeRealCodexAppServerTurn({
         allowFinishWithoutReply: false,
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand:
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
+        fixtureBinDirectory: binDirectory,
+        abortSignal: AbortSignal.timeout(600_000),
+        onProgress: (event) => {
+          if (event.kind !== 'reasoning') process.stdout.write(`[journal-progress] ${JSON.stringify({ kind: event.kind, state: event.state, label: event.safeLabel })}\n`)
+        },
         developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
           currentLocalDate: '2026-08-31',
           currentTimeZone: 'Europe/Warsaw',
-          scheduledOccurrenceAt: '2026-08-31T06:00:00.000Z',
+          hostedAutomationAvailable: true,
+          scheduledOccurrenceAt: afternoon ? '2026-08-31T14:00:00.000Z' : '2026-08-31T06:00:00.000Z',
         }),
         dynamicTools: [
           MURPH_AUTOMATION_TOOL,
@@ -14192,7 +14216,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         ],
         env: {
           ...config.env,
-          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
           PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         },
         hostedToolContext: {
@@ -14202,12 +14226,22 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
                 throw new Error('Expected an automation save request.')
               }
               automationRequests.push(request)
+              const saved = await upsertAutomation({
+                ...request, createOnly: true, vaultRoot: workingDirectory,
+                continuityPolicy: request.continuityPolicy ?? 'fresh',
+                status: request.status ?? 'active',
+                contextReferences: request.contextReferences ? [...request.contextReferences] : undefined,
+                tags: request.tags ? [...request.tags] : undefined,
+                now: new Date('2026-08-31T06:00:00.000Z'),
+                route: { channel: 'linq', deliveryTarget: 'synthetic-private-journal',
+                  identityId: null, participantId: null, threadId: 'synthetic-journal', threadIsDirect: true },
+              })
               return {
                 action: 'save',
-                automationId: 'automation_calendar_tennis_followup',
+                automationId: saved.record.automationId,
                 created: true,
                 effectiveTimeZone: 'Europe/Warsaw',
-                lookupId: 'automation_calendar_tennis_followup',
+                lookupId: saved.record.automationId,
                 occurrenceProjection: {
                   nextOccurrenceAt: '2026-08-31T18:00:00.000Z',
                   status: 'resolved' as const,
@@ -14298,10 +14332,11 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
-          automation.instructions,
+          (afternoon ? MURPH_MANAGED_AUTOMATIONS.find(candidate => candidate.slug === 'journal-connected-context-afternoon')?.instructions : automation.instructions) ?? automation.instructions,
+          buildMurphManagedJournalCalendarWindowInstructions(automation.automationId, afternoon ? '2026-08-31T14:00:00.000Z' : '2026-08-31T06:00:00.000Z'),
           'Scheduled occurrence context:',
           '- Current local date: 2026-08-31.',
-          '- Current local time: 08:00 Europe/Warsaw.',
+          afternoon ? '- Current local time: 16:00 Europe/Warsaw.' : '- Current local time: 08:00 Europe/Warsaw.',
           '- Complete the normal scheduled decision.',
         ].join('\n\n'),
         reasoningEffort: resolveMurphManagedAutomationSeed(automation.automationId)
@@ -14310,6 +14345,8 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         workingDirectory,
       })
 
+      const result = await runTurn(false)
+      process.stdout.write(`[journal-calendar-decision] ${JSON.stringify({ finalMessage: result.finalMessage, automationWrites: automationRequests.length })}\n`)
       expect(parseAssistantNotificationDecision(result.finalMessage).kind, result.finalMessage).toBe('skip')
       const providerOperations = connectedAppRequests.map(
         (request) => request.operation,
@@ -14327,10 +14364,16 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       const journalWrites = vaultCommands.filter((command) =>
         command.includes('event note add') && !isRecordedVaultHelpCommand(command)
       )
+      const savedNotes = (await readVaultRawTolerant(workingDirectory)).events.filter(event => event.kind === 'note')
+      expect(savedNotes).toMatchObject([{ kind: 'note', attributes: { noteType: 'journal-plan' }, tags: expect.arrayContaining(['planned']) }])
+      expect(savedNotes).toHaveLength(1)
       expect(journalWrites).toHaveLength(1)
       expect(journalWrites[0]).toMatch(/tennis/iu)
       expect(journalWrites[0]).not.toMatch(/dentist|dinner|Alex/iu)
+      expect(JSON.stringify(savedNotes)).not.toMatch(/dentist|dinner|Alex/iu)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(1)
       expect(automationRequests).toHaveLength(1)
+      expect(automationRequests[0]).toMatchObject({ contextReferences: [{ entityKind: 'event', entityId: savedNotes[0]?.entityId }] })
       const followupRequest = automationRequests[0]
       if (!followupRequest || followupRequest.action !== 'save') {
         throw new Error('Expected one saved calendar follow-up.')
@@ -14345,9 +14388,24 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       expect(Date.parse(followupRequest.schedule.at)).toBe(
         Date.parse('2026-08-31T19:00:00+02:00') + 60 * 60 * 1_000,
       )
-      expect(await readFile(ledgerCapturePath, 'utf8')).toContain(
+      expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toContain(
         'calendar_evt_tennis',
       )
+      const repeated = await runTurn(true)
+      process.stdout.write(`[journal-calendar-repeat-decision] ${JSON.stringify({ finalMessage: repeated.finalMessage, automationWrites: automationRequests.length })}\n`)
+      expect(parseAssistantNotificationDecision(repeated.finalMessage).kind).toBe('skip')
+      const repeatedNotes = (await readVaultRawTolerant(workingDirectory)).events.filter(event => event.kind === 'note')
+      expect(repeatedNotes.map(event => event.entityId)).toEqual(savedNotes.map(event => event.entityId))
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(1)
+      expect(automationRequests).toHaveLength(1)
+      const executedWindows = connectedAppRequests.filter(request => request.operation === 'execute')
+      process.stdout.write(`[journal-calendar-windows] ${JSON.stringify(executedWindows.map(request => request.input.arguments))}\n`)
+      expect(executedWindows).toHaveLength(2)
+      for (const request of executedWindows) {
+        expect(request.input.account).toBe('calendar_ready')
+        const args = readRecord(request.input.arguments)
+        expect(Date.parse(String(args?.timeMax)) - Date.parse(String(args?.timeMin))).toBe(36 * 60 * 60 * 1_000)
+      }
       process.stdout.write(
         `[journal-connected-calendar-e2e] ${JSON.stringify({
           finalMessage: result.finalMessage,
@@ -14377,28 +14435,19 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
 
     try {
       const binDirectory = path.join(workingDirectory, 'bin')
-      const skillsRoot = path.join(workingDirectory, 'skills')
-      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
       const commandLogPath = path.join(workingDirectory, 'vault-commands.txt')
-      await Promise.all([
-        materializeAssistantSkill({ skillsRoot, slug: 'connected-apps' }),
-        materializeAssistantSkill({
-          skillsRoot,
-          slug: 'journal-connected-context',
-        }),
-        materializeJournalConnectedContextVaultCli({
-          binDirectory,
-          commandLogPath,
-          ledgerCapturePath,
-          ledgerText: [
-            '# Journal connected context',
-            '',
-            '- account: gmail_ready',
-            '  toolkit: gmail',
-            '  state: notice-sent',
-          ].join('\n'),
-        }),
-      ])
+      await materializeJournalConnectedContextVaultCli({
+        binDirectory,
+        commandLogPath,
+        vaultRoot: workingDirectory,
+        ledgerText: [
+          '# Journal connected context',
+          '',
+          '- account: gmail_ready',
+          '  toolkit: gmail',
+          '  state: notice-sent',
+        ].join('\n'),
+      })
       const connectedAppRequests: Array<{
         input: Record<string, unknown>
         operation: string
@@ -14411,9 +14460,15 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         codexCommand:
           normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
+        fixtureBinDirectory: binDirectory,
+        abortSignal: AbortSignal.timeout(600_000),
+        onProgress: (event) => {
+          if (event.kind !== 'reasoning') process.stdout.write(`[journal-progress] ${JSON.stringify({ kind: event.kind, state: event.state, label: event.safeLabel })}\n`)
+        },
         developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
           currentLocalDate: '2026-08-31',
           currentTimeZone: 'Europe/Warsaw',
+          hostedAutomationAvailable: true,
           scheduledOccurrenceAt: '2026-08-31T06:00:00.000Z',
         }),
         dynamicTools: [
@@ -14424,7 +14479,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         ],
         env: {
           ...config.env,
-          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
           PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
         },
         hostedToolContext: {
@@ -14434,12 +14489,22 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
                 throw new Error('Expected an automation save request.')
               }
               automationRequests.push(request)
+              const saved = await upsertAutomation({
+                ...request, createOnly: true, vaultRoot: workingDirectory,
+                continuityPolicy: request.continuityPolicy ?? 'fresh',
+                status: request.status ?? 'active',
+                contextReferences: request.contextReferences ? [...request.contextReferences] : undefined,
+                tags: request.tags ? [...request.tags] : undefined,
+                now: new Date('2026-08-31T06:00:00.000Z'),
+                route: { channel: 'linq', deliveryTarget: 'synthetic-private-journal',
+                  identityId: null, participantId: null, threadId: 'synthetic-journal', threadIsDirect: true },
+              })
               return {
                 action: 'save',
-                automationId: 'automation_lisbon_followup',
+                automationId: saved.record.automationId,
                 created: true,
                 effectiveTimeZone: 'Europe/Lisbon',
-                lookupId: 'automation_lisbon_followup',
+                lookupId: saved.record.automationId,
                 occurrenceProjection: {
                   nextOccurrenceAt: '2026-09-12T14:00:00.000Z',
                   status: 'resolved' as const,
@@ -14555,13 +14620,17 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
       const journalWrites = vaultCommands.filter((command) =>
         command.includes('event note add') && !isRecordedVaultHelpCommand(command)
       )
+      const savedNotes = (await readVaultRawTolerant(workingDirectory)).events.filter(event => event.kind === 'note')
+      expect(savedNotes).toHaveLength(1)
       expect(journalWrites).toHaveLength(1)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items.length).toBeLessThanOrEqual(1)
+      expect(JSON.stringify(savedNotes)).not.toMatch(/ZX9Q|HTL-4431|1200|Rua Example/iu)
       expect(journalWrites[0]).toMatch(/Lisbon/iu)
       expect(journalWrites[0]).toMatch(/12|15/iu)
       expect(journalWrites[0]).not.toMatch(
         /ZX9Q|HTL-4431|1200|Rua Example/iu,
       )
-      expect(await readFile(ledgerCapturePath, 'utf8')).toMatch(
+      expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toMatch(
         /mail_flight_out|mail_hotel|mail_flight_back/iu,
       )
       process.stdout.write(
@@ -36426,43 +36495,19 @@ function personalPatternFixtureFactor(
 async function materializeJournalConnectedContextVaultCli(input: {
   binDirectory: string
   commandLogPath?: string
-  ledgerCapturePath: string
+  vaultRoot: string
   ledgerText?: string
 }): Promise<void> {
-  await mkdir(input.binDirectory, { recursive: true })
-  const executablePath = path.join(input.binDirectory, 'vault-cli')
-  await writeFile(
-    executablePath,
-    [
-      '#!/bin/sh',
-      ...(input.commandLogPath
-        ? [`printf '%s\\n' "$*" >> ${JSON.stringify(input.commandLogPath)}`]
-        : []),
-      'case "$*" in',
-      '  *"knowledge show journal-connected-context"*)',
-      `    printf '%s\\n' ${JSON.stringify(
-        input.ledgerText
-        ?? '# Journal connected context\\n\\n- account: calendar_old\\n  toolkit: googlecalendar\\n  state: baseline',
-      )}`,
-      '    ;;',
-      '  *"knowledge upsert --slug journal-connected-context"*)',
-      `    printf '%s\\n' "$*" > ${JSON.stringify(input.ledgerCapturePath)}`,
-      "    printf '%s\\n' '{\"ok\":true}'",
-      '    ;;',
-      '  *)',
-      ...(input.commandLogPath
-        ? ["    printf '%s\\n' '{\"id\":\"evt_fixture\",\"ok\":true}'"]
-        : [
-            '    printf \'unsupported Journal connected-context command: %s\\n\' "$*" >&2',
-            '    exit 64',
-          ]),
-      '    ;;',
-      'esac',
-      '',
-    ].join('\n'),
-    { encoding: 'utf8', mode: 0o700 },
-  )
-  await chmod(executablePath, 0o700)
+  await initializeVault({ vaultRoot: input.vaultRoot, timezone: 'Europe/Warsaw' })
+  await upsertKnowledgePage({
+    vault: input.vaultRoot, slug: 'journal-connected-context', title: 'Journal connected context',
+    body: input.ledgerText ?? '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline',
+  })
+  await materializeRealWorkoutVaultCli({
+    binDirectory: input.binDirectory,
+    commandLogPath: input.commandLogPath ?? path.join(input.vaultRoot, 'commands.log'),
+    vaultRoot: input.vaultRoot,
+  })
 }
 
 async function materializeWeeklyHealthInsightVaultCli(input: {
@@ -38336,11 +38381,13 @@ function buildAdaptiveWearableDeveloperInstructions(input: {
 
 function buildWeeklyHealthInsightDeveloperInstructions(input: {
   currentLocalDate?: string
+  hostedAutomationAvailable?: boolean
   currentTimeZone?: string
   scheduledOccurrenceAt?: string
 } = {}): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
+    assistantHostedAutomationAvailable: input.hostedAutomationAvailable ?? false,
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],

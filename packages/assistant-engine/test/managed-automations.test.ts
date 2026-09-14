@@ -131,6 +131,7 @@ import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
+  buildMurphManagedJournalCalendarWindowInstructions,
   MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
   MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
   MURPH_MANAGED_AUTOMATIONS,
@@ -3492,4 +3493,24 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
   })
 
+})
+
+describe('managed Journal calendar read window', () => {
+  it.each([
+    { occurrenceAt: '2026-08-31T08:00:00+02:00', start: '2026-08-31T06:00:00.000Z', end: '2026-09-01T18:00:00.000Z' },
+    { occurrenceAt: '2026-08-31T16:00:00+02:00', start: '2026-08-31T14:00:00.000Z', end: '2026-09-02T02:00:00.000Z' },
+    { occurrenceAt: '2026-10-24T16:00:00+02:00', start: '2026-10-24T14:00:00.000Z', end: '2026-10-26T02:00:00.000Z' },
+  ])('uses elapsed UTC hours across offsets and clock changes: $occurrenceAt', ({ occurrenceAt, start, end }) => {
+    for (const id of [MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID]) {
+      const instructions = buildMurphManagedJournalCalendarWindowInstructions(id, occurrenceAt)
+      expect(instructions).toContain(`timeMin: ${start}`)
+      expect(instructions).toContain(`timeMax: ${end}`)
+    }
+  })
+  it('does not invent a range for another job or missing/invalid occurrence', () => {
+    expect(buildMurphManagedJournalCalendarWindowInstructions('synthetic-reminder', '2026-08-31T06:00:00Z')).toBeNull()
+    for (const occurrence of [null, 'invalid']) {
+      expect(buildMurphManagedJournalCalendarWindowInstructions(MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, occurrence)).toBeNull()
+    }
+  })
 })

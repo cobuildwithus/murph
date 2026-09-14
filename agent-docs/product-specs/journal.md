@@ -96,6 +96,8 @@ remain unchanged. The member can stop all automatic capture or one category
 without disconnecting the account.
 
 At 08:00 and 16:00 local time, calendar capture reads only the next 36 hours.
+The cron host supplies exact UTC start and end instants from the scheduled
+occurrence, including retries, so the model need not calculate timezone offsets.
 It includes clear training, matches, races, sauna, recovery, long travel,
 flights, and outdoor plans. It excludes medical care, dental care, therapy,
 tests, procedures, work, and private social events. It reconciles a moved or

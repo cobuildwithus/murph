@@ -51,6 +51,7 @@ import {
   type AssistantExecutionContext,
 } from '../execution-context.js'
 import {
+  buildMurphManagedJournalCalendarWindowInstructions,
   isRetiredMurphManagedAutomationId,
   isRecognizedMurphOnboardingFollowupAutomation,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
@@ -1009,6 +1010,7 @@ export async function executeClaimedAssistantCronJob(
             instructions: buildAssistantCronExecutionInstructions(
               input.job,
               deviceActivityAuthority,
+              occurrenceAt,
             ),
             recurringReminderConversation:
               assistantCronUsesRecurringReminderConversation(input.job),
@@ -1844,6 +1846,7 @@ export function buildAssistantCronExecutionInstructions(
     automationId: string | null
     contextReferences: readonly AutomationContextReference[]
   },
+  occurrenceAt: string | null = null,
 ): string {
   const lastFailedAt = job.job.state.lastFailedAt
   const retryEvidence =
@@ -1871,6 +1874,10 @@ export function buildAssistantCronExecutionInstructions(
   const recurringReminderConversation =
     buildAssistantCronRecurringReminderConversationInstructions(job)
   const overlays = [
+    buildMurphManagedJournalCalendarWindowInstructions(
+      job.kind === 'canonical' && job.source.kind === 'automation' ? job.source.automationId : null,
+      occurrenceAt,
+    ),
     retryEvidence,
     automationContext,
     independentAuthority,
