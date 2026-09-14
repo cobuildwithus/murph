@@ -1,6 +1,6 @@
 # Reduce scheduled background model usage
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -87,3 +87,12 @@ Updated: 2026-09-13
 - Existing owner, query, closeout, prompt, changelog and emitted-build proof remains green. Parent candidate review passes the final bounded-time correction. Final ReviewGPT and required ready-state CI remain outstanding. No merge or deployment.
 
 - Final candidate proof: all five Luna scenarios (six turns) pass; 308 focused managed/cron/prompt tests, the canonical CLI fixture contract, current assistant typecheck/build and complexity guard pass. The two complete ordinary direct/group provider-input captures remain exactly 167221/153260 UTF-8 bytes, matching baseline; no exact model tokenizer is configured. Final review and CI are next.
+
+## Final review and closeout
+
+- Final ReviewGPT round 1: PASS on `5b6791fc438b9bd91d7b738683e50cfe68952ccc`, GPT-6 Pro, Eragon lane, 372 seconds. The exact turn, response hash, and model attestation agree. The full 17-file audit found zero qualifying bugs or Complexity Collapse opportunities; zero findings were accepted or rejected and no remediation was needed.
+- The reviewer independently exercised the production SQLite selector with 10,007 records and the calendar-window helper with offset, daylight-saving and invalid-input cases. It did not claim to rerun the full workspace or live subscription journeys. Parent final review agrees with the scoped result and confirms privacy, canonical ownership and useful success paths.
+- Review context: full sensitive snapshot, first/current/context-anchor head all equal the reviewed head, no previous head, and empty remediation deltas. The managed tool removed its uploaded ZIP after capture; metadata was reconstructed with the same head and invocation and checked against the reviewed 17-file/805-line scope.
+- The closure commit changes only this historical plan. It qualifies for the explanatory-doc exemption from another substantive review. Completed CI checks on the reviewed head passed; four package coverage jobs were still running at closeout. Required CI must pass on the final PR head before handoff; the PR body owns that final gate result.
+- Current-base merge-tree proof was clean against verified `fe2170b73aa858f21689a99d1c01ba00d5a88ec6`. No production mutation, merge or deployment was performed. The broader deterministic Journal pipeline remains deferred; this change supplies bounded meal selection, Luna routing and deterministic calendar timestamps.
+Completed: 2026-09-13
