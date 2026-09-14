@@ -2145,6 +2145,64 @@ test("importDeviceBatch retracts omitted facets from a newer bounded authoritati
   assert.equal(tombstone?.lifecycle?.state, "deleted");
 });
 
+test("authoritative revision admission precedes immutable conflicts and preserves atomic writes", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-authoritative-admission");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const identity = {
+    system: "junction",
+    resourceType: "junction-apple-health-profile",
+    resourceId: "synthetic-profile",
+  };
+  const facet = "synthetic-fact";
+  const version = "2026-06-03T08:00:00.000Z";
+  const event = {
+    kind: "note" as const,
+    occurredAt: "2026-06-01T08:00:00.000Z",
+    title: "Synthetic provider fact",
+    note: "Original synthetic content.",
+    externalRef: { ...identity, facet, version },
+  };
+  const set = { ...identity, version, facetPrefixes: [facet], currentFacets: [facet] };
+  const first = await importDeviceBatch({
+    vaultRoot, provider: "junction", importedAt: version,
+    events: [event], authoritativeEventSets: [set],
+  });
+  const shardPath = first.eventShardPaths[0];
+  assert.ok(shardPath);
+  const before = await snapshotVaultFiles(vaultRoot);
+  const olderVersion = "2026-06-02T08:00:00.000Z";
+  const stale = await importDeviceBatch({
+    vaultRoot, provider: "junction", importedAt: "2026-06-04T08:00:00.000Z",
+    events: [{
+      ...event,
+      note: "Changed synthetic content.",
+      externalRef: { ...event.externalRef, version: olderVersion },
+      externalRefUpdatePolicy: "immutable",
+    }],
+    authoritativeEventSets: [{ ...set, version: olderVersion }],
+  });
+  assert.equal(stale.applied, false);
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), before);
+
+  await assert.rejects(() => importDeviceBatch({
+    vaultRoot, provider: "junction", importedAt: "2026-06-05T08:00:00.000Z",
+    events: [
+      { ...event, externalRef: { ...event.externalRef, resourceId: "synthetic-sibling" } },
+      { ...event, note: "Conflicting synthetic content.", externalRefUpdatePolicy: "immutable" },
+    ],
+    authoritativeEventSets: [set],
+  }), (error: unknown) => {
+    assert.ok(error instanceof VaultError);
+    assert.equal(error.code, "EVENT_SOURCE_REVISION_CONFLICT");
+    assert.equal(error.message,
+      `Authoritative device event externalRef "junction/junction-apple-health-profile/` +
+      `synthetic-profile#synthetic-fact" has conflicting content for source revision ` +
+      `"${version}"; nothing was imported.`);
+    return true;
+  });
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), before);
+});
+
 test("importDeviceBatch rejects authoritative resources above the composed 514-facet maximum", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-authoritative-facet-limit");
   await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
@@ -8800,6 +8858,23 @@ test("importDeviceBatch retains omitted member edits above provider tombstones",
     && event.externalRef?.version === secondVersion
   ));
   assert.equal(await importDeviceBatch(omission({ version: secondVersion })).then((result) => result.applied), false);
+  const shardPath = first.eventShardPaths[0];
+  assert.ok(shardPath);
+  const canonicalBeforeReplay = await fs.readFile(path.join(vaultRoot, shardPath));
+  for (const setVersion of [firstVersion, secondVersion]) {
+    const freshDelivery = await importDeviceBatch({
+      ...omission({ version: secondVersion }),
+      importedAt: "2026-06-12T09:00:00.000Z",
+      authoritativeEventSets: omission({ version: setVersion }).authoritativeEventSets,
+      evidenceParts: [{
+        role: "synthetic-withdrawal-replay",
+        fileName: "replay.json",
+        content: { setVersion },
+      }],
+    });
+    assert.equal(freshDelivery.applied, true);
+    assert.deepEqual(await fs.readFile(path.join(vaultRoot, shardPath)), canonicalBeforeReplay);
+  }
 });
 
 test("importDeviceBatch advances historical provider refs behind user-authored no-externalRef edits", async () => {
