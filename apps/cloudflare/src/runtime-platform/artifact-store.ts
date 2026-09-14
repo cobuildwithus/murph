@@ -35,6 +35,10 @@ import {
   fetchHostedResponse,
 } from "./hosted-http.ts";
 
+// Admission window only; an admitted fetch still uses the original upload deadline.
+const ARTIFACT_UPLOAD_RECOVERY_WINDOW_MS = 1_000;
+const ARTIFACT_UPLOAD_RETRY_DELAY_MS = 100;
+
 export function createCloudflareArtifactStore(input: {
   fetchImpl: typeof fetch;
   timeoutMs: number;
@@ -54,10 +58,12 @@ export function createCloudflareArtifactStore(input: {
       requireWriteFence?: boolean;
     } = {},
   ): Promise<void> => {
+    // Snapshot before even the authority read can yield to a caller mutating its bytes.
+    const uploadBytes = copyBytesToArrayBuffer(artifact.bytes);
     const ordinal = ++artifactUploadOrdinal;
     const startedAt = Date.now();
     const logDetails = {
-      artifactByteLength: artifact.bytes.byteLength,
+      artifactByteLength: uploadBytes.byteLength,
       artifactUploadOrdinal: ordinal,
       method: "PUT",
       operation: "artifact_upload",
@@ -117,26 +123,63 @@ export function createCloudflareArtifactStore(input: {
     });
 
     let response: Response;
+    let attempt = 1;
     try {
-      // Inform the Worker of this fetch's existing budget, never a fresh retry budget.
-      headers.set(HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER, String(Date.now() + timeoutMs));
-      response = await fetchHostedResponse({
+      const fetchStartedAt = Date.now();
+      const deadline = fetchStartedAt + timeoutMs;
+      const recoveryDeadline = Math.min(
+        deadline,
+        fetchStartedAt + ARTIFACT_UPLOAD_RECOVERY_WINDOW_MS,
+      );
+      // Neither the deadline nor the invocation's fence is restamped on replay.
+      headers.set(HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER, String(deadline));
+      const url = new URL(`/objects/${artifact.sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`);
+      const upload = (remainingMs: number) => fetchHostedResponse({
         description: "Hosted artifact upload",
         fetchImpl,
-        init: {
-          body: copyBytesToArrayBuffer(artifact.bytes),
-          headers,
-          method: "PUT",
-        },
+        init: { body: uploadBytes, headers, method: "PUT" },
         redactedLogPath: "/objects/REDACTED",
-        timeoutMs,
-        url: new URL(`/objects/${artifact.sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
+        timeoutMs: remainingMs,
+        url,
       });
+      try {
+        response = await upload(timeoutMs);
+      } catch (error) {
+        if (
+          !isRetryableHostedArtifactUploadTransportError(error)
+          || Date.now() + 2 * ARTIFACT_UPLOAD_RETRY_DELAY_MS >= recoveryDeadline
+        ) {
+          throw error;
+        }
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runtime.artifact-store",
+          details: {
+            artifactByteLength: uploadBytes.byteLength,
+            artifactUploadOrdinal: ordinal,
+            artifactUploadAttempt: attempt,
+            durationMs: Date.now() - startedAt,
+            ...buildHostedRuntimeSafeErrorMetadata(error),
+          },
+          level: "warn",
+          message: "Hosted runtime artifact upload transport recovery backoff.",
+          phase: "checkpoint",
+          userId: null,
+        });
+        await new Promise<void>((resolve) => setTimeout(resolve, ARTIFACT_UPLOAD_RETRY_DELAY_MS));
+        const now = Date.now();
+        // Timer scheduling can consume the window too; reserve a repeat-effect margin.
+        if (now + ARTIFACT_UPLOAD_RETRY_DELAY_MS >= recoveryDeadline) {
+          throw error;
+        }
+        attempt = 2;
+        response = await upload(deadline - now);
+      }
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runtime.artifact-store",
         details: {
           ...logDetails,
+          artifactUploadAttempt: attempt,
           durationMs: Date.now() - startedAt,
           ...buildHostedRuntimeSafeErrorMetadata(error),
         },
@@ -158,6 +201,7 @@ export function createCloudflareArtifactStore(input: {
       component: "hosted.runtime.artifact-store",
       details: {
         ...logDetails,
+        artifactUploadAttempt: attempt,
         contentLengthPresent: response.headers.has("content-length"),
         contentTypePresent: response.headers.has("content-type"),
         durationMs: Date.now() - startedAt,
@@ -184,6 +228,7 @@ export function createCloudflareArtifactStore(input: {
       component: "hosted.runtime.artifact-store",
       details: {
         ...logDetails,
+        artifactUploadAttempt: attempt,
         durationMs: Date.now() - startedAt,
         responseStatus: response.status,
       },
@@ -488,4 +533,38 @@ function assertHostedArtifactFetchLive(
   throw signal.reason instanceof Error
     ? signal.reason
     : new Error("Hosted artifact fetch was interrupted.");
+}
+
+function isRetryableHostedArtifactUploadTransportError(error: unknown): boolean {
+  if (shouldPreserveHostedRuntimeFetchError(error) || readHostedArtifactErrorStatus(error) !== null) {
+    return false;
+  }
+
+  const cause = error instanceof HostedRuntimeControlPlaneFetchError ? error.cause : null;
+  // A binding PUT rejection belongs to the Worker's R2 retry owner, even when
+  // its service prose mentions a network failure.
+  if (cause instanceof Error && cause.message.startsWith("put: ")) {
+    return false;
+  }
+
+  const diagnostics = readHostedRuntimeControlPlaneFetchFailureDiagnostics(error);
+  if (
+    !diagnostics
+    || diagnostics.fetchCallerSignalAborted
+    || diagnostics.fetchRequestSignalAborted
+    || diagnostics.fetchTimeoutSignalAborted
+    || diagnostics.fetchCauseName === "AbortError"
+    || diagnostics.fetchCauseName === "TimeoutError"
+    || (diagnostics.fetchCauseCode !== "runtime_error" && diagnostics.fetchCauseCode !== "type_error")
+  ) {
+    return false;
+  }
+
+  // Diagnostics intentionally classify every TypeError as fetch_failed. A write
+  // replay needs positive transport evidence, not a deterministic TypeError.
+  return diagnostics.fetchCauseKind === "cloudflare_rpc_destroy"
+    || diagnostics.fetchCauseKind === "network"
+    || (diagnostics.fetchCauseKind === "fetch_failed"
+      && cause instanceof Error
+      && cause.message.trim().toLowerCase() === "fetch failed");
 }
