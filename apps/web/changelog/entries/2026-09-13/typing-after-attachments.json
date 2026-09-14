@@ -9,6 +9,6 @@
     "summary": "Murph's typing indicator continues from attachment preparation into the reply.",
     "details": "Finishing the reply releases the indicator so later messages can show typing normally.",
     "relevanceTags": ["messaging", "attachments"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3422]
   }
 }

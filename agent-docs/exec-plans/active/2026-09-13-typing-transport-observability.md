@@ -4,6 +4,8 @@ Status: active
 Created: 2026-09-13
 Updated: 2026-09-13
 
+PR: https://github.com/cobuildwithus/murph/pull/3422
+
 ## Goal
 
 Restore typing across attachment preparation, delivery, and the next turn. Make
