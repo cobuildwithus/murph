@@ -1539,7 +1539,21 @@ Last verified: 2026-09-04
   transport/status reason. Write-fence, lease, authority, deterministic 4xx,
   malformed-data, parser, and unclassified failures remain terminal; the runtime
   must not create a second artifact or checkpoint retry queue.
-  Within an artifact PUT request only, `handleRunnerArtifactRequest` admits one
+  The container's `createCloudflareArtifactStore` may replay an immutable PUT
+  once after a classified response-less `fetch_failed`, `network`, or
+  `cloudflare_rpc_destroy` transport failure. The `fetch_failed` case requires
+  actual `fetch failed` error text, not merely a diagnostic TypeError category.
+  It snapshots bytes before awaiting authority, reuses the same object identity,
+  fence headers and original deadline header, and subtracts elapsed time from the
+  second fetch timeout. A 100 ms delay plus a 100 ms margin must fit inside the
+  earlier of that deadline and a one-second admission window from first fetch;
+  the margin is checked again after waiting. Each request still live-validates
+  the original fence at the Worker. Cancellation/timeout, known HTTP status,
+  authority, deterministic and unclassified failures do not admit this replay.
+  Two transport failures retain the typed upload failure and existing job backoff;
+  only success enters the existing SHA dedupe cache. No new cancellation owner,
+  timeout budget or retry queue is introduced.
+  Separately, within an artifact PUT request only, `handleRunnerArtifactRequest` admits one
   repeat storage attempt for an actual R2 binding `put: ... (10001)` or
   `put: ... (10043)` Error, per the [R2 binding error contract](https://developers.cloudflare.com/r2/api/error-codes/).
   `createHostedArtifactStore` hashes and encrypts once and reuses the exact
@@ -1562,9 +1576,12 @@ Last verified: 2026-09-04
   cancellation option: an already-issued write is awaited, never raced into an
   overlapping retry or detached task.
   Two failed PUTs rethrow the original failure unchanged for the existing typed
-  transport classification and durable device-sync job backoff. Generic fetch or
-  TypeError, unknown/non-service codes (including quota/rate-limit), HTTP/auth,
-  lease, hash, body, encryption and client-abort failures do not admit recovery.
+  transport classification and durable device-sync job backoff. At this lower
+  R2-storage layer, generic fetch or TypeError, unknown/non-service codes
+  (including quota/rate-limit), HTTP/auth, lease, hash, body, encryption and
+  client-abort failures do not admit recovery. Exhausted R2 errors and HTTP
+  responses do not trigger the container's transport replay or multiply these
+  storage retries.
   The existing structured artifact events add only `artifactR2Code` (10001/10043),
   `artifactStorageStage` (`r2_put`), `artifactWriteAttempt` (1/2), and the finite
   `artifactWriteDisposition` (backoff, recovered, exhausted, budget_exhausted,
@@ -1574,7 +1591,11 @@ Last verified: 2026-09-04
   tests in `apps/cloudflare/test/runner-outbound.test.ts` prove HEAD, decrypted
   GET bytes/hash, exact ciphertext reuse, exclusion/cancellation/fence/budget
   behavior and bounded private metadata through the actual route/storage owner.
-  Composed container-upload tests retain one fetch and content-addressed dedupe;
+  Composed container-upload tests retain one fetch for R2 recovery/exhaustion,
+  and prove at most two serial fetches for response-less transport recovery,
+  same-SHA concurrent dedupe, response loss after persistence, unchanged fence
+  authority, and decrypted original bytes/hash despite caller byte mutation.
+  Container attempt metadata and transport classification remain private-safe;
   `packages/assistant-runtime/test/hosted-device-sync-runtime.test.ts` keeps
   collection/import behind the existing job backoff rather than a second loop.
   This is member-visible recovery, not a diagnostic-only change; its changelog
