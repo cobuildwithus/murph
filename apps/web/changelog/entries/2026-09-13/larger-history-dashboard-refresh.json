@@ -9,6 +9,6 @@
     "summary": "Dashboard updates do less repeated work and have more time to finish when your history is large.",
     "details": "New conversations still take priority while your dashboard updates in the background.",
     "relevanceTags": ["dashboard", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3410]
   }
 }
