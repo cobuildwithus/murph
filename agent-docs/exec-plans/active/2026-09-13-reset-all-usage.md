@@ -42,9 +42,14 @@ partial, unused, and referral-backed Starter balances, immutable history, and
 operation replay after new accounted usage. Web typecheck and complexity diff
 passed; the reset transaction's complexity decreased by one.
 
-Parent source, test, ownership, and privacy review passed. Pending: browser
-confirmation proof, exact-head CI, and required final ReviewGPT. No production
-reset or deployment is part of this PR.
+Parent source, test, ownership, and privacy review passed. Chromium confirmed
+readable confirmation copy without overflow at 390px and 1280px; inspected
+synthetic screenshots are attached to PR #3414. The existing Ops study renders
+the real component. A hosted preview is queued.
+
+Pending: hosted preview reachability, exact-head CI, and required final
+ReviewGPT. No production reset or deployment is part of this PR. Preview upload
+friction is recorded in the task's Frog entry.
 
 ## Changelog
 
