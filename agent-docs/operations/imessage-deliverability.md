@@ -11,6 +11,8 @@ current route/line checks, and receipt-ordering contract lives in
 failures or bypassing a disabled, opted-out, flagged, critical, or unhealthy
 egress state.
 
+Direct Linq webhook duplicates preserve the verified chat identity in the existing mailbox handoff. Instant first-turn completion uses that same identity to reconcile an already-accepted reply. The duplicate planner does not attach an append-path checkpoint: the existing wake owner still repairs a missing workspace through its legacy signal path.
+
 This is required reading for any Murph change that can affect text-message or iMessage behavior. Read it before editing assistant/provider prompts, reply generation, outbound copy, reminder behavior, notification behavior, message scheduling, line selection, delivery monitoring, onboarding copy, or any runtime path that can cause Murph to send a message through a phone-number based channel.
 
 The core rule is simple: design Murph messaging like a real reciprocal conversation, not a broadcast system. The highest-risk pattern is many outbound messages from one line with little or no recipient response.
