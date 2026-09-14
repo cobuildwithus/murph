@@ -6606,6 +6606,7 @@ describe('assistant cron runtime orchestration', () => {
     if (hasAccount) {
       expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
+          instructions: expect.stringContaining('timeMax: 2026-04-09T20:00:00.000Z'),
           scheduledInvocationAuthority: { automationId, occurrenceAt },
           serviceTier: 'flex',
         }),

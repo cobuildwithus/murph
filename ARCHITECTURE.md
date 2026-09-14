@@ -2093,7 +2093,9 @@ That same canonical import ensures one ordinary Murph-managed automation for the
 
 Scheduled managed meal closeout checks that same canonical work queue before
 model entry, requesting one item with the occurrence instant and occurrence
-local date. An empty result skips inference and delivery through the existing
+local date. The query projection applies capture eligibility and retry-first,
+oldest-photo ordering before its SQL limit, so the probe materializes at most
+one meal. An empty result skips inference and delivery through the existing
 cron precondition and advances the normal schedule. Retained historical photos
 and same-occurrence removal revisions keep the ordinary model path eligible;
 read failures use existing cron retry handling. Explicit manual runs bypass

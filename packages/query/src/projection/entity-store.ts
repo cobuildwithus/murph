@@ -147,6 +147,32 @@ function queryStoredCanonicalEntities(
     parameters.push(filters.to);
   }
 
+  let orderSql = "COALESCE(date, substr(occurred_at, 1, 10)) DESC, occurred_at DESC, sort_rank ASC";
+  if (filters.automaticMealPhotoCloseoutAt !== undefined) {
+    const occurrenceTime = Date.parse(filters.automaticMealPhotoCloseoutAt);
+    if (!Number.isFinite(occurrenceTime)) {
+      throw new TypeError("Automatic meal closeout requires a valid occurrence timestamp.");
+    }
+    const occurrenceAt = new Date(occurrenceTime).toISOString();
+    const retryEvidence = "julianday(json_extract(entity_json, '$.attributes.recordedAt')) >= julianday(?)";
+    whereClauses.push(
+      "family = 'event' AND kind = 'meal'",
+      "json_extract(entity_json, '$.attributes.externalRef.system') = 'meal-photo-capture'",
+      "json_extract(entity_json, '$.attributes.externalRef.resourceType') = 'photo'",
+      `(${retryEvidence} OR EXISTS (
+        SELECT 1 FROM json_each(entity_json, '$.attributes.attachments') AS attachment
+        WHERE json_extract(attachment.value, '$.kind') = 'photo'
+          AND json_extract(attachment.value, '$.role') = 'photo'
+      ))`,
+    );
+    parameters.push(occurrenceAt);
+    // Apply both eligibility and retry priority before LIMIT. Within each
+    // class preserve the existing oldest-first canonical ordering.
+    orderSql = `CASE WHEN ${retryEvidence} THEN 0 ELSE 1 END,
+      COALESCE(occurred_at, date, entity_id) ASC, entity_id ASC`;
+    parameters.push(occurrenceAt);
+  }
+
   const limit = filters.limit === null ? null : normalizeCanonicalEntityLimit(filters.limit ?? 1_000);
   const limitSql = limit === null ? "" : "LIMIT ?";
   if (limit !== null) {
@@ -157,14 +183,16 @@ function queryStoredCanonicalEntities(
     SELECT entity_json
     FROM query_entities
     ${whereSql}
-    ORDER BY COALESCE(date, substr(occurred_at, 1, 10)) DESC, occurred_at DESC, sort_rank ASC
+    ORDER BY ${orderSql}
     ${limitSql}
   `).all(...parameters).map((row) => decodeQueryProjectionEntityRow(row));
 
-  return rows
+  const entities = rows
     .map((row) => parseJsonValue<CanonicalEntity | null>(row.entity_json, null))
-    .filter((entity): entity is CanonicalEntity => entity !== null)
-    .sort(compareCanonicalEntities);
+    .filter((entity): entity is CanonicalEntity => entity !== null);
+  return filters.automaticMealPhotoCloseoutAt === undefined
+    ? entities.sort(compareCanonicalEntities)
+    : entities;
 }
 
 function normalizeCanonicalEntityLimit(value: number): number {

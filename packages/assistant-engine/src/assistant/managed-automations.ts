@@ -413,6 +413,10 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     hostedRuntimeOnly: true,
+    assistantTargetOverride: {
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'high',
+    },
     tags: ['murph-managed:journal-connected-context'],
     instructions: [
       'Run the private Journal connected-context morning pass.',
@@ -438,6 +442,10 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     hostedRuntimeOnly: true,
+    assistantTargetOverride: {
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'high',
+    },
     tags: ['murph-managed:journal-connected-context'],
     instructions: [
       'Run the private Journal connected-context afternoon pass.',
@@ -2218,4 +2226,25 @@ function canPreserveLegacyOneShotSchedule(input: {
     Number.isFinite(existingAtMs) &&
     input.now.getTime() < activeUntilMs &&
     existingAtMs <= activeUntilMs
+}
+
+/** Keep calendar range arithmetic out of the managed Journal model turn. */
+export function buildMurphManagedJournalCalendarWindowInstructions(
+  automationId: string | null,
+  occurrenceAt: string | null,
+): string | null {
+  if (
+    ![MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+      MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID].includes(automationId ?? '')
+    || occurrenceAt === null
+  ) return null
+  const start = new Date(occurrenceAt)
+  const end = new Date(start.getTime() + 36 * 60 * 60 * 1_000)
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return null
+  return [
+    'Journal calendar read window (engine-computed, exactly 36 elapsed hours):',
+    `- timeMin: ${start.toISOString()}`,
+    `- timeMax: ${end.toISOString()}`,
+    '- Use these exact UTC instants for calendar reads. Do not recalculate or widen them. Notices, baseline exclusions, and opt-outs still take precedence over reading content.',
+  ].join('\n')
 }

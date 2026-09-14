@@ -96,6 +96,8 @@ remain unchanged. The member can stop all automatic capture or one category
 without disconnecting the account.
 
 At 08:00 and 16:00 local time, calendar capture reads only the next 36 hours.
+The cron host supplies exact UTC start and end instants from the scheduled
+occurrence, including retries, so the model need not calculate timezone offsets.
 It includes clear training, matches, races, sauna, recovery, long travel,
 flights, and outdoor plans. It excludes medical care, dental care, therapy,
 tests, procedures, work, and private social events. It reconciles a moved or
@@ -105,7 +107,14 @@ The 08:00 pass also uses narrow transport and lodging confirmation searches.
 Its first pass looks back at most 90 days for future travel. It groups one trip
 into one normalized itinerary and stores no message body, price, booking code,
 attachment, exact address, or other traveler. Calendar events and trips get at
-most one follow-up after passive evidence is checked first.
+most one follow-up after passive evidence is checked first. Calendar check-ins
+are scheduled one hour after the event ends, using the event timezone.
+
+Both managed passes use `gpt-5.6-luna` with high reasoning effort, independent
+of the member's conversation model. Existing active managed records converge
+through ordinary seed reconciliation. These passes still use the existing
+connected-context agent and private ledger; model-free source reconciliation
+and a bounded classification-only model step are not implemented.
 
 ## Read model
 
