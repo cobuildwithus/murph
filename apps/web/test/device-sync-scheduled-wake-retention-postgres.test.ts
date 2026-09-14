@@ -411,7 +411,9 @@ describe.skipIf(!runPostgresProof)(
           inserted: false,
           runtimeOwnedRetiredDuplicate: false,
         });
-        expect(warn).toHaveBeenCalledTimes(2);
+        expect(warn.mock.calls.filter(([message]) =>
+          message === "Hosted mailbox dedupe conflict.",
+        )).toHaveLength(2);
       } finally {
         signal.mockRestore();
         getPrisma.mockRestore();
