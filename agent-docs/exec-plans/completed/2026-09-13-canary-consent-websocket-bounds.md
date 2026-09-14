@@ -1,6 +1,6 @@
 # Repair canary runtime authority and bound provider WebSocket queues
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -53,4 +53,7 @@ Updated: 2026-09-13
 - Candidate: 80 Web reader/route/actual-runtime-authority/browser-authority tests, 22 relay node tests and seven native workerd WebSocket tests pass. Web and Cloudflare typechecks pass. Complexity: relay maximum 16 to 15; observer maximum 19 unchanged; no hotspots. Whitespace and docs drift pass.
 - Parent candidate review: Ready. Retains exact identity/replica/checkpoint fences, no-store and generic diagnostics; canonical runtime policy denies withdrawal. Provider overload blocks new admission, keeps existing queue bounded and drains accepted terminal accounting/delivery. Native workerd verifies close ordering. No new waits, external calls, provider inputs, schemas, persisted state or timers on foreground execution.
 - Changelog decision: not applicable. Fixed-canary observation is operator-only and the relay change is internal resource-admission hardening; the cause of a particular production memory failure remains unproven, so no member-visible incident-recovery claim is made.
-- Remaining: draft PR, required final review and exact-head CI, then deployment/canary evidence under the existing authorized delivery path.
+- Final ReviewGPT: PASS on PR #3408 at 48438ff22a2bac7ea52ea3ce8b8fb2b2a582851c. Round 1 used a full snapshot and verified all 11 changed-file blobs; the captured requested/response model was gpt-6-pro with the exact completed response and REVIEW_COMPLETE marker after more than five minutes. The reviewer ran 14 independent synthetic relay checks and reported no qualifying bugs or material Complexity Collapse; no findings were accepted or remain unresolved.
+- Parent final review: Ready. The final closeout changes only this plan and its index reference; reviewed production source and tests remain identical. Required CI must pass on the final authored head before handoff.
+- Delivery boundary: ready PR for human merge under the existing production-sweep instructions. Functional fixes are not automatically merged or deployed. After authorized deployment, verify the serving Web/Worker revisions and the next hosted Linq canary; production recovery and the earlier memory-failure cause remain unproven by local checks.
+Completed: 2026-09-13
