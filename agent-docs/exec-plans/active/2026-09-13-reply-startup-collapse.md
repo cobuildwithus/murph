@@ -75,3 +75,15 @@ Updated: 2026-09-13
   differences. Do not add a path-selection interface without a measured need.
 - No second equally small removal was proved. The requested one-to-two-second
   production improvement remains unestablished; final review and CI are pending.
+
+- Changelog page rendering: 10 tests passed after generating fragments and
+  running Vitest from the repository root. The documented command's discovery
+  issue is already recorded in the existing friction log; no duplicate entry.
+- Web typecheck passed after normal generated-input preparation.
+- Local helper-only benchmarks on Node 24.14.1 used alternating base/head order,
+  fresh synthetic files, and retained-content hashes. Median paired savings were
+  3.7 ms for 12 rollouts (five pairs) and 167.9 ms for 2,000 rollouts (three pairs).
+  Both sets contained a slower patched sample. These noisy local measurements do
+  not establish a production gain or the requested one-to-two-second target.
+- Draft PR #3424 contains this one coherent deletion. Final ReviewGPT and CI
+  remain completion gates; production deployment remains outside scope.
