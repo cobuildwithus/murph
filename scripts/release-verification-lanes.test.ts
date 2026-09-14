@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -11,6 +12,12 @@ import {
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+const { validateReleaseContext } = await import(
+  new URL("./release-helpers.mjs", import.meta.url).href
+) as {
+  validateReleaseContext(context: ReturnType<typeof releaseValidationFixture>, options?: { expectVersion?: unknown }): unknown;
+};
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const releaseCheckPath = path.join(repoRoot, "scripts", "release-check.sh");
@@ -344,5 +351,163 @@ describe("release verification executable lanes", () => {
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true });
     }
+  });
+});
+
+function releaseValidationFixture() {
+  const fixtureRoot = path.resolve("synthetic-release");
+  const packageJson: Record<string, unknown> = {
+    name: "@murphai/example-tool",
+    private: false,
+    version: "1.2.3",
+    repository: "https://example.test/repository",
+    main: "dist/index.js",
+    types: "dist/index.d.ts",
+    exports: { ".": { types: "dist/index.d.ts", default: "dist/index.js" } },
+    publishConfig: { access: "public" },
+    bin: { murph: "dist/bin.js", "vault-cli": "dist/bin.js" },
+    files: ["dist", "CHANGELOG.md"],
+  };
+  const workspaceDependencies: Array<{ name: string; version: string }> = [];
+  const entry = {
+    name: "@murphai/example-tool",
+    path: "packages/example-tool",
+    packageJsonPath: path.join(fixtureRoot, "packages/example-tool/package.json"),
+    packageJson,
+    isScoped: true,
+    workspaceDependencies,
+  };
+  return {
+    repoRoot: fixtureRoot,
+    rootPackageJson: { name: "example-workspace" },
+    manifest: {
+      repositoryUrl: "https://example.test/repository",
+      primaryPackage: entry.name,
+      releaseArtifacts: { changelogPath: "CHANGELOG.md", releaseNotesDir: "release-notes" },
+    },
+    orderedPackages: [entry],
+    packageByName: new Map([[entry.name, entry]]),
+    packages: [entry],
+    primaryPackage: entry,
+    workspacePackages: [entry],
+    workspacePackageByName: new Map([[entry.name, entry]]),
+    releasePackageNames: new Set([entry.name]),
+  };
+}
+
+describe("release context validation contracts", () => {
+  it("preserves the complete summary and an explicitly undefined expected version", () => {
+    const context = releaseValidationFixture();
+    assert.deepEqual(validateReleaseContext(context, { expectVersion: undefined }), {
+      changelogPath: "CHANGELOG.md",
+      isPrerelease: false,
+      npmTag: "",
+      primaryPackage: {
+        name: "@murphai/example-tool",
+        packageJsonPath: "packages/example-tool/package.json",
+        path: "packages/example-tool",
+      },
+      packages: [{
+        bundledExternalDependencies: [],
+        bundledWorkspaceDependencies: [],
+        name: "@murphai/example-tool",
+        packageJsonPath: "packages/example-tool/package.json",
+        path: "packages/example-tool",
+        version: "1.2.3",
+        workspaceDependencies: [],
+      }],
+      releaseNotesPath: "release-notes/v1.2.3.md",
+      version: "1.2.3",
+    });
+  });
+
+  for (const expectVersion of [null, false, ""]) {
+    it(`rejects expected version ${JSON.stringify(expectVersion)} before reading manifest fields`, () => {
+      const context = releaseValidationFixture();
+      Object.defineProperty(context.manifest, "repositoryUrl", {
+        get() { throw new Error("manifest must not be inspected"); },
+      });
+      assert.throws(
+        () => validateReleaseContext(context, { expectVersion }),
+        (error: unknown) => error instanceof Error
+          && error.message.startsWith("Expected release version must match ")
+          && error.message.endsWith(`Received: ${expectVersion}`),
+      );
+    });
+  }
+
+  it("preserves aggregate diagnostic order across manifest, package, version, and primary checks", () => {
+    const context = releaseValidationFixture();
+    context.manifest.repositoryUrl = "";
+    Object.defineProperty(context.manifest, "releaseArtifacts", { value: undefined });
+    context.rootPackageJson.name = context.manifest.primaryPackage;
+    context.primaryPackage.packageJson = {
+      name: "@murphai/wrong-name", private: true, version: "1.2",
+      repository: "https://example.test/wrong-repository", main: null, types: false, exports: null,
+    };
+    const packagePath = "packages/example-tool/package.json";
+    assert.throws(() => validateReleaseContext(context), {
+      message: [
+        "scripts/release-manifest.json must declare repositoryUrl.",
+        "scripts/release-manifest.json must declare releaseArtifacts.changelogPath and releaseArtifacts.releaseNotesDir.",
+        "Root package name @murphai/example-tool conflicts with the published primary package name.",
+        `${packagePath} name must be @murphai/example-tool, found @murphai/wrong-name.`,
+        `${packagePath} must be publishable (private: false).`,
+        `${packagePath} version 1.2 is not supported by the release flow.`,
+        `${packagePath} repository must be .`,
+        `${packagePath} must declare main and types entrypoints.`,
+        `${packagePath} must expose a typed default export for '.'.`,
+        `${packagePath} must set publishConfig.access to public.`,
+        "Release packages must share one version, found: <missing>.",
+        `${packagePath} must publish the primary package name @murphai/example-tool.`,
+        `${packagePath} must expose the murph bin from dist/bin.js.`,
+        `${packagePath} must expose the vault-cli bin from dist/bin.js.`,
+        `${packagePath} files must include CHANGELOG.md.`,
+      ].join("\n"),
+    });
+  });
+
+  it("keeps default-export and entrypoint getter short circuits in order", () => {
+    const context = releaseValidationFixture();
+    const reads: string[] = [];
+    Object.defineProperty(context.primaryPackage.packageJson, "main", {
+      get() { reads.push("main"); return "dist/index.js"; },
+    });
+    Object.defineProperty(context.primaryPackage.packageJson, "types", {
+      get() { reads.push("types"); return "dist/index.d.ts"; },
+    });
+    context.primaryPackage.packageJson.exports = { ".": {
+      get types() { reads.push("export.types"); return "dist/index.d.ts"; },
+      get default() { reads.push("export.default"); return "dist/index.js"; },
+      get import() { throw new Error("import must not be read after a valid default"); },
+    } };
+    assert.doesNotThrow(() => validateReleaseContext(context));
+    assert.deepEqual(reads, ["main", "types", "export.types", "export.default"]);
+  });
+
+  it("reports missing private bundles before undeclared bundled and transitive external dependencies", () => {
+    const context = releaseValidationFixture();
+    const primary = context.primaryPackage;
+    const dependency = {
+      ...primary,
+      name: "@murphai/example-private",
+      path: "packages/example-private",
+      packageJsonPath: path.join(context.repoRoot, "packages/example-private/package.json"),
+      packageJson: { private: true, dependencies: { "example-transitive": "^1.0.0" } },
+      workspaceDependencies: [],
+    };
+    context.workspacePackages.push(dependency);
+    context.workspacePackageByName.set(dependency.name, dependency);
+    primary.workspaceDependencies.push({ name: dependency.name, version: "workspace:*" });
+    primary.packageJson.dependencies = { [dependency.name]: "workspace:*" };
+    primary.packageJson.bundleDependencies = ["example-undeclared"];
+    const packagePath = "packages/example-tool/package.json";
+    assert.throws(() => validateReleaseContext(context), {
+      message: [
+        `${packagePath} depends on internal workspace package @murphai/example-private, but bundleDependencies must include it so the packed tarball stays installable.`,
+        `${packagePath} bundleDependencies includes external package example-undeclared, but it must also be declared in dependencies, optionalDependencies, or peerDependencies so the packed tarball exposes a coherent dependency graph.`,
+        `${packagePath} bundles internal workspace packages that depend on external package example-transitive, but example-transitive must also be declared in dependencies, optionalDependencies, or peerDependencies so npm installs it.`,
+      ].join("\n"),
+    });
   });
 });
