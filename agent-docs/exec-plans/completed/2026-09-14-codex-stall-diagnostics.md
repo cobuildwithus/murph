@@ -1,6 +1,6 @@
 # Codex stall diagnostics and recovery proof
 
-Status: active
+Status: completed
 Created: 2026-09-14
 Updated: 2026-09-14
 
@@ -81,6 +81,12 @@ Five seconds works mechanically but is not a model-health threshold. The
 first-frame timer remains a fixture-only comparison, not a second recovery
 owner or a complete post-acknowledgement solution. Production stays unchanged.
 
-Final ReviewGPT and exact-head CI remain pending on the stable pushed candidate.
+Final ReviewGPT passed on candidate
+`7e641d64f74663bf39576df8caf7a96558b63a94`, with no qualifying findings.
+The reviewer inspected all 17 changed files and independently ran eight relay
+smoke cases; native/Workers timing evidence remains the local author's proof.
+Parent final review found no required remediation. The final commit only closes
+this plan; exact-head CI completion is recorded in PR #3440.
 Internal-only changelog disposition: observability and local transport proof;
 no member-visible response or recovery policy change ships here.
+Completed: 2026-09-14
