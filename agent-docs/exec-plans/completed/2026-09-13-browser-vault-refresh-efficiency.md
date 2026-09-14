@@ -1,6 +1,6 @@
 # Bound Browser Vault rebuild cost and allow complete background refreshes
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -54,5 +54,6 @@ Updated: 2026-09-13
 - A paired synthetic 10,000-event / 3,138,890-byte probe used one warmup pair and five alternating-order pairs through the same production hash owner. Full-vault hydration took 234/189/252/248/264 ms; narrow hydration took 79/77/117/127/102 ms. Hashes/accounting matched in every pair. Median component time fell from 248 to 102 ms (about 59%); this is not hosted end-to-end timing.
 - Product UX walkthrough: Ready for the tested patch. Mixed/sparse histories retain output and hash identity; a longer build can publish; foreground wake, abort, and earlier assistant deadlines retain priority; changed sources and conflicts cannot publish. No Murph prompt, interpretation, tool, silence, or reply behavior changed, so a paid model journey is not applicable.
 - Parent candidate review: source ownership, strict snapshot construction, all three consistency guards, generation, encrypted write/publication boundary, and unrelated projection semantics are preserved. The normal runtime/query bundle ships together without a new external schema or rollback floor.
-- Final ReviewGPT and exact-head required CI remain pending. Production recovery remains unverified until an authorized release and natural refresh.
-- Draft PR: https://github.com/cobuildwithus/murph/pull/3410. Final review starts only after the candidate is Ready; this functional PR remains for human merge and release.
+- Final ReviewGPT round 1: PASS on `061a252d802f1ba7cfebeb53b07e6c505c10c09b`; captured GPT-6 Pro response SHA-256 `9baadfa847ffac1d284ab1d121ed39295a7381c81563eb4beb346fd9aebf71a9`. All nine changed-file blobs and the review target were verified. No qualifying findings; parent final review also passes.
+- PR: https://github.com/cobuildwithus/murph/pull/3410. Billing and both CLI platform checks passed on the reviewed candidate. Required exact-head CI remains the final merge-readiness gate after this documentation-only closeout; record its final receipt on the PR. Reviewed source/tests/changelog stay unchanged. This functional PR remains for human merge and release, and production recovery awaits that release and natural refresh.
+Completed: 2026-09-13
