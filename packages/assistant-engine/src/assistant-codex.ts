@@ -3459,6 +3459,7 @@ function buildCodexTransportDiagnosticsTraceEvent(input: {
     codexTransportRetryMax: retryProgress?.retryMax ?? null,
     codexTransportRetryExhausted: terminalStreamFailure,
     codexTransportSourceMethod: source.sourceMethod,
+    codexTransportScope: source.turnIdPresent ? 'turn' : source.threadIdPresent ? 'thread' : 'unscoped',
     codexTransportStreamDisconnected: streamDisconnected,
     codexTransportTerminalAfterProviderAction:
       terminalStreamFailure && input.providerActionCount > 0,
@@ -5410,6 +5411,42 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
+  const emitTransportDiagnostics = (
+    message: CodexRpcMessage,
+    method: string | null,
+    scope: 'turn' | 'thread' = 'turn',
+  ): void => {
+    if (!input.onTraceEvent) return
+    if (scope === 'thread') {
+      const params = readCodexRecordField(message, 'params')
+      if (method !== 'warning' || !currentTurnStartedNotificationObserved || !codexThreadId
+        || !params || readCodexStringField(params, 'threadId') !== codexThreadId) return
+    }
+    const diagnostic = buildCodexTransportDiagnosticsTraceEvent({
+      codexThreadId, message, method, providerActionCount, turnId,
+    })
+    if (!diagnostic) return
+    try {
+      input.onTraceEvent({
+        codexThreadId: null,
+        rawEvent: {
+          ...diagnostic,
+          codexTransportWarmReused: isReusedWarmProcess,
+          ...(codexProviderRequestStartedAtMs === null ? {} : {
+            codexTransportElapsedMs: Math.max(0, Date.now() - codexProviderRequestStartedAtMs),
+          }),
+          ...(typeof input.providerRequestOrdinal === 'number' ? {
+            codexTransportProviderRequestOrdinal: input.providerRequestOrdinal,
+          } : {}),
+          ...(turnId ? { codexTransportTurnCorrelation: buildCodexTurnCorrelation(turnId) } : {}),
+        },
+        updates: [],
+      })
+    } catch {
+      // Metadata-only diagnostics must never alter turn processing.
+    }
+  }
+
   const handleAcceptedEvent = (
     message: CodexRpcMessage,
     method: string | null,
@@ -5450,26 +5487,7 @@ async function runCodexAppServerTurnOnProcess(
       observedAtMs,
       rawEvent: message,
     })
-    const transportDiagnosticsTraceEvent = input.onTraceEvent
-      ? buildCodexTransportDiagnosticsTraceEvent({
-          codexThreadId,
-          message,
-          method,
-          providerActionCount,
-          turnId,
-        })
-      : null
-    if (transportDiagnosticsTraceEvent) {
-      try {
-        input.onTraceEvent?.({
-          codexThreadId: null,
-          rawEvent: transportDiagnosticsTraceEvent,
-          updates: [],
-        })
-      } catch {
-        // Transport diagnostics are metadata-only and must not block turns.
-      }
-    }
+    emitTransportDiagnostics(message, method)
     const transportDiagnosticSource =
       readCodexTransportDiagnosticSource(message, method)
     if (transportDiagnosticSource?.willRetry === true) {
@@ -5856,6 +5874,9 @@ async function runCodexAppServerTurnOnProcess(
       messageTurnId === null &&
       method !== 'model/rerouted'
     ) {
+      // Native fallback warnings are thread-scoped. Observe their sanitized
+      // diagnostics without admitting raw text, output, or turn completion.
+      emitTransportDiagnostics(message, method, 'thread')
       return
     }
 

@@ -261,6 +261,29 @@ conversation and turn-scoped automation overrides resolve and is the normalized
 value passed to the Codex provider attempt. Raw provider configuration, prompts,
 messages, credentials, and paths remain excluded.
 
+### Warm Codex transport diagnostics
+
+The existing `codex.transport_diagnostics` provider trace includes
+`codexTransportScope` (`turn`, `thread`, or `unscoped`),
+`codexTransportElapsedMs` since the current provider turn request,
+`codexTransportProviderRequestOrdinal`, `codexTransportWarmReused`, and the
+content-free `codexTransportTurnCorrelation` shared with action and completion
+timing. Together with fallback, idle-timeout and retry classifications, these
+distinguish transport recovery from the encompassing model-turn duration.
+Elapsed time is measured when the notification is observed, not when buffered
+logs are persisted; it is not an upstream response-header measurement.
+
+Native fallback warnings contain a thread ID without a turn ID. Reused sessions
+observe only recognized transport warnings from the exact bound thread after
+the current turn-start notification. They emit sanitized metadata while still
+discarding raw warning text and all unscoped output, requests and completion.
+The scope describes identifiers carried by the notification; the correlation
+describes the active turn at observation time. A delayed thread-scoped warning
+cannot be attributed conclusively to that turn or an earlier WebSocket frame. POST egress
+diagnostics do not observe WebSocket frames, and absence of a warning is not
+proof that no recovery occurred. No endpoint, raw thread or turn ID, prompt,
+response, or additional provider error text enters the diagnostic record.
+
 ### Web-control preflight rejection attribution
 
 Ordinary hosted-runtime callers select branded route descriptors from the same
