@@ -176,6 +176,7 @@ const HOSTED_ASSISTANT_CODEX_TRANSPORT_METHOD_VALUES = new Set([
   "error",
   "warning",
 ]);
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_SCOPE_VALUES = new Set(["turn", "thread", "unscoped"]);
 const HOSTED_ASSISTANT_CODEX_TRANSPORT_VALUES = new Set([
   "http",
   "unknown",
@@ -327,9 +328,13 @@ const HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_BOOLEAN_KEYS = [
   "codexTransportThreadIdPresent",
   "codexTransportTurnIdPresent",
   "codexTransportWillRetry",
+  "codexTransportWarmReused",
 ] as const;
 const HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_NUMBER_KEYS = [
   "codexTransportErrorMessageLength",
+  "codexTransportElapsedMs",
+  "codexTransportProviderRequestOrdinal",
+  "codexTransportTurnCorrelation",
   "codexTransportProviderActionCount",
   "codexTransportRetryCount",
   "codexTransportRetryMax",
@@ -1133,6 +1138,12 @@ function readHostedAssistantCodexTransportDiagnosticTrace(
     providerTraceKind: "codex.transport_diagnostics",
     schema: ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
   };
+
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexTransportScope",
+    readHostedAssistantProviderDiagnosticAllowedString(record, "codexTransportScope", HOSTED_ASSISTANT_CODEX_TRANSPORT_SCOPE_VALUES),
+  );
 
   for (const key of HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_BOOLEAN_KEYS) {
     maybeSetHostedAssistantProviderDiagnosticDetail(
