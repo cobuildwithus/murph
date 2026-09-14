@@ -1,3 +1,5 @@
+import { createHostedWebSocketDiagnostics } from "./runner-egress-websocket-diagnostics.ts";
+import type { HostedRunnerDiagnosticJson } from "./runner-egress-responses-diagnostics.ts";
 import {
   HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
   hasHostedCodexMemoryBillableUsage,
@@ -51,11 +53,13 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   persistUsage?(
     completion: HostedCodexMemoryWebSocketCompletion,
   ): Promise<void>;
+  reportDiagnostic?: (diagnostic: HostedRunnerDiagnosticJson) => void;
   reportFailure?: (failure: {
     phase: HostedOpenAiWebSocketFailurePhase;
   }) => void;
   upstream: HostedOpenAiSocketPort;
 }): HostedOpenAiWebSocketRelayController {
+  const diagnostics = createHostedWebSocketDiagnostics(input.reportDiagnostic);
   let activeRequest: HostedCodexMemoryRequestMetadata | null = null;
   let downstreamClosed = false;
   let upstreamClosed = false;
@@ -99,6 +103,7 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   ): void => {
     if (stopped) return;
     stopped = true;
+    diagnostics.terminal("failed", "relay", code, phase);
     reportFailure(phase);
     closeDownstream(code, reason);
     closeUpstream(code, reason);
@@ -123,13 +128,20 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   };
   const forwardToUpstream = (
     data: HostedOpenAiWebSocketMessage,
+    observation: { receivedAt: number; ordinal: number },
   ): void => {
-    if (!upstreamClosed) input.upstream.send(data);
+    if (!upstreamClosed) {
+      input.upstream.send(data);
+      diagnostics.upstreamSent(observation);
+    }
   };
   const forwardToDownstream = (
     data: HostedOpenAiWebSocketMessage,
   ): void => {
-    if (!downstreamClosed) input.downstream.send(data);
+    if (!downstreamClosed) {
+      input.downstream.send(data);
+      diagnostics.downstreamSent();
+    }
   };
 
   try {
@@ -145,6 +157,7 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
 
   input.downstream.onMessage((data) => {
     if (stopped || upstreamClosed) return;
+    const observation = diagnostics.clientReceived();
     const bytes = frameByteLength(data);
     if (!reserveMessage(bytes)) {
       fail(
@@ -182,7 +195,7 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
           activeRequest = frame.metadata;
         }
       }
-      forwardToUpstream(data);
+      forwardToUpstream(data, observation);
     }).then(() => {
       pendingBytes -= bytes;
       pendingMessages -= 1;
@@ -191,6 +204,7 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
 
   input.upstream.onMessage((data) => {
     if (stopped || upstreamClosed) return;
+    diagnostics.upstreamReceived(data);
     const bytes = frameByteLength(data);
     if (!reserveMessage(bytes)) {
       // Stop admission now, but let already accepted terminal accounting and
@@ -288,6 +302,7 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
 
   input.downstream.onClose(({ code, reason }) => {
     if (downstreamClosed) return;
+    diagnostics.terminal("closed", "client", code);
     downstreamClosed = true;
     stopped = true;
     const close = sanitizePeerClose(code, reason);
@@ -296,6 +311,7 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   });
   input.upstream.onClose(({ code, reason }) => {
     if (upstreamClosed) return;
+    diagnostics.terminal("closed", "provider", code);
     upstreamClosed = true;
     const close = sanitizePeerClose(code, reason);
     // Finish the provider-facing handshake immediately, then preserve message
@@ -338,6 +354,7 @@ export function relayHostedOpenAiResponsesWebSocketUpgrade(input: {
   persistUsage?(
     completion: HostedCodexMemoryWebSocketCompletion,
   ): Promise<void>;
+  reportDiagnostic?: (diagnostic: HostedRunnerDiagnosticJson) => void;
   reportFailure?: (failure: {
     phase: HostedOpenAiWebSocketFailurePhase;
   }) => void;
@@ -359,6 +376,7 @@ export function relayHostedOpenAiResponsesWebSocketUpgrade(input: {
     downstream: adaptCloudflareWebSocket(downstreamServer),
     ...(input.persistUsage ? { persistUsage: input.persistUsage } : {}),
     ...(input.reportFailure ? { reportFailure: input.reportFailure } : {}),
+    ...(input.reportDiagnostic ? { reportDiagnostic: input.reportDiagnostic } : {}),
     upstream: adaptCloudflareWebSocket(upstreamSocket),
   });
 

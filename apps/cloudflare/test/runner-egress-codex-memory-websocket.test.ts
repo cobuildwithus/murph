@@ -1,4 +1,4 @@
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import {
   startHostedOpenAiResponsesWebSocketRelay,
@@ -79,6 +79,100 @@ function deferred<T>() {
 }
 
 const createdAt = 1_775_000_000;
+
+afterEach(() => vi.useRealTimers());
+
+test("records a forwarded request with no upstream messages when a silent socket closes", async () => {
+  vi.useFakeTimers();
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
+  downstream.emitMessage("PRIVATE_REQUEST_FIXTURE");
+  await controller.drain();
+  await vi.advanceTimersByTimeAsync(90_000);
+  downstream.emitClose(1006, "PRIVATE_CLOSE_REASON_FIXTURE");
+  const diagnostics = reportDiagnostic.mock.calls.map(([value]) => value);
+  expect(diagnostics.map((value) => value.websocketMilestone)).toEqual([
+    "client_received", "upstream_sent", "closed",
+  ]);
+  expect(diagnostics.at(-1)).toMatchObject({
+    clientFrameCount: 1, upstreamFrameCount: 0, downstreamFrameCount: 0,
+    requestElapsedMs: 90_000, upstreamSendElapsedMs: 0,
+    firstUpstreamElapsedMs: null, firstDownstreamElapsedMs: null,
+    upstreamSendObserved: true, upstreamFrameObserved: false,
+    downstreamSendObserved: false, closeSide: "client", closeCode: 1006,
+  });
+  expect(new Set(diagnostics.map((value) => value.websocketConnectionCorrelation)).size).toBe(1);
+  expect(JSON.stringify(diagnostics)).not.toContain("PRIVATE_");
+  expect(upstream.sent).toEqual(["PRIVATE_REQUEST_FIXTURE"]);
+});
+
+test("records first upstream latency and last frame age without logging every token", async () => {
+  vi.useFakeTimers();
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
+  downstream.emitMessage("request");
+  await controller.drain();
+  await vi.advanceTimersByTimeAsync(250);
+  upstream.emitMessage("PRIVATE_RESPONSE_FIXTURE");
+  await controller.drain();
+  await vi.advanceTimersByTimeAsync(200);
+  upstream.emitMessage("second response frame");
+  await controller.drain();
+  await vi.advanceTimersByTimeAsync(100);
+  upstream.emitClose(1000);
+  await controller.drain();
+  const diagnostics = reportDiagnostic.mock.calls.map(([value]) => value);
+  expect(diagnostics.map((value) => value.websocketMilestone)).toEqual([
+    "client_received", "upstream_sent", "upstream_received", "downstream_sent", "closed",
+  ]);
+  expect(diagnostics.at(-1)).toMatchObject({
+    firstUpstreamElapsedMs: 250, firstDownstreamElapsedMs: 0,
+    upstreamIdleMs: 100, downstreamIdleMs: 100,
+    upstreamFrameCount: 2, downstreamFrameCount: 2, closeSide: "provider",
+  });
+  expect(JSON.stringify(diagnostics)).not.toContain("PRIVATE_");
+});
+
+test.each([
+  { data: JSON.stringify({ type: "PRIVATE_EVENT_TYPE", text: "PRIVATE_CONTENT" }), kind: "other" },
+  { data: "PRIVATE_INVALID_JSON", kind: "invalid_json" },
+  { data: "PRIVATE_CONTENT".repeat(5_000), kind: "too_large" },
+  { data: new TextEncoder().encode("PRIVATE_BINARY_CONTENT").buffer, kind: "binary" },
+])("keeps first-frame diagnostics bounded and content-free ($kind)", async ({ data, kind }) => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
+  downstream.emitMessage("request");
+  await controller.drain();
+  upstream.emitMessage(data);
+  await controller.drain();
+  expect(downstream.sent).toEqual([data]);
+  expect(reportDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
+    websocketMilestone: "upstream_received", firstUpstreamMessageKind: kind,
+  }));
+  expect(JSON.stringify(reportDiagnostic.mock.calls)).not.toContain("PRIVATE_");
+});
+
+test("throwing diagnostic callbacks preserve relay forwarding and failure handling", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({
+    downstream, upstream, reportDiagnostic: () => { throw new Error("offline"); },
+  });
+  downstream.emitMessage("request");
+  upstream.emitMessage("response");
+  await controller.drain();
+  expect(upstream.sent).toEqual(["request"]);
+  expect(downstream.sent).toEqual(["response"]);
+  upstream.emitError();
+  await controller.drain();
+  expect(downstream.closes).toEqual([{ code: 1011, reason: "Responses WebSocket relay failed" }]);
+});
 
 test("bounds provider bytes before enqueue and drains accepted frames before closing Codex", async () => {
   const downstream = new FakeSocket();

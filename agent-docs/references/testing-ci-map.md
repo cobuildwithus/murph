@@ -749,6 +749,25 @@ pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-cove
   apps/cloudflare/test/container-image-contract.test.ts
 ```
 
+The credential-free `assistant-codex-websocket-stall.test.ts` suite runs the
+pinned binary through a local WebSocket fault proxy. It proves warm-socket silent
+stall detection, one native HTTPS fallback, sticky transport reuse, explicit-close
+recovery, and a test-only first-frame deadline that preserves acknowledged slow
+output. Short cases run in the ordinary assistant-engine lane. The opt-in full
+90-second reproduction and five-second comparisons run with:
+
+```sh
+MURPH_RUN_CODEX_STALL_REPRO=1 MURPH_VITEST_MAX_WORKERS=1 \
+  pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts \
+  --no-coverage test/assistant-codex-websocket-stall.test.ts
+```
+
+The Cloudflare Node and Workers
+`runner-egress-codex-memory-websocket.test.ts` suites prove content-free relay
+milestones, actual runtime-log parser/persistence routing, bounded outstanding
+writes, and forwarding despite failed diagnostics. These fixtures require no
+provider credentials; they do not prove production model health.
+
 The planner characterization retains its pre-adapter identity projection only
 for the existing broad snapshot; it separately asserts the new fingerprint
 against actual `thread/start` declarations with an independent hash oracle.

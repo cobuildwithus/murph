@@ -1618,6 +1618,10 @@ async function maybeHandleOpenAiRequest(input: {
     && pathnameSuffix === "/v1/responses"
   ) {
     return relayHostedOpenAiResponsesWebSocketUpgrade({
+      reportDiagnostic: createHostedRunnerWebSocketDiagnosticReporter({
+        ctx: input.ctx, env: input.env, request: input.request,
+        userId: authorization.userId, writeFence: authorization.writeFence,
+      }),
       authorizeClientFrame: async (data) => {
         const imageRequest = readHostedOpenAiImageRequest(data);
         if (imageRequest === "invalid") {
@@ -2744,6 +2748,45 @@ function appendProviderResponseDiagnostics(input: {
   }
 }
 
+function createHostedRunnerWebSocketDiagnosticReporter(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string | null;
+  writeFence: HostedProviderEgressWriteFenceMetadata | null;
+}): (diagnostic: HostedRunnerDiagnosticJson) => void {
+  let pendingWrites = 0;
+  let droppedRecords = 0;
+  return (diagnostic) => {
+    // No diagnostic queue and at most four in-flight writes per connection.
+    // Missing rows remain missing evidence, never evidence of healthy transport.
+    const runtimeLogScheduled = input.userId !== null && pendingWrites < 4;
+    if (!runtimeLogScheduled && input.userId) droppedRecords += 1;
+    const details = { ...diagnostic, droppedRecords, runtimeLogScheduled };
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details,
+      message: "Hosted Responses WebSocket milestone observed.",
+      phase: "wake.running",
+    });
+    if (!input.userId || !runtimeLogScheduled) return;
+    pendingWrites += 1;
+    const write = writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog({
+      diagnostic: details, env: input.env, request: input.request,
+      userId: input.userId, writeFence: input.writeFence,
+    }).catch(() => {
+      droppedRecords += 1;
+    }).finally(() => {
+      pendingWrites -= 1;
+    });
+    try {
+      input.ctx?.waitUntil?.(write);
+    } catch {
+      // Best-effort persistence must not change relay admission or forwarding.
+    }
+  };
+}
+
 async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
   diagnostic: HostedRunnerDiagnosticJson;
   env: RunnerOutboundEnvironmentSource;
@@ -2768,6 +2811,9 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
           level:
             input.diagnostic.providerResponseOutcomeKind === "rejected"
               || input.diagnostic.providerResponseOutcomeKind === "transport_error"
+              || (input.diagnostic.websocketMilestone === "closed"
+                && input.diagnostic.upstreamSendObserved === true
+                && input.diagnostic.upstreamFrameObserved === false)
               ? "warn"
               : "debug",
           phase: "fetch",

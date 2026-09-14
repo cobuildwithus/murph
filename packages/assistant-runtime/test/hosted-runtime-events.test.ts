@@ -734,7 +734,13 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
-  it("captures hosted Codex transport diagnostics without raw payloads", () => {
+  it.each([
+    { phase: "websocket-read", expectedPhase: "websocket-read" },
+    { phase: "websocket-send", expectedPhase: "websocket-send" },
+    { phase: "http-read", expectedPhase: "http-read" },
+    { phase: "PRIVATE_UNKNOWN_PHASE", expectedPhase: null },
+    { phase: undefined, expectedPhase: null },
+  ])("captures hosted Codex transport diagnostics without raw payloads ($phase)", ({ phase, expectedPhase }) => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_codex_transport_diagnostics",
       memberId: "member_123",
@@ -776,6 +782,7 @@ describe("executeHostedMailboxEvent", () => {
           codexTransportEventKind: "stream-idle-timeout",
           codexTransportFallbackActivated: false,
           codexTransportIdleTimeout: true,
+          codexTransportTimeoutPhase: phase,
           codexTransportProviderActionCount: 0,
           codexTransportRetryCount: 2,
           codexTransportRetryExhausted: false,
@@ -813,6 +820,7 @@ describe("executeHostedMailboxEvent", () => {
         codexTransportEventKind: "stream-idle-timeout",
         codexTransportFallbackActivated: false,
         codexTransportIdleTimeout: true,
+        ...(expectedPhase ? { codexTransportTimeoutPhase: expectedPhase } : {}),
         codexTransportProviderActionCount: 0,
         codexTransportRetryCount: 2,
         codexTransportRetryExhausted: false,
@@ -835,6 +843,8 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-turn-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("api.openai.com");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("PRIVATE_UNKNOWN_PHASE");
+    if (!expectedPhase) expect(entry?.redacted).not.toHaveProperty("codexTransportTimeoutPhase");
   });
 
   it("captures hosted Codex reusable app-server timing traces", () => {

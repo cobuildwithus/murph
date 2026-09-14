@@ -281,8 +281,96 @@ The scope describes identifiers carried by the notification; the correlation
 describes the active turn at observation time. A delayed thread-scoped warning
 cannot be attributed conclusively to that turn or an earlier WebSocket frame. POST egress
 diagnostics do not observe WebSocket frames, and absence of a warning is not
-proof that no recovery occurred. No endpoint, raw thread or turn ID, prompt,
+proof that no recovery occurred. `codexTransportTimeoutPhase` distinguishes
+`websocket-send`, `websocket-read`, and `http-read` when native warning text
+identifies the operation; missing or unknown phases are omitted by the runtime
+projection. No endpoint, raw thread or turn ID, prompt,
 response, or additional provider error text enters the diagnostic record.
+
+#### Responses WebSocket relay observations
+
+The Worker also writes `runner.provider_egress_diagnostic` records with
+`transportKind: websocket` through the existing runtime-log route. The
+`websocketMilestone` values describe actual relay boundaries:
+`client_received`, `upstream_sent`, first `upstream_received`, first
+`downstream_sent`, and one observed `closed` or `failed` event. First-frame
+observations reset after each forwarded client frame; token frames only update
+in-memory counts and last-frame times.
+
+Each connection gets a random `websocketConnectionCorrelation`. Counts include
+`clientFrameCount`, `upstreamSends`, `upstreamFrameCount`, and
+`downstreamFrameCount`. `activeClientMessageOrdinal` identifies the most recently
+forwarded client frame; `observedClientMessageOrdinal` on receipt can describe
+a newer frame still awaiting admission. `requestElapsedMs` starts at receipt of
+the latest forwarded frame, `upstreamSendElapsedMs` measures its admission/relay
+delay, and `firstUpstreamElapsedMs` and `firstDownstreamElapsedMs` measure the
+next receive and forward boundaries. `upstreamIdleMs` and `downstreamIdleMs`
+measure connection-wide time since the last data frame on each boundary.
+
+`firstUpstreamMessageKind` contains only a fixed event-type allowlist or
+`other`, `invalid_json`, `too_large`, or `binary`. Only the first frame is
+parsed for this field, with a 65,536-character limit. No raw frames, arbitrary
+event types, provider IDs, or close reasons enter the records. Close observations
+contain only side, numeric code, and a fixed failure phase. A provider close can
+be observed before queued downstream forwarding finishes; existing relay drain
+ordering remains authoritative.
+
+Interpret these as connection observations, not model-health or exact-request
+proof. A forwarded request followed by no upstream frames supports upstream
+silence; a received frame without its corresponding forward supports relay
+delay. Unsolicited metadata and overlapping frames can weaken attribution.
+A `response.created` observation establishes an acknowledgement, not continued
+inference progress. The runtime-log attempt/fence belongs to the socket upgrade
+and may precede later turns on a reused socket; it must not be treated as the
+current turn ID. Existing write-fence validation is preserved.
+
+Persistence is best effort: at most four log writes are in flight per connection,
+with no diagnostic queue or awaited write on the forwarding path. Structured
+Worker logs retain the observation even when the durable write is skipped.
+`runtimeLogScheduled` and cumulative `droppedRecords` expose local admission
+and failed writes on subsequent observations, without guaranteeing persistence.
+Failures and closes after a send with no upstream frame receive warning
+retention; ordinary milestones remain debug. Missing rows are missing evidence.
+
+#### Stall reproduction and recovery design
+
+The credential-free `assistant-codex-websocket-stall.test.ts` fixture runs the
+pinned Codex 0.153.4 binary against a local WebSocket/SSE provider. After a
+successful warm turn, the provider keeps the socket open, receives a pong, and
+sends no response data. The full 90-second test measured 90,006 ms from stalled
+request to the single native HTTPS fallback. A five-second native idle setting
+measured 5,021 ms; an explicit close with the 90-second setting measured 116 ms.
+Each case completed the answer and the next resumed turn, which stayed on HTTPS.
+This proves the synthetic failure mechanism, not the cause of an earlier
+production incident.
+
+The smallest proposed recovery change is a 20-second
+`stream_idle_timeout_ms` with the existing `stream_max_retries = 0`: native
+Codex detects stream silence and owns its one HTTPS fallback. Twenty seconds is
+a proposed latency tradeoff, not a measured health threshold. The five-second
+comparison proves the knob works; a healthy model can still remain quiet longer
+than that. An idle deadline bounds silence in a stream read, not end-to-end turn
+latency across HTTP setup, retries, tools, or reasoning with continuing events.
+
+A test-only alternative closes the socket after five seconds without its first
+upstream data frame; the same native fallback began at 5,010 ms while native idle
+remained 90 seconds. A separate healthy case emitted `response.created`
+promptly, waited one second for text, and completed without fallback despite a
+500 ms prototype deadline. This alternative preserves acknowledged quiet
+reasoning, but any first frame cancels it: it cannot recover a post-acknowledgement
+stall or establish model progress. It is not a complete replacement for the idle
+deadline. A post-acknowledgement stall fixture confirms native idle recovery
+still fires after the first-frame guard has been cancelled. Ping/pong similarly
+proves a responsive transport peer, not inference;
+Murph's Worker relay also separates the client and upstream transport legs.
+
+Production policy remains unchanged in this diagnostic change. Before adopting
+the shorter native timeout, prove fresh-process config adoption, acknowledged
+quiet responses, partial output/tool-effect recovery without duplicate delivery,
+and operator/child/compaction behavior that shares the configuration. Use the
+new relay observations and native timeout phases to distinguish timeout-driven
+recovery from normal model latency. Keep cancellation, retry, and delivery under
+their existing owners; do not introduce a second turn retry loop.
 
 ### Web-control preflight rejection attribution
 
