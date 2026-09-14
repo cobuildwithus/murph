@@ -2497,11 +2497,12 @@ repeating visible totals or target amounts. The static default mirrors the
 native visible hierarchy without repeated direction labels; the safe text
 recovery retains the complete status meaning outside the bitmap.
 Goal-aware null, incomplete, and unavailable goal states retain a neutral ring.
-Totals-only images omit the ring entirely and label the selected date, logged meal
-coverage, estimated/logged-so-far values, and the not-every-meal caveat without
-target judgments. Their subcaption carries the fixed optional introduction or
-coverage wording; goal-aware subcaptions still appear only for partial totals. Compact-table
-images retain the table grid or workout progress and exercise rows without a
+Totals-only images omit the ring and target judgments, retaining the same
+compact calorie and macro hierarchy without explanatory headers or disclaimers.
+Their provider caption uses the same short date and meal count as goal-aware
+cards. Subcaptions carry only actual partial-total coverage or the selected
+fixed optional introduction; complete cards otherwise have no subcaption.
+Compact-table images retain the table grid or workout progress and exercise rows without a
 large empty icon gutter. Their compact grid typography keeps short comparisons
 under one shared header, while stacked generic fields place each measured
 header above its full-width measured value so contract-valid tokens remain
