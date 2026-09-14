@@ -1501,6 +1501,54 @@ function readHostedRuntimeProgressClassifierFailuresForLog(
   return value.map((item) => String(item));
 }
 
+function buildInitialInvocationCheckpointMetadata(
+  request: HostedAssistantWorkspaceRuntimeJobInput["request"],
+  workspace: HostedWorkspaceState | null,
+): Parameters<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>[0]["metadata"] {
+  return {
+    attemptId: request.attemptId,
+    currentSnapshotRef: readHostedWorkspaceCurrentSnapshotRef(workspace),
+    expectedWorkspaceVersion: workspace?.version ?? request.workspaceVersion,
+    inboxMediaRetentionWakeAt: workspace?.inboxMediaRetentionWakeAt ?? null,
+    leaseGeneration: request.leaseGeneration,
+    nextDefaultProcessingWakeAt:
+      workspace?.nextDefaultProcessingWakeAt ?? null,
+    nextDefaultProcessingWakeReason:
+      workspace?.nextDefaultProcessingWakeReason ?? null,
+    nextWakeAt: workspace?.nextWakeAt ?? null,
+    nextWakeReason: workspace?.nextWakeReason ?? null,
+    systemMailboxProgressGeneration:
+      workspace?.systemMailboxProgressGeneration ?? null,
+  };
+}
+
+function buildInvocationBaseRuntimeEnv(
+  runtime: ReturnType<typeof normalizeHostedAssistantRuntimeConfig>,
+  astraAllowed: boolean | undefined,
+): Record<string, string> {
+  const imageCodexModelCatalogJson = resolveHostedCodexModelCatalogPath({
+    imageCatalogPath: process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
+    astraAllowed,
+  });
+  const imageHealthCommonsPackageRoot =
+    process.env["MURPH_HEALTH_COMMONS_PACKAGE_ROOT"]?.trim();
+  const baseRuntimeEnv = {
+    ...projectHostedRuntimeTrustStoreEnv(process.env),
+    ...runtime.forwardedEnv,
+    ...runtime.userEnv,
+    ...(isMurphAndroidAppEnabled(runtime.platformEnv)
+      ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
+      : {}),
+    ...(imageCodexModelCatalogJson
+      ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
+      : {}),
+    ...(imageHealthCommonsPackageRoot
+      ? { MURPH_HEALTH_COMMONS_PACKAGE_ROOT: imageHealthCommonsPackageRoot }
+      : {}),
+  };
+  return baseRuntimeEnv;
+}
+
 async function runHostedWorkspaceRuntimeJobInProcessImpl(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
@@ -1996,21 +2044,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     if (!guardedMailboxPort) {
       throw new TypeError("Hosted workspace runtime job mailbox port must be injected.");
     }
-    const checkpointMetadata = {
-      attemptId: input.request.attemptId,
-      currentSnapshotRef: readHostedWorkspaceCurrentSnapshotRef(activeWorkspace),
-      expectedWorkspaceVersion: activeWorkspace?.version ?? input.request.workspaceVersion,
-      inboxMediaRetentionWakeAt: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
-      leaseGeneration: input.request.leaseGeneration,
-      nextDefaultProcessingWakeAt:
-        activeWorkspace?.nextDefaultProcessingWakeAt ?? null,
-      nextDefaultProcessingWakeReason:
-        activeWorkspace?.nextDefaultProcessingWakeReason ?? null,
-      nextWakeAt: activeWorkspace?.nextWakeAt ?? null,
-      nextWakeReason: activeWorkspace?.nextWakeReason ?? null,
-      systemMailboxProgressGeneration:
-        activeWorkspace?.systemMailboxProgressGeneration ?? null,
-    };
+    const checkpointMetadata = buildInitialInvocationCheckpointMetadata(
+      input.request,
+      activeWorkspace,
+    );
     const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
       workspace: activeWorkspace,
       createSnapshot: createAbortGuardedCheckpointSnapshot,
@@ -2020,26 +2057,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
       nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
     });
-    const imageCodexModelCatalogJson = resolveHostedCodexModelCatalogPath({
-      imageCatalogPath: process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
-      astraAllowed: workspaceRead.hostedAssistantAstraAllowed,
-    });
-    const imageHealthCommonsPackageRoot =
-      process.env["MURPH_HEALTH_COMMONS_PACKAGE_ROOT"]?.trim();
-    const baseRuntimeEnv = {
-      ...projectHostedRuntimeTrustStoreEnv(process.env),
-      ...guardedRuntime.forwardedEnv,
-      ...guardedRuntime.userEnv,
-      ...(isMurphAndroidAppEnabled(guardedRuntime.platformEnv)
-        ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
-        : {}),
-      ...(imageCodexModelCatalogJson
-        ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
-        : {}),
-      ...(imageHealthCommonsPackageRoot
-        ? { MURPH_HEALTH_COMMONS_PACKAGE_ROOT: imageHealthCommonsPackageRoot }
-        : {}),
-    };
+    const baseRuntimeEnv = buildInvocationBaseRuntimeEnv(
+      guardedRuntime,
+      workspaceRead.hostedAssistantAstraAllowed,
+    );
     const systemMailboxProcessingMode =
       input.request.processingMode === "system_mailbox";
     // This marker can only suppress assistant execution. The Cloudflare
