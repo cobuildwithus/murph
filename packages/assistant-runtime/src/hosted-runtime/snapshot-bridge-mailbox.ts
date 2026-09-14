@@ -140,7 +140,16 @@ export function createHostedWorkspaceBridgeMailboxImporter(input: {
           resolveHostedDeviceSyncMessagingReturnTarget(wake),
         );
       },
-      runtime: input.runtime,
+      runtime: {
+        ...input.runtime,
+        platform: {
+          ...input.runtime.platform,
+          // Preparation and the foreground turn share one invocation authority.
+          providerFetch: context?.providerFetch === undefined
+            ? input.runtime.platform.providerFetch
+            : context.providerFetch,
+        },
+      },
       vaultRoot: input.vaultRoot,
     });
 
