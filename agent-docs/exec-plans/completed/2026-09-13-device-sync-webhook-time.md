@@ -1,6 +1,6 @@
 # Recover device hints with future source timestamps
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -59,3 +59,10 @@ Production deployment and post-deploy canonical readback are still required.
 - Parent Product UX replay: Ready for the model-free mailbox boundary. No model
   prompt, tool schema, interpretation, or reply behavior changes.
 - Production recovery remains unverified until a corrected runner is deployed.
+
+## Delivery
+
+Implementation and focused validation are complete in PR #3417. Required PR
+review and exact-head CI remain delivery gates; merge and production deployment
+are separate from this local correction.
+Completed: 2026-09-13

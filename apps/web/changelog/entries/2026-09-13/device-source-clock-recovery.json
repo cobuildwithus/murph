@@ -9,6 +9,6 @@
     "summary": "New device updates can continue syncing when a source reports an event time in the future.",
     "details": "Updates waiting behind an earlier sync can recover automatically, while scheduled syncs and provider retry limits stay in place.",
     "relevanceTags": ["devices"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3417]
   }
 }
