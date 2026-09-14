@@ -1,6 +1,6 @@
 # CLI validation diagnostics
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 Base: `ad68eb63915e72a6e7aab3f83894684343b5b69e`.
@@ -81,3 +81,4 @@ The durable failure-count query sums validation variants within each command
 summary before the existing per-turn/code/stage maximum. No database was queried.
 The correction changes only helper composition: one optional nested timing object
 and the existing flat assistant metadata remain unchanged.
+Completed: 2026-09-13
