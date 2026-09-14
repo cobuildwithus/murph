@@ -1,3 +1,10 @@
+import {
+  buildHostedWorkspaceSnapshotV2Aad,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+  type HostedWorkspaceSnapshotV2Ref,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts/browser-vault";
 import { BROWSER_VAULT_REPLICA_DEFAULT_MAX_AGE_MS } from "@murphai/hosted-execution/browser-vault";
 import type { BrowserVaultEntity } from "@murphai/query/browser-replica-client";
@@ -120,17 +127,55 @@ describe("production canary canonical outcome observer", () => {
     });
   });
 
-  it("refuses a stale replica even when it already contains the expected goal", async () => {
-    const workspace = await installEncryptedReplica([goal()]);
-    mocks.workspace.mockResolvedValue({ ...workspace, snapshotRef: snapshotRef("b".repeat(64)) });
+  it("reads a v2 checkpoint whose archive and canonical replica source hashes differ", async () => {
+    await installEncryptedReplica([goal()]);
+    expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual({
+      ready: true, totalGoalCount: 1, matchingGoalCount: 1, matchingGoalIdCount: 1,
+    });
+    expectReadOrder(readOrder);
+  });
+
+  it("rejects a retired replica generation even when its goal exists", async () => {
+    await installEncryptedReplica([goal()], { replicaGeneration: BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1 });
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
-    expectReadOrder(readOrder.slice(0, 4));
-    expect(console.warn).not.toHaveBeenCalled();
-    expect(console.error).not.toHaveBeenCalled();
     expect(mocks.session).not.toHaveBeenCalled();
   });
 
-  it("refuses a replica after the freshness window even with the matching source", async () => {
+  it.each([
+    { name: "another member", ref: () => snapshotRef(undefined, "member_synthetic_other") },
+    { name: "retired bundle format", ref: () => ({ hash: "a".repeat(64), key: "synthetic/retired.bundle.json", size: 128, updatedAt: generatedAt }) },
+  ])("rejects a checkpoint for $name before opening a session", async ({ ref }) => {
+    const workspace = await installEncryptedReplica([goal()]);
+    mocks.workspace.mockResolvedValue({ ...workspace, snapshotRef: ref() });
+    expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
+    expect(mocks.session).not.toHaveBeenCalled();
+    expectReadOrder(readOrder.slice(0, 4));
+  });
+
+  it("fails closed on malformed v2 archive metadata", async () => {
+    const workspace = await installEncryptedReplica([goal()]);
+    const ref = snapshotRef();
+    mocks.workspace.mockResolvedValue({ ...workspace, snapshotRef: {
+      ...ref, archive: { ...ref.archive, encryptedObjectSha256: "invalid" },
+    } });
+    await expect(readHostedLinqProductionCanaryOutcome({ prisma })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PRODUCTION_CANARY_OUTCOME_UNAVAILABLE", httpStatus: 503,
+    });
+    expect(mocks.session).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage: "initial_readiness" });
+  });
+
+  it("rejects a v2 archive change during decryption even if the workspace version is unchanged", async () => {
+    const workspace = await installEncryptedReplica([goal()]);
+    mocks.workspace.mockResolvedValueOnce(workspace).mockResolvedValueOnce({
+      ...workspace, snapshotRef: snapshotRef("e".repeat(64)),
+    });
+    expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
+    expectReadOrder(readOrder.slice(0, 9));
+    expect(mocks.authority).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a replica after the freshness window even with the current generation", async () => {
     await installEncryptedReplica([goal()]);
     vi.mocked(Date.now).mockReturnValue(Date.parse(generatedAt) + BROWSER_VAULT_REPLICA_DEFAULT_MAX_AGE_MS + 1);
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
@@ -307,7 +352,7 @@ describe("production canary canonical outcome observer", () => {
     { gate: "missing workspace", reads: 4, arrange: () => mocks.workspace.mockResolvedValueOnce(null) },
     { gate: "missing replica ref", reads: 4, arrange: (workspace: HostedWorkspaceRecord) =>
       mocks.workspace.mockResolvedValueOnce({ ...workspace, browserVaultReplicaRef: null }) },
-    { gate: "missing source hash", reads: 4, arrange: (workspace: HostedWorkspaceRecord) =>
+    { gate: "missing checkpoint", reads: 4, arrange: (workspace: HostedWorkspaceRecord) =>
       mocks.workspace.mockResolvedValueOnce({ ...workspace, snapshotRef: null }) },
     { gate: "empty session", reads: 7, arrange: () => mocks.session.mockResolvedValueOnce({
       state: "empty", memberId, encryptedReplica: null, replicaAad: null, replicaKeyEnvelope: null, replicaRef: null,
@@ -404,19 +449,34 @@ function goal(overrides: Partial<BrowserVaultEntity> = {}): BrowserVaultEntity {
   };
 }
 
-function snapshotRef(hash = "a".repeat(64)) {
-  return { hash, key: "synthetic/canary.bundle.json", size: 128, updatedAt: generatedAt };
+function snapshotRef(hash = "b".repeat(64), snapshotMemberId = memberId) {
+  const objectKey = "users/hsn_abcdef0123456789abcdef01/workspace-snapshots/synthetic_canary.snapshot.enc";
+  const snapshotId = "synthetic_canary";
+  return {
+    archive: {
+      compression: "zstd", encryptedByteSize: 1024, encryptedObjectSha256: hash,
+      fileCount: 12, format: "tar", plaintextArchiveSha256: "c".repeat(64), totalPlainBytes: 2048,
+    },
+    createdAt: generatedAt,
+    encryption: {
+      aad: { ...buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId: snapshotMemberId }) },
+      ivBase64: "AQIDBAUGBwgJCgsM", rootKeyId: "udrk:runtime:synthetic-canary",
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME, wrappedDataKey: "synthetic-wrapped-key",
+    },
+    objectKey, schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA, snapshotId,
+    upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND, userId: snapshotMemberId,
+  } satisfies HostedWorkspaceSnapshotV2Ref;
 }
 
 async function installEncryptedReplica(
   entities: BrowserVaultEntity[],
-  options: { sessionMemberId?: string; corruptCiphertext?: boolean } = {},
+  options: { sessionMemberId?: string; corruptCiphertext?: boolean; replicaGeneration?: number } = {},
 ): Promise<HostedWorkspaceRecord> {
   const source = { dataVersion: "d".repeat(64), sourceBundleHash: "a".repeat(64) };
   const plaintext = new TextEncoder().encode(JSON.stringify({
     assistantSummary: { highlights: [], latestDate: null },
     entities, experimentOutcomes: [], experimentRunCards: [], generatedAt,
-    generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION, hasLabBiomarkers: false,
+    generation: options.replicaGeneration ?? BROWSER_VAULT_REPLICA_CURRENT_GENERATION, hasLabBiomarkers: false,
     labResultRows: [], metricGoalProgressRows: [], metricRows: [], metricSelectionRows: [],
     policy: { bodyPreviewChars: 280, excludedFamilies: [], id: "health-vault-browser", includedFamilies: ["goal"], metricLookbackDays: 365 },
     schema: "murph.browser-vault-replica", searchRows: [], source,
@@ -424,7 +484,7 @@ async function installEncryptedReplica(
   }));
   const replicaRef = {
     byteLength: plaintext.byteLength, ...source, generatedAt,
-    generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+    generation: options.replicaGeneration ?? BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     keyId: "synthetic-browser-vault-key", objectKey: "synthetic/canary-replica.json",
     replicaSchema: "murph.browser-vault-replica", runtimeRootKeyId: "udrk:runtime:synthetic-canary",
     schema: "murph.hosted-browser-vault-replica-ref.v1",

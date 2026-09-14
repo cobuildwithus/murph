@@ -2,13 +2,15 @@ import "server-only";
 
 import { isContractId } from "@murphai/contracts";
 import { assessBrowserVaultReplicaFreshness, parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
+import { isHostedWorkspaceSnapshotV2Ref, parseHostedExecutionSnapshotRef } from "@murphai/hosted-execution/parsers";
+import { buildHostedWorkspaceSnapshotV2FingerprintSha256 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
 
 import { decodeReadyBrowserVaultSession, parseBrowserVaultSessionResponse } from "@/src/lib/browser-vault/loader";
 import { browserVaultReplicaRefsMatch } from "@/src/lib/browser-vault/ref";
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import { readHostedMailboxLatestPendingConversationItem } from "@/src/lib/hosted-mailbox/store";
-import { readHostedWorkspace, readHostedWorkspaceBrowserVaultSourceStateHash } from "@/src/lib/hosted-workspace/store";
+import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 
 import { HostedOnboardingError, hostedOnboardingError } from "./errors";
 import { readHostedLinqProductionCanaryMemberId } from "./linq-production-canary";
@@ -55,11 +57,13 @@ export async function readHostedLinqProductionCanaryOutcome(input: {
     const workspace = await readHostedWorkspace({ prisma, userId: memberId });
     if (!workspace) return { ...NOT_READY };
     const replicaRef = parseHostedBrowserVaultReplicaRef(workspace.browserVaultReplicaRef);
-    const sourceHash = readHostedWorkspaceBrowserVaultSourceStateHash(workspace.snapshotRef);
-    if (!replicaRef || !sourceHash || assessBrowserVaultReplicaFreshness({
-      currentSourceHash: sourceHash,
-      replicaRef,
-    }).freshness !== "fresh") return { ...NOT_READY };
+    const checkpointFingerprint = readCanaryCheckpointFingerprint(workspace.snapshotRef, memberId);
+    // The runtime owns canonical-content hashing. An archive fingerprint is a
+    // different identity; Web follows the published replica's generation/age policy.
+    if (!replicaRef || !checkpointFingerprint
+      || assessBrowserVaultReplicaFreshness({ replicaRef }).freshness !== "fresh") {
+      return { ...NOT_READY };
+    }
 
     stage = "control_configuration";
     const control = readHostedExecutionControlClientIfConfigured(10_000);
@@ -96,7 +100,7 @@ export async function readHostedLinqProductionCanaryOutcome(input: {
     }
     const current = await readHostedWorkspace({ prisma, userId: memberId });
     if (!current || current.version !== workspace.version
-      || readHostedWorkspaceBrowserVaultSourceStateHash(current.snapshotRef) !== sourceHash
+      || readCanaryCheckpointFingerprint(current.snapshotRef, memberId) !== checkpointFingerprint
       || !browserVaultReplicaRefsMatch(parseHostedBrowserVaultReplicaRef(current.browserVaultReplicaRef), replicaRef)
       || await readHostedLinqProductionCanaryMemberId({ prisma }) !== memberId) {
       return { ...NOT_READY };
@@ -130,6 +134,12 @@ export async function readHostedLinqProductionCanaryOutcome(input: {
       message: "The production canary outcome is unavailable.",
     });
   }
+}
+
+function readCanaryCheckpointFingerprint(value: unknown, memberId: string): string | null {
+  const ref = parseHostedExecutionSnapshotRef(value, "Canary workspace snapshot ref");
+  if (!isHostedWorkspaceSnapshotV2Ref(ref) || ref.userId !== memberId) return null;
+  return buildHostedWorkspaceSnapshotV2FingerprintSha256(ref);
 }
 
 async function assertCanaryRuntimeAuthority(input: {
