@@ -297,6 +297,39 @@ describe("production conversation canary runner", () => {
     expect(mocks.delay).toHaveBeenCalledOnce();
   });
 
+  it("observes each canonical stage after the production checkpoint quiet window", async () => {
+    prepareCompleteConversation();
+    const clock = mockCanaryObservationClock();
+    let stage = 0;
+    let stageStartedAt = 0;
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockImplementation(async () => {
+      if (clock.elapsedMs() - stageStartedAt < 185_000) {
+        return outcomeResponse({ ready: false, matchingGoalCount: 0, matchingGoalIdCount: 0 });
+      }
+      const count = stage++ === 0 ? 0 : 1;
+      stageStartedAt = clock.elapsedMs();
+      return outcomeResponse({ ready: true, matchingGoalCount: count, matchingGoalIdCount: count });
+    });
+
+    const result = await runLinqProductionCanary(TEST_ENV);
+    expect(result.canonicalOutcome).toEqual({ baselineGoalCount: 0, savedGoalCount: 1, readbackGoalCount: 1 });
+    expect(result.turns.map((turn) => turn.latencyMs)).toEqual([1_000, 1_000, 1_000, 1_000, 1_000]);
+    expect(clock.elapsedMs()).toBe(555_000);
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+  });
+
+  it("still stops at the observation deadline when publication never becomes ready", async () => {
+    prepareCompleteConversation();
+    const clock = mockCanaryObservationClock();
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockImplementation(async () =>
+      outcomeResponse({ ready: false, matchingGoalCount: 0, matchingGoalIdCount: 0 }));
+
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=runtime-identity" });
+    expect(clock.elapsedMs()).toBe(300_000);
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
   it("does not accept a save claim when the canonical goal never appears", async () => {
     prepareCompleteConversation();
     vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
@@ -338,6 +371,24 @@ describe("production conversation canary runner", () => {
     expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
   });
 });
+
+function mockCanaryObservationClock(): { elapsedMs(): number } {
+  let elapsedMs = 0;
+  const deadlines: Array<{ at: number; controller: AbortController }> = [];
+  vi.spyOn(AbortSignal, "timeout").mockImplementation((durationMs) => {
+    const controller = new AbortController();
+    deadlines.push({ at: elapsedMs + durationMs, controller });
+    return controller.signal;
+  });
+  mocks.delay.mockImplementation(async (durationMs: number, _value: unknown, options: { signal: AbortSignal }) => {
+    elapsedMs += durationMs;
+    for (const deadline of deadlines) {
+      if (elapsedMs >= deadline.at) deadline.controller.abort(new DOMException("Synthetic deadline elapsed", "TimeoutError"));
+    }
+    options.signal.throwIfAborted();
+  });
+  return { elapsedMs: () => elapsedMs };
+}
 
 function prepareCompleteConversation(readback = LINQ_PRODUCTION_CANARY_GOAL_TITLE): void {
   mocks.now = [0, 1_000, 1_000, 2_000, 2_000, 3_000, 3_000, 4_000, 4_000, 5_000];
