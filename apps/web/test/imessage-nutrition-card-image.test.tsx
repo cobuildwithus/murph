@@ -995,15 +995,18 @@ function headersInitToRecord(headers: HeadersInit | undefined): Record<string, s
 }
 
 
-test("totals-only nutrition shows date and logged coverage with no goal ring or judgment colors", async () => {
+test("totals-only nutrition keeps the native metric layout without extra copy or goal judgments", async () => {
   const { NutritionCardImage } = await import("@/src/components/imessage/nutrition-card-image");
   const card: DailyNutritionResponseCardV2 = { ...CARD, localDate: "2026-09-11",
     goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null } };
   const markup = renderToStaticMarkup(<NutritionCardImage card={card} />);
-  assert.match(markup, /logged so far/u);
-  assert.match(markup, /2026-09-11/u);
-  assert.match(markup, /3 logged meals/u);
-  assert.match(markup, /Logged records may not include everything eaten/u);
+  assert.match(markup, /imessage-native-nutrition-card/u);
+  assert.match(markup, /data-murph-card-logo="true"/u);
+  assert.match(markup, /1,840/u);
+  for (const label of ["PROTEIN", "CARBS", "FAT", "FIBER"]) {
+    assert.match(markup, new RegExp(label, "u"));
+  }
+  assert.doesNotMatch(markup, /estimated|logged|2026-09-11|everything eaten|partial estimates/iu);
   assert.doesNotMatch(markup, /data-calorie-progress|stroke-dasharray|#B3332B|#995E08|#337338|target unavailable|Goal unavailable/u);
   const unknown = renderToStaticMarkup(<NutritionCardImage card={{ ...card,
     totals: { ...card.totals, fiberGrams: { total: null, mealCount: 0 } } }} />);

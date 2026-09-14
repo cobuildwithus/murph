@@ -387,21 +387,14 @@ export function buildLinqIMessageAppLayout(
 
   const mealLabel = parsed.mealCount === 1 ? 'meal' : 'meals'
   const partialLabel = renderPartialNutritionLabel(parsed)
-  if (isTotalsOnlyDailyNutritionResponseCard(parsed)) {
-    const introduction = readDailyNutritionIntroduction(parsed, companionMessage)
-    return {
-      caption: `${parsed.localDate} · ${parsed.mealCount} logged ${mealLabel}`,
-      image_url: buildLinqIMessageAppCardImageUrl(parsed),
-      subcaption: [introduction, partialLabel].filter(Boolean).join(' ') ||
-        'Estimated nutrition logged so far; not necessarily everything eaten.',
-    }
-  }
+  const introduction = readDailyNutritionIntroduction(parsed, companionMessage)
+  const subcaption = introduction ?? partialLabel
   return {
     caption: `${formatNutritionCardDate(parsed.localDate)} · ${
       parsed.mealCount
     } ${mealLabel}`,
     image_url: buildLinqIMessageAppCardImageUrl(parsed),
-    ...(partialLabel === null ? {} : { subcaption: partialLabel }),
+    ...(subcaption === null ? {} : { subcaption }),
   }
 }
 
