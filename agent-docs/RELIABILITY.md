@@ -438,8 +438,13 @@ Last verified: 2026-09-04
   set, so a stale row cannot be reset during navigation.
 - One authenticated same-origin reset-everyone request reads at most 11
   ascending hosted-member IDs, admits 10, and invokes the existing canonical
-  per-member serializable reset sequentially. It performs at most one stale
-  re-read for that member, stops before acknowledging a remaining failure, and
+  per-member serializable reset sequentially. Its existing locked member read
+  also aggregates remaining Starter credit over the existing capped active
+  grants; only the deficit to the standard Starter allowance is granted, so
+  partial usage resets without duplicating other credits. This aggregate adds
+  no database round trip; grants use the existing canonical mutation, with no
+  external work in the transaction. It performs at most one stale re-read for
+  that member, stops before acknowledging a remaining failure, and
   calls the bounded runtime recheck only after the member transaction commits.
   All runtime rechecks in that request share one five-second deadline; after it
   expires, later latency hints become pending without another provider call,

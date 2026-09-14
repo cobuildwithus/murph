@@ -2482,6 +2482,10 @@ Current hosted billing assumptions:
   correlation.
 - `Reset everyone` requires the exact typed phrase, ignores any active search,
   and walks ascending hosted IDs in authenticated same-origin batches of 10.
+  Partly used as well as exhausted Starter accounts receive only the deficit
+  between their remaining Starter grants and the standard $4.50 allowance;
+  separate purchased and referral credit stays intact. Current period spend
+  is cleared, while already-full zero-spend Starter accounts are unchanged.
   Members are reset sequentially through the same canonical transaction; one
   stale re-read is allowed, the batch stops before acknowledging a remaining
   failure, and each runtime wake begins only after that member commits. The page
