@@ -126,6 +126,11 @@ Last verified: 2026-09-04
   one fixed synthetic goal. A read-only observer requires the current checkpoint's
   published replica and no pending conversation input, then checks canonical
   goal and distinct-ID counts. A reply alone cannot satisfy this outcome gate.
+  Initial and final authority reuse active member access followed by the ordinary
+  iMessage runtime access decision. Missing or outdated browser launch grants do
+  not invalidate a messaging-only canary, but lost access, suspension, deletion,
+  and explicit health-data withdrawal still deny observation. The observer never
+  writes consent, and ordinary Browser Vault authority is unchanged.
   Exceptional outcome reads emit at most one best-effort Web `console.warn` with
   the fixed message `Hosted Linq production canary outcome read failed.` and
   a request-local `stage`: `member_lookup` selects the fixed identity;

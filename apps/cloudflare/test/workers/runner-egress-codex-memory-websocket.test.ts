@@ -20,6 +20,17 @@ import {
   createHostedExecutionTestEnv,
 } from "../hosted-execution-fixtures.ts";
 
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+}
+
 const createdAt = 1_775_000_000;
 const memberId = "member_123";
 
@@ -157,6 +168,55 @@ function nextMessage(socket: WebSocket): Promise<string | ArrayBuffer> {
     }, { once: true });
   });
 }
+
+test("drains a metered terminal through real WebSockets before closing an overflowing provider stream", async () => {
+  const pair = new WebSocketPair();
+  const provider = pair[1];
+  provider.accept({ allowHalfOpen: true });
+  provider.addEventListener("close", (event) => provider.close(event.code, event.reason), { once: true });
+  const persistence = deferred<void>();
+  const started = deferred<void>();
+  const persistUsage = vi.fn(() => {
+    started.resolve();
+    return persistence.promise;
+  });
+  const response = relayHostedOpenAiResponsesWebSocketUpgrade({
+    persistUsage,
+    upstreamResponse: new Response(null, { status: 101, webSocket: pair[0] }),
+  });
+  const client = response.webSocket;
+  if (!client) throw new Error("Expected relayed WebSocket.");
+  client.accept({ allowHalfOpen: true });
+  client.addEventListener("close", (event) => client.close(event.code, event.reason), { once: true });
+  const request = JSON.stringify({ type: "response.create", model: "gpt-5.6-terra" });
+  const forwarded = nextMessage(provider);
+  client.send(request);
+  await expect(forwarded).resolves.toBe(request);
+  const completed = JSON.stringify({
+    type: "response.completed",
+    response: {
+      id: "resp_synthetic_overflow", model: "gpt-5.6-terra", created_at: createdAt,
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    },
+  });
+  const received: Array<string | ArrayBuffer> = [];
+  client.addEventListener("message", (event) => { received.push(event.data); });
+  let clientClosed = false;
+  const closed = nextClose(client).then((event) => { clientClosed = true; return event; });
+  const providerClosed = nextClose(provider);
+  provider.send(completed);
+  await started.promise;
+  // Tiny messages exercise actual event delivery without allocating huge payloads.
+  for (let index = 0; index < 4096; index++) provider.send("");
+  await expect(providerClosed).resolves.toMatchObject({ code: 1009 });
+  expect(clientClosed).toBe(false);
+  expect(received).toHaveLength(0);
+  persistence.resolve();
+  await expect(closed).resolves.toMatchObject({ code: 1009 });
+  expect(received[0]).toBe(completed);
+  expect(received).toHaveLength(4096);
+  expect(persistUsage).toHaveBeenCalledOnce();
+}, 15_000);
 
 test("terminates only the two relay legs and preserves application headers", async () => {
   const upstreamPair = new WebSocketPair();

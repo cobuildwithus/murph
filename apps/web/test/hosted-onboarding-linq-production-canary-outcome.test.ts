@@ -11,9 +11,12 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  authority: vi.fn(), control: vi.fn(), memberId: vi.fn(), pending: vi.fn(), session: vi.fn(), workspace: vi.fn(),
+  authority: vi.fn(), runtimeAccess: vi.fn(), control: vi.fn(), memberId: vi.fn(), pending: vi.fn(), session: vi.fn(), workspace: vi.fn(),
 }));
-vi.mock("@/src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.authority }));
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  assertActiveHostedMemberAccessAllowed: mocks.authority,
+  readHostedRuntimeAiAccessDecision: mocks.runtimeAccess,
+}));
 vi.mock("@/src/lib/hosted-execution/control", () => ({ readHostedExecutionControlClientIfConfigured: mocks.control }));
 vi.mock("@/src/lib/hosted-onboarding/linq-production-canary", () => ({ readHostedLinqProductionCanaryMemberId: mocks.memberId }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({ readHostedMailboxLatestPendingConversationItem: mocks.pending }));
@@ -48,6 +51,7 @@ describe("production canary canonical outcome observer", () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.parse(generatedAt) + 60_000);
     mocks.memberId.mockResolvedValue(memberId);
     mocks.authority.mockResolvedValue(undefined);
+    mocks.runtimeAccess.mockResolvedValue({ allowed: true });
     mocks.pending.mockResolvedValue(null);
     mocks.control.mockReturnValue({ createBrowserVaultSession: mocks.session });
   });
@@ -69,6 +73,13 @@ describe("production canary canonical outcome observer", () => {
     });
     expect(mocks.session).toHaveBeenCalledWith(expect.objectContaining({ userId: memberId, requestedShards: ["core"] }));
     expect(mocks.authority).toHaveBeenCalledTimes(2);
+    expect(mocks.runtimeAccess).toHaveBeenCalledTimes(2);
+    for (const index of [0, 1]) {
+      expect(mocks.runtimeAccess.mock.invocationCallOrder[index])
+        .toBeGreaterThan(mocks.authority.mock.invocationCallOrder[index]!);
+    }
+    expect(mocks.runtimeAccess.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.pending.mock.invocationCallOrder[0]!);
     expect(mocks.memberId).toHaveBeenCalledWith({ prisma });
     expectReadOrder(readOrder);
     expect(console.warn).not.toHaveBeenCalled();
@@ -83,6 +94,30 @@ describe("production canary canonical outcome observer", () => {
     expect(console.error).not.toHaveBeenCalled();
     expect(mocks.workspace).not.toHaveBeenCalled();
     expect(mocks.session).not.toHaveBeenCalled();
+  });
+
+  it.each(["initial", "final"])("refuses withdrawn runtime consent at the %s authority check", async (stage) => {
+    await installEncryptedReplica([goal()]);
+    if (stage === "final") mocks.runtimeAccess.mockResolvedValueOnce({ allowed: true });
+    mocks.runtimeAccess.mockResolvedValueOnce({ allowed: false, reason: "health_data_consent_withdrawn" });
+    await expect(readHostedLinqProductionCanaryOutcome({ prisma })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PRODUCTION_CANARY_OUTCOME_UNAVAILABLE", httpStatus: 503,
+    });
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, {
+      stage: `${stage}_authority`, authorityFailureReason: "consent_required",
+    });
+    if (stage === "initial") expect(mocks.session).not.toHaveBeenCalled();
+  });
+
+  it("refuses runtime access lost between the active-access and runtime checks", async () => {
+    mocks.runtimeAccess.mockResolvedValueOnce({ allowed: false, reason: "inactive" });
+    await expect(readHostedLinqProductionCanaryOutcome({ prisma })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PRODUCTION_CANARY_OUTCOME_UNAVAILABLE", httpStatus: 503,
+    });
+    expect(mocks.pending).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, {
+      stage: "initial_authority", authorityFailureReason: "access_required",
+    });
   });
 
   it("refuses a stale replica even when it already contains the expected goal", async () => {
@@ -334,7 +369,8 @@ describe("production canary canonical outcome observer", () => {
 });
 
 function expectReadOrder(expected: readonly string[]): void {
-  const operations = { ...mocks, keys: vi.mocked(runtimeState.generateHostedUserRecipientKeyPair) };
+  const { runtimeAccess: _runtimeAccess, ...stageOperations } = mocks;
+  const operations = { ...stageOperations, keys: vi.mocked(runtimeState.generateHostedUserRecipientKeyPair) };
   const actual = Object.entries(operations).flatMap(([operation, mock]) =>
     mock.mock.invocationCallOrder.map((order) => ({ operation, order })));
   expect(actual.sort((a, b) => a.order - b.order).map(({ operation }) => operation)).toEqual(expected);

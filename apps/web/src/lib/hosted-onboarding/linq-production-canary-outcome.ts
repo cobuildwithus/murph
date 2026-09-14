@@ -4,7 +4,6 @@ import { isContractId } from "@murphai/contracts";
 import { assessBrowserVaultReplicaFreshness, parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
 
-import { assertBrowserVaultMemberAuthority } from "@/src/lib/browser-vault/authority";
 import { decodeReadyBrowserVaultSession, parseBrowserVaultSessionResponse } from "@/src/lib/browser-vault/loader";
 import { browserVaultReplicaRefsMatch } from "@/src/lib/browser-vault/ref";
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
@@ -14,6 +13,7 @@ import { readHostedWorkspace, readHostedWorkspaceBrowserVaultSourceStateHash } f
 import { HostedOnboardingError, hostedOnboardingError } from "./errors";
 import { readHostedLinqProductionCanaryMemberId } from "./linq-production-canary";
 import { LINQ_PRODUCTION_CANARY_GOAL_TITLE, type LinqProductionCanaryOutcome } from "./linq-production-canary-contract";
+import { assertActiveHostedMemberAccessAllowed, readHostedRuntimeAiAccessDecision } from "./member-access";
 import type { HostedOnboardingReadClient } from "./shared";
 
 const NOT_READY: LinqProductionCanaryOutcome = {
@@ -44,7 +44,7 @@ export async function readHostedLinqProductionCanaryOutcome(input: {
     const memberId = await readHostedLinqProductionCanaryMemberId({ prisma });
     if (!memberId) return { ...NOT_READY };
     stage = "initial_authority";
-    await assertBrowserVaultMemberAuthority({ memberId, prisma });
+    await assertCanaryRuntimeAuthority({ memberId, prisma });
     stage = "initial_readiness";
     // Delivery can precede checkpoint. Consumption is committed with the canonical
     // checkpoint, so an earlier publication cannot stand in for the replying turn.
@@ -102,7 +102,7 @@ export async function readHostedLinqProductionCanaryOutcome(input: {
       return { ...NOT_READY };
     }
     stage = "final_authority";
-    await assertBrowserVaultMemberAuthority({ memberId, prisma });
+    await assertCanaryRuntimeAuthority({ memberId, prisma });
 
     stage = "goal_counting";
     const allGoals = decoded.shards.core.entities.filter((entity) => entity.family === "goal");
@@ -128,6 +128,25 @@ export async function readHostedLinqProductionCanaryOutcome(input: {
       code: "HOSTED_LINQ_PRODUCTION_CANARY_OUTCOME_UNAVAILABLE",
       httpStatus: 503,
       message: "The production canary outcome is unavailable.",
+    });
+  }
+}
+
+async function assertCanaryRuntimeAuthority(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<void> {
+  await assertActiveHostedMemberAccessAllowed(input);
+  // This fixed-account counts observer follows the iMessage runtime's policy.
+  // Signup does not create browser launch grants; explicit withdrawal still
+  // denies processing. Normal Browser Vault sessions keep their stricter gate.
+  const access = await readHostedRuntimeAiAccessDecision(input);
+  if (!access.allowed) {
+    throw hostedOnboardingError({
+      code: access.reason === "health_data_consent_withdrawn"
+        ? "HOSTED_CONSENT_REQUIRED" : "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
+      message: "The production canary runtime is not authorized.",
     });
   }
 }

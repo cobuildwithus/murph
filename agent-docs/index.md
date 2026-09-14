@@ -80,6 +80,8 @@ are indexed in `agent-docs/references/testing-ci-map.md`.
 
 The completed canary authority diagnostic plan is
 [`2026-09-13-canary-authority-reason-telemetry.md`](exec-plans/completed/2026-09-13-canary-authority-reason-telemetry.md).
+The canary runtime-authority and WebSocket queue-bound correction is tracked in
+[`2026-09-13-canary-consent-websocket-bounds.md`](exec-plans/completed/2026-09-13-canary-consent-websocket-bounds.md).
 
 Foreground promotion batch reuse and completion/wake race preservation are owned
 by `agent-docs/references/hosted-runtime-protocol.md`; focused admission, import
