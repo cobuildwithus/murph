@@ -1,6 +1,6 @@
 # Diagnose and shorten native rollout wait
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -78,3 +78,10 @@ Updated: 2026-09-13
   post-deploy evidence remain completion gates.
 - Reused existing Frog entry 20260912202546-changelog-focused-test for the
   documented test command directory mismatch; root-invoked test passed.
+
+## Implementation handoff
+
+- Public PR #3418 owns final exact-head review, CI, merge, protected deployment,
+  and live outcome evidence. Record those outcomes in its PR body; this archived
+  implementation plan remains immutable. The original session owns completion.
+Completed: 2026-09-13
