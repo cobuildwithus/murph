@@ -1314,6 +1314,20 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
   };
 }
 
+function hasNegativeLatencyInterval(startMs: number | null, endMs: number | null): boolean {
+  return startMs !== null && endMs !== null && endMs < startMs;
+}
+
+function collectNonnegativeObservedLatency(
+  durations: number[],
+  startMs: number | null,
+  endMs: number | null,
+): void {
+  if (startMs !== null && endMs !== null && endMs >= startMs) {
+    durations.push(endMs - startMs);
+  }
+}
+
 export async function readHostedIngressLatencyDashboard(
   input: HostedIngressLatencyDashboardInput = {},
 ): Promise<HostedIngressLatencyDashboard> {
@@ -1439,27 +1453,14 @@ export async function readHostedIngressLatencyDashboard(
       providerRowsWithoutAcceptedDeliveryLinkCount += 1;
     }
     const missingStaged = stagedAtMs === null;
-    const hasNegativeSignal = signalAtMs !== null && signalAtMs < acceptedAtMs;
-    const hasNegativeStaged = stagedAtMs !== null && stagedAtMs < acceptedAtMs;
-    const hasNegativeProviderWait =
-      stagedAtMs !== null && providerStartMs !== null && providerStartMs < stagedAtMs;
+    const hasNegativeSignal = hasNegativeLatencyInterval(acceptedAtMs, signalAtMs);
+    const hasNegativeStaged = hasNegativeLatencyInterval(acceptedAtMs, stagedAtMs);
+    const hasNegativeProviderWait = hasNegativeLatencyInterval(stagedAtMs, providerStartMs);
     const hasNegativeObservedMilestone =
-      (typingRequestAtMs !== null && typingRequestAtMs < acceptedAtMs)
-      || (
-        typingRequestAtMs !== null
-        && typingAcceptedAtMs !== null
-        && typingAcceptedAtMs < typingRequestAtMs
-      )
-      || (
-        providerStartMs !== null
-        && firstCodexOutputAtMs !== null
-        && firstCodexOutputAtMs < providerStartMs
-      )
-      || (
-        providerStartMs !== null
-        && firstCodexTextAtMs !== null
-        && firstCodexTextAtMs < providerStartMs
-      );
+      hasNegativeLatencyInterval(acceptedAtMs, typingRequestAtMs)
+      || hasNegativeLatencyInterval(typingRequestAtMs, typingAcceptedAtMs)
+      || hasNegativeLatencyInterval(providerStartMs, firstCodexOutputAtMs)
+      || hasNegativeLatencyInterval(providerStartMs, firstCodexTextAtMs);
 
     if (missingStaged && (mature || providerStartMs !== null)) {
       missingStagedCount += 1;
@@ -1479,30 +1480,26 @@ export async function readHostedIngressLatencyDashboard(
     ) {
       stagedToProviderDurations.push(providerStartMs - stagedAtMs);
     }
-    if (typingRequestAtMs !== null && typingRequestAtMs >= acceptedAtMs) {
-      acceptedToTypingRequestDurations.push(typingRequestAtMs - acceptedAtMs);
-    }
-    if (
-      typingRequestAtMs !== null
-      && typingAcceptedAtMs !== null
-      && typingAcceptedAtMs >= typingRequestAtMs
-    ) {
-      typingRequestToAcceptedDurations.push(typingAcceptedAtMs - typingRequestAtMs);
-    }
-    if (
-      providerStartMs !== null
-      && firstCodexOutputAtMs !== null
-      && firstCodexOutputAtMs >= providerStartMs
-    ) {
-      codexStartToFirstOutputDurations.push(firstCodexOutputAtMs - providerStartMs);
-    }
-    if (
-      providerStartMs !== null
-      && firstCodexTextAtMs !== null
-      && firstCodexTextAtMs >= providerStartMs
-    ) {
-      codexStartToFirstTextDurations.push(firstCodexTextAtMs - providerStartMs);
-    }
+    collectNonnegativeObservedLatency(
+      acceptedToTypingRequestDurations,
+      acceptedAtMs,
+      typingRequestAtMs,
+    );
+    collectNonnegativeObservedLatency(
+      typingRequestToAcceptedDurations,
+      typingRequestAtMs,
+      typingAcceptedAtMs,
+    );
+    collectNonnegativeObservedLatency(
+      codexStartToFirstOutputDurations,
+      providerStartMs,
+      firstCodexOutputAtMs,
+    );
+    collectNonnegativeObservedLatency(
+      codexStartToFirstTextDurations,
+      providerStartMs,
+      firstCodexTextAtMs,
+    );
 
     if (providerStartMs === null) {
       if (hasNegativeSignal || hasNegativeStaged || hasNegativeObservedMilestone) {
