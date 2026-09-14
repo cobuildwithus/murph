@@ -32,6 +32,8 @@ export interface AssistantChannelActivityStopOptions {
 }
 
 export interface AssistantChannelActivityHandle {
+  // Retained when an already provider-accepted handle is handed to a turn.
+  acceptedAt?: string
   isActive?: () => boolean
   refreshAfterMessage?: () => Promise<void>
   refreshNow?: () => Promise<void>

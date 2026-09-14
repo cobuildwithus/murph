@@ -540,7 +540,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   user or automation turn. It runs as isolated output-only formatting with no
   conversation history, private context, resume mutation, tools, network, or
   delegated work. Provider, webhook, and other external values remain
-  untrusted data, and the platform alone owns final delivery.
+  untrusted data, and the platform alone owns final delivery. The canonical
+  direct channel-connection greeting is a narrow context exception: exact
+  hosted-member/channel/destination validation permits bounded committed
+  direct-private transcript excerpts, with all output-only capability and
+  delivery restrictions preserved. Group and unknown audiences are excluded.
   Its restrictive configuration belongs to a fresh ephemeral thread on the
   resident App Server. It must not change provider process launch identity,
   replace the resident process, or persist a resumable notification thread.

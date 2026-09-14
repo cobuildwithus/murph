@@ -451,6 +451,15 @@ pnpm --dir packages/hosted-local-harness exec vitest run \
   test/junction-wearable-canary-workflow.test.ts
 ```
 
+Before starting the live wearable Vitest child, the E2E suite builds Web through
+`pnpm --dir apps/web build:hosted-local`. This uses the existing production build
+memory limits and synthetic smoke environment, with the same isolated smoke
+output suffix consumed by the harness's production-start selector. Compilation
+finishes before Web, Worker, Temporal, storage, and browser processes run
+together. Provider login and Junction/Kernel credentials remain restricted to
+the isolated test child. A failed build stops the suite before that child starts.
+Ordinary hermetic suites retain their existing preparation path.
+
 The private executor must expose and smoke-check the exact workspace Codex CLI installed
 by the frozen root dependency graph before hosted-local model-catalog
 preparation. That workspace pin currently matches the independently owned
@@ -510,7 +519,12 @@ pipe. The parent forwards only complete messages from the harness-owned closed
 vocabulary, including browser cleanup substeps; raw child output remains buffered.
 While a live wearable scenario runs, the parent reports numeric host CPU
 parallelism, one-minute load, and available/free/total memory every 30 seconds and stops
-that heartbeat after scenario cleanup. These observations cannot satisfy or
+that heartbeat after scenario cleanup. In GitHub Actions it also emits up to ten
+notice annotations containing the last validated stage, elapsed seconds, and the
+same numeric measurements. The first sample is immediate, then every four
+minutes or sooner when available memory falls below half its last annotated
+value. This respects the runner's per-step notice limit and makes bounded
+progress available separately from the final log archive. These observations cannot satisfy or
 replace connection, canonical-data, or cleanup proof. They contain no page,
 provider, account, URL, or environment content. Focused progress/privacy proof:
 `pnpm --dir packages/hosted-local-harness exec vitest run --config vitest.config.ts

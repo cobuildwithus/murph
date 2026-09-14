@@ -72,12 +72,13 @@ export const POST = withJsonError(async (request: Request) => {
       memberId,
       request: body,
       requestStartedAtMs,
-      scheduleMailboxWake: (wake) =>
-        handoffHostedMailboxWake({
+      scheduleMailboxWake: async (wake) => {
+        await handoffHostedMailboxWake({
           ...wake,
           directWakeSource: "assistant-ask-request",
           signal: request.signal,
-        }),
+        });
+      },
     }),
     supportedProjectionScopeKeys,
   );

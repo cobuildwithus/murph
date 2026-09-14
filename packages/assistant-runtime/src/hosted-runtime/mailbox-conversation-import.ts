@@ -93,6 +93,7 @@ import {
 import {
   recordHostedAssistantMilestonesBestEffort,
 } from "./assistant-latency-trace.ts";
+import { startHostedLinqAttachmentTyping } from "./channel-activity.ts";
 
 const CONVERSATION_PROJECTION_FAILED_REASON =
   "conversation-import.projection-failed";
@@ -500,66 +501,102 @@ export async function importHostedConversationMailboxItem(input: {
     await enqueuePendingReply();
     await notifyActiveTurnInputAvailable();
   }
-  if (!inboxProjectionRequired) {
-    return {
-      ...(foregroundAssistantInputId ? { assistantInputId: foregroundAssistantInputId } : {}),
-      captureId: null,
-      ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
-      ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
-      metrics: createEmptyHostedConversationWakeMetrics(),
-      status: "imported",
-    };
-  }
-  const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
-    importConversationWake,
-    loadAttachmentEvidenceCapture,
-    prepareWakeContext,
-    runtime: input.runtime,
-    signal: input.signal ?? null,
-    stagedInput,
-    vaultRoot: input.vaultRoot,
-    wake: decoded.wake,
-  });
-  if (attachmentAdmissionDeferred) {
-    assertHostedConversationMailboxImportLive(input.signal ?? null);
-  }
-  if (projectionEffect.parserRetry) {
-    return {
-      reasonCode: CONVERSATION_PARSER_RETRY_REASON,
-      retryable: true,
-      status: "blocked",
-    };
-  }
-  if (
-    attachmentAdmissionDeferred
-    && !await hasSettledHostedConversationAttachmentEvidence({
-      effect: projectionEffect.effect,
-      stagedInput,
-      vaultRoot: input.vaultRoot,
-    })
-  ) {
-    return {
-      reasonCode:
-        projectionEffect.effect.reasonCode
-        ?? CONVERSATION_ATTACHMENT_EVIDENCE_UPDATE_FAILED_REASON,
-      retryable: true,
-      status: "blocked",
-    };
-  }
-  if (attachmentAdmissionDeferred) {
-    await enqueuePendingReply();
-    await notifyActiveTurnInputAvailable();
-  }
-  return {
+  const importedOutcome = {
     ...(foregroundAssistantInputId ? { assistantInputId: foregroundAssistantInputId } : {}),
     captureId: null,
     ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
     ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
-    conversationImportTiming: projectionEffect.timing,
     metrics: createEmptyHostedConversationWakeMetrics(),
-    ...(projectionEffect.effect.reasonCode ? { reasonCode: projectionEffect.effect.reasonCode } : {}),
-    status: "imported",
+    status: "imported" as const,
   };
+  if (!inboxProjectionRequired) {
+    return importedOutcome;
+  }
+  const cancelAttachmentTyping = startHostedConversationAttachmentTyping({
+    foregroundAssistantInputId,
+    linqDeliveryContext,
+    runtime: input.runtime,
+    runtimeAttemptId: input.runtimeAttemptId,
+    signal: input.signal,
+    stagedInput,
+  });
+  let attachmentImportSucceeded = false;
+  try {
+    const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
+      importConversationWake,
+      loadAttachmentEvidenceCapture,
+      prepareWakeContext,
+      runtime: input.runtime,
+      signal: input.signal ?? null,
+      stagedInput,
+      vaultRoot: input.vaultRoot,
+      wake: decoded.wake,
+    });
+    if (attachmentAdmissionDeferred) {
+      assertHostedConversationMailboxImportLive(input.signal ?? null);
+    }
+    if (projectionEffect.parserRetry) {
+      return {
+        reasonCode: CONVERSATION_PARSER_RETRY_REASON,
+        retryable: true,
+        status: "blocked",
+      };
+    }
+    if (
+      attachmentAdmissionDeferred
+      && !await hasSettledHostedConversationAttachmentEvidence({
+        effect: projectionEffect.effect,
+        stagedInput,
+        vaultRoot: input.vaultRoot,
+      })
+    ) {
+      return {
+        reasonCode:
+          projectionEffect.effect.reasonCode
+          ?? CONVERSATION_ATTACHMENT_EVIDENCE_UPDATE_FAILED_REASON,
+        retryable: true,
+        status: "blocked",
+      };
+    }
+    if (attachmentAdmissionDeferred) {
+      await enqueuePendingReply();
+      await notifyActiveTurnInputAvailable();
+    }
+    attachmentImportSucceeded = true;
+    return {
+      ...importedOutcome,
+      conversationImportTiming: projectionEffect.timing,
+      ...(projectionEffect.effect.reasonCode ? { reasonCode: projectionEffect.effect.reasonCode } : {}),
+    };
+  } finally {
+    if (!attachmentImportSucceeded) cancelAttachmentTyping?.();
+  }
+}
+
+function startHostedConversationAttachmentTyping(input: {
+  foregroundAssistantInputId: string | null;
+  linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
+  runtime: HostedConversationMailboxRuntime;
+  runtimeAttemptId?: string | null;
+  signal?: AbortSignal | null;
+  stagedInput: HostedConversationMailboxAssistantInputStageResult;
+}): ReturnType<typeof startHostedLinqAttachmentTyping> {
+  if (!input.foregroundAssistantInputId || !input.stagedInput.attachmentEvidenceRequired) {
+    return null;
+  }
+  return startHostedLinqAttachmentTyping({
+    forwardedEnv: input.runtime.forwardedEnv,
+    latencyTraceContext: input.runtimeAttemptId ? {
+      assistantInputIds: [input.foregroundAssistantInputId],
+      latencyTracePort: input.runtime.platform.latencyTracePort,
+      runtimeAttemptId: input.runtimeAttemptId,
+      source: "linq",
+    } : null,
+    linqDeliveryContext: input.linqDeliveryContext,
+    providerFetch: input.runtime.platform.providerFetch,
+    signal: input.signal ?? undefined,
+    userEnv: input.runtime.userEnv,
+  });
 }
 
 function withHostedConversationImportLatencyMilestones(input: {

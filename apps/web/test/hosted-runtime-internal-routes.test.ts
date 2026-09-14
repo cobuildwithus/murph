@@ -2995,6 +2995,7 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.after).toHaveBeenCalledOnce();
     await mocks.after.mock.calls[0]?.[0]();
     expect(mocks.reportHostedPersonalPatternsRunAlerts).toHaveBeenCalledWith({
+      userId: "member_routes_1",
       entries,
     });
   });

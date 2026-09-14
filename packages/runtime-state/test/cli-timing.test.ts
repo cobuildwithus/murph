@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { stripTypeScriptTypes } from "node:module";
 import { test } from "vitest";
 
 import {
   addCliPhaseSample, CLI_TIMING_MAX_COMMANDS, CLI_TIMING_MAX_SPANS,
-  CLI_TIMING_PHASES, cliTimingCommand, emptyCliTiming, mergeCliTiming,
+  CLI_TIMING_PHASES, cliTimingCommand, cliTimingFailureCode, emptyCliTiming, mergeCliTiming,
   normalizeCliTiming, type CliTiming,
 } from "../src/cli-timing.ts";
 import {
@@ -198,6 +200,10 @@ test("normalization strips extras and rejects unsafe labels, numbers, dimensions
   })) };
   assert.deepEqual(normalizeCliTiming(JSON.parse(JSON.stringify(extra))), valid);
   assert.equal(cliTimingCommand("goal list --id PRIVATE_SENTINEL"), "other");
+  for (const leaf of ["report", "scaffold", "preview", "preview-view", "calculate", "calculate-bundle",
+    "inputs", "model-cards", "evidence"]) {
+    assert.equal(cliTimingCommand(`age ${leaf}`), "other");
+  }
   for (const mutate of [
     (r: CliTiming) => { r.commands[0]!.command = "/PRIVATE_SENTINEL"; },
     (r: CliTiming) => { r.commands[0]!.calls = Number.MAX_SAFE_INTEGER + 1; },
@@ -220,8 +226,8 @@ test("normalization strips extras and rejects unsafe labels, numbers, dimensions
 
 test("bounded cardinality and arithmetic overflow drop whole incoming calls, not legacy data", () => {
   const aggregate = emptyCliTiming();
-  const names = ["age calculate", "age evidence", "age inputs", "age model-cards", "age preview",
-    "age preview-view", "age report", "age scaffold", "allergy list", "allergy save", "allergy show",
+  const names = ["blood-test show", "capture show", "condition show", "document show", "food show",
+    "goal show", "provider list", "supplement list", "allergy list", "allergy save", "allergy show",
     "allergy scaffold", "assertion save", "assertion scaffold", "assistant ask", "assistant chat",
     "assistant status", "assistant stop", "assistant run", "audit list", "audit show", "audit tail",
     "automation list", "automation show", "batch", "blood-test list", "capture list", "condition list",
@@ -476,4 +482,96 @@ test("optional normalization uses bounded indexed reads and never retains an unc
   assert.deepEqual(normalized?.commands[0]!.failures, [{ code: "conflict", stage: "write", count: 1 }]);
   assert.equal(countReads, 1);
   assert.equal(JSON.stringify(normalized).includes("PRIVATE_SENTINEL"), false);
+});
+
+test("exercise source codes are optional finite evidence; legacy and unknown-code reports retain counts", () => {
+  for (const code of ["exercise_not_found", "exercise_catalog_unavailable", "exercise_catalog_invalid"] as const) {
+    const legacy = sample("exercise show");
+    legacy.commands[0]!.outcome = "error";
+    assert.deepEqual(normalizeCliTiming(legacy), legacy);
+    const report = structuredClone(legacy);
+    report.commands[0]!.failures = [{ code, stage: "unknown", count: 1 }];
+    assert.deepEqual(normalizeCliTiming(report), report);
+    // Exactly the mixed-version rule: an unknown/newer code never discards
+    // the command, outcome or count, and never admits its arbitrary string.
+    const future = { ...report, commands: [{ ...report.commands[0]!, failures: [
+      { code: `${code}_PRIVATE_SENTINEL`, stage: "unknown", count: 1 },
+    ] }] };
+    const normalized = normalizeCliTiming(future)!;
+    assert.equal(normalized.commands[0]!.outcome, "error");
+    assert.equal(normalized.commands[0]!.calls, 1);
+    assert.deepEqual(normalized.commands[0]!.failures, [{ code: "unknown", stage: "unknown", count: 1 }]);
+    assert.ok(!JSON.stringify(normalized).includes("PRIVATE_SENTINEL"));
+  }
+});
+
+test("memory read failure capture and normalization admit only the two exact codes", async () => {
+  const admitted = ["memory_not_found", "memory_document_invalid"] as const;
+  const unknown = ["SYNTHETIC_FORBIDDEN_CONTENT", "memory_persistence_invalid", "memory_not_f\u043eund",
+    ...admitted.flatMap((code) => [`prefix_${code}`, `${code}_suffix`, `${code} `, code.toUpperCase(), code.replaceAll("_", "-")])];
+  for (const code of [...admitted, ...unknown]) {
+    const expected = admitted.find((value) => value === code) ?? "unknown";
+    assert.equal(cliTimingFailureCode(code), expected);
+    const error = Object.assign(new Error("SYNTHETIC_FORBIDDEN_CONTENT"), {
+      code, context: { stage: "read", sourcePath: "/SYNTHETIC_PRIVATE_PATH/memory.md",
+        values: ["SYNTHETIC_FORBIDDEN_CONTENT"] }, cause: { code: "conflict" },
+    });
+    let report!: CliTiming;
+    let reports = 0;
+    await assert.rejects(withCliTiming(() => timeCliDispatch("memory show", async () => { throw error; }),
+      (value) => { report = value; reports += 1; }), (caught) => caught === error);
+    assert.equal(reports, 1);
+    assert.deepEqual(report.commands[0]!.failures, [{ code: expected, stage: "read", count: 1 }]);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    // Exercise the public consumer too, including extras a future writer must
+    // never make durable. It must retain accounting, not raw diagnostic data.
+    const input = { ...report, message: error.message, commands: [{ ...report.commands[0],
+      failures: [{ code, stage: "read", count: 1, message: error.message,
+        sourcePath: error.context.sourcePath, values: error.context.values }],
+    }] };
+    assert.deepEqual(normalizeCliTiming(input), report);
+    for (const forbidden of [error.message, error.context.sourcePath]) {
+      assert.ok(!JSON.stringify(report).includes(forbidden));
+    }
+  }
+});
+
+// Use the actual pre-admission portable reader, never a test copy of its parser.
+// The parent supplies the available main base from the active execution plan.
+const memoryFailureCompatibilityBase = process.env.MURPH_CLI_MEMORY_FAILURE_COMPAT_BASE;
+test.skipIf(!memoryFailureCompatibilityBase)("actual older memory-code reader maps new codes to unknown without losing counts or outcomes", async () => {
+  assert.match(memoryFailureCompatibilityBase ?? "", /^[a-f0-9]{40}$/u);
+  const source = execFileSync("git", ["show", `${memoryFailureCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { normalizeCliTiming: typeof normalizeCliTiming; cliTimingFailureCode: typeof cliTimingFailureCode } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
+  );
+  for (const code of ["memory_not_found", "memory_document_invalid"]) {
+    assert.equal(old.cliTimingFailureCode(code), "unknown", "compatibility base must precede admission");
+  }
+  let report!: CliTiming;
+  await withCliTiming(() => timeCliDispatch("batch", async () => {
+    for (const code of ["memory_not_found", "memory_document_invalid", "memory_not_found"] as const) {
+      const error = Object.assign(new Error("SYNTHETIC_FORBIDDEN_CONTENT"), { code, context: { stage: "read" } });
+      await assert.rejects(withCliTiming(() => timeCliDispatch("memory show", async () => { throw error; })),
+        (caught) => caught === error);
+    }
+    await withCliTiming(() => timeCliDispatch("memory show", async () => {}));
+  }), (value) => { report = value; });
+  assert.deepEqual(report.commands[0]!.failures, [
+    { code: "memory_not_found", stage: "read", count: 2 },
+    { code: "memory_document_invalid", stage: "read", count: 1 },
+  ]);
+  assert.deepEqual(report.commands.map(({ outcome, calls }) => ({ outcome, calls })), [
+    { outcome: "error", calls: 3 }, { outcome: "ok", calls: 1 },
+  ]);
+  assert.deepEqual(normalizeCliTiming(report), report);
+  const expected = structuredClone(report);
+  expected.commands[0]!.failures = [{ code: "unknown", stage: "read", count: 3 }];
+  assert.deepEqual(old.normalizeCliTiming(report), expected);
+  assert.deepEqual(normalizeCliTiming(expected), expected);
+  delete expected.commands[0]!.failures;
+  assert.deepEqual(old.normalizeCliTiming(expected), expected);
+  assert.deepEqual(normalizeCliTiming(expected), expected);
+  assert.ok(!JSON.stringify(report).includes("SYNTHETIC_FORBIDDEN_CONTENT"));
 });

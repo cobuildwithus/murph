@@ -1439,7 +1439,15 @@ async function resolveHostedLinqPlanningEvent(input: {
   } else if (threadRoute) {
     logHostedLinqChatClassification("thread-route-group");
     resolvedIsGroup = true;
+  } else if (webhookIsGroup === false) {
+    // The verified provider event supplies audience authority. A durable group
+    // route overrides it above and is checked again under the chat lock by the
+    // planner; an HTTP read cannot make those ownership checks unnecessary.
+    logHostedLinqChatClassification("webhook-direct");
+    resolvedIsGroup = false;
   } else {
+    // Legacy or incomplete payloads do not prove a private audience. A home
+    // binding identifies an owner, not the current participant roster.
     let canonicalIsGroup: boolean | null;
     try {
       const summary = await getHostedLinqChatSummary({
@@ -1487,19 +1495,17 @@ async function resolveHostedLinqPlanningEvent(input: {
         })
       : null;
   return {
-    event: webhookIsGroup === true
-      ? messageEvent
-      : {
-          ...messageEvent,
-          data: {
-            ...messageEvent.data,
-            chat: {
-              id: messageEvent.data.chat_id,
-              ...(messageEvent.data.chat ?? {}),
-              is_group: resolvedIsGroup,
-            },
-          },
+    event: {
+      ...messageEvent,
+      data: {
+        ...messageEvent.data,
+        chat: {
+          id: messageEvent.data.chat_id,
+          ...messageEvent.data.chat,
+          is_group: resolvedIsGroup,
         },
+      },
+    },
     ...(pendingGroupRoster?.initialGroupDisplayName
       ? { initialGroupDisplayName: pendingGroupRoster.initialGroupDisplayName }
       : {}),
@@ -3011,12 +3017,8 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
     memberId,
     prisma: input.prisma,
   });
-  const [identityRecord, routingRecord, accessAllowed, preparedFamilyInvite] =
+  const [routingRecord, accessAllowed, preparedFamilyInvite] =
     await Promise.all([
-      readHostedMemberIdentityRecord({
-        memberId,
-        prisma: input.prisma,
-      }),
       readHostedMemberRoutingRecord({
         memberId,
         prisma: input.prisma,
@@ -3032,6 +3034,11 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
           })
         : null,
     ]);
+  // Only Family acceptance consumes the private identity snapshot. Ordinary
+  // messages use blind identity/home lookups, revalidated under the locks.
+  const identityRecord = preparedFamilyInvite
+    ? await readHostedMemberIdentityRecord({ memberId, prisma: input.prisma })
+    : null;
   const shouldPrepareFamilyAcceptance =
     preparedFamilyInvite?.kind === "pending_acceptance";
   const preparedCryptoDomainRoots =

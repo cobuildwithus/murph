@@ -22,25 +22,53 @@ export interface BrowserVaultReplicaSource {
   vault: VaultReadModel;
 }
 
+export type BrowserVaultReplicaSourceStep =
+  | "canonical_source_read"
+  | "read_model_construction"
+  | "personal_pattern_vocabulary_read"
+  | "metric_projection"
+  | "default_entity_projection";
+
 export async function readBrowserVaultReplicaSource(
   vaultRoot: string,
-  options: { signal?: AbortSignal } = {},
+  options: {
+    // Synchronous, best-effort operation boundaries; null marks completion.
+    onSourceStep?: (step: BrowserVaultReplicaSourceStep | null) => void;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<BrowserVaultReplicaSource> {
+  const observe = (step: BrowserVaultReplicaSourceStep | null): void => {
+    try {
+      options.onSourceStep?.(step);
+    } catch {
+      // Optional diagnostics must not change source reads or cancellation.
+    }
+  };
   options.signal?.throwIfAborted();
+  observe("canonical_source_read");
   const snapshot = await readVaultSourceStrict(vaultRoot, options);
+  observe(null);
   options.signal?.throwIfAborted();
+  observe("read_model_construction");
   const sourceVault = createVaultReadModel({
     entities: snapshot.entities,
     metadata: snapshot.metadata,
     vaultRoot,
   });
+  observe(null);
+  observe("personal_pattern_vocabulary_read");
   const personalPatternVocabulary =
     await readBrowserVaultPersonalPatternVocabulary(vaultRoot);
+  observe(null);
 
   await yieldToBrowserVaultSourceCancellation(options.signal);
+  observe("metric_projection");
   const metricPoints = buildMetricProjection(sourceVault).metricPoints;
+  observe(null);
   await yieldToBrowserVaultSourceCancellation(options.signal);
+  observe("default_entity_projection");
   const vault = createDefaultProjectedVault(sourceVault);
+  observe(null);
 
   return { metricPoints, personalPatternVocabulary, vault };
 }

@@ -5484,8 +5484,13 @@ test("device sync service worker handles missing providers, disconnected jobs, a
   close();
 });
 
-test("device sync service imports accepted companion RMSSD jobs after terminal account state", async () => {
-  for (const status of ["disconnected", "reauthorization_required"] as const) {
+test("device sync service imports accepted companion RMSSD jobs without ordinary account authority", async () => {
+  for (const { status, setupPhase } of [
+    { status: "active", setupPhase: "pending_link" },
+    { status: "active", setupPhase: "link_returned" },
+    { status: "disconnected", setupPhase: null },
+    { status: "reauthorization_required", setupPhase: null },
+  ] as const) {
     const vaultRoot = await makeTempDirectory(`murph-device-syncd-companion-terminal-${status}`);
     const imports: unknown[] = [];
     const providerRequests = vi.fn(async (input: RequestInfo | URL) => {
@@ -5526,6 +5531,7 @@ test("device sync service imports accepted companion RMSSD jobs after terminal a
         displayName: "Junction",
         scopes: [],
         status,
+        setupPhase,
         credential: {
           kind: "provider_config",
           providerConfigKey: "junction",
@@ -5557,7 +5563,10 @@ test("device sync service imports accepted companion RMSSD jobs after terminal a
       await service.runWorkerOnce();
 
       assert.equal(store.getJobById(job.id)?.status, "succeeded");
+      assert.equal(store.getJobById(job.id)?.attempts, 1);
       assert.equal(store.getAccountById(account.id)?.status, status);
+      assert.equal(store.getAccountById(account.id)?.setupPhase, setupPhase);
+      assert.equal(service.listJobTimingDiagnostics()[0]?.outcome, "completed");
       assert.equal(imports.length, 1);
       assert.equal(providerRequests.mock.calls.length, 0);
     } finally {
@@ -5926,10 +5935,12 @@ test("device sync service retries structurally incomplete calendar rows before a
 });
 
 test("device sync service keeps calendar work dormant without account authority", async () => {
+  const now = new Date("2026-07-10T13:46:00.000Z");
   for (const accountState of [
-    { status: "active", setupPhase: "pending_link" },
-    { status: "disconnected", setupPhase: null },
-    { status: "reauthorization_required", setupPhase: null },
+    { status: "active", setupPhase: "pending_link", code: "CONNECTION_SETUP_PENDING" },
+    { status: "active", setupPhase: "link_returned", code: "CONNECTION_SETUP_PENDING" },
+    { status: "disconnected", setupPhase: null, code: "ACCOUNT_DISCONNECTED" },
+    { status: "reauthorization_required", setupPhase: null, code: "ACCOUNT_REAUTHORIZATION_REQUIRED" },
   ] as const) {
     const vaultRoot = await makeTempDirectory(`murph-device-syncd-calendar-dormant-${accountState.status}`);
     const providerRequests = vi.fn(async (input: RequestInfo | URL) => {
@@ -5937,6 +5948,7 @@ test("device sync service keeps calendar work dormant without account authority"
     });
     const { service, store, close } = createServiceFixture({
       secret: "secret-for-tests",
+      clock: { now: () => now },
       config: {
         vaultRoot,
         publicBaseUrl: "https://sync.example.test/device-sync",
@@ -5974,16 +5986,125 @@ test("device sync service keeps calendar work dormant without account authority"
           resource: "water",
           sourceProviderSlug: "garmin",
         },
-        availableAt: "2026-07-10T13:00:00.000Z",
+        availableAt: now.toISOString(),
+        maxAttempts: 1,
       });
+      const accountBeforeRun = store.getAccountById(account.id);
+      assert.ok(accountBeforeRun);
       await service.runWorkerOnce();
       const retained = store.getJobById(job.id);
       assert.equal(retained?.status, "queued");
       assert.equal(retained?.attempts, 1);
+      assert.equal(retained?.maxAttempts, 2);
+      assert.equal(retained?.lastErrorCode, accountState.code);
+      assert.equal(
+        retained?.availableAt,
+        new Date(now.getTime() + computeRetryDelayMs(1)).toISOString(),
+      );
+      assert.deepEqual(store.getAccountById(account.id), accountBeforeRun);
+      assert.deepEqual(service.listJobFailureDiagnostics(), []);
+      assert.equal(service.listJobTimingDiagnostics()[0]?.outcome, "deferred");
+      assert.equal(service.listJobTimingDiagnostics()[0]?.providerExecutionElapsedMs, null);
       assert.equal(providerRequests.mock.calls.length, 0);
     } finally {
       close();
     }
+  }
+});
+
+test.each([
+  { status: "active", setupPhase: "pending_link" },
+  { status: "active", setupPhase: "link_returned" },
+  { status: "disconnected", setupPhase: null },
+  { status: "reauthorization_required", setupPhase: null },
+] as const)("device sync service rejects overlapping companion/calendar payloads before $status/$setupPhase admission", async (accountState) => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-companion-calendar-overlap");
+  const now = new Date("2026-07-10T13:46:00.000Z");
+  const importSnapshot = vi.fn(async () => ({ events: [{ kind: "observation" }] }));
+  const providerRequest = vi.fn(async (input: RequestInfo | URL) => {
+    throw new Error(`Unexpected Junction request for overlapping job: ${readUrl(input)}`);
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: { importDeviceProviderSnapshot: importSnapshot },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryBackfillDays: 2,
+      summaryResources: [],
+      timeseriesResources: [],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+      fetchImpl: providerRequest,
+    })],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-companion-calendar-overlap",
+      displayName: "Junction",
+      ...accountState,
+      scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      connectedAt: "2026-07-10T13:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        ...buildCompanionHrvRmssdJobPayload({
+          schema: COMPANION_HRV_RMSSD_SCHEMA,
+          methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+          nightDate: "2026-07-10",
+          rmssdMs: 48.25,
+          completedWindowCount: 84,
+          acceptedWindowCount: 56,
+        }),
+        calendarRefreshDay: "2026-07-08",
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+        resourceCategory: "derived",
+        sourceProviderSlug: "whoop",
+      },
+      availableAt: now.toISOString(),
+      maxAttempts: 3,
+    });
+
+    const accountBeforeRun = store.getAccountById(account.id);
+    assert.ok(accountBeforeRun);
+    assert.equal((await service.runWorkerOnce(account.id))?.id, job.id);
+    const terminal = store.getJobById(job.id);
+    assert.equal(terminal?.status, "dead");
+    assert.equal(terminal?.attempts, 1);
+    assert.equal(terminal?.maxAttempts, 3);
+    assert.equal(terminal?.lastErrorCode, "JUNCTION_CALENDAR_REFRESH_JOB_INVALID");
+    assert.equal(terminal?.lastErrorMessage, "Junction calendar refresh job payload was invalid.");
+    assert.equal(terminal?.finishedAt, now.toISOString());
+    assert.deepEqual(store.getAccountById(account.id), accountBeforeRun);
+    assert.equal(readJobsForAccountForTesting(store, account.id).length, 1);
+    assert.equal(await service.runWorkerOnce(account.id), null);
+    const [failure] = service.listJobFailureDiagnostics();
+    assert.equal(failure?.code, "JUNCTION_CALENDAR_REFRESH_JOB_INVALID");
+    assert.equal(failure?.jobDisposition, "dead");
+    assert.equal(failure?.remainingAttempts, 0);
+    assert.equal(failure?.retryable, false);
+    const [timing] = service.listJobTimingDiagnostics();
+    assert.equal(timing?.outcome, "failed");
+    assert.equal(timing?.durableProgressCommitted, false);
+    assert.equal(timing?.providerExecutionElapsedMs, null);
+    assert.equal(timing?.snapshotImportCount, 0);
+    assert.equal(importSnapshot.mock.calls.length, 0);
+    assert.equal(providerRequest.mock.calls.length, 0);
+  } finally {
+    close();
   }
 });
 

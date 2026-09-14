@@ -25,6 +25,7 @@ import {
   readHostedPrivyPhoneTransferProof,
 } from "@/src/lib/hosted-onboarding/privy-phone-transfer-retirement";
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
+import { ensureHostedMemberPhoneWelcome } from "@/src/lib/hosted-onboarding/phone-welcome";
 import { readHostedPrivyUserById } from "@/src/lib/hosted-onboarding/privy";
 import { buildHostedPrivySessionState } from "@/src/lib/hosted-onboarding/privy-user";
 import { requireFreshPrivyMemberAuthForHostedAppSession } from "@/src/lib/hosted-onboarding/request-auth";
@@ -91,6 +92,9 @@ export const POST = withJsonError(async (request: Request) => {
     identity: providerSession.identity,
     phoneNumber,
   });
+  if (currentProjectionAligned) {
+    await ensureHostedMemberPhoneWelcome({ memberId: auth.member.id, prisma });
+  }
 
   if (
     expectation.kind === "changed-from"
@@ -173,6 +177,7 @@ export const POST = withJsonError(async (request: Request) => {
   traceHostedPhoneSync("projection-reconciled", {
     channelSyncQueued: syncResult.channelSyncDispatch !== null,
   });
+  await ensureHostedMemberPhoneWelcome({ memberId: auth.member.id, prisma });
   return jsonOk(syncResult.result);
 });
 

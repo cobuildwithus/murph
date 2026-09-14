@@ -877,7 +877,18 @@ validation type names. It does not call getters, enumerate objects, inspect
 messages/field errors, follow prototypes/causes, or retain original errors or
 contexts. Code-only observations are diagnostic hints, not authorization or a
 claim that a reported stage is independently verified. Existing dynamic-tool
-finite stage/reason/category diagnostics remain separate and unchanged.
+finite stage/reason/category diagnostics remain separate.
+
+Memory read diagnostics admit exactly `memory_not_found` and
+`memory_document_invalid`, both emitted by the existing CLI owner at `read`.
+The assistant's existing `tool-failure-diagnostics.ts` category map classifies
+these as `not_found` and `invalid_result`, respectively: a missing record is
+not invalid input, and an unreadable canonical document is invalid stored state,
+not proof of a caller argument defect. Other memory codes (including
+`memory_persistence_invalid`), arbitrary strings, and prefix/suffix/lookalike
+variants remain `unknown`. This only classifies existing errors; it does not
+change output, exit status, model-visible recovery guidance, reads, writes or
+retries. Messages, source paths, record ids and values never enter this vocabulary.
 
 The existing Incur error bridge observes ordinary handler throws **before** its
 public error projection can discard typed fields. Dispatch and invocation
@@ -935,6 +946,20 @@ A producer-first or consumer rollback loses detail, not billing validity. The
 history-backed test uses `MURPH_CLI_FAILURE_COMPAT_BASE=4949045492c` to load both
 actual pre-change owners; the older `MURPH_CLI_TIMING_COMPAT_BASE` test remains a
 separate, pre-timing rollout proof.
+
+Additional failure codes on the same `murph.cli-timing.v1` schema, including the
+two memory read codes, also roll out **reader before writer**: first update the
+portable normalizer in downstream Web/hosted usage and engine/profile consumers
+and the assistant category reader, then update CLI producers. Warm older
+failure-aware readers normalize unfamiliar codes to `unknown` and coalesce equal
+code/stage pairs while retaining command identity, outcomes, calls, phases and
+report counts. New readers still accept old reports without failure details and
+cannot recover classifications already collapsed by old writers. A reader
+rollback loses diagnostic specificity, not valid timing or usage accounting;
+no protocol bump or coordinated pause is needed. The history-backed runtime-state
+test uses `MURPH_CLI_MEMORY_FAILURE_COMPAT_BASE` to load the actual pre-admission
+portable reader; it must be run with the base named in the active rollout plan,
+not replaced with a copy of the old parser or a current-reader round trip.
 
 ### Bounded failure-frequency inspection and decision threshold
 

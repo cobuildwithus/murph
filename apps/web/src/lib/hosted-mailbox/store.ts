@@ -3030,7 +3030,7 @@ async function allocateHostedMailboxCausalSeqTx(input: {
   return rows[0].seq;
 }
 
-async function acquireHostedMailboxCausalAppendLockTx(input: {
+export async function acquireHostedMailboxCausalAppendLockTx(input: {
   tx: HostedMailboxMutationTx;
   userId: string;
 }): Promise<void> {

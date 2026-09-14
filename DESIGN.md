@@ -826,8 +826,9 @@ Keep the copy observational and conversational. Prefer `You slept less after cyc
 Comparison details keep their average bars and expose saved dates in one
 `Days compared` disclosure. Use a week-column calendar with filled factor marks,
 bordered sand confirmed-absence marks, and hollow unrecorded marks. Dates reveal
-their group on selection or keyboard focus. Keep the unrecorded-basis warning,
-label partial arrays, and omit the calendar when no valid saved dates exist.
+their group on selection or keyboard focus. Use `Not recorded` in the legend
+for unrecorded comparisons, with no repeated disclaimer beneath it. Label partial
+arrays beside `Days compared` and omit the calendar when no valid saved dates exist.
 Do not repeat statistics, evidence grades, or idle tap instructions below it.
 
 ## 6. Do's and Don'ts

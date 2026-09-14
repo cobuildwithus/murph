@@ -4,6 +4,7 @@ export {
   readBrowserVaultPersonalPatternVocabulary,
   readBrowserVaultReplicaSource,
   readBrowserVaultReplicaVault,
+  type BrowserVaultReplicaSourceStep,
 } from "./browser-replica/source.ts";
 export { listMetricPointsRuntime as listMetricPoints } from "./query-projection.ts";
 export { readVault } from "./vault-reader.ts";

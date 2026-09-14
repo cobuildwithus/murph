@@ -1,9 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   sendHostedPersonalPatternsRunAlerts,
 } from "@/src/lib/hosted-runtime-log/personal-patterns-run-alert";
 import type { sendHostedResendPlainTextEmail } from "@/src/lib/hosted-onboarding/resend-plain-text-email";
+
+
+const mocks = vi.hoisted(() => ({ findHostedUsageLimitedPersonalPatternsOccurrences: vi.fn() }));
+vi.mock("@/src/lib/hosted-runtime-log/usage-gate", () => ({
+  findHostedUsageLimitedPersonalPatternsOccurrences: mocks.findHostedUsageLimitedPersonalPatternsOccurrences,
+}));
 
 type SendAlertEmailInput = Parameters<typeof sendHostedResendPlainTextEmail>[0];
 
@@ -14,10 +20,14 @@ const alertEnv = {
 };
 
 describe("Personal Patterns run alerts", () => {
+  beforeEach(() => {
+    mocks.findHostedUsageLimitedPersonalPatternsOccurrences.mockReset().mockResolvedValue(new Set());
+  });
   it("ignores a failed managed run while automatic recovery is pending", async () => {
     const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
 
     await expect(sendHostedPersonalPatternsRunAlerts({
+      userId: "member_patterns_test",
       entries: [{
         at: "2026-08-31T13:02:00.000Z",
         errorCode: "ASSISTANT_CODEX_CONNECTION_LOST",
@@ -41,6 +51,7 @@ describe("Personal Patterns run alerts", () => {
     const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
 
     await expect(sendHostedPersonalPatternsRunAlerts({
+      userId: "member_patterns_test",
       entries: [{
         at: "2026-08-31T13:02:00.000Z",
         redactedJson: {
@@ -61,12 +72,13 @@ describe("Personal Patterns run alerts", () => {
     const sent: SendAlertEmailInput[] = [];
 
     await expect(sendHostedPersonalPatternsRunAlerts({
+      userId: "member_patterns_test",
       entries: [{
         at: "2026-08-31T13:02:00.000Z",
-        errorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
+        errorCode: "ASSISTANT_CODEX_CONNECTION_LOST",
         redactedJson: {
           failureAutomationSlug: "personal-patterns-update",
-          failureErrorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
+          failureErrorCode: "ASSISTANT_CODEX_CONNECTION_LOST",
           failureRetryScheduled: false,
           failureOccurrenceAt: "2026-08-31T13:00:00.000Z",
           failureRunOutcome: "failed",
@@ -88,8 +100,76 @@ describe("Personal Patterns run alerts", () => {
       "scheduled occurrence: 2026-08-31T13:00:00.000Z",
     );
     expect(sent[0]?.text).not.toContain("member");
-    expect(sent[0]?.text).not.toContain("ASSISTANT_CODEX_USAGE_LIMIT");
+    expect(sent[0]?.text).not.toContain("ASSISTANT_CODEX_CONNECTION_LOST");
     expect(sent[0]?.text).not.toContain("health");
+  });
+
+  it.each(["entry", "failureContext"])("ignores explicit usage limits from %s", async (source) => {
+    const sendEmail = vi.fn();
+    const entry = {
+      at: "2026-08-31T13:02:00.000Z",
+      ...(source === "entry" ? { errorCode: "ASSISTANT_CODEX_USAGE_LIMIT" } : {}),
+      redactedJson: {
+        failureAutomationSlug: "personal-patterns-update",
+        failureOccurrenceAt: "2026-08-31T13:00:00.000Z",
+        failureRetryScheduled: false,
+        failureRunOutcome: "failed",
+        type: "cron.job.completed",
+        ...(source === "failureContext" ? { failureErrorCode: "ASSISTANT_CODEX_USAGE_LIMIT" } : {}),
+      },
+    };
+    await expect(sendHostedPersonalPatternsRunAlerts({
+      userId: "member_patterns_test", entries: [entry], env: alertEnv, sendEmail,
+    })).resolves.toBe("unrelated");
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(mocks.findHostedUsageLimitedPersonalPatternsOccurrences).not.toHaveBeenCalled();
+  });
+
+  it("suppresses a paused expiration after reset but preserves a real failure at the same time", async () => {
+    const occurrenceAt = "2026-08-31T13:00:00.000Z";
+    const expired = {
+      at: "2026-09-01T12:00:00.000Z",
+      redactedJson: {
+        type: "cron.occurrence.expired",
+        failureAutomationSlug: "personal-patterns-update",
+        failureOccurrenceAt: occurrenceAt,
+      },
+    };
+    mocks.findHostedUsageLimitedPersonalPatternsOccurrences.mockResolvedValue(new Set([occurrenceAt]));
+    const sendEmail = vi.fn(async () => ({ providerMessageId: "email_test" }));
+    const input = { userId: "member_patterns_test", env: alertEnv, sendEmail };
+    await expect(sendHostedPersonalPatternsRunAlerts({ ...input, entries: [expired] }))
+      .resolves.toBe("unrelated");
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(mocks.findHostedUsageLimitedPersonalPatternsOccurrences).toHaveBeenCalledWith({
+      userId: input.userId,
+      occurrences: [{ occurrenceAt, observedAt: expired.at, expired: true }],
+    });
+    await expect(sendHostedPersonalPatternsRunAlerts({
+      ...input,
+      entries: [expired, {
+        ...expired,
+        redactedJson: { ...expired.redactedJson, type: "cron.job.completed",
+          failureRunOutcome: "failed", failureRetryScheduled: false },
+      }],
+    })).resolves.toBe("sent");
+    expect(sendEmail).toHaveBeenCalledOnce();
+  });
+
+  it("still alerts when usage history cannot be read", async () => {
+    mocks.findHostedUsageLimitedPersonalPatternsOccurrences.mockRejectedValue(new Error("synthetic database outage"));
+    const sendEmail = vi.fn(async () => ({ providerMessageId: "email_test" }));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await expect(sendHostedPersonalPatternsRunAlerts({
+        userId: "member_patterns_test", env: alertEnv, sendEmail,
+        entries: [{ at: "2026-08-31T16:00:00.000Z", redactedJson: {
+          type: "cron.occurrence.expired", failureAutomationSlug: "personal-patterns-update",
+          failureOccurrenceAt: "2026-08-31T13:00:00.000Z",
+        } }],
+      })).resolves.toBe("sent");
+      expect(sendEmail).toHaveBeenCalledOnce();
+    } finally { warning.mockRestore(); }
   });
 
   it("coalesces different members for one expired occurrence", async () => {
@@ -108,6 +188,7 @@ describe("Personal Patterns run alerts", () => {
       "2026-08-31T17:05:00.000Z",
     ]) {
       await sendHostedPersonalPatternsRunAlerts({
+      userId: "member_patterns_test",
         entries: [{ ...entry, at: observedAt }],
         env: alertEnv,
         sendEmail: async (input) => {
@@ -154,6 +235,7 @@ describe("Personal Patterns run alerts", () => {
     };
     for (const entries of [[expired], [failed], [failed, expired]]) {
       await sendHostedPersonalPatternsRunAlerts({
+      userId: "member_patterns_test",
         entries,
         env: alertEnv,
         sendEmail: async (input) => {
@@ -172,6 +254,7 @@ describe("Personal Patterns run alerts", () => {
     const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
 
     await expect(sendHostedPersonalPatternsRunAlerts({
+      userId: "member_patterns_test",
       entries: [
         {
           at: "2026-08-31T13:02:00.000Z",
@@ -202,6 +285,7 @@ describe("Personal Patterns run alerts", () => {
     const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
 
     await expect(sendHostedPersonalPatternsRunAlerts({
+      userId: "member_patterns_test",
       entries: [{
         at: "2026-08-31T13:02:00.000Z",
         redactedJson: {
@@ -222,6 +306,7 @@ describe("Personal Patterns run alerts", () => {
     let attempts = 0;
 
     await expect(sendHostedPersonalPatternsRunAlerts({
+      userId: "member_patterns_test",
       entries: [
         {
           at: "2026-08-31T13:02:00.000Z",

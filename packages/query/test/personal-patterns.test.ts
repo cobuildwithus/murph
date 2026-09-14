@@ -69,6 +69,7 @@ test("Personal Patterns keeps a repeated next-day link and matched comparison ev
       kind: "activity",
       label: "Running",
       observedDays: 8,
+      lastObservedDate: "2026-04-13",
     },
   ]);
   assert.equal(
@@ -138,6 +139,7 @@ test("Personal Patterns applies one validated vocabulary before aggregation", as
       kind: "activity",
       label: "Dance",
       observedDays: 2,
+      lastObservedDate: "2026-08-21",
     },
   ]);
 
@@ -356,6 +358,7 @@ test("Browser Vault reads the bounded vocabulary from its private Knowledge page
           kind: "activity",
           label: "Dance",
           observedDays: 2,
+          lastObservedDate: "2026-08-21",
         },
       ],
     );
@@ -518,6 +521,7 @@ test("Personal Patterns admits only the product-owned Oura sauna tag from neutra
       kind: "intervention",
       label: "Sauna",
       observedDays: 8,
+      lastObservedDate: "2026-04-13",
     },
   ]);
   assert.equal(

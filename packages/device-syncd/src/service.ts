@@ -1084,20 +1084,6 @@ class DeviceSyncServiceController {
     const preservesAcceptedCompanionHrv = isJunctionCompanionHrvRmssdJob(job);
     const retainsAcceptedCalendarRefresh = isJunctionSparseCalendarRefreshJob(job);
     const retainsAcceptedWork = preservesAcceptedCompanionHrv || retainsAcceptedCalendarRefresh;
-    const delayRetainedJobUntilAuthorityReturns = (code: string, message: string): void => {
-      const delayedAt = currentNow();
-      const transition = this.store.failJobIfOwned(
-        job.id,
-        this.workerId,
-        delayedAt,
-        code,
-        message,
-        addMilliseconds(delayedAt, computeRetryDelayMs(job.attempts)),
-        true,
-        true,
-      );
-      outcome = transition ? "deferred" : "cancelled";
-    };
 
     if (
       retainsAcceptedCalendarRefresh
@@ -1112,80 +1098,51 @@ class DeviceSyncServiceController {
       return finishPass();
     }
 
-    if (
-      storedAccount.status === "active"
-      && isDeviceSyncConnectionSetupPending(storedAccount)
-      && !retainsAcceptedWork
-    ) {
-      failClaimedJob(
-        "CONNECTION_SETUP_PENDING",
-        "Device sync setup must finish before queued jobs can run.",
-        null,
-        false,
-      );
-      return finishPass();
-    }
+    const admissionBlocker = resolveWorkerAccountAdmissionBlocker({
+      account: storedAccount,
+      preservesAcceptedCompanionHrv,
+      retainsAcceptedCalendarRefresh,
+    });
+    if (admissionBlocker) {
+      const { code, message } = admissionBlocker;
+      if (retainsAcceptedCalendarRefresh) {
+        const delayedAt = currentNow();
+        const transition = this.store.failJobIfOwned(
+          job.id,
+          this.workerId,
+          delayedAt,
+          code,
+          message,
+          addMilliseconds(delayedAt, computeRetryDelayMs(job.attempts)),
+          true,
+          true,
+        );
+        outcome = transition ? "deferred" : "cancelled";
+      } else if (storedAccount.status === "disconnected") {
+        const completed = this.store.completeJobIfOwned(job.id, this.workerId, currentNow());
 
-    if (
-      storedAccount.status === "active"
-      && isDeviceSyncConnectionSetupPending(storedAccount)
-      && retainsAcceptedCalendarRefresh
-    ) {
-      delayRetainedJobUntilAuthorityReturns(
-        "CONNECTION_SETUP_PENDING",
-        "Device sync setup must finish before retained calendar work can run.",
-      );
-      return finishPass();
-    }
-
-    if (storedAccount.status === "disconnected" && retainsAcceptedCalendarRefresh) {
-      delayRetainedJobUntilAuthorityReturns(
-        "ACCOUNT_DISCONNECTED",
-        "Device sync account must reconnect before retained calendar work can run.",
-      );
-      return finishPass();
-    }
-
-    if (storedAccount.status === "disconnected" && !preservesAcceptedCompanionHrv) {
-      const completed = this.store.completeJobIfOwned(job.id, this.workerId, currentNow());
-
-      if (!completed) {
-        this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
-          provider: job.provider,
-          accountId: job.accountId,
-          jobId: job.id,
-        });
+        if (!completed) {
+          this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
+            provider: job.provider,
+            accountId: job.accountId,
+            jobId: job.id,
+          });
+        } else {
+          outcome = "completed";
+          durableProgressCommitted = true;
+        }
       } else {
-        outcome = "completed";
-        durableProgressCommitted = true;
-      }
-      return finishPass();
-    }
-
-    if (storedAccount.status === "reauthorization_required" && retainsAcceptedCalendarRefresh) {
-      delayRetainedJobUntilAuthorityReturns(
-        "ACCOUNT_REAUTHORIZATION_REQUIRED",
-        "Device sync account must reauthorize before retained calendar work can run.",
-      );
-      return finishPass();
-    }
-
-    if (storedAccount.status === "reauthorization_required" && !preservesAcceptedCompanionHrv) {
-      const failed = failClaimedJob(
-        "ACCOUNT_REAUTHORIZATION_REQUIRED",
-        "Device sync account requires reconnection before queued jobs can run.",
-        null,
-        false,
-      );
-      if (failed) {
-        this.store.markPendingJobsDeadForAccountIfCurrent({
-          accountId: storedAccount.id,
-          code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
-          expectedLocalConnectionRevision: storedAccount.localConnectionRevision,
-          expectedStatus: "reauthorization_required",
-          message: "Device sync account requires reconnection before queued jobs can run.",
-          now: currentNow(),
-        });
+        const failed = failClaimedJob(code, message, null, false);
+        if (failed && storedAccount.status === "reauthorization_required") {
+          this.store.markPendingJobsDeadForAccountIfCurrent({
+            accountId: storedAccount.id,
+            code,
+            expectedLocalConnectionRevision: storedAccount.localConnectionRevision,
+            expectedStatus: "reauthorization_required",
+            message,
+            now: currentNow(),
+          });
+        }
       }
       return finishPass();
     }
@@ -1240,8 +1197,7 @@ class DeviceSyncServiceController {
       const currentStoredAccount = this.store.getAccountById(storedAccount.id);
 
       if (!currentStoredAccount || (
-        !preservesAcceptedCompanionHrv
-        && !retainsAcceptedCalendarRefresh
+        !retainsAcceptedWork
         && (
           currentStoredAccount.status !== "active"
           || currentStoredAccount.disconnectGeneration !== disconnectGeneration
@@ -1292,7 +1248,7 @@ class DeviceSyncServiceController {
       ensureExecutionActive();
       currentAccount = this.toDecryptedAccount(storedAccount);
       const normalizedJob = normalizeConfiguredDeviceSyncJobRecord(provider.provider, job, "execution");
-      activeJobs = preservesAcceptedCompanionHrv || retainsAcceptedCalendarRefresh
+      activeJobs = retainsAcceptedWork
         ? [normalizedJob]
         : this.claimProviderJobBatch({
             accountId: storedAccount.id,
@@ -1658,15 +1614,14 @@ class DeviceSyncServiceController {
             "retry progress",
           ).payload
         : undefined;
-      const retainsAcceptedCompanionHrvUntilSuccess = preservesAcceptedCompanionHrv
-        && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE;
-      const retainsAcceptedCalendarRefreshUntilSuccess = retainsAcceptedCalendarRefresh
-        && !isJunctionSparseCalendarRefreshTerminalFailureCode(failure.code);
-      const retainsAcceptedWorkUntilSuccess = retainsAcceptedCompanionHrvUntilSuccess
-        || retainsAcceptedCalendarRefreshUntilSuccess;
-      const retainedFailureRetryable = failure.retryable
-        || retainsAcceptedCompanionHrvUntilSuccess
-        || retainsAcceptedCalendarRefreshUntilSuccess;
+      const retainsAcceptedWorkUntilSuccess = (
+        preservesAcceptedCompanionHrv
+        && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE
+      ) || (
+        retainsAcceptedCalendarRefresh
+        && !isJunctionSparseCalendarRefreshTerminalFailureCode(failure.code)
+      );
+      const retainedFailureRetryable = failure.retryable || retainsAcceptedWorkUntilSuccess;
       const failureNow = currentNow();
       if (!isAccountExecutionCurrent()) {
         const released = releaseActiveJobsIfCurrentAccountActive(failureNow);
@@ -2255,6 +2210,47 @@ function earliestIsoTimestamp(...values: Array<string | null | undefined>): stri
   return values
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
+}
+
+function resolveWorkerAccountAdmissionBlocker(input: {
+  account: StoredDeviceSyncAccount;
+  preservesAcceptedCompanionHrv: boolean;
+  retainsAcceptedCalendarRefresh: boolean;
+}): { code: string; message: string } | null {
+  // Calendar admission takes precedence when the raw job predicates overlap.
+  if (input.preservesAcceptedCompanionHrv && !input.retainsAcceptedCalendarRefresh) {
+    return null;
+  }
+
+  if (
+    input.account.status === "active"
+    && isDeviceSyncConnectionSetupPending(input.account)
+  ) {
+    return {
+      code: "CONNECTION_SETUP_PENDING",
+      message: input.retainsAcceptedCalendarRefresh
+        ? "Device sync setup must finish before retained calendar work can run."
+        : "Device sync setup must finish before queued jobs can run.",
+    };
+  }
+
+  if (input.account.status === "disconnected") {
+    return {
+      code: "ACCOUNT_DISCONNECTED",
+      message: "Device sync account must reconnect before retained calendar work can run.",
+    };
+  }
+
+  if (input.account.status === "reauthorization_required") {
+    return {
+      code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
+      message: input.retainsAcceptedCalendarRefresh
+        ? "Device sync account must reauthorize before retained calendar work can run."
+        : "Device sync account requires reconnection before queued jobs can run.",
+    };
+  }
+
+  return null;
 }
 
 function resolveProviderJobExecutor(

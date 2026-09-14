@@ -1,6 +1,7 @@
 import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts/browser-vault";
 import { BROWSER_VAULT_REPLICA_DEFAULT_MAX_AGE_MS } from "@murphai/hosted-execution/browser-vault";
 import type { BrowserVaultEntity } from "@murphai/query/browser-replica-client";
+import * as runtimeState from "@murphai/runtime-state";
 import {
   buildHostedStorageAad,
   encryptHostedStoragePayload,
@@ -21,6 +22,9 @@ vi.mock("@/src/lib/hosted-workspace/store", async (importOriginal) => ({
   readHostedWorkspace: mocks.workspace,
 }));
 
+import * as browserVaultLoader from "@/src/lib/browser-vault/loader";
+import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { jsonError } from "@/src/lib/hosted-onboarding/http";
 import { LINQ_PRODUCTION_CANARY_GOAL_TITLE } from "@/src/lib/hosted-onboarding/linq-production-canary-contract";
 import { readHostedLinqProductionCanaryOutcome } from "@/src/lib/hosted-onboarding/linq-production-canary-outcome";
 import type { HostedWorkspaceRecord } from "@/src/lib/hosted-workspace/store";
@@ -31,10 +35,16 @@ const goalId = "goal_01K4A000000000000000000001";
 const otherGoalId = "goal_01K4A000000000000000000002";
 const generatedAt = "2026-09-10T12:00:00.000Z";
 const notReady = { ready: false, totalGoalCount: 0, matchingGoalCount: 0, matchingGoalIdCount: 0 };
+const diagnosticMessage = "Hosted Linq production canary outcome read failed.";
+const readOrder = ["memberId", "authority", "pending", "workspace", "control", "keys", "session",
+  "pending", "workspace", "memberId", "authority"];
 
 describe("production canary canonical outcome observer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(runtimeState, "generateHostedUserRecipientKeyPair");
     vi.spyOn(Date, "now").mockReturnValue(Date.parse(generatedAt) + 60_000);
     mocks.memberId.mockResolvedValue(memberId);
     mocks.authority.mockResolvedValue(undefined);
@@ -60,20 +70,17 @@ describe("production canary canonical outcome observer", () => {
     expect(mocks.session).toHaveBeenCalledWith(expect.objectContaining({ userId: memberId, requestedShards: ["core"] }));
     expect(mocks.authority).toHaveBeenCalledTimes(2);
     expect(mocks.memberId).toHaveBeenCalledWith({ prisma });
+    expectReadOrder(readOrder);
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it("does not read any other identity when the fixed canary is absent", async () => {
     mocks.memberId.mockResolvedValue(null);
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
-    expect(mocks.workspace).not.toHaveBeenCalled();
-    expect(mocks.session).not.toHaveBeenCalled();
-  });
-
-  it("requires active access and health-data consent before reading a replica", async () => {
-    mocks.authority.mockRejectedValue(new Error("synthetic access denial"));
-    await expect(readHostedLinqProductionCanaryOutcome({ prisma })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_PRODUCTION_CANARY_OUTCOME_UNAVAILABLE", httpStatus: 503,
-    });
+    expectReadOrder(readOrder.slice(0, 1));
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
     expect(mocks.workspace).not.toHaveBeenCalled();
     expect(mocks.session).not.toHaveBeenCalled();
   });
@@ -82,6 +89,9 @@ describe("production canary canonical outcome observer", () => {
     const workspace = await installEncryptedReplica([goal()]);
     mocks.workspace.mockResolvedValue({ ...workspace, snapshotRef: snapshotRef("b".repeat(64)) });
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
+    expectReadOrder(readOrder.slice(0, 4));
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
     expect(mocks.session).not.toHaveBeenCalled();
   });
 
@@ -89,6 +99,9 @@ describe("production canary canonical outcome observer", () => {
     await installEncryptedReplica([goal()]);
     vi.mocked(Date.now).mockReturnValue(Date.parse(generatedAt) + BROWSER_VAULT_REPLICA_DEFAULT_MAX_AGE_MS + 1);
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
+    expectReadOrder(readOrder.slice(0, 4));
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
     expect(mocks.session).not.toHaveBeenCalled();
   });
 
@@ -96,6 +109,9 @@ describe("production canary canonical outcome observer", () => {
     await installEncryptedReplica([goal()]);
     mocks.pending.mockResolvedValue({ id: "synthetic-pending-conversation" });
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
+    expectReadOrder(readOrder.slice(0, 3));
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
     expect(mocks.session).not.toHaveBeenCalled();
   });
 
@@ -103,18 +119,27 @@ describe("production canary canonical outcome observer", () => {
     await installEncryptedReplica([goal()]);
     mocks.pending.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "synthetic-pending-conversation" });
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
+    expectReadOrder(readOrder.slice(0, 8));
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it("rejects a checkpoint or replica publication that races decryption", async () => {
     const workspace = await installEncryptedReplica([goal()]);
     mocks.workspace.mockResolvedValueOnce(workspace).mockResolvedValueOnce({ ...workspace, version: "2" });
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
+    expectReadOrder(readOrder.slice(0, 9));
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it("rejects a reset that replaces the canary identity during the read", async () => {
     await installEncryptedReplica([goal()]);
     mocks.memberId.mockResolvedValueOnce(memberId).mockResolvedValueOnce("member_synthetic_replacement");
     expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
+    expectReadOrder(readOrder.slice(0, 10));
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it("rejects encrypted data bound to another member", async () => {
@@ -122,23 +147,217 @@ describe("production canary canonical outcome observer", () => {
     await expect(readHostedLinqProductionCanaryOutcome({ prisma })).rejects.toMatchObject({
       code: "HOSTED_LINQ_PRODUCTION_CANARY_OUTCOME_UNAVAILABLE",
     });
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage: "decryption" });
+    expectReadOrder(readOrder.slice(0, 7));
   });
 
-  it("fails explicitly without the protected control client", async () => {
-    await installEncryptedReplica([goal()]);
-    mocks.control.mockReturnValue(null);
-    await expect(readHostedLinqProductionCanaryOutcome({ prisma })).rejects.toMatchObject({ httpStatus: 503 });
-    expect(mocks.session).not.toHaveBeenCalled();
-  });
-
-  it("scrubs provider errors instead of returning private source pointers", async () => {
-    await installEncryptedReplica([goal()]);
-    mocks.session.mockRejectedValue(new Error("synthetic-private-ref"));
+  it.each([
+    { stage: "member_lookup", reads: 1, fail: (error: Error) => mocks.memberId.mockRejectedValueOnce(error) },
+    { stage: "initial_readiness", reads: 3, fail: (error: Error) => mocks.pending.mockRejectedValueOnce(error) },
+    { stage: "initial_readiness", reads: 4, fail: (error: Error) => mocks.workspace.mockRejectedValueOnce(error) },
+    { stage: "control_configuration", reads: 5, fail: () => mocks.control.mockReturnValueOnce(null) },
+    { stage: "control_configuration", reads: 5, fail: (error: Error) => mocks.control.mockImplementationOnce(() => { throw error; }) },
+    { stage: "key_generation", reads: 6, fail: (error: Error) => vi.mocked(runtimeState.generateHostedUserRecipientKeyPair).mockRejectedValueOnce(error) },
+    { stage: "session_request", reads: 7, fail: (error: Error) => mocks.session.mockRejectedValueOnce(error) },
+    { stage: "session_parsing", reads: 7, fail: () => mocks.session.mockResolvedValueOnce(null) },
+    { stage: "session_parsing", reads: 7, fail: () => mocks.session.mockResolvedValueOnce({ state: "ready", privatePayload: "synthetic-private-response" }) },
+    { stage: "decryption", reads: 7, fail: () => installEncryptedReplica([goal()], { corruptCiphertext: true }) },
+    { stage: "final_readiness", reads: 8, fail: (error: Error) => mocks.pending.mockResolvedValueOnce(null).mockRejectedValueOnce(error) },
+    { stage: "final_readiness", reads: 9, fail: (error: Error, workspace: HostedWorkspaceRecord) =>
+      mocks.workspace.mockResolvedValueOnce(workspace).mockRejectedValueOnce(error) },
+    { stage: "final_readiness", reads: 10, fail: (error: Error) => mocks.memberId.mockResolvedValueOnce(memberId).mockRejectedValueOnce(error) },
+  ])("logs only $stage on failure after $reads operations, without retrying", async ({ stage, reads, fail }) => {
+    const workspace = await installEncryptedReplica([goal()]);
+    const privateError = new Error("synthetic-private-message", { cause: new Error("synthetic-private-cause") });
+    privateError.stack = "synthetic-private-stack";
+    await fail(privateError, workspace);
     const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
-    expect(error).toMatchObject({ message: "The production canary outcome is unavailable.", cause: undefined });
-    expect(JSON.stringify(error)).not.toContain("synthetic-private-ref");
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage });
+    expect(console.error).not.toHaveBeenCalled();
+    expectReadOrder(readOrder.slice(0, reads));
+    await expectUnavailable(error);
+    expect(JSON.stringify([vi.mocked(console.warn).mock.calls, vi.mocked(console.error).mock.calls]))
+      .not.toContain("synthetic-private");
+  });
+
+  describe.each([
+    { stage: "initial_authority", reads: 2 },
+    { stage: "final_authority", reads: 11 },
+  ])("$stage diagnostics", ({ stage, reads }) => {
+    beforeEach(async () => {
+      await installEncryptedReplica([goal()]);
+      if (stage === "final_authority") mocks.authority.mockResolvedValueOnce(undefined);
+    });
+
+    it.each([
+      { code: "HOSTED_ACCESS_REQUIRED", reason: "access_required" },
+      { code: "HOSTED_MEMBER_SUSPENDED", reason: "member_suspended" },
+      { code: "HOSTED_CONSENT_REQUIRED", reason: "consent_required" },
+      { code: "synthetic-private-code", reason: "other" },
+    ])("classifies local $code as $reason without reading private fields", async ({ code, reason }) => {
+      const rejection = new HostedOnboardingError({
+        code, httpStatus: 403, message: "synthetic-private-message",
+        cause: new Error("synthetic-private-cause"), details: { payload: "synthetic-private-details" },
+      });
+      const inspect = vi.fn(() => { throw new Error("synthetic-private-inspection"); });
+      for (const key of ["name", "message", "stack", "cause", "details"]) {
+        Object.defineProperty(rejection, key, { get: inspect });
+      }
+      mocks.authority.mockRejectedValueOnce(rejection);
+      const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+      expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage, authorityFailureReason: reason });
+      expect(console.error).not.toHaveBeenCalled();
+      expectReadOrder(readOrder.slice(0, reads));
+      await expectUnavailable(error);
+      expect(inspect).not.toHaveBeenCalled();
+      expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+    });
+
+    it.each([
+      { failure: "database error", create: () => new Error("synthetic-private-database", { cause: "synthetic-private-cause" }) },
+      { failure: "lookalike object", create: () => ({ code: "HOSTED_ACCESS_REQUIRED", message: "synthetic-private-message" }) },
+      { failure: "foreign error class", create: () => new (class HostedOnboardingError extends Error {
+        readonly code = "HOSTED_MEMBER_SUSPENDED";
+      })("synthetic-private-message") },
+      { failure: "lookalike code getter", create: (inspect: () => never) =>
+        Object.defineProperty({}, "code", { get: inspect }) },
+      { failure: "non-string local code", create: (inspect: () => never) =>
+        Object.defineProperty(new HostedOnboardingError({
+          code: "HOSTED_CONSENT_REQUIRED", httpStatus: 403, message: "synthetic-private-message",
+        }), "code", { value: { [Symbol.toPrimitive]: inspect } }) },
+    ])("reports other for a $failure", async ({ create }) => {
+      const inspect = vi.fn(() => { throw new Error("synthetic-private-inspection"); });
+      mocks.authority.mockRejectedValueOnce(create(inspect));
+      const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+      expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage, authorityFailureReason: "other" });
+      expect(console.error).not.toHaveBeenCalled();
+      expectReadOrder(readOrder.slice(0, reads));
+      await expectUnavailable(error);
+      expect(inspect).not.toHaveBeenCalled();
+      expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+    });
+
+    it.each(["prototype", "code"] as const)("falls back to other when %s inspection throws", async (boundary) => {
+      const rejection = new HostedOnboardingError({
+        code: "HOSTED_CONSENT_REQUIRED", httpStatus: 403, message: "synthetic-private-message",
+      });
+      const inspect = vi.fn(() => { throw new Error("synthetic-private-inspection"); });
+      mocks.authority.mockRejectedValueOnce(boundary === "prototype"
+        ? new Proxy(rejection, { getPrototypeOf: inspect })
+        : Object.defineProperty(rejection, "code", { get: inspect }));
+      const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+      expect(inspect).toHaveBeenCalledTimes(1);
+      expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage, authorityFailureReason: "other" });
+      expect(console.error).not.toHaveBeenCalled();
+      expectReadOrder(readOrder.slice(0, reads));
+      await expectUnavailable(error);
+      expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+    });
+
+    it("preserves the generic 503 when logging a policy outcome throws", async () => {
+      mocks.authority.mockRejectedValueOnce(new HostedOnboardingError({
+        code: "HOSTED_ACCESS_REQUIRED", httpStatus: 403, message: "synthetic-private-message",
+      }));
+      vi.mocked(console.warn).mockImplementation(() => { throw new Error("synthetic-private-logger"); });
+      const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+      expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage, authorityFailureReason: "access_required" });
+      expect(console.error).not.toHaveBeenCalled();
+      expectReadOrder(readOrder.slice(0, reads));
+      await expectUnavailable(error);
+      expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+    });
+  });
+
+  it.each([
+    { gate: "missing workspace", reads: 4, arrange: () => mocks.workspace.mockResolvedValueOnce(null) },
+    { gate: "missing replica ref", reads: 4, arrange: (workspace: HostedWorkspaceRecord) =>
+      mocks.workspace.mockResolvedValueOnce({ ...workspace, browserVaultReplicaRef: null }) },
+    { gate: "missing source hash", reads: 4, arrange: (workspace: HostedWorkspaceRecord) =>
+      mocks.workspace.mockResolvedValueOnce({ ...workspace, snapshotRef: null }) },
+    { gate: "empty session", reads: 7, arrange: () => mocks.session.mockResolvedValueOnce({
+      state: "empty", memberId, encryptedReplica: null, replicaAad: null, replicaKeyEnvelope: null, replicaRef: null,
+    }) },
+  ])("keeps the ordinary $gate gate silent", async ({ arrange, reads }) => {
+    const workspace = await installEncryptedReplica([goal()]);
+    arrange(workspace);
+    expect(await readHostedLinqProductionCanaryOutcome({ prisma })).toEqual(notReady);
+    expectReadOrder(readOrder.slice(0, reads));
+    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it.each(["session_request", "decryption"] as const)("never inspects a caught %s exception", async (stage) => {
+    await installEncryptedReplica([goal()]);
+    const inspect = vi.fn(() => { throw new Error("synthetic-private-inspection"); });
+    const rejection = new Proxy(new Error("synthetic-private-message"), {
+      get: inspect, ownKeys: inspect, getOwnPropertyDescriptor: inspect, getPrototypeOf: inspect,
+    });
+    if (stage === "session_request") mocks.session.mockRejectedValueOnce(rejection);
+    else vi.spyOn(browserVaultLoader, "decodeReadyBrowserVaultSession").mockRejectedValueOnce(rejection);
+    const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+    expect(inspect).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage });
+    expectReadOrder(readOrder.slice(0, 7));
+    await expectUnavailable(error);
+    expect(inspect).not.toHaveBeenCalled();
+  });
+
+  it("preserves the generic error and HTTP 503 when the diagnostic itself throws", async () => {
+    await installEncryptedReplica([goal()]);
+    mocks.session.mockRejectedValueOnce(new Error("synthetic-private-transport"));
+    vi.mocked(console.warn).mockImplementation(() => { throw new Error("synthetic-private-logger"); });
+    const error: unknown = await readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(diagnosticMessage, { stage: "session_request" });
+    expectReadOrder(readOrder.slice(0, 7));
+    await expectUnavailable(error);
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("synthetic-private");
+  });
+
+  it("keeps stages local when an earlier authority check fails after another read reaches control", async () => {
+    await installEncryptedReplica([goal()]);
+    let rejectAuthority!: (reason: Error) => void;
+    mocks.authority.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectAuthority = reject; }));
+    mocks.session.mockRejectedValueOnce(new Error("synthetic-private-transport"));
+    const first = readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+    const second = readHostedLinqProductionCanaryOutcome({ prisma }).catch((caught: unknown) => caught);
+    const secondError = await second;
+    rejectAuthority(new Error("synthetic-private-authority"));
+    const firstError = await first;
+    expect(vi.mocked(console.warn).mock.calls).toEqual([
+      [diagnosticMessage, { stage: "session_request" }],
+      [diagnosticMessage, { stage: "initial_authority", authorityFailureReason: "other" }],
+    ]);
+    expectReadOrder(["memberId", "memberId", "authority", "authority", "pending", "workspace", "control", "keys", "session"]);
+    await expectUnavailable(firstError);
+    await expectUnavailable(secondError);
   });
 });
+
+function expectReadOrder(expected: readonly string[]): void {
+  const operations = { ...mocks, keys: vi.mocked(runtimeState.generateHostedUserRecipientKeyPair) };
+  const actual = Object.entries(operations).flatMap(([operation, mock]) =>
+    mock.mock.invocationCallOrder.map((order) => ({ operation, order })));
+  expect(actual.sort((a, b) => a.order - b.order).map(({ operation }) => operation)).toEqual(expected);
+  if (expected.includes("control")) expect(mocks.control).toHaveBeenCalledWith(10_000);
+}
+
+async function expectUnavailable(error: unknown): Promise<void> {
+  expect(error).toBeInstanceOf(HostedOnboardingError);
+  expect(error).toMatchObject({
+    name: "HostedOnboardingError", code: "HOSTED_LINQ_PRODUCTION_CANARY_OUTCOME_UNAVAILABLE",
+    httpStatus: 503, message: "The production canary outcome is unavailable.",
+    cause: undefined, details: undefined, retryable: false,
+  });
+  expect(error).not.toHaveProperty("stage");
+  expect(error).not.toHaveProperty("authorityFailureReason");
+  const response = jsonError(error);
+  expect(response.status).toBe(503);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.text()).toBe(JSON.stringify({ error: {
+    code: "HOSTED_LINQ_PRODUCTION_CANARY_OUTCOME_UNAVAILABLE",
+    message: "The production canary outcome is unavailable.", retryable: false,
+  } }));
+}
 
 function goal(overrides: Partial<BrowserVaultEntity> = {}): BrowserVaultEntity {
   return {
@@ -155,7 +374,7 @@ function snapshotRef(hash = "a".repeat(64)) {
 
 async function installEncryptedReplica(
   entities: BrowserVaultEntity[],
-  options: { sessionMemberId?: string } = {},
+  options: { sessionMemberId?: string; corruptCiphertext?: boolean } = {},
 ): Promise<HostedWorkspaceRecord> {
   const source = { dataVersion: "d".repeat(64), sourceBundleHash: "a".repeat(64) };
   const plaintext = new TextEncoder().encode(JSON.stringify({
@@ -183,6 +402,11 @@ async function installEncryptedReplica(
   const encryptedReplica = await encryptHostedStoragePayload({
     aad: buildHostedStorageAad(replicaAad), key, keyId: replicaRef.keyId, plaintext, scope: "browser-vault-replica",
   });
+  if (options.corruptCiphertext) {
+    const ciphertext = Buffer.from(encryptedReplica.ciphertext, "base64");
+    ciphertext[0] = ciphertext[0]! ^ 1;
+    encryptedReplica.ciphertext = ciphertext.toString("base64");
+  }
   mocks.session.mockImplementation(async ({ browserPublicKeyJwk }: { browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk }) => ({
     encryptedReplica, replicaAad, replicaRef, state: "ready",
     replicaKeyEnvelope: await wrapHostedBrowserSessionKey({

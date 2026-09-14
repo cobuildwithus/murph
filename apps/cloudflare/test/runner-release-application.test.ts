@@ -8,11 +8,11 @@ const container = {
 };
 
 describe("rendered runner to native application contract", () => {
-  it("preserves custom CPU, memory, decimal disk sizing, placement and capacity", () => {
-    expect(runnerApplicationSpecification(container, true)).toEqual({
+  it.each([0, 300])("preserves native resources and numeric grace %s", (grace) => {
+    expect(runnerApplicationSpecification({ ...container, rollout_active_grace_period: grace }, true)).toEqual({
       configuration: { image: container.image, vcpu: 2, memory_mib: 4096, disk: { size_mb: 6000 }, observability: { logs: { enabled: true } }, wrangler_ssh: { enabled: false } },
       constraints: { tiers: [1, 2] }, scheduling_policy: "default",
-      max_instances: 12, rollout_active_grace_period: 300,
+      max_instances: 12, rollout_active_grace_period: grace,
     });
     expect(runnerApplicationSpecification({ ...container, constraints: { regions: ["ENAM"] } }, true).constraints).toEqual({ tiers: [1, 2], regions: ["ENAM"] });
   });
@@ -44,6 +44,7 @@ describe("rendered runner to native application contract", () => {
       { image: `registry.example.test/runner@sha256:${"b".repeat(64)}` },
 
       { instance_type: { ...container.instance_type, vcpu: 4 } },
+      { rollout_active_grace_period: 0 },
     ]) expect(runnerApplicationExecutionIdentity(runnerApplicationSpecification({ ...container, ...override }, true))).not.toBe(identity);
   });
 });

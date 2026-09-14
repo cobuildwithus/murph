@@ -934,13 +934,14 @@ export function resolveMurphManagedAutomationOwnerScope(
 export async function applyMurphManagedAutomations(
   input: ApplyMurphManagedAutomationsInput,
 ): Promise<ApplyMurphManagedAutomationsResult> {
+  const shouldYield = input.shouldYield ?? (() => false)
   const now = input.now ?? new Date()
   const result: ApplyMurphManagedAutomationsResult = {
     created: 0,
     skipped: 0,
     updated: 0,
   }
-  if (input.shouldYield?.() === true) {
+  if (shouldYield()) {
     return { ...result, yielded: true }
   }
   if (input.seeds === undefined) {
@@ -949,7 +950,7 @@ export async function applyMurphManagedAutomations(
       shouldYield: input.shouldYield ?? null,
       vaultRoot: input.vaultRoot,
     })
-    if (input.shouldYield?.() === true) {
+    if (shouldYield()) {
       return { ...result, yielded: true }
     }
   }
@@ -980,7 +981,7 @@ export async function applyMurphManagedAutomations(
   if (experimentLifecycleFailure !== null) {
     result.experimentLifecycleFailure = experimentLifecycleFailure
   }
-  if (experimentLifecycle?.yielded === true || input.shouldYield?.() === true) {
+  if (experimentLifecycle?.yielded === true || shouldYield()) {
     return { ...result, yielded: true }
   }
   let onboardingGoalCheckin: Awaited<ReturnType<
@@ -1007,7 +1008,7 @@ export async function applyMurphManagedAutomations(
   if (onboardingGoalCheckinFailure !== null) {
     result.onboardingGoalCheckinFailure = onboardingGoalCheckinFailure
   }
-  if (onboardingGoalCheckin?.yielded === true || input.shouldYield?.() === true) {
+  if (onboardingGoalCheckin?.yielded === true || shouldYield()) {
     return { ...result, yielded: true }
   }
   reportMurphManagedAutomationDiagnosticStage(input, {
@@ -1057,14 +1058,14 @@ export async function applyMurphManagedAutomations(
       seedPosition: seedIndex + 1,
       stage: 'managed_seed',
     })
-    if (input.shouldYield?.() === true) {
+    if (shouldYield()) {
       return { ...result, yielded: true }
     }
     const existing = await showAutomation({
       automationId: rawSeed.automationId,
       vaultRoot: input.vaultRoot,
     })
-    if (input.shouldYield?.() === true) {
+    if (shouldYield()) {
       return { ...result, yielded: true }
     }
 
@@ -1077,7 +1078,7 @@ export async function applyMurphManagedAutomations(
         continue
       }
 
-      if (input.shouldYield?.() === true) {
+      if (shouldYield()) {
         return { ...result, yielded: true }
       }
       await patchAutomation({
@@ -1107,7 +1108,7 @@ export async function applyMurphManagedAutomations(
           result.stableKeyRetryNeeded = true
           continue
         }
-        if (input.shouldYield?.() === true) {
+        if (shouldYield()) {
           return { ...result, yielded: true }
         }
       }
@@ -1140,19 +1141,25 @@ export async function applyMurphManagedAutomations(
     result[outcome] += 1
   }
 
-  if (input.seeds === undefined && await reconcileMurphManagedOnboardingFollowup({
-    input,
-    now,
-    resolveCreateRoute,
-    resolveScheduleStableKey,
-    result,
-    scheduleStableKeyUnavailable,
-  })) {
-    return { ...result, yielded: true }
+  if (input.seeds === undefined) {
+    reportMurphManagedAutomationDiagnosticStage(input, { stage: 'onboarding_followup' })
+    const followup = await reconcileMurphManagedOnboardingFollowup({
+      ...input,
+      defaultRoute: createRoute === undefined ? input.defaultRoute : createRoute,
+      now,
+      stableKey: scheduleStableKeyUnavailable ? null : scheduleStableKey,
+    })
+    result.created += followup.created
+    result.updated += followup.updated
+    if (followup.stableKeyFailure !== undefined) {
+      result.stableKeyFailure = followup.stableKeyFailure
+      result.stableKeyRetryNeeded = true
+    }
+    if (followup.yielded === true) return { ...result, yielded: true }
   }
 
   if (desiredExperimentSupportSeries !== null) {
-    if (input.shouldYield?.() === true) {
+    if (shouldYield()) {
       return { ...result, yielded: true }
     }
     reportMurphManagedAutomationDiagnosticStage(input, {
@@ -1174,84 +1181,66 @@ export async function applyMurphManagedAutomations(
   return result
 }
 
-async function reconcileMurphManagedOnboardingFollowup({
-  input,
-  now,
-  resolveCreateRoute,
-  resolveScheduleStableKey,
-  result,
-  scheduleStableKeyUnavailable,
-}: {
-  input: ApplyMurphManagedAutomationsInput
-  now: Date
-  resolveCreateRoute: () => Promise<AutomationRoute | null>
-  resolveScheduleStableKey: () => Promise<string | null>
-  result: ApplyMurphManagedAutomationsResult
-  scheduleStableKeyUnavailable: boolean
-}): Promise<boolean> {
-  if (input.shouldYield?.() === true) {
-    return true
+export async function reconcileMurphManagedOnboardingFollowup(
+  input: Pick<ApplyMurphManagedAutomationsInput,
+    | 'defaultRoute' | 'now' | 'operatorHomeRoot' | 'routeValidationProfile'
+    | 'shouldYield' | 'vaultRoot' | 'onOnboardingFollowupDiagnostic'
+  > & { stableKey?: string | null },
+): Promise<ApplyMurphManagedAutomationsResult & { nextWakeAt: string | null }> {
+  const shouldYield = input.shouldYield ?? (() => false)
+  const now = input.now ?? new Date()
+  const result: ApplyMurphManagedAutomationsResult & { nextWakeAt: string | null } = {
+    created: 0, skipped: 0, updated: 0, nextWakeAt: null,
   }
-  reportMurphManagedAutomationDiagnosticStage(input, {
-    stage: 'onboarding_followup',
-  })
-  const existingOnboardingFollowup = await showAutomation({
+  if (shouldYield()) return { ...result, yielded: true }
+  const existing = await showAutomation({
     slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
     vaultRoot: input.vaultRoot,
   })
-  if (input.shouldYield?.() === true) {
-    return true
-  }
-  let onboardingFollowupCreated = false
-  if (!existingOnboardingFollowup && !scheduleStableKeyUnavailable) {
-    let stableKey: string | null = null
-    try {
-      stableKey = await resolveScheduleStableKey()
-    } catch (error) {
-      result.stableKeyFailure = error
-      result.stableKeyRetryNeeded = true
-    }
-    if (input.shouldYield?.() === true) {
-      return true
-    }
-    if (stableKey !== null) {
-      const route = await resolveCreateRoute()
-      if (route !== null) {
-        const seedResult =
-          await seedMurphOnboardingFollowupFromStartedOnboarding({
-            now,
-            route,
-            stableKey,
-            vault: input.vaultRoot,
-          })
-        if (seedResult.kind === 'ready') {
-          result.created += 1
-          onboardingFollowupCreated = true
-        }
+  if (shouldYield()) return { ...result, yielded: true }
+  if (!existing) {
+    let stableKey = input.stableKey ?? null
+    if (input.stableKey === undefined) {
+      try {
+        stableKey = await resolveMurphManagedScheduleStableKey(input)
+      } catch (error) {
+        return { ...result, stableKeyFailure: error, stableKeyRetryNeeded: true }
       }
     }
+    if (shouldYield()) return { ...result, yielded: true }
+    if (stableKey === null) return result
+    const route = await resolveMurphManagedAutomationCreateRoute(input)
+    if (shouldYield()) return { ...result, yielded: true }
+    if (!route) return result
+    const seeded = await seedMurphOnboardingFollowupFromStartedOnboarding({
+      now,
+      route,
+      routeValidationProfile: input.routeValidationProfile,
+      shouldYield: input.shouldYield,
+      stableKey,
+      vault: input.vaultRoot,
+    })
+    if (seeded.kind === 'yielded') return { ...result, yielded: true }
+    return seeded.kind === 'ready'
+      ? { ...result, created: 1, nextWakeAt: seeded.job.enabled ? seeded.job.state.nextRunAt : null }
+      : result
   }
-  const onboardingReconciliation = onboardingFollowupCreated
-    ? { diagnostic: null, updated: false, yielded: false }
-    : await reconcileExistingOnboardingFollowupAutomation({
-        existing: existingOnboardingFollowup,
-        now,
-        shouldYield: input.shouldYield ?? null,
-        vaultRoot: input.vaultRoot,
-      })
-  if (onboardingReconciliation.yielded) {
-    return true
+  const reconciled = await reconcileExistingOnboardingFollowupAutomation({
+    existing,
+    now,
+    routeValidationProfile: input.routeValidationProfile,
+    shouldYield: input.shouldYield ?? null,
+    vaultRoot: input.vaultRoot,
+  })
+  if (reconciled.diagnostic) {
+    reportMurphOnboardingFollowupDiagnostic(input, reconciled.diagnostic)
   }
-  if (onboardingReconciliation.diagnostic) {
-    reportMurphOnboardingFollowupDiagnostic(
-      input,
-      onboardingReconciliation.diagnostic,
-    )
+  return {
+    ...result,
+    nextWakeAt: reconciled.nextWakeAt ?? null,
+    updated: reconciled.updated ? 1 : 0,
+    ...(reconciled.yielded ? { yielded: true } : {}),
   }
-  if (onboardingReconciliation.updated) {
-    result.updated += 1
-  }
-  return false
 }
 
 async function createMurphManagedAutomation({
@@ -1641,14 +1630,17 @@ function stableHashToIndex(material: string, length: number): number {
 async function reconcileExistingOnboardingFollowupAutomation(input: {
   existing: AutomationRecord | null
   now: Date
+  routeValidationProfile?: AssistantCronDeliveryRouteValidationProfile
   shouldYield: (() => boolean) | null
   vaultRoot: string
 }): Promise<{
   diagnostic: MurphOnboardingFollowupDiagnostic | null
+  nextWakeAt?: string | null
   updated: boolean
   yielded: boolean
 }> {
-  if (input.shouldYield?.() === true) {
+  const shouldYield = input.shouldYield ?? (() => false)
+  if (shouldYield()) {
     return { diagnostic: null, updated: false, yielded: true }
   }
   const existing = input.existing
@@ -1670,7 +1662,7 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
     onboardingStateStatus: onboardingState.status,
     onboardingStateUpdatedAt: onboardingState.updatedAt,
   }
-  if (input.shouldYield?.() === true) {
+  if (shouldYield()) {
     return { diagnostic: null, updated: false, yielded: true }
   }
   if (onboardingState.status === 'completed') {
@@ -1697,7 +1689,7 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
   }
 
   const vault = await loadVault({ vaultRoot: input.vaultRoot })
-  if (input.shouldYield?.() === true) {
+  if (shouldYield()) {
     return { diagnostic: null, updated: false, yielded: true }
   }
   const vaultId = typeof vault.metadata.vaultId === 'string'
@@ -1776,7 +1768,7 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
     }
   }
 
-  if (input.shouldYield?.() === true) {
+  if (shouldYield()) {
     return { diagnostic: null, updated: false, yielded: true }
   }
   const reconciled = await upsertAssistantCronAutomation({
@@ -1788,18 +1780,24 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
     instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
     now: input.now,
     route: existing.route,
+    routeValidationProfile: input.routeValidationProfile,
     schedule,
+    shouldYield: input.shouldYield,
     slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
     summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
     tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
     title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
     vault: input.vaultRoot,
   })
+  if (shouldYield()) {
+    return { diagnostic: null, updated: false, yielded: true }
+  }
   if (!reconciled) {
     return { diagnostic: null, updated: false, yielded: false }
   }
 
   return {
+    nextWakeAt: reconciled.enabled ? reconciled.state.nextRunAt : null,
     diagnostic: {
       action:
         previousScheduleKind === schedule.kind

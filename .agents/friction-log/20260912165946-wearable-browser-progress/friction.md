@@ -18,3 +18,7 @@ Run the browser with a synthetic authorization failure and a cleanup promise tha
 ## Context
 
 This prevents distinguishing browser work from cleanup and host resource pressure in bounded canary runs. Forward only an exact closed stage vocabulary and numeric machine resource measurements.
+
+## Retention follow-up
+
+Incremental stdout alone is insufficient when a runner terminates without publishing its job log archive. Keep a capped set of fixed-stage and numeric resource samples in Actions notice annotations, which are queued as timeline updates during the step. Never forward raw child text into annotations.

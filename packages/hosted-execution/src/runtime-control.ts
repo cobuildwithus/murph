@@ -1408,8 +1408,21 @@ export interface HostedRuntimeGroupChatParticipant {
   ownerAdvisoryName?: string;
 }
 
+export interface HostedRuntimeGroupSharedFreshnessRequirement {
+  projectionScopeKey: string;
+  date: string;
+}
+
+export interface HostedRuntimeGroupSharedFreshness {
+  /** Time of the successful shared-snapshot read, not a provider upload time. */
+  checkedAt: string;
+  refreshStatus: "requested" | "unavailable" | "not_needed";
+}
+
 export interface HostedRuntimeGroupSharedReadRequest {
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
+  /** Only missing, currently consented wearable dates can request existing sync work. */
+  freshness?: readonly HostedRuntimeGroupSharedFreshnessRequirement[];
 }
 
 export type HostedRuntimeGroupSharedRecord = Pick<
@@ -1446,6 +1459,7 @@ export interface HostedRuntimeGroupSharedMember {
 
 export type HostedRuntimeGroupSharedReadResult =
   | {
+      freshness?: HostedRuntimeGroupSharedFreshness;
       members: readonly HostedRuntimeGroupSharedMember[];
       requestedProjectionScopeKeys: readonly string[];
       status: "ok";
@@ -3989,3 +4003,10 @@ export function isHostedRetiredMailboxKind(
 ): value is HostedRetiredMailboxKind {
   return HOSTED_RETIRED_MAILBOX_KINDS.some((kind) => kind === value);
 }
+
+export {
+  parseHostedGroupSharedFreshnessRequirements,
+  hostedGroupMemberHasMissingWearableDates,
+  hostedGroupSharedNeedsWearableRecovery,
+  getHostedGroupWearableReportingGaps,
+} from "./group-shared-freshness.ts";

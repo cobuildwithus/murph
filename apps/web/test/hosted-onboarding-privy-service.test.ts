@@ -28,6 +28,11 @@ const privyManagementMocks = vi.hoisted(() => ({
   setCustomMetadata: vi.fn(),
 }));
 
+const phoneWelcomeMocks = vi.hoisted(() => ({ ensure: vi.fn() }));
+vi.mock("@/src/lib/hosted-onboarding/phone-welcome", () => ({
+  ensureHostedMemberPhoneWelcome: phoneWelcomeMocks.ensure,
+}));
+
 const phoneCallResultRecoveryMocks = vi.hoisted(() => ({
   rearmRequired: vi.fn(),
 }));
@@ -1669,6 +1674,7 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(phoneWelcomeMocks.ensure).toHaveBeenCalledWith({ memberId: existingMember.id, prisma });
   });
 
   it("resolves a texted-first member by phone on first web auth without creating a duplicate", async () => {

@@ -314,6 +314,7 @@ function buildDeviceSyncWake(input: {
   expectedConnectedAt?: string | null;
   hint?: {
     junctionTemporalSweepKey?: string;
+    junctionReconcileProof?: string;
     jobs?: Array<{
       availableAt?: string;
       dedupeKey?: string;
@@ -9795,12 +9796,14 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("manual reconcile wakes delegate job creation to the device-sync service", async () => {
+  test.each(["standalone", "retained", "retry"])("manual reconcile wakes delegate job creation to the device-sync service (%s)", async (scenario) => {
+    const retained = scenario !== "standalone";
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
     await mkdir(vaultRoot, { recursive: true });
     const demoProvider = createFakeProvider();
+    const createScheduledJobs = vi.fn(() => ({ jobs: [], nextReconcileAt: null }));
     const junctionProvider: DeviceSyncProvider = {
       ...demoProvider,
       provider: "junction",
@@ -9809,6 +9812,7 @@ describe("hosted device-sync runtime", () => {
         provider: "junction",
         displayName: "Junction",
       },
+      jobExecutor: { async executeJob() { return {}; }, createScheduledJobs },
     };
     const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
 
@@ -9841,26 +9845,52 @@ describe("hosted device-sync runtime", () => {
         tokenBundle: null,
       });
 
-      await syncHostedDeviceSyncControlPlaneState({
+      const retainedJob = { kind: "resource" as const, dedupeKey: "synthetic-preserved-history",
+        availableAt: "2026-04-05T10:00:00.000Z", maxAttempts: 2, priority: 20 };
+      const wake = buildDeviceSyncWake({
+        connectionId: "hosted_conn_manual_reconcile",
+        hint: retained ? { reason: "manual_reconcile_pending", jobs: [retainedJob] }
+          : { reason: "manual_reconcile" },
+        occurredAt: "2026-04-04T10:00:00.000Z", reason: "reconcile_due",
+      });
+      if (scenario === "retry") {
+        const before = structuredClone(wake);
+        createScheduledJobs.mockImplementationOnce(() => { throw new Error("Synthetic manual creation failure"); });
+        await assert.rejects(syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+          wake, secret: DEVICE_SYNC_SECRET, service,
+        }), /Synthetic manual creation failure/u);
+        assert.deepEqual(wake, before);
+        assert.equal(readJobsForAccount(service, account.id).length, 1);
+      }
+      const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
-        wake: buildDeviceSyncWake({
-          connectionId: "hosted_conn_manual_reconcile",
-          hint: {
-            reason: "manual_reconcile",
-          },
-          occurredAt: "2026-04-04T10:00:00.000Z",
-          reason: "reconcile_due",
-        }),
+        wake,
         secret: DEVICE_SYNC_SECRET,
         service,
       });
 
       const jobs = readJobsForAccount(service, account.id);
-      assert.equal(jobs.length, 1);
-      assert.equal(jobs[0]?.kind, "reconcile");
-      assert.equal(jobs[0]?.priority, 80);
-      assert.deepEqual(JSON.parse(jobs[0]?.payloadJson ?? "{}"), {});
-      assert.equal(jobs[0]?.status, "queued");
+      assert.equal(jobs.length, retained ? 2 : 1);
+      const manualJob = jobs.find((job) => job.kind === "reconcile");
+      assert.ok(manualJob);
+      assert.equal(manualJob.priority, 80);
+      assert.deepEqual(JSON.parse(manualJob.payloadJson), {});
+      assert.equal(manualJob.status, "queued");
+      if (retained) {
+        const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+        assert.equal(recovery?.wake.hint?.reason, "manual_reconcile");
+        assert.deepEqual(recovery?.wake.hint?.jobs?.find((job) => job.dedupeKey === retainedJob.dedupeKey), retainedJob);
+        assert.equal(recovery?.wake.hint?.jobs?.filter((job) => job.kind === "reconcile").length, 1);
+        assert.ok(recovery);
+        const creationCount = createScheduledJobs.mock.calls.length;
+        await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+          wake: recovery.wake, secret: DEVICE_SYNC_SECRET, service,
+        });
+        assert.equal(createScheduledJobs.mock.calls.length, creationCount);
+        assert.equal(readJobsForAccount(service, account.id).length, 2);
+      }
       assert.equal(
         getStore(service).getAccountById(account.id)?.nextReconcileAt,
         "2026-04-04T12:00:00.000Z",
@@ -14449,7 +14479,19 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("reconciliation sends a disconnected update when the local account disconnects after sync", async () => {
+  test.each([
+    { setupPhase: null, setupExpiresAt: null, expectedSetup: {} },
+    { setupPhase: "pending_link", setupExpiresAt: null, expectedSetup: { setupPhase: null } },
+    {
+      setupPhase: null,
+      setupExpiresAt: "2026-04-07T00:00:00.000Z",
+      expectedSetup: { setupExpiresAt: null },
+    },
+  ] as const)("reconciliation sends a disconnected update when the local account disconnects after sync ($setupPhase, $setupExpiresAt)", async ({
+    expectedSetup,
+    setupExpiresAt,
+    setupPhase,
+  }) => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -14459,14 +14501,17 @@ describe("hosted device-sync runtime", () => {
 
     try {
       const snapshot = buildRuntimeSnapshot({
+        capabilities: { connectionSourceApply: true },
         connectionId: "hosted_conn_disconnect_after_sync",
         externalAccountId: "demo-disconnect-after-sync",
+        setupExpiresAt,
+        setupPhase,
       });
-      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const appliedRequests: ApplyUpdatesRequest[] = [];
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
         ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
-          appliedRequest = input;
+          appliedRequests.push(input);
           return {
             appliedAt: "2026-04-06T10:10:01.000Z",
             updates: [],
@@ -14490,7 +14535,29 @@ describe("hosted device-sync runtime", () => {
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_disconnect_after_sync");
       assert.ok(localAccountId);
 
-      getStore(service).disconnectAccount(localAccountId, "2026-04-06T09:40:00.000Z");
+      const store = getStore(service);
+      store.markWebhookReceived(localAccountId, "2026-04-06T09:36:00.000Z");
+      store.markSyncStarted(localAccountId, "2026-04-06T09:37:00.000Z");
+      assert.equal(store.markSyncSucceeded(localAccountId, "2026-04-06T09:38:00.000Z"), true);
+      store.upsertConnectionSource({
+        connectionId: localAccountId,
+        sourceInstanceKey: "demo-source",
+        sourceProviderSlug: "demo",
+        displayName: "Local Source",
+        status: "connected",
+        resourceAvailabilitySummary: { activity: true },
+        firstSeenAt: "2026-04-06T09:36:00.000Z",
+        lastSeenAt: "2026-04-06T09:39:00.000Z",
+      });
+      store.disconnectAccount(localAccountId, "2026-04-06T09:40:00.000Z");
+      // Retained setup and differing active-only fields must not escape a disconnect.
+      store.patchAccount(localAccountId, {
+        displayName: "Local Disconnected",
+        metadata: { local: "not-published" },
+        scopes: ["read:data", "offline"],
+        setupExpiresAt: "2026-04-08T00:00:00.000Z",
+        setupPhase: "source_confirmed",
+      });
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -14500,19 +14567,23 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates[0], {
-        connection: {
-          status: "disconnected",
-        },
-        connectionId: "hosted_conn_disconnect_after_sync",
-        observedTokenVersion: 4,
-        observedConnectedAt: "2026-04-04T09:00:00.000Z",
-        observedUpdatedAt: "2026-04-04T09:05:00.000Z",
-        credential: {
-          clearTokens: true,
-          kind: "oauth_tokens",
-        },
-      });
+      assert.deepEqual(appliedRequests, [{
+        occurredAt: "2026-04-06T10:10:00.000Z",
+        updates: [{
+          connection: {
+            status: "disconnected",
+            ...expectedSetup,
+          },
+          connectionId: "hosted_conn_disconnect_after_sync",
+          observedTokenVersion: 4,
+          observedConnectedAt: "2026-04-04T09:00:00.000Z",
+          observedUpdatedAt: "2026-04-04T09:05:00.000Z",
+          credential: {
+            clearTokens: true,
+            kind: "oauth_tokens",
+          },
+        }],
+      }]);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -14531,15 +14602,17 @@ describe("hosted device-sync runtime", () => {
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_error_delta",
         externalAccountId: "demo-error-delta",
+        setupExpiresAt: "2026-04-07T00:00:00.000Z",
+        setupPhase: "pending_link",
         localState: {
           nextReconcileAt: "2026-04-06T11:00:00.000Z",
         },
       });
-      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const appliedRequests: ApplyUpdatesRequest[] = [];
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
         ...createNoDirtyStateDeviceSyncPortMethods(),
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
-          appliedRequest = input;
+          appliedRequests.push(input);
           return {
             appliedAt: "2026-04-06T10:10:01.000Z",
             updates: [],
@@ -14563,6 +14636,24 @@ describe("hosted device-sync runtime", () => {
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_error_delta");
       assert.ok(localAccountId);
 
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:36:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+      assert.deepEqual(appliedRequests, [{
+        occurredAt: "2026-04-06T09:36:00.000Z",
+        updates: [],
+      }]);
+
+      getStore(service).patchAccount(localAccountId, {
+        displayName: null,
+        scopes: ["read:data", "offline"],
+        setupExpiresAt: null,
+        setupPhase: "failed",
+      });
       getStore(service).markSyncFailed(
         localAccountId,
         "2026-04-06T09:40:00.000Z",
@@ -14579,20 +14670,30 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates[0], {
-        connection: {
-          status: "reauthorization_required",
+      assert.deepEqual(appliedRequests, [
+        { occurredAt: "2026-04-06T09:36:00.000Z", updates: [] },
+        {
+          occurredAt: "2026-04-06T10:10:00.000Z",
+          updates: [{
+            connection: {
+              displayName: null,
+              scopes: ["read:data", "offline"],
+              setupExpiresAt: null,
+              setupPhase: "failed",
+              status: "reauthorization_required",
+            },
+            connectionId: "hosted_conn_error_delta",
+            localState: {
+              lastErrorCode: "LOCAL_ERR",
+              lastErrorMessage: "local error delta",
+              lastSyncErrorAt: "2026-04-06T09:40:00.000Z",
+              nextReconcileAt: null,
+            },
+            observedConnectedAt: "2026-04-04T09:00:00.000Z",
+            observedUpdatedAt: "2026-04-04T09:05:00.000Z",
+          }],
         },
-        connectionId: "hosted_conn_error_delta",
-        localState: {
-          lastErrorCode: "LOCAL_ERR",
-          lastErrorMessage: "local error delta",
-          lastSyncErrorAt: "2026-04-06T09:40:00.000Z",
-          nextReconcileAt: null,
-        },
-        observedConnectedAt: "2026-04-04T09:00:00.000Z",
-        observedUpdatedAt: "2026-04-04T09:05:00.000Z",
-      });
+      ]);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -15396,6 +15497,125 @@ describe("hosted device-sync runtime", () => {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
+  });
+
+  test("fences Junction reconcile proofs through warm retries and checkpointed cold continuations", async () => {
+    const connectedAt = "2026-04-01T00:00:00.000Z";
+    const now = "2026-04-24T12:00:00.000Z";
+    const nextReconcileAt = "2026-04-24T13:00:00.000Z";
+    const connectionId = "hosted_conn_reconcile_proof";
+    const proof = "v1|2026-04-24T12:00:00.000Z|" + "a".repeat(64);
+    const workspaces = await Promise.all(["warm", "cold"].map(async (slug) => {
+      const workspace = await createHostedRuntimeWorkspace(`hosted-junction-proof-${slug}-`);
+      await mkdir(workspace.vaultRoot, { recursive: true });
+      return workspace;
+    }));
+    const [warm, cold] = workspaces;
+    assert.ok(warm && cold);
+    const services = workspaces.map(({ vaultRoot }) => createDeviceSyncServiceForVault(vaultRoot));
+    const [service, restoredService] = services;
+    assert.ok(service && restoredService);
+    let metadata: Record<string, unknown> = { unrelatedProgress: "preserved" };
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async fetchSnapshot() {
+        return buildRuntimeSnapshot({ connectedAt, connectionId, externalAccountId: "proof-source",
+          provider: "demo", localState: { nextReconcileAt }, metadata });
+      },
+      async applyUpdates(input) {
+        for (const update of input.updates) {
+          if (update.connection?.metadata) metadata = { ...update.connection.metadata };
+        }
+        return { appliedAt: now, userId: "member_123", updates: input.updates.map((update) => ({
+          connection: null, connectionId: update.connectionId, status: "updated" as const,
+          tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
+        })) };
+      },
+      async createConnectLink() { throw new Error("Unexpected connection request"); },
+    };
+    const wake = buildDeviceSyncWake({ connectionId, expectedConnectedAt: connectedAt,
+      occurredAt: now, provider: "demo", reason: "reconcile_due", hint: { jobs: [] } });
+    try {
+      let state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+      });
+      const accountId = state.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(accountId);
+      getStore(service).markSyncSucceeded(accountId, now, null, {
+        metadataPatch: { junctionReconcileProofV1: proof }, nextReconcileAt,
+      });
+      const reconcile = () => reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, state, wake,
+      });
+      await reconcile();
+      assert.equal(metadata.junctionReconcileProofV1, undefined,
+        "An ordinary pre-checkpoint control update cannot publish a local proof");
+      state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+      });
+      assert.equal(getStore(service).getAccountById(accountId)?.metadata.junctionReconcileProofV1, proof);
+      assert.equal(state.snapshot?.connections[0]?.connection.metadata.junctionReconcileProofV1, undefined);
+      await reconcile();
+      assert.equal(metadata.junctionReconcileProofV1, undefined,
+        "A warm retry cannot turn unpublished local progress into a Web baseline");
+
+      const completion = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+      assert.equal(completion?.wake.hint?.reason, "retained_completion_fence");
+      assert.equal(completion?.wake.hint?.junctionReconcileProof, proof,
+        "A proof-only change requires a checkpoint even when cadence is unchanged");
+      getStore(service).enqueueJob({ accountId, availableAt: nextReconcileAt, kind: "resource",
+        provider: "demo", priority: 40, dedupeKey: "proof-child", payload: { resource: "sleep" } });
+      const continuation = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+      assert.equal(continuation?.wake.hint?.junctionReconcileProof, proof);
+      assert.equal(continuation?.wake.hint?.jobs?.length, 1);
+      assert.ok(continuation);
+      const parsedWake = parseHostedExecutionWake(JSON.parse(JSON.stringify(continuation.wake)));
+      assert.ok(parsedWake.kind === "device-sync.wake");
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: restoredService, wake: parsedWake,
+      });
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      assert.equal(getStore(restoredService).getAccountById(restoredAccountId)?.metadata.junctionReconcileProofV1, proof);
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: restoredService,
+        state: restoredState, wake: parsedWake,
+      });
+      assert.equal(metadata.junctionReconcileProofV1, proof);
+    } finally {
+      services.forEach(closeHostedRuntimeDeviceSyncService);
+      await Promise.all(workspaces.map(({ cleanup }) => cleanup()));
+    }
+  });
+
+  test("publishes checkpointed reconcile proofs without cadence changes and fences reconnects", async () => {
+    const connectedAt = "2026-04-01T00:00:00.000Z";
+    const nextReconcileAt = "2026-04-24T13:00:00.000Z";
+    const connectionId = "hosted_conn_completed_proof";
+    const proof = "v1|" + "b".repeat(64);
+    const snapshot = buildRuntimeSnapshot({ connectedAt, connectionId, externalAccountId: "completed-proof",
+      provider: "junction", localState: { nextReconcileAt }, metadata: { unrelatedProgress: "preserved" } });
+    const applied: ApplyUpdatesRequest[] = [];
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createSnapshotOnlyDeviceSyncPort(snapshot),
+      async applyUpdates(input) {
+        applied.push(input);
+        return { appliedAt: nextReconcileAt, userId: "member_123", updates: input.updates.map((update) => ({
+          connection: null, connectionId: update.connectionId, status: "updated" as const,
+          tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
+        })) };
+      },
+    };
+    const wake = buildDeviceSyncWake({ connectionId, expectedConnectedAt: connectedAt,
+      occurredAt: nextReconcileAt, provider: "junction", reason: "reconcile_due",
+      hint: { jobs: [], reason: "retained_completion_fence", nextReconcileAt, junctionReconcileProof: proof } });
+    await publishHostedDeviceSyncCompletionFence({ deviceSyncPort: port, wake });
+    assert.deepEqual(applied[0]?.updates[0]?.connection?.metadata, {
+      unrelatedProgress: "preserved", junctionReconcileProofV1: proof,
+    });
+    await publishHostedDeviceSyncCompletionFence({ deviceSyncPort: port,
+      wake: { ...wake, expectedConnectedAt: "2026-03-01T00:00:00.000Z" } });
+    assert.equal(applied.length, 1);
   });
 
   test("publishes a checkpointed sweep marker even without a cadence change and fences reconnects", async () => {

@@ -2413,12 +2413,28 @@ That command:
 - prepares the stable native runner base image with Docker's local cache; production deploy paths force that build from source, while hosted-local E2E lanes may reuse the GHCR-published runner base image when the source fingerprint matches the current checkout
 - publishes the compatible Worker through Wrangler version commands, proves the isolated artifact behavior, and updates the serving image through native gradual rollout by default; explicit immediate and Worker-only releases use the same guarded owner
 
-The serving application retains a 300-second connection-age grace and native
-10/25/50/100 percentage targets. Pristine standby preparation pauses during the
-mixed-image window. The isolated `DeploySmokeRunnerContainer` uses zero active
-grace and a single 100-percent step. The private workflow's `container_rollout`
-input defaults to gradual; selecting immediate targets 100 percent in one step.
-Both image modes can interrupt a selected process and require checkpoint recovery.
+Fresh deployment configuration uses zero additional connection-age grace for
+runner containers, matching Cloudflare's default. Native 10/25/50/100 percentage
+targets and the separate SIGTERM checkpoint/drain path remain unchanged. A
+recently connected runner may therefore be selected for replacement sooner;
+connection age is not a checkpoint deadline. Pristine standby preparation still
+pauses during the mixed-image window. The isolated `DeploySmokeRunnerContainer`
+uses zero grace and one 100-percent step. The private workflow's
+`container_rollout` input defaults to gradual; immediate targets 100 percent in
+one step. Both image modes can interrupt a selected process and require recovery.
+
+Apply changed grace only from a stable release: grace is part of the admitted
+execution identity, so an existing pending candidate must finish through its
+exact retry path before changing that target. Worker-only releases and retained
+applications preserve their observed native grace, image and resources.
+
+After an authorized full rollout, verify zero native grace on the serving and
+small applications, completed matching rollouts, and post-promotion smoke with
+the promoted Worker context and configured standby target. Measure standby loss
+through restored ready inventory, including refill after promotion; compare like
+rollout modes and observe checkpoint failures, shutdown rejections and recovery.
+Removing this optional wait does not establish a fixed deployment duration or a
+measured fourfold improvement.
 
 Worker replacement is checkpoint-safe at the runtime fence rather than through rollout timing alone. The snapshot-session handshake has one six-second total deadline; the runtime starts its first exact durable upload-session heartbeat immediately after that response, then keeps serialized attempts on a two-second start-to-start cadence throughout publication. `UserRunner` retains the fence and retries after one second only for that exact attempt and lease generation while its heartbeat is less than 10 seconds old and completion is absent. Successful foreground preemption bypasses this preservation and stops heartbeat liveness before detached cleanup. After Web accepts the checkpoint, the runtime stops heartbeating and best-effort marks completion; marker failure falls back to stale-heartbeat expiry. Other starts remain immediate; live snapshots have no artificial publication deadline, while a dead runtime can defer replacement for the 10-second liveness window plus at most one additional retry interval (one second) after its final heartbeat.
 

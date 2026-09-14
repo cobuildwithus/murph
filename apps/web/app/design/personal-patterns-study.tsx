@@ -11,6 +11,8 @@ import { PersonalPatternsSection } from "@/src/components/overview/personal-patt
 const POPULATED_REPORT: PersonalPatternReport = {
   asOfDate: "2026-08-06",
   factors: [
+    { id: "single-session", kind: "activity", label: "Single session", observedDays: 1, lastObservedDate: "2026-08-05" },
+    { id: "inactive-session", kind: "activity", label: "Inactive activity", observedDays: 8, lastObservedDate: "2026-05-05" },
     { id: "running", kind: "activity", label: "Running", observedDays: 14 },
     { id: "sauna", kind: "intervention", label: "Sauna", observedDays: 11 },
     {
@@ -100,6 +102,8 @@ const POPULATED_REPORT: PersonalPatternReport = {
     { id: "unsupported", label: "Unsupported outcome", unit: "score" },
   ],
   cells: [
+    cell("single-session", "hrv", "new_clue", "higher", 10, 48, 43.6, 1),
+    cell("inactive-session", "hrv", "seen_again", "higher", 10, 48, 43.6, 8),
     cell("running", "hrv", "seen_again", "higher", 12.4, 48, 42.7, 9),
     cell("housework", "hrv", "seen_again", "higher", 6.3, 46.5, 43.7, 8),
     cell("mobility", "hrv", "new_clue", "higher", 4.8, 45.7, 43.6, 7),

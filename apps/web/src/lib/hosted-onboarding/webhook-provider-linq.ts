@@ -143,7 +143,6 @@ import {
 } from "./linq-routing-policy";
 import {
   createHostedEmailLookupKey,
-  createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
@@ -725,15 +724,20 @@ async function lockPreparedHostedLinqDirectMemberTx(input: {
     memberId,
     prisma: input.prisma,
   });
-  const identityRecord = await readHostedMemberIdentityRecord({
-    memberId,
-    prisma: input.prisma,
-  });
-  if (!hostedMemberIdentityRecordsEqual(
-    identityRecord,
-    input.prepared.identityRecord,
-  )) {
-    throw hostedLinqDirectMailboxPreparationRequired("member");
+  // Family writes consume the prepared private identity snapshot. Direct
+  // admission does not: it re-reads identity/home ownership below, under these
+  // locks, and fences a different member without loading unused private fields.
+  if (input.prepared.preparedFamilyInvite) {
+    const identityRecord = await readHostedMemberIdentityRecord({
+      memberId,
+      prisma: input.prisma,
+    });
+    if (!hostedMemberIdentityRecordsEqual(
+      identityRecord,
+      input.prepared.identityRecord,
+    )) {
+      throw hostedLinqDirectMailboxPreparationRequired("member");
+    }
   }
   return input.prepared;
 }
