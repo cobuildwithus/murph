@@ -685,6 +685,7 @@ export class RunnerContainer extends Container {
     timeoutMs: number;
   }): Promise<{
     prepared: true;
+    runnerImage: { bundleFingerprint: string; sourceFingerprint: string };
     releaseId: string;
     region: HostedRunnerRegion;
     slotName: string;
@@ -721,13 +722,14 @@ export class RunnerContainer extends Container {
         if (!response.ok) throw new Error("Hosted standby Codex CLI preflight failed.");
         health = await this.readStandbyHealth(deadlineAtEpochMs);
       }
-      this.assertPristineStandbyHealth(health, input);
+      const runnerImage = this.assertPristineStandbyHealth(health, input);
       const after = store.read();
       if (after.state !== "unbound") {
         throw new Error("Hosted standby slot binding changed during preparation.");
       }
       return {
         prepared: true,
+        runnerImage,
         releaseId: after.releaseId,
         region: after.region,
         slotName: after.slotName,
@@ -933,16 +935,23 @@ export class RunnerContainer extends Container {
       releaseId: string;
       region: HostedRunnerRegion;
     },
-  ): void {
-    const expectedBundleFingerprint = readRunnerSlotRequiredEnvironmentString(
+  ): { bundleFingerprint: string; sourceFingerprint: string } {
+    // Pristine inventory still requires configured image identity. Admission of
+    // complete image pairs belongs to the same owner as ordinary runner health.
+    readRunnerSlotRequiredEnvironmentString(
       this.environment.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT,
       "HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT",
     );
-    const expectedSourceFingerprint = readRunnerSlotRequiredEnvironmentString(
+    readRunnerSlotRequiredEnvironmentString(
       this.environment.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT,
       "HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT",
     );
     const runnerBundle = isRunnerSlotHealthRecord(payload.runnerBundle) ? payload.runnerBundle : null;
+    const bundleFingerprint = runnerBundle?.bundleFingerprint;
+    const sourceFingerprint = runnerBundle?.sourceFingerprint;
+    if (typeof bundleFingerprint !== "string" || typeof sourceFingerprint !== "string") {
+      throw new Error("Hosted standby slot failed pristine readiness proof: runner_image_fingerprints.");
+    }
     const failedChecks: string[] = [];
     if (payload.activeJobCount !== 0) failedChecks.push("active_job_count");
     if (payload.codexShellPreflightStatus !== "ready") {
@@ -964,17 +973,17 @@ export class RunnerContainer extends Container {
     if (payload.workspaceInvocationAcceptedCount !== 0) {
       failedChecks.push("workspace_invocation_accepted_count");
     }
-    if (runnerBundle?.bundleFingerprint !== expectedBundleFingerprint) {
-      failedChecks.push("runner_bundle_fingerprint");
-    }
-    if (runnerBundle?.sourceFingerprint !== expectedSourceFingerprint) {
-      failedChecks.push("runner_source_fingerprint");
+    if (!hostedRunnerImageMatches(
+      this.environment, bundleFingerprint, sourceFingerprint,
+    )) {
+      failedChecks.push("runner_image_fingerprints");
     }
     if (failedChecks.length > 0) {
       throw new Error(
         `Hosted standby slot failed pristine readiness proof: ${failedChecks.join(", ")}.`,
       );
     }
+    return { bundleFingerprint, sourceFingerprint };
   }
 
   async invoke(

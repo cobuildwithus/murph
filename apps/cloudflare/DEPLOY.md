@@ -184,7 +184,7 @@ timing coverage separate. Deployment success alone is not latency evidence.
    mode sends one 100-percent step. Neither mode is an atomic switch.
 6. Wait for completed native distribution, then run signed smoke against the
    target image and serving namespace. A final Worker-only activation removes the
-   old image from admission and resumes configured pristine standby inventory.
+   old image from admission while preserving configured pristine standby inventory.
    Verify that this publication did not mutate native applications and record
    the effective config for private release verification.
 
@@ -238,9 +238,12 @@ images. Promotion changes the executing image without aging out member bindings.
 The other bank's previous descriptor remains available solely for existing
 retained ownership and cleanup; fresh allocation selects the serving bank.
 
-While a candidate is pending, fresh pristine standby preparation pauses and
-unbound inventory drains. Existing exact claim replay remains available.
-Configured standby inventory resumes after promotion. Worker-only deployments
+During an in-place image transition, configured pristine standby inventory stays
+eligible for preparation, claims, and refill. Both health gates admit the same
+complete active or candidate image pair; all pristine and immutable member-binding
+checks remain required. Native replacement can still require a slot to restart
+and reprove readiness. Promotion narrows admission to the candidate image.
+Worker-only deployments
 preserve an existing pending pair and all member images and capacities; only the
 smoke artifact changes. They never silently cancel a pending image rollout.
 
@@ -2417,8 +2420,8 @@ Fresh deployment configuration uses zero additional connection-age grace for
 runner containers, matching Cloudflare's default. Native 10/25/50/100 percentage
 targets and the separate SIGTERM checkpoint/drain path remain unchanged. A
 recently connected runner may therefore be selected for replacement sooner;
-connection age is not a checkpoint deadline. Pristine standby preparation still
-pauses during the mixed-image window. The isolated `DeploySmokeRunnerContainer`
+connection age is not a checkpoint deadline. Pristine standby preparation remains
+enabled during the mixed-image window. The isolated `DeploySmokeRunnerContainer`
 uses zero grace and one 100-percent step. The private workflow's
 `container_rollout` input defaults to gradual; immediate targets 100 percent in
 one step. Both image modes can interrupt a selected process and require recovery.
@@ -2672,9 +2675,14 @@ check because foreground traffic can consume a previously verified slot. This
 proves a ready inventory snapshot; the migration checks above still own failed
 preparation recovery, drain, foreground allocation and background exclusion.
 
-When ready inventory is disabled or targets zero slots, the initial smoke prepares
-and retires one synthetic unbound slot in the actual candidate namespace. A
-separate smoke application alone is not evidence that the candidate image is ready.
+Regardless of cached ready inventory, the initial smoke prepares and retires one
+synthetic unbound slot in the actual candidate namespace. Preparation returns its
+attested image pair; smoke requires the exact candidate pair (or active pair when
+stable), rejecting missing attestation from an older Worker. Retirement is awaited
+on success and failure. This fresh proof is independent of cached coordinator
+rows and the separate smoke application; neither proves the serving candidate
+image on its own. Artifact-only and live-model-only phases do not touch serving
+inventory.
 
 Optional smoke env:
 
