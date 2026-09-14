@@ -40,6 +40,7 @@ const RESPONSES_TOO_LARGE_CLOSE_CODE = 1009;
 const RESPONSES_PROTOCOL_CLOSE_REASON = "Responses WebSocket protocol error";
 const RESPONSES_RELAY_CLOSE_REASON = "Responses WebSocket relay failed";
 const RESPONSES_TOO_LARGE_CLOSE_REASON = "Responses WebSocket frame too large";
+const RESPONSES_MAX_PENDING_MESSAGES = 4_096;
 
 export function startHostedOpenAiResponsesWebSocketRelay(input: {
   authorizeClientFrame?: (
@@ -60,7 +61,16 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   let upstreamClosed = false;
   let stopped = false;
   let queue = Promise.resolve();
-  let pendingClientBytes = 0;
+  let pendingBytes = 0;
+  let pendingMessages = 0;
+
+  const reserveMessage = (bytes: number): boolean => {
+    if (bytes + pendingBytes > HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES
+      || pendingMessages >= RESPONSES_MAX_PENDING_MESSAGES) return false;
+    pendingBytes += bytes;
+    pendingMessages += 1;
+    return true;
+  };
 
   const reportFailure = (
     phase: HostedOpenAiWebSocketFailurePhase,
@@ -134,9 +144,9 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   }
 
   input.downstream.onMessage((data) => {
-    if (stopped) return;
+    if (stopped || upstreamClosed) return;
     const bytes = frameByteLength(data);
-    if (bytes + pendingClientBytes > HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES) {
+    if (!reserveMessage(bytes)) {
       fail(
         "protocol",
         RESPONSES_TOO_LARGE_CLOSE_CODE,
@@ -144,7 +154,6 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
       );
       return;
     }
-    pendingClientBytes += bytes;
     void enqueue(async () => {
       if (input.authorizeClientFrame) {
         const denied = await input.authorizeClientFrame(data);
@@ -175,21 +184,28 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
       }
       forwardToUpstream(data);
     }).then(() => {
-      pendingClientBytes -= bytes;
+      pendingBytes -= bytes;
+      pendingMessages -= 1;
     });
   });
 
   input.upstream.onMessage((data) => {
-    if (stopped) return;
-    enqueue(async () => {
-      if (!hasAllowedFrameSize(data)) {
+    if (stopped || upstreamClosed) return;
+    const bytes = frameByteLength(data);
+    if (!reserveMessage(bytes)) {
+      // Stop admission now, but let already accepted terminal accounting and
+      // delivery finish before Codex sees the close and considers retrying.
+      closeUpstream(RESPONSES_TOO_LARGE_CLOSE_CODE, RESPONSES_TOO_LARGE_CLOSE_REASON);
+      void enqueue(() => {
         fail(
           "protocol",
           RESPONSES_TOO_LARGE_CLOSE_CODE,
           RESPONSES_TOO_LARGE_CLOSE_REASON,
         );
-        return;
-      }
+      }, true);
+      return;
+    }
+    void enqueue(async () => {
       if (!input.persistUsage || typeof data !== "string") {
         forwardToDownstream(data);
         return;
@@ -264,7 +280,10 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
       if (!stopped) {
         forwardToDownstream(data);
       }
-    }, true);
+    }, true).then(() => {
+      pendingBytes -= bytes;
+      pendingMessages -= 1;
+    });
   });
 
   input.downstream.onClose(({ code, reason }) => {
@@ -393,12 +412,6 @@ function copyWebSocketApplicationHeaders(headers: Headers): Headers {
     copied.delete(name);
   }
   return copied;
-}
-
-function hasAllowedFrameSize(
-  data: HostedOpenAiWebSocketMessage,
-): boolean {
-  return frameByteLength(data) <= HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES;
 }
 
 async function readDeniedClientFrame(response: Response): Promise<string> {

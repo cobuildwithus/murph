@@ -706,8 +706,12 @@ Last verified: 2026-08-31
   message ids, or provider responses.
 - The companion Linq canary outcome GET reuses that same bearer and fixed
   server-configured identity, authenticates before inspecting input, and accepts
-  no query or body selectors. It requires active member access and current health
-  consent. It reads only an already-published Browser Vault core replica through
+  no query or body selectors. Before and after the read it requires active member
+  access and the existing iMessage runtime access decision, including denial of
+  explicit health-data withdrawal. The reset-and-signup messaging journey does
+  not create browser launch grants; this operator-only counts observer must not
+  manufacture those grants. Normal Browser Vault sessions retain their current
+  launch-consent gate. It reads only an already-published Browser Vault core replica through
   the existing authenticated control/session and decryption owners; it never
   refreshes a replica or wakes the runtime. Readiness requires no uncheckpointed
   conversation input, a replica matching the current canonical source checkpoint,
