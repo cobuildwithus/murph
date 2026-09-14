@@ -1,6 +1,6 @@
 # Reset all usage and suppress usage-denied typing alerts
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -47,10 +47,24 @@ readable confirmation copy without overflow at 390px and 1280px; inspected
 synthetic screenshots are attached to PR #3414. The existing Ops study renders
 the real component. A hosted preview is queued.
 
-Pending: hosted preview reachability, exact-head CI, and required final
-ReviewGPT. No production reset or deployment is part of this PR. Preview upload
-friction is recorded in the task's Frog entry.
+ReviewGPT round 1 passed at 368b9b30b43c664b81fcc4b80309cbe1ea6342ab,
+with no qualifying serious bugs or material Complexity Collapse findings.
+The parent final review found no additional changes. All currently required
+GitHub checks passed on that reviewed head; remaining optional build checks
+were still running at plan closure. The final documentation-only head requires
+its own CI check before handoff.
+
+At plan closure the hosted preview was still building; the PR evidence owns
+its final reachability result. No production reset or deployment was performed.
+Preview upload friction is recorded in the committed task Frog entry.
+
+## Completion
+
+PR #3414 contains both fixes and synthetic proof. No production behavior
+changed after the reviewed head. Required final-head CI, current-base
+mergeability, and preview status will be verified in the PR completion record.
 
 ## Changelog
 
 Internal Ops maintenance and operational alerts; no public changelog entry.
+Completed: 2026-09-13
