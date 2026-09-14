@@ -9,6 +9,6 @@
     "summary": "Nutrition cards can open in the Murph Messages extension even when no nutrition goals are attached.",
     "details": "Logged totals now use the interactive card when the extension is available. Devices without the extension still receive the static card.",
     "relevanceTags": ["nutrition", "imessage", "cards"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3415]
   }
 }
