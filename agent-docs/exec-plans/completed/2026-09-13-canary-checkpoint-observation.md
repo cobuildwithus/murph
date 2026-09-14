@@ -1,6 +1,6 @@
 # Align live canary observation with production checkpoint timing
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -52,3 +52,6 @@ Updated: 2026-09-13
 - Fail-before: both new runner regressions fail against the 90-second implementation; the delayed three-stage journey stops at the baseline, and the absent-publication case exposes the premature 90-second deadline.
 - Focused proof: 25 Web runner tests and five controller tests pass after the correction. Web typecheck, doc drift, doc gardening (zero issues), and whitespace pass. Complexity remains 16 with zero hotspots.
 - Parent candidate review: the actual canary loop and controller timeout compose correctly. All new requests are serial fixed-account observations after replies; there are no changes to runtime authority, canonical storage, or foreground/provider work.
+- Final ReviewGPT: PASS on `c211b3fff1fd719b9e0b74b6f44e8049ac62d51c`, full seven-file snapshot, verified requested/response model `gpt-6-pro`, completed marker and minimum duration accepted. The reviewer inspected the runner and independently passed all five controller tests. No findings or implementation remediation remain.
+- Parent final review accepts that result and the unchanged source/tests. This plan closes the implementation record; exact-head CI, authorized merge, and the real production journey remain post-commit gates owned by the current session. No live success is claimed by this pre-merge record.
+Completed: 2026-09-13

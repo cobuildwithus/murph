@@ -85,7 +85,7 @@ The canary runtime-authority and WebSocket queue-bound correction is tracked in
 The canary observation window follows the production checkpoint quiet window in
 [`operations/live-provider-canaries.md`](operations/live-provider-canaries.md);
 the timing correction is tracked in
-[`2026-09-13-canary-checkpoint-observation.md`](exec-plans/active/2026-09-13-canary-checkpoint-observation.md).
+[`2026-09-13-canary-checkpoint-observation.md`](exec-plans/completed/2026-09-13-canary-checkpoint-observation.md).
 
 Foreground promotion batch reuse and completion/wake race preservation are owned
 by `agent-docs/references/hosted-runtime-protocol.md`; focused admission, import
