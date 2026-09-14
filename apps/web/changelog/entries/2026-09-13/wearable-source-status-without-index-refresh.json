@@ -11,7 +11,7 @@
     "relevanceTags": [
       "wearables"
     ],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [3432],
     "tryIt": {
       "label": "Check wearable sources",
       "prompt": "Which wearable sources are contributing data, and how fresh are they?"
