@@ -97,6 +97,9 @@ test("lazy conversation events import retries after rejection while preserving p
   successfulModuleLoad.resolve({
     HostedConversationInboxProjectionError,
     importHostedConversationMessageWakeIntoLocalInbox,
+    prepareHostedConversationAudioPairIntoLocalInbox: async () => {
+      throw new Error("Audio pairs are not part of the single-import loader fixture.");
+    },
   });
   const [secondOutcome, concurrentOutcome] = await Promise.all([
     secondImport,

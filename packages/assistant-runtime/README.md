@@ -124,6 +124,28 @@ unchanged, and evidence-write
 failures remain retryable unless a durable read proves terminal evidence was
 already preserved. This keeps raw attachment paths inspectable and available
 audio/video transcripts in the input snapshot used for prompt construction.
+Consecutive fresh direct Linq audio inputs may be prepared in batch-local pairs
+(fixed cap two) only after inline mailbox validation, contiguous lane and causal
+sequences, matching decoded conversation/reply authority, and serial input/context
+staging. Each input must contain exactly one audio attachment; system-lane batches,
+sidecars, durably consumed replay, mixed media, other channels, and different reply contexts retain
+the serial path. The existing item budget reserves both slots before preparation.
+Downloads and capture-scoped parser preparation may overlap; canonical raw capture
+persistence, index/enqueue/claim operations, derived publication/attempt finalization,
+and assistant evidence/pending/notification remain ordered in their existing owners.
+A failure before the next raw capture stops further persistence/claims. Every
+already-started download and parser preparation is joined before the inbox runtime
+closes. Hosted preemption is observed after non-aborted parser finalization, not
+forwarded into a claimed parse attempt. If an earlier input needs retry, a completed
+sibling's local raw/derived result remains reusable on replay, but its assistant
+evidence, pending visibility, and notification stay withheld behind that input.
+This does not add a retry owner or strengthen the existing checkpoint/crash boundary.
+The existing content-free import diagnostic may include `audioPairCount`,
+`audioPairPreparationMs` (whole pair preparation wall span), and
+`audioParsePreparationOverlapMs` (intersection of artifact/parse/scratch-cleanup
+spans). These are not isolated transcription/download timers; summed per-input
+projection timings are not batch wall time. Reply selection and prompts are unchanged.
+
 Ordinary video bytes remain warm-container-only: accepted input may
 protect them locally while active, but snapshot planning excludes their
 validated canonical paths and idle maintenance deletes them atomically as soon

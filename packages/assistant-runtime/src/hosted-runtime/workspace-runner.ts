@@ -68,6 +68,7 @@ import type {
   HostedMailboxAssistantInputRecord,
   HostedMailboxConversationDeferral,
   HostedMailboxItemImportOutcome,
+  HostedMailboxImporter,
   HostedMailboxPrefixPrefetch,
   HostedMailboxPostCheckpointEffect,
   HostedMailboxPostCheckpointEffectResult,
@@ -435,10 +436,8 @@ export interface HostedWorkspaceRunnerRuntimeStatusCheckpointInput {
   workspace: HostedWorkspaceState | null;
 }
 
-export type HostedWorkspaceRunnerMailboxImportItem = (
-  item: HostedMailboxResolvedImportItem,
-  context?: HostedWorkspaceRunnerMailboxImportContext,
-) => Promise<HostedMailboxItemImportOutcome>;
+export type HostedWorkspaceRunnerMailboxImportItem =
+  HostedMailboxImporter<HostedWorkspaceRunnerMailboxImportContext>;
 
 export interface HostedWorkspaceRunnerInput {
   awaitBackgroundMaintenanceBarrier?: ((input: {
@@ -2462,6 +2461,7 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
   input: HostedMailboxForWorkspaceRunnerImportInput,
 ): Promise<HostedMailboxImportCheckpointResult> {
   const importItem = input.importItem ?? input.input.importItem;
+  const importAudioPair = importItem.importAudioPair;
   const signal = input.signal ?? input.importItemContext?.signal ?? input.input.signal ?? null;
   const initialAssistantAskRequestTargetKind =
     input.input.initialMailboxImportContext?.assistantAskRequestTargetKind;
@@ -2491,7 +2491,15 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
     deferCheckpoint: input.deferCheckpoint === true,
     expectedUserId: input.input.expectedUserId,
     fetchSignal: input.mailboxFetchSignal ?? null,
-    importItem: (item) => importItem(item, importItemContext ?? undefined),
+    importItem: Object.assign(
+      (item: HostedMailboxResolvedImportItem) => importItem(item, importItemContext ?? undefined),
+      {
+        importAudioPair: importAudioPair
+          ? (items: Parameters<NonNullable<HostedMailboxImporter["importAudioPair"]>>[0]) =>
+              importAudioPair(items, importItemContext ?? undefined)
+          : undefined,
+      },
+    ),
     lanes: input.lanes,
     limitPerLane: input.limitPerLane ?? input.input.limitPerLane,
     mailboxPort: input.input.platform.mailboxPort,

@@ -59,6 +59,9 @@ export type HostedMailboxItemImportOutcome =
     };
 
 export interface HostedMailboxConversationImportTiming {
+  audioPairCount?: number;
+  audioPairPreparationMs?: number;
+  audioParsePreparationOverlapMs?: number;
   projectionPrepareMs?: number;
   projectionImportMs?: number;
   attachmentEvidenceMs?: number;
@@ -87,6 +90,22 @@ export interface HostedMailboxResolvedImportItem {
   payload: Extract<HostedMailboxPayloadResolutionResult, { status: "resolved" }>;
   route: HostedMailboxRoutePlan;
 }
+
+/** Exactly two already routed, fresh, contiguous conversation items from this batch.
+ * null declines without mutations; a null sibling outcome has not been admitted.
+ * The owner must settle all started preparation before returning or throwing.
+ */
+export type HostedMailboxAudioPairImport<Context = never> = (
+  items: readonly [HostedMailboxResolvedImportItem, HostedMailboxResolvedImportItem],
+  context?: Context,
+) => Promise<readonly [HostedMailboxItemImportOutcome, HostedMailboxItemImportOutcome | null] | null>;
+
+export type HostedMailboxImporter<Context = never> = ((
+  item: HostedMailboxResolvedImportItem,
+  context?: Context,
+) => Promise<HostedMailboxItemImportOutcome>) & {
+  importAudioPair?: HostedMailboxAudioPairImport<Context>;
+};
 
 export interface HostedMailboxImportLoopResult {
   assistantInputIds?: string[];
@@ -194,7 +213,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   deferConversationUntil?: HostedMailboxConversationDeferral | null;
   expectedUserId: string;
   fetchSignal?: AbortSignal | null;
-  importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
+  importItem: HostedMailboxImporter;
   lanes?: readonly HostedMailboxLane[];
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
@@ -242,7 +261,11 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const systemLaneFetched = itemsByLane.system.length > 0;
   const lanesWithConsumedReplayInBatch = new Set<HostedMailboxLane>();
 
-  for (const { item, lane } of interleaveMailboxItemsByLane(lanes, itemsByLane)) {
+  const orderedItems = interleaveMailboxItemsByLane(lanes, itemsByLane);
+  const importBatchItem = createHostedMailboxBatchImporter({
+    ...input, orderedItems, consumedSeqState, systemLaneFetched,
+  });
+  for (const [index, { item, lane }] of orderedItems.entries()) {
     if (stoppedLanes.has(lane)) {
       continue;
     }
@@ -416,7 +439,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       continue;
     }
 
-    const outcome = await input.importItem({
+    const resolvedItem: HostedMailboxResolvedImportItem = {
       durablyConsumed: itemIsDurablyConsumedReplay,
       ...(lane === "conversation"
         && !itemIsDurablyConsumedReplay
@@ -431,7 +454,8 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       item,
       payload,
       route,
-    });
+    };
+    const outcome = await importBatchItem(index, resolvedItem);
     if (outcome.status === "deferred") {
       const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.deferred");
       if (
@@ -581,6 +605,67 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   };
 }
 
+/** Keep lookahead and its one completed sibling local to this fetched batch. */
+function createHostedMailboxBatchImporter(input: {
+  importItem: HostedMailboxImporter;
+  orderedItems: ReturnType<typeof interleaveMailboxItemsByLane>;
+  consumedSeqState: ReturnType<typeof readHostedMailboxFetchConsumedSeqState>;
+  systemLaneFetched: boolean;
+  mailboxPort: HostedRuntimeMailboxPort;
+  requestId: string;
+}) {
+  let preparedSibling: { itemId: string; outcome: HostedMailboxItemImportOutcome } | null = null;
+  return async (index: number, item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome> => {
+    if (preparedSibling?.itemId === item.item.id) {
+      const outcome = preparedSibling.outcome;
+      preparedSibling = null;
+      return outcome;
+    }
+    const importPair = input.importItem.importAudioPair;
+    if (!importPair || input.systemLaneFetched) return input.importItem(item);
+    const next = input.orderedItems[index + 1]?.item;
+    if (!next || !isHostedMailboxAudioPairSibling(item, next, input.consumedSeqState)) {
+      return input.importItem(item);
+    }
+    const route = createHostedMailboxRoutingPlan(next);
+    if (route.state !== "route" || route.action !== "import-conversation-message") {
+      return input.importItem(item);
+    }
+    // Inline-only lookahead cannot fetch a sidecar or private media.
+    const payload = await resolveHostedMailboxItemPayload({
+      item: next, mailboxPort: input.mailboxPort,
+      requestId: `${input.requestId}:${next.id}:payload`,
+    });
+    if (payload.status !== "resolved" || payload.source !== "inline") return input.importItem(item);
+    const pair = await importPair([item, { ...item, item: next, payload, route }]);
+    if (!pair) return input.importItem(item);
+    if (pair[1]) preparedSibling = { itemId: next.id, outcome: pair[1] };
+    return pair[0];
+  };
+}
+
+/** No system item, sidecar, replay, malformed sequence or gap may enter lookahead. */
+function isHostedMailboxAudioPairSibling(
+  first: HostedMailboxResolvedImportItem,
+  next: HostedMailboxItem,
+  consumed: ReturnType<typeof readHostedMailboxFetchConsumedSeqState>,
+): boolean {
+  if (first.item.lane !== "conversation" || next.lane !== "conversation"
+    || first.route.action !== "import-conversation-message"
+    || first.durablyConsumed || first.payload.source !== "inline"
+    || hasHostedMailboxSidecarPayload(next)) return false;
+  const seq = parseMailboxSeqForImportOrNull(first.item.laneSeq);
+  const causalSeq = parseMailboxSeqForImportOrNull(first.item.causalSeq ?? "");
+  if (seq === null || causalSeq === null || causalSeq <= 0n
+    || parseMailboxSeqForImportOrNull(next.laneSeq) !== seq + 1n
+    || parseMailboxSeqForImportOrNull(next.causalSeq ?? "") !== causalSeq + 1n) return false;
+  return !isDurablyConsumedReplay({
+    consumedSeq: consumed.seqByLane.conversation,
+    consumedSeqPresent: consumed.presentByLane.conversation,
+    item: next, itemSeq: seq + 1n,
+  });
+}
+
 function mergeHostedMailboxConversationImportTiming(
   current: HostedMailboxConversationImportTiming | null,
   next: HostedMailboxConversationImportTiming | null,
@@ -594,6 +679,9 @@ function mergeHostedMailboxConversationImportTiming(
   addHostedMailboxConversationImportTimingField(merged, "projectionImportMs", next.projectionImportMs);
   addHostedMailboxConversationImportTimingField(merged, "attachmentEvidenceMs", next.attachmentEvidenceMs);
   addHostedMailboxConversationImportTimingField(merged, "projectionTotalMs", next.projectionTotalMs);
+  addHostedMailboxConversationImportTimingField(merged, "audioPairCount", next.audioPairCount);
+  addHostedMailboxConversationImportTimingField(merged, "audioPairPreparationMs", next.audioPairPreparationMs);
+  addHostedMailboxConversationImportTimingField(merged, "audioParsePreparationOverlapMs", next.audioParsePreparationOverlapMs);
   return Object.keys(merged).length > 0 ? merged : current;
 }
 
