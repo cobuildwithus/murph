@@ -103,7 +103,7 @@ export function readWearableSummaryRows(
   });
 
   try {
-    assertQueryProjectionTables(database, location);
+    assertQueryProjectionTables(database, location, "wearable");
 
     return {
       providerFilterWasProvided,
