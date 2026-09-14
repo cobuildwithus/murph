@@ -1,5 +1,6 @@
 import { withCanonicalWriteLock } from "@murphai/core";
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
+import { startCliPhase, timeCliPhase } from "@murphai/runtime-state/node/cli-timing";
 
 import { isDefaultProjectedQueryEntity, isSearchIndexedQueryEntity } from "../query-visibility.ts";
 import { createVaultReadModel } from "../read-model.ts";
@@ -18,8 +19,13 @@ import {
 } from "../vault-source.ts";
 import { collectWearableDataset } from "../wearables/candidates.ts";
 import type { RebuildQueryProjectionResult } from "../query-projection-types.ts";
+import type { WearableSummaryFilters } from "../wearables.ts";
 import { insertQueryEntities } from "./entity-store.ts";
-import { resetUnsupportedQueryProjection } from "./freshness.ts";
+import {
+  isWearableProjectionFresh,
+  resetUnsupportedQueryProjection,
+  writeWearableSourceManifest,
+} from "./freshness.ts";
 import {
   extractMetricTargetsFromCanonicalEntities,
   insertMetricPoints,
@@ -40,6 +46,9 @@ import {
 } from "./wearable-summary-projector.ts";
 import {
   insertWearableSummaryRows,
+  readWearableSummaryRows,
+  type QueryWearableSummaryRow,
+  type QueryWearableSummaryRowSet,
 } from "./wearable-summary-store.ts";
 
 export async function rebuildQueryProjectionFromCanonicalSource(
@@ -67,22 +76,27 @@ export async function rebuildQueryProjectionFromCanonicalSource(
     const dailySampleSummaries = metricProjection.dailySampleSummaries;
     const metricPoints = metricProjection.metricPoints;
     const metricTargets = extractMetricTargetsFromCanonicalEntities(snapshot.entities);
-    const wearableSummaries = buildWearableSummaryProjectionFromDataset(wearableDataset);
+    // A preceding source-only read may have already published this exact
+    // canonical generation. Global metrics still have their own derivation.
+    const wearableSummaries = await isWearableProjectionFresh(location, currentManifest)
+      ? null
+      : buildWearableSummaryProjectionFromDataset(wearableDataset);
     const searchableEntities = projectedEntities.filter(isSearchIndexedQueryEntity);
     const searchDocuments = [
       ...materializeSearchDocuments(searchableEntities),
       ...materializeSummaryDocuments(dailySampleSummaries),
     ];
-    const database = openQueryProjectionDatabase(location, { create: true });
+    const database = openQueryProjectionDatabase(location, { create: true, wearableOnly: true });
 
     try {
-      ensureQueryProjectionSchema(database);
       const builtAt = withImmediateTransaction(database, () => {
+        // Schema promotion is atomic too: failed publication must not leave
+        // empty global tables readable by a mixed-version in-flight reader.
+        ensureQueryProjectionSchema(database);
         database.exec(`
           DELETE FROM query_entities;
           DELETE FROM query_metric_points;
           DELETE FROM query_metric_targets;
-          DELETE FROM query_wearable_summaries;
           DELETE FROM query_source_manifest;
           DELETE FROM query_search_document;
         `);
@@ -90,7 +104,9 @@ export async function rebuildQueryProjectionFromCanonicalSource(
         insertQueryEntities(database, projectedEntities);
         insertMetricPoints(database, metricPoints);
         insertMetricTargets(database, metricTargets);
-        insertWearableSummaryRows(database, wearableSummaries);
+        if (wearableSummaries !== null) {
+          replaceWearableProjection(database, wearableSummaries, currentManifest);
+        }
         insertQuerySourceManifest(database, currentManifest);
         insertSearchDocuments(database, searchDocuments);
 
@@ -115,6 +131,59 @@ export async function rebuildQueryProjectionFromCanonicalSource(
       database.close();
     }
   });
+}
+
+/** Capture committed stored rows under the existing cross-process reentrant
+ * lock. A stale read publishes only wearables, never global query work. */
+export async function readFreshWearableSummaryRows(
+  vaultRoot: string,
+  filters: Pick<WearableSummaryFilters, "providers">,
+): Promise<QueryWearableSummaryRowSet> {
+  const endFreshness = startCliPhase("query-freshness");
+  const endWait = startCliPhase("query-wait");
+  try {
+    return await withCanonicalWriteLock(vaultRoot, async () => {
+      endWait();
+      const location = currentQueryProjectionLocation(vaultRoot);
+      const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+      const fresh = await timeCliPhase("query-status", () => isWearableProjectionFresh(location, manifest));
+      if (!fresh) {
+        await timeCliPhase("query-rebuild", async () => {
+          // Keep strict-source failures intact, including empty provider scopes.
+          // Do not destroy an old projection before canonical validation succeeds.
+          const snapshot = await readVaultSourceStrict(vaultRoot);
+          const dataset = collectWearableDataset(createVaultReadModel({ ...snapshot, vaultRoot }), {});
+          const rows = buildWearableSummaryProjectionFromDataset(dataset);
+          await resetUnsupportedQueryProjection(location);
+          const database = openQueryProjectionDatabase(location, { create: true, wearableOnly: true });
+          try {
+            withImmediateTransaction(database, () => {
+              replaceWearableProjection(database, rows, manifest);
+              writeMeta(database, "schema_version", QUERY_PROJECTION_SCHEMA_ID);
+            });
+          } finally {
+            database.close();
+          }
+        });
+      }
+      // Capture before releasing the lock; composition owns only these rows,
+      // not a pending promise that another lock owner could wait behind.
+      return readWearableSummaryRows(location, filters);
+    });
+  } finally {
+    endWait();
+    endFreshness();
+  }
+}
+
+function replaceWearableProjection(
+  database: DatabaseSync,
+  rows: readonly QueryWearableSummaryRow[],
+  manifest: readonly QuerySourceManifestEntry[],
+): void {
+  database.exec("DELETE FROM query_wearable_summaries");
+  insertWearableSummaryRows(database, rows);
+  writeWearableSourceManifest(database, manifest);
 }
 
 function insertQuerySourceManifest(

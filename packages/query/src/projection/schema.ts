@@ -25,7 +25,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 25: Omit audit rows and unused indexes from rebuilt query stores.
 // 26: Rebuild wearable provider rows after public query slug canonicalization.
 // 27: Rebuild goal targets through the canonical target schema.
-export const QUERY_PROJECTION_SQLITE_VERSION = 27;
+// 28: Independently certify wearable rows; older full rebuilders must reset them.
+export const QUERY_PROJECTION_SQLITE_VERSION = 28;
 
 export interface QueryProjectionLocation {
   absolutePath: string;
@@ -90,16 +91,18 @@ export function parseJsonValue<TValue>(
 
 export function openQueryProjectionDatabase(
   location: QueryProjectionLocation,
-  options: { create?: boolean; readOnly?: boolean } = {},
+  options: { create?: boolean; readOnly?: boolean; wearableOnly?: boolean } = {},
 ): DatabaseSync {
-  const database = openSqliteRuntimeDatabase(location.absolutePath, options);
+  const { wearableOnly = false, ...runtimeOptions } = options;
+  const database = openSqliteRuntimeDatabase(location.absolutePath, runtimeOptions);
 
   if (!(options.readOnly ?? false)) {
     applySqliteRuntimeMigrations(database, {
       migrations: [{
         version: QUERY_PROJECTION_SQLITE_VERSION,
         migrate(candidateDatabase) {
-          ensureQueryProjectionSchema(candidateDatabase);
+          if (wearableOnly) ensureWearableQueryProjectionSchema(candidateDatabase);
+          else ensureQueryProjectionSchema(candidateDatabase);
         },
       }],
       schemaVersion: QUERY_PROJECTION_SQLITE_VERSION,
@@ -110,19 +113,9 @@ export function openQueryProjectionDatabase(
   return database;
 }
 
+/** Supported wearable core/version; global completeness is checked separately. */
 export function hasCurrentQueryProjectionSchema(database: DatabaseSync): boolean {
-  if (
-    !tableExists(database, "query_meta") ||
-    !tableExists(database, "query_entities") ||
-    !tableExists(database, "query_metric_points") ||
-    !tableExists(database, "query_metric_targets") ||
-    !tableExists(database, "query_wearable_summaries") ||
-    !tableExists(database, "query_source_manifest") ||
-    !tableExists(database, "query_search_document") ||
-    !tableExists(database, "query_search_fts")
-  ) {
-    return false;
-  }
+  if (!hasWearableQueryProjectionTables(database)) return false;
 
   return (
     readMeta(database, "schema_version") === QUERY_PROJECTION_SCHEMA_ID &&
@@ -151,13 +144,40 @@ export function emptyQueryProjectionStatus(): QueryProjectionStatus {
   };
 }
 
-export function ensureQueryProjectionSchema(database: DatabaseSync): void {
+// A partial store deliberately omits global tables. Even an older reader that
+// passed its freshness check before a version reset fails its table guard,
+// rather than reading empty global results from a newly published partial store.
+function ensureWearableQueryProjectionSchema(database: DatabaseSync): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS query_meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS query_wearable_summaries (
+      id TEXT PRIMARY KEY,
+      provider_scope_key TEXT NOT NULL,
+      provider_scope_json TEXT NOT NULL,
+      summary_kind TEXT NOT NULL,
+      summary_date TEXT,
+      sort_rank INTEGER NOT NULL,
+      summary_json TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS query_wearable_summaries_scope_kind_date_idx
+      ON query_wearable_summaries(provider_scope_key, summary_kind, summary_date DESC);
+    CREATE INDEX IF NOT EXISTS query_wearable_summaries_kind_date_idx
+      ON query_wearable_summaries(summary_kind, summary_date DESC);
+  `);
+}
+
+function hasWearableQueryProjectionTables(database: DatabaseSync): boolean {
+  return tableExists(database, "query_meta") && tableExists(database, "query_wearable_summaries");
+}
+
+export function ensureQueryProjectionSchema(database: DatabaseSync): void {
+  ensureWearableQueryProjectionSchema(database);
+  database.exec(`
     CREATE TABLE IF NOT EXISTS query_entities (
       entity_id TEXT PRIMARY KEY,
       sort_rank INTEGER NOT NULL,
@@ -224,21 +244,6 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS query_metric_targets_metric_idx ON query_metric_targets(metric_key);
     CREATE INDEX IF NOT EXISTS query_metric_targets_biomarker_idx ON query_metric_targets(biomarker_key);
 
-    CREATE TABLE IF NOT EXISTS query_wearable_summaries (
-      id TEXT PRIMARY KEY,
-      provider_scope_key TEXT NOT NULL,
-      provider_scope_json TEXT NOT NULL,
-      summary_kind TEXT NOT NULL,
-      summary_date TEXT,
-      sort_rank INTEGER NOT NULL,
-      summary_json TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS query_wearable_summaries_scope_kind_date_idx
-      ON query_wearable_summaries(provider_scope_key, summary_kind, summary_date DESC);
-    CREATE INDEX IF NOT EXISTS query_wearable_summaries_kind_date_idx
-      ON query_wearable_summaries(summary_kind, summary_date DESC);
-
     CREATE TABLE IF NOT EXISTS query_source_manifest (
       relative_path TEXT PRIMARY KEY,
       size_bytes INTEGER NOT NULL,
@@ -297,8 +302,12 @@ export function hasQueryProjectionTables(database: DatabaseSync): boolean {
 export function assertQueryProjectionTables(
   database: DatabaseSync,
   location: QueryProjectionLocation,
+  scope: "global" | "wearable" = "global",
 ): void {
-  if (!hasQueryProjectionTables(database)) {
+  const hasTables = scope === "wearable"
+    ? hasWearableQueryProjectionTables(database)
+    : hasQueryProjectionTables(database);
+  if (!hasTables) {
     throw new Error(
       `Query projection at ${location.dbPath} is missing required tables. Rebuild the projection and try again.`,
     );

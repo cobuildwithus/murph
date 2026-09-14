@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-13",
+  "order": 100,
+  "item": {
+    "id": "wearable-source-status-without-index-refresh",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less waiting for wearable source status",
+    "summary": "Check which wearables are contributing data without repeating unnecessary work between requests.",
+    "details": "Your source status keeps the same coverage, freshness, duplicate and conflict facts, including after new data, corrections or deletions.",
+    "relevanceTags": [
+      "wearables"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Check wearable sources",
+      "prompt": "Which wearable sources are contributing data, and how fresh are they?"
+    }
+  }
+}

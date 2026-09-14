@@ -291,7 +291,9 @@ test("activity runtime reads bounded workout features without hydrating query en
       ].map((record) => JSON.stringify(record)).join("\n").concat("\n"),
       "utf8",
     );
+    const coldSourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot);
     await rebuildQueryProjection(vaultRoot);
+    assert.deepEqual(await summarizeWearableSourceHealthRuntime(vaultRoot), coldSourceHealth);
 
     const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH));
     try {

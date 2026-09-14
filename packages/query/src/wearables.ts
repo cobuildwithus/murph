@@ -1316,7 +1316,10 @@ export interface ProjectedWearableSummaryBundle {
   sourceHealth: ProjectedWearableSourceHealthSummary[];
 }
 
-export function buildWearableSummaryBundleFromDataset(dataset: WearableDataset): WearableSummaryBundle {
+export function buildWearableSummaryBundleFromDataset(
+  dataset: WearableDataset,
+  options: { includeSourceHealth?: boolean } = {},
+): WearableSummaryBundle {
   const activityDays = listWearableActivityDaysFromDataset(dataset);
   const sleepNights = listWearableSleepNightsFromDataset(dataset);
   const recoveryDays = listWearableRecoveryDaysFromDataset(dataset);
@@ -1331,7 +1334,7 @@ export function buildWearableSummaryBundleFromDataset(dataset: WearableDataset):
     bodyStateDays: publicBodyStateDays,
     recoveryDays: publicRecoveryDays,
     sleepNights: publicSleepNights,
-    sourceHealth: buildWearableSourceHealth({
+    sourceHealth: options.includeSourceHealth === false ? [] : buildWearableSourceHealth({
       activityDays: publicActivityDays,
       bodyStateDays: publicBodyStateDays,
       dataset,
