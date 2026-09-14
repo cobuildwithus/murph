@@ -3908,7 +3908,7 @@ function parseJunctionFloatingDateTime(value: string): {
   return Object.values(parsed).every(Number.isFinite) ? parsed : undefined;
 }
 
-function buildJunctionDailyTimeseriesAggregates(input: {
+interface JunctionDailyTimeseriesInput {
   context: NormalizationContext;
   normalizeValue: (value: unknown, entry: PlainObject) => number | undefined;
   payload: unknown;
@@ -3917,7 +3917,274 @@ function buildJunctionDailyTimeseriesAggregates(input: {
   resourceSlug: string;
   valuePaths: readonly string[];
   selectedSparseRecords?: ReadonlyMap<string, JunctionSparseIntervalReading>;
-}): JunctionDailyTimeseriesAggregate[] {
+}
+
+function junctionDailyTimeseriesEntries(
+  input: JunctionDailyTimeseriesInput,
+  ownsTemporalFeatures: boolean,
+): JunctionResourceEntry[] {
+  // A complete-source-day payload is always grouped; its rows are exactly the
+  // grouped rows, so an empty grouped envelope or an explicitly empty group
+  // data array is a valid authoritative empty rather than a lossy row.
+  return ownsTemporalFeatures && asPlainObject(asPlainObject(input.payload)?.groups)
+    ? groupedTimeseriesResourceEntries(input.payload).filter(({ entry }) =>
+        !Array.isArray(entry.data) || entry.data.length > 0)
+    : timeseriesResourceEntries(input.payload);
+}
+
+function junctionDailyTimeseriesRowFailureReason(
+  providerValue: unknown,
+  numericProviderValue: number | undefined,
+  value: number | undefined,
+): JunctionCalendarRefreshNormalizationFailureReason {
+  if (numericProviderValue === undefined) {
+    return providerValue === undefined || providerValue === null
+      ? "daily.value_missing"
+      : "daily.value_non_numeric";
+  }
+  return value === undefined
+    ? "daily.value_out_of_range"
+    : "daily.timestamp_or_day_unresolved";
+}
+
+function resolveJunctionDailyTimeseriesRow(
+  input: JunctionDailyTimeseriesInput,
+  { entry, originFallback }: JunctionResourceEntry,
+  index: number,
+  { evidencePartRole, ownsTemporalFeatures, sparseResource, timestampPaths }: {
+    evidencePartRole: string;
+    ownsTemporalFeatures: boolean;
+    sparseResource: JunctionSparseIntervalResource | undefined;
+    timestampPaths: readonly string[];
+  },
+) {
+  const providerTimestamp = firstStringFromPaths(entry, timestampPaths)
+    ?? firstValueFromPaths(entry, timestampPaths);
+  const rowDiagnostic = {
+    rowOrdinal: index + 1,
+    timestampKind: classifyJunctionNormalizationTimestampKind(providerTimestamp),
+  };
+  const resourceContext = buildResourceContext({
+    entry,
+    originFallback,
+    resource: input.resource,
+    resourceSlug: input.resourceSlug,
+    identityKind: "timeseries",
+    index,
+    fallbackArtifactRole: evidencePartRole,
+    context: input.context,
+  });
+
+  if (!resourceContext) {
+    // A complete-source-day replacement may not silently drop a delivered
+    // row; an unowned row invalidates the day's replacement authority.
+    if (ownsTemporalFeatures) {
+      throw junctionCalendarRefreshNormalizationError(
+        "source_context.unresolved",
+        {
+          ...rowDiagnostic,
+          timestampSemantics: typeof providerTimestamp === "string"
+            ? inferTimestampSemantics(providerTimestamp)
+            : undefined,
+        },
+      );
+    }
+    return undefined;
+  }
+
+  const providerValue = firstValueFromPaths(entry, input.valuePaths);
+  const numericProviderValue = firstNumberFromPaths(entry, input.valuePaths);
+  const value = input.normalizeValue(numericProviderValue, entry);
+  const sparseStartRaw = sparseResource
+    ? firstStringFromPaths(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS)
+    : undefined;
+  const timestamp = sparseStartRaw
+    ? resolveJunctionSparseIntervalTimestamp(
+        entry,
+        sparseStartRaw,
+        input.context,
+        resourceContext.sourceProviderSlug,
+      )
+    : resolveRecordTimestamp(
+        entry,
+        input.context,
+        resourceContext.sourceProviderSlug,
+        JUNCTION_INTERVAL_START_OWNED_TIMESTAMP_PATHS,
+      );
+  const resolvedRowDiagnostic = {
+    ...rowDiagnostic,
+    sourceProvider: normalizeKnownJunctionSourceProviderSlug(resourceContext.sourceProviderSlug),
+    timestampKind: classifyJunctionNormalizationTimestampKind(
+      timestamp.observedAtRaw ?? providerTimestamp,
+    ),
+    timestampSemantics: timestamp.timestampSemantics,
+  };
+  const sampleAt = resolveJunctionDailyAggregateSampleAt(
+    timestamp,
+    input.requireExplicitTimestamp,
+  );
+  const dayKey = input.requireExplicitTimestamp
+    ? timestamp.timestampSemantics === "floating" && timestamp.dayKey
+      ? timestamp.dayKey
+      : extractIsoDatePrefix(sampleAt) ?? undefined
+    : resolveJunctionTimeseriesAggregateDayKey(
+        entry,
+        timestamp,
+        sampleAt,
+        input.context.defaultTimeZone,
+      );
+  const legacyDayKey = input.requireExplicitTimestamp
+    ? dayKey
+    : resolveLegacyJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
+
+  if (
+    value === undefined
+    || (
+      input.requireExplicitTimestamp
+      && !hasValidJunctionExplicitTimeseriesTimestamp(timestamp)
+    )
+    || !sampleAt
+    || !dayKey
+  ) {
+    // Rows without a usable value, timestamp semantics, or target day cannot
+    // certify a complete source day; fail the import instead of certifying a
+    // lossy response as authoritative.
+    if (ownsTemporalFeatures) {
+      const reason = junctionDailyTimeseriesRowFailureReason(
+        providerValue, numericProviderValue, value,
+      );
+      throw junctionCalendarRefreshNormalizationError(reason, resolvedRowDiagnostic);
+    }
+    return undefined;
+  }
+
+  return {
+    entry, resourceContext, providerValue, value, timestamp,
+    resolvedRowDiagnostic, sampleAt, dayKey, legacyDayKey,
+  };
+}
+
+type JunctionDailyTimeseriesRow = NonNullable<ReturnType<typeof resolveJunctionDailyTimeseriesRow>>;
+
+function acceptJunctionDailyFidelityRecord(
+  input: JunctionDailyTimeseriesInput,
+  { entry, providerValue, resourceContext, timestamp }: JunctionDailyTimeseriesRow,
+  existing: JunctionDailyTimeseriesAggregate | undefined,
+  { denseResource, sparseResource, fidelityResource, selectedDenseRecordKeys, seenFidelityRecords }: {
+    denseResource: JunctionDenseFidelityResource | undefined;
+    sparseResource: JunctionSparseIntervalResource | undefined;
+    fidelityResource: JunctionFidelityResource | undefined;
+    selectedDenseRecordKeys: ReadonlyMap<string, JunctionFidelityRecordSelection> | undefined;
+    seenFidelityRecords: Set<string>;
+  },
+): boolean {
+  const providerUnit = trimOptionalToLength(
+    firstStringFromPaths(entry, JUNCTION_INTERVAL_UNIT_PATHS),
+    160,
+  );
+  const fidelityRecordKey = fidelityResource
+    ? buildJunctionTimeseriesFidelityRecordKey({
+        entry,
+        providerUnit,
+        providerValue,
+        resource: input.resource,
+        resourceContext,
+        timestamp,
+      })
+    : undefined;
+  const denseStableIdentity = denseResource
+    ? buildJunctionDenseFidelityStableIdentity(denseResource, entry, resourceContext)
+    : undefined;
+  const denseSelection = denseStableIdentity
+    ? selectedDenseRecordKeys?.get(denseStableIdentity)
+    : undefined;
+  if (
+    denseStableIdentity
+    && fidelityRecordKey
+    && denseSelection?.recordKey !== fidelityRecordKey
+  ) {
+    return false;
+  }
+  const sparseSelection = fidelityRecordKey
+    ? input.selectedSparseRecords?.get(fidelityRecordKey)
+    : undefined;
+  if (
+    sparseResource
+    && entry.authoritativeEmptyCalendarSet !== true
+    && fidelityRecordKey
+    && input.selectedSparseRecords
+    && !sparseSelection
+  ) {
+    return false;
+  }
+  if (fidelityRecordKey && seenFidelityRecords.has(fidelityRecordKey)) {
+    if (existing) {
+      existing.duplicateSampleCount += 1;
+    }
+    return false;
+  }
+  if (fidelityRecordKey) {
+    seenFidelityRecords.add(fidelityRecordKey);
+  }
+  return true;
+}
+
+function appendJunctionDailyTimeseriesAggregate({
+  aggregates, key, existing, sample, row, evidencePartRole, timeZone, fidelitySample, fidelityResource,
+}: {
+  aggregates: Map<string, JunctionDailyTimeseriesAggregate>;
+  key: string;
+  existing: JunctionDailyTimeseriesAggregate | undefined;
+  sample: JunctionDailyTimeseriesSample;
+  row: JunctionDailyTimeseriesRow;
+  evidencePartRole: string;
+  timeZone: string | undefined;
+  fidelitySample: JunctionTimeseriesFidelityPoint | undefined;
+  fidelityResource: JunctionFidelityResource | undefined;
+}): void {
+  const { entry, value, dayKey, sampleAt, legacyDayKey } = row;
+  const legacyDayKeys = existing?.legacyDayKeys ?? new Set<string>();
+  if (legacyDayKey && legacyDayKey !== dayKey) {
+    legacyDayKeys.add(legacyDayKey);
+  }
+
+  if (!existing) {
+    const aggregate = createJunctionTimeseriesAggregate(
+      sample, dayKey, sampleAt, evidencePartRole, timeZone,
+    );
+    aggregate.authoritativeEmptyCalendarSet = entry.authoritativeEmptyCalendarSet === true;
+    aggregate.fidelitySamples = fidelitySample ? [fidelitySample] : [];
+    aggregate.legacyDayKeys = legacyDayKeys;
+    aggregate.sampleCount = 1;
+    aggregate.sum = value;
+    aggregate.sumSquares = value * value;
+    aggregates.set(key, aggregate);
+    if (fidelityResource) {
+      assertJunctionTimeseriesSourceDayBound(fidelityResource, 1);
+    }
+  } else {
+    appendJunctionTimeseriesSample(existing, sample, sampleAt);
+    existing.authoritativeEmptyCalendarSet ||= entry.authoritativeEmptyCalendarSet === true;
+    if (fidelitySample) {
+      existing.fidelitySamples.push(fidelitySample);
+    }
+    if (fidelityResource) {
+      assertJunctionTimeseriesSourceDayBound(fidelityResource, existing.sampleCount);
+    }
+    existing.sumSquares += value * value;
+    if (value < existing.minValue) {
+      existing.minValue = value;
+    }
+
+    if (value > existing.maxValue) {
+      existing.maxValue = value;
+    }
+  }
+}
+
+function buildJunctionDailyTimeseriesAggregates(
+  input: JunctionDailyTimeseriesInput,
+): JunctionDailyTimeseriesAggregate[] {
   const evidencePartRole = `junction-timeseries-daily-${input.resourceSlug}`;
   const aggregates = new Map<string, JunctionDailyTimeseriesAggregate>();
   const temporalAggregates = new Map<string, JunctionDailyTimeseriesAggregate>();
@@ -3926,13 +4193,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     : undefined;
   const ownsTemporalFeatures = temporalFeatureResource !== undefined
     && input.context.temporalFeatureSourceDay?.resources.includes(input.resource) === true;
-  // A complete-source-day payload is always grouped; its rows are exactly the
-  // grouped rows, so an empty grouped envelope or an explicitly empty group
-  // data array is a valid authoritative empty rather than a lossy row.
-  const entries = ownsTemporalFeatures && asPlainObject(asPlainObject(input.payload)?.groups)
-    ? groupedTimeseriesResourceEntries(input.payload).filter(({ entry }) =>
-        !Array.isArray(entry.data) || entry.data.length > 0)
-    : timeseriesResourceEntries(input.payload);
+  const entries = junctionDailyTimeseriesEntries(input, ownsTemporalFeatures);
   const denseResource = isJunctionDenseFidelityResource(input.resource) ? input.resource : undefined;
   const sparseResource = isJunctionSparseIntervalResource(input.resource) ? input.resource : undefined;
   const fidelityResource = denseResource ?? sparseResource;
@@ -3953,114 +4214,19 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       })
     : undefined;
   const seenFidelityRecords = new Set<string>();
+  const rowSettings = { evidencePartRole, ownsTemporalFeatures, sparseResource, timestampPaths };
+  const fidelitySelection = {
+    denseResource, sparseResource, fidelityResource, selectedDenseRecordKeys, seenFidelityRecords,
+  };
 
-  for (const [index, { entry, originFallback }] of entries.entries()) {
-    const providerTimestamp = firstStringFromPaths(entry, timestampPaths)
-      ?? firstValueFromPaths(entry, timestampPaths);
-    const rowDiagnostic = {
-      rowOrdinal: index + 1,
-      timestampKind: classifyJunctionNormalizationTimestampKind(providerTimestamp),
-    };
-    const resourceContext = buildResourceContext({
-      entry,
-      originFallback,
-      resource: input.resource,
-      resourceSlug: input.resourceSlug,
-      identityKind: "timeseries",
-      index,
-      fallbackArtifactRole: evidencePartRole,
-      context: input.context,
-    });
-
-    if (!resourceContext) {
-      // A complete-source-day replacement may not silently drop a delivered
-      // row; an unowned row invalidates the day's replacement authority.
-      if (ownsTemporalFeatures) {
-        throw junctionCalendarRefreshNormalizationError(
-          "source_context.unresolved",
-          {
-            ...rowDiagnostic,
-            timestampSemantics: typeof providerTimestamp === "string"
-              ? inferTimestampSemantics(providerTimestamp)
-              : undefined,
-          },
-        );
-      }
+  for (const [index, resourceEntry] of entries.entries()) {
+    const row = resolveJunctionDailyTimeseriesRow(input, resourceEntry, index, rowSettings);
+    if (!row) {
       continue;
     }
-
-    const providerValue = firstValueFromPaths(entry, input.valuePaths);
-    const numericProviderValue = firstNumberFromPaths(entry, input.valuePaths);
-    const value = input.normalizeValue(numericProviderValue, entry);
-    const sparseStartRaw = sparseResource
-      ? firstStringFromPaths(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS)
-      : undefined;
-    const timestamp = sparseStartRaw
-      ? resolveJunctionSparseIntervalTimestamp(
-          entry,
-          sparseStartRaw,
-          input.context,
-          resourceContext.sourceProviderSlug,
-        )
-      : resolveRecordTimestamp(
-          entry,
-          input.context,
-          resourceContext.sourceProviderSlug,
-          JUNCTION_INTERVAL_START_OWNED_TIMESTAMP_PATHS,
-        );
-    const resolvedRowDiagnostic = {
-      ...rowDiagnostic,
-      sourceProvider: normalizeKnownJunctionSourceProviderSlug(resourceContext.sourceProviderSlug),
-      timestampKind: classifyJunctionNormalizationTimestampKind(
-        timestamp.observedAtRaw ?? providerTimestamp,
-      ),
-      timestampSemantics: timestamp.timestampSemantics,
-    };
-    const sampleAt = resolveJunctionDailyAggregateSampleAt(
-      timestamp,
-      input.requireExplicitTimestamp,
-    );
-    const dayKey = input.requireExplicitTimestamp
-      ? timestamp.timestampSemantics === "floating" && timestamp.dayKey
-        ? timestamp.dayKey
-        : extractIsoDatePrefix(sampleAt) ?? undefined
-      : resolveJunctionTimeseriesAggregateDayKey(
-          entry,
-          timestamp,
-          sampleAt,
-          input.context.defaultTimeZone,
-        );
-    const legacyDayKey = input.requireExplicitTimestamp
-      ? dayKey
-      : resolveLegacyJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
-
-    if (
-      value === undefined
-      || (
-        input.requireExplicitTimestamp
-        && !hasValidJunctionExplicitTimeseriesTimestamp(timestamp)
-      )
-      || !sampleAt
-      || !dayKey
-    ) {
-      // Rows without a usable value, timestamp semantics, or target day cannot
-      // certify a complete source day; fail the import instead of certifying a
-      // lossy response as authoritative.
-      if (ownsTemporalFeatures) {
-        let reason: JunctionCalendarRefreshNormalizationFailureReason;
-        if (numericProviderValue === undefined) {
-          reason = providerValue === undefined || providerValue === null
-            ? "daily.value_missing"
-            : "daily.value_non_numeric";
-        } else if (value === undefined) {
-          reason = "daily.value_out_of_range";
-        } else {
-          reason = "daily.timestamp_or_day_unresolved";
-        }
-        throw junctionCalendarRefreshNormalizationError(reason, resolvedRowDiagnostic);
-      }
-      continue;
-    }
+    const {
+      entry, resourceContext, value, timestamp, resolvedRowDiagnostic, sampleAt, dayKey,
+    } = row;
 
     const key = junctionTimeseriesSourceDayKey(resourceContext, dayKey);
     const existing = aggregates.get(key);
@@ -4069,53 +4235,8 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     const timeZone = input.requireExplicitTimestamp
       ? "UTC"
       : firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
-    const providerUnit = trimOptionalToLength(
-      firstStringFromPaths(entry, JUNCTION_INTERVAL_UNIT_PATHS),
-      160,
-    );
-    const fidelityRecordKey = fidelityResource
-      ? buildJunctionTimeseriesFidelityRecordKey({
-          entry,
-          providerUnit,
-          providerValue,
-          resource: input.resource,
-          resourceContext,
-          timestamp,
-        })
-      : undefined;
-    const denseStableIdentity = denseResource
-      ? buildJunctionDenseFidelityStableIdentity(denseResource, entry, resourceContext)
-      : undefined;
-    const denseSelection = denseStableIdentity
-      ? selectedDenseRecordKeys?.get(denseStableIdentity)
-      : undefined;
-    if (
-      denseStableIdentity
-      && fidelityRecordKey
-      && denseSelection?.recordKey !== fidelityRecordKey
-    ) {
+    if (!acceptJunctionDailyFidelityRecord(input, row, existing, fidelitySelection)) {
       continue;
-    }
-    const sparseSelection = fidelityRecordKey
-      ? input.selectedSparseRecords?.get(fidelityRecordKey)
-      : undefined;
-    if (
-      sparseResource
-      && entry.authoritativeEmptyCalendarSet !== true
-      && fidelityRecordKey
-      && input.selectedSparseRecords
-      && !sparseSelection
-    ) {
-      continue;
-    }
-    if (fidelityRecordKey && seenFidelityRecords.has(fidelityRecordKey)) {
-      if (existing) {
-        existing.duplicateSampleCount += 1;
-      }
-      continue;
-    }
-    if (fidelityRecordKey) {
-      seenFidelityRecords.add(fidelityRecordKey);
     }
     const fidelitySample = denseResource
       ? buildJunctionTimeseriesFidelityPoint({
@@ -4127,43 +4248,9 @@ function buildJunctionDailyTimeseriesAggregates(input: {
           value,
       })
       : undefined;
-    const legacyDayKeys = existing?.legacyDayKeys ?? new Set<string>();
-    if (legacyDayKey && legacyDayKey !== dayKey) {
-      legacyDayKeys.add(legacyDayKey);
-    }
-
-    if (!existing) {
-      const aggregate = createJunctionTimeseriesAggregate(
-        sample, dayKey, sampleAt, evidencePartRole, timeZone,
-      );
-      aggregate.authoritativeEmptyCalendarSet = entry.authoritativeEmptyCalendarSet === true;
-      aggregate.fidelitySamples = fidelitySample ? [fidelitySample] : [];
-      aggregate.legacyDayKeys = legacyDayKeys;
-      aggregate.sampleCount = 1;
-      aggregate.sum = value;
-      aggregate.sumSquares = value * value;
-      aggregates.set(key, aggregate);
-      if (fidelityResource) {
-        assertJunctionTimeseriesSourceDayBound(fidelityResource, 1);
-      }
-    } else {
-      appendJunctionTimeseriesSample(existing, sample, sampleAt);
-      existing.authoritativeEmptyCalendarSet ||= entry.authoritativeEmptyCalendarSet === true;
-      if (fidelitySample) {
-        existing.fidelitySamples.push(fidelitySample);
-      }
-      if (fidelityResource) {
-        assertJunctionTimeseriesSourceDayBound(fidelityResource, existing.sampleCount);
-      }
-      existing.sumSquares += value * value;
-      if (value < existing.minValue) {
-        existing.minValue = value;
-      }
-
-      if (value > existing.maxValue) {
-        existing.maxValue = value;
-      }
-    }
+    appendJunctionDailyTimeseriesAggregate({
+      aggregates, key, existing, sample, row, evidencePartRole, timeZone, fidelitySample, fidelityResource,
+    });
 
     const temporalSourceDay = ownsTemporalFeatures
       ? input.context.temporalFeatureSourceDay

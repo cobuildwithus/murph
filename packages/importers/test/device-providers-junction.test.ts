@@ -16423,3 +16423,70 @@ test("Junction migration keeps active Fitbit facts and admits successor only aft
     .map((event) => event.fields?.endAt);
   assert.deepEqual(sleepEnds, ["2026-08-13T10:00:00.000Z"]);
 });
+
+test("Junction daily row reduction preserves revision admission, duplicate counts, and extrema", () => {
+  const newest = {
+    id: "synthetic-reading", timestamp: "2026-04-22T20:00:00.000Z",
+    recorded_at: "2026-04-23T02:00:00.000Z", value: 60,
+  };
+  const data = [
+    newest,
+    { ...newest, recorded_at: "2026-04-23T01:00:00.000Z", value: 20 },
+    { ...newest },
+    { id: "synthetic-earlier", timestamp: "2026-04-22T08:00:00.000Z", value: 0 },
+  ];
+  const normalize = (rows: typeof data) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    timeseries: { stress_level: { groups: {
+      garmin: [{ data: rows, source: { provider: "garmin", type: "watch" } }],
+    } } },
+  });
+  const payload = normalize(data);
+  const artifacts = findJunctionCompactTimeseriesArtifacts(payload, "stress-level");
+  assert.equal(artifacts.length, 1);
+  const content = artifacts[0]?.content;
+  assert.ok(content && typeof content === "object");
+  assert.deepEqual({
+    sampleCount: Reflect.get(content, "sampleCount"),
+    duplicateSampleCount: Reflect.get(content, "duplicateSampleCount"),
+    mean: Reflect.get(content, "meanValue"),
+    min: Reflect.get(content, "minValue"),
+    max: Reflect.get(content, "maxValue"),
+    first: Reflect.get(content, "firstSampleAt"),
+    last: Reflect.get(content, "lastSampleAt"),
+    recorded: Reflect.get(content, "lastRecordedAt"),
+  }, {
+    sampleCount: 2, duplicateSampleCount: 1, mean: 30, min: 0, max: 60,
+    first: "2026-04-22T08:00:00.000Z", last: "2026-04-22T20:00:00.000Z",
+    recorded: "2026-04-23T02:00:00.000Z",
+  });
+  assert.equal(payload.events?.find((event) => event.fields?.metric === "stress-level")?.fields?.value, 30);
+  assert.deepEqual(normalize([...data].reverse()), payload);
+});
+
+test("Junction daily row validation reports the first invalid delivered row before publication", () => {
+  const missing = { timestamp: "2026-04-22T09:00:00.000Z" };
+  const outOfRange = { timestamp: "2026-04-22T10:00:00.000Z", value: 150 };
+  for (const [first, second, reason] of [
+    [missing, outOfRange, "daily.value_missing"],
+    [outOfRange, missing, "daily.value_out_of_range"],
+  ] as const) {
+    assert.throws(() => normalizeCompleteTemporalSourceDay({
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: { blood_oxygen: { groups: {
+        garmin: [{
+          data: [{ timestamp: "2026-04-22T08:00:00.000Z", value: 97 }, first, second],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      } } },
+    }, "2026-04-22"), (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.equal(error.code, "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION");
+      assert.deepEqual(error.diagnostic, {
+        reason, rowOrdinal: 2, sourceProvider: "garmin",
+        timestampKind: "absolute", timestampSemantics: "utc",
+      });
+      return true;
+    });
+  }
+});
