@@ -1393,19 +1393,27 @@ export async function pruneHostedCodexHomeToSessionReferencedRollouts(input: {
   nativeMemoryRetention?: "none" | "read-artifacts";
   operatorHomeRoot: string;
 }): Promise<void> {
-  const collection = await collectHostedCodexContinuity({
-    assistantStateRoot: input.assistantStateRoot,
-    operatorHomeRoot: input.operatorHomeRoot,
-  });
-  const retainedRelativePaths = new Set(
-    collection.entries.map((entry) => entry.codexRolloutRelativePath),
+  const requirements = await readAssistantSessionProviderResumeRequirements(input.assistantStateRoot);
+  const retainedRelativePaths = new Set<string>(
+    input.nativeMemoryRetention === "read-artifacts"
+      ? HOSTED_CODEX_DURABLE_MEMORY_READ_ARTIFACT_RELATIVE_PATHS
+      : [],
   );
+  for (const requirement of requirements) {
+    const normalized = normalizeHostedCodexRolloutRelativePathForProvider({
+      providerSessionId: requirement.providerSessionId,
+      value: requirement.codexRolloutRelativePath,
+    });
+    if (normalized.reason === null) {
+      retainedRelativePaths.add(normalized.relativePath);
+    }
+  }
+  // The pruning walk validates the root, ancestors, and retained regular files.
+  // Snapshot collection also inspects each rollout's ancestors and byte size;
+  // doing that here would repeat the same filesystem work without using its sizes.
   await pruneHostedCodexHomeRoot({
     operatorHomeRoot: input.operatorHomeRoot,
     retainedRelativePaths,
-    shouldRetainRelativePath: input.nativeMemoryRetention === "read-artifacts"
-      ? isHostedCodexMemoryReadArtifactRelativePath
-      : undefined,
   });
 }
 
@@ -2640,12 +2648,6 @@ function parseWorkspaceSnapshotArtifactPath(relativePath: string): {
   };
 }
 
-function isHostedCodexMemoryReadArtifactRelativePath(relativePath: string): boolean {
-  return HOSTED_CODEX_DURABLE_MEMORY_READ_ARTIFACT_RELATIVE_PATHS.has(
-    normalizeWorkspaceSnapshotRelativePath(relativePath),
-  );
-}
-
 function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): boolean {
   const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
 
@@ -2823,7 +2825,6 @@ async function inspectHostedCodexRolloutFile(input: {
 async function pruneHostedCodexHomeRoot(input: {
   operatorHomeRoot: string;
   retainedRelativePaths: ReadonlySet<string>;
-  shouldRetainRelativePath?: (relativePath: string) => boolean;
 }): Promise<void> {
   const codexHomeRoot = path.join(input.operatorHomeRoot, HOSTED_CODEX_HOME_RELATIVE_PATH);
   let codexHomeStats: Stats;
@@ -2848,7 +2849,6 @@ async function pruneHostedCodexHomeRoot(input: {
     directoryPath: codexHomeRoot,
     relativePath: "",
     retainedRelativePaths: input.retainedRelativePaths,
-    shouldRetainRelativePath: input.shouldRetainRelativePath,
   });
   if (!keptAny) {
     await rm(codexHomeRoot, { force: true, recursive: true });
@@ -2859,7 +2859,6 @@ async function pruneHostedCodexHomeDirectory(input: {
   directoryPath: string;
   relativePath: string;
   retainedRelativePaths: ReadonlySet<string>;
-  shouldRetainRelativePath?: (relativePath: string) => boolean;
 }): Promise<boolean> {
   let entries;
   try {
@@ -2871,34 +2870,31 @@ async function pruneHostedCodexHomeDirectory(input: {
     throw error;
   }
 
+  let keptAny = false;
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     const entryPath = path.join(input.directoryPath, entry.name);
     const entryRelativePath = input.relativePath
       ? `${input.relativePath}${path.posix.sep}${entry.name}`
       : entry.name;
-    if (entry.isDirectory()) {
-      const keptDirectory = await pruneHostedCodexHomeDirectory({
+    if (
+      entry.isDirectory()
+      && [...input.retainedRelativePaths].some((retainedPath) =>
+        isStrictAncestorPath(entryRelativePath, retainedPath)
+      )
+    ) {
+      if (await pruneHostedCodexHomeDirectory({
         directoryPath: entryPath,
         relativePath: entryRelativePath,
         retainedRelativePaths: input.retainedRelativePaths,
-        shouldRetainRelativePath: input.shouldRetainRelativePath,
-      });
-      if (!keptDirectory) {
-        await rm(entryPath, { force: true, recursive: true });
+      })) {
+        keptAny = true;
+        continue;
       }
-      continue;
-    }
-
-    if (
-      entry.isFile()
-      && (
-        input.retainedRelativePaths.has(entryRelativePath)
-        || input.shouldRetainRelativePath?.(entryRelativePath) === true
-      )
-    ) {
+    } else if (entry.isFile() && input.retainedRelativePaths.has(entryRelativePath)) {
       try {
         const fileStats = await lstat(entryPath);
         if (fileStats.isFile() && fileStats.nlink === 1) {
+          keptAny = true;
           continue;
         }
       } catch (error) {
@@ -2908,19 +2904,14 @@ async function pruneHostedCodexHomeDirectory(input: {
         throw error;
       }
     }
+    // No retained descendant needs this subtree. Delete it directly rather than
+    // listing every private cache file first. rm does not follow symbolic links.
     await rm(entryPath, { force: true, recursive: true });
   }
 
-  let remainingEntries;
-  try {
-    remainingEntries = await readdir(input.directoryPath);
-  } catch (error) {
-    if (isMissingPathError(error)) {
-      return false;
-    }
-    throw error;
-  }
-  return remainingEntries.length > 0;
+  // Restore owns a quiescent Codex home, so the completed walk is the result;
+  // a second directory listing would only rediscover the files we just kept.
+  return keptAny;
 }
 
 function createHostedCodexContinuityDiagnostics(input: {
