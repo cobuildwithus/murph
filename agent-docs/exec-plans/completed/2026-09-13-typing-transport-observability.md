@@ -1,6 +1,6 @@
 # Restore typing handoff and diagnose stalled provider transport
 
-Status: active
+Status: completed
 Created: 2026-09-13
 Updated: 2026-09-13
 
@@ -83,4 +83,21 @@ warm Codex transport stalls diagnosable and obtain a bounded-recovery recommenda
   qualification. Timeout policy is a follow-up to this typing/diagnostic PR.
   The diagnostic patch labels source scope separately from observed active-turn
   correlation so thread warnings do not masquerade as turn-specific proof.
-  Final PR review, exact-head CI and plan closeout remain pending.
+  No timeout configuration was changed in this PR.
+
+## Final review
+
+- Parent review confirms the capability handoff, explicit denial and cancellation
+  owners, strict warm event acceptance, sanitized optional metadata, and proof
+  through the production importer and Linq HTTP boundary.
+- Final ReviewGPT round 1: PASS at
+  `649350d15f0716cf2a67d7cdd7fee40114ce43af`, with zero findings to resolve.
+  Hercules lane selected because the earlier consultation's Phlebas launch
+  failed. Requested and captured model: GPT-6 Pro. Capture took approximately
+  366 seconds; the exact accepted turn, full snapshot, response hash and
+  completion marker were verified. The review checked all 13 patch files and
+  reasoned about provider authority and warm event isolation; it did not rerun tests.
+- Changelog source links PR #3422; generation and all 10 page tests pass.
+- The plan closeout is explanatory documentation only. Final-head CI remains
+  tracked on PR #3422; deployment and native timeout qualification are separate.
+Completed: 2026-09-13
