@@ -497,7 +497,7 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
           fallback_text: 'Your daily nutrition.',
           interactive: true,
           layout: {
-            caption: '2026-07-28 · 4 logged meals',
+            caption: 'Jul 28 · 4 meals',
             image_url: expect.stringMatching(
               /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
             ),

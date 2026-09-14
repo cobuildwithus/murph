@@ -1848,6 +1848,7 @@ async function admitHostedLinqExistingDirectMemberTx(admission: {
         // signal path that repairs a missing workspace row.
         wakeHandoffs: [{
           eventId: input.event.event_id,
+          linqChatId: summary.chatId,
           mailboxItemId: existingMailboxItem.id,
           source: "linq",
           userId: existingMember.id,

@@ -5703,6 +5703,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           prisma,
           rawBody: buildHostedLinqWebhookBody({
             eventId: `evt_null_preflight_${authority}`,
+            service: authority === "duplicate" ? "iMessage" : undefined,
           }),
           signature: null,
           timestamp: null,
@@ -5735,7 +5736,69 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(
           authority === "consent" ? 1 : 0,
         );
+        if (authority === "duplicate") {
+          const { completeHostedLinqInstantFirstTurn } = await vi.importActual<
+            typeof import("@/src/lib/hosted-onboarding/linq-instant-first-turn")
+          >("@/src/lib/hosted-onboarding/linq-instant-first-turn");
+          const wakeHandoff: Parameters<typeof completeHostedLinqInstantFirstTurn>[0]["wakeHandoff"]
+            | undefined = mocks.maybeHandoffHostedExecutionWebhookWake.mock.calls.at(-1)?.[0]?.wakeHandoff;
+          const participantContact = createHostedLinqParticipantContact({
+            kind: "phone",
+            value: "+15551234567",
+          });
+          if (!wakeHandoff || !participantContact) {
+            throw new Error("Expected a duplicate wake and valid participant contact.");
+          }
+          expect(wakeHandoff).toMatchObject({
+            eventId: "evt_null_preflight_duplicate",
+            mailboxItemId: "mailbox_existing_null_preflight",
+            source: "linq",
+            userId: "member_123",
+          });
+          expect(wakeHandoff).not.toHaveProperty("wakeMailboxCheckpoint");
+          const acceptedMailboxItem = {
+            id: "mailbox_accepted_first_turn",
+            lane: "conversation" as const,
+            laneSeq: "7",
+          };
+          mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce(acceptedMailboxItem);
+
+          // Feed the real duplicate planner's handoff to the real completion
+          // owner. An already-saved reply must reconcile without another send.
+          await expect(completeHostedLinqInstantFirstTurn({
+            generation: { kind: "completed" },
+            inboundMessageId: "msg_123",
+            participantContact,
+            // The completed branch uses the mocked mailbox port; this ingress
+            // fixture intentionally omits unrelated Prisma client methods.
+            // @ts-expect-error -- deliberate narrow fixture for this owner boundary.
+            prisma,
+            recipientPhoneNumber: "+15550000000",
+            service: "iMessage",
+            wakeHandoff,
+          })).resolves.toEqual({
+            kind: "accepted",
+            wakeHandoff: {
+              eventId: "evt_null_preflight_duplicate",
+              linqChatId: "chat_123",
+              mailboxItemId: acceptedMailboxItem.id,
+              source: "linq",
+              userId: "member_123",
+              wakeMailboxCheckpoint: { lane: "conversation", laneSeq: "7" },
+            },
+          });
+          expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenLastCalledWith({
+            dedupeKey: expect.stringMatching(/^linq\.instant-first-turn\./u),
+            prisma,
+            userId: "member_123",
+          });
+          expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+          expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx)
+            .not.toHaveBeenCalled();
+          expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+        }
       } finally {
+        mocks.readHostedMailboxItemByDedupeKey.mockReset().mockResolvedValue(null);
         restoreRootMock();
       }
     },
