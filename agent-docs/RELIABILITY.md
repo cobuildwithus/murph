@@ -1714,7 +1714,11 @@ Last verified: 2026-09-04
   hints and superseded scheduled ticks for its exact member, provider,
   connection, and connection epoch. A scheduled tick is superseded only when
   its explicit cadence is strictly earlier than the retained owner's; equal or
-  missing cadence cannot prove reconciliation ran. This transfers the hints to
+  missing cadence cannot prove reconciliation ran. A webhook's source occurrence
+  time is metadata, so a future source timestamp cannot block accepted plain
+  dirty hints or admission through their retained owner, including after restore.
+  Scheduled ticks keep their time checks and retained jobs keep their retry
+  deadlines. This transfers the hints to
   the existing durable continuation before dirty input is fetched; it never discards its provider jobs or backoff. A
   Same-epoch connection-established work may join this admission when its
   initial jobs have explicit, non-colliding identities and fit the existing
