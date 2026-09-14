@@ -495,7 +495,7 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
             team_id: 'G9DJH2XUMK',
           },
           fallback_text: 'Your daily nutrition.',
-          interactive: false,
+          interactive: true,
           layout: {
             caption: '2026-07-28 · 4 logged meals',
             image_url: expect.stringMatching(
@@ -551,7 +551,7 @@ test('linq app-card 2xx without provider identity remains ambiguous after one re
           team_id: 'G9DJH2XUMK',
         },
         fallback_text: 'Your daily nutrition.',
-        interactive: false,
+        interactive: true,
         layout: buildLinqIMessageAppLayout(NUTRITION_CARD),
         type: 'imessage_app',
         url: buildLinqIMessageAppCardUrl(NUTRITION_CARD),
@@ -4232,7 +4232,7 @@ test('device sync client wraps transport and http failures with control-plane co
 })
 
 
-test('linq totals-only card uses one static message with the bounded introduction even for installed apps', async () => {
+test('linq totals-only card requests one interactive message and keeps the bounded fallback introduction', async () => {
   const card = { ...NUTRITION_CARD, mealCount: 1,
     totals: { calories: { total: 610, mealCount: 1 }, proteinGrams: { total: 28, mealCount: 1 },
       carbsGrams: { total: 84, mealCount: 1 }, fatGrams: { total: 17, mealCount: 1 }, fiberGrams: { total: 14, mealCount: 1 } },
@@ -4247,7 +4247,7 @@ test('linq totals-only card uses one static message with the bounded introductio
   }, { env: { LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3', LINQ_API_TOKEN: 'linq-token' }, fetchImplementation })
   expect(fetchImplementation).toHaveBeenCalledTimes(1)
   expect(request).toMatchObject({ message: { idempotency_key: 'totals-intro', parts: [{
-    type: 'imessage_app', interactive: false,
+    type: 'imessage_app', interactive: true,
     layout: { subcaption: DAILY_NUTRITION_OPTIONAL_GOALS_INTRO },
   }] } })
   expect((request as { message?: { parts?: unknown[] } } | null)?.message?.parts).toHaveLength(1)
