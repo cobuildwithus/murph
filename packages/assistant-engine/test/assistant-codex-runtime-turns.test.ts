@@ -2238,7 +2238,11 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     expect(codexMocks.spawn).toHaveBeenCalledOnce()
   })
 
-  it('emits metadata-only Codex transport diagnostics for stream retry and fallback', async () => {
+  it.each([
+    { timeoutMessage: 'idle timeout waiting for websocket', timeoutPhase: 'websocket-read', transport: 'websocket' },
+    { timeoutMessage: 'idle timeout sending websocket request', timeoutPhase: 'websocket-send', transport: 'websocket' },
+    { timeoutMessage: 'idle timeout waiting for SSE', timeoutPhase: 'http-read', transport: 'http' },
+  ])('emits metadata-only Codex transport diagnostics for $timeoutPhase and fallback', async ({ timeoutMessage, timeoutPhase, transport }) => {
     const workingDirectory = await createTempDir('assistant-codex-transport-diagnostics-')
     const onTraceEvent = vi.fn()
 
@@ -2293,7 +2297,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
                     },
                   },
                   additionalDetails:
-                    'stream disconnected before completion: idle timeout waiting for websocket at https://api.openai.com/v1/responses',
+                    `stream disconnected before completion: ${timeoutMessage} at https://api.openai.com/v1/responses`,
                 },
                 threadId: 'thread-transport',
                 turnId: 'turn-transport',
@@ -2366,6 +2370,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       type: 'assistant.codex.transport_diagnostics',
       codexTransportAdditionalDetailsPresent: true,
       codexTransportEventKind: 'stream-idle-timeout',
+      codexTransportTimeoutPhase: timeoutPhase,
       codexTransportFallbackActivated: false,
       codexTransportIdleTimeout: true,
       codexTransportRetryExhausted: false,
@@ -2375,7 +2380,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       codexTransportStreamDisconnected: true,
       codexTransportTerminalAfterProviderAction: false,
       codexTransportThreadIdPresent: true,
-      codexTransportTransport: 'websocket',
+      codexTransportTransport: transport,
       codexTransportTurnIdPresent: true,
       codexTransportWillRetry: true,
     })

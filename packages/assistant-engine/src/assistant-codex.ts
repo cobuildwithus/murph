@@ -3417,9 +3417,12 @@ function buildCodexTransportDiagnosticsTraceEvent(input: {
   const retryProgress = readCodexTransportRetryProgress(diagnosticText)
   const fallbackActivated =
     normalizedText.includes('falling back from websockets to https transport')
-  const idleTimeout =
-    normalizedText.includes('idle timeout waiting for websocket') ||
-    normalizedText.includes('idle timeout waiting for sse')
+  const [, timeoutPhase] = ([
+    ['idle timeout sending websocket request', 'websocket-send'],
+    ['idle timeout waiting for websocket', 'websocket-read'],
+    ['idle timeout waiting for sse', 'http-read'],
+  ] as const).find(([phrase]) => normalizedText.includes(phrase)) ?? ['', null]
+  const idleTimeout = timeoutPhase !== null
   const streamDisconnected =
     normalizedText.includes('stream disconnected') ||
     normalizedText.includes('response stream disconnected')
@@ -3454,6 +3457,7 @@ function buildCodexTransportDiagnosticsTraceEvent(input: {
     codexTransportEventKind: eventKind,
     codexTransportFallbackActivated: fallbackActivated,
     codexTransportIdleTimeout: idleTimeout,
+    codexTransportTimeoutPhase: timeoutPhase,
     codexTransportProviderActionCount: input.providerActionCount,
     codexTransportRetryCount: retryProgress?.retryCount ?? null,
     codexTransportRetryMax: retryProgress?.retryMax ?? null,

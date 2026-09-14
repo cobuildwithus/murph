@@ -135,8 +135,10 @@
   },
   "devDependencies": {
     "@openai/codex": "0.153.4",
+    "@types/ws": "8.18.1",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
+    "ws": "8.21.0",
     "zod": "^4.4.3"
   }
 }

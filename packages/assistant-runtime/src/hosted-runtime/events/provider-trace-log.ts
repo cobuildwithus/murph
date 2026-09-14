@@ -166,6 +166,9 @@ const HOSTED_ASSISTANT_CODEX_APP_SERVER_COLD_START_REASON_VALUES = new Set([
   "previous-turn-abort",
   "previous-turn-failure",
 ]);
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_TIMEOUT_PHASE_VALUES = new Set([
+  "websocket-send", "websocket-read", "http-read",
+]);
 const HOSTED_ASSISTANT_CODEX_TRANSPORT_EVENT_KIND_VALUES = new Set([
   "stream-disconnected",
   "stream-idle-timeout",
@@ -1139,6 +1142,11 @@ function readHostedAssistantCodexTransportDiagnosticTrace(
     schema: ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
   };
 
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexTransportTimeoutPhase",
+    readHostedAssistantProviderDiagnosticAllowedString(record, "codexTransportTimeoutPhase", HOSTED_ASSISTANT_CODEX_TRANSPORT_TIMEOUT_PHASE_VALUES),
+  );
   maybeSetHostedAssistantProviderDiagnosticDetail(
     details,
     "codexTransportScope",
