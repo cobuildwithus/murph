@@ -426,7 +426,7 @@ function PurchaseScreenContent({
         {actions.canResume ? (
           <Button
             type="button"
-            size="lg"
+            size="xl"
             className="w-full"
             disabled={checkoutInFlight}
             onClick={onResume}
@@ -438,7 +438,7 @@ function PurchaseScreenContent({
           <Button
             type="button"
             variant="outline"
-            size="lg"
+            size="xl"
             className="w-full"
             aria-busy={purchase.operation === "canceling_checkout"}
             disabled={checkoutInFlight}
@@ -456,7 +456,7 @@ function PurchaseScreenContent({
         {actions.canRetry ? (
           <Button
             type="button"
-            size="lg"
+            size="xl"
             className="w-full"
             aria-busy={purchase.operation === "opening_checkout"}
             disabled={checkoutInFlight}
@@ -474,7 +474,7 @@ function PurchaseScreenContent({
         {actions.canCheckAgain ? (
           <Button
             type="button"
-            size="lg"
+            size="xl"
             className="w-full"
             disabled={checkoutInFlight}
             onClick={onCheckAgain}
@@ -486,7 +486,7 @@ function PurchaseScreenContent({
           <Button
             type="button"
             variant="ghost"
-            size="lg"
+            size="xl"
             className="w-full"
             onClick={onClose}
           >
@@ -514,7 +514,7 @@ function CloseScreenContent({
       <Button
         type="button"
         variant="outline"
-        size="lg"
+        size="xl"
         className="w-full"
         onClick={onClose}
       >
@@ -680,7 +680,7 @@ function SelectionActions({
         <Button
           type="button"
           variant="ghost"
-          size="lg"
+          size="xl"
           className="w-full"
           onClick={onClose}
         >

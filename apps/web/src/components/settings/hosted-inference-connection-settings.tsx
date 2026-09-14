@@ -488,7 +488,7 @@ export function HostedInferenceConnectionPane(
             </Field>
           </FieldSet>
           <div className="flex flex-wrap items-center gap-2">
-            <Button disabled={disabled} type="submit">
+            <Button size="lg" disabled={disabled} type="submit">
               {pendingAction === "connection" ? (
                 <Spinner aria-hidden="true" />
               ) : null}
@@ -498,6 +498,7 @@ export function HostedInferenceConnectionPane(
             </Button>
             {connection ? (
               <Button
+                size="lg"
                 disabled={disabled}
                 onClick={() => {
                   setEditing(false);

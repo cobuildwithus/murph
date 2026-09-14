@@ -315,10 +315,10 @@ export function AssistantProviderDialog({
               onConnectionChange={(next) => onConnectionChange?.(next)}
               selected={connection?.selected === true}
             />
-            <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
+            <div className="flex flex-col items-stretch justify-between sm:flex-row sm:items-center gap-2 border-t border-border pt-4">
               <Button
                 onClick={() => setPane("list")}
-                size="sm"
+                size="lg"
                 type="button"
                 variant="ghost"
               >
@@ -331,7 +331,7 @@ export function AssistantProviderDialog({
                     onRoutingChange(CUSTOM_INFERENCE_ROUTING);
                     changeOpen(false);
                   }}
-                  size="sm"
+                  size="lg"
                   type="button"
                   variant={
                     routing === CUSTOM_INFERENCE_ROUTING ? "outline" : "default"

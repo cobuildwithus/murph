@@ -1,5 +1,6 @@
 "use client";
 
+import { CircleCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
@@ -22,6 +23,27 @@ type MethodResponse = { ok: true; methods: Methods; initialMessagingSetupAllowed
 function allowsInitialMessagingSetup(state: MethodResponse | null, method: HostedCredentialChange["method"], operation: HostedCredentialChange["operation"]) {
   return method !== "email" && operation === "set" && state !== null
     && !state.requiresLogin && state.initialMessagingSetupAllowed === true;
+}
+
+function loginMethodDialogCopy(method: HostedCredentialChange["method"], operation: HostedCredentialChange["operation"], previous: string | null, saved: boolean) {
+  const label = method === "telegram" ? "Telegram" : method;
+  if (saved) {
+    const name = { email: "Email", phone: "Phone number", telegram: "Telegram" }[method];
+    const action = operation === "remove" ? "removed" : previous ? "updated" : "added";
+    const destination = { email: "this email", phone: "this phone number", telegram: "Telegram" }[method];
+    return {
+      title: `${name} ${action}`,
+      description: operation === "remove"
+        ? "This sign-in method is disconnected. Your other devices have been signed out."
+        : `You can now sign in with ${destination}.`,
+    };
+  }
+  return {
+    title: `${operation === "remove" ? "Remove" : previous ? "Change" : "Add"} ${label}`,
+    description: operation === "remove" || previous
+      ? "This changes where you can sign in and message Murph. Other sessions will be signed out; this browser stays signed in."
+      : null,
+  };
 }
 
 export function HostedLoginMethodEditor({ method, operation, onOpenChange, onSaved, onActiveChange, presentation = "dialog" }: {
@@ -119,13 +141,10 @@ export function HostedLoginMethodEditor({ method, operation, onOpenChange, onSav
 
   function renderContent() {
     let content;
-    if (showSavedConfirmation) content = <>
-      <SettingsStatusLine message={operation === "remove" ? `${label === "Telegram" ? label : "Your " + label} was removed.` : "Your account is updated."} tone="success" />
-      <Button type="button" onClick={() => onOpenChange(false)}>Done</Button>
-    </>;
+    if (showSavedConfirmation) content = <Button type="button" size="xl" onClick={() => onOpenChange(false)}>Done</Button>;
     else if (current?.requiresLogin) content = <>
       <p className="text-sm text-muted-foreground">Sign in to approve changes to your login methods.</p>
-      <Button type="button" onClick={() => { onOpenChange(false); openAuthDialog(); }}>Sign in to continue</Button>
+      <Button type="button" size="xl" onClick={() => { onOpenChange(false); openAuthDialog(); }}>Sign in to continue</Button>
     </>;
     else if (needsInitialPasskey) content = <>
       <p className="text-sm text-muted-foreground">Set up a passkey to protect changes to your connected accounts.</p>
@@ -135,12 +154,12 @@ export function HostedLoginMethodEditor({ method, operation, onOpenChange, onSav
     else if (operation === "remove") content = <>
       <p className="break-words text-sm">{method === "phone" && previous ? formatMaskedPhoneNumber(previous) : method === "email" ? previous : "Your connected Telegram account"}</p>
       {Object.values(methods ?? {}).filter(Boolean).length <= 1 ? <p className="text-sm text-muted-foreground">Add another login method before removing this one.</p>
-        : <Button type="button" variant="destructive" disabled={pending || !previous} onClick={() => void submitChange(change(null), {})}>{pending ? "Removing..." : `Approve and remove ${label}`}</Button>}
+        : <Button type="button" size="xl" variant="destructive" disabled={pending || !previous} onClick={() => void submitChange(change(null), {})}>{pending ? "Removing..." : `Approve and remove ${label}`}</Button>}
     </>;
     else if (method === "telegram") content = telegram ? <>
       <p className="text-sm text-muted-foreground">Telegram is verified. Approve this account change with your passkey.</p>
-      <Button type="button" disabled={pending} onClick={() => void submitChange(telegram.change, { idToken: telegram.idToken })}>{pending ? "Saving..." : "Approve and save"}</Button>
-      <Button type="button" variant="ghost" disabled={pending} onClick={() => { setTelegram(null); setError(null); }}>Use another Telegram account</Button>
+      <Button type="button" size="xl" disabled={pending} onClick={() => void submitChange(telegram.change, { idToken: telegram.idToken })}>{pending ? "Saving..." : "Approve and save"}</Button>
+      <Button type="button" size="xl" variant="ghost" disabled={pending} onClick={() => { setTelegram(null); setError(null); }}>Use another Telegram account</Button>
     </> : <HostedTelegramProofButton purpose="credential" label="Connect Telegram" onProof={async (idToken, signal) => {
       await readActionMethods(signal);
       const prepared = await requestHostedOnboardingJson<{ change: HostedCredentialChange; challenge: SensitiveActionChallengeResponse | null }>({
@@ -166,15 +185,17 @@ export function HostedLoginMethodEditor({ method, operation, onOpenChange, onSav
 
   const body = <div className="flex flex-col gap-4" inert={presentation === "inline" && saved}>{renderContent()}{error && !saved ? <>
     <SettingsStatusLine message={error} tone="destructive" />
-    {!methods ? <Button type="button" variant="outline" onClick={() => { setError(null); setAttempt((value) => value + 1); }}>Try again</Button> : null}
+    {!methods ? <Button type="button" size="xl" variant="outline" onClick={() => { setError(null); setAttempt((value) => value + 1); }}>Try again</Button> : null}
   </> : null}</div>;
   if (presentation === "inline") return body;
+  const copy = loginMethodDialogCopy(method, operation, previous, showSavedConfirmation);
   return <Dialog open onOpenChange={onOpenChange}>
     <DialogContent className="max-w-[min(30rem,calc(100vw-2rem))] gap-6 border border-border/80 bg-popover p-6 text-popover-foreground ring-border sm:max-w-[30rem] md:p-8">
-      <DialogHeader className="gap-2 pr-10">
-        <DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal text-popover-foreground">{operation === "remove" ? "Remove" : previous ? "Change" : "Add"} {label}</DialogTitle>
-        {(operation === "remove" || previous) && <DialogDescription className="max-w-[34ch] text-base/7 text-muted-foreground">
-          This changes where you can sign in and message Murph. Other sessions will be signed out; this browser stays signed in.
+      <DialogHeader className="gap-2 pr-10" aria-live="polite" aria-atomic="true">
+        {showSavedConfirmation ? <CircleCheck className="mb-2 size-8 text-primary" strokeWidth={1.6} aria-hidden="true" /> : null}
+        <DialogTitle className="font-serif text-2xl/8 font-semibold tracking-normal text-popover-foreground">{copy.title}</DialogTitle>
+        {copy.description && <DialogDescription className="max-w-[34ch] text-base/7 text-muted-foreground">
+          {copy.description}
         </DialogDescription>}
       </DialogHeader>
       {body}

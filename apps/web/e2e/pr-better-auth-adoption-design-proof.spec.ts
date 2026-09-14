@@ -242,3 +242,104 @@ for (const width of [390, 1280]) {
     expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   });
 }
+
+for (const width of [390, 1280]) {
+  test(`account change confirmations at ${width}px`, async ({ page }) => {
+    test.setTimeout(180_000);
+    await page.setViewportSize({ width, height: 900 });
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator.credentials, "get", { value: async () => ({
+        id: "synthetic-passkey", rawId: new Uint8Array([1]).buffer, type: "public-key",
+        response: { authenticatorData: new Uint8Array([1]).buffer, clientDataJSON: new Uint8Array([1]).buffer, signature: new Uint8Array([1]).buffer, userHandle: null },
+        getClientExtensionResults: () => ({}),
+      }) });
+    });
+    let existingEmail: string | null = null;
+    await page.route("**/api/settings/login-methods", (route) => route.fulfill({ json: {
+      ok: true, methods: { email: existingEmail, phone: "+12025550152", telegram: null },
+    } }));
+    await page.route("**/api/settings/approval-passkeys", (route) => route.fulfill({ json: { initialEnrollmentAllowed: false } }));
+    await page.route("**/api/settings/login-methods/challenge", (route) => route.fulfill({ json: { token: "synthetic-challenge" } }));
+    await page.route("**/api/settings/approval-passkeys/authenticate", (route) => route.fulfill({ json: {
+      method: "passkey", options: { challenge: "c3ludGhldGlj", rpId: "localhost" },
+    } }));
+    await page.route("**/api/settings/login-methods/otp/*", (route) => route.fulfill({ json: { ok: true } }));
+    await page.route("**/api/settings/login-methods/remove", (route) => route.fulfill({ json: { ok: true } }));
+    await page.goto("/design?tab=components", { waitUntil: "load", timeout: 90_000 });
+    const study = page.locator("#better-auth-adoption");
+    await study.evaluate((element) => element.removeAttribute("inert"));
+    for (const action of ["added", "updated", "removed"] as const) {
+      const trigger = action === "added" ? "Add Email" : action === "updated" ? "Change Email" : "Remove Email";
+      await study.locator(`[data-auth-study="${action === "added" ? "unconnected" : "connections"}"]`).getByRole("button", { name: trigger, exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      if (action === "removed") {
+        await expect(dialog.getByRole("button", { name: "Approve and remove email" })).toHaveCSS("height", "56px");
+        await dialog.getByRole("button", { name: "Approve and remove email" }).click();
+      } else {
+        await dialog.getByLabel("Your email", { exact: true }).fill("new@example.test");
+        await dialog.getByRole("button", { name: "Email me a code" }).click();
+        await dialog.locator('input[autocomplete="one-time-code"]').fill("123456");
+        await dialog.getByRole("button", { name: "Approve and save" }).click();
+      }
+      await expect(dialog.getByRole("heading", { name: `Email ${action}`, exact: true })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Done", exact: true })).toHaveCSS("height", "56px");
+      await expect(dialog).not.toContainText("will be signed out");
+      await capture(page, dialog, `email-${action}-${width}`);
+      const box = await dialog.boundingBox();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+      await dialog.getByRole("button", { name: "Done", exact: true }).click();
+      await expect(dialog).not.toBeVisible();
+      existingEmail = "member@example.test";
+    }
+  });
+}
+
+for (const width of [390, 1280]) {
+  test(`other dialog action sizes at ${width}px`, async ({ page }) => {
+    test.setTimeout(90_000);
+    page.setDefaultTimeout(10_000);
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/design?tab=components", { waitUntil: "load", timeout: 90_000 });
+    const removals = page.locator('[data-design-component="linked-account-removal"]');
+    for (const button of await removals.locator("button").all()) await expect(button).toHaveCSS("height", "56px");
+    await capture(page, removals, `linked-account-actions-${width}`);
+    const share = page.getByRole("button", { name: "Download image", exact: true, includeHidden: true }).first();
+    await expect(share).toHaveCSS("height", "44px");
+    await capture(page, share.locator(".."), `share-actions-${width}`);
+    await page.getByRole("button", { name: "Preview capacity response", exact: true }).click();
+    let dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("button", { name: "Close", exact: true }).first()).toHaveCSS("height", "56px");
+    await capture(page, dialog, `usage-capacity-${width}`);
+    await page.keyboard.press("Escape");
+    await page.goto("/screenshots/settings?study=health-data-withdrawal", { waitUntil: "load" });
+    dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("button", { name: "Withdraw consent", exact: true })).toHaveCSS("height", "56px");
+    await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toHaveCSS("height", "56px");
+    await capture(page, dialog, `consent-actions-${width}`);
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    const inference = page.locator("#settings-custom-inference");
+    await inference.evaluate((element) => {
+      for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) ancestor.removeAttribute("inert");
+    });
+    await expect(inference.getByRole("button", { name: "Verify and save", exact: true })).toHaveCSS("height", "44px");
+    const endpoint = inference.locator('[data-design-variant="custom-venice-enabled"]');
+    await endpoint.hover();
+    await endpoint.getByRole("button", { name: /Change inference routing/ }).click();
+    dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Manage", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Back to providers", exact: true })).toHaveCSS("height", "44px");
+    await capture(page, dialog, `endpoint-actions-${width}`);
+    await page.keyboard.press("Escape");
+    await page.goto("/screenshots/health", { waitUntil: "load", timeout: 60_000 });
+    const records = page.locator("#clinical-records");
+    await expect(records).toHaveAttribute("data-preview-ready", "true");
+    await records.evaluate((element) => {
+      for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) ancestor.removeAttribute("inert");
+    });
+    await records.getByRole("button", { name: "Disconnect", exact: true }).first().click();
+    dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("button", { name: "Disconnect", exact: true })).toHaveCSS("height", "56px");
+    await capture(page, dialog, `records-actions-${width}`);
+  });
+}

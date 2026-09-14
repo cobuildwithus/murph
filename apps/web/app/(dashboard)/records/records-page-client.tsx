@@ -324,7 +324,7 @@ function ImportCounts({ importedCount, reviewCount, skippedExistingCount }: { im
   );
 }
 
-function DisconnectDialog({
+export function DisconnectDialog({
   connection,
   errorMessage,
   onConfirm,
@@ -351,6 +351,7 @@ function DisconnectDialog({
         ) : null}
         <DialogFooter className="-mx-6 -mb-6 px-6 pb-6 md:-mx-7 md:-mb-7 md:px-7 md:pb-7">
           <Button
+            size="xl"
             disabled={pending}
             onClick={() => onOpenChange(false)}
             type="button"
@@ -359,6 +360,7 @@ function DisconnectDialog({
             Cancel
           </Button>
           <Button
+            size="xl"
             disabled={pending}
             onClick={onConfirm}
             type="button"

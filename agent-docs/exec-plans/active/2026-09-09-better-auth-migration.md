@@ -674,3 +674,11 @@ activation and the broader live-auth qualification remain incomplete.
 - Completed recovery has its own success heading and confirmation, with an explicit action to create a replacement backup through the existing passkey-authorized flow. Canceling that approval preserves the completed recovery state and permits dismissal.
 - Product UX: Ready for Preview. Twelve client cases pass, including stale-primary recovery requiring login and canceled WebAuthn. Two composed Chromium journeys cover the single entry action, both choices, phone/desktop creation, exact clipboard and downloaded-file contents, retained dialog state, completion, recovery entry, returning to the choices without a mutation, and creating a new backup after recovery. Synthetic screenshots were inspected; backend proof is mocked in these browser journeys.
 - Verification: Web typecheck, changed-file ESLint, diff checks, and complexity pass; no new hotspots. The existing unshipped adoption changelog covers this follow-up. Frontend interaction exemption retains the earlier sensitive-rule review.
+
+## Account dialog confirmation follow-up
+
+- Outcome: completed email, phone, and Telegram changes show an outcome-specific heading, checkmark, plain confirmation, and a full-size Done action. Inline onboarding retains its existing continuity behavior.
+- Dialog audit: normalize undersized credential, disconnect, consent, usage status, and endpoint actions using existing button variants. Share actions retain a minimum touch height in their mobile column layout. Compact row triggers and icon controls retain their intended density.
+- Boundary: presentation only; authorization, provider proofs, persistence, and session policy are unchanged. Existing production components are represented in the component catalog and settings/health screenshot studies.
+- Verification: eight focused client suites, Web typecheck, changed-file ESLint, and complexity checks cover the affected components. Browser proof covers add/change/remove confirmation and other dialog actions at phone/desktop widths with synthetic inputs. Final render review and Preview publication are recorded in the PR.
+- Review: frontend presentation exemption retains the earlier sensitive-rule review. The existing unshipped adoption changelog covers this follow-up.

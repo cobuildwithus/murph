@@ -74,7 +74,7 @@ test("adding a method binds the destination and requires explicit approval after
   }));
   expect(mocks.saved).toHaveBeenCalledOnce();
   expect(mocks.refresh).toHaveBeenCalledOnce();
-  expect(rendered.container.textContent).toContain("Your account is updated.");
+  expect(rendered.container.textContent).toContain("Phone number added");
   await rendered.cleanup();
 });
 
@@ -85,6 +85,8 @@ test("removal explains other-session revocation and signs only the current ident
   const selected = { method: "email", operation: "remove", expectedIdentity: methods.email, value: null };
   expect(mocks.sign).toHaveBeenCalledWith(challenge, selected);
   expect(mocks.request).toHaveBeenLastCalledWith(expect.objectContaining({ url: "/api/settings/login-methods/remove", payload: { change: selected, authorization } }));
+  expect(rendered.container.textContent).toContain("Email removed");
+  expect(rendered.container.textContent).not.toContain("will be signed out");
   await rendered.cleanup();
 });
 
@@ -100,7 +102,7 @@ test("lost commit responses refresh canonical state without replay or a false su
   expect(mocks.refresh).toHaveBeenCalledOnce();
   expect(mocks.request.mock.calls.filter(([input]) => input.url.endsWith("/remove"))).toHaveLength(1);
   expect(rendered.container.textContent).toContain("Refresh Settings.");
-  expect(rendered.container.textContent).not.toContain("was removed.");
+  expect(rendered.container.textContent).not.toContain("Email removed");
   expect(mocks.saved).not.toHaveBeenCalled();
   await rendered.cleanup();
 });
@@ -249,7 +251,7 @@ test("inline phone setup renders the actual input with no dialog heading or inte
   await act(async () => { await mocks.contact!.onVerify("+12025550195", "123456", new AbortController().signal); });
   expect(mocks.refresh).toHaveBeenCalledOnce();
   expect(rendered.container.querySelector('input[type="tel"]')).not.toBeNull();
-  expect(rendered.container.textContent).not.toContain("Your account is updated.");
+  expect(rendered.container.textContent).not.toContain("Phone number added");
   expect(rendered.container.querySelector("[inert]")).not.toBeNull();
   await rendered.cleanup();
 });

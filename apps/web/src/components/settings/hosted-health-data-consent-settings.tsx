@@ -336,7 +336,7 @@ export function HostedHealthDataWithdrawalConfirmation({
           className="w-full"
           disabled={pending}
           onClick={onConfirm}
-          size="lg"
+          size="xl"
           type="button"
           variant="secondary"
         >
@@ -347,7 +347,7 @@ export function HostedHealthDataWithdrawalConfirmation({
           disabled={pending}
           onClick={onCancel}
           ref={cancelRef}
-          size="default"
+          size="xl"
           type="button"
           variant="ghost"
         >
