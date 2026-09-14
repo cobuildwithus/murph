@@ -156,7 +156,7 @@ test('natural sender bounds the datagram and accounts for trimmed command summar
   const originalClock = process.hrtime.bigint
   let clock = originalClock()
   process.hrtime.bigint = () => clock
-  const commands = ['goal list', 'family list', 'memory show', 'provider list',
+  const commands = ['food search-labels', 'knowledge upsert', 'knowledge append-section', 'provider list',
     'capture show', 'event list', 'allergy list', 'allergy show', 'audit list',
     'audit show', 'audit tail', 'automation list', 'condition list', 'capture list',
     'food list', 'meal list']
@@ -172,7 +172,9 @@ test('natural sender bounds the datagram and accounts for trimmed command summar
           for (const phase of CLI_TIMING_PHASES) await timeCliPhase(phase, async () => {
             clock += 1_000_000_000_000n
           })
-          if (failed) throw Error('synthetic')
+          if (failed) throw Object.assign(Error('PRIVATE_SENTINEL'), { name: 'Incur.ValidationError',
+            publicIssues: [{ path: command === 'food search-labels' ? 'query' : 'body', code: 'invalid_type', missing: true }],
+          })
         }))
         if (failed) await assert.rejects(call)
         else await call
@@ -188,6 +190,9 @@ test('natural sender bounds the datagram and accounts for trimmed command summar
     assert.equal(report.transportTruncated, false)
     assert.ok(report.commands.length > 0)
     assert.ok(report.droppedCalls > 0)
+    assert.deepEqual(report.commands.find((command) => command.command === 'food search-labels' && command.outcome === 'error')?.failures,
+      [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 1, validation: { field: 'query', code: 'invalid_type', missing: true } }])
+    assert.ok(!JSON.stringify(report).includes('PRIVATE_SENTINEL'))
     assert.equal(report.commands.reduce((sum, c) => sum + c.calls, 0) + report.droppedCalls, 32)
     assert.ok(Buffer.byteLength(JSON.stringify(report)) < CLI_TIMING_MAX_REPORT_BYTES)
   } finally {

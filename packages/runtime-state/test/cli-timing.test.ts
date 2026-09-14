@@ -6,7 +6,7 @@ import { test } from "vitest";
 import {
   addCliPhaseSample, CLI_TIMING_MAX_COMMANDS, CLI_TIMING_MAX_SPANS,
   CLI_TIMING_PHASES, cliTimingCommand, cliTimingFailureCode, emptyCliTiming, mergeCliTiming,
-  normalizeCliTiming, type CliTiming,
+  normalizeCliTiming, cliTimingValidationFailure, CLI_TIMING_MAX_VALIDATION_ISSUES, type CliTiming, type CliValidationDiagnostic,
 } from "../src/cli-timing.ts";
 import {
   finishCliTimingAction, isCliTimingActive, noteCliTimingExit,
@@ -470,17 +470,19 @@ test("failure merging preserves legacy identities, bounded drops, mixed-version 
 });
 
 
-test("optional normalization uses bounded indexed reads and never retains an unchecked accessor value", () => {
+test("optional normalization uses own indexed data and never invokes failure accessors", () => {
   const timing = sample("experiment session log");
   timing.commands[0]!.outcome = "error";
-  let countReads = 0;
-  const failures = [{ code: "conflict", stage: "write",
-    get count() { countReads += 1; return countReads === 1 ? 1 : "PRIVATE_SENTINEL"; },
+  let reads = 0;
+  const failures = [{ code: "VALIDATION_ERROR", stage: "validation", count: 1,
+    get validation() { reads += 1; throw new Error("PRIVATE_SENTINEL"); },
   }];
   Object.defineProperty(failures, Symbol.iterator, { get() { throw new Error("PRIVATE_SENTINEL"); } });
   const normalized = normalizeCliTiming({ ...timing, commands: [{ ...timing.commands[0], failures }] });
-  assert.deepEqual(normalized?.commands[0]!.failures, [{ code: "conflict", stage: "write", count: 1 }]);
-  assert.equal(countReads, 1);
+  assert.deepEqual(normalized?.commands[0]!.failures, [{ code: "VALIDATION_ERROR", stage: "validation", count: 1 }]);
+  const accessor = { code: "conflict", stage: "write", get count() { reads += 1; return 1; } };
+  assert.deepEqual(normalizeCliTiming({ ...timing, commands: [{ ...timing.commands[0], failures: [accessor] }] }), timing);
+  assert.equal(reads, 0);
   assert.equal(JSON.stringify(normalized).includes("PRIVATE_SENTINEL"), false);
 });
 
@@ -574,4 +576,173 @@ test.skipIf(!memoryFailureCompatibilityBase)("actual older memory-code reader ma
   assert.deepEqual(old.normalizeCliTiming(expected), expected);
   assert.deepEqual(normalizeCliTiming(expected), expected);
   assert.ok(!JSON.stringify(report).includes("SYNTHETIC_FORBIDDEN_CONTENT"));
+});
+
+
+test("validation selection admits only exact schema-owned fields and one standard issue", () => {
+  const scopes = [
+    ["food search-labels", ["query", "limit"]],
+    ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks", "relatedSlug", "librarySlug", "sourcePath"]],
+    ["knowledge append-section", ["slug", "heading", "body", "title", "position", "sourcePath"]],
+  ] as const;
+  for (const [command, fields] of scopes) for (const field of fields) {
+    const issue = { path: field, code: "invalid_type", missing: true, message: "PRIVATE_SENTINEL", value: "PRIVATE_SENTINEL" };
+    const expected = { field, code: "invalid_type", missing: true };
+    for (const property of ["publicIssues", "fieldErrors"] as const) {
+      assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", { [property]: [issue, { ...issue, code: "too_small" }] }, property), { validation: expected });
+    }
+    assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", { validation: { ...expected, path: "PRIVATE_SENTINEL" } }, "validation"), { validation: expected });
+  }
+  for (const command of ["other", "food search-labels-batch", "knowledge show", "knowledge upsert PRIVATE_SENTINEL", "FOOD search-labels"]) {
+    assert.deepEqual(cliTimingValidationFailure(command, "VALIDATION_ERROR", { publicIssues: [{ path: "body", code: "invalid_type", missing: true }] }, "publicIssues"), {});
+  }
+  for (const path of ["body", "query.value", "query[0]", "query.0", "PRIVATE_SENTINEL.query", "queryPRIVATE_SENTINEL",
+    " query", "query ", "Query", "quеry", ["query"], 0, null, { toString() { throw Error("must not coerce"); } }]) {
+    assert.deepEqual(cliTimingValidationFailure("food search-labels", "VALIDATION_ERROR", { publicIssues: [{ path, code: "invalid_type", missing: true }] }, "publicIssues"), {});
+  }
+  const source = { publicIssues: [{ path: "query", code: "invalid_type", received: "undefined", message: "Required" }] };
+  assert.deepEqual(cliTimingValidationFailure("food search-labels", "VALIDATION_ERROR", source, "publicIssues"), { validation: { field: "query", code: "invalid_type" } });
+  let reads = 0;
+  const uninspected = new Proxy({}, { getOwnPropertyDescriptor() { reads += 1; throw Error("PRIVATE_SENTINEL"); } });
+  for (const code of [undefined, "unknown", "invalid_payload", "VALIDATION_ERROR_PRIVATE_SENTINEL", "validation_error", "VALIDATION_ERROR "]) {
+    for (const property of ["publicIssues", "fieldErrors", "validation"] as const) {
+      assert.deepEqual(cliTimingValidationFailure("food search-labels", code, uninspected, property), {});
+    }
+  }
+  assert.equal(reads, 0);
+});
+
+test("validation reads a fixed prefix of own data without getters, prototypes, causes or proxy escapes", () => {
+  let reads = 0;
+  const getter = { get() { reads += 1; throw Error("PRIVATE_SENTINEL"); } };
+  const good = { path: "query", code: "invalid_type", missing: true };
+  const huge: unknown[] = new Array(1_000_000);
+  Object.defineProperty(huge, "0", getter);
+  Object.defineProperty(huge, Symbol.iterator, getter);
+  Object.defineProperty(huge, String(CLI_TIMING_MAX_VALIDATION_ISSUES), getter);
+  assert.deepEqual(cliTimingValidationFailure("food search-labels", "VALIDATION_ERROR", { publicIssues: huge }, "publicIssues"), {});
+  huge[CLI_TIMING_MAX_VALIDATION_ISSUES - 1] = good;
+  assert.deepEqual(cliTimingValidationFailure("food search-labels", "VALIDATION_ERROR", { publicIssues: huge }, "publicIssues"),
+    { validation: { field: "query", code: "invalid_type", missing: true } });
+  const hostile = Object.defineProperty({}, "publicIssues", getter);
+  const proxy = new Proxy({}, { getOwnPropertyDescriptor() { throw Error("PRIVATE_SENTINEL"); }, get: getter.get });
+  const revoked = Proxy.revocable([], {}); revoked.revoke();
+  for (const source of [hostile, proxy, { publicIssues: revoked.proxy }, { publicIssues: [proxy] },
+    Object.create({ publicIssues: [good] }), { cause: { publicIssues: [good] } },
+    { publicIssues: [Object.create(good)] }, { publicIssues: [Object.assign([], good)] }, { publicIssues: [Object.defineProperty({ ...good }, "path", getter)] }]) {
+    assert.deepEqual(cliTimingValidationFailure("food search-labels", "VALIDATION_ERROR", source, "publicIssues"), {});
+  }
+  for (const key of ["message", "expected", "received", "value", "argument", "cause"]) Object.defineProperty(good, key, getter);
+  assert.deepEqual(cliTimingValidationFailure("food search-labels", "VALIDATION_ERROR", { publicIssues: [good] }, "publicIssues"),
+    { validation: { field: "query", code: "invalid_type", missing: true } });
+  assert.equal(reads, 0);
+});
+
+test("malformed optional validation is omitted without losing failure counts or changing unknown/success boundaries", () => {
+  const report = sample("food search-labels");
+  const command = report.commands[0]!;
+  command.outcome = "error";
+  command.failures = [{ code: "VALIDATION_ERROR", stage: "validation", count: 1 }];
+  const good = { field: "query", code: "invalid_type", missing: true };
+  const proxy = new Proxy({}, { getOwnPropertyDescriptor() { throw Error("PRIVATE_SENTINEL"); } });
+  for (const validation of [null, [], "PRIVATE_SENTINEL", proxy, Object.create(good),
+    { ...good, field: "body" }, { ...good, field: "query.PRIVATE_SENTINEL" }, { ...good, field: ["query"] },
+    ...["INVALID_TYPE", "invalid_type ", "invalid_type_PRIVATE_SENTINEL", "PRIVATE_SENTINEL"].map((code) => ({ ...good, code })),
+    ...[null, "true", 1, {}].map((missing) => ({ ...good, missing })),
+    Object.defineProperty({ ...good }, "code", { get() { throw Error("PRIVATE_SENTINEL"); } })]) {
+    assert.deepEqual(normalizeCliTiming({ ...report, commands: [{ ...command,
+      failures: [{ ...command.failures[0], validation }] }] }), report);
+  }
+  const input = { ...report, commands: [{ ...command, failures: [{ ...command.failures[0],
+    validation: { ...good, path: "PRIVATE_SENTINEL", expected: "PRIVATE_SENTINEL", value: "PRIVATE_SENTINEL" } }] }] };
+  assert.deepEqual(normalizeCliTiming(input)?.commands[0]!.failures, [{ ...command.failures[0], validation: good }]);
+  assert.ok(!JSON.stringify(normalizeCliTiming(input)).includes("PRIVATE_SENTINEL"));
+  for (const name of ["other", "exercise list", "knowledge show"]) {
+    assert.equal(normalizeCliTiming({ ...input, commands: [{ ...input.commands[0], command: name }] })?.commands[0]!.failures?.[0]?.validation, undefined);
+  }
+  const unknown = { ...input, commands: [{ ...command, failures: [{ code: "PRIVATE_SENTINEL", stage: "validation", count: 1, validation: good }] }] };
+  assert.deepEqual(normalizeCliTiming(unknown)?.commands[0]!.failures, [{ code: "unknown", stage: "validation", count: 1 }]);
+  assert.equal(normalizeCliTiming({ ...input, commands: [{ ...input.commands[0], outcome: "ok" }] })?.commands[0]!.failures, undefined);
+});
+
+test("original validation capture is first-observation-only and retains neither the error nor mutable issues", async () => {
+  const { noteCliTimingFailure } = await import("../src/node/cli-timing.ts");
+  const issues = [{ path: "body", code: "invalid_type", missing: true }];
+  const original = Object.assign(new Error("PRIVATE_SENTINEL"), { name: "Incur.ValidationError", publicIssues: issues });
+  const replacement = new Error("PRIVATE_SENTINEL");
+  let report!: CliTiming, reports = 0;
+  await assert.rejects(withCliTiming(() => timeCliDispatch("knowledge upsert", async () => {
+    noteCliTimingFailure(original);
+    issues[0]!.path = "PRIVATE_SENTINEL";
+    throw replacement;
+  }), (value) => { report = value; reports += 1; }), (caught) => caught === replacement);
+  assert.equal(reports, 1);
+  assert.equal(report.commands[0]!.calls, 1);
+  assert.deepEqual(report.commands[0]!.failures, [{ code: "VALIDATION_ERROR", stage: "validation", count: 1,
+    validation: { field: "body", code: "invalid_type", missing: true } }]);
+  assert.deepEqual(normalizeCliTiming(report), report);
+  assert.ok(!JSON.stringify(report).includes("PRIVATE_SENTINEL"));
+  await withCliTiming(() => timeCliDispatch("knowledge upsert", async () => {
+    noteCliTimingFailure(original); noteCliTimingExit(0, false);
+  }), (value) => { report = value; });
+  assert.equal(report.commands[0]!.failures, undefined);
+});
+
+test("validation variants merge separately with cap eight, legacy absence, independent copies and unchanged drops", () => {
+  const variants: (CliValidationDiagnostic | undefined)[] = [
+    { field: "body", code: "invalid_type", missing: true },
+    { field: "body", code: "invalid_type", missing: false },
+    { field: "body", code: "invalid_type" },
+    { field: "body", code: "too_small", missing: false },
+    { field: "slug", code: "invalid_format", missing: false },
+    { field: "title", code: "too_small", missing: false },
+    { field: "status", code: "too_small", missing: false },
+    undefined, // Old failure-aware peer; must not coalesce with unknown missing.
+    { field: "pageType", code: "too_small", missing: false },
+  ];
+  const aggregate = emptyCliTiming();
+  for (const validation of [...variants, variants[0]]) {
+    const incoming = sample("knowledge upsert");
+    incoming.commands[0]!.outcome = "error";
+    incoming.commands[0]!.failures = [{ code: "VALIDATION_ERROR", stage: "validation", count: 1,
+      ...(validation ? { validation: { ...validation } } : {}) }];
+    const original = structuredClone(incoming);
+    mergeCliTiming(aggregate, incoming);
+    assert.deepEqual(incoming, original);
+    const detail = incoming.commands[0]!.failures[0]!.validation;
+    if (detail) detail.missing = !detail.missing;
+  }
+  const legacy = sample("knowledge upsert"); legacy.commands[0]!.outcome = "error";
+  mergeCliTiming(aggregate, legacy); // No invented observation for an old call.
+  assert.equal(aggregate.commands.length, 1);
+  const command = aggregate.commands[0]!;
+  assert.equal(command.calls, 11);
+  assert.equal(command.failures?.length, 8);
+  assert.equal(command.failures?.[0]?.count, 2);
+  assert.deepEqual(command.failures?.map((failure) => failure.validation), variants.slice(0, 8));
+  assert.equal(command.droppedFailures, 1);
+  assert.equal(command.failures!.reduce((sum, failure) => sum + failure.count, 0) + command.droppedFailures!, 10);
+  assert.equal(aggregate.droppedCalls, 0);
+  assert.equal(aggregate.droppedSpans, 0);
+  assert.deepEqual(normalizeCliTiming(aggregate), aggregate);
+  // Duplicate normalized entries use the same variant identity as merging.
+  const repeated = { ...command, calls: 2, droppedFailures: 0,
+    failures: [command.failures![1], command.failures![1]] };
+  assert.deepEqual(normalizeCliTiming({ ...aggregate, commands: [repeated] })?.commands[0]!.failures,
+    [{ ...command.failures![1], count: 2 }]);
+});
+
+test("only the three existing knowledge source codes survive producer and wire admission", async () => {
+  const admitted = ["knowledge_source_unreadable", "knowledge_invalid_source_path", "knowledge_invalid_library_slug"] as const;
+  for (const code of [...admitted, "knowledge_source_not_found", "knowledge_source_unreadаble",
+    ...admitted.flatMap((value) => [`prefix_${value}`, `${value}_suffix`, `${value} `, value.toUpperCase()])]) {
+    const expected = admitted.find((value) => value === code) ?? "unknown";
+    const error = Object.assign(new Error("PRIVATE_SENTINEL"), { code, context: { sourcePath: "PRIVATE_SENTINEL" } });
+    let report!: CliTiming;
+    await assert.rejects(withCliTiming(() => timeCliDispatch("knowledge append-section", async () => { throw error; }),
+      (value) => { report = value; }), (caught) => caught === error);
+    assert.deepEqual(report.commands[0]!.failures, [{ code: expected, stage: "unknown", count: 1 }]);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    assert.ok(!JSON.stringify(report).includes("PRIVATE_SENTINEL"));
+  }
 });

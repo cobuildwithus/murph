@@ -348,6 +348,9 @@ describe('knowledge and memory command completion diagnostics', () => {
     ['knowledge', 'show', 'knowledge_page_invalid', 'integrity', 'invalid_result'],
     ['knowledge', 'upsert', 'knowledge_page_conflict', undefined, 'conflict'],
     ['knowledge', 'append-section', 'knowledge_duplicate_slug', undefined, 'conflict'],
+    ['knowledge', 'append-section', 'knowledge_source_unreadable', undefined, 'unavailable'],
+    ['knowledge', 'upsert', 'knowledge_invalid_source_path', undefined, 'invalid_input'],
+    ['knowledge', 'upsert', 'knowledge_invalid_library_slug', undefined, 'invalid_input'],
     ['memory', 'show', 'memory_not_found', 'read', 'not_found'],
     ['memory', 'show', 'memory_document_invalid', 'read', 'invalid_result'],
   ] as const)('classifies %s %s %s without changing completion counts', (family, operation, code, stage, category) => {
@@ -414,7 +417,10 @@ describe('knowledge and memory command completion diagnostics', () => {
   })
 
   it.each([
-    ...['knowledge_page_not_found_extra', 'KNOWLEDGE_PAGE_NOT_FOUND', 'knowledge_page_not_found ',
+    ...['knowledge_source_not_found', 'knowledge_source_unreadаble',
+      ...['knowledge_source_unreadable', 'knowledge_invalid_source_path', 'knowledge_invalid_library_slug'].flatMap((code) => [
+        `prefix_${code}`, `${code}_suffix`, `${code} `, code.toUpperCase(),
+      ]), 'knowledge_page_not_found_extra', 'KNOWLEDGE_PAGE_NOT_FOUND', 'knowledge_page_not_found ',
       'knowledge_page_reserved', 'knowledge_page_not_loadable', sentinel.repeat(4)]
       .map((code) => JSON.stringify(envelope(code))),
     JSON.stringify({ ...envelope('knowledge_page_not_found'), message: null }),
@@ -472,6 +478,65 @@ describe('knowledge and memory command completion diagnostics', () => {
         expect(commandIssue(JSON.stringify(body), 'vault-cli knowledge show synthetic-nearby --format json', 0)).toBeNull()
       }
     } finally { await rm(vault, { recursive: true, force: true }) }
+  })
+})
+
+describe('bounded CLI validation completion metadata', () => {
+  it.each([
+    ['food search-labels', 'limit', 'too_big', false],
+    ['food search-labels', 'query', 'invalid_type', true],
+    ['knowledge upsert', 'body', 'invalid_type', true],
+    ['knowledge upsert', 'slug', 'invalid_format', false],
+    ['knowledge append-section', 'heading', 'invalid_type', true],
+  ] as const)('selects one finite %s %s issue from the existing error envelope', (command, field, code, missing) => {
+    const error = { ...envelope('VALIDATION_ERROR'), fieldErrors: [
+      { path: `body.${sentinel}`, code: 'invalid_type', missing: true },
+      { path: field, code, missing, expected: sentinel, received: sentinel, value: sentinel, message: sentinel },
+      { path: field, code: 'custom', missing: false },
+    ] }
+    for (const full of [false, true]) {
+      const output = JSON.stringify(full ? { ok: false, error } : error)
+      const issue = commandIssue(output, `vault-cli ${command} --format json`)
+      expect(issue?.details).toMatchObject({
+        vaultCliCommand: command, commandAttribution: 'recognized', vaultCliErrorCode: 'VALIDATION_ERROR',
+        errorCategory: 'invalid_input', vaultCliValidationField: field, vaultCliValidationCode: code,
+        vaultCliValidationMissing: missing,
+      })
+      expect(Object.keys(issue?.details ?? {}).length).toBeLessThanOrEqual(24)
+      expect(JSON.stringify(issue)).not.toContain(sentinel)
+      expect(commandIssue(output, `vault-cli ${command} --format json`, 0)).toBeNull()
+    }
+  })
+
+  it('does not promote unsupported commands, nested paths, unknown flags or oversized output into validation evidence', () => {
+    const good = { path: 'body', code: 'invalid_type', missing: true }
+    const base = { ...envelope('VALIDATION_ERROR'), fieldErrors: [good] }
+    const cases = [
+      ['vault-cli knowledge show synthetic', base],
+      ['vault-cli future-command synthetic', base],
+      ['vault-cli --format json knowledge upsert', base],
+      ['vault-cli knowledge upsert && node synthetic.js', base],
+      ['node synthetic.js', base],
+      ['vault-cli knowledge upsert', { ...base, code: 'invalid_payload' }],
+      ['vault-cli knowledge upsert', { ...base, fieldErrors: [{ ...good, path: ['body'] }] }],
+      ['vault-cli knowledge upsert', { ...base, fieldErrors: [{ ...good, path: `body.${sentinel}` }] }],
+      ['vault-cli knowledge upsert', { ...base, fieldErrors: [{ ...good, missing: 'true' }] }],
+      ['vault-cli knowledge upsert', { ...base, fieldErrors: Array(8).fill({ path: sentinel, code: 'invalid_type' }).concat(good) }],
+      ['vault-cli knowledge upsert', { ...base, message: '界'.repeat(6000) }],
+      ['vault-cli knowledge upsert', { ok: true, error: base }],
+    ] as const
+    for (const [command, error] of cases) {
+      const issue = commandIssue(JSON.stringify(error), command)
+      expect(issue).not.toBeNull()
+      expect(issue?.details).not.toHaveProperty('vaultCliValidationField')
+      expect(issue?.details).not.toHaveProperty('vaultCliValidationCode')
+      expect(issue?.details).not.toHaveProperty('vaultCliValidationMissing')
+      expect(JSON.stringify(issue)).not.toContain(sentinel)
+    }
+    const absent = commandIssue(JSON.stringify({ ...base, fieldErrors: [{ path: 'body', code: 'invalid_type', received: 'undefined' }] }),
+      'vault-cli knowledge upsert')
+    expect(absent?.details).toMatchObject({ vaultCliValidationField: 'body', vaultCliValidationCode: 'invalid_type' })
+    expect(absent?.details).not.toHaveProperty('vaultCliValidationMissing')
   })
 })
 
@@ -540,6 +605,18 @@ describe('existing diagnostic transport and denominator', () => {
       expect(memory.details?.vaultCliErrorCode).toBe(code)
       issues.push(memory)
     }
+    const validation = commandIssue(JSON.stringify({ ...envelope('VALIDATION_ERROR'),
+      fieldErrors: [{ path: 'body', code: 'invalid_type', missing: true, value: sentinel, message: sentinel }] }),
+      'vault-cli knowledge upsert')
+    if (!validation) throw new Error('Expected synthetic validation diagnostic')
+    expect(validation.details).toMatchObject({ vaultCliValidationField: 'body', vaultCliValidationCode: 'invalid_type', vaultCliValidationMissing: true })
+    issues.push(validation)
+    for (const code of ['knowledge_source_unreadable', 'knowledge_invalid_source_path', 'knowledge_invalid_library_slug']) {
+      const source = commandIssue(JSON.stringify(envelope(code)), 'vault-cli knowledge upsert')
+      if (!source) throw new Error('Expected synthetic source diagnostic')
+      expect(source.details?.vaultCliErrorCode).toBe(code)
+      issues.push(source)
+    }
     let release!: () => void
     const pending = new Promise<void>((resolve) => { release = resolve })
     writes.write.mockReturnValue(pending)
@@ -556,7 +633,8 @@ describe('existing diagnostic transport and denominator', () => {
         expect(parsed.details).toEqual(issues[index % issues.length]!.details)
         expect(Object.keys(parsed.details ?? {}).length).toBeLessThanOrEqual(24)
         const legacy = JSON.parse(encoded)
-        for (const key of ['commandAttribution', 'vaultCliCommand', 'vaultCliErrorAttribution', 'vaultCliErrorCode', 'vaultCliErrorStage']) {
+        for (const key of ['commandAttribution', 'vaultCliCommand', 'vaultCliErrorAttribution', 'vaultCliErrorCode', 'vaultCliErrorStage',
+          'vaultCliValidationField', 'vaultCliValidationCode', 'vaultCliValidationMissing']) {
           Reflect.deleteProperty(legacy.details, key)
         }
         expect(parseAssistantRuntimeIssueRecord(legacy).details).toEqual(legacy.details)
