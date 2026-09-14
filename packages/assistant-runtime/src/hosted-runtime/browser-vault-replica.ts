@@ -18,8 +18,8 @@ import {
 } from "@murphai/contracts";
 
 import type {
+  CanonicalEntity,
   CanonicalQuerySourceHash,
-  VaultReadModel,
 } from "@murphai/query";
 import type { BrowserVaultReplica } from "@murphai/query/browser";
 import type { BrowserVaultReplicaSourceStep } from "@murphai/query/browser-replica-server";
@@ -166,7 +166,7 @@ export type HostedBrowserVaultReplicaRefreshResult =
       status: "publish_conflict" | "skipped_no_port" | "workspace_missing" | "refresh_failed";
     };
 
-const DEFAULT_HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT_MS = 30_000;
+const DEFAULT_HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT_MS = 60_000;
 const utf8Encoder = new TextEncoder();
 
 export async function createHostedBrowserVaultReplicaForSourceState(input: {
@@ -192,7 +192,7 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
   input.signal?.throwIfAborted();
   const outcomeProjection = await readHostedBrowserVaultExperimentOutcomes(
     input.vaultRoot,
-    vault,
+    vault.experiments,
     input.signal,
   );
   input.signal?.throwIfAborted();
@@ -555,20 +555,20 @@ export async function hashHostedBrowserVaultReplicaSources(
   const {
     hashCanonicalQuerySources,
     readBrowserVaultPersonalPatternVocabulary,
-    readBrowserVaultReplicaVault,
+    readBrowserVaultReplicaExperiments,
   } = await import("@murphai/query/browser-replica-server");
   signal?.throwIfAborted();
-  const [canonicalSourceResult, vaultResult, vocabularyResult] =
+  const [canonicalSourceResult, experimentsResult, vocabularyResult] =
     await Promise.allSettled([
       hashCanonicalQuerySources(vaultRoot, { signal }),
-      readBrowserVaultReplicaVault(vaultRoot, { signal }),
+      readBrowserVaultReplicaExperiments(vaultRoot, { signal }),
       readBrowserVaultPersonalPatternVocabulary(vaultRoot),
     ]);
   if (canonicalSourceResult.status === "rejected") {
     throw canonicalSourceResult.reason;
   }
-  if (vaultResult.status === "rejected") {
-    throw vaultResult.reason;
+  if (experimentsResult.status === "rejected") {
+    throw experimentsResult.reason;
   }
   if (vocabularyResult.status === "rejected") {
     throw vocabularyResult.reason;
@@ -576,7 +576,7 @@ export async function hashHostedBrowserVaultReplicaSources(
   signal?.throwIfAborted();
   const outcomeProjection = await readHostedBrowserVaultExperimentOutcomes(
     vaultRoot,
-    vaultResult.value,
+    experimentsResult.value,
     signal,
   );
   signal?.throwIfAborted();
@@ -614,17 +614,14 @@ export async function hashHostedBrowserVaultReplicaSources(
 
 async function readHostedBrowserVaultExperimentOutcomes(
   vaultRoot: string,
-  vault: VaultReadModel,
+  experiments: readonly CanonicalEntity[],
   signal?: AbortSignal,
 ): Promise<HostedBrowserVaultOutcomeProjection> {
   const outcomes: ExperimentOutcome[] = [];
   const sources: HostedBrowserVaultOutcomeSource[] = [];
 
-  for (const entity of vault.entities) {
+  for (const entity of experiments) {
     signal?.throwIfAborted();
-    if (entity.family !== "experiment") {
-      continue;
-    }
 
     const parsedFrontmatter = experimentFrontmatterSchema.safeParse(
       entity.frontmatter ?? entity.attributes,

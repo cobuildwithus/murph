@@ -3914,6 +3914,15 @@ all other immutable-field mismatches still fail closed.
 The assistant runtime owns the refresh build. It computes a stable canonical
 query-source hash from sorted source-relative paths, byte sizes, and content
 hashes; mtimes, generatedAt, user ids, and runtime cache paths are excluded.
+Each freshness hash still covers all canonical source bytes, but parses only
+experiments through query's cancellation-aware `readBrowserVaultReplicaExperiments`
+export to find referenced outcomes. That narrow read retains strict parsing,
+canonical paths, default visibility, and entity ordering without building a full
+vault read model. Referenced outcome bytes (including duplicate references and
+malformed or mismatched files) and validated Pattern vocabulary retain their
+existing hash identity and accounting; missing outcomes are omitted and
+unreferenced outcome files are not scanned. Full-snapshot strict parsing remains
+in replica construction, not the three freshness hashes.
 Ordinary background system work uses that existing source hash, generation, and
 max-age policy to skip a current replica. Only an exact Browser Vault refresh
 request forces reconstruction of a metadata-current replica, including its
@@ -3936,7 +3945,7 @@ owner's cancellation and is aborted and joined before release; a notification
 accepted during that boundary remains available to foreground handling. An empty
 scheduler hint therefore cannot abandon a dirty replica refresh after its
 recording item has already completed.
-The default refresh deadline is 30 seconds and remains bounded by any earlier
+The default refresh deadline is 60 seconds and remains bounded by any earlier
 invocation deadline. Cancellation reaches the direct canonical reads, replica
 build checkpoints, content hashing, and size serialization; parallel source
 reads share that signal and every started child settles before the lane returns,
@@ -4095,7 +4104,7 @@ acknowledgement stay within that offer. A runtime-wake interruption or timeout
 returns through the existing invocation continuation owner, preserving immediate
 foreground admission or the bounded requested-refresh retry and earlier pending
 assistant wakes. Ordinary due work without a fresh runtime wake can wait for
-the existing 30-second Browser refresh budget and a successor invocation;
+the existing 60-second Browser refresh budget and a successor invocation;
 fresh conversations and the exact due-assistant durability barrier retain
 priority ahead of that offer.
 

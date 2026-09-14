@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 
 import { brotliCompressSync } from "node:zlib";
 
-import { afterEach, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import { CURRENT_VAULT_FORMAT_VERSION, VAULT_LAYOUT } from "@murphai/contracts";
 
@@ -17,6 +17,7 @@ import {
 } from "../src/vault-source.ts";
 
 import {
+  readBrowserVaultReplicaExperiments,
   readBrowserVaultReplicaSource,
   readBrowserVaultReplicaVault,
   type BrowserVaultReplicaSourceStep,
@@ -195,6 +196,111 @@ test("readVaultSourceStrict rejects a direct experiment filename that disagrees 
       && "issue" in error.details
       && error.details.issue === "document_path_mismatch",
   );
+});
+
+test("Browser Vault experiment reads preserve default order without parsing unrelated history", async () => {
+  const vaultRoot = await createTempVaultRoot();
+  for (const [slug, id, date] of [
+    ["a-late", "exp_b", "2026-05-02"],
+    ["z-early", "exp_z", "2026-05-01"],
+    ["b-tie", "exp_a", "2026-05-02"],
+  ]) {
+    await writeVaultFile(
+      vaultRoot,
+      `bank/experiments/${slug}.md`,
+      `---\nexperimentId: ${id}\nslug: ${slug}\nstartedOn: ${date}\nqueryVisibility: hidden\n---\n# Trial\n`,
+    );
+  }
+  // Neither nested legacy documents nor outcome files are experiment sources.
+  await writeVaultFile(vaultRoot, "bank/experiments/legacy/broken.md", "---\nbroken\n");
+  await writeVaultFile(vaultRoot, "bank/experiments/outcomes/unreferenced.json", "{\n");
+  const expected = (await readBrowserVaultReplicaVault(vaultRoot)).entities
+    .filter((entity) => entity.family === "experiment");
+  assert.deepEqual(expected.map((entity) => entity.entityId), ["exp_z", "exp_a", "exp_b"]);
+  assert.deepEqual(await readBrowserVaultReplicaExperiments(vaultRoot), expected);
+
+  await writeVaultFile(vaultRoot, "ledger/events/2026/2026-05.jsonl", "{\n");
+  assert.deepEqual(await readBrowserVaultReplicaExperiments(vaultRoot), expected);
+  // The build still rejects malformed canonical history that freshness only hashes.
+  await assert.rejects(readBrowserVaultReplicaSource(vaultRoot), {
+    code: "VAULT_INVALID_JSONL",
+  });
+});
+
+test.each([
+  ["frontmatter_invalid", "---\nexperimentId: exp_trial\nslug: trial\nbroken line\n---\n"],
+  ["missing_field", "---\nslug: trial\n---\n"],
+  ["document_path_mismatch", "---\nexperimentId: exp_trial\nslug: other\n---\n"],
+])("Browser Vault experiment reads retain strict %s errors", async (issue, contents) => {
+  const vaultRoot = await createTempVaultRoot();
+  await writeVaultFile(vaultRoot, "bank/experiments/trial.md", contents);
+  await expect(readBrowserVaultReplicaExperiments(vaultRoot)).rejects.toMatchObject({
+    code: "QUERY_SOURCE_INVALID",
+    details: { issue, relativePath: "bank/experiments/trial.md" },
+  });
+});
+
+test("aborted Browser Vault experiment reads join every started page read", async () => {
+  const vaultRoot = await createTempVaultRoot();
+  for (const slug of ["first", "second"]) {
+    await writeVaultFile(
+      vaultRoot,
+      `bank/experiments/${slug}.md`,
+      `---\nexperimentId: exp_${slug}\nslug: ${slug}\n---\n`,
+    );
+  }
+  const sourcePaths = new Set(["first", "second"].map((slug) =>
+    path.join(vaultRoot, `bank/experiments/${slug}.md`)
+  ));
+  const releases: Array<() => void> = [];
+  let started = () => {};
+  const readsStarted = new Promise<void>((resolve) => { started = resolve; });
+  let readsSettled = 0;
+  vi.resetModules();
+  vi.doMock("node:fs/promises", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:fs/promises")>();
+    return {
+      ...actual,
+      async readFile(...args: Parameters<typeof actual.readFile>) {
+        const contents = await actual.readFile(...args);
+        if (!sourcePaths.has(String(args[0]))) return contents;
+        await new Promise<void>((resolve) => {
+          releases.push(resolve);
+          if (releases.length === 2) started();
+        });
+        readsSettled += 1;
+        return contents;
+      },
+    };
+  });
+  try {
+    const { readBrowserVaultReplicaExperiments: readExperiments } =
+      await import("../src/browser-replica-server.ts");
+    const controller = new AbortController();
+    const reason = new Error("Synthetic experiment read cancellation");
+    controller.abort(reason);
+    await expect(readExperiments(vaultRoot, { signal: controller.signal })).rejects.toBe(reason);
+    assert.equal(releases.length, 0);
+
+    const active = new AbortController();
+    let settled = false;
+    const pending = readExperiments(vaultRoot, { signal: active.signal });
+    const rejected = expect(pending).rejects.toBe(reason);
+    void pending.then(() => { settled = true; }, () => { settled = true; });
+    await readsStarted;
+    active.abort(reason);
+    releases[0]!();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(readsSettled, 1);
+    assert.equal(settled, false);
+    releases[1]!();
+    await rejected;
+    assert.equal(readsSettled, 2);
+  } finally {
+    releases.forEach((release) => release());
+    vi.doUnmock("node:fs/promises");
+    vi.resetModules();
+  }
 });
 
 test("hashCanonicalQuerySources is stable across mtimes and ignores non-query files", async () => {
