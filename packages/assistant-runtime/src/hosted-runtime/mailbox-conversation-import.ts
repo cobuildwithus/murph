@@ -632,37 +632,14 @@ async function importHostedConversationMailboxAudioPair(
 ): ReturnType<HostedMailboxAudioPairImport> {
   // Custom local importers retain their original serial contract.
   if (input.importConversationWake) return null;
-  assertHostedConversationMailboxImportLive(input.signal ?? null);
-  const firstDecodeStartedAt = Date.now();
-  const first = await decodeHostedConversationMailboxItem({ ...input, item: items[0] });
-  const firstDecodeDoneAt = Date.now();
-  if (first.status !== "decoded") return null;
-  const firstKey = hostedConversationAudioPreparationKey(items[0], first.wake);
-  if (firstKey === null) return null;
-  const secondDecodeStartedAt = Date.now();
-  let second: HostedConversationMailboxPayloadDecodeResult;
-  try {
-    second = await decodeHostedConversationMailboxItem({ ...input, item: items[1] });
-  } catch {
-    // Lookahead is optional and has not mutated anything. Preserve the first
-    // item's ordinary import when a later decoder is unavailable or rejects.
-    assertHostedConversationMailboxImportLive(input.signal ?? null);
-    return null;
-  }
-  const secondDecodeDoneAt = Date.now();
-  if (second.status !== "decoded"
-    || hostedConversationAudioPreparationKey(items[1], second.wake) !== firstKey) return null;
-  // Duplicate capture identities cannot own independent parser preparations.
-  if (first.wake.eventId === second.wake.eventId
-    || (isHostedLinqConversationMessageWake(first.wake)
-      && isHostedLinqConversationMessageWake(second.wake)
-      && first.wake.message.linqMessage.messageId === second.wake.message.linqMessage.messageId)) return null;
+  const decoded = await decodeHostedConversationMailboxAudioPair(input, items);
+  if (!decoded) return null;
 
   const prepareWakeContext = input.prepareWakeContext ?? prepareHostedConversationMailboxWakeContext;
   const staged: HostedConversationMailboxStagedImport[] = [];
   try {
     const prepareMs: number[] = [];
-    const wakes = [first.wake, second.wake] as const;
+    const wakes = [decoded[0].wake, decoded[1].wake] as const;
     for (const index of [0, 1] as const) {
       assertHostedConversationMailboxImportLive(input.signal ?? null);
       const wake = wakes[index];
@@ -672,8 +649,8 @@ async function importHostedConversationMailboxAudioPair(
       }, {
         // Reuse the exact validated payload and its measured decode span.
         result: { status: "decoded", wake },
-        startedAt: index === 0 ? firstDecodeStartedAt : secondDecodeStartedAt,
-        doneAt: index === 0 ? firstDecodeDoneAt : secondDecodeDoneAt,
+        startedAt: decoded[index].startedAt,
+        doneAt: decoded[index].doneAt,
       });
       if (item.status !== "staged") {
         if (index === 0) return [item, null];
@@ -739,6 +716,43 @@ async function importHostedConversationMailboxAudioPair(
   } finally {
     for (const item of staged) item.cancelUnadmittedTyping();
   }
+}
+
+/** Decode lookahead without staging or starting media; a declined pair has no mutations. */
+async function decodeHostedConversationMailboxAudioPair(
+  input: Omit<HostedConversationMailboxImportInput, "item">,
+  items: Parameters<HostedMailboxAudioPairImport>[0],
+) {
+  assertHostedConversationMailboxImportLive(input.signal ?? null);
+  const firstDecodeStartedAt = Date.now();
+  const first = await decodeHostedConversationMailboxItem({ ...input, item: items[0] });
+  const firstDecodeDoneAt = Date.now();
+  if (first.status !== "decoded") return null;
+  const firstKey = hostedConversationAudioPreparationKey(items[0], first.wake);
+  if (firstKey === null) return null;
+  const secondDecodeStartedAt = Date.now();
+  let second: HostedConversationMailboxPayloadDecodeResult;
+  try {
+    second = await decodeHostedConversationMailboxItem({ ...input, item: items[1] });
+  } catch {
+    // Lookahead is optional and has not mutated anything. Preserve the first
+    // item's ordinary import when a later decoder is unavailable or rejects.
+    assertHostedConversationMailboxImportLive(input.signal ?? null);
+    return null;
+  }
+  const secondDecodeDoneAt = Date.now();
+  if (second.status !== "decoded"
+    || hostedConversationAudioPreparationKey(items[1], second.wake) !== firstKey) return null;
+  // Duplicate capture identities cannot own independent parser preparations.
+  if (first.wake.eventId === second.wake.eventId
+    || (isHostedLinqConversationMessageWake(first.wake)
+      && isHostedLinqConversationMessageWake(second.wake)
+      && first.wake.message.linqMessage.messageId === second.wake.message.linqMessage.messageId)) return null;
+
+  return [
+    { ...first, startedAt: firstDecodeStartedAt, doneAt: firstDecodeDoneAt },
+    { ...second, startedAt: secondDecodeStartedAt, doneAt: secondDecodeDoneAt },
+  ] as const;
 }
 
 function hostedConversationAudioPreparationKey(

@@ -14,6 +14,7 @@ import {
 } from "@murphai/assistant-engine";
 import { createParserRegistry } from "@murphai/parsers";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
+import * as channelAdapters from "@murphai/assistant-engine/assistant-channel-adapters";
 import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
@@ -65,6 +66,7 @@ vi.mock("@murphai/inboxd/runtime", async (importOriginal) => {
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
+  vi.restoreAllMocks();
   probes.configure.mockReset();
   probes.failNextFailureRead = false;
   probes.closeActiveCounts.length = 0;
@@ -72,6 +74,40 @@ afterEach(async () => {
 });
 
 describe.sequential("hosted consecutive audio preparation", () => {
+  test.each(["success", "retry", "abort"] as const)(
+    "preserves attachment typing during parallel preparation and cleans up on %s",
+    async (scenario) => {
+      const stop = vi.fn(async () => {});
+      const start = vi.spyOn(channelAdapters, "startLinqTypingIndicator")
+        .mockResolvedValue({ stop, isActive: () => true });
+      const fixture = await createFixture(2, { typing: true });
+      const abort = new AbortController();
+      if (scenario === "retry") probes.failNextFailureRead = true;
+      const operation = fixture.run({ signal: abort.signal });
+      try {
+        await observeBarrier(Promise.all(fixture.started.map((gate) => gate.promise)));
+        assert.equal(start.mock.calls.length, 1);
+        assert.deepEqual(await fixture.pending(), []);
+        assert.equal(stop.mock.calls.length, 0);
+        if (scenario === "abort") abort.abort(new Error("Synthetic paired typing preemption."));
+        fixture.releaseAll();
+        if (scenario === "abort") {
+          await assert.rejects(operation, /Synthetic paired typing preemption/u);
+        } else {
+          const result = await operation;
+          assert.equal(result.importedCount, scenario === "success" ? 2 : 0);
+        }
+        if (scenario === "success") assert.equal(stop.mock.calls.length, 0);
+        else await vi.waitFor(() => assert.equal(stop.mock.calls.length, 1));
+      } finally {
+        abort.abort();
+        fixture.releaseAll();
+        await operation.catch(() => undefined);
+        await vi.waitFor(() => assert.equal(stop.mock.calls.length, 1));
+      }
+    },
+  );
+
   test("overlaps two separate messages, joins reverse completion, then admits one ordered combined batch", async () => {
     const fixture = await createFixture(3);
     const operation = fixture.run();
@@ -293,7 +329,7 @@ describe.sequential("hosted consecutive audio preparation", () => {
 });
 
 type ImporterOptions = Parameters<typeof createHostedConversationMailboxImportItem>[0];
-async function createFixture(count: number) {
+async function createFixture(count: number, options: { typing?: boolean } = {}) {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-audio-pair-"));
   const occurredAt = new Date().toISOString();
   await initializeVault({ vaultRoot, createdAt: occurredAt });
@@ -356,7 +392,7 @@ async function createFixture(count: number) {
   probes.configure.mockResolvedValue({
     registry, ffmpeg: { allowSystemLookup: false, commandCandidates: [] },
   });
-  const options: ImporterOptions = {
+  const importerOptions: ImporterOptions = {
     vaultRoot,
     decodePayload: {
       async decode(input) {
@@ -374,6 +410,7 @@ async function createFixture(count: number) {
     runtime: {
       forwardedEnv: {}, userEnv: {}, platformEnv: {}, parserToolchain: null,
       platform: {
+        ...(options.typing ? { providerFetch: vi.fn<typeof fetch>() } : {}),
         artifactStore: { async get() { return null; }, async put() {} },
         effectsPort: { async readRawEmailMessage() { return null; }, async sendEmail() {} },
         publicInternetFetch: async (input) => {
@@ -433,7 +470,7 @@ async function createFixture(count: number) {
       }
     },
     run(context: { signal?: AbortSignal } = {}) {
-      const importer = createHostedConversationMailboxImportItem(options);
+      const importer = createHostedConversationMailboxImportItem(importerOptions);
       const bound = Object.assign(
         (item: Parameters<typeof importer>[0]) => item.item.lane === "system"
           ? Promise.resolve({ status: "skipped" as const })
@@ -473,7 +510,9 @@ async function observeBarrier<T>(promise: Promise<T>): Promise<T> {
     return await Promise.race([
       promise,
       new Promise<never>((_, reject) => {
-        watchdog = setTimeout(() => reject(new Error("Synthetic preparation barrier did not open.")), 15_000);
+        // Allow a cold lazy module import on a busy host. The barrier and call
+        // counts prove overlap; wall-clock duration is never a success condition.
+        watchdog = setTimeout(() => reject(new Error("Synthetic preparation barrier did not open.")), 60_000);
       }),
     ]);
   } finally {

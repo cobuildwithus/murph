@@ -140,6 +140,8 @@ forwarded into a claimed parse attempt. If an earlier input needs retry, a compl
 sibling's local raw/derived result remains reusable on replay, but its assistant
 evidence, pending visibility, and notification stay withheld behind that input.
 This does not add a retry owner or strengthen the existing checkpoint/crash boundary.
+Existing attachment typing starts during staging, remains available for the reply
+handoff after admission, and is released for any staged input left unadmitted.
 The existing content-free import diagnostic may include `audioPairCount`,
 `audioPairPreparationMs` (whole pair preparation wall span), and
 `audioParsePreparationOverlapMs` (intersection of artifact/parse/scratch-cleanup
