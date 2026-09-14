@@ -663,6 +663,90 @@ function resolveResponseCardAvailability({
   }
 }
 
+function resolveRouteStylePreferences(
+  preferenceContext: AssistantTurnPreferenceContext,
+  applyPersona: boolean,
+) {
+  const explicitAssistantPersona =
+    applyPersona
+    ? preferenceContext.assistantPersona ?? null
+    : null
+  const effectiveAssistantStyle = explicitAssistantPersona
+    ? resolveAssistantEffectiveStyle({
+        persona: explicitAssistantPersona,
+        ...(preferenceContext.assistantTone
+          ? { tone: preferenceContext.assistantTone }
+          : {}),
+        ...(preferenceContext.assistantVoice
+          ? { voice: preferenceContext.assistantVoice }
+          : {}),
+        ...(preferenceContext.assistantPersonality
+          ? { personality: preferenceContext.assistantPersonality }
+          : {}),
+      })
+    : null
+  const assistantTone = effectiveAssistantStyle?.tone
+    ?? preferenceContext.assistantTone
+  // Unhinged is not part of persona identity: every persona resolves it to the
+  // neutral default 0. Rendering that default band for a member who never set
+  // Unhinged would violate the sparse-dial thread contract and rotate every
+  // persona user's thread fingerprint on deploy. Keep the persona-derived
+  // Humor/Push/Detail bands, but include Unhinged in the thread personality only
+  // when the member's saved sparse preference explicitly owns that key.
+  const assistantPersonality = resolveThreadPersonalityForPrompt(
+    effectiveAssistantStyle?.personality ?? null,
+    preferenceContext.assistantPersonality,
+  )
+  const assistantVoice = preferenceContext.assistantVoice
+    ?? effectiveAssistantStyle?.voice
+    ?? null
+  return { explicitAssistantPersona, assistantTone, assistantPersonality, assistantVoice }
+}
+
+function resolveRouteNativeResumeThreadId({
+  input,
+  resumeBinding,
+  supportsNativeResume,
+  assistantContractFingerprint,
+  threadStartDeveloperInstructions,
+  dynamicTools,
+}: {
+  input: AssistantRouteTurnPlanInput
+  resumeBinding: ReturnType<typeof resolveAssistantRouteResumeBinding>
+  supportsNativeResume: boolean
+  assistantContractFingerprint: string
+  threadStartDeveloperInstructions: string | null
+  dynamicTools: readonly MurphDynamicTool[]
+}): string | null {
+  const storedAssistantContractFingerprint = normalizeNullableString(
+    resumeBinding?.assistantContractFingerprint,
+  )
+  const assistantContractMatches =
+    storedAssistantContractFingerprint === assistantContractFingerprint ||
+    (
+      resumeBinding !== null &&
+      storedAssistantContractFingerprint === buildAssistantCodexContractFingerprint({
+        developerInstructions: threadStartDeveloperInstructions,
+        dynamicTools,
+        routeFingerprint: resumeBinding.routeFingerprint,
+      })
+    )
+  const nativeResumeEnabled =
+    input.profile.threadScope === 'session-thread'
+  const resumeCodexThreadId =
+    nativeResumeEnabled &&
+    supportsNativeResume &&
+    resumeBinding !== null &&
+    assistantContractMatches
+      ? resolveAssistantEffectiveCodexResumeThreadId({
+          resumeCodexThreadId: resolveAssistantCodexResumeThreadId({
+            resumeState: resumeBinding,
+          }),
+        })
+      : null
+  return resumeCodexThreadId
+}
+
 export async function resolveAssistantRouteTurnPlan(
   input: AssistantRouteTurnPlanInput,
 ): Promise<AssistantRouteTurnPlan> {
@@ -816,39 +900,11 @@ export async function resolveAssistantRouteTurnPlan(
     hostedGroupRuntime && conversationProviderTurn
   const assistantVoicePreferenceApplies =
     privateInteractiveAudience || hostedGroupRuntime
-  const explicitAssistantPersona =
-    privateInteractiveProviderTurn || groupAssistantStylePreferencesApply
-    ? preferenceContext.assistantPersona ?? null
-    : null
-  const effectiveAssistantStyle = explicitAssistantPersona
-    ? resolveAssistantEffectiveStyle({
-        persona: explicitAssistantPersona,
-        ...(preferenceContext.assistantTone
-          ? { tone: preferenceContext.assistantTone }
-          : {}),
-        ...(preferenceContext.assistantVoice
-          ? { voice: preferenceContext.assistantVoice }
-          : {}),
-        ...(preferenceContext.assistantPersonality
-          ? { personality: preferenceContext.assistantPersonality }
-          : {}),
-      })
-    : null
-  const assistantTone = effectiveAssistantStyle?.tone
-    ?? preferenceContext.assistantTone
-  // Unhinged is not part of persona identity: every persona resolves it to the
-  // neutral default 0. Rendering that default band for a member who never set
-  // Unhinged would violate the sparse-dial thread contract and rotate every
-  // persona user's thread fingerprint on deploy. Keep the persona-derived
-  // Humor/Push/Detail bands, but include Unhinged in the thread personality only
-  // when the member's saved sparse preference explicitly owns that key.
-  const assistantPersonality = resolveThreadPersonalityForPrompt(
-    effectiveAssistantStyle?.personality ?? null,
-    preferenceContext.assistantPersonality,
-  )
-  const assistantVoice = preferenceContext.assistantVoice
-    ?? effectiveAssistantStyle?.voice
-    ?? null
+  const { explicitAssistantPersona, assistantTone, assistantPersonality, assistantVoice } =
+    resolveRouteStylePreferences(
+      preferenceContext,
+      privateInteractiveProviderTurn || groupAssistantStylePreferencesApply,
+    )
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
@@ -1232,32 +1288,14 @@ export async function resolveAssistantRouteTurnPlan(
     dynamicTools,
     routeFingerprint: readCodexThreadCompatibilityFingerprint(input.route),
   })
-  const storedAssistantContractFingerprint = normalizeNullableString(
-    resumeBinding?.assistantContractFingerprint,
-  )
-  const assistantContractMatches =
-    storedAssistantContractFingerprint === assistantContractFingerprint ||
-    (
-      resumeBinding !== null &&
-      storedAssistantContractFingerprint === buildAssistantCodexContractFingerprint({
-        developerInstructions: threadStartDeveloperInstructions,
-        dynamicTools,
-        routeFingerprint: resumeBinding.routeFingerprint,
-      })
-    )
-  const nativeResumeEnabled =
-    input.profile.threadScope === 'session-thread'
-  const resumeCodexThreadId =
-    nativeResumeEnabled &&
-    followUp.supportsNativeResume &&
-    resumeBinding !== null &&
-    assistantContractMatches
-      ? resolveAssistantEffectiveCodexResumeThreadId({
-          resumeCodexThreadId: resolveAssistantCodexResumeThreadId({
-            resumeState: resumeBinding,
-          }),
-        })
-      : null
+  const resumeCodexThreadId = resolveRouteNativeResumeThreadId({
+    input,
+    resumeBinding,
+    supportsNativeResume: followUp.supportsNativeResume,
+    assistantContractFingerprint,
+    threadStartDeveloperInstructions,
+    dynamicTools,
+  })
   const conversationHistoryMessages = resumeCodexThreadId === null
     ? await resolveCommittedTranscriptHistoryMessages()
     : []
