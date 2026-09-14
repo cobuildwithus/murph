@@ -68,6 +68,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("next/navigation", () => ({
   usePathname: mocks.usePathname,
+  useSelectedLayoutSegment: () => "(dashboard)",
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
