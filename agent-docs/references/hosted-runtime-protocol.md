@@ -3994,8 +3994,8 @@ carries optional `sourceReadAtDeadline: { step, elapsedMs }`. The same done even
 adds `details.browserVaultRefreshSourceReadStep` and
 `details.browserVaultRefreshSourceReadStepElapsedMs`. The closed source labels
 are `canonical_source_read` (`readVaultSourceStrict`), `read_model_construction`
-(`createVaultReadModel`), `personal_pattern_vocabulary_read`, `metric_projection`
-(`buildMetricProjection`), and `default_entity_projection`. Source elapsed time
+(`createVaultReadModel`), `personal_pattern_vocabulary_read`, and `metric_projection`
+(`buildMetricProjection`). Source elapsed time
 is a bounded, finite, non-negative integer measured through the first operation
 boundary at or after the deadline, or through timeout observation while active.
 The effective deadline includes an earlier caller deadline, not just the

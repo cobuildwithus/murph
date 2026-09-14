@@ -1,6 +1,12 @@
 # Personal Patterns
 
-Last verified: 2026-09-06
+Last verified: 2026-09-12
+
+Runtime and Browser Vault derive pattern evidence from the same full canonical
+source loader, including raw wearable observations. Public query summaries, Journal, and
+replica entities retain their visibility filters; source provenance stays inside
+the calculation. Runtime Patterns rebuilds the needed metric evidence from this
+local snapshot instead of reading the stripped SQLite display summaries.
 
 ## Product boundary
 
@@ -85,39 +91,92 @@ product-owned comparisons. The first version focuses on the same day and next
 day outcome windows. It does not search every threshold, delay, combination, or
 context.
 
-For a factor day, the query first uses a confirmed-absence comparison when one
-exists. Otherwise, eligible device-backed factors can use an unobserved
-weekday-matched comparison day within 35 days. Within each weekday, the query
-maximizes the number of usable pairs, then minimizes their total date distance.
-Both sides stay inside the factor report window; next-day outcomes may extend
-one day past its end. Matching uses dates and outcome availability, never
-outcome values. No exposed
-or comparison day is reused for the same factor and outcome. A manual or
-inferred factor that uses this weaker baseline cannot receive a grade above D.
+Device-backed inferred absence is date- and source-specific. The candidate day
+must have a directly observed daily step count from the same underlying source,
+import route, and known device instance. A valid zero is observed data. Session
+aggregates, sleep-only data, and workout percent-recorded are not daytime
+coverage. The fallback requires 17 observed days in the trailing 21 days and
+four recorded session dates spanning 14 days within 120 days of the candidate in the same source
+history. It excludes the latest two calendar days. These are explicit product
+assumptions about a functioning recorded-session feed, not guarantees that every
+activity was detected or imported. Query inputs do not expose provider pagination
+completion, permission history, or recording-mode changes.
 
-The query averages several matched days from one episode into one case.
-Episode records that share a factor day are merged transitively, including
-an ordinary note that overlaps a named episode. Duplicate records therefore
-cannot inflate independent evidence or reuse the same daily outcome.
+Confirmed absence and qualified inferred absence share one control pool. The
+comparison says confirmed absence only when every selected control has explicit
+absence evidence. Conflicting presence and absence excludes the date. Manual
+notes retain descriptive unobserved comparisons and their existing grade-D cap.
+Known dated illness and travel context excludes activity comparisons; unmentioned
+context is not imputed. Only the latest uninterrupted observed factor-source and
+outcome-source periods participate.
 
-A repeated-evidence grade requires at least 75% of independent cases to agree
-with the overall direction (all cases when there are two or three). The median
-paired difference must also meet the outcome's meaningful-difference threshold.
-For four or more cases, both chronological halves must retain that direction.
-Grade A requires the median paired difference to clear the larger-effect floor
-as well, so one unusual case cannot promote an otherwise modest pattern.
-Displayed means and deltas still include every matched case. These are bounded
-product evidence rules, not significance tests or causal estimates.
+Within the report window, a bounded deterministic assignment selects up to three
+unique controls per exposed date. It maximizes first controls before second and
+third controls, then minimizes pre-exposure covariate distance and calendar
+distance. Weekday must match exactly; dates must be within 35 days. Neither side
+is reused. Selection never inspects the target outcome value. Available prior-day
+outcome values and preceding seven-day mean steps (at least five observed days)
+provide a small comparison profile. A profile requires 70% coverage on each side;
+known values cannot match missing values. Numeric calipers use 0.75 robust scale,
+with fixed resolution floors. Known previous-day exposure status must agree.
+
+Explicit overlapping episodes merge transitively; consecutive exposed days also
+form one episode. Each episode receives equal weight, its matched exposed days
+receive equal weight, and each day's controls share its comparison weight.
+Both displayed averages and their percentage use those same actual observations.
+The drawer counts distinct contributing dates, independently of episode count.
+No new drawer copy or presentation controls are added.
+
+A directional result requires at least six episodes across 42 days and six
+occupied weeks. The episode floor increases by
+`ceil(log2(max(1, searchedComparisons / 12)))`, plus two when no numeric profile
+is available. The computational factor cap is chosen by recency and coverage
+before inspecting results; search size includes all eligible factor/outcome
+combinations before that cap. At least 60% of outcome-observed exposures must
+remain matched. Outcome availability must reach 70% on each otherwise eligible
+side, with a gap no greater than 20 percentage points.
+
+The mean and median episode difference must meet the metric's existing absolute
+or relative relevance floor. Six or seven episodes must all agree in direction;
+larger histories require 80% agreement. Both chronological halves must agree.
+A signal-to-variability screen scales with searched comparisons and caps its
+information index by episode count and occupied weeks on both sides. Matched
+profile imbalance must stay within 0.25 robust scale; both-missing profile weight
+cannot exceed 20%.
+
+No fortnight may supply more than 35% of exposed weight. Removing any episode or
+any 14-day block from either side must retain direction and half the relevance
+floor. One-control and 21-day-radius alternatives must retain at least 70% of
+primary exposed weight to be usable; at least one must be usable and every usable
+alternative must retain direction and half the floor. Unaffected matches stay
+fixed during deletion checks. Recent evidence requires an exposed date within
+28 days and outcome data within seven days. Positive and negative effects use
+identical rules. Failed reliability retains actual averages in the existing
+neutral state; absent comparisons use the existing insufficient state.
+
+These are bounded product screening heuristics, not significance tests, causal
+estimates, or validated false-discovery guarantees. Deterministic calibration
+covers repeated annual windows with 90 correlated comparisons, serial noise and
+calendar drift, alongside injected signals, coverage gaps, source changes,
+confounded load, stale evidence and episode concentration. The limited synthetic
+family is not a guarantee for real histories or every possible confounder.
+
+Sleep quality uses one metric across the entire report, selected before factors
+are evaluated: sleep score when it covers at least 70% of available completed
+sleep dates and at least 14 dates, otherwise sleep efficiency under the same
+rule. Only the selected metric enters the report. Missing score nights stay
+missing; a factor's effect cannot cause metric substitution. Existing consumers
+therefore keep their Sleep quality slot while displaying one coherent comparison.
 
 ## Result levels and grades
 
-The report uses one scale in the product:
+After passing the directional screen above, the existing internal grades remain:
 
 | Grade | Product name | Minimum evidence                                |
 | ----- | ------------ | ----------------------------------------------- |
-| E     | Observation  | One meaningful comparison case                  |
-| D     | Early signal | Two repeated comparison cases                   |
-| C     | Pattern      | Five cases across 21 days                       |
+| E     | Observation  | Legacy sparse-report compatibility only         |
+| D     | Early signal | Cap for manual unobserved comparisons           |
+| C     | Pattern      | Passes the directional screen                   |
 | B     | Pattern      | Eight cases across 42 days                      |
 | A     | Pattern      | Twelve cases across 56 days and a larger effect |
 
@@ -163,8 +222,9 @@ Cards with only neutral measures use a compact header with a plain
 Measures that still need data are omitted from mobile cards. `Show more`
 reveals the remaining report factors. The report keeps at most 100 sorted
 factors to bound Browser Vault size and calculation work. The page requires at
-least two recorded factor days and two independent
-comparison cases on both sides of each displayed result. Activities (including
+least two recorded factor days and two contributing dates on each side of a
+displayed result. Directional grading separately requires repeated independent
+episodes. Activities (including
 mixed activity factors) must have a recorded session within three calendar months
 of the report date, inclusive; month-end cutoffs clamp to the last day of the
 cutoff month. This uses the factor's latest observed date, even when that session
@@ -239,8 +299,7 @@ Uncertainty belongs within the finding, without repeated caveats or a standalone
 causation disclaimer. Messages preserve comparison and outcome timing without
 implying cause or prescribing habit changes. Links use the full
 `https://www.withmurph.ai/patterns` URL on its own final line; a bare route is
-never a message link. Grade E Observations remain visible on the page but stay
-quiet. A saved private ledger deduplicates result identities.
+never a message link. Legacy grade E Observations stay quiet and are excluded by the page's existing evidence filter. A saved private ledger deduplicates result identities.
 It also stores factor or result mutes requested in conversation. Grade changes
 do not create separate messages. The weekly health insight can mention a useful
 strengthening, weakening, or removed result.

@@ -313,7 +313,6 @@ test.each([false, true])("replica source observation preserves results (populate
     "read_model_construction", null,
     "personal_pattern_vocabulary_read", null,
     "metric_projection", null,
-    "default_entity_projection", null,
   ]);
   assert.deepEqual(observed, expected);
   assert.deepEqual(observed.vault, await readBrowserVaultReplicaVault(vaultRoot));

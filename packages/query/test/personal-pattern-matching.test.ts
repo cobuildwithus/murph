@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { matchPersonalPatternDates } from "../src/personal-pattern-matching.ts";
+import { matchPersonalPatternControls } from "../src/personal-pattern-matching.ts";
 
 const daysBetween = (left: string, right: string) =>
   Math.abs(Date.parse(left) - Date.parse(right)) / 86_400_000;
+
+function matchPersonalPatternDates(exposed: string[], controls: string[], radius: number): Map<string, string> {
+  return new Map([...matchPersonalPatternControls(exposed, controls, (a, b) =>
+    daysBetween(a, b) <= radius ? daysBetween(a, b) : null, 1)]
+    .map(([date, matches]) => [date, matches[0]]));
+}
 
 test("date matching maximizes pairs then minimizes distance across small exhaustive histories", () => {
   const dates = Array.from({ length: 7 }, (_, index) =>

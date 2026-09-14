@@ -134,7 +134,7 @@ export async function createBrowserVaultReplica(
       row.biomarkerKey !== null &&
       row.value !== null
     ),
-    journal: buildJournalView(input.vault, allMetricPoints, {
+    journal: buildJournalView(defaultProjectedVault, allMetricPoints, {
       asOf: addDaysToIsoDate(generatedAt.slice(0, 10), 1),
       vocabulary: input.personalPatternVocabulary,
     }),

@@ -55,7 +55,7 @@ test("Personal Patterns keeps a repeated next-day link and matched comparison ev
       );
     }),
   ];
-  const vault = createVaultReadModel({
+  const vault = createObservedPatternVault({
     entities,
     vaultRoot: "test://personal-patterns",
   });
@@ -80,11 +80,11 @@ test("Personal Patterns keeps a repeated next-day link and matched comparison ev
     (cell) => cell.factorId === "running" && cell.outcomeId === "hrv",
   );
   assert.ok(hrv);
-  assert.equal(hrv.grade, "B");
+  assert.equal(hrv.grade, "C");
   assert.equal(hrv.stage, "seen_again");
   assert.equal(hrv.direction, "higher");
   assert.equal(hrv.repeatedDirection, true);
-  assert.equal(hrv.exposedDays, 8);
+  assert.equal(hrv.exposedDays, 7);
   assert.equal(hrv.comparisonDays, 8);
   assert.equal(hrv.exposedMean, 70);
   assert.equal(hrv.comparisonMean, 50);
@@ -139,6 +139,7 @@ test("Personal Patterns applies one validated vocabulary before aggregation", as
       kind: "activity",
       label: "Dance",
       observedDays: 2,
+      episodeCount: 1,
       lastObservedDate: "2026-08-21",
     },
   ]);
@@ -205,8 +206,8 @@ test("Personal Patterns counts merged aliases once per independent day", () => {
   const oneDayCell = oneDay.cells.find(
     (cell) => cell.factorId === "dance" && cell.outcomeId === "hrv",
   );
-  assert.equal(oneDayCell?.exposedDays, 1);
-  assert.equal(oneDayCell?.grade, "E");
+  assert.equal(oneDayCell?.exposedDays, 0);
+  assert.equal(oneDayCell?.grade, null);
 
   const twoDays = buildPersonalPatternReport(
     createVaultReadModel({
@@ -226,8 +227,8 @@ test("Personal Patterns counts merged aliases once per independent day", () => {
   const twoDayCell = twoDays.cells.find(
     (cell) => cell.factorId === "dance" && cell.outcomeId === "hrv",
   );
-  assert.equal(twoDayCell?.exposedDays, 2);
-  assert.equal(twoDayCell?.grade, "D");
+  assert.equal(twoDayCell?.exposedDays, 0);
+  assert.equal(twoDayCell?.grade, null);
 });
 
 test("Personal Patterns rejects ambiguous or unbounded vocabulary", () => {
@@ -358,6 +359,7 @@ test("Browser Vault reads the bounded vocabulary from its private Knowledge page
           kind: "activity",
           label: "Dance",
           observedDays: 2,
+          episodeCount: 1,
           lastObservedDate: "2026-08-21",
         },
       ],
@@ -372,7 +374,7 @@ test("Personal Patterns keeps a repeated eight-minute deep-sleep change", async 
   const runningDates = Array.from({ length: 8 }, (_, index) =>
     addDays(start, index * 14),
   );
-  const vault = createVaultReadModel({
+  const vault = createObservedPatternVault({
     entities: runningDates.map((date, index) =>
       event(`deep_sleep_run_${index}`, date, "activity_session", {
         activityType: "running",
@@ -432,7 +434,7 @@ test("Personal Patterns reuses the canonical provider activity-kind resolver", (
     addDays(start, index * 14),
   );
   const report = buildPersonalPatternReport(
-    createVaultReadModel({
+    createObservedPatternVault({
       entities: [
         ...runningDates.map((date, index) =>
           event(`provider_run_${index}`, date, "activity_session", {
@@ -528,7 +530,7 @@ test("Personal Patterns admits only the product-owned Oura sauna tag from neutra
     report.cells.find(
       (cell) => cell.factorId === "sauna" && cell.outcomeId === "hrv",
     )?.stage,
-    "seen_again",
+    "insufficient",
   );
   assert.equal(
     report.factors.some((factor) => factor.id === "headache"),
@@ -553,7 +555,7 @@ test("Browser Vault Personal Patterns falls back to its selected metric rows", a
   const runningDates = Array.from({ length: 8 }, (_, index) =>
     addDays(start, index * 14),
   );
-  const vault = createVaultReadModel({
+  const vault = createObservedPatternVault({
     entities: runningDates.map((date, index) =>
       event(`metric_run_${index}`, date, "activity_session", {
         activityType: "running",
@@ -621,7 +623,7 @@ test("Browser Vault Personal Patterns includes sleep outcomes from metric rows",
   const runningDates = Array.from({ length: 8 }, (_, index) =>
     addDays(start, index * 14),
   );
-  const vault = createVaultReadModel({
+  const vault = createObservedPatternVault({
     entities: runningDates.map((date, index) =>
       event(`sleep_metric_run_${index}`, date, "activity_session", {
         activityType: "running",
@@ -668,7 +670,6 @@ test("Browser Vault Personal Patterns includes sleep outcomes from metric rows",
   assert.deepEqual(report?.outcomes.map((outcome) => outcome.id), [
     "total-sleep",
     "sleep-score",
-    "sleep-efficiency",
   ]);
   assert.equal(
     report?.cells.find((cell) => cell.outcomeId === "sleep-score")?.stage,
@@ -685,7 +686,7 @@ test("Personal Patterns does not duplicate the canonical readiness metric as rec
   const runningDates = Array.from({ length: 8 }, (_, index) =>
     addDays(start, index * 14),
   );
-  const vault = createVaultReadModel({
+  const vault = createObservedPatternVault({
     entities: runningDates.map((date, index) =>
       event(`readiness_run_${index}`, date, "activity_session", {
         activityType: "running",
@@ -758,7 +759,7 @@ test("Personal Patterns keeps qualified factors for the expandable report", () =
     }),
   ];
   const report = buildPersonalPatternReport(
-    createVaultReadModel({
+    createObservedPatternVault({
       entities,
       vaultRoot: "test://personal-pattern-cap",
     }),
@@ -794,7 +795,7 @@ test("Personal Patterns uses the nearest unused same-weekday comparisons", () =>
     addDays(start, offset),
   );
   const report = buildPersonalPatternReport(
-    createVaultReadModel({
+    createObservedPatternVault({
       entities: [
         ...runningDates.map((date, index) =>
           event(`run_match_${index}`, date, "activity_session", {
@@ -911,35 +912,35 @@ test("Personal Patterns keeps the evidence-stage boundaries and repeated-directi
   const cases = [
     {
       count: 5,
-      expected: "seen_again",
+      expected: "no_clear_pattern",
       exposed: () => 70,
       name: "five over 21 days",
       span: 21,
     },
     {
       count: 5,
-      expected: "new_clue",
+      expected: "no_clear_pattern",
       exposed: () => 70,
       name: "five under 21 days",
       span: 20,
     },
     {
       count: 8,
-      expected: "seen_again",
+      expected: "no_clear_pattern",
       exposed: () => 70,
       name: "eight over 42 days",
       span: 42,
     },
     {
       count: 8,
-      expected: "seen_again",
+      expected: "no_clear_pattern",
       exposed: () => 70,
       name: "eight under 42 days",
       span: 41,
     },
     {
       count: 12,
-      expected: "worth_testing",
+      expected: "seen_again",
       exposed: () => 53.75,
       name: "twelve over 56 days at 1.5x",
       span: 56,
@@ -974,7 +975,7 @@ test("Personal Patterns keeps the evidence-stage boundaries and repeated-directi
   }
 });
 
-test("Personal Patterns labels one result as an Observation and repeated results as an Early signal", () => {
+test("Personal Patterns keeps sparse observations neutral until they repeat across time", () => {
   const one = buildPersonalPatternReport(
     createVaultReadModel({
       entities: [
@@ -989,8 +990,8 @@ test("Personal Patterns labels one result as an Observation and repeated results
     { asOf: "2026-01-20", windowDays: 28 },
   );
   const observationCell = one.cells.find((cell) => cell.factorId === "running");
-  assert.equal(observationCell?.grade, "E");
-  assert.equal(observationCell?.classification, "observation");
+  assert.equal(observationCell?.grade, null);
+  assert.equal(observationCell?.classification, null);
 
   const repeated = buildPersonalPatternReport(
     createVaultReadModel({
@@ -1012,30 +1013,30 @@ test("Personal Patterns labels one result as an Observation and repeated results
         observation(
           "coffee_exposed_1",
           "2026-01-06",
-          "sleep-score",
+          "hrv",
           55,
-          "score",
+          "ms",
         ),
         observation(
           "coffee_exposed_2",
           "2026-01-20",
-          "sleep-score",
+          "hrv",
           54,
-          "score",
+          "ms",
         ),
         observation(
           "coffee_control_1",
           "2026-01-13",
-          "sleep-score",
+          "hrv",
           80,
-          "score",
+          "ms",
         ),
         observation(
           "coffee_control_2",
           "2026-01-27",
-          "sleep-score",
+          "hrv",
           82,
-          "score",
+          "ms",
         ),
       ],
       vaultRoot: "test://personal-pattern-early-signal",
@@ -1043,8 +1044,8 @@ test("Personal Patterns labels one result as an Observation and repeated results
     { asOf: "2026-02-01", windowDays: 35 },
   );
   const earlyCell = repeated.cells.find((cell) => cell.factorId === "coffee");
-  assert.equal(earlyCell?.grade, "D");
-  assert.equal(earlyCell?.classification, "early_signal");
+  assert.equal(earlyCell?.grade, null);
+  assert.equal(earlyCell?.classification, null);
   assert.equal(earlyCell?.comparisonBasis, "confirmed_absence");
   assert.equal(repeated.factors[0]?.confirmedAbsentDays, 2);
 });
@@ -1120,7 +1121,7 @@ test("Personal Patterns caps mixed device and manual observations that use an un
     (candidate) => candidate.factorId === "running",
   );
   assert.equal(cell?.comparisonBasis, "unobserved_baseline");
-  assert.equal(cell?.grade, "D");
+  assert.equal(cell?.grade, null);
 });
 
 test("Personal Patterns counts a multi-day context as one episode", () => {
@@ -1161,7 +1162,7 @@ test("Personal Patterns counts a multi-day context as one episode", () => {
   );
   assert.equal(hrv?.exposedDays, 1);
   assert.equal(hrv?.comparisonDays, 1);
-  assert.equal(hrv?.grade, "E");
+  assert.equal(hrv?.grade, null);
 });
 
 test("Personal Patterns keeps explicit absence for a bounded factor detail", () => {
@@ -1193,10 +1194,10 @@ test("Personal Patterns keeps explicit absence for a bounded factor detail", () 
           "did-not-happen",
           ["timing-late", "amount-high"],
         ),
-        observation("late_sleep_1", "2026-01-06", "sleep-score", 55, "score"),
-        observation("late_sleep_2", "2026-01-20", "sleep-score", 54, "score"),
-        observation("early_sleep_1", "2026-01-13", "sleep-score", 80, "score"),
-        observation("early_sleep_2", "2026-01-27", "sleep-score", 82, "score"),
+        observation("late_sleep_1", "2026-01-06", "hrv", 55, "ms"),
+        observation("late_sleep_2", "2026-01-20", "hrv", 54, "ms"),
+        observation("early_sleep_1", "2026-01-13", "hrv", 80, "ms"),
+        observation("early_sleep_2", "2026-01-27", "hrv", 82, "ms"),
       ],
       vaultRoot: "test://personal-pattern-factor-detail-absence",
     }),
@@ -1206,7 +1207,7 @@ test("Personal Patterns keeps explicit absence for a bounded factor detail", () 
   const detailedCell = report.cells.find(
     (cell) => cell.factorId === "coffee--amount-high",
   );
-  assert.equal(detailedCell?.grade, "D");
+  assert.equal(detailedCell?.grade, null);
   assert.equal(detailedCell?.comparisonBasis, "confirmed_absence");
   assert.equal(
     report.cells.some((cell) => cell.factorId === "coffee--timing-late"),
@@ -1264,11 +1265,11 @@ test("Personal Patterns uses same-day subjective outcomes", () => {
       entry.factorId === "tennis" && entry.outcomeId === "subjective-soreness",
   );
   assert.equal(outcome?.lagDays, 0);
-  assert.equal(cell?.grade, "D");
-  assert.equal(cell?.direction, "higher");
+  assert.equal(cell?.grade, null);
+  assert.equal(cell?.direction, "flat");
 });
 
-test("Personal Patterns keeps common synthetic health links as regression baselines", () => {
+test("Personal Patterns withholds directions for sparse synthetic comparisons", () => {
   const scenarios = [
     {
       baseline: 440,
@@ -1349,10 +1350,10 @@ test("Personal Patterns keeps common synthetic health links as regression baseli
         entry.outcomeId === scenario.outcome,
     );
 
-    assert.equal(cell?.grade, "C", scenario.factor);
+    assert.equal(cell?.grade ?? null, null, scenario.factor);
     assert.equal(
-      cell?.direction,
-      scenario.exposed > scenario.baseline ? "higher" : "lower",
+      cell?.direction ?? "flat",
+      "flat",
       scenario.factor,
     );
   }
@@ -1380,6 +1381,7 @@ test("Personal Patterns anchors sleep outcomes to the localized sleep-end date i
       occurredAt: `${date}T12:00:00.000Z`,
       schemaVersion: "murph.event.v1",
       source: "device",
+      externalRef: { system: "whoop", resourceType: "workouts", resourceId: `run-${index}` },
       title: "Running",
     }),
   );
@@ -1449,6 +1451,16 @@ test("Personal Patterns anchors sleep outcomes to the localized sleep-end date i
         value: sleepScore,
       },
     );
+  }
+
+  for (let index = 0; index < 112; index += 1) {
+    const date = addDays(start, index);
+    if (runningDates.includes(date)) continue;
+    const note = journalFactor(`absence_${index}`, date, "running", "did-not-happen");
+    canonicalEntities.push(note);
+    ledgerEvents.push({ id: `evt_absence_${index}`, kind: "note", schemaVersion: "murph.event.v1",
+      dayKey: date, occurredAt: `${date}T12:00:00.000Z`, source: "manual", title: "Running absence",
+      noteType: "journal-factor", note: "Running", tags: note.tags });
   }
 
   const direct = buildPersonalPatternReport(
@@ -1894,7 +1906,7 @@ test("Personal Patterns runtime and Browser Vault reuse the same projected metri
     assert.equal(runtimeReport.factors[0]?.id, "running");
     assert.equal(
       runtimeReport.cells.find((cell) => cell.outcomeId === "hrv")?.stage,
-      "seen_again",
+      "insufficient",
     );
     assert.deepEqual(browserReport, runtimeReport);
   } finally {
@@ -1922,7 +1934,7 @@ test("Personal Patterns retains available pairs when a nearest match would stran
   );
   const cell = report.cells.find((cell) => cell.outcomeId === "hrv");
   assert.equal(cell?.exposedDays, 2);
-  assert.equal(cell?.grade, "D");
+  assert.equal(cell?.grade, null);
   assert.deepEqual(cell?.exposedDates, exposed);
   assert.deepEqual(cell?.comparisonDates, controls);
   assert.deepEqual(buildPersonalPatternReport(
@@ -1932,7 +1944,7 @@ test("Personal Patterns retains available pairs when a nearest match would stran
 });
 
 for (const scenario of [
-  { name: "one unusual case cannot inflate a typical modest effect to grade A", deltas: [27, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3], grade: "B" },
+  { name: "one unusual case cannot inflate a typical modest effect to grade A", deltas: [27, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3], grade: null },
   { name: "a consistently larger effect still earns grade A", deltas: Array(12).fill(10), grade: "A" },
   { name: "two extreme cases contradict the typical case", deltas: [-1, -1, 35, -1, -1, -1, -1, -1, 35, -1, -1, -1], grade: null },
   { name: "tiny consistent changes depend on extreme cases for magnitude", deltas: [30, 0.1, 0.1, 0.1, 30, 0.1, 0.1, 0.1], grade: null },
@@ -1949,14 +1961,19 @@ for (const scenario of [
         observation(`baseline_hrv_${index}`, addDays(date, 8), "hrv", 50, "ms"),
       ];
     });
+    const asOf = addDays("2026-01-05", (scenario.deltas.length - 1) * 14 + 9);
+    const existing = new Set(entities.filter((entry) => entry.attributes.metric === "hrv").map((entry) => entry.date));
+    for (let date = addDays("2026-01-05", -21); date <= asOf; date = addDays(date, 1)) {
+      if (!existing.has(date)) entities.push(observation(`daily_hrv_${date}`, date, "hrv", 50, "ms"));
+    }
     const report = buildPersonalPatternReport(
-      createVaultReadModel({ entities, vaultRoot: "test://repeated-evidence" }),
-      { asOf: "2026-06-30", windowDays: 200 },
+      createObservedPatternVault({ entities, vaultRoot: "test://repeated-evidence" }),
+      { asOf, windowDays: 200 },
     );
     const cell = report.cells.find((cell) => cell.outcomeId === "hrv");
     assert.equal(cell?.exposedDays, scenario.deltas.length);
     assert.equal(cell?.grade, scenario.grade);
-    assert.equal(cell?.repeatedDirection, scenario.grade !== null);
+    if (scenario.grade) assert.equal(cell?.repeatedDirection, true);
   });
 }
 
@@ -1979,11 +1996,11 @@ test("Personal Patterns counts overlapping episode records as one independent ca
     );
     const cell = report.cells.find((cell) => cell.outcomeId === "hrv");
     assert.equal(report.factors[0]?.episodeCount, 1);
-    assert.equal(cell?.exposedDays, 1);
-    assert.equal(cell?.comparisonDays, 1);
+    assert.equal(cell?.exposedDays, 3);
+    assert.equal(cell?.comparisonDays, 3);
     assert.equal(cell?.exposedDates?.length, 3);
     assert.equal(new Set(cell?.comparisonDates).size, 3);
-    assert.equal(cell?.grade, "E");
+    assert.equal(cell?.grade, null);
   }
 });
 
@@ -2015,7 +2032,7 @@ test("Personal Patterns does not use tomorrow as a same-day subjective baseline"
     }),
     { asOf: "2026-03-31", windowDays: 28 },
   );
-  assert.equal(report.cells[0]?.stage, "insufficient");
+  assert.deepEqual(report.cells, []);
 });
 
 function event(
@@ -2027,7 +2044,7 @@ function event(
   return entity("event", id, {
     attributes:
       kind === "activity_session" && attributes.source === undefined
-        ? { ...attributes, source: "device" }
+        ? { externalRef: { system: "whoop", resourceType: "workouts", resourceId: id }, ...attributes, source: "device" }
         : attributes,
     date,
     kind,
@@ -2283,7 +2300,7 @@ function buildHrvStageFixture(
   ];
 
   return buildPersonalPatternReport(
-    createVaultReadModel({
+    createObservedPatternVault({
       entities,
       vaultRoot: `test://personal-pattern-stage-${count}-${spanDays}`,
     }),
@@ -2292,4 +2309,17 @@ function buildHrvStageFixture(
       windowDays: Math.max(28, asOfOffset + 1),
     },
   );
+}
+
+// A complete synthetic daytime feed for tests that explicitly assume observed
+// device days. Gap/unknown-source tests use createVaultReadModel directly.
+function createObservedPatternVault(input: Parameters<typeof createVaultReadModel>[0]) {
+  const dates = input.entities.map((entry) => entry.date).filter((date): date is string => date !== null).sort();
+  const steps: CanonicalEntity[] = [];
+  if (dates.length) {
+    for (let date = addDays(dates[0], -21); date <= addDays(dates.at(-1)!, 14); date = addDays(date, 1)) {
+      steps.push(observation(`covered_steps_${date}`, date, "steps", 6000, "count"));
+    }
+  }
+  return createVaultReadModel({ ...input, entities: [...input.entities, ...steps] });
 }

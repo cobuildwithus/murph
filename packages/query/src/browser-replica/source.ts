@@ -26,8 +26,7 @@ export type BrowserVaultReplicaSourceStep =
   | "canonical_source_read"
   | "read_model_construction"
   | "personal_pattern_vocabulary_read"
-  | "metric_projection"
-  | "default_entity_projection";
+  | "metric_projection";
 
 export async function readBrowserVaultReplicaSource(
   vaultRoot: string,
@@ -66,11 +65,9 @@ export async function readBrowserVaultReplicaSource(
   const metricPoints = buildMetricProjection(sourceVault).metricPoints;
   observe(null);
   await yieldToBrowserVaultSourceCancellation(options.signal);
-  observe("default_entity_projection");
-  const vault = createDefaultProjectedVault(sourceVault);
-  observe(null);
-
-  return { metricPoints, personalPatternVocabulary, vault };
+  // Keep raw wearable evidence until derived calculations finish. Replica
+  // serialization applies its own default entity visibility filter.
+  return { metricPoints, personalPatternVocabulary, vault: sourceVault };
 }
 
 export async function readBrowserVaultPersonalPatternVocabulary(

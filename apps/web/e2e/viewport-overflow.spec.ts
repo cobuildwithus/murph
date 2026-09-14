@@ -653,14 +653,16 @@ test("Goal guide source hover changes only the hovered source", async ({ page })
     waitUntil: "load",
   });
   expect(response?.status()).toBe(200);
-  const sources = page.locator("article a[href^='http']:not([aria-label])");
+  const sources = page.locator("[data-goal-sources] a[href^='http']");
   expect(await sources.count()).toBeGreaterThan(1);
   const before = await sources.evaluateAll((links) =>
-    links.slice(0, 2).map((link) => getComputedStyle(link).textDecorationColor),
+    links.slice(0, 2).map((link) => getComputedStyle(link).color),
   );
   await sources.first().hover();
+  await expect.poll(() => sources.first().evaluate((link) => getComputedStyle(link).color))
+    .not.toBe(before[0]);
   const after = await sources.evaluateAll((links) =>
-    links.slice(0, 2).map((link) => getComputedStyle(link).textDecorationColor),
+    links.slice(0, 2).map((link) => getComputedStyle(link).color),
   );
 
   expect(after[0]).not.toBe(before[0]);

@@ -74,11 +74,11 @@ test('replayed Junction tags persist neutrally and Oura sauna reaches Personal P
     expect(initialReport.factors).toEqual([
       expect.objectContaining({ id: 'sauna', kind: 'intervention', observedDays: 5 }),
     ])
-    expect(initialReport.cells.some((cell) =>
-      cell.factorId === 'sauna'
-      && cell.grade === 'C'
-      && cell.classification === 'pattern'
-    )).toBe(true)
+    // Five imported tags establish the factor, but not enough independent
+    // repetitions for a direction under the comparable-evidence contract.
+    const saunaCells = initialReport.cells.filter((cell) => cell.factorId === 'sauna')
+    expect(saunaCells.length).toBeGreaterThan(0)
+    expect(saunaCells.every((cell) => cell.grade === null && cell.direction === 'flat')).toBe(true)
 
     await expect(directoryContainsText(vaultRoot, SENSITIVE_NOTE_VALUE))
       .resolves.toBe(false)

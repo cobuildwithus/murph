@@ -88,17 +88,20 @@ test("Oura persona covers a varied activity history", async () => {
   const detectedFactors = new Set(detectedCells.map((cell) => cell.factorId));
   const detectedOutcomes = new Set(detectedCells.map((cell) => cell.outcomeId));
 
-  for (const expected of ["cycling", "late-caffeine", "running", "strength"]) {
+  for (const expected of ["cycling", "running", "strength"]) {
     assert.ok(detectedFactors.has(expected), expected);
   }
   for (const expected of [
     "deep-sleep",
     "rem-sleep",
-    "sleep-efficiency",
-    "total-sleep",
+    "sleep-score",
+    "hrv",
   ]) {
     assert.ok(detectedOutcomes.has(expected), expected);
   }
+  assert.ok(replica.personalPatterns.cells
+    .filter((cell) => cell.factorId === "late-caffeine")
+    .every((cell) => cell.direction === "flat"));
   assert.ok(
     replica.personalPatterns?.cells.some(
       (cell) => cell.stage === "no_clear_pattern",
@@ -132,7 +135,8 @@ test("Whoop persona exposes provider-specific sleep and recovery outcomes", asyn
     .flatMap((day) => day.events)
     .find((event) => event.kind === "sleep");
   assert.ok(sleep);
-  assert.notEqual(sleep.metrics.recoveryScore, null);
+  // Metric points use the canonical readiness key for provider recovery scores.
+  assert.notEqual(sleep.metrics.recoveryScore ?? sleep.metrics.readinessScore, null);
   assert.notEqual(sleep.metrics.deepSleepMinutes, null);
   assert.notEqual(sleep.metrics.spo2Percent, null);
 
@@ -276,16 +280,15 @@ test("training and group personas show completed actions and private context", a
         entity.attributes.source === "murph-live",
     ).length >= 12,
   );
-  assert.equal(
-    training.personalPatterns?.cells.some(
-      (cell) =>
-        cell.factorId === "strength" &&
-        cell.outcomeId === "deep-sleep" &&
-        cell.stage !== "insufficient" &&
-        cell.stage !== "no_clear_pattern",
-    ),
-    true,
+  // A short self-logged training history supplies context, not a device-backed
+  // repeated direction under the comparable-evidence contract.
+  assert.ok(training.personalPatterns);
+  const trainingSleep = training.personalPatterns.cells.find(
+    (cell) => cell.factorId === "strength" && cell.outcomeId === "deep-sleep",
   );
+  assert.ok(trainingSleep);
+  assert.equal(trainingSleep.direction, "flat");
+  assert.equal(trainingSleep.grade, null);
 
   const familyEvents = family.journal?.days.flatMap((day) => day.events) ?? [];
   assert.equal(

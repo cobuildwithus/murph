@@ -1196,7 +1196,6 @@ describe("hosted browser-vault replica refresh preparation", () => {
     "read_model_construction",
     "personal_pattern_vocabulary_read",
     "metric_projection",
-    "default_entity_projection",
     "between_operations",
   ] as const)("retains source deadline attribution for %s when the timer runs late", async (slowStep) => {
     let nowMs = 10_000;

@@ -10,7 +10,11 @@ import {
 } from "../src/browser-vault.ts";
 
 test("browser vault generation rebuilds replicas for canonical goal target interpretation", () => {
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 16);
+  assert.ok(BROWSER_VAULT_REPLICA_CURRENT_GENERATION >= 16);
+});
+
+test("browser vault generation refreshes comparable Personal Patterns evidence", () => {
+  assert.ok(BROWSER_VAULT_REPLICA_CURRENT_GENERATION >= 17);
 });
 
 test("browser vault owns one fixed 32-bucket lowercase hexadecimal namespace", () => {

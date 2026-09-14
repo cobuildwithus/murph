@@ -12,7 +12,9 @@ import {
   resolveInterventionSessionLocalDate,
 } from "./experiment-adherence.ts";
 import { selectMetricSeries, type MetricPoint } from "./metrics/index.ts";
-import { matchPersonalPatternDates } from "./personal-pattern-matching.ts";
+import { comparePersonalPattern, latestPersonalPatternPeriod } from "./personal-pattern-comparison.ts";
+import { buildPersonalPatternEvidence, personalPatternSource, personalPatternMetricSource,
+  type PersonalPatternEvidence } from "./personal-pattern-evidence.ts";
 import type { VaultReadModel } from "./read-model.ts";
 import { buildWearableSummaryBundle } from "./wearables.ts";
 import type {
@@ -29,7 +31,6 @@ const MAX_REPORT_FACTORS = 100;
 export const PERSONAL_PATTERN_VOCABULARY_SLUG =
   "journal-pattern-vocabulary";
 const MIN_OUTCOME_DAYS = 2;
-const COMPARISON_SEARCH_DAYS = 35;
 // Product-owned and intentionally fail-closed. A new provider tag requires
 // explicit product evidence before it can acquire action semantics here.
 const PERSONAL_PATTERN_OURA_ACTION_TAG = "sauna";
@@ -165,11 +166,13 @@ interface FactorAccumulator {
   dates: Set<string>;
   episodeDates: Map<string, Set<string>>;
   implicitAbsenceAllowed: boolean;
+  sources: Map<string, string | null>;
   kinds: Set<"activity" | "intervention">;
   token: string;
 }
 
 interface FactorCandidate {
+  source: string | null;
   date: string;
   episodeId: string;
   implicitAbsenceAllowed: boolean;
@@ -181,6 +184,7 @@ interface FactorCandidate {
 interface OutcomeSeries extends PersonalPatternOutcome {
   lagDays: 0 | 1;
   values: Map<string, number>;
+  sources: Map<string, string | null>;
   meaningfulAbsoluteDelta: number;
   meaningfulRelativeDelta: number;
 }
@@ -214,7 +218,7 @@ export function buildPersonalPatternReport(
 
 export function buildPersonalPatternReportFromWearableBundle(
   vault: VaultReadModel,
-  wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
+  wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights"> & Partial<Pick<WearableSummaryBundle, "activityDays">>,
   options: {
     asOf?: Date | string;
     vocabulary?: PersonalPatternVocabulary | null;
@@ -229,12 +233,13 @@ export function buildPersonalPatternReportFromWearableBundle(
       ...collectJournalOutcomeSeries(vault.events, window),
     ],
     options,
+    buildPersonalPatternEvidence(vault.events, wearableBundle.activityDays ?? [], resolveAsOfDate(options.asOf)),
   );
 }
 
 export function buildPersonalPatternReportFromWearableBundleAndMetricPoints(
   vault: VaultReadModel,
-  wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
+  wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights"> & Partial<Pick<WearableSummaryBundle, "activityDays">>,
   metricPoints: readonly MetricPoint[],
   options: {
     asOf?: Date | string;
@@ -264,26 +269,32 @@ export function buildPersonalPatternReportFromWearableBundleAndMetricPoints(
     vault,
     [...wearableOutcomes, ...fallbackOutcomes, ...journalOutcomes],
     options,
+    buildPersonalPatternEvidence(vault.events, wearableBundle.activityDays ?? [], resolveAsOfDate(options.asOf)),
   );
 }
 
 function buildPersonalPatternReportFromOutcomeSeries(
   vault: VaultReadModel,
-  outcomes: readonly OutcomeSeries[],
+  rawOutcomes: readonly OutcomeSeries[],
   options: {
     asOf?: Date | string;
     vocabulary?: PersonalPatternVocabulary | null;
     windowDays?: number;
   },
+  evidence: PersonalPatternEvidence,
 ): PersonalPatternReport {
   const asOfDate = resolveAsOfDate(options.asOf);
   const windowDays = normalizeWindowDays(options.windowDays);
   const fromDate = addDays(asOfDate, -(windowDays - 1));
+  const outcomes = selectSleepQualityOutcome(rawOutcomes, fromDate);
   const vocabulary = buildPersonalPatternVocabularyIndex(options.vocabulary);
   const factorAccumulators = pruneRedundantFactorDetails(
     collectFactorAccumulators(vault.events, fromDate, asOfDate, vocabulary),
   );
-  const candidateFactors = collectFactors(factorAccumulators, vocabulary);
+  const candidateFactors = collectFactors(factorAccumulators, vocabulary)
+    .sort((a, b) => (b.lastObservedDate ?? "").localeCompare(a.lastObservedDate ?? "")
+      || b.observedDays - a.observedDays || a.id.localeCompare(b.id))
+    .slice(0, MAX_REPORT_FACTORS);
   const candidateCells = candidateFactors.flatMap((factor) =>
     outcomes.map((outcome) =>
       buildPatternCell(
@@ -292,6 +303,8 @@ function buildPersonalPatternReportFromOutcomeSeries(
         outcome,
         fromDate,
         asOfDate,
+        evidence,
+        factorAccumulators.size * outcomes.length,
       ),
     ),
   );
@@ -326,6 +339,7 @@ function buildPersonalPatternReportFromOutcomeSeries(
     outcomes: outcomes.map(
       ({
         values: _values,
+        sources: _sources,
         meaningfulAbsoluteDelta: _absolute,
         meaningfulRelativeDelta: _relative,
         ...outcome
@@ -407,6 +421,9 @@ function collectFactorAccumulators(
           existing.implicitAbsenceAllowed &&=
             candidate.implicitAbsenceAllowed;
           existing.dates.add(candidate.date);
+          const priorSource = existing.sources.get(candidate.date);
+          existing.sources.set(candidate.date, priorSource === undefined || priorSource === candidate.source
+            ? candidate.source : null);
           addEpisodeDate(
             existing.episodeDates,
             candidate.episodeId,
@@ -431,6 +448,7 @@ function collectFactorAccumulators(
         ),
         implicitAbsenceAllowed:
           candidate.state === "absent" || candidate.implicitAbsenceAllowed,
+        sources: new Map(candidate.state === "observed" ? [[candidate.date, candidate.source]] : []),
         kinds: new Set([candidate.kind]),
         token: candidate.token,
       });
@@ -568,6 +586,7 @@ function buildObservedFactorCandidates(input: {
   token: string;
 }): FactorCandidate[] {
   const base: FactorCandidate = {
+    source: input.event.attributes.source === "device" ? personalPatternSource(input.event.attributes) : "manual",
     date: input.date,
     episodeId: readEpisodeId(input.event) ?? `${input.token}:${input.date}`,
     implicitAbsenceAllowed:
@@ -601,6 +620,7 @@ function readJournalNoteFactorCandidates(
   const state = event.tags.includes("did-not-happen") ? "absent" : "observed";
   if (event.tags.includes("planned") && state !== "absent") return [];
   const base: FactorCandidate = {
+    source: "manual",
     date,
     episodeId: readEpisodeId(event) ?? `${token}:${date}`,
     implicitAbsenceAllowed: false,
@@ -733,6 +753,7 @@ function collectJournalOutcomeSeries(
       meaningfulRelativeDelta: 0.2,
       unit: "level",
       values,
+      sources: new Map([...values.keys()].map((date) => [date, "manual"])),
     }));
 }
 
@@ -762,7 +783,7 @@ function readSubjectiveOutcomeValue(value: string | null): number | null {
 }
 
 function collectOutcomeSeries(
-  wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
+  wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights"> & Partial<Pick<WearableSummaryBundle, "activityDays">>,
   window: PatternWindow,
   fallbackTimeZone: string | null,
 ): OutcomeSeries[] {
@@ -1016,6 +1037,8 @@ function metricPointOutcome(
 ): OutcomeSeries {
   const metricKeys = typeof metricKey === "string" ? [metricKey] : metricKey;
   const values = new Map<string, number>();
+  const sources = new Map<string, string | null>();
+  const pointsById = new Map(metricPoints.map((point) => [point.id, point]));
   for (const key of metricKeys) {
     const rows = selectMetricSeries({
       from: window.fromDate,
@@ -1030,6 +1053,13 @@ function metricPointOutcome(
         !values.has(row.date)
       ) {
         values.set(row.date, row.value);
+        const pointIds = new Set(row.pointIds ?? (row.id ? [row.id] : []));
+        const selected = [...pointIds].flatMap((id) => {
+          const point = pointsById.get(id);
+          return point ? [point] : [];
+        });
+        const origins = new Set(selected.map((point) => personalPatternSource(point.provenance)));
+        sources.set(row.date, origins.size === 1 ? [...origins][0] : null);
       }
     }
   }
@@ -1041,6 +1071,7 @@ function metricPointOutcome(
     meaningfulRelativeDelta,
     unit,
     values,
+    sources,
   };
 }
 
@@ -1055,11 +1086,13 @@ function outcome<T extends { date: string }>(
   selectDate: (day: T) => string = (day) => day.date,
 ): OutcomeSeries {
   const values = new Map<string, number>();
+  const sources = new Map<string, string | null>();
   for (const day of days) {
     const metric = select(day);
     const value = metric.selection.value;
     if (value === null || metric.confidence.level === "none") continue;
     values.set(selectDate(day), value);
+    sources.set(selectDate(day), personalPatternMetricSource(metric));
   }
   return {
     id,
@@ -1069,7 +1102,24 @@ function outcome<T extends { date: string }>(
     meaningfulRelativeDelta,
     unit,
     values,
+    sources,
   };
+}
+
+function selectSleepQualityOutcome(outcomes: readonly OutcomeSeries[], fromDate: string): OutcomeSeries[] {
+  const score = outcomes.find((outcome) => outcome.id === "sleep-score");
+  const efficiency = outcomes.find((outcome) => outcome.id === "sleep-efficiency");
+  const sleep = outcomes.find((outcome) => outcome.id === "total-sleep");
+  const covered = new Set([...latestPersonalPatternPeriod(sleep?.sources ?? score?.sources ?? efficiency?.sources ?? new Map())]
+    .filter((date) => date >= fromDate));
+  const adequate = (series: OutcomeSeries | undefined) => {
+    const period = latestPersonalPatternPeriod(series?.sources ?? new Map());
+    const count = [...covered].filter((date) => period.has(date)).length;
+    return count >= 14 && count / Math.max(1, covered.size) >= 0.7;
+  };
+  const selected = adequate(score) ? score : adequate(efficiency) ? efficiency : null;
+  return outcomes.filter((outcome) => !["sleep-score", "sleep-efficiency"].includes(outcome.id)
+    || outcome === selected);
 }
 
 function readVaultTimeZone(vault: VaultReadModel): string | null {
@@ -1083,19 +1133,23 @@ function buildPatternCell(
   outcome: OutcomeSeries,
   fromDate: string,
   toDate: string,
+  evidence: PersonalPatternEvidence,
+  searchSize: number,
 ): PersonalPatternCell {
   const factorDates = accumulator?.dates ?? new Set<string>();
   const confirmedAbsentDates = accumulator?.absentDates ?? new Set<string>();
-  const comparisonBasis = comparisonBasisForDates(confirmedAbsentDates);
-  const pairs = matchComparisonDays(
-    factorDates,
-    accumulator?.episodeDates ?? new Map(),
-    outcome.values,
-    outcome.lagDays,
-    comparisonBasis === "confirmed_absence" ? confirmedAbsentDates : null,
-    fromDate,
-    toDate,
-  );
+  const { pairs, reliable } = comparePersonalPattern({
+    dates: factorDates, absentDates: confirmedAbsentDates,
+    sources: accumulator?.sources ?? new Map(),
+    episodes: independentEpisodeDates(factorDates, accumulator?.episodeDates ?? new Map()),
+    values: outcome.values, outcomeSources: outcome.sources, lagDays: outcome.lagDays,
+    fromDate, asOf: toDate, activity: factor.kind !== "intervention", evidence,
+    absoluteFloor: outcome.meaningfulAbsoluteDelta, relativeFloor: outcome.meaningfulRelativeDelta,
+    searchSize,
+  });
+  const comparisonBasis = pairs.length > 0 && pairs.every((pair) =>
+    pair.comparisonDates.every((date) => confirmedAbsentDates.has(date)))
+    ? "confirmed_absence" : "unobserved_baseline";
   const exposedDates = [
     ...new Set(pairs.flatMap((pair) => pair.exposedDates)),
   ].sort();
@@ -1108,7 +1162,6 @@ function buildPatternCell(
     exposedDates,
     factorId: factor.id,
     outcomeId: outcome.id,
-    pairCount: pairs.length,
   });
 
   if (pairs.length === 0 || !base.firstExposedDate || !base.lastExposedDate) {
@@ -1142,7 +1195,7 @@ function buildPatternCell(
     typicalDelta,
     meaningfulDelta,
   );
-  const direction = patternDirection(delta, meaningfulDelta);
+  const direction = reliable ? patternDirection(delta, meaningfulDelta) : "flat";
   const spanDays = daysBetween(base.firstExposedDate, base.lastExposedDate);
   const initialGrade = patternGrade({
     typicalDelta,
@@ -1162,23 +1215,15 @@ function buildPatternCell(
   return {
     ...base,
     classification: grade ? classificationForGrade(grade) : null,
-    comparisonMean: round(comparisonMean),
-    delta: round(delta),
-    deltaPercent: deltaPercent === null ? null : round(deltaPercent),
+    comparisonMean,
+    delta,
+    deltaPercent,
     direction,
-    exposedMean: round(exposedMean),
+    exposedMean,
     grade,
     repeatedDirection,
     stage,
   };
-}
-
-function comparisonBasisForDates(
-  confirmedAbsentDates: ReadonlySet<string>,
-): PersonalPatternCell["comparisonBasis"] {
-  return confirmedAbsentDates.size > 0
-    ? "confirmed_absence"
-    : "unobserved_baseline";
 }
 
 function buildPatternCellBase(input: {
@@ -1187,14 +1232,13 @@ function buildPatternCellBase(input: {
   exposedDates: string[];
   factorId: string;
   outcomeId: string;
-  pairCount: number;
 }) {
   return {
     classification: null,
     comparisonBasis: input.comparisonBasis,
     comparisonDates: input.comparisonDates,
-    comparisonDays: input.pairCount,
-    exposedDays: input.pairCount,
+    comparisonDays: input.comparisonDates.length,
+    exposedDays: input.exposedDates.length,
     exposedDates: input.exposedDates,
     factorId: input.factorId,
     firstExposedDate: input.exposedDates[0] ?? null,
@@ -1264,74 +1308,14 @@ function patternStageForGrade(
   return "no_clear_pattern";
 }
 
-function matchComparisonDays(
-  factorDates: ReadonlySet<string>,
-  episodeDates: ReadonlyMap<string, ReadonlySet<string>>,
-  outcomeValues: ReadonlyMap<string, number>,
-  lagDays: 0 | 1,
-  confirmedAbsentDates: ReadonlySet<string> | null,
-  fromDate: string,
-  toDate: string,
-): MatchedPair[] {
-  const eligibleComparisonDates = [...outcomeValues.keys()]
-    .map((outcomeDate) => addDays(outcomeDate, -lagDays))
-    .filter((date) => date >= fromDate && date <= toDate)
-    .filter((date) => !factorDates.has(date))
-    .filter(
-      (date) => confirmedAbsentDates === null || confirmedAbsentDates.has(date),
-    );
-  const matchedDates = matchPersonalPatternDates(
-    [...factorDates].filter((date) => outcomeValues.has(addDays(date, lagDays))),
-    eligibleComparisonDates,
-    COMPARISON_SEARCH_DAYS,
-  );
-  const pairs: MatchedPair[] = [];
-  const episodes = independentEpisodeDates(factorDates, episodeDates);
-
-  for (const dates of episodes) {
-    const episodePairs: Array<{
-      comparisonDate: string;
-      comparisonValue: number;
-      exposedDate: string;
-      exposedValue: number;
-    }> = [];
-    for (const exposedDate of [...dates].sort()) {
-      const exposedValue = outcomeValues.get(addDays(exposedDate, lagDays));
-      if (exposedValue === undefined) continue;
-
-      const comparisonDate = matchedDates.get(exposedDate);
-      if (!comparisonDate) continue;
-
-      const comparisonValue = outcomeValues.get(
-        addDays(comparisonDate, lagDays),
-      );
-      if (comparisonValue === undefined) continue;
-      episodePairs.push({
-        comparisonDate,
-        comparisonValue,
-        exposedDate,
-        exposedValue,
-      });
-    }
-    if (episodePairs.length > 0) {
-      pairs.push({
-        comparisonDates: episodePairs.map((pair) => pair.comparisonDate),
-        comparisonValue: mean(episodePairs.map((pair) => pair.comparisonValue)),
-        exposedDates: episodePairs.map((pair) => pair.exposedDate),
-        exposedValue: mean(episodePairs.map((pair) => pair.exposedValue)),
-      });
-    }
-  }
-
-  return pairs;
-}
-
 function independentEpisodeDates(
   factorDates: ReadonlySet<string>,
   episodeDates: ReadonlyMap<string, ReadonlySet<string>>,
 ): Set<string>[] {
   const byDate = new Map<string, Set<string>>();
-  for (const dates of episodeDates.values()) {
+  const adjacent = [...factorDates].sort().flatMap((date) => factorDates.has(addDays(date, -1))
+    ? [new Set([addDays(date, -1), date])] : []);
+  for (const dates of [...episodeDates.values(), ...adjacent]) {
     const merged = new Set(dates);
     for (const date of dates) {
       for (const overlappingDate of byDate.get(date) ?? []) {
@@ -1433,8 +1417,8 @@ function resolveWindow(options: {
   const asOfDate = resolveAsOfDate(options.asOf);
   const windowDays = normalizeWindowDays(options.windowDays);
   return {
-    fromDate: addDays(asOfDate, -(windowDays - 1)),
-    outcomeToDate: addDays(asOfDate, 1),
+    fromDate: addDays(asOfDate, -(windowDays - 1) - 21),
+    outcomeToDate: asOfDate,
   };
 }
 
@@ -1479,10 +1463,6 @@ function median(values: readonly number[]): number {
 
 function mean(values: readonly number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function round(value: number): number {
-  return Number(value.toFixed(2));
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {

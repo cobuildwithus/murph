@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { initializeVault } from '@murphai/core'
 import { emptyPersonalPatternReport, type PersonalPatternReport } from '@murphai/query'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
@@ -65,6 +65,35 @@ test('skips a reviewed report using canonical history without writing or calling
   expect(await canSkipManagedPersonalPatterns(input)).toBe(true)
   expect(query).toHaveBeenCalledExactlyOnceWith(input.vaultRoot, { asOf: '2026-08-19' })
   expect(await getKnowledgePage({ vault: input.vaultRoot, slug: 'personal-pattern-notifications' })).toEqual(before)
+})
+
+test('does not skip a newly qualified Junction result for an already reviewed factor', async () => {
+  const input = await setup(JSON.stringify({ ...ledger(), results: [] }))
+  const asOf = '2026-08-19'
+  const dateAt = (offset: number) => new Date(Date.parse(asOf) - offset * 86_400_000).toISOString().slice(0, 10)
+  const exposures = new Set(Array.from({ length: 8 }, (_, index) => dateAt(16 + index * 14)))
+  const events: Record<string, unknown>[] = []
+  for (let offset = 0; offset < 140; offset += 1) {
+    const date = dateAt(offset)
+    const base = {
+      schemaVersion: 'murph.event.v1', dayKey: date, occurredAt: `${date}T12:00:00Z`,
+      recordedAt: `${date}T12:00:00Z`, source: 'device', title: 'Synthetic comparison evidence',
+      dataOrigin: { version: 1, aggregatorProvider: 'junction', sourceProviderSlug: 'oura', sourceType: 'ring', sourceInstanceId: 'synthetic-ring' },
+      externalRef: { system: 'junction', resourceType: 'junction-oura-summary', resourceId: `synthetic-${date}` },
+    }
+    if (exposures.has(date)) events.push({ ...base, id: `evt_session_${offset}`, kind: 'activity_session', activityType: 'walking' })
+    events.push(
+      { ...base, id: `evt_steps_${offset}`, kind: 'observation', metric: 'steps', observationGrain: 'daily-summary', value: 5_000, unit: 'count' },
+      { ...base, id: `evt_hrv_${offset}`, kind: 'observation', metric: 'hrv', observationGrain: 'daily-summary', value: exposures.has(dateAt(offset + 1)) ? 65 : 50, unit: 'ms' },
+    )
+  }
+  await mkdir(`${input.vaultRoot}/ledger/events/2026`, { recursive: true })
+  await writeFile(`${input.vaultRoot}/ledger/events/2026/2026-08.jsonl`, events.map((event) => JSON.stringify(event)).join('\n') + '\n')
+  const actual = await vi.importActual<typeof import('@murphai/query')>('@murphai/query')
+  const qualified = await actual.buildPersonalPatternReportRuntime(input.vaultRoot, { asOf })
+  expect(qualified.cells.find((cell) => cell.outcomeId === 'hrv')?.grade).toBe('B')
+  query.mockResolvedValueOnce(qualified)
+  expect(await canSkipManagedPersonalPatterns(input)).toBe(false)
 })
 
 test.each(['Legacy history with a saved factor mute.', '{}', JSON.stringify({ ...ledger(), version: 2 }), JSON.stringify({ ...ledger(), extraPreference: 'retain' })])(
