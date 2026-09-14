@@ -3267,6 +3267,285 @@ export async function executeMurphDynamicToolRequest(
   )
 }
 
+async function executeOversizedResponseCardDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'response-card-envelope-too-large' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  if (input.privateDirectResponseCardAllowed !== true) {
+    return toolTextResult(
+      false,
+      'response cards require a private direct conversation',
+      'authority_rejected',
+    )
+  }
+  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+    return toolTextResult(false, 'a response card is already attached', 'conflict')
+  }
+  if ((input.currentResponseMedia ?? []).length > 0) {
+    return toolTextResult(
+      false,
+      'response cards cannot be combined with response media',
+      'conflict',
+    )
+  }
+  return {
+    ...toolTextResult(
+      true,
+      'workout card envelope too large; full text recovery selected',
+    ),
+    responseCardTextFallbackPatch: { card: request.card },
+  }
+}
+
+async function executeResponseCardAttachmentDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'attach-response-card' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  if (request.card.kind === 'challenge_standings') {
+    return toolTextResult(
+      false,
+      'challenge standings response cards require page-authorized observation input',
+      'authority_rejected',
+    )
+  }
+  const telegramPresentationAllowed =
+    input.telegramPresentationResponseCardAllowed === true &&
+    (
+      request.card.kind === 'exercise_routine' ||
+      request.card.kind === 'telegram_rich_content'
+    )
+  if (
+    input.privateDirectResponseCardAllowed !== true &&
+    !telegramPresentationAllowed
+  ) {
+    return toolTextResult(
+      false,
+      'response cards require a private direct conversation',
+      'authority_rejected',
+    )
+  }
+  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+    return toolTextResult(false, 'a response card is already attached', 'conflict')
+  }
+  if ((input.currentResponseMedia ?? []).length > 0) {
+    return toolTextResult(
+      false,
+      'response cards cannot be combined with response media',
+      'conflict',
+    )
+  }
+  const card = await attachTrustedWorkoutCardEditor({
+    card: request.card,
+    vaultRoot: input.vaultRoot ?? null,
+  })
+  return {
+    ...toolTextResult(true, nutritionCardAttachmentGuidance(card)),
+    responseCardPatch: { card },
+  }
+}
+
+async function executeResponseMediaAttachmentDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'attach-response-media' }>,
+  hostedImageCompletionEffectScope: AssistantHostedImageCompletionEffectScope | null,
+): Promise<MurphDynamicToolExecutionResult> {
+  if (
+    request.media.length > 0 &&
+    input.currentResponseCard !== null &&
+    input.currentResponseCard !== undefined
+  ) {
+    return toolTextResult(
+      false,
+      'response media cannot be combined with a response card',
+      'conflict',
+    )
+  }
+  const resolved = await resolveAttachedResponseMedia({
+    media: request.media,
+    vaultRoot: input.vaultRoot ?? null,
+  })
+  if ('failureDiagnostic' in resolved) {
+    return {
+      ...toolTextResult(
+        false,
+        'private response image could not be prepared',
+      ),
+      ...toolFailureMetadata(resolved),
+      responseMediaPatch: {
+        media: [],
+        op: 'replace',
+      },
+    }
+  }
+  const { media } = resolved
+  if (
+    hostedImageCompletionEffectScope !== null &&
+    !matchesExactHostedImageCompletionMedia({
+      actual: media,
+      expected: hostedImageCompletionEffectScope.exactMedia,
+    })
+  ) {
+    return {
+      ...toolTextResult(
+        false,
+        'the trusted completion image no longer matches its saved media',
+        'action_result_mismatch',
+      ),
+      responseMediaPatch: {
+        media: [],
+        op: 'replace',
+      },
+    }
+  }
+  return {
+    ...toolTextResult(
+      true,
+      media.length === 0
+        ? 'response media cleared'
+        : `${media.length} response image${media.length === 1 ? '' : 's'} attached`,
+    ),
+    responseMediaPatch: {
+      media,
+      op: 'replace',
+    },
+  }
+}
+
+async function executeDeviceRequestDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'device' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  const deviceTool = input.hostedToolContext?.deviceTool ?? null
+  if (!deviceTool) {
+    return toolTextResult(
+      false,
+      'device management is unavailable for this turn',
+      'unavailable',
+    )
+  }
+  const invocationScope =
+    input.hostedToolContext?.currentInvocationScope?.() ?? null
+  const acceptedInputAuthority =
+    invocationScope?.conversationScope === 'direct'
+    && invocationScope.origin.kind === 'accepted_input'
+      ? { assistantInputId: invocationScope.origin.assistantInputId }
+      : null
+  return await executeDeviceDynamicTool({
+    acceptedInputAuthority,
+    abortSignal: input.abortSignal ?? null,
+    deviceTool,
+    request,
+  })
+}
+
+async function executeVideoAnalysisRequestDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'analyze-video' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  if (!currentConversationMediaScope(input.hostedToolContext)) {
+    return toolTextResult(
+      false,
+      'video analysis requires a verified direct or authenticated group conversation',
+      'authority_rejected',
+    )
+  }
+  const attachmentAuthorities = input.hostedToolContext
+    ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? []
+  return await executeAnalyzeVideoDynamicTool({
+    abortSignal: input.abortSignal ?? null,
+    acceptedInputIds: attachmentAuthorities.map((authority) => authority.messageRef),
+    attachmentAuthorities,
+    args: request.args,
+    materializeWorkspaceArtifacts:
+      input.materializeWorkspaceArtifacts ?? null,
+    runtime: input.analyzeVideoRuntime ?? null,
+    turnState: input.analyzeVideoTurnState ?? null,
+    vaultRoot: input.vaultRoot ?? null,
+  })
+}
+
+async function executeComputerRequestDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, {
+    kind:
+      | 'computer-open'
+      | 'computer-act'
+      | 'computer-os-control'
+      | 'computer-pause-for-user'
+      | 'computer-finish-run'
+  }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  switch (request.kind) {
+    case 'computer-open': {
+      return await executeHostedComputerOpenTool({
+        abortSignal: input.abortSignal ?? null,
+        args: request.args,
+        fetchImpl: input.fetchImpl,
+        hostedToolContext: input.hostedToolContext ?? null,
+      })
+    }
+    case 'computer-act': {
+      const { runId, ...body } = request.args
+      return await executeHostedComputerApiTool({
+        abortSignal: input.abortSignal ?? null,
+        body,
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'act',
+          runId,
+        }),
+        sanitizer: 'act',
+      })
+    }
+    case 'computer-os-control': {
+      const { runId, ...body } = request.args
+      return await executeHostedComputerApiTool({
+        abortSignal: input.abortSignal ?? null,
+        body,
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'os-control',
+          runId,
+        }),
+        sanitizer: 'os-control',
+      })
+    }
+    case 'computer-pause-for-user': {
+      const { runId, ...body } = request.args
+      return await executeHostedComputerPauseForUserTool({
+        abortSignal: input.abortSignal ?? null,
+        body: {
+          ...body,
+          pauseDeliveryContext: currentHostedDeliveryContext(
+            input.hostedToolContext ?? null,
+          ),
+        } satisfies HostedComputerPauseForUserRequest,
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'pause-for-user',
+          runId,
+        }),
+      })
+    }
+    case 'computer-finish-run': {
+      const { runId, ...body } = request.args
+      return await executeHostedComputerApiTool({
+        abortSignal: input.abortSignal ?? null,
+        body: {
+          ...body,
+          summary: null,
+        },
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'finish',
+          runId,
+        }),
+        sanitizer: 'finish',
+      })
+    }
+  }
+}
+
 async function dispatchMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
@@ -3311,30 +3590,7 @@ async function dispatchMurphDynamicToolRequest(
     case 'invalid-automation-arguments':
       return executeInvalidAutomationArgumentsDynamicTool(input.request)
     case 'response-card-envelope-too-large':
-      if (input.privateDirectResponseCardAllowed !== true) {
-        return toolTextResult(
-          false,
-          'response cards require a private direct conversation',
-          'authority_rejected',
-        )
-      }
-      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
-        return toolTextResult(false, 'a response card is already attached', 'conflict')
-      }
-      if ((input.currentResponseMedia ?? []).length > 0) {
-        return toolTextResult(
-          false,
-          'response cards cannot be combined with response media',
-          'conflict',
-        )
-      }
-      return {
-        ...toolTextResult(
-          true,
-          'workout card envelope too large; full text recovery selected',
-        ),
-        responseCardTextFallbackPatch: { card: input.request.card },
-      }
+      return await executeOversizedResponseCardDynamicTool(input, input.request)
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool', 'unsupported_request')
     case 'attach-group-challenge-response-card':
@@ -3347,111 +3603,14 @@ async function dispatchMurphDynamicToolRequest(
         turnState: input.groupSharedReadTurnState ?? null,
         vaultRoot: input.vaultRoot ?? null,
       })
-    case 'attach-response-card': {
-      if (input.request.card.kind === 'challenge_standings') {
-        return toolTextResult(
-          false,
-          'challenge standings response cards require page-authorized observation input',
-          'authority_rejected',
-        )
-      }
-      const telegramPresentationAllowed =
-        input.telegramPresentationResponseCardAllowed === true &&
-        (
-          input.request.card.kind === 'exercise_routine' ||
-          input.request.card.kind === 'telegram_rich_content'
-        )
-      if (
-        input.privateDirectResponseCardAllowed !== true &&
-        !telegramPresentationAllowed
-      ) {
-        return toolTextResult(
-          false,
-          'response cards require a private direct conversation',
-          'authority_rejected',
-        )
-      }
-      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
-        return toolTextResult(false, 'a response card is already attached', 'conflict')
-      }
-      if ((input.currentResponseMedia ?? []).length > 0) {
-        return toolTextResult(
-          false,
-          'response cards cannot be combined with response media',
-          'conflict',
-        )
-      }
-      const card = await attachTrustedWorkoutCardEditor({
-        card: input.request.card,
-        vaultRoot: input.vaultRoot ?? null,
-      })
-      return {
-        ...toolTextResult(true, nutritionCardAttachmentGuidance(card)),
-        responseCardPatch: { card },
-      }
-    }
-    case 'attach-response-media': {
-      if (
-        input.request.media.length > 0 &&
-        input.currentResponseCard !== null &&
-        input.currentResponseCard !== undefined
-      ) {
-        return toolTextResult(
-          false,
-          'response media cannot be combined with a response card',
-          'conflict',
-        )
-      }
-      const resolved = await resolveAttachedResponseMedia({
-        media: input.request.media,
-        vaultRoot: input.vaultRoot ?? null,
-      })
-      if ('failureDiagnostic' in resolved) {
-        return {
-          ...toolTextResult(
-            false,
-            'private response image could not be prepared',
-          ),
-          ...toolFailureMetadata(resolved),
-          responseMediaPatch: {
-            media: [],
-            op: 'replace',
-          },
-        }
-      }
-      const { media } = resolved
-      if (
-        hostedImageCompletionEffectScope !== null &&
-        !matchesExactHostedImageCompletionMedia({
-          actual: media,
-          expected: hostedImageCompletionEffectScope.exactMedia,
-        })
-      ) {
-        return {
-          ...toolTextResult(
-            false,
-            'the trusted completion image no longer matches its saved media',
-            'action_result_mismatch',
-          ),
-          responseMediaPatch: {
-            media: [],
-            op: 'replace',
-          },
-        }
-      }
-      return {
-        ...toolTextResult(
-          true,
-          media.length === 0
-            ? 'response media cleared'
-            : `${media.length} response image${media.length === 1 ? '' : 's'} attached`,
-        ),
-        responseMediaPatch: {
-          media,
-          op: 'replace',
-        },
-      }
-    }
+    case 'attach-response-card':
+      return await executeResponseCardAttachmentDynamicTool(input, input.request)
+    case 'attach-response-media':
+      return await executeResponseMediaAttachmentDynamicTool(
+        input,
+        input.request,
+        hostedImageCompletionEffectScope,
+      )
     case 'send-progress-update':
       return await executeProgressUpdateTool({
         deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
@@ -3495,29 +3654,8 @@ async function dispatchMurphDynamicToolRequest(
         request: input.request,
         vaultRoot: input.vaultRoot ?? null,
       })
-    case 'device': {
-      const deviceTool = input.hostedToolContext?.deviceTool ?? null
-      if (!deviceTool) {
-        return toolTextResult(
-          false,
-          'device management is unavailable for this turn',
-          'unavailable',
-        )
-      }
-      const invocationScope =
-        input.hostedToolContext?.currentInvocationScope?.() ?? null
-      const acceptedInputAuthority =
-        invocationScope?.conversationScope === 'direct'
-        && invocationScope.origin.kind === 'accepted_input'
-          ? { assistantInputId: invocationScope.origin.assistantInputId }
-          : null
-      return await executeDeviceDynamicTool({
-        acceptedInputAuthority,
-        abortSignal: input.abortSignal ?? null,
-        deviceTool,
-        request: input.request,
-      })
-    }
+    case 'device':
+      return await executeDeviceRequestDynamicTool(input, input.request)
     case 'labs': {
       const labsTool = input.hostedToolContext?.labsTool ?? null
       if (!labsTool) {
@@ -3702,28 +3840,8 @@ async function dispatchMurphDynamicToolRequest(
         vaultRoot: input.vaultRoot,
       })
     }
-    case 'analyze-video': {
-      if (!currentConversationMediaScope(input.hostedToolContext)) {
-        return toolTextResult(
-          false,
-          'video analysis requires a verified direct or authenticated group conversation',
-          'authority_rejected',
-        )
-      }
-      const attachmentAuthorities = input.hostedToolContext
-        ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? []
-      return await executeAnalyzeVideoDynamicTool({
-        abortSignal: input.abortSignal ?? null,
-        acceptedInputIds: attachmentAuthorities.map((authority) => authority.messageRef),
-        attachmentAuthorities,
-        args: input.request.args,
-        materializeWorkspaceArtifacts:
-          input.materializeWorkspaceArtifacts ?? null,
-        runtime: input.analyzeVideoRuntime ?? null,
-        turnState: input.analyzeVideoTurnState ?? null,
-        vaultRoot: input.vaultRoot ?? null,
-      })
-    }
+    case 'analyze-video':
+      return await executeVideoAnalysisRequestDynamicTool(input, input.request)
     case 'create-calendar-link': {
       return executeCreateCalendarLinkDynamicTool(input.request.event)
     }
@@ -3757,73 +3875,12 @@ async function dispatchMurphDynamicToolRequest(
         request: input.request,
       })
     }
-    case 'computer-open': {
-      return await executeHostedComputerOpenTool({
-        abortSignal: input.abortSignal ?? null,
-        args: input.request.args,
-        fetchImpl: input.fetchImpl,
-        hostedToolContext: input.hostedToolContext ?? null,
-      })
-    }
-    case 'computer-act': {
-      const { runId, ...body } = input.request.args
-      return await executeHostedComputerApiTool({
-        abortSignal: input.abortSignal ?? null,
-        body,
-        fetchImpl: input.fetchImpl,
-        path: buildHostedComputerRunOperationPath({
-          operation: 'act',
-          runId,
-        }),
-        sanitizer: 'act',
-      })
-    }
-    case 'computer-os-control': {
-      const { runId, ...body } = input.request.args
-      return await executeHostedComputerApiTool({
-        abortSignal: input.abortSignal ?? null,
-        body,
-        fetchImpl: input.fetchImpl,
-        path: buildHostedComputerRunOperationPath({
-          operation: 'os-control',
-          runId,
-        }),
-        sanitizer: 'os-control',
-      })
-    }
-    case 'computer-pause-for-user': {
-      const { runId, ...body } = input.request.args
-      return await executeHostedComputerPauseForUserTool({
-        abortSignal: input.abortSignal ?? null,
-        body: {
-          ...body,
-          pauseDeliveryContext: currentHostedDeliveryContext(
-            input.hostedToolContext ?? null,
-          ),
-        } satisfies HostedComputerPauseForUserRequest,
-        fetchImpl: input.fetchImpl,
-        path: buildHostedComputerRunOperationPath({
-          operation: 'pause-for-user',
-          runId,
-        }),
-      })
-    }
-    case 'computer-finish-run': {
-      const { runId, ...body } = input.request.args
-      return await executeHostedComputerApiTool({
-        abortSignal: input.abortSignal ?? null,
-        body: {
-          ...body,
-          summary: null,
-        },
-        fetchImpl: input.fetchImpl,
-        path: buildHostedComputerRunOperationPath({
-          operation: 'finish',
-          runId,
-        }),
-        sanitizer: 'finish',
-      })
-    }
+    case 'computer-open':
+    case 'computer-act':
+    case 'computer-os-control':
+    case 'computer-pause-for-user':
+    case 'computer-finish-run':
+      return await executeComputerRequestDynamicTool(input, input.request)
   }
 }
 
