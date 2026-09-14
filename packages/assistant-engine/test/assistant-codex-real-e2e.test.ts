@@ -218,6 +218,7 @@ import {
   listAssistantTranscriptEntries,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
+import { normalizeAssistantExecutionContext } from '../src/assistant/execution-context.ts'
 import type {
   AssistantHostedAutomationToolRequest,
   AssistantHostedDeviceConnectProvider,
@@ -13387,12 +13388,35 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   it.each([
     { label: 'Apple Health', sourceProvider: 'apple_health_kit' },
     { label: 'WHOOP', sourceProvider: 'whoop_v2' },
-  ])('stops $label no-data check-ins once from a private member request', async ({ label, sourceProvider }) => {
+  ])('normalized hosted context stops $label check-ins while keeping sync connected', async ({ label, sourceProvider }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-wearable-checkin-preference-e2e-'),
     )
     const requests: AssistantHostedDeviceToolRequest[] = []
+    const executionContext = normalizeAssistantExecutionContext({ hosted: {
+      memberId: '  member-synthetic-context  ',
+      userEnvKeys: [],
+      deviceTool: {
+        request: async (request) => {
+          requests.push(request)
+          if (request.action !== 'configure_no_data_outreach'
+            || request.sourceProvider !== sourceProvider
+            || request.mode !== 'off') {
+            throw new Error('Only the requested source check-in opt-out is supported.')
+          }
+          return {
+            action: 'configure_no_data_outreach',
+            effectiveAfterDays: null,
+            setting: 'off',
+            sourceProvider,
+            status: 'saved',
+          }
+        },
+      },
+    } })
+    expect(executionContext.hosted?.memberId).toBe('member-synthetic-context')
+    expect(executionContext.hosted?.deviceTool).toBeDefined()
     try {
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never',
@@ -13417,23 +13441,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
             },
             originSessionId: 'session-wearable-preference',
           }),
-          deviceTool: {
-            request: async (request) => {
-              requests.push(request)
-              if (request.action !== 'configure_no_data_outreach'
-                || request.sourceProvider !== sourceProvider
-                || request.mode !== 'off') {
-                throw new Error('Only the requested source check-in opt-out is supported.')
-              }
-              return {
-                action: 'configure_no_data_outreach',
-                effectiveAfterDays: null,
-                setting: 'off',
-                sourceProvider,
-                status: 'saved',
-              }
-            },
-          },
+          deviceTool: executionContext.hosted!.deviceTool,
           sendVaultFile: async () => { throw new Error('No file send is expected.') },
           vaultFileSendAvailable: false,
         },
