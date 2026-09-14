@@ -2262,6 +2262,10 @@ Last verified: 2026-09-04
   originally started cold. Missing warmth evidence uses the 10-second cutoff and
   is labeled unconfirmed; deployment version, rollout convergence, canary identity,
   access changes, other incidents, and quiet hours do not suppress these alerts.
+  An exact member-bound mailbox item with recorded `ai_usage_denied_at` is
+  excluded: its wait reflects denied AI admission, including typing observed
+  after a later recovery. The same bounded query reads that existing mailbox
+  fact without adding per-input queries or suppressing other inputs for the member.
   Linq and Telegram acceptance milestones stay asynchronous. The engine's
   existing turn handle retains the original provider acceptance timestamp for
   the initial accepted-input journal and subsequent pre-provider or live-steered

@@ -67,6 +67,30 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
     });
   });
 
+  it.each(["linq", "telegram"] as const)("excludes usage-denied %s inputs while alerting on other slow inputs for the same member", async (source) => {
+    await withTables(async (tx) => {
+      const usageDeniedAt = new Date(received.getTime() + 1500);
+      await insertTrace(tx, "denied-warm", { source, elapsed: null, usageDeniedAt });
+      await insertTrace(tx, "denied-cold", { source, cold: true, elapsed: null, usageDeniedAt });
+      await insertTrace(tx, "denied-unconfirmed", { source, cold: null, elapsed: null, usageDeniedAt });
+      await insertTrace(tx, "denied-later-typing", { source, elapsed: 20_000, usageDeniedAt });
+      await insertTrace(tx, "allowed-slow", { source, elapsed: 4000 });
+      await insertTrace(tx, "allowed-missing", { source, cold: null, elapsed: null });
+
+      const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () =>
+        new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }));
+      expect(await runHostedRuntimeTypingAlertMonitor({ env, fetchImpl, now, prisma: tx })).toEqual({
+        queuedCount: 2, scanTruncated: false,
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      const alerts = await tx.hostedLinqAlert.findMany({ select: { id: true, status: true } });
+      expect(alerts.sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+        { id: "runtime-typing/allowed-missing", status: "sent" },
+        { id: "runtime-typing/allowed-slow", status: "sent" },
+      ]);
+    });
+  });
+
   it.each(["linq", "telegram"] as const)("deduplicates %s emails and retries their frozen body through existing recovery", async (source) => {
     await withTables(async (tx) => {
       await insertTrace(tx, "first", { source, elapsed: 4000 });
@@ -122,8 +146,11 @@ async function withTables(run: (tx: Prisma.TransactionClient) => Promise<void>) 
   });
   try {
     await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`CREATE TEMP TABLE hosted_mailbox_item (
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, ai_usage_denied_at TIMESTAMP(3)
+      ) ON COMMIT DROP`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_ingress_latency_trace (
-        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source TEXT NOT NULL,
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source TEXT NOT NULL, mailbox_item_id TEXT,
         assistant_input_id TEXT, accepted_at TIMESTAMP(3), webhook_received_at TIMESTAMP(3),
         workspace_restore_done_at TIMESTAMP(3), ingress_typing_accepted_at TIMESTAMP(3), phase_breakdown_json JSONB
       ) ON COMMIT DROP`;
@@ -150,6 +177,7 @@ async function insertTrace(tx: Prisma.TransactionClient, id: string, input: {
   receivedAt?: Date | null;
   restoredBeforeReceipt?: boolean;
   source?: "linq" | "telegram";
+  usageDeniedAt?: Date;
 }) {
   const source = input.source ?? "linq";
   const receivedAt = input.receivedAt === undefined ? received : input.receivedAt;
@@ -162,11 +190,16 @@ async function insertTrace(tx: Prisma.TransactionClient, id: string, input: {
     },
     ...input.extra,
   };
+  const mailboxItemId = `mailbox-${id}`;
+  await tx.$executeRaw(Prisma.sql`
+    INSERT INTO hosted_mailbox_item (id, user_id, ai_usage_denied_at)
+    VALUES (${mailboxItemId}, 'synthetic-member', ${input.usageDeniedAt ?? null})
+  `);
   await tx.$executeRaw(Prisma.sql`
     INSERT INTO hosted_ingress_latency_trace
-      (id, user_id, source, assistant_input_id, accepted_at, webhook_received_at,
+      (id, user_id, source, mailbox_item_id, assistant_input_id, accepted_at, webhook_received_at,
        workspace_restore_done_at, phase_breakdown_json)
-    VALUES (${id}, 'synthetic-member', ${source}, ${`input-${id}`},
+    VALUES (${id}, 'synthetic-member', ${source}, ${mailboxItemId}, ${`input-${id}`},
       ${new Date(received.getTime() + 2000)}, ${receivedAt}, ${restoredAt},
       ${JSON.stringify(phase)}::jsonb)
   `);

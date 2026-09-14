@@ -97,7 +97,7 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         ${inputIds ? Prisma.sql`AND trace.assistant_input_id IN (${Prisma.join(inputIds.length ? [...inputIds] : [""])})` : Prisma.empty}`
     : Prisma.empty;
   // All clocks are UTC; timestamp-without-time-zone conversion is explicit.
-  // No member, canary, current rollout, access, reply outcome, or quiet-hour filter.
+  // A recorded denial belongs to this input; current member access is not a filter.
   return Prisma.sql`
     WITH observations AS (
       SELECT
@@ -128,6 +128,12 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         AND trace.accepted_at >= ${new Date(input.now.getTime() - 7 * 24 * 60 * 60_000)}
         AND trace.webhook_received_at <= ${input.now}
         ${scope}
+        AND NOT EXISTS (
+          SELECT 1 FROM hosted_mailbox_item AS mailbox
+          WHERE mailbox.id = trace.mailbox_item_id
+            AND mailbox.user_id = trace.user_id
+            AND mailbox.ai_usage_denied_at IS NOT NULL
+        )
         AND NOT EXISTS (
           SELECT 1 FROM hosted_linq_alert AS alert
           WHERE alert.id = 'runtime-typing/' || trace.id
