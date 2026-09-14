@@ -2027,7 +2027,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("does not count or wake duplicate active-member Linq event ids", async () => {
+  it("repairs duplicate active-member Linq wakes without recounting or appending input", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -2072,7 +2072,12 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma,
       timeoutMs: expect.any(Number),
     });
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledOnce();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+    });
   });
 
   it("dedupes active-member Linq replays after preflight and before route mutation", async () => {
