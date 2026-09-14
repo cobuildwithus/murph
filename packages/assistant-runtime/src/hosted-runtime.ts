@@ -807,6 +807,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
 
 export interface HostedWorkspaceRuntimeJobImportContext {
   assistantBootstrap?: HostedAssistantBootstrapResult | null;
+  providerFetch?: typeof fetch | null;
   assistantTarget?: AssistantModelTarget | null;
   assistantAskRequestTargetKind?: "joined_group";
   onConversationActivityObserved?: (() => void) | null;
@@ -1833,6 +1834,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       context: HostedWorkspaceRunnerMailboxImportContext | undefined,
     ): HostedWorkspaceRuntimeJobImportContext => ({
       assistantBootstrap: context?.assistantBootstrap ?? null,
+      providerFetch: guardedPlatform.providerFetch ?? null,
       ...(invocationAssistantTarget
         ? { assistantTarget: invocationAssistantTarget }
         : {}),

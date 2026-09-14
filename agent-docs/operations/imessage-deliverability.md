@@ -258,6 +258,12 @@ Linq egress should stay small and obvious:
 - Hosted native reply and app-card delivery may use raw direct-recipient details only from the invocation-local decoded delivery context. A conversation input admitted into an already-running turn carries that same ephemeral context into the existing delivery owner; durable assistant input remains blinded and no recipient lookup or second route owner is introduced.
 - Do not restart typing between reply bubbles. Linq clears the turn's existing indicator on send, and repeated typing cycles add line activity without proven deliverability value.
 
+The mailbox import context supplies the invocation's abort-guarded provider
+fetch to attachment typing. Preparation and the foreground turn must retain
+that same function identity so the existing typing claim can transfer without
+another provider start. An explicitly absent invocation provider overrides the
+bridge's original provider; standalone imports retain their supplied provider.
+
 ## Prompt and copy guidance
 
 Preferred shape:
