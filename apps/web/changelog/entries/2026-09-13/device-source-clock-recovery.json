@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-13",
+  "order": 100,
+  "item": {
+    "id": "device-source-clock-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer device update delays from clock differences",
+    "summary": "New device updates can continue syncing when a source reports an event time in the future.",
+    "details": "Updates waiting behind an earlier sync can recover automatically, while scheduled syncs and provider retry limits stay in place.",
+    "relevanceTags": ["devices"],
+    "sourcePullRequests": []
+  }
+}

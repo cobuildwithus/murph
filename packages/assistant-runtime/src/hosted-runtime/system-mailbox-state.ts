@@ -740,13 +740,13 @@ export function findHostedRunnableSystemMailboxItem(input: {
     && systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)
     && item.nextAttemptAt !== null
     && !systemMailboxItemIsDue(item, input.now)
-    && Date.parse(item.occurredAt) <= Date.parse(input.now)
     && [...(input.coverage.get(item.itemId)?.coveredHintIds ?? [])]
       .some((id) => input.eligibleDeviceHintIds.has(id))
   );
   // Covered dirty or connection work is runnable even when the owner's job retry
   // is later. A returned item is runnable now; its stored retry remains intact
   // and must not be used to re-derive the admission time by the wake publisher.
+  // The owner's source occurrence time is metadata, not a retry deadline.
   return owner ?? null;
 }
 
@@ -996,7 +996,7 @@ function isHostedDeviceHintCoveredByOwner(
     && wake.expectedConnectedAt === owner.wake.expectedConnectedAt
     && (wake.reason !== "reconcile_due" || cadence != null)
     && (cadence == null || (ownerCadence != null && Date.parse(cadence) < Date.parse(ownerCadence)))
-    && Date.parse(wake.occurredAt) <= Date.parse(now);
+    && (wake.reason === "webhook_hint" || Date.parse(wake.occurredAt) <= Date.parse(now));
 }
 
 export function isHostedRetainedDeviceScheduledAdmission(
