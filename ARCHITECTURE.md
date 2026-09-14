@@ -1818,7 +1818,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - Fresh member execution uses one globally eligible `RunnerContainer` fleet.
   Warm inventory is an allocation optimization within that fleet: the memberless
   coordinator maintains a configurable number of pristine current-release slots
-  (two by default), and atomically removes a slot when claimed. Warm and cold
+  (two by default), and atomically removes a slot when claimed. In-place image
+  transitions preserve this target and admit only the complete active or candidate
+  image pair through both readiness gates. Deployment smoke separately proves
+  the exact candidate image on a fresh serving slot before promotion. Warm and cold
   starts use the same opaque identity, immutable binding, invocation, retention,
   and retirement lifecycle. `UserRunner` persists the exact target before binding
   and remains the sole member execution, write-fence, and workspace owner.

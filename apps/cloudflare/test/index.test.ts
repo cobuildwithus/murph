@@ -26,6 +26,7 @@ import { hostedLocalTestInternalRoutes } from "../src/worker/hosted-local-test-r
 import { workerInternalRoutes } from "../src/worker/internal-routes.ts";
 import { workerPublicRoutes } from "../src/worker/public-routes.ts";
 import {
+  handleDeployContainerSmokeRoute,
   readDeployContainerSmokeAttempt,
   resolveDeployContainerSmokeObjectName,
 } from "../src/worker/route-handlers/deploy-smoke.ts";
@@ -51,6 +52,9 @@ import type {
 } from "../src/runner-container.ts";
 import {
   HOSTED_RUNNER_REGION,
+  HOSTED_STANDBY_READY_TIMEOUT_MS,
+  createHostedRunnerSlotName,
+  type HostedRunnerSlotLifecycle,
   HOSTED_STANDBY_LOCATION_HINT,
   HOSTED_STANDBY_REGION,
   createHostedStandbySlotName,
@@ -67,6 +71,7 @@ import {
   hostedWorkspaceSnapshotObjectKey,
 } from "../src/storage-paths.ts";
 import type {
+  WorkerRouteContext,
   UserRunnerDurableObjectStubLike,
   WorkerExecutionContext,
   WorkerEnvironmentSource,
@@ -553,7 +558,7 @@ describe("cloudflare worker routes", () => {
     const release = { bank: "next", id: "next-candidate", bundleFingerprint: "b".repeat(64), sourceFingerprint: "c".repeat(64) };
     const prepareStandbySlot = vi.fn<NonNullable<HostedExecutionContainerStubLike["prepareStandbySlot"]>>(async (input) => {
       if (fails) throw new Error("Hosted runner container bundle fingerprint mismatch.");
-      return { ...input, prepared: true };
+      return { ...input, prepared: true, runnerImage: release };
     });
     const retireStandbySlot = vi.fn(async () => ({ retired: true as const }));
     const bindStandbySlot = vi.fn(async () => { throw new Error("Deploy smoke must not bind member work."); });
@@ -5444,3 +5449,98 @@ function createTestVercelOidcToken(
 function base64UrlEncode(value: string | Buffer): string {
   return Buffer.from(value).toString("base64url");
 }
+
+function createSmokeHarness(bank: "primary" | "next", failure?: "prepare" | "retire" | "old-image" | "mixed-image" | "missing-image") {
+  const active = { bank, id: `${bank}-permanent`, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+  const candidate = { ...active, bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64), image: `registry.example.test/runner@sha256:${"e".repeat(64)}` };
+  const readySlotNames = [createHostedRunnerSlotName(active.id), createHostedRunnerSlotName(active.id)];
+  const prepareStandbySlot = vi.fn<HostedRunnerSlotLifecycle["prepareStandbySlot"]>(async input => {
+    if (failure === "prepare") throw new Error("Fresh serving shell is not ready.");
+    const runnerImage = failure === "missing-image" ? undefined : failure === "old-image" ? active
+      : failure === "mixed-image" ? { ...candidate, sourceFingerprint: active.sourceFingerprint } : candidate;
+    return { ...input, prepared: true, runnerImage };
+  });
+  const retireStandbySlot = vi.fn<HostedRunnerSlotLifecycle["retireStandbySlot"]>(async () => {
+    if (failure === "retire") throw new Error("Fresh serving probe stop is unsettled.");
+    return { retired: true };
+  });
+  const unexpected = vi.fn(async () => { throw new Error("Smoke must not use member work or retained bindings."); });
+  const slot = {
+    ...createRunnerContainerNamespace().getByName("probe"),
+    prepareStandbySlot, retireStandbySlot, bindStandbySlot: unexpected,
+    readStandbySlotBinding: unexpected, readStandbySlotCoordinatorState: unexpected,
+    resolveRetainedStandbySlot: unexpected,
+  } satisfies HostedRunnerSlotLifecycle;
+  const servingGet = vi.fn((_slotName: string) => slot);
+  const otherBankGet = vi.fn(() => { throw new Error("Smoke touched the other bank."); });
+  const ensureReadyStandby = vi.fn(async () => ({ accepted: true as const }));
+  const claimReadyStandby = vi.fn(async () => { throw new Error("Smoke must not consume ready inventory."); });
+  const coordinatorGet = vi.fn(() => ({
+    ensureReadyStandby, claimReadyStandby,
+    async readStandbyCoordinatorState() {
+      // These records can all have been proved on the old image before native rollout.
+      return { readySlotNames, provisioningSlotNames: [], releaseId: active.id, region: HOSTED_RUNNER_REGION };
+    },
+  }));
+  const smokeHealth = vi.fn(async () => ({
+    ...await createRunnerContainerNamespace().getByName("artifact").smokeHealth(),
+    runnerBundle: candidate,
+  }));
+  const env = createWorkerEnv(createUserRunnerStub(), {
+    HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active, candidate, previous: null }),
+    HOSTED_EXECUTION_STANDBY_MODE: "allocate", HOSTED_EXECUTION_STANDBY_TARGET: "2",
+    RUNNER_CONTAINER: { getByName: bank === "primary" ? servingGet : otherBankGet },
+    NEXT_RUNNER_CONTAINER: { getByName: bank === "next" ? servingGet : otherBankGet },
+    STANDBY_COORDINATOR: { getByName: coordinatorGet },
+    RUNNER_CONTAINER_SMOKE: { getByName: vi.fn(() => ({
+      ...createRunnerContainerNamespace().getByName("artifact"), smokeHealth,
+    })) },
+  });
+  // Direct handler fixture: route authentication is covered by the existing index tests.
+  const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
+  const context: WorkerRouteContext = { env, url, request: new Request(url),
+    environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
+  };
+  return { active, context, readySlotNames, servingGet, otherBankGet, coordinatorGet,
+    ensureReadyStandby, claimReadyStandby, prepareStandbySlot, retireStandbySlot, unexpected, smokeHealth };
+}
+
+describe("deployment standby serving proof", () => {
+  for (const bank of ["primary", "next"] as const) {
+    it.each([undefined, "prepare", "retire", "old-image", "mixed-image", "missing-image"] as const)(
+      `requires a fresh ${bank} serving proof despite full cached transition inventory (failure=%s)`,
+      async failure => {
+        const h = createSmokeHarness(bank, failure);
+        const response = await handleDeployContainerSmokeRoute(h.context);
+        expect(response.status).toBe(failure ? 500 : 200);
+        expect(h.prepareStandbySlot).toHaveBeenCalledOnce();
+        const input = h.prepareStandbySlot.mock.calls[0]![0];
+        expect(input).toEqual({ releaseId: h.active.id, region: HOSTED_RUNNER_REGION,
+          slotName: h.servingGet.mock.calls[0]![0], timeoutMs: HOSTED_STANDBY_READY_TIMEOUT_MS });
+        expect(h.readySlotNames).not.toContain(input.slotName);
+        expect(h.retireStandbySlot).toHaveBeenCalledWith({});
+        expect(h.smokeHealth).toHaveBeenCalledTimes(failure ? 0 : 1);
+        expect(h.otherBankGet).not.toHaveBeenCalled();
+        expect(h.claimReadyStandby).not.toHaveBeenCalled();
+        expect(h.unexpected).not.toHaveBeenCalled();
+        if (!failure) {
+          await expect(response.json()).resolves.toMatchObject({ ok: true,
+            standbyInventory: { ready: true, readyCount: 2, target: 2, provisioningCount: 0 } });
+        }
+      },
+    );
+  }
+
+  it.each(["artifact", "live-model"] as const)("keeps the %s phase off serving inventory", async phase => {
+    const h = createSmokeHarness("primary");
+    if (phase === "live-model") h.context.url.searchParams.set("liveModelTurn", "1");
+    const response = await handleDeployContainerSmokeRoute(h.context, phase === "artifact");
+    expect(response.status).toBe(200);
+    expect(h.smokeHealth).toHaveBeenCalledOnce();
+    expect(h.coordinatorGet).not.toHaveBeenCalled();
+    expect(h.servingGet).not.toHaveBeenCalled();
+    expect(h.otherBankGet).not.toHaveBeenCalled();
+    expect(h.prepareStandbySlot).not.toHaveBeenCalled();
+    expect(h.retireStandbySlot).not.toHaveBeenCalled();
+  });
+});
