@@ -139,6 +139,14 @@ are not a reason to restore pre-consent readers.
 
 ## Browser-vault dashboard loading
 
+Signed-out visits to the shared `(dashboard)` route group automatically open
+the existing auth dialog once per pathname. Dismissing it keeps the page usable;
+visiting another dashboard page prompts again. Successful sign-in resumes the
+current path, query, and anchor when the member's stage allows dashboard access.
+Signed-in and authentication-unavailable states do not trigger the prompt.
+The root auth provider derives this scope from Next's selected layout segment,
+so dashboard pages do not maintain separate route lists or dialog owners.
+
 Browser-vault dashboard sessions and public-homepage preparation read only the
 published replica ref and workspace version. Refresh orchestration is imported
 only when the existing after-response refresh path needs it. The browser loader
