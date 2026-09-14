@@ -66,6 +66,7 @@ import {
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   appendHostedScheduledDeviceSyncWakeEnvelopeTx,
   prepareHostedMailboxItemAppendCrypto,
+  runWithPreparedHostedMailboxItemAppendCrypto,
   type AppendHostedMailboxItemResult,
   type PreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
@@ -2565,39 +2566,46 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
     traceId: input.traceId ?? null,
     userId: input.userId,
   });
-  const appendResult = await persistHostedDeviceSyncWake({
-    appendMailbox: (tx) => appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-      envelope: wake,
-      tx,
+  const appendResult = await runWithPreparedHostedMailboxItemAppendCrypto({
+    prisma,
+    userId: input.userId,
+    append: (prepared) => persistHostedDeviceSyncWake({
+      appendMailbox: (tx) => runWithHostedDomainRootProviderCallsDisabled(() =>
+        appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+          envelope: wake,
+          prepared,
+          tx,
+        })
+      ),
+      healthDataConnectionId: input.connectionId,
+      healthDataUserId: input.userId,
+      signalFailureMode: "throw",
+      // The first append owns the direct Temporal handoff. A later recovery
+      // bucket can encounter the same durable schedule tuple while its imported
+      // runtime work is still pending; the shared mailbox-handoff sweep recovers
+      // only a never-imported first signal, while imported work keeps its own
+      // persisted retry owner.
+      startWorkflowOnDuplicate: false,
+      wake,
+      store,
+      persist: async () => {},
+      complete: async () => {
+        await store.createSignal({
+          userId: input.userId,
+          connectionId: input.connectionId,
+          provider: input.provider,
+          kind: "reconcile_due",
+          occurredAt: hint.occurredAt ?? null,
+          traceId: normalizeNullableString(hint.traceId),
+          eventType: null,
+          resourceCategory: null,
+          reason: null,
+          nextReconcileAt: hint.nextReconcileAt ?? null,
+          revokeWarning: null,
+          createdAt: input.createdAt,
+        });
+      },
     }),
-    healthDataConnectionId: input.connectionId,
-    healthDataUserId: input.userId,
-    signalFailureMode: "throw",
-    // The first append owns the direct Temporal handoff. A later recovery
-    // bucket can encounter the same durable schedule tuple while its imported
-    // runtime work is still pending; the shared mailbox-handoff sweep recovers
-    // only a never-imported first signal, while imported work keeps its own
-    // persisted retry owner.
-    startWorkflowOnDuplicate: false,
-    wake,
-    store,
-    persist: async () => {},
-    complete: async () => {
-      await store.createSignal({
-        userId: input.userId,
-        connectionId: input.connectionId,
-        provider: input.provider,
-        kind: "reconcile_due",
-        occurredAt: hint.occurredAt ?? null,
-        traceId: normalizeNullableString(hint.traceId),
-        eventType: null,
-        resourceCategory: null,
-        reason: null,
-        nextReconcileAt: hint.nextReconcileAt ?? null,
-        revokeWarning: null,
-        createdAt: input.createdAt,
-      });
-    },
   });
   const wakeAccepted = appendResult.inserted
     || (appendResult.duplicate && !appendResult.dedupeConflict);

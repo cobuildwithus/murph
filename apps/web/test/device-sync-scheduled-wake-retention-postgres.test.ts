@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -7,16 +7,21 @@ import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-
 import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
 import { runHostedDeviceSyncDueReconcileSweeper } from "@/src/lib/device-sync/due-reconcile-sweeper";
 import { runHostedDeviceSyncRecoverySweep } from "@/src/lib/device-sync/recovery-sweeper";
+import { appendHostedDeviceSyncScheduledReconcileWake } from "@/src/lib/device-sync/wake-service";
+import * as cryptoEnv from "@/src/lib/hosted-crypto/env";
 import * as runtimeSignal from "@/src/lib/hosted-orchestration/signal-runtime";
 import * as prismaModule from "@/src/lib/prisma";
 import {
   appendHostedMailboxEnvelopeTx,
   appendHostedScheduledDeviceSyncWakeEnvelopeTx,
   fetchHostedRuntimeMailboxProjection,
+  runWithPreparedHostedMailboxItemAppendCrypto,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
 } from "@/src/lib/hosted-mailbox/store";
 import { createPrismaClient } from "@/src/lib/prisma";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
+import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "@/src/lib/hosted-crypto/domain-root-store";
+import { runWithHostedDomainRootProviderCallsDisabled } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { checkpointHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -37,8 +42,10 @@ describe.skipIf(!runPostgresProof)(
   () => {
     let prisma: PrismaClient | null = null;
     const memberIds: string[] = [];
+    let restoreCrypto: () => void;
 
     beforeAll(() => {
+      restoreCrypto = configureLocalCryptoForTest();
       prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
     });
 
@@ -50,7 +57,97 @@ describe.skipIf(!runPostgresProof)(
         });
       }
       await prisma?.$disconnect();
+      restoreCrypto();
     });
+
+    it.each(["success", "kms_failure", "consent_revoked", "root_rotated"] as const)(
+      "keeps the sole connection available during scheduled wake preparation: %s",
+      async (scenario) => {
+        const client = requirePrisma(prisma);
+        const fixture = await seedRetiredScheduledWake({ client, importedSeq: "1", memberIds });
+        const connectionId = fixture.wake.connectionId!;
+        await client.deviceConnection.create({ data: {
+          id: connectionId, userId: fixture.memberId, provider: "oura", status: "active",
+          providerAccountBlindIndex: `synthetic-${connectionId}`,
+          connectedAt: new Date(fixture.wake.expectedConnectedAt!),
+        } });
+        const request = {
+          connectionId,
+          createdAt: "2026-09-04T12:00:00.000Z",
+          eventId: `${fixture.wake.eventId}:new-occurrence`,
+          expectedConnectedAt: fixture.wake.expectedConnectedAt!,
+          nextReconcileAt: fixture.wake.hint!.nextReconcileAt!,
+          provider: "oura",
+          userId: fixture.memberId,
+        };
+        setHostedSecureBoxStringTestCodecForTests(null);
+        vi.spyOn(prismaModule, "getPrisma").mockReturnValue(client);
+        const signal = vi.spyOn(runtimeSignal, "signalHostedDeviceSyncMailboxRuntime")
+          .mockImplementation(async ({ mailboxItemId }) => {
+            // A query on the same one-connection pool also proves signal runs
+            // after the append commits, with its durable row already visible.
+            expect(await client.hostedMailboxItem.count({ where: { id: mailboxItemId } })).toBe(1);
+            return { signalAccepted: true, workflowId: "synthetic-workflow" };
+          });
+        const config = cryptoEnv.getHostedWebCryptoConfig();
+        vi.spyOn(cryptoEnv, "getHostedWebCryptoConfig").mockReturnValue(config);
+        let release!: () => void;
+        let started!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        const preparing = new Promise<void>((resolve) => { started = resolve; });
+        const decrypt = config.gcpKms.decrypt.bind(config.gcpKms);
+        const kms = vi.spyOn(config.gcpKms, "decrypt").mockImplementationOnce(async (input) => {
+          started();
+          await held;
+          if (scenario === "kms_failure") throw new Error("Synthetic KMS unavailable");
+          return decrypt(input);
+        });
+        const pending = appendHostedDeviceSyncScheduledReconcileWake(request);
+        void pending.catch(() => {});
+        try {
+          await Promise.race([preparing, pending]);
+          await expect(client.$queryRaw`SELECT 1 AS available`).resolves.toEqual([{ available: 1 }]);
+          expect(signal).not.toHaveBeenCalled();
+          expect(await client.hostedMailboxItem.count({ where: { dedupeKey: request.eventId } })).toBe(0);
+          if (scenario === "consent_revoked") {
+            await client.hostedConsentGrant.create({ data: {
+              memberId: fixture.memberId, status: "revoked",
+              scope: "launch.health-data", source: "synthetic-test",
+              documentVersionsJson: {}, grantedAt: new Date(), revokedAt: new Date(),
+            } });
+          }
+          if (scenario === "root_rotated") {
+            await client.hostedUserCryptoEnvelope.updateMany({
+              where: { userId: fixture.memberId, domain: "ingress", status: "active" },
+              data: { status: "decrypt_only", decryptOnlyAt: new Date() },
+            });
+            await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+              domain: "ingress", prisma: client, reason: "synthetic-rotation", userId: fixture.memberId,
+            });
+          }
+          release();
+          if (scenario === "kms_failure" || scenario === "consent_revoked") {
+            await expect(pending).rejects.toMatchObject(scenario === "kms_failure"
+              ? { message: "Synthetic KMS unavailable" }
+              : { code: "HEALTH_DATA_CONSENT_REQUIRED" });
+            expect(signal).not.toHaveBeenCalled();
+            expect(await client.hostedMailboxItem.count({ where: { dedupeKey: request.eventId } })).toBe(0);
+            expect(await client.deviceSyncSignal.count({ where: { connectionId } })).toBe(0);
+          } else {
+            await expect(pending).resolves.toMatchObject({ wakeAccepted: true, wakeInserted: true });
+            expect(kms).toHaveBeenCalledTimes(scenario === "root_rotated" ? 2 : 1);
+            await expect(appendHostedDeviceSyncScheduledReconcileWake(request)).resolves.toMatchObject({
+              wakeAccepted: true, wakeDuplicate: true, wakeInserted: false,
+            });
+            expect(signal).toHaveBeenCalledOnce();
+            expect(await client.hostedMailboxItem.count({ where: { dedupeKey: request.eventId } })).toBe(1);
+          }
+        } finally {
+          release();
+          await pending.catch(() => {});
+        }
+      },
+    );
 
     it("recovers dirty work after its scheduled mailbox owner was fully consumed", async () => {
       const client = requirePrisma(prisma);
@@ -128,13 +225,9 @@ describe.skipIf(!runPostgresProof)(
       });
       try {
         const envelope = { ...fixture.wake, eventId: recovered.eventId };
-        const appended = await client.$transaction((tx) =>
-          appendHostedScheduledDeviceSyncWakeEnvelopeTx({ envelope, tx })
-        );
+        const appended = await appendScheduledWake(client, envelope);
         expect(appended.inserted).toBe(true);
-        const repeated = await client.$transaction((tx) =>
-          appendHostedScheduledDeviceSyncWakeEnvelopeTx({ envelope, tx })
-        );
+        const repeated = await appendScheduledWake(client, envelope);
         expect(repeated.inserted).toBe(false);
         expect(repeated.dedupeConflict).toBe(false);
         const counter = await client.hostedMailboxLaneCounter.findUniqueOrThrow({
@@ -170,12 +263,7 @@ describe.skipIf(!runPostgresProof)(
         });
 
         warn.mockClear();
-        const scheduled = await client.$transaction((tx) =>
-          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-            envelope: fixture.wake,
-            tx,
-          })
-        );
+        const scheduled = await appendScheduledWake(client, fixture.wake);
         expect(scheduled).toMatchObject({
           dedupeConflict: false,
           duplicate: true,
@@ -201,12 +289,7 @@ describe.skipIf(!runPostgresProof)(
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
       try {
-        await expect(client.$transaction((tx) =>
-          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-            envelope: fixture.wake,
-            tx,
-          })
-        )).resolves.toMatchObject({
+        await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
           dedupeConflict: false,
           duplicate: true,
           inserted: false,
@@ -231,12 +314,7 @@ describe.skipIf(!runPostgresProof)(
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
       try {
-        await expect(client.$transaction((tx) =>
-          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-            envelope: fixture.wake,
-            tx,
-          })
-        )).resolves.toMatchObject({
+        await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
           dedupeConflict: false,
           duplicate: true,
           inserted: false,
@@ -285,12 +363,7 @@ describe.skipIf(!runPostgresProof)(
 
       try {
         for (const fixture of [firstRetained, secondRetained, blocking]) {
-          await expect(client.$transaction((tx) =>
-            appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-              envelope: fixture.wake,
-              tx,
-            })
-          )).resolves.toMatchObject({
+          await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
             dedupeConflict: false,
             duplicate: true,
             inserted: false,
@@ -348,12 +421,7 @@ describe.skipIf(!runPostgresProof)(
           userId: firstRetained.memberId,
         });
         expect(recordingCheckpoint.status).toBe("updated");
-        await expect(client.$transaction((tx) =>
-          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-            envelope: firstRetained.wake,
-            tx,
-          })
-        )).resolves.toMatchObject({
+        await expect(appendScheduledWake(client, firstRetained.wake)).resolves.toMatchObject({
           dedupeConflict: false,
           duplicate: true,
           inserted: false,
@@ -375,24 +443,14 @@ describe.skipIf(!runPostgresProof)(
           userId: firstRetained.memberId,
         });
         expect(completedCheckpoint.status).toBe("updated");
-        await expect(client.$transaction((tx) =>
-          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-            envelope: firstRetained.wake,
-            tx,
-          })
-        )).resolves.toMatchObject({
+        await expect(appendScheduledWake(client, firstRetained.wake)).resolves.toMatchObject({
           dedupeConflict: true,
           duplicate: true,
           inserted: false,
           runtimeOwnedRetiredDuplicate: false,
         });
         for (const fixture of [secondRetained, blocking]) {
-          await expect(client.$transaction((tx) =>
-            appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-              envelope: fixture.wake,
-              tx,
-            })
-          )).resolves.toMatchObject({
+          await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
             dedupeConflict: false,
             duplicate: true,
             inserted: false,
@@ -400,12 +458,7 @@ describe.skipIf(!runPostgresProof)(
           });
         }
 
-        await expect(client.$transaction((tx) =>
-          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-            envelope: completed.wake,
-            tx,
-          })
-        )).resolves.toMatchObject({
+        await expect(appendScheduledWake(client, completed.wake)).resolves.toMatchObject({
           dedupeConflict: true,
           duplicate: true,
           inserted: false,
@@ -463,12 +516,7 @@ describe.skipIf(!runPostgresProof)(
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
       try {
-        await expect(client.$transaction((tx) =>
-          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-            envelope: fixture.wake,
-            tx,
-          })
-        )).resolves.toMatchObject({
+        await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
           dedupeConflict: true,
           duplicate: true,
           inserted: false,
@@ -543,12 +591,7 @@ describe.skipIf(!runPostgresProof)(
 
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
       try {
-        await expect(client.$transaction((tx) =>
-          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-            envelope: fixture.wake,
-            tx,
-          })
-        )).resolves.toMatchObject({
+        await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
           dedupeConflict: true,
           duplicate: true,
           inserted: false,
@@ -661,12 +704,7 @@ describe.skipIf(!runPostgresProof)(
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
       try {
-        await expect(client.$transaction((tx) =>
-          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-            envelope: fixture.wake,
-            tx,
-          })
-        )).resolves.toMatchObject({
+        await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
           dedupeConflict: true,
           duplicate: true,
           inserted: false,
@@ -705,6 +743,12 @@ async function seedRetiredScheduledWake(input: {
 
   await input.client.hostedMember.create({
     data: { billingStatus: "active", id: memberId },
+  });
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "ingress",
+    prisma: input.client,
+    reason: "scheduled-wake-test",
+    userId: memberId,
   });
   await input.client.hostedWorkspace.create({
     data: {
@@ -830,4 +874,71 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function appendScheduledWake(
+  client: PrismaClient,
+  envelope: Parameters<typeof appendHostedScheduledDeviceSyncWakeEnvelopeTx>[0]["envelope"],
+) {
+  return runWithPreparedHostedMailboxItemAppendCrypto({
+    prisma: client,
+    userId: envelope.userId,
+    append: (prepared) => client.$transaction((tx) =>
+      runWithHostedDomainRootProviderCallsDisabled(() =>
+        appendHostedScheduledDeviceSyncWakeEnvelopeTx({ envelope, prepared, tx })
+      )
+    ),
+  });
+}
+
+const LOCAL_CRYPTO_ENV_KEYS = [
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK",
+  "HOSTED_CRYPTO_ENV",
+  "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
+  "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
+  "HOSTED_CRYPTO_GCP_KMS_API_ROOT",
+  "HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME",
+  "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK",
+  "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY",
+] as const;
+
+function configureLocalCryptoForTest(): () => void {
+  const previous = new Map(
+    LOCAL_CRYPTO_ENV_KEYS.map((key) => [key, process.env[key]]),
+  );
+  const authorityKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
+  const automationKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "jwk" },
+  });
+  Object.assign(process.env, {
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "scheduled-wake-test-key",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK:
+      JSON.stringify(automationKey.publicKey),
+    HOSTED_CRYPTO_ENV: "test",
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
+      "projects/murph-test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1",
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
+    HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+      "projects/murph-test/locations/global/keyRings/test/cryptoKeys/web-wrap",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
+      JSON.stringify(authorityKey.privateKey),
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 23).toString("base64"),
+  });
+  return () => {
+    for (const [key, value] of previous) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  };
 }
