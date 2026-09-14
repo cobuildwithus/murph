@@ -1,4 +1,3 @@
-import { isTotalsOnlyDailyNutritionResponseCard } from '@murphai/contracts'
 import { createHash } from 'node:crypto'
 import { isIP } from 'node:net'
 
@@ -736,9 +735,7 @@ export async function sendLinqIMessageAppCard(
           team_id: 'G9DJH2XUMK',
           bundle_id: 'ai.withmurph.app.messages',
         },
-        // Swift is outside this repository. Use our static renderer for totals
-        // so older installed extensions cannot introduce a ring/goal judgment.
-        interactive: !isTotalsOnlyDailyNutritionResponseCard(input.card),
+        interactive: true,
         url: buildLinqIMessageAppCardUrl(input.card),
         fallback_text: buildLinqIMessageAppFallbackText(input.card),
         layout: buildLinqIMessageAppLayout(input.card, input.companionMessage),
