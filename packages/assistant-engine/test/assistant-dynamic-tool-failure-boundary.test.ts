@@ -152,7 +152,8 @@ describe('common dynamic-tool failure boundary', () => {
       retryable: true, stage: 'device-reconcile',
     } }) }] })
     expect(result.failureDiagnostic).toEqual({ failureStage: 'execution', failureReason: 'handler_exception',
-      errorCategory: 'unavailable' })
+      errorCategory: 'unavailable', deviceAction: 'reconcile',
+      deviceErrorCode: 'device_reconcile_unavailable' })
     expectPrivateClassification(result)
   })
 
