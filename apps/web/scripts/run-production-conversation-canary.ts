@@ -23,7 +23,10 @@ const CANARY_OUTCOME_PATH =
 const CANARY_REPLY_BUDGET_MS = 20_000;
 const CANARY_REPLY_WAIT_MS = 90_000;
 const CANARY_RESET_TIMEOUT_MS = 300_000;
-const CANARY_OUTCOME_WAIT_MS = 90_000;
+// Production checkpoints only after at least 180 seconds of quiet. Observation
+// also allows checkpoint/publication time; it is separate from reply latency.
+const CANARY_OUTCOME_WAIT_MS = 300_000;
+const CANARY_OUTCOME_POLL_MS = 1_000;
 const CANARY_TURNS = [
   { prompt: "Hey Murph", stage: "welcome" },
   { prompt: "Yes, ready.", stage: "identity-question" },
@@ -218,7 +221,7 @@ async function waitForCanonicalGoalOutcome(
   stage: string,
 ): Promise<LinqProductionCanaryOutcome> {
   const signal = AbortSignal.timeout(CANARY_OUTCOME_WAIT_MS);
-  for (let attempt = 0; attempt < 90; attempt += 1) {
+  for (let attempt = 0; attempt < CANARY_OUTCOME_WAIT_MS / CANARY_OUTCOME_POLL_MS; attempt += 1) {
     const response = await fetch(new URL(CANARY_OUTCOME_PATH, config.productionBaseUrl), {
       headers: { authorization: `Bearer ${config.resetSecret}` },
       method: "GET",
@@ -239,7 +242,7 @@ async function waitForCanonicalGoalOutcome(
       }
       if (outcome.matchingGoalCount === expectedCount) return outcome;
     }
-    await delay(1_000, undefined, { signal })
+    await delay(CANARY_OUTCOME_POLL_MS, undefined, { signal })
       .catch(() => throwCanaryFailure(`outcome-not-ready; stage=${stage}`));
   }
   throwCanaryFailure(`outcome-not-ready; stage=${stage}`);
