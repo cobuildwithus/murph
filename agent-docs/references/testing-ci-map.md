@@ -1320,14 +1320,22 @@ limits, and local proof distinctions are owned by
   paging without losing the complementary baseline, failed-confirmation
   retention, positive recovered-counter deltas, persistent-gap telemetry
   paging, and the scheduled Durable Object boundary for that retry,
-  SQLite sample persistence and 30-day pruning, concrete
-  connection thresholds, two-failure collection hysteresis, one acknowledged
-  page per unresolved telemetry-notification window, recovered threshold
-  coalescing before acknowledgment, truthful partial-then-unavailable,
+  SQLite sample persistence and 30-day pruning, completed-slot and older-slot
+  replay without counter/evidence mutation, six-distinct-check telemetry and
+  pressure admission across replay/restart, same-slot pending delivery retry
+  under the hourly fence, replay after recovery using the newest sample,
+  inherited replay-count repair from synthetic pre-PR-writer SQLite fixtures
+  with and without older recovered failures, truthful six-distinct-sample
+  windows and pressure delivery after upgrade, preserved acknowledged-outage
+  one-shot state, concrete
+  connection thresholds, six-failure collection hysteresis, one acknowledged
+  page per unresolved telemetry-notification window, recovered unadmitted threshold
+  withdrawal before delivery, truthful partial-then-unavailable,
   unavailable-then-partial, and different-family partial-window summaries with
   bounded observed evidence, failed-scrape incident preservation,
   telemetry obligation retention behind older pending and connection-error-only
-  pages across restart and recovery, current-pressure priority at the first
+  pages across restart, withdrawal on recovery before admission, and immutable
+  admitted telemetry retry through recovery, current-pressure priority at the first
   eligible provider slot with historical observation time, exact combined
   pressure, telemetry, and category-specific connection-error retention when
   concrete evidence appears at or after the unadmitted threshold across

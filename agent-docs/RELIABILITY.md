@@ -717,6 +717,17 @@ Last verified: 2026-09-04
   owner. A five-minute Cron Trigger records one normalized PlanetScale sample
   or classified failure in Durable Object SQLite and prunes history after 30
   days. A two-minute persisted run lease coalesces overlapping cron delivery.
+  After lease admission, a scheduled timestamp at or before the newest persisted
+  sample resumes only pending delivery from that latest observation. It does not
+  scrape, overwrite evidence, advance counters, or readmit old conditions. This
+  keeps failure counts aligned with distinct samples across completed-slot replay
+  and restart; pending delivery still observes its body/key and hourly fence.
+  Before six failures, inherited counters are capped by the contiguous failed
+  suffix of the newest five distinct samples, stopping at the latest healthy
+  sample. This repairs old-writer replay drift without counting failures from
+  an earlier recovered gap. Counts already at or above six remain unchanged to
+  preserve one-shot outage state. The reconciled count commits with the next
+  collected sample and alert admission in the existing SQLite transaction.
   Concrete unhealthy gauges page immediately. Metric families are normalized
   independently: primary-only Postgres and PgBouncer families require an
   explicit `planetscale_role="primary"` label, while the edge connection-error
@@ -753,20 +764,20 @@ Last verified: 2026-09-04
   omitted port retains its prior baseline, and new or reset region series are
   independently suppressed. This makes transient counter-family absence less
   noisy without converting unknown to zero, replaying an old delta, or weakening
-  the two-check telemetry fallback. The confirmation retains the existing
+  the six-check telemetry fallback. The confirmation retains the existing
   two-observation/four-request ceiling. Including two sequential ten-second
   fetch timeouts per observation, its 41-second worst-case wall time remains
   below the persisted two-minute run lease and the platform's 15-minute
   scheduled runtime. Structured failure warnings include the actual
   parsed-observation count and per-port omission counts, without raw provider
   payloads or signed scrape values.
-  Discovery, scrape, parse, or incomplete required metrics must recur on two
+  Discovery, scrape, parse, or incomplete required metrics must recur on six
   consecutive runs before paging the monitoring condition. A failed check never
   erases a successfully parsed observation: even an all-family-
   missing parse remains an incomplete observation if its retry later fails,
   while `unavailable` means that the check produced no parsed observation.
   Crossing the threshold persists one bounded telemetry-page obligation in the
-  existing incident row. The represented first two-check window counts
+  existing incident row. The represented first six-check window counts
   incomplete versus unavailable observations, unions only canonical missing
   families, and sums parsed observations plus exact 5432/6432 omission counts
   from checks where the whole family was absent.
@@ -779,13 +790,14 @@ Last verified: 2026-09-04
   collection failure, but durable evidence clears that diagnostic count unless
   the canonical connection-error family is missing. This preserves the legacy
   reader correlation invariant across rollback. Legacy single-port monitoring
-  obligations remain readable. The obligation survives an
-  occupied pending-message slot,
-  restart, recovery, and connection-error-only prioritization; only
-  acknowledgment of a pending body that includes the monitoring condition
-  clears it. Recovery and another threshold before acknowledgment deliberately
-  coalesce into that unresolved notification, retaining the first threshold
-  window; this monitor does not maintain an outage backlog. The additive
+  obligations remain readable. While telemetry is incomplete, the obligation
+  survives an occupied pending-message slot, restart, and connection-error-only
+  prioritization. A complete check clears an obligation that has not entered a
+  pending message, even when an older concrete-pressure message remains pending.
+  Once a pending body includes telemetry, preserve that body and its idempotency
+  key through recovery and restart: a recipient may already have received it.
+  A later gap after unadmitted recovery starts its own six-check window. There
+  is no backlog of recovered monitoring-only incidents. The additive
   columns retain the existing schema version so a rollback Worker can ignore
   them. Current code recognizes the prior Worker's cleared pending key/body with
   the telemetry marker still set as an acknowledgment and removes the stale
