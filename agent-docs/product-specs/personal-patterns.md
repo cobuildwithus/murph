@@ -217,10 +217,13 @@ import completeness and vocabulary/alias normalization remain with the existing
 model instructions; pending imports therefore retain model review.
 
 It sends at most one private message per run. Partial initial imports stay
-quiet. When source coverage proves the first report is complete, Murph sends
-one first digest with at most three grade A-D highlights. If that report has no
-grade A-D result, it marks the digest complete and stays quiet. Later new
-results become one summary with at most three highlights.
+quiet. When source coverage proves the first report is complete, Murph sends one
+first update with exactly one eligible grade A-D factor-and-outcome result. If
+that report has no grade A-D result, it marks the digest complete and stays
+quiet. Later new results receive the same one-finding limit. When several
+results qualify, choose the strongest or most useful one, including only one
+outcome for that factor. Record all reviewed identities as usual; unselected
+results are not queued for later messages.
 
 The hosted runtime emits a privacy-safe internal email alert when this managed
 run fails or when its occurrence starts too late and expires. Alert delivery
@@ -232,17 +235,18 @@ evidence preserves the alert; unrelated terminal failures still notify operators
 because the runtime cannot report while it is offline.
 
 Only a new grade A-D identity can trigger that daily message. Letter grades and
-report classifications stay internal to selection and bookkeeping. Messages
-lead with the finding in a short conversational paragraph, with a light qualifier
-where evidence is limited and supporting counts in the report's actual unit.
-Uncertainty belongs within the finding, without repeated caveats or a standalone
-causation disclaimer. Messages preserve comparison and outcome timing without
-implying cause or prescribing habit changes. Links use the full
-`https://www.withmurph.ai/patterns` URL on its own final line; a bare route is
-never a message link. Grade E Observations remain visible on the page but stay
-quiet. A saved private ledger deduplicates result identities.
-It also stores factor or result mutes requested in conversation. Grade changes
-do not create separate messages. The weekly health insight can mention a useful
+report classifications stay internal to selection and bookkeeping. Messages lead
+with the finding in one short conversational paragraph, usually one or two
+sentences, with a light qualifier where evidence is limited and supporting
+counts in the report's actual unit. Uncertainty belongs within the finding,
+without repeated caveats or a standalone causation disclaimer. Messages name the
+comparison baseline and outcome timing, using one effect-size number when
+available instead of both group averages, without implying cause or prescribing
+habit changes. These proactive messages contain no links, Patterns-page
+invitations, or see-the-rest footers. Grade E Observations remain visible on the
+page but stay quiet. A saved private ledger deduplicates result identities. It
+also stores factor or result mutes requested in conversation. Grade changes do
+not create separate messages. The weekly health insight can mention a useful
 strengthening, weakening, or removed result.
 
 ## Weekly audit
