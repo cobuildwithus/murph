@@ -1,6 +1,6 @@
 # Correct production canary replica freshness identity
 
-Status: active
+Status: completed
 Created: 2026-09-14
 Updated: 2026-09-14
 
@@ -42,3 +42,10 @@ The observer uses a legacy base/delta bundle helper. Current v2 refs have neithe
 ## Verification
 
 The new v2 checkpoint regression fails before implementation and passes after it. All 93 observer/runner tests pass, including malformed metadata, wrong-member/retired checkpoints, old generation/age rejection, and a same-version archive race. Web typecheck passes after normal generated-client preparation and mapping the existing public v2 module. Complexity passes (maximum 19, no debt or hotspots); docs drift/gardening and whitespace checks pass. Final review, exact-head CI, deployment, and live proof remain pending. Earlier canary failures are evidence of an unresolved issue, not a passing result.
+
+## Completion evidence
+
+- Final ReviewGPT: PASS on `4390eaf14f657094546a7498e439fb37e8d6066c`, full seven-file snapshot and verified `gpt-6-pro` response. It inspected v2 parsing/member binding, complete fingerprint identity, generation/age policy, encrypted decoding, authority/read races, and runner cardinality. Its direct parser/fingerprint checks passed; it did not independently rerun the reported Vitest/typecheck commands. No qualifying findings or remediation remain.
+- Parent final review accepts the unchanged production source, public entrypoint mapping, and synthetic regressions. The 93 focused tests and Web typecheck were run locally; repository CI additionally passed Web test shards, database shards, build/typecheck, and Cloudflare verification.
+- This closes the implementation record. Final exact-head CI, authorized merge, ordinary Web deployment, and the protected live journey remain post-commit gates owned by the current session. This pre-merge record does not claim a live pass.
+Completed: 2026-09-14
