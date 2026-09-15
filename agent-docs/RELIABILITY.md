@@ -635,8 +635,9 @@ Last verified: 2026-09-04
 
 - Web recovery sweeps spread each selected due-device wake and shared mailbox
   handoff across a stable zero-to-five-second per-user jitter window. The
-  existing 25-item default, 250-item limit, and five-operation concurrency cap
-  remain; selection/access checks stay bounded and selected items are ordered
+  device sweep defaults to 100 items; the shared mailbox handoff remains at
+  25. Both retain the 250-item limit and five-operation concurrency cap;
+  selection/access checks stay bounded and selected items are ordered
   by offset before taking execution slots. Pacing happens before transaction or
   signal entry and holds no pooled connection. Offsets use monotonic elapsed
   time within each batch, so delays do not accumulate per item. The shared
@@ -647,7 +648,13 @@ Last verified: 2026-09-04
   interrupted work remains discoverable through existing due state and mailbox
   ownership. Direct ingress, exact reminders, and runtime/provider retry
   deadlines do not enter this executor. Jitter reduces recovery bursts, not
-  total work or a guaranteed global requests-per-second ceiling.
+  total work or a guaranteed global requests-per-second ceiling. The device
+  sweep reports its limit-plus-one sentinel as `hasMoreDueConnections`, not an
+  exact backlog count. Optional device preflights stop starting after 60 seconds
+  of monotonic batch time, including jitter; already-started preflights are
+  awaited and provider calls retain their existing timeout. Remaining connections
+  use the ordinary scheduled wake path. This admission budget does not bound the full
+  callback or alter provider cadence, retry ownership, or live authority checks.
 
 ## Runtime Expectations
 

@@ -36,11 +36,11 @@ describe("hosted device-sync scheduled wake sweep route", () => {
     mocks.runHostedDeviceSyncRecoverySweep.mockResolvedValue({
       dueReconcileSweeper: {
         dueConnections: 1,
-        skippedDueConnections: 0,
+        hasMoreDueConnections: false,
         wakeAccepted: 1,
         wakeAttempted: 1,
         wakeFailed: 0,
-        wakeLimit: 25,
+        wakeLimit: 100,
         wakeNotAccepted: 0,
       },
       preferenceHandoffSweeper: {
@@ -77,11 +77,11 @@ describe("hosted device-sync scheduled wake sweep route", () => {
     await expect(response.json()).resolves.toEqual({
       dueReconcileSweeper: {
         dueConnections: 1,
-        skippedDueConnections: 0,
+        hasMoreDueConnections: false,
         wakeAccepted: 1,
         wakeAttempted: 1,
         wakeFailed: 0,
-        wakeLimit: 25,
+        wakeLimit: 100,
         wakeNotAccepted: 0,
       },
       preferenceHandoffSweeper: {

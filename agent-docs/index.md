@@ -11,6 +11,11 @@ foreground yield are owned by `agent-docs/RELIABILITY.md`; provider and durable
 service restart/retry proof lives in
 `packages/device-syncd/test/junction-full-backfill-progress.test.ts`.
 
+Device-sync sweep capacity, backlog-presence telemetry, and the optional
+preflight admission budget are owned by `agent-docs/RELIABILITY.md`; the
+implementation record is
+[`2026-09-15-device-sweep-capacity.md`](exec-plans/active/2026-09-15-device-sweep-capacity.md).
+
 ## Purpose
 
 Immediate manual meal estimation and ordinary incomplete-meal recovery are
