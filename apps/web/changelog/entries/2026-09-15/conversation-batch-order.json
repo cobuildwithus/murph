@@ -9,6 +9,6 @@
     "summary": "Background device sync no longer splits compatible queued messages into separate replies.",
     "details": "Murph can answer consecutive messages together while keeping separate conversations and replies to different messages distinct.",
     "relevanceTags": ["messaging", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3467]
   }
 }
