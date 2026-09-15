@@ -9,6 +9,6 @@
     "summary": "Saving and refreshing workout cards in Messages no longer rebuilds unrelated health-data views.",
     "details": "Murph still checks that the card matches your workout and protects against applying the same save twice.",
     "relevanceTags": ["workouts", "imessage"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3477]
   }
 }
