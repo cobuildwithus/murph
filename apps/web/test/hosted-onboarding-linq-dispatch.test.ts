@@ -297,6 +297,10 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
       mocks.planHostedLinqMessageEditedWebhook,
     resolveHostedLinqDirectPreparationMemberId:
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+    resolveHostedLinqDirectPreparationTarget: vi.fn(async () => {
+      const memberId = await mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId();
+      return memberId ? { memberId, prepareIngressFromOwnAccess: false } : null;
+    }),
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   };
@@ -5888,12 +5892,19 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }
   });
 
-  it("settles consent withdrawn when direct root preparation raced with access drift", async () => {
+  it.each([false, true])("settles consent withdrawn after root failure with own-access preparation hint %s", async (prepareIngressFromOwnAccess) => {
     const {
       hostedMemberRouting,
       prisma,
       restoreRootMock,
     } = await createDirectRootPreparationFailureFixture();
+    const { resolveHostedLinqDirectPreparationTarget } = await import(
+      "@/src/lib/hosted-onboarding/webhook-provider-linq"
+    );
+    vi.mocked(resolveHostedLinqDirectPreparationTarget).mockResolvedValueOnce({
+      memberId: "member_123",
+      prepareIngressFromOwnAccess,
+    });
     mocks.readHostedRuntimeAiAccessDecision.mockResolvedValueOnce({
       allowed: false,
       reason: "health_data_consent_withdrawn",
@@ -5923,6 +5934,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       });
 
       expect(prisma.$transaction).toHaveBeenCalled();
+      expect(mocks.readHostedRuntimeAiAccessDecision).toHaveBeenCalledTimes(1);
       expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(1);
       expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({

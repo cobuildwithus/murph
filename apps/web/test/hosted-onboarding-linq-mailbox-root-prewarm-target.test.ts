@@ -31,6 +31,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq";
 import {
   resolveHostedLinqDirectPreparationMemberId,
+  resolveHostedLinqDirectPreparationTarget,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
 } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 
@@ -73,13 +74,14 @@ function buildMessageEvent(input: {
 }
 
 function buildPrisma(input: {
+  billingStatus?: "active" | "not_started";
   emailMemberIds?: string[];
   homeMemberIds?: string[];
   pendingMemberIds?: string[];
   phoneMemberIds?: string[];
 } = {}) {
   const buildMemberCore = (memberId: string) => ({
-    billingStatus: "active",
+    billingStatus: input.billingStatus ?? "active",
     createdAt: new Date("2026-07-01T00:00:00.000Z"),
     id: memberId,
     suspendedAt: null,
@@ -126,6 +128,20 @@ describe("hosted Linq mailbox-root prewarm target", () => {
     vi.clearAllMocks();
     accessMocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     accessMocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValue(true);
+  });
+
+  it.each(["active", "not_started"] as const)("retains the %s own-access snapshot only as a crypto preparation hint", async (billingStatus) => {
+    const prisma = buildPrisma({ billingStatus, phoneMemberIds: ["member_direct"] });
+    await expect(resolveHostedLinqDirectPreparationTarget({
+      event: buildMessageEvent({ chatIsGroup: false }),
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      memberId: "member_direct",
+      prepareIngressFromOwnAccess: billingStatus === "active",
+    });
+    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMemberRouting.findMany).toHaveBeenCalledTimes(1);
+    expect(accessMocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
   });
 
   it("uses narrow phone and home-chat lookups for an active direct member", async () => {

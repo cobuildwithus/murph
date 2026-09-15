@@ -2931,7 +2931,11 @@ observes cached failures before starting new metadata or provider work.
 Established Linq direct messages resolve a blind-index/member-id target and
 prepare the required control and mailbox ingress roots plus the observed routing
 snapshot before `BEGIN`. They do not load or compare a full private identity
-snapshot unless Family acceptance/replay consumes it. The transaction still
+snapshot unless Family acceptance/replay consumes it. The target retains the
+already-read own-active-access predicate only to select ingress preparation;
+ordinary own-active members avoid a second, relation-heavy access read.
+Other members still use canonical sponsored-access derivation for preparation.
+That hint is discarded before admission. The transaction still
 locks identity authority, repeats blind identity/home ownership lookups, and
 revalidates member, route snapshot, access, and root authority. Preparation is
 not an authorization cache. Established Linq and Telegram group routes also

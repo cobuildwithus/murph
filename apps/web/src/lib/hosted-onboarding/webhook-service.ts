@@ -52,6 +52,7 @@ import {
   prewarmHostedLinqMessageEditPreparation,
   readHostedLinqMessageEditPreparation,
   resolveHostedLinqDirectPreparationMemberId,
+  resolveHostedLinqDirectPreparationTarget,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   type HostedLinqMessageEditPreparation,
   type HostedOnboardingLinqWebhookResponse,
@@ -3004,19 +3005,23 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   routingRecord: HostedMemberRoutingRecord | null;
   routingState: HostedMemberRoutingStateSnapshot | null;
 } | null> {
-  const memberId = await resolveHostedLinqDirectPreparationMemberId({
+  const target = await resolveHostedLinqDirectPreparationTarget({
     event: input.event,
     prisma: input.prisma,
   });
-  if (!memberId) {
+  if (!target) {
     return null;
   }
+  const { memberId } = target;
 
   const context = resolveHostedOnboardingLinqMessageContext(input.event);
-  const activeMemberAccess = readActiveHostedMemberAccess({
-    memberId,
-    prisma: input.prisma,
-  });
+  // Routing already read this member's own access status. It is sufficient to
+  // select speculative ingress crypto work, never to authorize admission.
+  // Sponsored access still uses the canonical derivation; the transaction
+  // independently rechecks current runtime access for every member.
+  const activeMemberAccess = target.prepareIngressFromOwnAccess
+    ? Promise.resolve(true)
+    : readActiveHostedMemberAccess({ memberId, prisma: input.prisma });
   const [routingRecord, accessAllowed, preparedFamilyInvite] =
     await Promise.all([
       readHostedMemberRoutingRecord({
@@ -3041,14 +3046,15 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
     : null;
   const shouldPrepareFamilyAcceptance =
     preparedFamilyInvite?.kind === "pending_acceptance";
+  const shouldPrepareIngress =
+    shouldPrepareFamilyAcceptance
+    || (accessAllowed && preparedFamilyInvite?.kind !== "accepted_replay");
   const preparedCryptoDomainRoots =
     await prepareHostedCryptoDomainRootCandidates({
       ...(shouldPrepareFamilyAcceptance
         ? {}
         : {
-            domains: preparedFamilyInvite?.kind === "accepted_replay"
-              ? (["control"] as const)
-              : accessAllowed
+            domains: shouldPrepareIngress
               ? (["control", "ingress"] as const)
               : (["control"] as const),
           }),
@@ -3062,10 +3068,6 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
         : {}),
       userId: memberId,
     });
-  const shouldPrepareIngress =
-    shouldPrepareFamilyAcceptance
-    || (accessAllowed && preparedFamilyInvite?.kind !== "accepted_replay");
-
   // Candidate signing finishes before unwrap preparation begins. Each phase is
   // bounded at two concurrent provider operations: ingress runs beside one
   // control lane, and that control lane warms historical roots sequentially
