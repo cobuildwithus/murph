@@ -9,7 +9,7 @@
     "summary": "Medical-topic goal titles now describe learning, tracking, or following an existing care plan.",
     "details": "The same topics stay available, with matching guide titles, related links, and prefilled messages to Murph.",
     "relevanceTags": ["goals", "health"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [3463],
     "tryIt": {
       "label": "Browse health goals",
       "href": "/goals"
