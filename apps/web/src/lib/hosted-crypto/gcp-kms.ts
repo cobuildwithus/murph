@@ -80,6 +80,7 @@ const GRPC_STATUS_REASONS = new Map<number, string>([
 // single-attempt and fail-closed.
 export const HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS = 10_000;
 export const HOSTED_GCP_KMS_DECRYPT_TIMEOUT_MS = 25_000;
+const HOSTED_GCP_KMS_SLOW_RESPONSE_MS = 250;
 const HOSTED_GCP_KMS_DECRYPT_MAX_ATTEMPTS = 2;
 const HOSTED_GCP_KMS_DECRYPT_RETRY_MIN_DELAY_MS = 100;
 const HOSTED_GCP_KMS_DECRYPT_RETRY_JITTER_MS = 200;
@@ -742,24 +743,14 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
           async () => await invoke(options),
         );
         throwIfProviderAttemptAborted(context, attemptContext);
-        if (attempt > 1) {
-          console.info(
-            "Hosted Google Cloud KMS decrypt provider response received after retry.",
-            {
-              ...buildHostedGcpKmsAttemptLogDetails({
-                attempt,
-                attemptContext,
-                context,
-                maxAttempts,
-                operation,
-                providerReason: "RESPONSE_RECEIVED",
-                requestMetrics,
-              }),
-              completionStage: "kms_rpc",
-              outcome: "provider_response_received",
-            },
-          );
-        }
+        logHostedGcpKmsProviderResponse({
+          attempt,
+          attemptContext,
+          context,
+          maxAttempts,
+          operation,
+          requestMetrics,
+        });
         return response;
       } catch (error) {
         if (context.callerSignal?.aborted) {
@@ -1809,6 +1800,32 @@ function finishHostedGcpKmsStage(stage: HostedGcpKmsAttemptFailureStage): void {
   }
   diagnostics.stageDurationsMs[stage] +=
     readHostedGcpKmsBoundedElapsedMs(startedAtMs, Date.now());
+}
+
+function logHostedGcpKmsProviderResponse(input: {
+  attempt: number;
+  attemptContext: HostedGcpKmsAttemptContext;
+  context: HostedGcpKmsOperationContext;
+  maxAttempts: number;
+  operation: HostedGcpKmsOperation;
+  requestMetrics: HostedGcpKmsRequestMetrics;
+}): void {
+  if (input.attempt === 1 && readHostedGcpKmsBoundedElapsedMs(
+    input.attemptContext.diagnostics.startedAtMs,
+    Date.now(),
+  ) < HOSTED_GCP_KMS_SLOW_RESPONSE_MS) {
+    return;
+  }
+  console.info(
+    input.attempt > 1
+      ? "Hosted Google Cloud KMS decrypt provider response received after retry."
+      : "Hosted Google Cloud KMS slow provider response received.",
+    {
+      ...buildHostedGcpKmsAttemptLogDetails({ ...input, providerReason: "RESPONSE_RECEIVED" }),
+      completionStage: "kms_rpc",
+      outcome: "provider_response_received",
+    },
+  );
 }
 
 function buildHostedGcpKmsAttemptLogDetails(input: {

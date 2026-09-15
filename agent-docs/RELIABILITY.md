@@ -357,6 +357,17 @@ Last verified: 2026-09-04
   target or workspace checks. Legacy transaction append adapters stay
   provider-capable for separately migrated producers and must not be mistaken
   for the prepared surface.
+- Mailbox envelope admission checks workspace existence with one narrow read
+  inside its existing transaction and issues one insert-or-ignore only when
+  missing. The warm read neither changes checkpoint fields/timestamps nor waits
+  for checkpoint writes. Concurrent cold creation converges on one row and
+  rolls back with a failed append. Target checks, crypto authority, dedupe locks,
+  and sequence allocation retain their existing owners and ordering.
+- Google KMS provider responses after a retry or taking at least 250 ms emit
+  the existing allowlisted attempt timings, including SDK initialization,
+  authentication refresh, and the KMS RPC. This records response receipt before
+  integrity validation, never plaintext, credentials, resource names, or AAD.
+  Fast first responses stay quiet; request deadlines and retry policy do not change.
 - Privy completion settles live provider authority, the exact control-domain
   root, and existing private projections before `BEGIN`. It drains sibling
   preparation after a failure and reports the first observed failure. Identity
