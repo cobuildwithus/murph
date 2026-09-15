@@ -9,6 +9,6 @@
     "summary": "Murph can get to work on incoming messages sooner.",
     "details": "This improvement applies to private conversations and group chats.",
     "relevanceTags": ["conversations", "performance"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3466]
   }
 }

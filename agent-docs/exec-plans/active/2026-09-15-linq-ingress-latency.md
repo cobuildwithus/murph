@@ -46,7 +46,9 @@ Updated: 2026-09-15
 - The same probe shows canonical access loading expands into seven SQL statements for an ordinary active member. This remains an optimization candidate; no live access predicate is removed.
 - Applied the workspace reduction to both mailbox envelope admission owners. Real PostgreSQL proof covers rollback, simultaneous first messages, retained checkpoint fields/timestamps, replay, and causal/lane ordering. A contention probe rejected a blind insert-or-ignore because it waits on an in-flight checkpoint update; the warm existence read avoids that regression.
 - Added metadata-only timing for KMS responses taking at least 250 ms, using the existing diagnostic fields and leaving deadlines, retry count, integrity validation, and key cleanup intact.
-- Focused proof passed before the final contention correction: 90 mailbox tests, 28 PostgreSQL routing/concurrency tests, 93 adjacent composition tests, and 43 KMS tests. Web typecheck and complexity guard passed. The corrected warm read is under renewed verification. Exploratory ReviewGPT is still running; no final review has been claimed.
+- The corrected warm read passes 211 mailbox, PostgreSQL concurrency, and adjacent composition tests. All 43 KMS tests, 10 changelog render tests, Web typecheck, and complexity guard also pass.
+- Draft PR #3466 contains the verified workspace optimization and bounded KMS diagnostic improvement. Exploratory ReviewGPT is still running; the PR stays draft pending its response and a separate final review.
+- Reused the existing documented-changelog-test Frog entries for the stale app-directory command and required generated input. The repository-root Vitest workspace command passes after normal fragment generation; no new friction entry was needed.
 
 ## Verification
 
