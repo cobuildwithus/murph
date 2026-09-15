@@ -2706,6 +2706,8 @@ function isGeneratedWebBiomarkerIndexEntry(value: unknown): boolean {
     isArrayOf(value["categories"], isString) &&
     isHealthCommonsBiomarkerDesiredDirection(value["desiredDirection"]) &&
     isArrayOf(value["fallbackRanges"], isGeneratedWebBiomarkerFallbackRange) &&
+    Array.isArray(value["privateMetricBindings"]) &&
+    typeof value["valuePrecision"] === "number" &&
     typeof value["hidden"] === "boolean" &&
     typeof value["key"] === "string" &&
     typeof value["published"] === "boolean" &&

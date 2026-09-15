@@ -315,7 +315,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       .filter((entry) => entry.published)
       .map((entry) => entry.routeId);
 
-    expect(biomarkerIndex.schemaVersion).toBe("murph.commons.web.biomarker-index.v3");
+    expect(biomarkerIndex.schemaVersion).toBe("murph.commons.web.biomarker-index.v4");
     expect(publishedRouteIds).toEqual(expect.arrayContaining([
       "estimated-vo2max",
       "resting-heart-rate",

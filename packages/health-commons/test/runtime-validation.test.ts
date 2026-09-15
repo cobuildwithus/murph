@@ -423,6 +423,7 @@ const experimentEntry = {
 } satisfies HealthCommonsWebExperimentIndexEntry;
 const biomarkerEntry = {
   aliases: [], bundlePath: "bundles/biomarker/example-marker.json", categories: [],
+  privateMetricBindings: [], valuePrecision: 0,
   desiredDirection: null, fallbackRanges: [], hidden: false, key: "biomarker:example-marker",
   published: false, quality: null, revision: REVISION, routeId: "example-marker", shortName: "",
   slug: "example-marker", status: null, summary: null, title: "", unit: null,

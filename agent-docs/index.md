@@ -316,6 +316,9 @@ The deployment unblock retaining the dormant experiment namespace is tracked in
 The completed Home account-check optimization and local proof are recorded in
 [`2026-09-15-home-first-paint.md`](exec-plans/completed/2026-09-15-home-first-paint.md).
 
+The broader dashboard latency work is recorded in
+[`2026-09-15-dashboard-latency.md`](exec-plans/active/2026-09-15-dashboard-latency.md).
+
 ## Conventions
 
 Local feedback diagnostics are documented in

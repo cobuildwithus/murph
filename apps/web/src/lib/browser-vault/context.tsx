@@ -159,6 +159,11 @@ export function BrowserVaultProvider({
   initialMemberId: string | null;
   loadEnabled?: boolean;
 }) {
+  const pathname = usePathname();
+  // Account-management pages have no health-data consumers. Reuse the disabled
+  // owner so returning to data pages still requires fresh session authority.
+  const accountPage = /^\/(?:settings|connect|records)(?:\/|$)/u.test(pathname);
+
   if (developmentReplica) {
     return (
       <DevelopmentBrowserVaultProvider replica={developmentReplica}>
@@ -167,7 +172,7 @@ export function BrowserVaultProvider({
     );
   }
 
-  if (!loadEnabled) {
+  if (!loadEnabled || accountPage) {
     return (
       <DisabledBrowserVaultProvider>{children}</DisabledBrowserVaultProvider>
     );
