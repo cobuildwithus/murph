@@ -7,6 +7,8 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   encodeHostedExecutionSignedRequestPayload,
+  addHostedExecutionRuntimeAuthority,
+  readHostedExecutionRuntimeAuthority,
 } from "@murphai/hosted-execution/auth";
 import { Prisma } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +21,10 @@ import {
 } from "../../src/lib/hosted-execution/cloudflare-callback-auth";
 import { PrismaHostedCallbackRequestNonceStore, type HostedCallbackRequestNonceStore } from "../../src/lib/hosted-execution/internal-request-nonces";
 import { requireVercelCronRequest } from "../../src/lib/hosted-execution/vercel-cron";
+
+const runtimeAdmission = vi.hoisted(() => ({ check: vi.fn(), transaction: vi.fn() }));
+vi.mock("../../src/lib/prisma", () => ({ getPrisma: () => ({ $transaction: runtimeAdmission.transaction }) }));
+vi.mock("../../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: runtimeAdmission.check }));
 
 const FIXED_TIMESTAMP = "2026-04-05T00:00:00.000Z";
 const FIXED_NOW_MS = Date.parse(FIXED_TIMESTAMP);
@@ -185,6 +191,54 @@ describe("requireHostedCloudflareCallbackRequest", () => {
       code: "HOSTED_CLOUDFLARE_CALLBACK_REPLAYED",
       httpStatus: 401,
     } satisfies Partial<HostedOnboardingError>);
+  });
+
+  it.each(["GET", "POST"])("authenticates runtime identity on %s callbacks", async (method) => {
+    const url = new URL("https://join.example.test/api/internal/hosted-workspace");
+    const authority = { attemptId: "rt_synthetic", generation: "4", workspaceVersion: "12" };
+    addHostedExecutionRuntimeAuthority(url, authority);
+    const request = await createSignedCallbackRequest({
+      body: "", method, nonce: "runtimeauthoritynonce00000000001", path: url.pathname,
+      privateJwkJson: currentPrivateJwkJson, search: url.search, userId: "member_runtime_auth",
+    });
+    const options = { runtimeAuthority: "caller_transaction" as const, maxBodyBytes: 0, nowMs: FIXED_NOW_MS, nonceStore: new MemoryNonceStore() };
+    await expect(requireHostedCloudflareCallbackRequest(request.clone(), options)).resolves.toBe("member_runtime_auth");
+    expect(readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers)).toEqual(authority);
+    const tampered = new URL(request.url);
+    tampered.searchParams.set("runtimeGeneration", "5");
+    await expect(requireHostedCloudflareCallbackRequest(new Request(tampered, request.clone()), options))
+      .rejects.toMatchObject({ httpStatus: 401 });
+    const conflicting = request.clone();
+    conflicting.headers.set("x-hosted-runtime-attempt-id", "rt_other");
+    await expect(requireHostedCloudflareCallbackRequest(conflicting, options))
+      .rejects.toMatchObject({ httpStatus: 401 });
+    expect(readHostedExecutionRuntimeAuthority(new URL("https://join.example.test/"), new Headers({
+      "x-hosted-runtime-attempt-id": authority.attemptId,
+      "x-hosted-runtime-lease-generation": authority.generation,
+    }))).toBeNull();
+  });
+
+  it("runs fresh owner admission for signed runtime callbacks and rejects late legacy callbacks", async () => {
+    const tx = { syntheticTransaction: true };
+    runtimeAdmission.transaction.mockImplementation(async operation => operation(tx));
+    runtimeAdmission.check.mockResolvedValue(null);
+    const url = new URL("https://join.example.test/api/internal/hosted-runtime/log");
+    const authority = { attemptId: "rt_fresh_admission", generation: "4", workspaceVersion: "12" };
+    addHostedExecutionRuntimeAuthority(url, authority);
+    const signed = await createSignedCallbackRequest({ body: "", method: "POST",
+      nonce: "freshadmissionnonce0000000000001", path: url.pathname, search: url.search,
+      privateJwkJson: currentPrivateJwkJson, userId: "member_runtime_admission" });
+    const options = { maxBodyBytes: 0, nowMs: FIXED_NOW_MS, nonceStore: new MemoryNonceStore() };
+    await expect(requireHostedCloudflareCallbackRequest(signed, options)).resolves.toBe("member_runtime_admission");
+    expect(runtimeAdmission.check).toHaveBeenLastCalledWith(tx, { ...authority, userId: "member_runtime_admission" });
+    runtimeAdmission.check.mockRejectedValueOnce(new Error("synthetic retired runtime"));
+    const legacy = await createSignedCallbackRequest({ body: "", method: "POST",
+      nonce: "legacyadmissionnonce000000000001", path: url.pathname,
+      privateJwkJson: currentPrivateJwkJson, userId: "member_runtime_admission" });
+    legacy.headers.set("x-hosted-runtime-attempt-id", "legacy-attempt");
+    legacy.headers.set("x-hosted-runtime-lease-generation", "1");
+    await expect(requireHostedCloudflareCallbackRequest(legacy, options)).rejects.toThrow("synthetic retired runtime");
+    expect(runtimeAdmission.check).toHaveBeenLastCalledWith(tx, null);
   });
 
   it("rejects a signed callback as replay when reindex raises a nonce conflict", async () => {

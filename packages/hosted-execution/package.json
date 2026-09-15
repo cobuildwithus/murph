@@ -22,6 +22,10 @@
       "types": "./dist/auth.d.ts",
       "default": "./dist/auth.js"
     },
+    "./runtime-owner": {
+      "types": "./dist/runtime-owner.d.ts",
+      "default": "./dist/runtime-owner.js"
+    },
     "./assistant-inference": {
       "types": "./dist/assistant-inference.d.ts",
       "default": "./dist/assistant-inference.js"
@@ -161,6 +165,26 @@
     "./workspace-snapshot-v2": {
       "types": "./dist/workspace-snapshot-v2.d.ts",
       "default": "./dist/workspace-snapshot-v2.js"
+    },
+    "./workspace-snapshot-store": {
+      "types": "./dist/workspace-snapshot-store.d.ts",
+      "default": "./dist/workspace-snapshot-store.js"
+    },
+    "./runtime-resources": {
+      "types": "./dist/runtime-resources.d.ts",
+      "default": "./dist/runtime-resources.js"
+    },
+    "./storage-paths": {
+      "types": "./dist/storage-paths.d.ts",
+      "default": "./dist/storage-paths.js"
+    },
+    "./runtime-media": {
+      "types": "./dist/runtime-media.d.ts",
+      "default": "./dist/runtime-media.js"
+    },
+    "./runtime-resource-purge": {
+      "types": "./dist/runtime-resource-purge.d.ts",
+      "default": "./dist/runtime-resource-purge.js"
     }
   },
   "files": [

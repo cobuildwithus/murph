@@ -1,3 +1,4 @@
+import type { HostedExecutionContainerStubLike } from "./runner-container.ts";
 import type {
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
@@ -119,7 +120,9 @@ export interface WorkerRuntimeCompletionReceipt {
   userId: string;
 }
 
-export interface WorkerRunnerContainerStubLike {
+export interface WorkerRunnerContainerStubLike extends Pick<HostedExecutionContainerStubLike,
+  "beginRuntimeUsageSettlement" | "finishRuntimeUsageSettlement" | "runtimeUsageSettlementAllowsProviders" | "readSupervisedInvocation" | "recordSupervisedRuntimeCompletion"
+> {
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
 }
 

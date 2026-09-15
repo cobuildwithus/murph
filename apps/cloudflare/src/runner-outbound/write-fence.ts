@@ -1,3 +1,5 @@
+import { usesPostgresRuntimeOwner } from "../runtime-cutover.ts";
+import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
 import type {
   HostedRuntimeUsageRecordResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -62,6 +64,13 @@ export async function requireRunnerRuntimeWriteFence(input: {
   userId: string;
 }): Promise<RunnerRuntimeWriteFenceHeaders> {
   const headers = requireRunnerRuntimeWriteFenceHeaders(input.request);
+  if (usesPostgresRuntimeOwner(input.env)) {
+    const result = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: {
+      operation: "authorize_effect", attemptId: headers.attemptId, generation: headers.generation, runnerContainerName: null, managedAi: false,
+    } });
+    if (result.cutover !== "postgres" || result.status !== "authorized") throw new RunnerRuntimeWriteFenceError();
+    return headers;
+  }
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
   const ownsWriteFence = await validateRunnerRuntimeWriteFence(stub, {
     attemptId: headers.attemptId,
@@ -80,20 +89,9 @@ export async function requireRunnerRuntimeWriteFenceWorkspaceWrite(input: {
   request: Request;
   userId: string;
 }): Promise<RunnerRuntimeWriteFenceWorkspaceAuthority> {
-  const headers = requireRunnerRuntimeWriteFenceHeaders(input.request);
+  const headers = await requireRunnerRuntimeWriteFence(input);
   const workspaceVersion = readValidWorkspaceVersionOrNull(headers.workspaceVersion);
-  if (!workspaceVersion) {
-    throw new RunnerRuntimeWriteFenceError();
-  }
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const ownsWriteFence = await validateRunnerRuntimeWriteFence(stub, {
-    attemptId: headers.attemptId,
-    generation: headers.generation,
-    userId: input.userId,
-  });
-  if (!ownsWriteFence) {
-    throw new RunnerRuntimeWriteFenceError();
-  }
+  if (!workspaceVersion) throw new RunnerRuntimeWriteFenceError();
 
   return {
     ...headers,

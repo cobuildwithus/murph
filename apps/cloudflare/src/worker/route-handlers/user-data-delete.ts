@@ -1,3 +1,5 @@
+import { usesPostgresRuntimeOwner } from "../../runtime-cutover.ts";
+import { deletePostgresRunnerUserData } from "../../runtime-user-control.ts";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -71,8 +73,9 @@ export async function handleUserDataDeleteRoute(
     throw error;
   }
 
-  const stub = context.env.USER_RUNNER.getByName(userId);
-  const result = await stub.deleteHostedUserData(userId);
+  const result = usesPostgresRuntimeOwner(context.env)
+    ? await deletePostgresRunnerUserData(context.env, userId)
+    : await context.env.USER_RUNNER.getByName(userId).deleteHostedUserData(userId);
   if (typeof result === "object" && result !== null && "ok" in result && result.ok === false) {
     const retryAfterSeconds = "retryAfterSeconds" in result
       && typeof result.retryAfterSeconds === "number"

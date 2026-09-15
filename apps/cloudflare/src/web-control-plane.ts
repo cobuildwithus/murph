@@ -8,6 +8,7 @@ import {
 import {
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution/env";
+import { addHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 
 import {
   createHostedWebCallbackSignatureHeaders,
@@ -76,6 +77,15 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
 
   const headers = createHostedWebControlForwardHeaders(input.headers);
   headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
+  const attemptId = headers.get("x-hosted-runtime-attempt-id");
+  const generation = headers.get("x-hosted-runtime-lease-generation");
+  if (attemptId !== null || generation !== null) {
+    addHostedExecutionRuntimeAuthority(targetUrl, {
+      attemptId: attemptId ?? "",
+      generation: generation ?? "",
+      workspaceVersion: headers.get("x-hosted-runtime-workspace-version"),
+    });
+  }
 
   if (input.body !== undefined) {
     headers.set("content-type", "application/json");

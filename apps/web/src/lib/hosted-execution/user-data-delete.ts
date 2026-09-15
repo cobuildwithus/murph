@@ -48,9 +48,9 @@ export async function deleteHostedRunnerUserDataBestEffort(input: {
           alarmCleared: result.durableObject.alarmCleared,
           configured: true,
           deleteAllCompleted: result.durableObject.deleteAllCompleted === true,
-          deleted: result.durableObject.deleteAllCompleted === true
-            && result.durableObject.stateDeleted
-            && result.durableObject.alarmCleared
+          deleted: (result.stateOwner === "postgres" ? result.runtimeStateCleared === true
+            : result.durableObject.deleteAllCompleted === true
+              && result.durableObject.stateDeleted && result.durableObject.alarmCleared)
             && result.r2.supported
             && !result.r2.skippedUserScopedPrefixes,
           errorCode: null,

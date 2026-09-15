@@ -473,6 +473,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
       deleteUserData,
+      purgeRuntimeResource: vi.fn(),
       enqueueDeviceWebhook: vi.fn(),
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
@@ -508,6 +509,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       createEnvironmentRealtimeCall: vi.fn(),
       deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
+      purgeRuntimeResource: vi.fn(),
       deleteUserData: vi.fn().mockResolvedValue({
         deletedAt: "2026-04-29T00:00:00.000Z",
         durableObject: {
@@ -554,6 +556,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
       deleteUserData,
+      purgeRuntimeResource: vi.fn(),
       enqueueDeviceWebhook: vi.fn(),
       ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),

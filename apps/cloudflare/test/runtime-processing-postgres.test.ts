@@ -1,0 +1,121 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { HostedRuntimeOwnerResponse, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
+import { ensurePostgresRuntimeProcessing } from "../src/runtime-processing.ts";
+import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
+import { recordHostedRuntimeOwnerCompletion } from "../src/runtime-owner-completion.ts";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
+import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
+import type { HostedExecutionContainerStubLike } from "../src/runner-container.ts";
+import type { RunnerWriteFenceToken } from "../src/user-runner/runner-state-store.ts";
+import type { HostedStandbySlotBinding } from "../src/standby-runner-contract.ts";
+import type { RunnerInvocationReceipt } from "../src/runner-invocation-receipt.ts";
+
+vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
+vi.mock("../src/runtime-owner-completion.ts", () => ({ recordHostedRuntimeOwnerCompletion: vi.fn(async () => true) }));
+vi.mock("../src/runtime-invocation-preparation.ts", () => ({
+  RuntimeInvocationPreparation: class {
+    prepareForFreshStart() {
+      return async (token: RunnerWriteFenceToken) => ({ job: {}, token, input: {}, workspaceVersion: "0", workspaceCheckpointedAt: null });
+    }
+  },
+}));
+
+const target = `runner--v-release_1--${"1".repeat(32)}`;
+const allocationId = "standby-claim-11111111-1111-4111-8111-111111111111";
+const request = { userId: "member-a", orchestrationAttemptId: "orchestration-a" };
+function owner(patch: Partial<HostedRuntimeOwnerSnapshot> = {}): HostedRuntimeOwnerSnapshot {
+  return { userId: request.userId, attemptId: "attempt-a", generation: "1", phase: "active",
+    processingMode: "default", allocationId, runnerContainerName: target, workspaceVersion: "0",
+    customInferenceEnvelope: null, platformAiUsageAllowed: true, startedAt: new Date().toISOString(),
+    acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null, ...patch };
+}
+function response(current: HostedRuntimeOwnerSnapshot | null, status: HostedRuntimeOwnerResponse["status"] = "existing"): HostedRuntimeOwnerResponse {
+  return { cutover: "postgres", status, owner: current };
+}
+function harness() {
+  const binding = { state: "bound" as const, slotName: target, releaseId: "release_1", region: "GLOBAL" as const, userId: request.userId, claimId: allocationId };
+  const container = {
+    destroyInstance: vi.fn(async () => {}), invoke: vi.fn(), smokeHealth: vi.fn(),
+    readSupervisedInvocation: vi.fn(async (): Promise<RunnerInvocationReceipt | null> => null),
+    readActiveRuntimeUserFence: vi.fn(async () => ({ active: false as const, reason: "no_active_runtime" as const })),
+    ensureProcessing: vi.fn(async () => ({ kind: "accepted" as const, action: "woken" as const })),
+    ensureReadyForProcessing: vi.fn(async () => ({ kind: "ready" as const })),
+    startSupervisedInvocation: vi.fn(async () => ({ accepted: true as const })),
+    bindStandbySlot: vi.fn(async (input) => ({ ...input, bound: true as const })),
+    prepareStandbySlot: vi.fn(),
+    readStandbySlotBinding: vi.fn(async (): Promise<HostedStandbySlotBinding> => binding),
+    readStandbySlotCoordinatorState: vi.fn(async () => ({ coordinatorOwned: false, releaseId: binding.releaseId, slotName: target, state: binding.state })),
+    resolveRetainedStandbySlot: vi.fn(async () => binding),
+    retireStandbySlot: vi.fn(async () => ({ retired: true as const })),
+  } satisfies HostedExecutionContainerStubLike;
+  const source = { ...createHostedExecutionTestEnv(), CF_VERSION_METADATA: { id: "release_1" },
+    HOSTED_RUNTIME_POSTGRES_ENABLED: "true", BUNDLES: new MemoryEncryptedR2Bucket(), RUNNER_CONTAINER: { getByName: () => container } };
+  return { source, container, binding };
+}
+
+describe("Postgres runtime orchestration", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("uses the finite legacy bridge and closes admission during draining", async () => {
+    const { source, container } = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce({ cutover: "legacy", status: "blocked", owner: null });
+    expect(await ensurePostgresRuntimeProcessing({ ...source, HOSTED_RUNTIME_POSTGRES_ENABLED: "false" }, request)).toBeNull();
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce({ cutover: "draining", status: "blocked", owner: null });
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "retry_later" });
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+  });
+
+  it("wakes the exact live owner and forwards foreground promotion in place", async () => {
+    const { source, container } = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner({ processingMode: "system_mailbox" })));
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "runtime_processing_accepted", action: "woken", runtimeAttemptId: "attempt-a" });
+    expect(container.ensureProcessing).toHaveBeenCalledWith(expect.objectContaining({ activeRuntime: expect.objectContaining({ attemptId: "attempt-a", leaseGeneration: "1", requestedProcessingMode: "default" }) }));
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+  });
+
+  it("does not discard authority when a wake acknowledgement is unknown", async () => {
+    const { source, container } = harness();
+    container.ensureProcessing.mockRejectedValue(new Error("synthetic lost acknowledgment"));
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner()));
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "retry_later" });
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(1);
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+  });
+
+  it("fences an expired unacknowledged launch through exact native retirement before releasing it", async () => {
+    const { source, container, binding } = harness();
+    // The original bind might never have initialized its reserved target.
+    container.readSupervisedInvocation.mockRejectedValue(new Error("synthetic uninitialized slot"));
+    container.readStandbySlotBinding.mockResolvedValue({ ...binding, state: "retired", claimId: null, userId: null });
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner({ phase: "starting", workspaceVersion: null, startedAt: "2020-01-01T00:00:00Z" })))
+      .mockResolvedValue(response(null, "updated"));
+    await ensurePostgresRuntimeProcessing(source, request);
+    expect(container.retireStandbySlot).toHaveBeenCalledWith({ claimId: allocationId, target: { slotName: target, userId: request.userId } });
+    const operations = vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation);
+    expect(operations).toEqual(["claim", "retire", "release"]);
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+  });
+
+  it("keeps an uncertain native stop pinned", async () => {
+    const { source, container } = harness();
+    container.retireStandbySlot.mockRejectedValue(new Error("synthetic stop uncertainty"));
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner({ phase: "retiring" }))).mockResolvedValue(response(null, "updated"));
+    await expect(ensurePostgresRuntimeProcessing(source, request)).rejects.toThrow("stop uncertainty");
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["claim", "retire"]);
+  });
+
+  it("reconciles a lost completion acknowledgment and starts the successor in the retained warm shell", async () => {
+    const { source, container } = harness();
+    container.readSupervisedInvocation.mockResolvedValue({ attemptId: "attempt-a", generation: "1", state: "completed", immediateRecheckRequested: true });
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner()))
+      .mockResolvedValueOnce(response(null, "updated"))
+      .mockResolvedValueOnce(response(owner({ attemptId: "attempt-b", generation: "2", phase: "starting", workspaceVersion: null }), "claimed"))
+      .mockResolvedValue(response(null, "updated"));
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "runtime_processing_accepted", runtimeAttemptId: "attempt-b" });
+    expect(recordHostedRuntimeOwnerCompletion).toHaveBeenCalledWith(expect.objectContaining({ attemptId: "attempt-a", result: { immediateRecheckRequested: true } }));
+    expect(container.resolveRetainedStandbySlot).toHaveBeenCalled();
+    expect(container.bindStandbySlot).not.toHaveBeenCalled();
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(container.startSupervisedInvocation).toHaveBeenCalledTimes(1);
+  });
+});
