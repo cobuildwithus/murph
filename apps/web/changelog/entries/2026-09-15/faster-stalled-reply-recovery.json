@@ -9,6 +9,6 @@
     "summary": "Murph starts recovering sooner when an OpenAI response stops sending data.",
     "details": "Longer reasoning and tool work can still continue. This change does not set a time limit for receiving a finished reply or change custom inference settings.",
     "relevanceTags": ["messaging", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3468]
   }
 }

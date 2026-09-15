@@ -59,8 +59,8 @@ old and new containers may coexist without schema or protocol changes.
 - Final reasoning event-shape and partial-text checks passed after fixture review.
   Assistant Engine and Assistant Runtime typechecks passed. Complexity and
   docs drift passed; no new source complexity debt.
-- Web release-note rendering/typecheck, PR publication, ReviewGPT and exact-head
-  CI pending. Prior live-model measurements remain the live-provider evidence;
+- Web release-note rendering: 10 passed; Web typecheck passed. PR #3468 is
+  open. ReviewGPT and exact-head CI pending. Prior live-model measurements remain the live-provider evidence;
   no prompt, tool schema, model choice, or reply policy changes.
 - Reused Frog entries for the documented changelog command's root-relative test
   discovery/generation issue; use repository-root Vitest and prepare the catalog.
