@@ -1128,12 +1128,17 @@ export class RunnerContainer extends Container {
   }
 
   async readActiveRuntimeUserFence(): Promise<WorkerActiveRuntimeUserFenceResult> {
-    this.noteContainerInteraction();
     const abortInProgress = this.workspaceInvocationNoPointerAbort;
+    const active = this.readWorkspaceInvocationOperation();
+    if (active && !abortInProgress && !active.abortResult && !active.requiresFailClosedStopReason) {
+      // Observing the registered owner admits no work and performs no I/O.
+      // Preserve its completion generation; actual arrivals still invalidate it.
+      return createActiveRuntimeUserFence(active);
+    }
+    this.noteContainerInteraction();
     if (abortInProgress) {
       return createActiveRuntimeUserFence(abortInProgress);
     }
-    const active = this.readWorkspaceInvocationOperation();
     if (!active) {
       const status = await readRunnerContainerStatus(this);
       if (

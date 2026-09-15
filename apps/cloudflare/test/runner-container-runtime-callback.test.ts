@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { readRuntimeFenceLivenessBestEffort } from "../src/user-runner/runtime-fence-liveness.js";
+
 import {
   RunnerContainer,
 } from "../src/runner-container.js";
@@ -57,6 +59,47 @@ describe("RunnerContainer internal runtime dispatch", () => {
     await expect(container.onActivityExpired()).resolves.toBeUndefined();
     expect(destroy).toHaveBeenCalledOnce();
   });
+
+  it.each(["before-response", "after-response"] as const)(
+    "stops after an exact-active observation with completion %s",
+    async (completionOrder) => {
+      const response = createDeferred<Response>();
+      const { container, containerFetch, destroy } = createActivityExpiryContainerDouble({
+        invocationResponse: response.promise,
+      });
+      const identity = {
+        attemptId: "attempt_member_123",
+        leaseGeneration: "11",
+        userId: "member_123",
+      };
+      const invocation = container.invoke({
+        job: createWorkspaceRunnerJob(identity.userId),
+        timeoutMs: 5_000,
+        userId: identity.userId,
+      });
+      await vi.waitFor(() => expect(containerFetch).toHaveBeenCalled());
+      const fetchesBeforeObservation = containerFetch.mock.calls.length;
+      await expect(readRuntimeFenceLivenessBestEffort({
+        identity,
+        runnerContainerName: "synthetic-runner",
+        runnerContainerNamespace: { getByName: () => container },
+        stepTimeoutMs: 1_000,
+      })).resolves.toEqual({ outcome: "exact-active" });
+      expect(containerFetch).toHaveBeenCalledTimes(fetchesBeforeObservation);
+      const earlyCompletion = completionOrder === "before-response"
+        ? container.onRuntimeCompletionRecorded(identity)
+        : null;
+      response.resolve(new Response(JSON.stringify(createRunnerResult()), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }));
+      await expect(invocation).resolves.toMatchObject({ status: "idle" });
+      if (earlyCompletion) await earlyCompletion;
+      else await container.onRuntimeCompletionRecorded(identity);
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+    },
+  );
 
   it("stops a terminal shell when durable completion wins the outer response race", async () => {
     const invocationResponse = createDeferred<Response>();
