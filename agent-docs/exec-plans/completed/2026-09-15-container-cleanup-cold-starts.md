@@ -1,6 +1,6 @@
 # Stop observational liveness checks from delaying container cleanup
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-15
 
@@ -39,4 +39,9 @@ Worker-only lifecycle semantics with unchanged RPC/envelope shapes; old runner i
 - Complexity diff passed with unchanged debt. Existing unrelated hotspots remain in wakeRuntimeObserved, ensureContainerReady, and classifyHostedRunnerContainerErrorResponse.
 - Investigation identified late scheduled mailbox arrivals after initial import, plus retained continuations intentionally choosing provider cadence ahead of future history-job availability. Those paths need a separate scheduling change with composed cold-restore and canonical publication proof; shortening cleanup does not itself reduce start count.
 - No member-visible behavior or provider-input change; changelog is not applicable to this internal lifecycle correction.
-- Final PR review and CI pending.
+- Final ReviewGPT passed on the pushed source head `72f406e1581623d57f0c10c25f2e8dfbd2ea7543`: no qualifying bugs or complexity collapse; exact response model and hash verified.
+- Parent review confirmed the ordinary active path has no I/O and no work admission, while actual readiness/wake/abort and uncertain status/health paths still coordinate cleanup.
+- Owner documentation and index updated; docs drift and diff whitespace checks passed.
+- Logged the PR complexity evidence global-flag parsing friction through Frog; the PR description uses the required canonical command label.
+- Implementation and investigation are complete. Final closeout changes only documentation and the friction report; exact final-head CI remains the PR handoff gate. Production rollout and post-deploy measurement remain separate.
+Completed: 2026-09-15
