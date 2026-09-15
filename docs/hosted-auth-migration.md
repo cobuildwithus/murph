@@ -347,3 +347,32 @@ Verify. IP admission uses [Vercel request headers](https://vercel.com/docs/heade
 PR 3 must qualify [Telegram's current login contract](https://core.telegram.org/bots/telegram-login),
 including verified numeric user identity, nonce binding and one-use completion;
 the OIDC subject must not be assumed to equal the existing numeric bot user ID.
+
+
+## Conditional iPhone update screen
+
+`GET /api/device-sync/companion/app-policy` is anonymous public metadata with
+`Cache-Control: no-store`. Its version-1 response is
+`{ "schemaVersion": 1, "minimumIOSBuild": null }` when
+`HOSTED_IOS_MINIMUM_BUILD` is unset. An explicitly configured positive 32-bit
+integer sets the minimum supported `CFBundleVersion`; this is not the latest
+release number. Invalid configuration returns 503 rather than clearing a floor.
+No database, provider, cookie or member authority participates in this lookup.
+
+The native reader presents Update Murph only below that floor. It checks before
+showing login/product UI and again on foreground. A failed initial lookup leaves
+normal offline and authentication recovery intact; a failed later lookup retains
+a known update requirement in memory. The policy never logs out an account,
+clears local data, revokes Health permissions, or replaces API authorization.
+Background SDK work remains under its existing authority owners. The update
+button opens the fixed Murph App Store listing. There is no Web notice.
+
+Deploy the endpoint with the floor unset, then distribute the native reader.
+Raise the minimum only for a breaking change after its replacement is publicly
+available in every supported storefront and on supported OS versions. Continue
+monotonically increasing integer iOS build numbers across marketing versions.
+Clear the setting to withdraw the requirement; app foreground or Check again
+rereads it. This is a user-facing compatibility control, not a security fence.
+Older installed binaries without the reader cannot show the new screen and
+still require an ordinary App Store update. Keep legacy auth until its separate
+retirement gates pass; publishing a new app does not prove adoption.
