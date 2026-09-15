@@ -1816,12 +1816,17 @@ function logHostedGcpKmsProviderResponse(input: {
   ) < HOSTED_GCP_KMS_SLOW_RESPONSE_MS) {
     return;
   }
+  const description = input.attempt > 1
+    ? "Hosted Google Cloud KMS decrypt provider response received after retry."
+    : "Hosted Google Cloud KMS slow provider response received.";
+  const diagnosticDetails = buildHostedGcpKmsAttemptLogDetails({
+    ...input,
+    providerReason: "RESPONSE_RECEIVED",
+  });
   console.info(
-    input.attempt > 1
-      ? "Hosted Google Cloud KMS decrypt provider response received after retry."
-      : "Hosted Google Cloud KMS slow provider response received.",
+    description,
     {
-      ...buildHostedGcpKmsAttemptLogDetails({ ...input, providerReason: "RESPONSE_RECEIVED" }),
+      ...diagnosticDetails,
       completionStage: "kms_rpc",
       outcome: "provider_response_received",
     },
