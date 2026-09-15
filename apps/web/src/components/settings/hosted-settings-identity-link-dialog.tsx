@@ -651,8 +651,9 @@ export function HostedSettingsIdentityRemovalView({
           ? "Another linked sign-in will keep your Murph account accessible. Existing messages and billing records stay in your account."
           : "Add another email, phone, or Telegram sign-in first so you don't lose access to your Murph account."}
       </p>
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <div className="flex flex-col-reverse gap-2">
         <Button
+          size="xl"
           type="button"
           variant="ghost"
           disabled={pending}
@@ -661,6 +662,7 @@ export function HostedSettingsIdentityRemovalView({
           Cancel
         </Button>
         <Button
+          size="xl"
           type="button"
           variant={intent === "replace" ? "default" : "destructive"}
           disabled={pending || !removable}

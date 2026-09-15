@@ -1,13 +1,13 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import {
   RecordsConnectLauncherState,
   ProviderSearch,
 } from "@/app/(dashboard)/records/connect/records-connect-client";
 
-import { ConnectionRow } from "@/app/(dashboard)/records/records-page-client";
+import { ConnectionRow, DisconnectDialog } from "@/app/(dashboard)/records/records-page-client";
 import type { ClinicalRecordConnectionContract } from "@/src/lib/clinical-records/client-contracts";
 
 const savedSource: ClinicalRecordConnectionContract = {
@@ -33,10 +33,12 @@ const savedSource: ClinicalRecordConnectionContract = {
 };
 
 export function ClinicalRecordsConnectLauncherStudy() {
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
   return (
     <div
       className="grid gap-6 xl:grid-cols-2"
       id="clinical-records"
+      ref={(node) => { node?.setAttribute("data-preview-ready", "true"); }}
       data-design-section="clinical-records-connect-launcher"
       inert
     >
@@ -45,7 +47,7 @@ export function ClinicalRecordsConnectLauncherStudy() {
       </StudyState>
       <StudyState label="Saved lab results">
         <ul>
-          <ConnectionRow connection={savedSource} disabled={false} onDisconnect={() => {}} />
+          <ConnectionRow connection={savedSource} disabled={false} onDisconnect={() => setDisconnectOpen(true)} />
         </ul>
       </StudyState>
       <StudyState label="Partial results after access ends">
@@ -96,6 +98,7 @@ export function ClinicalRecordsConnectLauncherStudy() {
       <StudyState label="Launcher can be retried">
         <RecordsConnectLauncherState state="launch-failed" />
       </StudyState>
+      <DisconnectDialog connection={disconnectOpen ? savedSource : null} errorMessage={null} onConfirm={() => setDisconnectOpen(false)} onOpenChange={setDisconnectOpen} pending={false} />
     </div>
   );
 }

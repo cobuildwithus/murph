@@ -60,6 +60,10 @@ import {
   readRequiredHostedRuntimePositiveInteger,
   readRequiredHostedRuntimeString,
 } from "./hosted-http.ts";
+import {
+  observeHostedWorkspaceSnapshotFetch,
+  readHostedWorkspaceSnapshotResponseIds,
+} from "./workspace-snapshot-fetch-diagnostics.ts";
 
 const WORKSPACE_SNAPSHOT_READ_IDLE_TIMEOUT_MS = 15_000;
 const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS = 2_000;
@@ -648,11 +652,13 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       }
 
       const objectFetchStartedAt = Date.now();
+      let objectFetchAttempt = 0;
       const archiveTimings = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
         details: restoreLogDetails,
         signal: request.signal,
         onAttempt: noteReplaySafeReadAttempt,
         run: async () => {
+          objectFetchAttempt += 1;
           const objectFetchAttemptTiming = {
             objectFetchResponseHeadersMs: 0,
             objectFetchBodyReadMs: 0,
@@ -661,6 +667,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
             Math.max(1, presignedGet.expiresAtMs - Date.now() - 5_000);
           const objectFetchDeadlineMs = Date.now() + objectFetchTimeoutMs;
           const encryptedStream = readHostedWorkspaceSnapshotEncryptedObjectStream({
+            attempt: objectFetchAttempt,
             deadlineMs: objectFetchDeadlineMs,
             expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
             fetchImpl: input.fetchImpl,
@@ -1394,6 +1401,7 @@ async function unwrapWorkspaceSnapshotDataKey(input: {
 }
 
 async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
+  attempt: number;
   deadlineMs: number;
   expectedEncryptedByteSize: number;
   fetchImpl: typeof fetch;
@@ -1406,7 +1414,7 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
   timeoutMs: number;
 }): AsyncIterable<Uint8Array> {
   const responseHeadersStartedAt = Date.now();
-  const response = await fetchHostedResponse({
+  const response = await observeHostedWorkspaceSnapshotFetch(() => fetchHostedResponse({
     description: "Hosted workspace snapshot fetch",
     fetchImpl: input.fetchImpl,
     init: {
@@ -1417,7 +1425,7 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
     signal: input.signal ?? null,
     timeoutMs: input.timeoutMs,
     url: new URL(input.getUrl),
-  });
+  }), { attempt: input.attempt, timeoutMs: input.timeoutMs });
   input.timing.objectFetchResponseHeadersMs =
     readHostedRuntimeStepElapsedMs(responseHeadersStartedAt);
   if (response.status === 404) {
@@ -1465,6 +1473,9 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
     emitHostedExecutionStructuredLog({
       component: "hosted.runtime.workspace-snapshot",
       details: {
+        workspaceSnapshotRestoreAttempt: input.attempt,
+        workspaceSnapshotRestoreStep: "object_fetch",
+        ...readHostedWorkspaceSnapshotResponseIds(response.headers),
         bytesRead: byteCount,
         complete,
         durationMs,

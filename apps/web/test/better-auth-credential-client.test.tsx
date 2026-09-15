@@ -1,0 +1,303 @@
+import { act, createElement, type ComponentProps, type ReactNode } from "react";
+import { beforeEach, expect, test, vi } from "vitest";
+import { renderClientComponent } from "./render-client-component";
+import type { HostedContactCodeForm } from "@/src/components/hosted-onboarding/hosted-contact-code-form";
+import type { HostedTelegramProofButton } from "@/src/components/hosted-onboarding/hosted-telegram-proof-button";
+
+const mocks = vi.hoisted(() => ({
+  realContact: false, request: vi.fn(), sign: vi.fn(), saved: vi.fn(), enroll: vi.fn(),
+  enrollment: { registered: false, pending: false, error: null as string | null }, refresh: vi.fn(), openAuth: vi.fn(), close: vi.fn(),
+  contact: null as ComponentProps<typeof HostedContactCodeForm> | null,
+  telegram: null as ComponentProps<typeof HostedTelegramProofButton> | null,
+}));
+vi.mock("@/src/components/sensitive-actions/use-approval-passkey-enrollment", () => ({
+  useApprovalPasskeyEnrollment: () => ({ ...mocks.enrollment, enroll: mocks.enroll }),
+}));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
+vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({ useAuth: () => ({ openAuthDialog: mocks.openAuth }) }));
+vi.mock("@/src/components/hosted-onboarding/client-api", () => ({ requestHostedOnboardingJson: mocks.request }));
+vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization", () => ({ useSensitiveActionAuthorization: () => ({ signChallenge: mocks.sign }) }));
+vi.mock("@/src/components/hosted-onboarding/hosted-contact-code-form", async (original) => {
+  const { HostedContactCodeForm: Form } = await original<typeof import("@/src/components/hosted-onboarding/hosted-contact-code-form")>();
+  return { HostedContactCodeForm: (props: ComponentProps<typeof HostedContactCodeForm>) => {
+    mocks.contact = props;
+    return mocks.realContact ? createElement(Form, props) : createElement("button", { type: "button" }, props.verifyLabel);
+  } };
+});
+vi.mock("@/src/components/hosted-onboarding/hosted-telegram-proof-button", () => ({ HostedTelegramProofButton: (props: ComponentProps<typeof HostedTelegramProofButton>) => {
+  mocks.telegram = props; return createElement("button", { type: "button" }, "Continue with Telegram");
+} }));
+vi.mock("@/src/components/ui/dialog", () => {
+  const wrap = ({ children }: { children?: ReactNode }) => createElement("div", null, children);
+  return { Dialog: wrap, DialogContent: wrap, DialogDescription: wrap, DialogHeader: wrap, DialogTitle: wrap };
+});
+import { HostedLoginMethodDialog, HostedLoginMethodEditor } from "@/src/components/settings/hosted-login-method-dialog";
+
+const methods = { email: "member@example.test", phone: null, telegram: "735001" };
+const challenge = { token: "synthetic-challenge", message: "Approve the selected change", expiresAt: "2099-01-01T00:00:00Z" };
+const authorization = { method: "passkey", token: challenge.token, assertion: { id: "synthetic-passkey" } };
+beforeEach(() => {
+  vi.resetAllMocks(); mocks.realContact = false; mocks.enrollment.registered = false; mocks.enrollment.pending = false; mocks.enrollment.error = null; mocks.contact = null; mocks.telegram = null;
+  mocks.sign.mockResolvedValue(authorization);
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => {
+    if (url === "/api/settings/login-methods") return { ok: true, methods };
+    if (url === "/api/settings/approval-passkeys") return { initialEnrollmentAllowed: false };
+    if (url.endsWith("/challenge")) return challenge;
+    return { ok: true };
+  });
+});
+
+async function render(method: "email" | "phone" | "telegram", operation: "set" | "remove" = "set") {
+  return renderClientComponent(createElement(HostedLoginMethodDialog, { method, operation, onOpenChange: mocks.close, onSaved: mocks.saved }), { requireButton: false, matchMedia: (query) => ({
+    matches: false, media: query, onchange: null, addListener() {}, removeListener() {},
+    addEventListener() {}, removeEventListener() {}, dispatchEvent: () => true,
+  }) });
+}
+async function click(rendered: Awaited<ReturnType<typeof render>>, text: string) {
+  const button = [...rendered.container.querySelectorAll("button")].find((entry) => entry.textContent === text);
+  expect(button).toBeDefined();
+  await act(async () => { button!.dispatchEvent(new rendered.window.Event("click", { bubbles: true })); });
+}
+
+test("adding a method binds the destination and requires explicit approval after code entry", async () => {
+  const rendered = await render("phone");
+  const form = mocks.contact!;
+  expect(form.autoSubmit).toBe(false);
+  const selected = { method: "phone", operation: "set", expectedIdentity: null, value: "+15555550127" };
+  const signal = new AbortController().signal;
+  await act(async () => { await form.onSend(selected.value, signal); });
+  expect(mocks.sign).not.toHaveBeenCalled();
+  await act(async () => { await form.onVerify(selected.value, "123456", signal); });
+  expect(mocks.sign).toHaveBeenCalledWith(challenge, selected);
+  expect(mocks.request).toHaveBeenLastCalledWith(expect.objectContaining({
+    url: "/api/settings/login-methods/otp/verify", payload: { change: selected, authorization, code: "123456" },
+  }));
+  expect(mocks.saved).toHaveBeenCalledOnce();
+  expect(mocks.refresh).toHaveBeenCalledOnce();
+  expect(rendered.container.textContent).toContain("Phone number added");
+  await rendered.cleanup();
+});
+
+test("removal explains other-session revocation and signs only the current identity", async () => {
+  const rendered = await render("email", "remove");
+  expect(rendered.container.textContent).toContain("Other sessions will be signed out; this browser stays signed in.");
+  await click(rendered, "Approve and remove email");
+  const selected = { method: "email", operation: "remove", expectedIdentity: methods.email, value: null };
+  expect(mocks.sign).toHaveBeenCalledWith(challenge, selected);
+  expect(mocks.request).toHaveBeenLastCalledWith(expect.objectContaining({ url: "/api/settings/login-methods/remove", payload: { change: selected, authorization } }));
+  expect(rendered.container.textContent).toContain("Email removed");
+  expect(rendered.container.textContent).not.toContain("will be signed out");
+  await rendered.cleanup();
+});
+
+test("lost commit responses refresh canonical state without replay or a false success", async () => {
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => {
+    if (url === "/api/settings/login-methods") return { ok: true, methods };
+    if (url.endsWith("/challenge")) return challenge;
+    if (url.endsWith("/remove")) throw new Error("The connection was interrupted. Refresh Settings.");
+    return {};
+  });
+  const rendered = await render("email", "remove");
+  await click(rendered, "Approve and remove email");
+  expect(mocks.refresh).toHaveBeenCalledOnce();
+  expect(mocks.request.mock.calls.filter(([input]) => input.url.endsWith("/remove"))).toHaveLength(1);
+  expect(rendered.container.textContent).toContain("Refresh Settings.");
+  expect(rendered.container.textContent).not.toContain("Email removed");
+  expect(mocks.saved).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
+test("canceled and late approvals cannot submit the credential mutation", async () => {
+  let finish!: (value: typeof authorization) => void;
+  mocks.sign.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  const rendered = await render("email", "remove");
+  await click(rendered, "Approve and remove email");
+  await rendered.cleanup();
+  await act(async () => { finish(authorization); });
+  expect(mocks.request.mock.calls.some(([input]) => input.url.endsWith("/remove"))).toBe(false);
+  expect(mocks.refresh).not.toHaveBeenCalled();
+});
+
+test("approval rejection leaves the contact and session untouched", async () => {
+  mocks.sign.mockRejectedValue(new Error("Approval was canceled."));
+  const rendered = await render("email", "remove");
+  await click(rendered, "Approve and remove email");
+  expect(rendered.container.textContent).toContain("Approval was canceled.");
+  expect(mocks.request.mock.calls.some(([input]) => input.url.endsWith("/remove"))).toBe(false);
+  expect(mocks.refresh).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
+test("legacy browser access asks for login only when changing a method", async () => {
+  mocks.request.mockResolvedValue({ ok: true, requiresLogin: true });
+  const rendered = await render("phone");
+  expect(mocks.contact).toBeNull();
+  expect(mocks.openAuth).not.toHaveBeenCalled();
+  await click(rendered, "Sign in to continue");
+  expect(mocks.close).toHaveBeenCalledWith(false);
+  expect(mocks.openAuth).toHaveBeenCalledOnce();
+  expect(mocks.request.mock.calls.some(([input]) => input.url.includes("logout"))).toBe(false);
+  await rendered.cleanup();
+});
+
+test("Telegram proof and explicit credential approval use separate endpoints", async () => {
+  const selected = { method: "telegram", operation: "set", expectedIdentity: methods.telegram, value: "735002" };
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => {
+    if (url.endsWith("/prepare")) return { change: selected, challenge };
+    if (url === "/api/settings/login-methods") return { ok: true, methods };
+    return { ok: true };
+  });
+  const rendered = await render("telegram");
+  expect(mocks.telegram!.purpose).toBe("credential");
+  await act(async () => { await mocks.telegram!.onProof("synthetic-id-token", new AbortController().signal); });
+  expect(mocks.sign).not.toHaveBeenCalled();
+  await click(rendered, "Approve and save");
+  expect(mocks.sign).toHaveBeenCalledWith(challenge, selected);
+  expect(mocks.request).toHaveBeenLastCalledWith(expect.objectContaining({
+    url: "/api/settings/login-methods/telegram/verify", payload: { change: selected, authorization, idToken: "synthetic-id-token" },
+  }));
+  expect(mocks.request.mock.calls.some(([input]) => input.url.startsWith("/api/auth/"))).toBe(false);
+  await rendered.cleanup();
+});
+
+test("a Telegram connection changed in another session requires a new review", async () => {
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => {
+    if (url.endsWith("/prepare")) return { change: { method: "telegram", operation: "set", expectedIdentity: "735009", value: "735002" }, challenge };
+    if (url === "/api/settings/login-methods") return { ok: true, methods };
+    return {};
+  });
+  const rendered = await render("telegram");
+  await expect(mocks.telegram!.onProof("synthetic-id-token", new AbortController().signal)).rejects.toThrow("connection changed");
+  expect(mocks.sign).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
+
+test("initial passkey setup stays in the connection dialog and resumes the selected method", async () => {
+  let needsPasskey = true;
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => url === "/api/settings/login-methods"
+    ? { ok: true, methods } : { initialEnrollmentAllowed: needsPasskey });
+  const rendered = await render("phone");
+  expect(mocks.contact).toBeNull();
+  await click(rendered, "Set up");
+  expect(mocks.enroll).toHaveBeenCalledOnce();
+  expect(mocks.saved).not.toHaveBeenCalled();
+  needsPasskey = false;
+  mocks.enrollment.registered = true;
+  await rendered.rerender(createElement(HostedLoginMethodDialog, { method: "phone", operation: "set", onOpenChange: mocks.close, onSaved: mocks.saved }));
+  await vi.waitFor(() => expect(mocks.contact?.method).toBe("phone"));
+  expect(mocks.close).not.toHaveBeenCalled();
+  expect(mocks.openAuth).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
+
+test("first phone setup uses the code form without enrolling or signing a passkey", async () => {
+  mocks.realContact = true;
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => url === "/api/settings/login-methods"
+    ? { ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialMessagingSetupAllowed: true }
+    : { ok: true, initialEnrollmentAllowed: true });
+  const rendered = await render("phone");
+  expect(mocks.contact?.method).toBe("phone");
+  expect(rendered.container.querySelector('input[type="tel"]')).not.toBeNull();
+  expect(rendered.container.textContent).toContain("Your phone");
+  expect(rendered.container.textContent).toContain("Send verification code");
+  expect(mocks.contact?.autoSubmit).toBe(true);
+  expect(mocks.contact?.verifyLabel).toBe("Verify phone");
+  expect(rendered.container.textContent).not.toContain("Set up a passkey");
+  const signal = new AbortController().signal;
+  await act(async () => { await mocks.contact!.onSend("+12025550195", signal); });
+  await act(async () => { await mocks.contact!.onVerify("+12025550195", "123456", signal); });
+  expect(mocks.enroll).not.toHaveBeenCalled();
+  expect(mocks.sign).not.toHaveBeenCalled();
+  expect(mocks.request.mock.calls.some(([input]) => input.url.endsWith("/challenge"))).toBe(false);
+  expect(mocks.saved).toHaveBeenCalledOnce();
+  expect(mocks.refresh).toHaveBeenCalledOnce();
+  await rendered.cleanup();
+});
+
+
+test("first Telegram connection saves immediately after provider proof without passkey setup", async () => {
+  const selected = { method: "telegram", operation: "set", expectedIdentity: null, value: "735009" };
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => {
+    if (url === "/api/settings/login-methods") return { ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialMessagingSetupAllowed: true };
+    if (url.endsWith("telegram/prepare")) return { change: selected, challenge: null };
+    return { ok: true, initialEnrollmentAllowed: true };
+  });
+  const rendered = await render("telegram");
+  expect(rendered.container.textContent).not.toContain("Set up a passkey");
+  expect(mocks.telegram?.label).toBe("Connect Telegram");
+  const signal = new AbortController().signal;
+  await act(async () => { await mocks.telegram!.onProof("synthetic-token", signal); });
+  expect(mocks.request).toHaveBeenLastCalledWith(expect.objectContaining({ url: "/api/settings/login-methods/telegram/verify", payload: { change: selected, idToken: "synthetic-token", authorization: undefined } }));
+  expect(mocks.enroll).not.toHaveBeenCalled();
+  expect(mocks.sign).not.toHaveBeenCalled();
+  expect(mocks.saved).toHaveBeenCalledOnce();
+  await rendered.cleanup();
+});
+
+test("inline phone setup renders the actual input with no dialog heading or intermediate action", async () => {
+  mocks.realContact = true;
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => url === "/api/settings/login-methods"
+    ? { ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialMessagingSetupAllowed: true }
+    : { ok: true, initialEnrollmentAllowed: true });
+  const rendered = await renderClientComponent(createElement(HostedLoginMethodEditor, {
+    method: "phone", operation: "set", presentation: "inline", onOpenChange: mocks.close,
+  }));
+  expect(rendered.container.querySelector('input[type="tel"]')).not.toBeNull();
+  expect(rendered.container.textContent).not.toContain("Add phone");
+  expect(rendered.container.textContent).not.toContain("Connect phone");
+  expect(rendered.container.textContent).not.toContain("Checking your login methods");
+  await act(async () => { await mocks.contact!.onVerify("+12025550195", "123456", new AbortController().signal); });
+  expect(mocks.refresh).toHaveBeenCalledOnce();
+  expect(rendered.container.querySelector('input[type="tel"]')).not.toBeNull();
+  expect(rendered.container.textContent).not.toContain("Phone number added");
+  expect(rendered.container.querySelector("[inert]")).not.toBeNull();
+  await rendered.cleanup();
+});
+
+
+test("inline phone stays visible while settings load and waits before sending a code", async () => {
+  mocks.realContact = true;
+  let resolve!: (value: unknown) => void;
+  const state = new Promise((done) => { resolve = done; });
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => url === "/api/settings/login-methods" ? state : { ok: true, initialEnrollmentAllowed: true });
+  const rendered = await renderClientComponent(createElement(HostedLoginMethodEditor, { method: "phone", operation: "set", presentation: "inline", onOpenChange: mocks.close }));
+  expect(rendered.container.querySelector('input[type="tel"]')).not.toBeNull();
+  expect(rendered.container.textContent).not.toContain("Checking");
+  expect(rendered.container.querySelector(".animate-spin")).toBeNull();
+  let sending!: Promise<void>;
+  await act(async () => { sending = mocks.contact!.onSend("+12025550195", new AbortController().signal); });
+  expect(mocks.request.mock.calls.some(([input]) => input.url.endsWith("otp/send"))).toBe(false);
+  await act(async () => {
+    resolve({ ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialMessagingSetupAllowed: true });
+    await sending;
+  });
+  expect(mocks.request.mock.calls.filter(([input]) => input.url.endsWith("otp/send"))).toHaveLength(1);
+  expect(mocks.sign).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});
+
+test.each([false, true])("inline Telegram renders before settings and respects unmount=%s before forwarding proof", async (unmount) => {
+  let resolve!: (value: unknown) => void;
+  const state = new Promise((done) => { resolve = done; });
+  mocks.request.mockImplementation(async ({ url }: { url: string }) => {
+    if (url === "/api/settings/login-methods") return state;
+    if (url.endsWith("telegram/prepare")) return { change: { method: "telegram", operation: "set", expectedIdentity: null, value: "735009" }, challenge: null };
+    return { ok: true, initialEnrollmentAllowed: true };
+  });
+  const rendered = await renderClientComponent(createElement(HostedLoginMethodEditor, { method: "telegram", operation: "set", presentation: "inline", onOpenChange: mocks.close }));
+  expect(mocks.telegram?.label).toBe("Connect Telegram");
+  let saving!: Promise<unknown>;
+  await act(async () => { saving = mocks.telegram!.onProof("synthetic-token", new AbortController().signal).catch((error) => error); });
+  expect(mocks.request.mock.calls.some(([input]) => input.url.endsWith("telegram/prepare"))).toBe(false);
+  if (unmount) await rendered.rerender(createElement("div", null, "Closed"));
+  await act(async () => {
+    resolve({ ok: true, methods: { email: "new@example.test", phone: null, telegram: null }, initialMessagingSetupAllowed: true });
+    await saving;
+  });
+  expect(mocks.request.mock.calls.filter(([input]) => input.url.endsWith("telegram/verify"))).toHaveLength(unmount ? 0 : 1);
+  expect(mocks.sign).not.toHaveBeenCalled();
+  expect(mocks.saved).not.toHaveBeenCalled();
+  await rendered.cleanup();
+});

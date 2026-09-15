@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Download, Trash2 } from "lucide-react";
 import Link from "next/link";
 
@@ -8,7 +8,6 @@ import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
-import { HostedPrivyLogout } from "@/src/components/hosted-onboarding/hosted-privy-logout";
 import { useSensitiveActionAuthorization } from "@/src/components/sensitive-actions/use-sensitive-action-authorization";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -67,7 +66,6 @@ interface HostedAccountDeleteResponse {
 }
 
 const DEFAULT_VAULT_EXPORT_FILENAME = "murph-vault-export.json";
-const POST_DELETE_REDIRECT_FALLBACK_MS = 8_000;
 type SensitiveActionAuthorizer =
   ReturnType<typeof useSensitiveActionAuthorization>["authorize"];
 
@@ -133,25 +131,15 @@ function HostedDataPrivacySettingsContent(props: {
     )
     && !deletePending;
 
-  const redirectToFarewell = useCallback(() => {
-    window.location.replace(buildAccountDeletionFarewellPath(cleanupPending));
-  }, [cleanupPending]);
-
   useEffect(() => {
     if (!deleted) {
       return;
     }
 
-    // Replace the invalidated dashboard with the farewell immediately, then
-    // keep a hard navigation fallback in case Privy's best-effort browser
-    // logout never settles.
+    // Canonical deletion and durable session revocation own completion.
     deletedPageRef.current?.focus();
-    const fallbackTimer = window.setTimeout(
-      redirectToFarewell,
-      POST_DELETE_REDIRECT_FALLBACK_MS,
-    );
-    return () => window.clearTimeout(fallbackTimer);
-  }, [deleted, redirectToFarewell]);
+    window.location.replace(buildAccountDeletionFarewellPath(cleanupPending));
+  }, [deleted, cleanupPending]);
 
   async function handleExportConfirmed() {
     if (!exportReady || !authorize) {
@@ -325,7 +313,6 @@ function HostedDataPrivacySettingsContent(props: {
           ref={deletedPageRef}
           takeover
         />
-        <HostedPrivyLogout onDone={redirectToFarewell} />
       </>
     );
   }

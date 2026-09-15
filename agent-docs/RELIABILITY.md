@@ -2826,6 +2826,23 @@ Last verified: 2026-09-04
   and request id to the existing `checkpoint.snapshot_failed` error cause; the
   raw body, resource path, object key, and presigned request material remain
   excluded.
+- Each cold-restore snapshot GET emits one metadata-only
+  `Hosted workspace snapshot response headers settled.` event on success or
+  failure. Passive Node/Undici hooks separate DNS lookup, TCP connect, TLS
+  handshake, request dispatch, response-header wait, and fetch-resolution delay;
+  missing observations remain null or absent after log sanitization. The last
+  observed stage and bounded fetch failure metadata distinguish interrupted
+  connection setup from a response wait.
+  Request/connection counts expose redirects or additional connection activity.
+  `socketPreviouslyWritten` records prior socket writes; it is not proof of TLS
+  session reuse. Hooks observe only that fetch context and its request identities,
+  detach at settlement, and neither replace transport nor add retries or calls.
+  Process CPU and event-loop active/idle deltas cover the header-wait interval and
+  include concurrent process work. Response wait includes network transit and
+  storage service work; it is not a server-only duration. Header and body events
+  share the restore attempt ordinal plus bounded `cfRay` and `r2RequestId` when
+  supplied. Signed URLs, object keys, addresses, arbitrary headers, error prose,
+  and payloads are excluded. Existing body read/consumer timings remain separate.
 - One-time current-sender Assistant Ask has one origin-level request, one Web
   admission owner, one mailbox lifecycle, one deterministic origin identity,
   ten-minute expiry, isolated personal read, existing fresh allow/deny reviewer,

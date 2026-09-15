@@ -33,6 +33,8 @@ const HOSTED_PROVIDER_CLEANUP_RECOVERY_FILE_NAME =
 const HOSTED_PROVIDER_CLEANUP_DEFAULT_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const HOSTED_PROVIDER_CLEANUP_AFTER_IDLE_BUFFER_MS = 1_000;
 const HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS = 5 * 60_000;
+const HOSTED_PROVIDER_CLEANUP_REQUEST_BUDGET_MS = 1_000;
+const HOSTED_PROVIDER_CLEANUP_YIELD_POLL_MS = 25;
 
 interface HostedProviderCleanupState {
   linqMessageIds: string[];
@@ -325,36 +327,17 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
   }
 
   let deletedCount = 0;
+  let attemptedCount = 0;
   for (let index = 0; index < messageIds.length; index += 1) {
-    if (input.shouldYield?.() === true) {
-      const nextWakeAt = resolveHostedProviderCleanupRetryWakeAt();
-      await writeHostedProviderCleanupState(input.vaultRoot, {
-        schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
-        checkpoint: {
-          nextWakeAt,
-        },
-        linqMessageIds: messageIds.slice(index),
-      });
-      return {
-        attemptedLinqMessageCount: deletedCount,
-        deletedLinqMessageCount: deletedCount,
-        failedLinqMessageCount: 0,
-        nextWakeAt,
-      };
-    }
-
     try {
-      await assertHostedProviderCleanupLiveNow(input);
-      const dependencies = requireHostedProviderFetchDependencies({
-        env: input.env,
-        fetchImplementation: input.fetchImplementation,
-        ...(input.signal ? { signal: input.signal } : {}),
-      }, "Hosted Linq provider cleanup");
-      await deleteHostedLinqMessages({
-        ...dependencies,
-        messageIds: [messageIds[index]!],
-      });
-      deletedCount += 1;
+      if (input.shouldYield?.() !== true) {
+        await assertHostedProviderCleanupLiveNow(input);
+        attemptedCount += 1;
+        if (await deleteHostedProviderCleanupMessage(input, messageIds[index]!)) {
+          deletedCount += 1;
+          continue;
+        }
+      }
     } catch (error) {
       const remainingMessageIds = messageIds.slice(index);
       const nextWakeAt = resolveHostedProviderCleanupRetryWakeAt();
@@ -385,6 +368,19 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
         nextWakeAt,
       };
     }
+
+    const nextWakeAt = resolveHostedProviderCleanupRetryWakeAt();
+    await writeHostedProviderCleanupState(input.vaultRoot, {
+      schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
+      checkpoint: { nextWakeAt },
+      linqMessageIds: messageIds.slice(index),
+    });
+    return {
+      attemptedLinqMessageCount: attemptedCount,
+      deletedLinqMessageCount: deletedCount,
+      failedLinqMessageCount: 0,
+      nextWakeAt,
+    };
   }
 
   await clearHostedProviderCleanupState(input.vaultRoot);
@@ -394,6 +390,44 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
     failedLinqMessageCount: 0,
     nextWakeAt: null,
   };
+}
+
+async function deleteHostedProviderCleanupMessage(
+  input: Pick<Parameters<typeof drainHostedProviderCleanupAfterCommit>[0],
+    "env" | "fetchImplementation" | "shouldYield" | "signal">,
+  messageId: string,
+): Promise<boolean> {
+  // Only the idempotent provider request is interruptible. The caller awaits its
+  // settlement before retaining the unconfirmed id in the existing cleanup queue.
+  const controller = new AbortController();
+  const yieldRequest = () => controller.abort(
+    new DOMException("Provider cleanup yielded.", "AbortError"),
+  );
+  const budgetTimer = setTimeout(yieldRequest, HOSTED_PROVIDER_CLEANUP_REQUEST_BUDGET_MS);
+  budgetTimer.unref?.();
+  const yieldTimer = input.shouldYield
+    ? setInterval(() => {
+        if (input.shouldYield?.() === true) yieldRequest();
+      }, HOSTED_PROVIDER_CLEANUP_YIELD_POLL_MS)
+    : null;
+  yieldTimer?.unref?.();
+  try {
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: input.env,
+      fetchImplementation: input.fetchImplementation,
+      signal: input.signal
+        ? AbortSignal.any([input.signal, controller.signal])
+        : controller.signal,
+    }, "Hosted Linq provider cleanup");
+    await deleteHostedLinqMessages({ ...dependencies, messageIds: [messageId] });
+    return true;
+  } catch (error) {
+    if (controller.signal.aborted && !input.signal?.aborted) return false;
+    throw error;
+  } finally {
+    clearTimeout(budgetTimer);
+    if (yieldTimer) clearInterval(yieldTimer);
+  }
 }
 
 function collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(

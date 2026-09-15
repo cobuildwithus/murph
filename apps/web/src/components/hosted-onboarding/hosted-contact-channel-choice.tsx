@@ -17,13 +17,15 @@ export function HostedContactChannelChoice({
     <div className="space-y-5">
       {phone}
 
-      <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-        <span className="h-px flex-1 bg-border" />
-        OR
-        <span className="h-px flex-1 bg-border" />
-      </div>
+      {telegram ? <>
+        <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          OR
+          <span className="h-px flex-1 bg-border" />
+        </div>
 
-      {telegram}
+        {telegram}
+      </> : null}
     </div>
   );
 }

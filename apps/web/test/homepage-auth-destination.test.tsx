@@ -1,4 +1,4 @@
-import { createElement, type ReactNode } from "react";
+import { createElement } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
@@ -20,16 +20,6 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
     return createElement("div", null, "Auth dialog");
   },
   preloadHostedAuthPanelIsland: vi.fn(),
-}));
-
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-runtime", () => ({
-  HostedAuthRuntime({
-    children,
-  }: {
-    children: (state: { kind: "configured" }) => ReactNode;
-  }) {
-    return children({ kind: "configured" });
-  },
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({

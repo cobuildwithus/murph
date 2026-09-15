@@ -773,6 +773,7 @@ test("hosted provider cleanup drains only persisted ids after commit", async () 
       },
       fetchImplementation: providerFetch,
       messageIds: ["linq_inbound_1"],
+      signal: expect.any(AbortSignal),
     });
     await assert.rejects(readHostedProviderCleanupFile(vaultRoot), {
       code: "ENOENT",
@@ -829,6 +830,74 @@ test("hosted provider cleanup drain yields to foreground work between provider d
   }
 });
 
+test.each(["foreground", "budget"] as const)(
+  "hosted provider cleanup interrupts an in-flight delete for %s and retries retained ids",
+  async (interruption) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+    const parent = new AbortController();
+    try {
+      await recordHostedProviderCleanupBeforeCommit({
+        linqMessageIds: ["linq_inbound_1", "linq_inbound_2"],
+        checkpoint: { nextWakeAt: null },
+        vaultRoot,
+      });
+      let foregroundPending = false;
+      let notifyStarted = () => {};
+      const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+      mocks.deleteHostedLinqMessages.mockImplementation(
+        ({ signal }: { signal: AbortSignal }) => new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          notifyStarted();
+        }),
+      );
+      const drainInput = {
+        env: { LINQ_API_TOKEN: "test-token" },
+        fetchImplementation: vi.fn<typeof fetch>(),
+        checkpoint,
+        shouldYield: () => foregroundPending,
+        signal: parent.signal,
+        vaultRoot,
+        wake,
+      };
+      const drain = drainHostedProviderCleanupAfterCommit(drainInput);
+      await started;
+      foregroundPending = interruption === "foreground";
+      await vi.advanceTimersByTimeAsync(interruption === "foreground" ? 25 : 1_000);
+      const result = await drain;
+      expect(result).toMatchObject({
+        attemptedLinqMessageCount: 1,
+        deletedLinqMessageCount: 0,
+        failedLinqMessageCount: 0,
+      });
+      expect(result.nextWakeAt).not.toBeNull();
+      expect(parent.signal.aborted).toBe(false);
+      expect(mocks.deleteHostedLinqMessages).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(await readHostedProviderCleanupFile(vaultRoot)).toMatchObject({
+        linqMessageIds: ["linq_inbound_1", "linq_inbound_2"],
+        checkpoint: { nextWakeAt: result.nextWakeAt },
+      });
+
+      foregroundPending = false;
+      vi.setSystemTime(new Date(result.nextWakeAt!));
+      mocks.deleteHostedLinqMessages.mockResolvedValue(undefined);
+      expect(await drainHostedProviderCleanupAfterCommit(drainInput)).toEqual({
+        attemptedLinqMessageCount: 2,
+        deletedLinqMessageCount: 2,
+        failedLinqMessageCount: 0,
+        nextWakeAt: null,
+      });
+      await assert.rejects(readHostedProviderCleanupFile(vaultRoot), { code: "ENOENT" });
+    } finally {
+      parent.abort();
+      vi.useRealTimers();
+      await cleanup();
+    }
+  },
+);
+
 test("hosted provider cleanup uses direct provider cleanup with provider fetch", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
 
@@ -862,6 +931,7 @@ test("hosted provider cleanup uses direct provider cleanup with provider fetch",
       },
       fetchImplementation: providerFetch,
       messageIds: ["linq_inbound_1"],
+      signal: expect.any(AbortSignal),
     });
   } finally {
     await cleanup();

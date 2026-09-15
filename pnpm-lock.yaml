@@ -325,6 +325,9 @@ importers:
       input-otp:
         specifier: 1.4.2
         version: 1.4.2(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      jose:
+        specifier: 6.2.3
+        version: 6.2.3
       lucide-react:
         specifier: 1.14.0
         version: 1.14.0(react@19.2.6)
