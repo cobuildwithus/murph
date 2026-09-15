@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "longer-device-import-passes",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer pauses during large device imports",
+    "summary": "Large device imports can process more queued work before pausing to save progress.",
+    "details": "Background sync gets a longer bounded work window, reducing save-and-resume overhead. Messages and due reminders keep their existing priority, and unfinished imports remain resumable.",
+    "relevanceTags": ["devices", "sync"],
+    "sourcePullRequests": []
+  }
+}
