@@ -110,6 +110,10 @@ owned by `operations/device-sync-ingestion-invariants.md` and `RELIABILITY.md`.
 The implementation and focused proof are recorded in
 [`2026-09-14-junction-preflight-fallbacks.md`](exec-plans/completed/2026-09-14-junction-preflight-fallbacks.md).
 
+Telegram proof creation delegates record IDs to the encrypted Better Auth adapter;
+the warning regression and delivery evidence are tracked in
+[`2026-09-15-telegram-auth-id.md`](exec-plans/completed/2026-09-15-telegram-auth-id.md).
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

@@ -1,5 +1,5 @@
 import "server-only";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import * as z from "@murphai/contracts/zod-runtime";
 import { getPrisma } from "../prisma";
 import { runWithFreshHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
@@ -62,7 +62,7 @@ export async function createHostedTelegramProof(prisma: PrismaClient, binding: s
   const nonce = randomBytes(32).toString("base64url");
   const now = new Date();
   await hostedAuthAdapter(prisma)({}).create({ model: "verification", data: {
-    id: randomUUID(), identifier: identifier(nonce), value: binding,
+    identifier: identifier(nonce), value: binding,
     expiresAt: new Date(now.getTime() + 300_000), createdAt: now, updatedAt: now,
   } });
   const response = jsonOk({ ok: true, nonce, clientId });
