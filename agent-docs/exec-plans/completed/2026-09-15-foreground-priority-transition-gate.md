@@ -1,6 +1,6 @@
 # Gate foreground priority across runtime transitions
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-15
 
@@ -61,8 +61,21 @@ softening the gate.
   full snapshot and exact response identity confirmed. Review traced both
   changed handoffs, repeated wakes, interruption, provider/shutdown authority,
   and deferred effects. Round 2 will include the added CI gate.
+- Round 2: PASS on `621326fd93d966017079e87ccb958cdf71d1f33f`.
+  Verified `gpt-6-pro`, exact committed turn and response hash, full sensitive
+  snapshot, 10 changed files, and first/previous-head ancestry. No findings.
+  Reviewer rechecked runtime ownership, the 12-case matrix, and required CI
+  aggregation, and executed four focused CI policy checks successfully.
+- Final unmutated matrix: 12/12 passed. GitHub Actions executed the new
+  foreground transition gate successfully on the round-2 head.
+- Final parent review: no findings; changes after round 1 contain no production
+  source changes. Source mutation was fully restored. The final closeout only
+  archives this plan and updates its index; the reviewed behavior is unchanged.
+- Exact final-head CI remains a PR completion gate and is recorded in the PR
+  body. No merge or production deployment was performed.
 - Product UX: Ready at the deterministic scheduling boundary. Assistant model
   generation, outbound transport, and production latency remain outside this
   test-port proof; no prompt, provider-input, tool, or reply policy changed.
 - Changelog: `2026-09-15/foreground-reply-priority` in this PR. Additional
   prevention changes affect tests and CI only.
+Completed: 2026-09-15
