@@ -1771,9 +1771,12 @@ and fixed category labels without recording error messages or connection fields.
 
 Pool pressure is reported before it becomes a failure. `Hosted web database pool
 pressure.` logs the same total, idle, and waiting counts when the pool is full
-before the prospective first waiter queues, or whenever later callers are
-already waiting with no idle connection. It is rate limited to once per ten
-seconds per pool; a pool with idle capacity logs nothing. `Hosted web database slow transaction
+at an actual pool checkout before the prospective first waiter queues, or
+whenever later callers are already waiting with no idle connection. Statements
+using an acquired transaction connection do not request another checkout and
+therefore do not emit pressure warnings merely because the pool is full. Sampling
+is rate limited to once per ten seconds per pool; a pool with idle capacity logs
+nothing. `Hosted web database slow transaction
 acquisition.` measures only the wait before an interactive callback begins,
 while `Hosted web database slow transaction callback.` measures callback wall
 time and reports the effective transaction timeout without claiming the
