@@ -1187,7 +1187,7 @@ function mirroredJournalSession(left: JournalCandidate, right: JournalCandidate)
   const otherProvider = journalSessionProvider(right);
   return provider !== null && otherProvider !== null && provider !== otherProvider
     && left.kind === right.kind && left.activityKey === right.activityKey
-    && left.sleepType === right.sleepType
+    && left.groupHint === right.groupHint
     && left.sessionWindow != null && right.sessionWindow != null
     && left.durationMinutes !== null && right.durationMinutes !== null
     && Math.abs(left.durationMinutes - right.durationMinutes) <= 1

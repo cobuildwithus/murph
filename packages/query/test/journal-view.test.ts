@@ -1275,7 +1275,9 @@ test("Journal presents matching main sleep copies once without erasing conflicti
   const build = (entities: CanonicalEntity[]) => buildJournalView(
     createVaultReadModel({ entities, vaultRoot: "test://journal-sleep-mirrors" }), [],
     { asOf: "2026-08-21T12:00:00Z" });
-  const view = build([sleep("direct", "whoop-v2"), sleep("mirror", "apple-health-kit")]);
+  const mirror = sleep("mirror", "apple-health-kit");
+  mirror.attributes.sleepType = "unknown";
+  const view = build([sleep("direct", "whoop-v2"), mirror]);
   assert.equal(view.days[0]?.events[0]?.records.length, 1);
   assert.equal(view.days[0]?.events[0]?.records[0]?.source, "WHOOP · Apple Health");
   assert.equal(view.days[0]?.events[0]?.metrics.sleepMinutes, 430);

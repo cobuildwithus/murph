@@ -1,8 +1,8 @@
 # Count mirrored Journal sessions once
 
-Status: active
+Status: completed
 Created: 2026-09-14
-Updated: 2026-09-14
+Updated: 2026-09-15
 
 ## Goal
 
@@ -38,4 +38,9 @@ Use recorded session intervals and durations with a small rounding tolerance; ne
 
 ## Verification
 
-Focused Journal suite: 28 tests passed. Query typecheck passed. Complexity diff passed with no hotspot above 20. Final checks and CI remain pending.
+Focused Journal suite: 28 tests passed. Query typecheck passed. Complexity diff passed with no hotspot above 20. Release-note rendering: 10 tests passed after using the existing documented-command workaround. Private in-memory archive replay confirmed mirrored-session collapse without storing member content. Web typecheck remains running; final ReviewGPT and exact-head CI are tracked on PR #3464. No source edits are known to remain.
+
+## Implementation outcome
+
+The existing projection now derives one record and activity contribution per matching cross-source session; no canonical records or client schema change. Product UX: Ready in focused projection and rendering proof. Deployment and refreshed production projection verification remain separate from this implementation. Existing Frog entries 20260912202546 and 20260911184822 cover the changelog command workaround; no duplicate friction entry was created.
+Completed: 2026-09-15
