@@ -1,6 +1,6 @@
 # Reduce authenticated dashboard loading latency
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-15
 
@@ -39,7 +39,7 @@ is exposed without authorization.
 1. Implement narrow data-work reductions and regression proof.
 2. Run focused tests, relevant typechecks/lint, complexity guard, and parent review.
 3. Open draft PR, complete evidence/changelog linkage, push stable Ready head.
-4. Run ReviewGPT concurrently with CI and resolve the exact candidate.
+4. ReviewGPT passed; finish the test-only CI corrections and rerun exact-head CI.
 
 ## Verification
 
@@ -64,3 +64,27 @@ is exposed without authorization.
 - No production timing claim: authenticated production replay and deployment
   are outside this local proof. CI and final ReviewGPT remain pending on the PR.
 
+
+## Review and CI disposition
+
+- PR: https://github.com/cobuildwithus/murph/pull/3489.
+- ReviewGPT round 1 passed on `2433e71d72e76d9dfda13eced0c686b715376c26`
+  with zero findings. The managed Mountain lane selected `gpt-6-pro`; matching
+  model metadata, attachment, exact response hash, and completion marker were
+  verified. The response wait exceeded six minutes. The source-based review
+  covered all 21 files and the auth, recovery, replica, and catalog boundaries.
+- An additional 91 shared-provider consumer tests passed. CI found two
+  test-scaffolding gaps: the local SQL guard rejected CI's `murph_test_gate`
+  database name, and a companion route Prisma fixture lacked `findFirst`.
+  Both were reproduced and corrected without changing production source.
+- Corrected phone SQL suite: 22 passed; companion route suite: 115 passed;
+  Web typecheck passed. Total distinct focused tests: 794.
+- These isolated proof corrections and plan closure use the review loop's
+  non-production exemption; the reviewed production patch is unchanged.
+- Existing synthetic Biomarkers rendering was inspected at 1440px and 390px,
+  with HTTP 200 and no document overflow. Exact list equivalence covers the
+  data-preparation change; no new loading UI or visual changes were introduced.
+- Local implementation, parent review, and ReviewGPT are complete. Required CI
+  must pass again on the final pushed commit after this archive step. Keep the
+  worktree while the PR remains open; no merge or deployment is authorized.
+Completed: 2026-09-15

@@ -29,7 +29,10 @@ import {
 it.runIf(process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1")("phone welcome preflight uses one PostgreSQL query and preserves recovery candidates", async () => {
   const databaseUrl = process.env.DATABASE_URL ?? "";
   const url = new URL(databaseUrl);
-  if (url.hostname !== "127.0.0.1" || url.pathname !== "/murph_test" || url.search) {
+  if (!["postgres:", "postgresql:"].includes(url.protocol)
+    || url.hostname !== "127.0.0.1"
+    || !/^\/murph_test(?:_[a-z0-9_]+)?$/u.test(url.pathname)
+    || url.search || url.hash) {
     throw new Error("Phone welcome database proof requires loopback murph_test.");
   }
   const { PrismaClient } = await import("@prisma/client");

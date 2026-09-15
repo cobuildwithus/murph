@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
       findUnique: vi.fn(),
     },
     hostedMember: {
+      findFirst: vi.fn(),
       findUnique: vi.fn(),
     },
     label: "test-prisma",
@@ -136,6 +137,7 @@ function mockVerifiedPrivyUser(): void {
   mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(ACTIVE_MEMBER);
   mocks.prismaClient.hostedAuthRecord.findUnique.mockResolvedValue(null);
   mocks.prismaClient.hostedMemberIdentity.findUnique.mockResolvedValue({ memberId: ACTIVE_MEMBER.id });
+  mocks.prismaClient.hostedMember.findFirst.mockResolvedValue(null);
   mocks.projectHostedMemberIdentityState.mockResolvedValue({ privyUserId: "did:privy:user_123" });
   mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
     accountGroupMemberships: [],
