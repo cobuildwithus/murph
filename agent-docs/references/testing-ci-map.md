@@ -1804,3 +1804,12 @@ selection, overlap and omissions without starting a stack.
 fixture and is required independently of warm restart by the cross-repository
 coverage guard. Murph Cloud's delivery/restart lane owns its automatic execution;
 its manifest companion must land before this public requirement.
+
+## Hosted-local activity expiry targeting
+
+The activity-expiry test control reads the selected runner from UserRunner's
+active fence or retained target, then uses the existing namespace router.
+`apps/cloudflare/test/index.test.ts` covers primary, next-bank, and legacy
+routing; `apps/cloudflare/test/user-runner-alarm.test.ts` covers active and
+settled target projection and cross-user rejection. The retryable-outbox restart
+E2E retains its canonical checkpoint, real destruction, and exact-send checks.

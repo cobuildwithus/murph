@@ -7328,6 +7328,18 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms).toEqual([]);
   });
 
+  it.each([false, true])("reads the selected target for activity expiry (active: %s)", async (active) => {
+    const { alarms, runner, sql } = createRunnerHarness({ workspace: createWorkspaceState({ version: "7" }) });
+    await runner.bindUser(TEST_USER_ID);
+    const target = `runner--v-current--${"b".repeat(32)}`;
+    sql.exec("UPDATE runner_meta SET active_runner_container_name = ? WHERE singleton = 1", target);
+    if (active) await runner.startStuckInvocationForTest({ userId: TEST_USER_ID });
+
+    await expect(runner.readRunnerContainerNameForTest({ userId: TEST_USER_ID })).resolves.toBe(target);
+    await expect(runner.readRunnerContainerNameForTest({ userId: "member_other" })).rejects.toThrow();
+    expect(alarms).toEqual([]);
+  });
+
   it("can age an existing active fence without replacing its attempt", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

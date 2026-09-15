@@ -23,3 +23,8 @@ Run the focused Cloudflare route test with an active fence whose container name 
 ## Context
 
 This blocks the private foreground-reply-priority admission scenario after standby allocation is enabled.
+
+The activity-expiry control had the same stale target assumption after opaque
+runner allocation became the default. Its correction reads both active and
+retained target identity from the existing user state and preserves the real
+restart assertions. Primary and next-bank route probes reproduce the old miss.

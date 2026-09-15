@@ -321,3 +321,7 @@ agent-facing command and dedicated browser session.
 - Research and audits are evidence for their stated date, not operating policy.
 - Completed plans are immutable historical snapshots. Use live owner docs for
   implementation, deployment, rollback, and incident response.
+
+The hosted-local activity-expiry target correction is recorded in
+[`2026-09-15-recovery-test-targets.md`](exec-plans/completed/2026-09-15-recovery-test-targets.md);
+its active/retained target and namespace-routing proof is owned by the testing CI map.
