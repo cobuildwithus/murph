@@ -1,6 +1,6 @@
 # Remove the serial mailbox crypto-context request
 
-Status: active
+Status: completed
 Created: 2026-09-14
 Updated: 2026-09-14
 
@@ -29,3 +29,12 @@ Patch: reduce startup latency in private and group conversations. Empty, system-
 2. Opt into and attach one signed ingress context for eligible mailbox fetches.
 3. Prove call counts, cache hits, rollout skew, denied/consumed paths, corrupt envelopes, and identity boundaries.
 4. Run focused Worker and Web tests, both typechecks, complexity guard, candidate review, ReviewGPT, and required PR checks. Add the changelog and update the protocol owner.
+
+## Implementation result
+
+- Focused Worker decode/crypto tests passed (36); Web mailbox, consent and crypto boundary tests passed (182); changelog rendering passed (10).
+- Cloudflare and Web typechecks, complexity guard and diff whitespace checks passed. The existing dispatcher hotspot remains unchanged at 46; other changed owners remain below the threshold.
+- Parent review completed. ReviewGPT round 1 passed on `ccc88fed28b3edb021be9b740abc372f5cd8bec7`, with zero qualifying findings and verified model/response identity.
+- PR #3453 owns final-head CI and mergeability evidence. Both Worker/Web rollout orders and missing/invalid context fallback have focused proof. No merge or deployment was performed.
+- This closure changes explanatory documentation only; runtime code and tests are unchanged from the reviewed candidate.
+Completed: 2026-09-14
