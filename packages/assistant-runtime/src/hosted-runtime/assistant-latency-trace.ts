@@ -5,7 +5,7 @@ import type {
 
 import type { HostedRuntimePlatform } from "./platform.ts";
 
-const HOSTED_ASSISTANT_MILESTONE_TRACE_RETRY_DELAYS_MS = [250, 1_000] as const;
+const HOSTED_ASSISTANT_MILESTONE_TRACE_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 
 export interface HostedAssistantMilestoneTraceContext {
   assistantInputIds: readonly string[];
@@ -53,13 +53,20 @@ export function recordHostedAssistantMilestonesBestEffort(input: {
           type: "assistant_milestone" as const,
         },
       };
-      let response = await latencyTracePort.record(request);
       for (const delayMs of HOSTED_ASSISTANT_MILESTONE_TRACE_RETRY_DELAYS_MS) {
-        if (response.unmatchedCount === 0) {
-          return;
+        if (delayMs > 0) await sleep(delayMs);
+        try {
+          const response = await latencyTracePort.record(request);
+          if (response.unmatchedCount === 0) return;
+        } catch {
+          // Transport failures share the same finite retry budget as late staging.
         }
-        await sleep(delayMs);
-        response = await latencyTracePort.record(request);
+      }
+      if (milestone === "linq_typing_accepted" || milestone === "telegram_typing_accepted") {
+        console.warn("Hosted typing acceptance telemetry exhausted its retry budget.", {
+          source: context.source,
+          inputCount: assistantInputIds.length,
+        });
       }
     })).catch(() => {
       // Latency traces are diagnostic-only and must not affect runtime progress.

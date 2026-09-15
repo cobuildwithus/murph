@@ -592,6 +592,9 @@ export async function recordHostedIngressAssistantMilestone(input: {
     : lifecycleProjection
       ? Prisma.sql`input.runtime_attempt_id`
       : Prisma.sql`trace.runtime_attempt_id`;
+  // Accepted typing is alert evidence. Wait for competing short trace writes
+  // instead of losing the final retry to SKIP LOCKED. This callback is detached
+  // from provider execution and delivery; other diagnostic writes still skip.
   const ordinaryMilestoneLeaf = terminalNonReplyProjection
     ? null
     : readHostedIngressAssistantMilestoneLeaf(input.milestone);
@@ -657,7 +660,8 @@ export async function recordHostedIngressAssistantMilestone(input: {
           )
         )
       ORDER BY trace.id
-      FOR UPDATE OF trace SKIP LOCKED
+      FOR UPDATE OF trace ${input.milestone === "linq_typing_accepted"
+        || input.milestone === "telegram_typing_accepted" ? Prisma.empty : Prisma.sql`SKIP LOCKED`}
     ),
     updated AS (
       UPDATE hosted_ingress_latency_trace AS trace

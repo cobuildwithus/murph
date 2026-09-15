@@ -295,6 +295,45 @@ test("hosted assistant milestones retry when staging has not claimed the runtime
   }
 });
 
+test.each(["transport", "late-staging"] as const)("typing acceptance recovers after two %s failures", async (failure) => {
+  vi.useFakeTimers();
+  const record = vi.fn();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (failure === "transport") record.mockRejectedValueOnce(new Error("Synthetic unavailable transport"));
+    else record.mockResolvedValueOnce({ matchedCount: 0, recorded: false, unmatchedCount: 1 });
+  }
+  record.mockResolvedValue({ matchedCount: 1, recorded: true, unmatchedCount: 0 });
+  try {
+    recordHostedAssistantMilestonesBestEffort({
+      context: { assistantInputIds: ["synthetic-input"], runtimeAttemptId: "synthetic-attempt",
+        source: "linq", latencyTracePort: { record } },
+      milestones: [{ at: "2026-09-01T12:00:00.000Z", milestone: "linq_typing_accepted" }],
+    });
+    expect(record).not.toHaveBeenCalled();
+    await vi.runAllTimersAsync();
+    expect(record).toHaveBeenCalledTimes(3);
+    expect(record.mock.calls[2]).toEqual(record.mock.calls[0]);
+  } finally { vi.useRealTimers(); }
+});
+
+test("typing acceptance exhaustion is bounded and reports no identifiers or error prose", async () => {
+  vi.useFakeTimers();
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const record = vi.fn().mockRejectedValue(new Error("Synthetic private error prose"));
+  try {
+    recordHostedAssistantMilestonesBestEffort({
+      context: { assistantInputIds: ["synthetic-private-input"], runtimeAttemptId: "synthetic-private-attempt",
+        source: "linq", latencyTracePort: { record } },
+      milestones: [{ at: "2026-09-01T12:00:00.000Z", milestone: "linq_typing_accepted" }],
+    });
+    await vi.runAllTimersAsync();
+    expect(record).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "Hosted typing acceptance telemetry exhausted its retry budget.", { source: "linq", inputCount: 1 },
+    );
+  } finally { warn.mockRestore(); vi.useRealTimers(); }
+});
+
 test("hosted Linq typing starts without route authority when the target context matches", async () => {
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {

@@ -2356,6 +2356,25 @@ to apply after cutover.
   through the earliest accepted typing indicator: strictly over 3 seconds for a
   warm workspace and over 10 seconds for a cold workspace. Mailbox acceptance
   remains its existing timestamp; it never substitutes for webhook receipt.
+  For unanswered Linq inputs, the latest accepted message in the same chat
+  resets the silence start between receipt and the first typing acceptance
+  (or the missing-observation check). A reply does not exempt subsequent silence.
+  An accepted reply linked to this exact input ends its wait; no later typing
+  is required for an already-answered input. Existing blinded provider message/chat
+  keys establish the exact conversation; another chat cannot reset the clock,
+  and another member cannot supply prior-typing evidence.
+  An earlier accepted typing session covers arrival until its linked reply or
+  five-minute expiry, then silence resumes from that endpoint. Missing correlation,
+  failed sends, and sends after the measured typing endpoint cannot reset the clock.
+  Missing typing retains a 30-second telemetry grace from the silence start;
+  observed typing uses the strict warm/cold threshold. Frozen emails retain both
+  receipt and silence-start timestamps; older records retain their original text.
+  Telegram retains exact-input typing observations and the existing thresholds.
+  Accepted-typing persistence waits for competing short trace-row writes in the
+  detached callback; other retry-backed milestones keep skipping locked rows.
+  Transport exceptions use the existing two retries (250 ms and 1 second), and
+  exhausted acceptance reporting emits only channel and input count. No provider
+  or delivery operation waits for this diagnostic persistence.
   A restore completed before the message arrived, or an explicit reused restore,
   identifies warmth. This includes later messages within an invocation that
   originally started cold. Missing warmth evidence uses the 10-second cutoff and
@@ -3341,9 +3360,10 @@ to apply after cutover.
   trace-id lock order. This common order prevents cross-writer row-lock cycles,
   while the fresh checkpoint snapshot prevents an older waiting lease from
   overwriting a newer one, without a broad transaction retry. Provider-start
-  and assistant-milestone writers additionally skip contended rows and report
-  them unmatched so their existing bounded 250 ms / 1 s caller retries own
-  recovery; writers without that retry contract keep ordinary ordered locking.
+  and ordinary assistant-milestone writers additionally skip contended rows and
+  report them unmatched so their existing bounded 250 ms / 1 s caller retries
+  own recovery. Accepted-typing milestones and writers without that retry
+  contract keep ordinary ordered locking.
   Persistence failures emit only event type, source, input cardinality, query
   tag, Prisma code, and SQLSTATE; trace and attempt identifiers and query text
   stay out of failure logs. The bounded transaction-local trace-id list passes
