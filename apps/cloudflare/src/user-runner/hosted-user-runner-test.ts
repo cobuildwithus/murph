@@ -159,6 +159,12 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     };
   }
 
+  async readRunnerContainerNameForTest(input: { userId: string }): Promise<string | null> {
+    await this.stateStore.bindUser(input.userId);
+    const record = await this.stateStore.readState();
+    return record.writeFence?.runnerContainerName ?? record.pendingRunnerContainerName;
+  }
+
   async readActiveRuntimeFenceForTest(input: {
     userId: string;
   }): Promise<HostedRunnerActiveFenceTestResult | null> {

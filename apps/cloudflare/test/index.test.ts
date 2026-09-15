@@ -2172,6 +2172,38 @@ describe("cloudflare worker routes", () => {
     expect(invalidResponse.status).toBe(400);
   });
 
+  it.each(["runner", "next", "legacy"])("expires the selected %s runner target", async (bank) => {
+    const selectedName = bank === "legacy" ? null
+      : bank === "next" ? createHostedRunnerSlotName("next-release_1")
+      : createHostedRunnerSlotName("release_1");
+    const expireActivityForTest = vi.fn(async () => ({ ok: true as const }));
+    const stub = {
+      ...createRunnerContainerNamespace().getByName("member_123"),
+      expireActivityForTest,
+    };
+    const exactGetByName = vi.fn(() => stub);
+    const nextGetByName = vi.fn(() => stub);
+    const readRunnerContainerNameForTest = vi.fn(async () => selectedName);
+    const env = createWorkerEnv(createUserRunnerStub({ readRunnerContainerNameForTest }), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+      RUNNER_CONTAINER: { getByName: exactGetByName },
+      NEXT_RUNNER_CONTAINER: { getByName: nextGetByName },
+    });
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/container-activity-expired",
+        { method: "POST" },
+      ), { boundUserId: "member_123" }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(bank === "next" ? nextGetByName : exactGetByName)
+      .toHaveBeenCalledWith(selectedName ?? "member_123");
+    expect(bank === "next" ? exactGetByName : nextGetByName).not.toHaveBeenCalled();
+    expect(expireActivityForTest).toHaveBeenCalledWith({ userId: "member_123" });
+  });
+
   it("stops the standby container that owns the active runtime fence", async () => {
     const standbyContainerName = createHostedStandbySlotName("release_1");
     const beginExactShutdown = vi.fn(async () => ({ ok: true as const }));
@@ -5182,6 +5214,7 @@ async function resolveHostedUserCryptoContextForTest(
 }
 
 type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
+  readRunnerContainerNameForTest(input: { userId: string }): Promise<string | null>;
   ageActiveRuntimeFenceForTest(input: {
     startedAgoMs: number;
     userId: string;
@@ -5265,6 +5298,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     forgetHostedMediaAsset: vi.fn(async () => true),
     recordHostedMediaAsset: vi.fn(async () => true),
     readActiveRuntimeFenceForTest: vi.fn(async () => null),
+    readRunnerContainerNameForTest: vi.fn(async () => null),
     runUntilIdleForTest: vi.fn(async () => ({
       nextWakeAt: null,
       status: "idle" as const,
