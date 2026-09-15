@@ -1844,7 +1844,7 @@ async function admitHostedLinqExistingDirectMemberTx(admission: {
           reason: "duplicate-webhook-event",
         },
         // No checkpoint on the duplicate read: this transaction did not run
-        // the append-path workspace upsert, so the retry keeps the legacy
+        // the append-path workspace ensure, so the retry keeps the legacy
         // signal path that repairs a missing workspace row.
         wakeHandoffs: [{
           eventId: input.event.event_id,

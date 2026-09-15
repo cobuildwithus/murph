@@ -299,7 +299,7 @@ describe("Linq message-edit preparation composition", () => {
       "access-authority",
       "chat-ownership-lock",
       "thread-route-read",
-      "workspace-upsert",
+      "workspace-ensure",
       "mailbox-dedupe-lock",
       "mailbox-dedupe-read",
       "mailbox-causal-lock",
@@ -784,12 +784,14 @@ function createPrismaStub(input: {
       }),
     },
     hostedWorkspace: {
-      upsert: vi.fn(async (upsertInput: unknown) => {
-        expect(upsertInput).toMatchObject({
-          where: { userId: TEST_USER_ID },
+      findUnique: vi.fn(async () => null),
+      createMany: vi.fn(async (createInput: unknown) => {
+        expect(createInput).toMatchObject({
+          data: [{ userId: TEST_USER_ID }],
+          skipDuplicates: true,
         });
-        recordDatastoreCall("workspace-upsert");
-        return { userId: TEST_USER_ID };
+        recordDatastoreCall("workspace-ensure");
+        return { count: 0 };
       }),
     },
   };

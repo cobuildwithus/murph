@@ -491,6 +491,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             prisma,
           })
         : null;
+      // A positive continuation lookup can seed the first direct preparation.
+      // This is only a speculative member ID, never locked admission authority.
+      let initialDirectPreparationMemberId: string | undefined;
       const startInstantFirstTurnGeneration = async (continuationOnly = false): Promise<void> => {
         if (
           instantFirstTurnGeneration
@@ -507,13 +510,17 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           event: planningEvent,
           participantContact: context.participantContact,
         });
-        const claim = await claimHostedLinqInstantFirstTurn({
-          ...(continuationOnly ? {
-            continuationMemberId: await resolveHostedLinqDirectPreparationMemberId({
+        const continuationMemberId = continuationOnly
+          ? await resolveHostedLinqDirectPreparationMemberId({
               event: planningEvent,
               prisma,
-            }),
-          } : {}),
+            })
+          : null;
+        if (continuationMemberId) {
+          initialDirectPreparationMemberId = continuationMemberId;
+        }
+        const claim = await claimHostedLinqInstantFirstTurn({
+          ...(continuationOnly ? { continuationMemberId } : {}),
           linqChatId: context.summary.chatId,
           prisma,
           request,
@@ -541,6 +548,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         const {
           instantStartAllowed = true,
         } = options;
+        // Consume once: cold misses, preparation retries, and later plans after
+        // activation must discover their own member instead of reusing this ID.
+        const directPreparationMemberId = initialDirectPreparationMemberId;
+        initialDirectPreparationMemberId = undefined;
         let reusableDirectCryptoDomainRoots: {
           memberId: string;
           preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
@@ -634,6 +645,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           },
           prepare: async ({ attempt }) => {
             const preparation = await prepareHostedLinqThreadRoutingCrypto({
+              ...(attempt === 0 && directPreparationMemberId
+                ? { directPreparationMemberId }
+                : {}),
               event: planningEvent,
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
@@ -2372,6 +2386,7 @@ async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
 }
 
 async function prepareHostedLinqThreadRoutingCrypto(input: {
+  directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
   pendingGroupRosterUnavailable: boolean;
@@ -2476,6 +2491,9 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     return {
       preparedDirectMailboxPayloadRoot:
         await prepareHostedLinqDirectMailboxPayloadRoot({
+          ...(input.directPreparationMemberId
+            ? { directPreparationMemberId: input.directPreparationMemberId }
+            : {}),
           event: input.event,
           prisma: input.prisma,
           ...(input.reusableDirectCryptoDomainRoots
@@ -2986,6 +3004,7 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
 }
 
 async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
+  directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   prisma: PrismaClient;
   reusableDirectCryptoDomainRoots?: {
@@ -3004,10 +3023,11 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   routingRecord: HostedMemberRoutingRecord | null;
   routingState: HostedMemberRoutingStateSnapshot | null;
 } | null> {
-  const memberId = await resolveHostedLinqDirectPreparationMemberId({
-    event: input.event,
-    prisma: input.prisma,
-  });
+  const memberId = input.directPreparationMemberId
+    ?? await resolveHostedLinqDirectPreparationMemberId({
+      event: input.event,
+      prisma: input.prisma,
+    });
   if (!memberId) {
     return null;
   }
@@ -3041,14 +3061,15 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
     : null;
   const shouldPrepareFamilyAcceptance =
     preparedFamilyInvite?.kind === "pending_acceptance";
+  const shouldPrepareIngress =
+    shouldPrepareFamilyAcceptance
+    || (accessAllowed && preparedFamilyInvite?.kind !== "accepted_replay");
   const preparedCryptoDomainRoots =
     await prepareHostedCryptoDomainRootCandidates({
       ...(shouldPrepareFamilyAcceptance
         ? {}
         : {
-            domains: preparedFamilyInvite?.kind === "accepted_replay"
-              ? (["control"] as const)
-              : accessAllowed
+            domains: shouldPrepareIngress
               ? (["control", "ingress"] as const)
               : (["control"] as const),
           }),
@@ -3062,10 +3083,6 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
         : {}),
       userId: memberId,
     });
-  const shouldPrepareIngress =
-    shouldPrepareFamilyAcceptance
-    || (accessAllowed && preparedFamilyInvite?.kind !== "accepted_replay");
-
   // Candidate signing finishes before unwrap preparation begins. Each phase is
   // bounded at two concurrent provider operations: ingress runs beside one
   // control lane, and that control lane warms historical roots sequentially

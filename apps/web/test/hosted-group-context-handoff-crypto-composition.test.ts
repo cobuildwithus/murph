@@ -393,7 +393,8 @@ function createPrismaStub(input: {
       }),
     },
     hostedWorkspace: {
-      upsert: vi.fn(async () => ({ userId: TARGET_MEMBER_ID })),
+      findUnique: vi.fn(async () => null),
+      createMany: vi.fn(async () => ({ count: 0 })),
     },
   };
 

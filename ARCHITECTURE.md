@@ -2928,10 +2928,16 @@ or authority lock. When an opted-in speculative batch fails during envelope
 metadata lookup or verification, it retains that same rejection for every
 affected uncached root reference. A later mixed cached-and-uncached request
 observes cached failures before starting new metadata or provider work.
+Boolean active-access gates select only a matching member ID in one database
+statement, composing the canonical direct/Family/owner predicate with the
+current participant lease predicate. They do not hydrate access-state relations
+or cache authority. Callers that need the access state retain the full reader.
 Established Linq direct messages resolve a blind-index/member-id target and
 prepare the required control and mailbox ingress roots plus the observed routing
 snapshot before `BEGIN`. They do not load or compare a full private identity
-snapshot unless Family acceptance/replay consumes it. The transaction still
+snapshot unless Family acceptance/replay consumes it. A positive member ID
+already discovered for an opener-continuation claim seeds only the first direct
+preparation attempt; misses, retries and later plans resolve again. The transaction still
 locks identity authority, repeats blind identity/home ownership lookups, and
 revalidates member, route snapshot, access, and root authority. Preparation is
 not an authorization cache. Established Linq and Telegram group routes also

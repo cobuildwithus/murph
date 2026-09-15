@@ -3452,7 +3452,11 @@ test.each([false, true])("phone channel welcome prepares real routing and mailbo
     hostedMemberRouting: { findUnique: vi.fn(async () => null), groupBy: vi.fn(async () => []), upsert: routingWrite },
     hostedThreadRoute: { groupBy: vi.fn(async () => []) },
     hostedMailboxItem: { findUnique: vi.fn(async () => null) },
-    hostedWorkspace: { upsert: vi.fn(async () => ({})) },
+    hostedWorkspace: {
+      findUnique: vi.fn(async () => null),
+      createMany: vi.fn(async () => ({ count: 0 })),
+      upsert: vi.fn(async () => ({})),
+    },
     hostedLinqLine: {
       findMany: vi.fn(async () => [{ phoneNumberLookupKey: createHostedPhoneLookupKey(line),
         phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(line), phoneNumberHint: "*** test",

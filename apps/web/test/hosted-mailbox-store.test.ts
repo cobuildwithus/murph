@@ -1384,7 +1384,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
     });
 
     expect(hostedThreadRoute.findFirst).not.toHaveBeenCalled();
-    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedWorkspace.createMany).not.toHaveBeenCalled();
     expect(hostedMailboxItem.create).not.toHaveBeenCalled();
   });
 
@@ -1418,7 +1418,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
         },
       }),
     }));
-    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedWorkspace.createMany).not.toHaveBeenCalled();
     expect(hostedMailboxItem.create).not.toHaveBeenCalled();
   });
 
@@ -1457,7 +1457,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
     });
 
     expect(hostedThreadRoute.findFirst).toHaveBeenCalledTimes(1);
-    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedWorkspace.createMany).not.toHaveBeenCalled();
     expect(hostedMailboxItem.create).not.toHaveBeenCalled();
   });
 
@@ -1497,14 +1497,9 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       },
     });
 
-    expect(tx.hostedWorkspace.upsert).toHaveBeenCalledWith({
-      create: {
-        userId: "member_thread_container_123",
-      },
-      update: {},
-      where: {
-        userId: "member_thread_container_123",
-      },
+    expect(tx.hostedWorkspace.createMany).toHaveBeenCalledWith({
+      data: [{ userId: "member_thread_container_123" }],
+      skipDuplicates: true,
     });
     expect(hostedMailboxItem.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -1678,7 +1673,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       },
     });
     expect(tx.hostedThreadContainer.findUnique).not.toHaveBeenCalled();
-    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedWorkspace.createMany).not.toHaveBeenCalled();
   });
 
   it("rejects group email when its runtime member is not a thread container", async () => {
@@ -1705,7 +1700,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       retryable: true,
     });
 
-    expect(tx.hostedWorkspace.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedWorkspace.createMany).not.toHaveBeenCalled();
     expect(hostedMailboxItem.create).not.toHaveBeenCalled();
   });
 
@@ -1737,7 +1732,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       },
     });
 
-    expect(tx.hostedWorkspace.upsert).toHaveBeenCalledTimes(1);
+    expect(tx.hostedWorkspace.createMany).toHaveBeenCalledTimes(1);
     expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
   });
 
@@ -3027,7 +3022,8 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         }]),
       },
       hostedWorkspace: {
-        upsert: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn(async () => null),
+        createMany: vi.fn().mockResolvedValue(null),
       },
     });
     const transaction = vi.fn(async (
@@ -3331,7 +3327,8 @@ function createHostedMailboxTx(input: {
       findFirst: vi.fn(async () => null),
     },
     hostedWorkspace: {
-      upsert: vi.fn(async () => null),
+      findUnique: vi.fn(async () => null),
+      createMany: vi.fn(async () => null),
     },
   }) as Parameters<typeof appendHostedMailboxItemTx>[0]["tx"];
 }

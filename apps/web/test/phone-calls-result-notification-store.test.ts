@@ -1318,6 +1318,8 @@ function buildRealMailboxPrisma(initialCall: HostedPhoneCall) {
       }),
     },
     hostedWorkspace: {
+      findUnique: vi.fn(async () => null),
+      createMany: vi.fn(async () => ({ count: 0 })),
       upsert: vi.fn(async () => undefined),
     },
   };

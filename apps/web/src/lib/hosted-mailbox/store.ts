@@ -927,11 +927,7 @@ export async function prepareHostedMailboxEnvelopeAppend(input: {
     : null;
   const reserved = await input.prisma.$transaction(async (tx) => {
     await assertHostedMailboxEnvelopeWorkspaceTargetTx({ envelope, tx });
-    await tx.hostedWorkspace.upsert({
-      create: { userId: envelope.userId },
-      update: {},
-      where: { userId: envelope.userId },
-    });
+    await ensureHostedMailboxWorkspaceTx({ tx, userId: envelope.userId });
     await acquireHostedMailboxDedupeAppendLockTx({
       dedupeKey: envelope.eventId,
       tx,
@@ -1156,15 +1152,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
     envelope,
     tx: input.tx,
   });
-  await input.tx.hostedWorkspace.upsert({
-    create: {
-      userId: envelope.userId,
-    },
-    update: {},
-    where: {
-      userId: envelope.userId,
-    },
-  });
+  await ensureHostedMailboxWorkspaceTx({ tx: input.tx, userId: envelope.userId });
   const encodedPayload = serializeHostedMailboxPayload(envelope);
   const lane = resolveHostedMailboxLaneForKind(envelope.kind);
   const assistantInputLookupKey = envelope.kind === "conversation.message"
@@ -1311,6 +1299,25 @@ function hasSameMealPhotoCapture(
     && existing.mealPhoto.captureId === requested.mealPhoto.captureId
     && existing.mealPhoto.capturedAt === requested.mealPhoto.capturedAt
     && existing.mealPhoto.sha256 === requested.mealPhoto.sha256;
+}
+
+async function ensureHostedMailboxWorkspaceTx(input: {
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<void> {
+  // An empty-update upsert issues three reads. Read only existence, and avoid
+  // an insert on the warm path: even ON CONFLICT DO NOTHING can wait behind a
+  // concurrent checkpoint update to an existing row.
+  const existing = await input.tx.hostedWorkspace.findUnique({
+    select: { userId: true },
+    where: { userId: input.userId },
+  });
+  if (!existing) {
+    await input.tx.hostedWorkspace.createMany({
+      data: [{ userId: input.userId }],
+      skipDuplicates: true,
+    });
+  }
 }
 
 async function assertHostedMailboxEnvelopeWorkspaceTargetTx(input: {

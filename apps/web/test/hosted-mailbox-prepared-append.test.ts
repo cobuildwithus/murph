@@ -165,7 +165,8 @@ interface MailboxFixtureTx {
     create: ReturnType<typeof vi.fn>;
   };
   hostedWorkspace: {
-    upsert: ReturnType<typeof vi.fn>;
+    findUnique: ReturnType<typeof vi.fn>;
+    createMany: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -274,7 +275,10 @@ function createMailboxFixture(input: {
     $queryRaw: queryRaw,
     hostedMailboxItem: { findUnique: txFindUnique },
     hostedMailboxPayload: { create: hostedMailboxPayloadCreate },
-    hostedWorkspace: { upsert: vi.fn(async () => undefined) },
+    hostedWorkspace: {
+      findUnique: vi.fn(async () => null),
+      createMany: vi.fn(async () => ({ count: 0 })),
+    },
   };
   let addedConcurrentRow = false;
   const transaction = vi.fn(async <T>(
@@ -523,10 +527,9 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
       });
     });
 
-    expect(fixture.tx.hostedWorkspace.upsert).toHaveBeenCalledWith({
-      create: { userId: USER_ID },
-      update: {},
-      where: { userId: USER_ID },
+    expect(fixture.tx.hostedWorkspace.createMany).toHaveBeenCalledWith({
+      data: [{ userId: USER_ID }],
+      skipDuplicates: true,
     });
     expect(domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx)
       .toHaveBeenCalledTimes(1);

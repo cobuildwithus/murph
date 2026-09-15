@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 
+import { PrismaPg } from "@prisma/adapter-pg";
 import {
   HostedBillingStatus,
   type Prisma,
-  type PrismaClient,
+  PrismaClient,
 } from "@prisma/client";
 import {
   buildHostedExecutionLinqConversationMessageWake,
@@ -189,6 +190,94 @@ async function acquireHostedMailboxSourceLocksForTest(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Linq home-routing PostgreSQL concurrency",
   () => {
+    it("reads a warm mailbox workspace once without waiting for checkpoints and preserves cold creation and replay", async () => {
+      const prisma = new PrismaClient({
+        adapter: new PrismaPg({ connectionString: databaseUrl }),
+        log: [{ emit: "event", level: "query" }],
+      });
+      const workspaceQueries: string[] = [];
+      prisma.$on("query", ({ query }) => {
+        if (query.includes('"public"."hosted_workspace"')) {
+          workspaceQueries.push(query);
+        }
+      });
+      const memberId = `member_workspace_append_${randomUUID()}`;
+      const contactLookupKey = requireString(createHostedPhoneLookupKey("+15551112222"));
+      const envelope = (eventId: string) => buildHostedExecutionLinqConversationMessageWake({
+        accountLookupKey: requireString(createHostedPhoneLookupKey("+15550000000")),
+        contactKind: "phone",
+        contactLookupKey,
+        eventId,
+        linqMessage: {
+          chatId: "synthetic-workspace-chat",
+          from: "+15551112222",
+          isFromMe: false,
+          messageId: eventId,
+          parts: [{ type: "text", value: "Synthetic message" }],
+          service: "iMessage",
+          threadIsDirect: true,
+        },
+        occurredAt: "2030-01-01T00:00:00.000Z",
+        phoneLookupKey: contactLookupKey,
+        userId: memberId,
+      });
+      const append = (eventId: string) => prisma.$transaction((tx) =>
+        appendHostedMailboxEnvelopeTx({ envelope: envelope(eventId), tx }), transactionOptions);
+      const checkpointLocked = createDeferred();
+      const releaseCheckpoint = createDeferred();
+      let checkpointResult: Promise<PromiseSettledResult<void>[]> | null = null;
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await expect(prisma.$transaction(async (tx) => {
+          await appendHostedMailboxEnvelopeTx({ envelope: envelope("rolled-back"), tx });
+          throw new Error("synthetic rollback");
+        }, transactionOptions)).rejects.toThrow("synthetic rollback");
+        expect(await prisma.hostedWorkspace.findUnique({ where: { userId: memberId } })).toBeNull();
+        expect(await prisma.hostedMailboxItem.count({ where: { userId: memberId } })).toBe(0);
+
+        workspaceQueries.length = 0;
+        const concurrent = await Promise.allSettled([append("first"), append("second")]);
+        expect(concurrent.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"]);
+        expect(workspaceQueries.filter((query) => query.startsWith("SELECT"))).toHaveLength(2);
+        const creates = workspaceQueries.filter((query) => query.startsWith("INSERT"));
+        expect(creates.length).toBeGreaterThanOrEqual(1);
+        expect(creates.length).toBeLessThanOrEqual(2);
+        expect(creates.every((query) => query.includes("ON CONFLICT DO NOTHING"))).toBe(true);
+        let retained = await prisma.hostedWorkspace.update({
+          where: { userId: memberId },
+          data: { version: 42n, snapshotRef: { key: "synthetic-snapshot" } },
+        });
+        checkpointResult = Promise.allSettled([prisma.$transaction(async (tx) => {
+          retained = await tx.hostedWorkspace.update({
+            where: { userId: memberId },
+            data: { checkpointedAt: new Date("2030-01-01T00:00:00Z") },
+          });
+          checkpointLocked.resolve();
+          await releaseCheckpoint.promise;
+        }, transactionOptions)]);
+        await checkpointLocked.promise;
+        for (const duplicate of [false, true]) {
+          workspaceQueries.length = 0;
+          expect(await append("third")).toMatchObject({ duplicate, inserted: !duplicate });
+          expect(workspaceQueries).toHaveLength(1);
+          expect(workspaceQueries[0]).toMatch(/^SELECT/u);
+        }
+        releaseCheckpoint.resolve();
+        expect(await checkpointResult).toEqual([{ status: "fulfilled", value: undefined }]);
+        expect(await prisma.hostedWorkspace.findUnique({ where: { userId: memberId } })).toEqual(retained);
+        expect(await prisma.hostedMailboxItem.findMany({
+          where: { userId: memberId },
+          orderBy: { causalSeq: "asc" },
+          select: { causalSeq: true, laneSeq: true },
+        })).toEqual([1n, 2n, 3n].map((seq) => ({ causalSeq: seq, laneSeq: seq })));
+      } finally {
+        releaseCheckpoint.resolve();
+        await checkpointResult;
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
     it.each([false, true])("repairs a conflicting pending route without disturbing its home (has home: %s)", async (hasHome) => {
       const client = createPrismaClient({ databaseUrl, poolMax: 1 });
       const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
