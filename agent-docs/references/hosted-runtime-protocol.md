@@ -862,8 +862,13 @@ remain independent of device-sync and other maintenance completion.
 Once terminal reply delivery is durable, the foreground lane releases ownership;
 it does not wait for provider cleanup or another exact automation inventory
 scan. A conversation import that lands while foreground-owned maintenance is
-in flight aborts that work through the runner-scoped background-maintenance
-signal so the new message can enter assistant admission immediately.
+in flight makes the existing foreground-work predicate true. Provider cleanup
+observes that predicate every 25 ms during each HTTP delete and cancels only
+that request; each delete also has a one-second budget. The drain awaits request
+settlement and retains every unconfirmed id under the existing future cleanup
+wake. Intentional interruption is deferral rather than a provider failure.
+The shared maintenance signal is not cancelled by foreground input, so required
+canonical state commits remain protected.
 
 Freshly staged assistant input IDs already prove foreground work. Before that
 lane starts, derive the immediate pending wake from the phase clock instead of
