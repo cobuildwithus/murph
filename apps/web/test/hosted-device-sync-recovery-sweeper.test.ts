@@ -91,7 +91,7 @@ describe("hosted device-sync scheduled wake sweeper", () => {
 
 function buildDueReconcileSweepResult(overrides: Partial<{
   dueConnections: number;
-  skippedDueConnections: number;
+  hasMoreDueConnections: boolean;
   wakeAccepted: number;
   wakeAttempted: number;
   wakeFailed: number;
@@ -100,11 +100,11 @@ function buildDueReconcileSweepResult(overrides: Partial<{
 }> = {}) {
   return {
     dueConnections: 1,
-    skippedDueConnections: 0,
+    hasMoreDueConnections: false,
     wakeAccepted: 1,
     wakeAttempted: 1,
     wakeFailed: 0,
-    wakeLimit: 25,
+    wakeLimit: 100,
     wakeNotAccepted: 0,
     ...overrides,
   };
