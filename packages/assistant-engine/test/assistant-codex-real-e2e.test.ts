@@ -6030,6 +6030,53 @@ describeRealCodex('real Codex assistant-style boundary e2e', () => {
   )
 })
 
+describeRealCodex('real Codex conversation batch e2e', () => {
+  it.each([false, true])('answers both resumed bottle messages in one turn (group=%s)', async (groupConversation) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-conversation-batch-e2e-'))
+    try {
+      const inputs = [
+        'Murph, help me choose a water bottle. The green bottle holds 600 mL and the blue bottle holds 900 mL.',
+        'I want the larger one. Reply with its color and capacity only; no need to look anything up or save anything.',
+      ].map((text, index) => {
+        const input = buildSyntheticLinqGroupPromptInput({
+          inputId: `ain_${String(index + 1).repeat(32)}`,
+          occurredAt: `2026-05-01T12:00:0${index}.000Z`,
+          senderHandle: 'synthetic-bottle-member',
+          speakerLabel: { displayName: 'Avery', source: 'profile-name' },
+          text,
+        })
+        return { ...input, conversation: { ...input.conversation, threadIsDirect: !groupConversation } }
+      })
+      const prompt = buildAssistantAutoReplyPrompt(inputs)
+      expect(prompt.kind).toBe('ready')
+      if (prompt.kind !== 'ready') throw new Error('Expected a ready conversation batch.')
+      expect(prompt.prompt).toContain(inputs[0]!.text)
+      expect(prompt.prompt).toContain(inputs[1]!.text)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: groupConversation
+          ? buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true })
+          : buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [], env: config.env, groupConversation,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: prompt.prompt, reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
+      })
+      expect(readCapabilityRoutingActions(result.jsonEvents)).toEqual([])
+      expect(result.finalMessage).toMatch(/blue/iu)
+      expect(result.finalMessage).toMatch(/900\s*m[lL]/u)
+      expect(result.finalMessage).not.toMatch(/green|600|saved|scheduled|device.sync|queue|causal/iu)
+      expect(result.responseMedia).toEqual([])
+      expect(result.responseCard).toBeNull()
+      process.stdout.write(`[conversation-batch-e2e] ${JSON.stringify({ groupConversation, reply: result.finalMessage })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
     'uses Linq speaker labels to attribute a group promise',

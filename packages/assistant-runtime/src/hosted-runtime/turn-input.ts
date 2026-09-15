@@ -23,7 +23,6 @@ import {
   isSameAuthenticatedAssistantGroupRoute,
   shouldGroupAdjacentAssistantInputCandidates,
 } from "@murphai/assistant-engine/assistant-automation";
-import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 import {
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
@@ -706,7 +705,7 @@ async function selectHostedAssistantExactSuccessorEvents(input: {
 
   // Exact invocation-local candidates avoid a global scan, but they do not
   // weaken the compound-batch boundary. Ignore duplicate candidates at or
-  // behind the supplied frontier, then stop at the first missing causal
+  // behind the supplied frontier, then stop at the first missing conversation
   // successor, incomplete projection, or non-replyable event and leave later
   // IDs pending.
   const successorEvents = [...input.events]
@@ -751,23 +750,31 @@ function isHostedAssistantInputEventBatchSuccessor(
     return false;
   }
 
-  const previousCausalSeq = readPositiveHostedAssistantInputCausalSeq(previous);
-  const candidateCausalSeq = readPositiveHostedAssistantInputCausalSeq(candidate);
-  return previousCausalSeq !== null
+  const previousLaneSeq = readPositiveHostedConversationInputSequence(previous, "laneSeq");
+  const candidateLaneSeq = readPositiveHostedConversationInputSequence(candidate, "laneSeq");
+  const previousCausalSeq = readPositiveHostedConversationInputSequence(previous, "causalSeq");
+  const candidateCausalSeq = readPositiveHostedConversationInputSequence(candidate, "causalSeq");
+  // System work shares causal order, but cannot create a missing conversation
+  // message. Effect owners still use the terminal accepted input's causal order.
+  return previousLaneSeq !== null
+    && candidateLaneSeq === previousLaneSeq + 1n
+    && previousCausalSeq !== null
     && candidateCausalSeq !== null
-    && candidateCausalSeq === previousCausalSeq + 1n;
+    && candidateCausalSeq > previousCausalSeq;
 }
 
-function readPositiveHostedAssistantInputCausalSeq(
+function readPositiveHostedConversationInputSequence(
   event: AssistantInputEventRecord,
+  field: "causalSeq" | "laneSeq",
 ): bigint | null {
-  if (event.sourceRef.kind !== "hosted-mailbox") {
+  if (event.sourceRef.kind !== "hosted-mailbox"
+    || event.sourceRef.lane !== "conversation") {
     return null;
   }
-  const causalSeq = BigInt(
-    assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq ?? "0"),
-  );
-  return causalSeq > 0n ? causalSeq : null;
+  const value = event.sourceRef[field] ?? "";
+  if (!/^[1-9][0-9]{0,18}$/u.test(value)) return null;
+  const seq = BigInt(value);
+  return seq <= 9_223_372_036_854_775_807n ? seq : null;
 }
 
 async function readHostedAssistantInputCandidatesById(input: {

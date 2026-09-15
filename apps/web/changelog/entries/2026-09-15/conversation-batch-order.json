@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "conversation-batch-order",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Keep queued messages together",
+    "summary": "Background device sync no longer splits compatible queued messages into separate replies.",
+    "details": "Murph can answer consecutive messages together while keeping separate conversations and replies to different messages distinct.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": []
+  }
+}

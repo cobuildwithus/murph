@@ -13,6 +13,11 @@ service restart/retry proof lives in
 
 ## Purpose
 
+Conversation batching uses conversation-lane adjacency while retaining increasing
+causal order for effects; initial, recovered and live admission are owned by
+`agent-docs/references/hosted-runtime-protocol.md` and verified by the runtime
+turn-input suite.
+
 Immediate manual meal estimation and ordinary incomplete-meal recovery are
 owned by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/SECURITY.md`. Their focused proof covers canonical import replay,

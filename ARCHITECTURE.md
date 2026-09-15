@@ -1205,7 +1205,8 @@ server-keyed lookup of their existing deterministic assistant input id; the raw
 id is not persisted there, and this adds no mailbox wire, `sourceRef`, or
 event-id field. For an update, the runtime forwards the terminal
 provider-accepted input id only after the accepted ids revalidate as one
-exact-successor direct-conversation actor/reply-anchor batch or one authenticated
+conversation-lane-successor direct-conversation actor/reply-anchor batch with
+increasing causal order or one authenticated
 non-direct group-room batch. Inside the mutation
 transaction, web resolves the
 callback member plus a keyed lookup of that id to one live conversation-lane
