@@ -195,7 +195,7 @@ test.each(scenarios)(
                   const response = await baseMailboxPort.fetch(request);
                   if (request.requestId.includes(":system-work-assistant-upgrade")) {
                     wakeChecks += 1;
-                    assert.deepEqual(request.lanes.map((lane) => lane.lane), ["conversation"]);
+                    assert.deepEqual(request.lanes.map((lane) => lane.lane), ["conversation", "system"]);
                     assert.ok(request.limitPerLane > 0 && request.limitPerLane <= 100);
                     if (response.items.length === 0) {
                       emptyWakeChecked.resolve();

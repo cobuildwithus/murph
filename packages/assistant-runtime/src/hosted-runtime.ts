@@ -3483,7 +3483,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (assistantExecutionBlocked) return false;
         if (systemMailboxForegroundWakePrefetch) return true;
         const prefetch = await createHostedForegroundMailboxPrefetch({
-          lanes: HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
+          lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
           limitPerLane: mailboxBudget.fetchLimitPerLane,
           requestId: `${requestId}:system-work-assistant-upgrade`,
           runnerInput: baseRunnerInput,
@@ -4305,7 +4305,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
       if (!systemMailboxForegroundWakePrefetch) {
         const foregroundPrefetch = await createHostedForegroundMailboxPrefetch({
-          lanes: HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
+          lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
           limitPerLane: mailboxBudget.fetchLimitPerLane,
           requestId: `${requestId}:system-mailbox-foreground-upgrade`,
           runnerInput: baseRunnerInput,
