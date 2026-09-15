@@ -784,6 +784,25 @@ async function retainHostedSystemMailboxPreparedItemAfterForegroundPreemption(in
   };
 }
 
+/** Retire only schedules covered by durable retained owners; never claim new work. */
+export async function retireHostedCoveredDeviceSchedulesAfterImport(input: {
+  now: string;
+  vaultRoot: string;
+}): Promise<void> {
+  await updateHostedSystemMailboxState(input.vaultRoot, async (state) => {
+    const continuationItemIds = await readHostedSystemMailboxContinuationItemIds({
+      state, vaultRoot: input.vaultRoot,
+    });
+    const compacted = retireHostedCoveredDeviceScheduleHints({
+      continuationItemIds,
+      coverage: projectHostedDeviceHintCoverage({ now: input.now, pending: state.pending }),
+      eligibleItemIds: new Set(state.pending.map((item) => item.itemId)),
+      state,
+    });
+    return compacted.retired ? compacted.state : { result: undefined, write: false };
+  });
+}
+
 function retireHostedCoveredDeviceScheduleHints(input: {
   continuationItemIds: ReadonlySet<string>;
   coverage: ReadonlyMap<string, HostedDeviceHintCoverage>;

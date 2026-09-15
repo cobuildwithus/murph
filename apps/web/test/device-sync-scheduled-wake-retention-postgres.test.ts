@@ -147,7 +147,7 @@ describe.skipIf(!runPostgresProof)(
       expect(await client.hostedMailboxItem.count({ where: { userId: fixture.memberId } })).toBe(1);
     });
 
-    it.each(["success", "kms_failure", "consent_revoked", "root_rotated"] as const)(
+    it.each(["success", "kms_failure", "consent_revoked", "root_rotated", "schedule_advanced", "reconnected", "disconnected"] as const)(
       "keeps the sole connection available during scheduled wake preparation: %s",
       async (scenario) => {
         const client = requirePrisma(prisma);
@@ -157,6 +157,7 @@ describe.skipIf(!runPostgresProof)(
           id: connectionId, userId: fixture.memberId, provider: "oura", status: "active",
           providerAccountBlindIndex: `synthetic-${connectionId}`,
           connectedAt: new Date(fixture.wake.expectedConnectedAt!),
+          nextReconcileAt: new Date(fixture.wake.hint!.nextReconcileAt!),
         } });
         const request = {
           connectionId,
@@ -212,8 +213,20 @@ describe.skipIf(!runPostgresProof)(
               domain: "ingress", prisma: client, reason: "synthetic-rotation", userId: fixture.memberId,
             });
           }
+          if (scenario === "schedule_advanced" || scenario === "reconnected" || scenario === "disconnected") {
+            await client.deviceConnection.update({ where: { id: connectionId }, data:
+              scenario === "schedule_advanced" ? { nextReconcileAt: new Date(Date.now() + 3_600_000) }
+              : scenario === "reconnected" ? { connectedAt: new Date() }
+              : { status: "disconnected" },
+            });
+          }
           release();
-          if (scenario === "kms_failure" || scenario === "consent_revoked") {
+          if (scenario === "schedule_advanced" || scenario === "reconnected" || scenario === "disconnected") {
+            await expect(pending).resolves.toMatchObject({ reason: "schedule_superseded", wakeAccepted: false, wakeInserted: false });
+            expect(signal).not.toHaveBeenCalled();
+            expect(await client.hostedMailboxItem.count({ where: { dedupeKey: request.eventId } })).toBe(0);
+            expect(await client.deviceSyncSignal.count({ where: { connectionId } })).toBe(0);
+          } else if (scenario === "kms_failure" || scenario === "consent_revoked") {
             await expect(pending).rejects.toMatchObject(scenario === "kms_failure"
               ? { message: "Synthetic KMS unavailable" }
               : { code: "HEALTH_DATA_CONSENT_REQUIRED" });
@@ -450,6 +463,13 @@ describe.skipIf(!runPostgresProof)(
 
       try {
         for (const fixture of [firstRetained, secondRetained, blocking]) {
+          await client.deviceConnection.create({ data: {
+            id: fixture.wake.connectionId!, userId: firstRetained.memberId,
+            provider: "oura", status: "active",
+            providerAccountBlindIndex: `synthetic-${fixture.wake.connectionId}`,
+            connectedAt: new Date(fixture.wake.expectedConnectedAt!),
+            nextReconcileAt: new Date(fixture.wake.hint!.nextReconcileAt!),
+          } });
           await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
             dedupeConflict: false,
             duplicate: true,

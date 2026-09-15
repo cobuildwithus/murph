@@ -2588,7 +2588,22 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
       startWorkflowOnDuplicate: false,
       wake,
       store,
-      persist: async () => {},
+      persist: async (tx) => {
+        // The sweep selected this tuple before crypto preparation and may now
+        // be behind a checkpoint publication. Both owners hold this connection lock.
+        const current = await tx.$queryRaw<Array<{ current: number }>>`
+          SELECT 1 AS current FROM device_connection
+          WHERE id = ${input.connectionId} AND user_id = ${input.userId}
+            AND provider = ${input.provider} AND status = 'active'
+            AND connected_at = ${new Date(input.expectedConnectedAt)}
+            AND next_reconcile_at = ${new Date(input.nextReconcileAt)}
+            AND next_reconcile_at <= NOW() AT TIME ZONE 'UTC'
+        `;
+        if (current.length === 0) throw deviceSyncError({
+          code: "SCHEDULED_RECONCILE_SUPERSEDED", httpStatus: 409, retryable: false,
+          message: "The selected device schedule is no longer current.",
+        });
+      },
       complete: async () => {
         await store.createSignal({
           userId: input.userId,
@@ -2606,7 +2621,14 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
         });
       },
     }),
+  }).catch((error: unknown) => {
+    if (isDeviceSyncError(error) && error.code === "SCHEDULED_RECONCILE_SUPERSEDED") return null;
+    throw error;
   });
+  if (!appendResult) return {
+    reason: "schedule_superseded", wakeAccepted: false, wakeAppended: false,
+    wakeDuplicate: false, wakeInserted: false,
+  };
   const wakeAccepted = appendResult.inserted
     || (appendResult.duplicate && !appendResult.dedupeConflict);
 
