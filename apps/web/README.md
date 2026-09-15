@@ -539,9 +539,11 @@ The hosted Prisma schema keeps ownership sharp and nested:
   a zero default so existing receipts and old-Web inserts remain compatible;
   after the cursor-aware Web is live and prior functions drain, the contract
   lane rejects any unexpected null before setting `NOT NULL`. Immediate
-  cleanup uses one five-second shared target deadline plus a small
+  cleanup uses one eight-second shared target deadline plus a small
   receipt-settlement margin; hourly retries use a fifteen-second shared target
-  deadline and four-receipt concurrency. Cloudflare is
+  deadline and four-receipt concurrency. Cloudflare deadline expiry logs
+  informational cleanup-pending metadata and retains its error code and retry
+  receipt; other runner deletion failures remain error logs. Cloudflare is
   terminal only when the capability-bearing Worker explicitly confirms
   `deleteAllCompleted`, so a legacy response cannot erase retry ownership.
 
@@ -1771,9 +1773,12 @@ and fixed category labels without recording error messages or connection fields.
 
 Pool pressure is reported before it becomes a failure. `Hosted web database pool
 pressure.` logs the same total, idle, and waiting counts when the pool is full
-before the prospective first waiter queues, or whenever later callers are
-already waiting with no idle connection. It is rate limited to once per ten
-seconds per pool; a pool with idle capacity logs nothing. `Hosted web database slow transaction
+at an actual pool checkout before the prospective first waiter queues, or
+whenever later callers are already waiting with no idle connection. Statements
+using an acquired transaction connection do not request another checkout and
+therefore do not emit pressure warnings merely because the pool is full. Sampling
+is rate limited to once per ten seconds per pool; a pool with idle capacity logs
+nothing. `Hosted web database slow transaction
 acquisition.` measures only the wait before an interactive callback begins,
 while `Hosted web database slow transaction callback.` measures callback wall
 time and reports the effective transaction timeout without claiming the

@@ -955,6 +955,19 @@ Device hints, restored timers, imports, activity scheduling, and exact
 acknowledgments all use the workspace-owned mailbox path. Common durable effects
 retain their existing delivery and shutdown behavior.
 
+Before the dedicated system-mailbox lane checkpoints completed workspace work,
+it offers one additional bounded system-prefix import after those attempts
+quiesce. This uses the invocation's remaining mailbox budget and yields to
+foreground wakes, abort, receipt capacity, and assistant deadlines. It does not
+execute another device pass or change the original completion preparation's
+admission authority. The existing post-checkpoint recording publishes current
+cadence and compacts only covered later hints; its follow-up checkpoint persists
+that removal. Equal-cadence, manual, different-epoch, and unrelated connection
+requests remain actionable. Final progress and import retry projection use the
+latest imported prefix, and each import's deferred effects run at most once
+after a covering checkpoint. Input arriving after this one read remains ordinary
+durable follow-up work. No polling loop, wire field, or persisted schema changes.
+
 Scheduling preserves per-connection ordering and the imported-watermark-bounded
 continuation projection used by handling. Invalid continuation authority cannot
 advance the handled prefix, but it does not block an unrelated connection or
@@ -2473,6 +2486,15 @@ preference items during enqueue or checkpoint preparation. This ordering is
 what preserves two adjacent changes to different personality dials without a
 merge queue or second state owner.
 
+Conversation batching across system events does not reattribute preference
+intent: `assistant_style` and `personalization` updates select the requesting
+accepted `message_ref`. Both prompt builders expose validated input IDs across
+transports, independently of native reply/reaction eligibility. The runtime
+checks membership in the current accepted scope, including inputs admitted live, and passes that input through the
+existing signed authority callback. An ambiguous batch without a selected ref
+fails closed. Web still reloads the selected message's canonical timestamp and
+causal sequence before comparing each preference against newer Settings state.
+
 Mailbox append also allocates one immutable per-member causal sequence under a
 user-scoped transaction lock, shared by the conversation and system lanes.
 That acceptance sequence, not lane import order or wall-clock time, orders
@@ -3327,6 +3349,16 @@ Overlapping wakes that receive identity-verified acknowledgement from the same
 runtime do not invalidate one another. Wake acknowledgement checks actual
 invocation, abort, destroy, and stop changes; the activity generation used to
 protect warm-shell expiry is not runtime ownership.
+Active wakes use the native container port directly. They do not read SDK
+lifecycle state, start a container, or wait for SDK readiness before dispatch.
+The wake owner checks the member binding once, records activity, and preserves
+the existing timeout, identity proof, bounded metadata drain, and stop/abort
+fences. Its existing entry timestamp includes that binding check. Cold starts
+continue through the explicit readiness owner; a wake cannot create a new child.
+UserRunner calls the unified `ensureProcessing` RPC supported by all production
+container classes, including retained-image classes. There is no alternate
+legacy wake RPC; a missing method remains an unconfirmed wake. Node HTTP wake
+response compatibility is independent and retains its existing identity checks.
 A failed transport call to an accepted invocation does not prove the invocation
 died. Before clearing the write fence after an invoke transport failure, the
 UserRunner probes the RunnerContainer for the exact fence identity
@@ -3393,9 +3425,13 @@ lifecycle decision. That result is the sole owner of the interaction generation,
 captured when its invocation enters the container; the notification carries
 identity only. The two in-memory halves accept either arrival order. A mismatch,
 newer interaction, Durable Object activation reset, RPC failure, active child,
-retained warmth, near wake, or uncertain status/health leaves the ordinary
+retained warmth, or uncertain status/health leaves the ordinary
 `sleepAfter` timer as the cleanup owner. No durable notification, retry loop,
 queue, scheduler, or second lifecycle owner is added.
+An ordinary synchronous active-fence read only observes the registered operation:
+it does not advance the interaction generation or postpone completion cleanup.
+Inactive, aborting, and transport/cleanup-uncertain reads retain their existing
+lifecycle coordination; actual readiness and wake arrivals still advance it.
 When the outer RunnerContainer active-operation pointer is missing, a container
 wake response must carry explicit identity-checked wake metadata before an
 accepted wake is trusted; identity-blind accepted responses from deploy-skewed
@@ -3605,12 +3641,20 @@ source-less wake preempts those drains only after the resumed import proves new
 conversation work; a no-progress or system-only nudge must not starve bounded
 maintenance or the idle checkpoint.
 The assistant engine admits the frozen same-wake compound batch before provider
-start without broad hosted mailbox rediscovery. While a Codex turn is live,
+start without broad hosted mailbox rediscovery. Initial selection, recovered
+pending selection, live admission, and terminal accepted-input revalidation use
+the existing conversation lane sequence for adjacency. Intervening system work,
+including device-sync wakes, does not split neighboring conversation inputs.
+Positive increasing shared causal sequences remain required, and the terminal
+accepted input retains its canonical causal sequence for field-level mutations.
+System-fact application and effect authority remain with their existing owners;
+batching does not wait for, consume, or grant authority to system work. While a Codex turn is live,
 later mailbox input may still be imported and staged. Its exact staged input ID
 may join through the generic live-steering path while the current provider
 request is open, only while the turn remains below the cumulative 50-message
 initial-plus-live bound, and only when the stored event is the next positive
-causal-sequence successor and preserves the direct actor and native reply
+conversation-lane successor with increasing positive causal order and preserves
+the direct actor and native reply
 anchor, or for an authenticated non-direct group preserves the room, delivery
 route, account/audience, projection readiness, and reaction boundary. Every
 completed provider text or media segment remains deliverable for ordinary
@@ -3636,7 +3680,7 @@ provider steering but keeps conversation admission registered until an atomic
 quiet cutoff or one reconsideration admission. A successfully committed live
 steer during request 0 also selects reconsideration and keeps registration open
 through request 1, which closes at its first completed response. Missing input,
-a causal gap, a boundary change, capacity
+a conversation-lane gap, a boundary change, capacity
 overflow, or input arriving after the final cutoff remains pending for a normal
 later assistant turn. Strict active-turn-targeted input still fails closed
 instead of falling through. Reconsideration is capped at provider request 1 and
@@ -4274,9 +4318,10 @@ routing.
 
 ### Cloudflare Owns
 
-Fresh member allocations use the regular runner fleet. Removal of the retired
-single-account container namespace requires checkpointed retirement of every
-stored target before the delete migration; the deployment sequence is owned by
+Fresh member allocations use the regular runner fleet. The retired experiment
+namespace remains drain-only for stored targets; normal releases preserve its
+native application and ship no deletion migration. Physical deletion requires
+checkpointed retirement of every stored target; the deployment contract is owned by
 [`apps/cloudflare/DEPLOY.md`](../../apps/cloudflare/DEPLOY.md#retiring-the-selected-account-size-experiment).
 
 - per-user Durable Object routing

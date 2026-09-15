@@ -1,3 +1,5 @@
+import { SmallRunnerContainer } from "../src/standby-runner-container.js";
+import { RunnerSlotBindingStore } from "../src/runner-slot-binding.js";
 import assert from "node:assert/strict";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
@@ -89,6 +91,48 @@ describe("hosted standby contract", () => {
     expect(standbyGet).toHaveBeenCalledWith(standbyName, {
       locationHint: HOSTED_STANDBY_LOCATION_HINT,
     });
+  });
+});
+
+describe("retained small namespace", () => {
+  const slotName = `runner-small--v-${RELEASE_ID}--${"a".repeat(32)}`;
+  const owner = { claimId: "standby-claim-12345678-1234-4123-8123-123456789abc", userId: "member_retained" };
+  const identity = { slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
+
+  it("rejects fresh preparation and binding without starting a container", async () => {
+    const h = createStandbyContainerHarness({ containerClass: SmallRunnerContainer, slotName });
+    await expect(h.container.prepareStandbySlot({ ...identity, timeoutMs: 1000 })).rejects.toThrow("drain-only");
+    await expect(h.container.bindStandbySlot({ ...identity, ...owner })).rejects.toThrow("drain-only");
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(h.codexPreflight).not.toHaveBeenCalled();
+  });
+
+  it("preserves the exact persisted binding and retires it through the existing owner", async () => {
+    const h = createStandbyContainerHarness({ containerClass: SmallRunnerContainer, slotName, bound: owner });
+    await expect(h.container.bindStandbySlot({ ...identity, ...owner })).resolves.toMatchObject({ bound: true });
+    await expect(h.container.bindStandbySlot({ ...identity, ...owner, userId: "member_other" })).rejects.toThrow("another claim");
+    await expect(h.container.retireStandbySlot({ target: { slotName, userId: owner.userId } })).resolves.toEqual({ retired: true });
+    await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({ state: "retired", userId: null });
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("withdraws an unbound pending target and fences a late bind", async () => {
+    const h = createStandbyContainerHarness({ containerClass: SmallRunnerContainer, slotName });
+    await expect(h.container.retireStandbySlot({ target: { slotName, userId: owner.userId } })).resolves.toEqual({ retired: true });
+    await expect(h.container.bindStandbySlot({ ...identity, ...owner })).rejects.toThrow("drain-only");
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("routes persisted names only to their original namespace and allocates ordinary names", () => {
+    const small = createSlotStub(slotName), regular = createSlotStub("regular");
+    const exactGet = vi.fn(() => regular), smallGet = vi.fn(() => small);
+    const router = createHostedRunnerContainerNamespaceRouter({ exactUser: { getByName: exactGet }, small: { getByName: smallGet }, standby: null })!;
+    expect(router.getByName(slotName)).toBe(small);
+    expect(exactGet).not.toHaveBeenCalled();
+    expect(router.getByName(createHostedRunnerSlotName(RELEASE_ID))).toBe(regular);
+    const missing = createHostedRunnerContainerNamespaceRouter({ exactUser: { getByName: exactGet }, standby: null })!;
+    expect(() => missing.getByName(slotName)).toThrow("binding is unavailable");
+    expect(exactGet).toHaveBeenCalledOnce();
   });
 });
 
@@ -266,6 +310,14 @@ describe("RunnerContainer slot lifecycle", () => {
       userId: "member_456",
     })).rejects.toThrow("not bound to the runtime user");
     await expect(harness.container.ensureProcessing({
+      userId: "member_456",
+    })).rejects.toThrow("not bound to the runtime user");
+    await expect(harness.container.ensureProcessing({
+      activeRuntime: {
+        attemptId: "attempt_wrong_member_wake",
+        leaseGeneration: "1",
+        userId: "member_456",
+      },
       userId: "member_456",
     })).rejects.toThrow("not bound to the runtime user");
     await expect(harness.container.onRuntimeCompletionRecorded({
@@ -1432,6 +1484,8 @@ function seedLegacyCoordinator(db: DatabaseSync, ready: string, pending: string,
 }
 
 function createStandbyContainerHarness(input: {
+  containerClass?: typeof RunnerContainer;
+  bound?: { claimId: string; userId: string };
   destroy?: () => Promise<void>;
   nativeStatus?: string;
   environment?: Record<string, unknown>;
@@ -1457,7 +1511,13 @@ function createStandbyContainerHarness(input: {
     HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: SOURCE_FINGERPRINT,
     ...input.environment,
   };
-  const container = new RunnerContainer({
+  if (input.bound) {
+    const store = new RunnerSlotBindingStore(state.storage.sql!);
+    const identity = { slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
+    store.initialize(identity);
+    store.bind({ ...identity, ...input.bound });
+  }
+  const container = new (input.containerClass ?? RunnerContainer)({
     ...state,
     id: { name: slotName },
     container: { get running() { return nativeStatus !== "stopped"; } },

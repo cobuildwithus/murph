@@ -1163,8 +1163,8 @@ describe("HostedUserRunner execution coordination", () => {
     expect(claimReadyStandby).toHaveBeenCalledOnce();
   });
 
-  it("invokes a retained runner slot with no extra binding RPC", async () => {
-    const slotName = `runner--v-release_1--${"d".repeat(32)}`;
+  it.each(["runner", "runner-small"])("invokes a retained %s slot with no extra binding RPC", async prefix => {
+    const slotName = `${prefix}--v-release_1--${"d".repeat(32)}`;
     const binding: HostedStandbySlotBinding = {
       claimId: "standby-claim-12345678-1234-4123-8123-123456789abc",
       releaseId: "release_1", region: "GLOBAL", slotName,
@@ -1197,8 +1197,8 @@ describe("HostedUserRunner execution coordination", () => {
     expect(harness.invoke).toHaveBeenCalledOnce();
   });
 
-  it("clears a proven retirement before the next message without an old-target RPC", async () => {
-    const oldTarget = `runner--v-release_1--${"c".repeat(32)}`;
+  it.each(["runner", "runner-small"])("clears a proven %s retirement before the next message without an old-target RPC", async prefix => {
+    const oldTarget = `${prefix}--v-release_1--${"c".repeat(32)}`;
     const retired: HostedStandbySlotBinding = { slotName: oldTarget, releaseId: "release_1",
       region: "GLOBAL", state: "retired", claimId: null, userId: null };
     const readProof = vi.fn(async () => retired);
@@ -4267,54 +4267,6 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("calls the legacy wakeRuntime fallback directly on the container stub", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const wakeRuntime = vi.fn<NonNullable<HostedExecutionContainerStubLike["wakeRuntime"]>>(
-      async () => ({
-        action: "woken" as const,
-        kind: "accepted" as const,
-      }),
-    );
-    const { invoke, runner, sql } = createRunnerHarness({
-      wakeRuntime,
-      workspace: createWorkspaceState({ version: "7" }),
-    });
-    await runner.bindUser(TEST_USER_ID);
-    const token = writeRuntimeFenceForTest(sql, {
-      workspaceVersion: "7",
-    });
-
-    await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt",
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "woken",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: expect.any(String),
-      runtimeAttemptId: token.attemptId,
-    });
-
-    expect(wakeRuntime).toHaveBeenCalledWith({
-      attemptId: token.attemptId,
-      leaseGeneration: String(token.generation),
-      orchestration: {
-        activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
-        activeFenceTargetWasPriorVersion: false,
-        activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
-        runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
-        userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
-        runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
-        runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
-        runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
-        runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
-      },
-      processingMode: "default",
-      userId: TEST_USER_ID,
-    });
-    expect(invoke).not.toHaveBeenCalled();
-  });
-
   it.each([
     ["retention-only", "default", "default", "inbox_media_retention"],
     ["retention-only", "system-mailbox", "system_mailbox", "inbox_media_retention"],
@@ -4453,12 +4405,6 @@ describe("HostedUserRunner execution coordination", () => {
         kind: "accepted" as const,
       }),
     );
-    const wakeRuntime = vi.fn<NonNullable<HostedExecutionContainerStubLike["wakeRuntime"]>>(
-      async () => ({
-        action: "woken" as const,
-        kind: "accepted" as const,
-      }),
-    );
     const readActiveRuntimeUserFence = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
     >(async () => ({
@@ -4471,7 +4417,6 @@ describe("HostedUserRunner execution coordination", () => {
       abortWorkspaceInvocation,
       ensureProcessing,
       readActiveRuntimeUserFence,
-      wakeRuntime,
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
@@ -4498,7 +4443,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledTimes(recheckCount);
     expect(ensureProcessing).not.toHaveBeenCalled();
-    expect(wakeRuntime).not.toHaveBeenCalled();
     expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -9560,7 +9504,6 @@ function createRunnerHarness(input: {
     doubles?: number[];
     indexes?: string[];
   }): void };
-  wakeRuntime?: HostedExecutionContainerStubLike["wakeRuntime"];
   workspace?: HostedWorkspaceState | null;
 } = {}) {
   const durable = createDurableObjectState({
@@ -9714,24 +9657,6 @@ function createRunnerHarness(input: {
           ),
         }
       : {}),
-    ...(input.wakeRuntime
-      ? {
-          wakeRuntime: createDirectOnlyRpcMethod<
-            NonNullable<HostedExecutionContainerStubLike["wakeRuntime"]>
-          >(
-            async function (
-              this: HostedExecutionContainerStubLike,
-              wakeInput,
-            ) {
-              expect(this).toBe(stub);
-              return await input.wakeRuntime?.call(this, wakeInput) ?? {
-                kind: "not-wakeable",
-                reason: "no-active-child",
-              };
-            },
-          ),
-        }
-      : {}),
     invoke,
     smokeHealth: async () => ({
       ok: true,
@@ -9794,6 +9719,7 @@ function createRunnerHarness(input: {
     input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,
     createHostedRunnerContainerNamespaceRouter({
       exactUser: input.runnerContainerNamespace === undefined ? namespace : input.runnerContainerNamespace,
+      small: namespace,
       standby: input.standbyContainerNamespace ?? {
         getByName(name) {
           const container = namespace.getByName(name);

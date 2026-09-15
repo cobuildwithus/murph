@@ -435,13 +435,35 @@ still fires after the first-frame guard has been cancelled. Ping/pong similarly
 proves a responsive transport peer, not inference;
 Murph's Worker relay also separates the client and upstream transport legs.
 
-Production policy remains unchanged in this diagnostic change. Before adopting
-the shorter native timeout, prove fresh-process config adoption, acknowledged
-quiet responses, partial output/tool-effect recovery without duplicate delivery,
-and operator/child/compaction behavior that shares the configuration. Use the
-new relay observations and native timeout phases to distinguish timeout-driven
-recovery from normal model latency. Keep cancellation, retry, and delivery under
-their existing owners; do not introduce a second turn retry loop.
+The current hosted policy uses a provisional 30-second native stream-idle
+timeout for OpenAI, including its HTTPS fallback and operator requests. Child
+requests and streaming compaction inherit the same provider configuration.
+Native Codex also uses this knob for WebSocket sends; it does not replace the
+separate connection and HTTP request budgets.
+Venice and custom inference retain 90 seconds. `codex.prepare` reports the
+selected provider's idle timeout and request/stream retry limits. Native Codex
+still owns the single WebSocket attempt and HTTPS fallback; request retries,
+Murph cancellation, accepted work, and delivery ownership are unchanged.
+
+Local subscription measurements on 2026-09-15 completed eight Terra low turns
+at 90- and 20-second idle settings; the longest provider data gap was 9.377
+seconds. Sol high and extra-high stress runs stayed active through local test
+budgets with maximum gaps of 11.576 and 12.847 seconds, but did not finish an
+answer. No 90-second silence was reproduced. These selected WebSocket samples
+do not establish production latency tails, live HTTPS fallback behavior, or the
+cause of the original delayed reply. Genuine provider silence over 30 seconds
+can interrupt useful work; continuing events reset the idle wait, while local
+tool work occurs outside it. This is not a total reply deadline.
+
+The opt-in `MURPH_RUN_CODEX_30S_PROOF=1` cases in the two fixture files above
+exercise the full 30-second setting: silence before/after acknowledgement or partial text,
+22-second quiet completion, reasoning events and local tools spanning 35
+seconds, continuation recovery after a completed tool, and a resumed next turn.
+Routine CI runs short native equivalents and checks the rendered hosted config.
+Rollout needs fresh-process config adoption; mixed old/new containers retain
+their respective native windows without a wire or persisted-state change.
+Observe selected timeout, acknowledgement/forwarding gaps, native timeout phase,
+fallback frequency, and terminal failures through the existing diagnostics.
 
 ### Web-control preflight rejection attribution
 
@@ -1037,6 +1059,36 @@ For the final bucket, the observed maximum supplies a finite upper bound on the
 retained sample. Histograms merge by summing corresponding counts; never compute
 per-call percentiles from per-profile averages. Truncation/loss means even those
 bounds describe the retained samples, not the complete population.
+
+### Private device failure evidence
+
+Caught device-handler failures may add three optional scalars to the existing
+`ToolFailureDiagnostic` classification row: `deviceAction` is the parsed
+`list_accounts | connect | reconcile | configure_no_data_outreach` action;
+`deviceErrorCode` is exact membership in `DEVICE_FAILURE_CODES` in
+`packages/assistant-engine/src/assistant-codex/tool-failure-diagnostics.ts` (the
+11 codes already recognized by the device adapter); `deviceHttpStatus` is an
+integer from 100 through 599, read from own `status`, or own `statusCode` only
+when `status` is nullish. Unknown codes and absent/invalid statuses are omitted,
+not suppressed failures. A status does not establish an external cause, override
+a local unsupported-selection code, or authorize a retry.
+
+Only this caught-device boundary emits the fields. Capture rejects proxies
+before descriptor reads and never invokes accessors, follows prototypes, reads
+contexts/causes/bodies/payloads, or retains errors, names, prose, providers,
+identifiers, arguments or results. The existing issue-input, reporting and
+sanitizer path retains the scalars without schema or cap changes (at most eight
+classification detail keys here, within the existing 24-key cap). Old/missing
+fields remain valid. RPCs, prompts, tool schemas, completion counters and
+success/admission telemetry are unchanged; classification rows are not another
+completed-call denominator.
+
+For the next authorized review, query at most 200 device classification failures
+in one fixed 24-hour window, grouped only by these fields and the existing
+reason/category. Keep missing/unknown evidence unresolved and completion counts
+separate. Propose a behavior correction only after at least two matching
+action/code observations and a deterministic reproduction at the responsible
+owner; telemetry alone does not establish the original cause.
 
 ### Finite CLI failure counts (optional, same timing identity)
 

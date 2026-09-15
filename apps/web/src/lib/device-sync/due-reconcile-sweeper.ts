@@ -10,9 +10,10 @@ import {
   buildHostedDeviceSyncScheduledReconcileWakeEventId,
 } from "./wake-service";
 
-const DEFAULT_WAKE_LIMIT = 25;
+const DEFAULT_WAKE_LIMIT = 100;
 const DUE_RECONCILE_WAKE_BUCKET_MS = 5 * 60_000;
 const MAX_WAKE_LIMIT = 250;
+const PREFLIGHT_START_BUDGET_MS = 60_000;
 
 export interface HostedDeviceSyncDueReconcileSweeperResult {
   dueConnections: number;
@@ -21,7 +22,7 @@ export interface HostedDeviceSyncDueReconcileSweeperResult {
   wakeFailed: number;
   wakeLimit: number;
   wakeNotAccepted: number;
-  skippedDueConnections: number;
+  hasMoreDueConnections: boolean;
 }
 
 type HostedDeviceSyncDueReconcileSweeperLogger = Pick<Console, "info" | "warn">;
@@ -54,6 +55,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     recoveryBucketStartedAt: wakeBucketStartedAt,
   });
   const selectedDueConnections = dueConnections.slice(0, wakeLimit);
+  const hasMoreDueConnections = dueConnections.length > selectedDueConnections.length;
 
   logger.info("Hosted device-sync due reconcile sweeper scanned due connections.", {
     dueAt: nowIso,
@@ -61,6 +63,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     wakeBucketStartedAt: wakeBucketStartedAtIso,
     wakeLimit,
     selectedDueConnections: selectedDueConnections.length,
+    hasMoreDueConnections,
     orphanedDirtyRecoveryCount: selectedDueConnections.filter(
       (connection) => connection.orphanedDirtyRecoveryKey !== undefined,
     ).length,
@@ -77,12 +80,17 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     webhookAgeOutcomes: {} as Record<string, number>,
   };
 
+  const preflightStartedAt = performance.now();
   await runHostedRecoveryBatch(
     selectedDueConnections,
     async (dueConnection) => {
       const canProbe = dueConnection.provider === "junction"
         && dueConnection.orphanedDirtyRecoveryKey === undefined;
-      if (canProbe) {
+      // Stop starting optional preflights after a minute; await started work
+      // and give remaining candidates their ordinary scheduled wakes.
+      if (canProbe && performance.now() - preflightStartedAt >= PREFLIGHT_START_BUDGET_MS) {
+        preflightTotals.reasons.budget_exhausted = (preflightTotals.reasons.budget_exhausted ?? 0) + 1;
+      } else if (canProbe) {
         preflightTotals.attempted += 1;
         try {
           const probe = await (input.preflight ?? preflightHostedScheduledReconcile)({ connection: dueConnection, now });
@@ -164,11 +172,10 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     true,
   );
 
-  const skippedDueConnections = Math.max(0, dueConnections.length - selectedDueConnections.length);
-  if (skippedDueConnections > 0) {
-    logger.warn("Hosted device-sync due reconcile sweeper skipped due connections after wake limit.", {
+  if (hasMoreDueConnections) {
+    logger.warn("Hosted device-sync due reconcile sweeper has more due connections after wake limit.", {
       wakeLimit,
-      skippedDueConnections,
+      hasMoreDueConnections,
     });
   }
 
@@ -179,7 +186,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     wakeFailed,
     wakeLimit,
     wakeNotAccepted,
-    skippedDueConnections,
+    hasMoreDueConnections,
     preflight: preflightTotals,
   });
 
@@ -190,7 +197,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     wakeFailed,
     wakeLimit,
     wakeNotAccepted,
-    skippedDueConnections,
+    hasMoreDueConnections,
   };
 }
 

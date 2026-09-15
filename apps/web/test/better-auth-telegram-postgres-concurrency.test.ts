@@ -148,6 +148,36 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     return { idToken: flow.idToken, change: result.change, authorization: member.approve(result.challenge) };
   }
 
+  it("creates login proofs and linked accounts without adapter ID warnings", async () => {
+    const member = await credentialMember(false);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const login = await begin();
+    const credential = await beginCredential(member);
+    const credentialNonce = credential.nonceCookie.slice(credential.nonceCookie.indexOf("=") + 1);
+    const rows = await getPrisma().hostedAuthRecord.findMany({ where: {
+      model: "verification", lookupKey: { in: [login.nonce, credentialNonce].map((nonce) =>
+        authLookupKey("verification", "identifier", `telegram-login:${nonce}`)) },
+    }, take: 2 });
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2);
+    for (const row of rows) {
+      const record = await openAuthRecord(row, getPrisma());
+      expect(record.id).toEqual(expect.any(String));
+      expect(record.id).toBeTruthy();
+      expect(record.expiresAt).toBeInstanceOf(Date);
+    }
+    const prepared = await (await prepareCredential(request("/api/settings/login-methods/telegram/prepare", {
+      idToken: credential.idToken,
+    }, credential.cookie))).json();
+    expect((await verifyCredential(request("/api/settings/login-methods/telegram/verify", {
+      change: prepared.change, idToken: credential.idToken,
+    }, credential.cookie))).status).toBe(200);
+    expect((await readHostedLoginMethods(getPrisma(), member.memberId)).methods.telegram).toBe(credential.id);
+    expect(warn.mock.calls.some((args) => args.some((arg) => String(arg).includes("forceAllowId")))).toBe(false);
+    expect(log.mock.calls.some((args) => args.some((arg) => String(arg).includes("Create method with `id`")))).toBe(false);
+  });
+
   it("links the first Telegram account after email without a passkey and rejects replay and replacement", async () => {
     const prisma = getPrisma(); const member = await credentialMember(false);
     const flow = await beginCredential(member);

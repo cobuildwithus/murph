@@ -30,6 +30,7 @@ import {
 } from "./runner-container-ca-env.ts";
 import {
   isHostedRunnerSlotName,
+  isHostedSmallRunnerSlotName,
   isHostedRunnerTargetName,
   isHostedStandbySlotName,
   readHostedStandbyReleaseId,
@@ -324,7 +325,6 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   ): Promise<void>;
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
   smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
-  wakeRuntime?(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -633,7 +633,7 @@ export class RunnerContainer extends Container {
 
   protected readonly environment: RunnerContainerEnvironmentSource;
   // This discriminator is namespace identity, not a second lifecycle owner.
-  protected readonly slotNamespace: "runner" | "standby" = "runner";
+  protected readonly slotNamespace: "runner" | "standby" | "small" = "runner";
   private slotStore: RunnerSlotBindingStore | null = null;
   private readonly durableObjectName: string | null;
   private lifecycleLock: Promise<void> = Promise.resolve();
@@ -695,8 +695,8 @@ export class RunnerContainer extends Container {
     slotName: string;
   }> {
     this.assertRunnerSlotAllocationIdentity(input);
-    if (this.slotNamespace === "standby") {
-      throw new Error("Legacy standby inventory is drain-only.");
+    if (this.slotNamespace !== "runner") {
+      throw new Error("Legacy runner inventory is drain-only.");
     }
     if (readHostedRunnerDeployment(this.environment)?.previous?.id === input.releaseId) {
       throw new Error("Previous runner inventory is drain-only.");
@@ -757,8 +757,8 @@ export class RunnerContainer extends Container {
     this.assertRunnerSlotAllocationIdentity(input);
     return await this.withLifecycleLock(async () => {
       const store = this.requireRunnerSlotStore();
-      if (this.slotNamespace === "standby" && store.readOptional()?.state !== "bound") {
-        throw new Error("Legacy standby allocation is drain-only.");
+      if (this.slotNamespace !== "runner" && store.readOptional()?.state !== "bound") {
+        throw new Error("Legacy runner allocation is drain-only.");
       }
       const deployment = readHostedRunnerDeployment(this.environment);
       if (deployment && input.releaseId !== deployment.active.id && store.readOptional()?.state !== "bound") {
@@ -899,7 +899,8 @@ export class RunnerContainer extends Container {
   private assertRunnerSlotNamespace(slotName: string): void {
     const valid = this.slotNamespace === "standby"
       ? isHostedStandbySlotName(slotName)
-      : isHostedRunnerSlotName(slotName);
+      : this.slotNamespace === "small" ? isHostedSmallRunnerSlotName(slotName)
+        : isHostedRunnerSlotName(slotName) && !isHostedSmallRunnerSlotName(slotName);
     if (!valid) throw new Error("Hosted runner slot belongs to a different namespace.");
     if (this.durableObjectName !== null && this.durableObjectName !== slotName) {
       throw new Error("Hosted runner slot does not match the addressed Durable Object.");
@@ -1232,12 +1233,17 @@ export class RunnerContainer extends Container {
   }
 
   async readActiveRuntimeUserFence(): Promise<WorkerActiveRuntimeUserFenceResult> {
-    this.noteContainerInteraction();
     const abortInProgress = this.workspaceInvocationNoPointerAbort;
+    const active = this.readWorkspaceInvocationOperation();
+    if (active && !abortInProgress && !active.abortResult && !active.requiresFailClosedStopReason) {
+      // Observing the registered owner admits no work and performs no I/O.
+      // Preserve its completion generation; actual arrivals still invalidate it.
+      return createActiveRuntimeUserFence(active);
+    }
+    this.noteContainerInteraction();
     if (abortInProgress) {
       return createActiveRuntimeUserFence(abortInProgress);
     }
-    const active = this.readWorkspaceInvocationOperation();
     if (!active) {
       const status = await readRunnerContainerStatus(this);
       if (
@@ -1520,8 +1526,6 @@ export class RunnerContainer extends Container {
   }
 
   async ensureProcessing(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult> {
-    this.authorizeBoundUser(input.userId);
-    this.noteContainerInteraction();
     assertRunnerContainerEnsureProcessingUserIds(input);
     let startAction: Extract<RunnerContainerEnsureProcessingResult, { kind: "accepted" }>["action"] = "started";
     if (input.activeRuntime) {
@@ -1552,6 +1556,8 @@ export class RunnerContainer extends Container {
       startAction = "restarted";
     }
 
+    this.authorizeBoundUser(input.userId);
+    this.noteContainerInteraction();
     if (!input.invoke) {
       return {
         kind: "start-required",
@@ -1697,7 +1703,9 @@ export class RunnerContainer extends Container {
     try {
       diagnostics.wakeStage = "dispatch";
       diagnostics.wakeDispatchAtEpochMs = Date.now();
-      const response = await this.containerFetch(
+      // A wake probes an existing child; SDK proxying can read stale lifecycle
+      // state and enter startup before sending. Cold starts have a separate owner.
+      const response = await this.ctx.container!.getTcpPort(RUNNER_PORT).fetch(
         RUNNER_RUNTIME_WAKE_URL,
         {
           body: JSON.stringify(input),

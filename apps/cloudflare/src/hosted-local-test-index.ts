@@ -1,3 +1,4 @@
+export { SmallRunnerContainer } from "./standby-runner-container.ts";
 export { ContainerProxy } from "@cloudflare/containers";
 export {
   DeploySmokeRunnerContainer,

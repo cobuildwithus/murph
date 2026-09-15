@@ -1177,6 +1177,52 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
+  it("wakes through the native port without consulting SDK startup state", async () => {
+    const nativeFetch = vi.fn(async () => new Response(null, {
+      status: 204,
+      headers: {
+        "x-runtime-wake-accepted": "1",
+        "x-runtime-wake-identity-checked": "1",
+      },
+    }));
+    const getTcpPort = vi.fn(() => ({ fetch: nativeFetch }));
+    const sdkFetch = vi.fn(async () => {
+      throw new Error("Synthetic unavailable SDK lifecycle state");
+    });
+    const { container, destroy, getState, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "stopped",
+      state: { container: { running: true, getTcpPort } },
+      containerFetch: sdkFetch,
+    });
+
+    await expect(container.ensureProcessing({
+      activeRuntime: {
+        attemptId: "attempt_native_wake",
+        leaseGeneration: "12",
+        userId: "member_123",
+      },
+      userId: "member_123",
+    })).resolves.toMatchObject({ kind: "accepted", action: "woken" });
+
+    expect(getTcpPort).toHaveBeenCalledWith(8080);
+    expect(nativeFetch).toHaveBeenCalledExactlyOnceWith(
+      "http://container/internal/runtime-wake",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          attemptId: "attempt_native_wake",
+          leaseGeneration: "12",
+          userId: "member_123",
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(sdkFetch).not.toHaveBeenCalled();
+    expect(getState).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it("does not turn accepted response headers into success when metadata drain fails", async () => {
     const { container } = createContainerDouble({
       initialStatus: "running", platformRunning: true,
@@ -10934,17 +10980,14 @@ interface CreateContainerDoubleInput {
 function createContainerDouble(input: CreateContainerDoubleInput = {}) {
   let currentStatus = input.initialStatus ?? "stopped";
   let currentLastChange = Date.now();
-  const platformContainer = input.platformRunning === undefined
-    ? undefined
-    : {
-        get running(): boolean {
-          return input.platformRunning === true;
-        },
-      };
+  const platformContainer = {
+    get running(): boolean | undefined { return input.platformRunning; },
+    getTcpPort: () => ({ fetch: containerFetch }),
+  };
   const ContainerClass = input.containerClass ?? RunnerContainer;
   const storage = input.storage ?? createContainerStorageDouble();
   const container = new ContainerClass({
-    ...(platformContainer ? { container: platformContainer } : {}),
+    container: platformContainer,
     storage,
     ...(input.state ?? {}),
   } as never, {

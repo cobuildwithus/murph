@@ -81,7 +81,7 @@ import {
 } from "./hosted-runtime/environment.ts";
 import {
   HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
-  HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
+  hostedCodexProviderTransportDiagnostics,
   prepareHostedCodexRuntimeEnvironment,
   projectHostedRuntimeProcessEnvironment,
   resolveHostedCodexModelCatalogPath,
@@ -2445,7 +2445,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           codexEffectiveModelProviderId:
             preparedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
           ...HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
-          ...HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
+          ...hostedCodexProviderTransportDiagnostics(
+            preparedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? "",
+          ),
           runtimeEnvKeyCount: Object.keys(preparedCodexRuntime.runtimeEnv).length,
           voiceMemoElevenLabsApiKeyConfigured:
             hasHostedRuntimeEnvValue(preparedCodexRuntime.runtimeEnv, "ELEVENLABS_API_KEY"),
@@ -3064,6 +3066,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             systemMailboxProgressedSinceCheckpoint = true;
           },
         });
+      let latestMailboxImport = initialMailboxImport;
+      let completionTailAttempted = false;
+      let completionTailImportEffects: HostedMailboxImportCheckpointResult | null = null;
       let currentRedactedStatus = buildHostedMailboxImportRedactedStatus(
         initialMailboxImport.importResult,
       );
@@ -3117,7 +3122,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ) => await resolveHostedSystemMailboxProcessingModeWake({
         assistantExecutionBlocked,
         extraCandidates,
-        mailboxImportRetryAt: initialMailboxImport.importResult.nextRetryAt ?? null,
+        mailboxImportRetryAt: latestMailboxImport.importResult.nextRetryAt ?? null,
         nowMs: Date.now(),
         operatorHomeRoot: restored.operatorHomeRoot,
         runtimeEnv: invocationRuntimeEnv,
@@ -3143,20 +3148,30 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         ...(systemMailboxPostRecordWake?.at ? [systemMailboxPostRecordWake] : []),
         ...extraCandidates,
       ], systemMailboxState);
-      const finishInitialImportEffectsOnce = async () => {
+      const finishMailboxImportEffectsOnce = async () => {
         if (
           !checkpointed
-          || initialMailboxImportPostCheckpointEffectsFinished
           || shouldYieldSystemMailboxWork()
         ) {
           return;
         }
-        initialMailboxImportPostCheckpointEffectsFinished = true;
-        await finishHostedMailboxImportPostCheckpointEffects({
-          importResult: initialMailboxImport,
-          runnerInput: baseRunnerInput,
-          signal: runtimeAbortController.signal,
-        });
+        if (!initialMailboxImportPostCheckpointEffectsFinished) {
+          initialMailboxImportPostCheckpointEffectsFinished = true;
+          await finishHostedMailboxImportPostCheckpointEffects({
+            importResult: initialMailboxImport,
+            runnerInput: baseRunnerInput,
+            signal: runtimeAbortController.signal,
+          });
+        }
+        if (completionTailImportEffects && !shouldYieldSystemMailboxWork()) {
+          const importResult = completionTailImportEffects;
+          completionTailImportEffects = null;
+          await finishHostedMailboxImportPostCheckpointEffects({
+            importResult,
+            runnerInput: baseRunnerInput,
+            signal: runtimeAbortController.signal,
+          });
+        }
       };
       const offerVaultShareProjectionBeforeRecording = async (
         projectionMode?: HostedVaultShareProjectionMode,
@@ -3323,6 +3338,55 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           ? { outcome: "preempted" }
           : { outcome: "completed", result: offerResult.value };
       };
+      const importSystemMailboxCompletionTail = async (): Promise<void> => {
+        if (completionTailAttempted || pendingDurableCheckpointEffects.length === 0
+          || mailboxBudgetExhausted() || backgroundWorkSignal.aborted
+          || shouldYieldSystemMailboxWork()) return;
+        completionTailAttempted = true;
+        // Admit one prefix while the completed owners are quiescent. Their
+        // original preparation still owns publication and covered-hint removal.
+        const interruption = createHostedRuntimeCheckpointWakeInterruption({
+          enabled: true, runtimeWakeSignal: systemMailboxWakeSignal,
+        });
+        const fetchSignal = interruption.signal
+          ? AbortSignal.any([backgroundWorkSignal, interruption.signal])
+          : backgroundWorkSignal;
+        try {
+          const tail = await runHostedWorkspaceUntilIdleOrBudget({
+            ...baseRunnerInput,
+            deferInitialMailboxPostCheckpointEffects: true,
+            importItem: async (item, context) => {
+              if (interruption.signal?.aborted || shouldYieldSystemMailboxWork()) {
+                return { status: "deferred", reasonCode: "runtime.background_yield" };
+              }
+              return await importMailboxItem(item, context);
+            },
+            initialMailboxFetchSignal: fetchSignal,
+            initialMailboxImportContext: { assistantBootstrap: initialAssistantBootstrap },
+            initialMailboxImportLanes: ["system"],
+            requestId: `${requestId}:system-mailbox-completion-tail`,
+            signal: backgroundWorkSignal,
+            workspace: checkpointRequestBuilder.latestWorkspace() ?? activeWorkspace,
+          });
+          latestMailboxImport = tail.latestMailboxImport;
+          completionTailImportEffects = latestMailboxImport;
+          activeWorkspace = tail.latestWorkspace ?? activeWorkspace;
+          runtimeStateDirty ||= tail.runtimeStateDirty;
+          importOrStartupCheckpointPending ||= latestMailboxImport.checkpointDeferred
+            && latestMailboxImport.stateChanged;
+          currentRedactedStatus = {
+            ...currentRedactedStatus,
+            ...tail.runtimeRedactedStatus,
+            ...buildHostedMailboxImportRedactedStatus(latestMailboxImport.importResult),
+          };
+        } catch (error) {
+          if (!(error instanceof HostedRuntimeCheckpointInterruptedByWakeError)
+            || !interruption.signal?.aborted) throw error;
+        } finally {
+          await interruption.dispose();
+          observeForegroundWake(interruption.takeNotification());
+        }
+      };
       const checkpointSystemMailboxMode = async (
         systemMailboxCheckpointStage: string,
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
@@ -3333,6 +3397,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           checkpointSignal ?? runtimeAbortController.signal,
         );
         checkpointSignal?.throwIfAborted();
+        await importSystemMailboxCompletionTail();
         activeWorkspace = checkpointRequestBuilder.latestWorkspace() ?? activeWorkspace;
         currentRedactedStatus = { ...currentRedactedStatus, ...checkpointRequestBuilder.readRedactedStatus() };
         const checkpointWake = await resolveCurrentSystemMailboxModeWake(extraCandidates);
@@ -3409,7 +3474,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             foregroundWakeObserved = true;
           }
         }
-        await finishInitialImportEffectsOnce();
+        await finishMailboxImportEffectsOnce();
         return checkpoint;
       };
       const prefetchSystemMailboxAssistantWork = async (): Promise<boolean> => {
@@ -3561,7 +3626,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             || (!assistantExecutionBlocked && defaultOwnerDueNow),
           nextWake: returnedWake,
           redactedStatus: await withHostedMailboxProgressStatus({
-            mailboxState: initialMailboxImport.state,
+            mailboxState: latestMailboxImport.state,
             redactedStatus: currentRedactedStatus,
             systemMailboxState,
             vaultRoot: restored.vaultRoot,

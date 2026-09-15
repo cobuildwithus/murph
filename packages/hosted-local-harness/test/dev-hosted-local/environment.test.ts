@@ -1712,6 +1712,7 @@ describe("buildWranglerLocalDevConfig", () => {
       "NextRunnerContainer",
       "DeploySmokeRunnerContainer",
       "StandbyRunnerContainer",
+      "SmallRunnerContainer",
     ]);
     expect(config.compatibility_flags).toEqual([
       "nodejs_compat",

@@ -393,6 +393,7 @@ export interface WorkerEnvironmentContract<
   >;
   STANDBY_COORDINATOR?: HostedStandbyCoordinatorNamespaceLike;
   STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
+  SMALL_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;

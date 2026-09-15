@@ -66,6 +66,15 @@
       },
       "rollout_active_grace_period": 0,
       "ssh": { "enabled": false }
+    },
+    {
+      "class_name": "SmallRunnerContainer",
+      "image": "../../Dockerfile.cloudflare-hosted-runner",
+      "image_build_context": ".",
+      "instance_type": { "vcpu": 2, "memory_mib": 6144, "disk_mb": 6000 },
+      "max_instances": 0,
+      "rollout_active_grace_period": 0,
+      "ssh": { "enabled": false }
     }
   ],
   "durable_objects": {
@@ -105,7 +114,8 @@
       {
         "name": "STANDBY_RUNNER_CONTAINER",
         "class_name": "StandbyRunnerContainer"
-      }
+      },
+      { "name": "SMALL_RUNNER_CONTAINER", "class_name": "SmallRunnerContainer" }
     ]
   },
   "version_metadata": {
@@ -150,10 +160,6 @@
     {
       "tag": "v9",
       "new_sqlite_classes": ["SmallRunnerContainer"]
-    },
-    {
-      "tag": "v10",
-      "deleted_classes": ["SmallRunnerContainer"]
     }
   ],
   "triggers": {

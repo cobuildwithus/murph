@@ -235,7 +235,7 @@ describe("createHostedAssistantInputSource", () => {
         dedupeKey: "dedupe_late_active",
         eventId: "evt_late_active",
         itemId: "item_late_active",
-        laneSeq: "30",
+        laneSeq: "21",
         messageId: "msg_late_active",
         occurredAt: "2026-04-23T00:00:05.000Z",
         receivedAt: "2026-04-23T00:00:06.000Z",
@@ -436,7 +436,10 @@ describe("createHostedAssistantInputSource", () => {
     expect(listSpy).not.toHaveBeenCalled();
   });
 
-  it("does not live-steer an exact notified input across a causal gap", async () => {
+  it.each([
+    { laneSeq: "31", admitted: true },
+    { laneSeq: "32", admitted: false },
+  ])("live admission across system events requires the next conversation sequence: $laneSeq", async ({ laneSeq, admitted }) => {
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
@@ -461,7 +464,7 @@ describe("createHostedAssistantInputSource", () => {
         dedupeKey: "dedupe_exact_after_gap",
         eventId: "evt_exact_after_gap",
         itemId: "item_exact_after_gap",
-        laneSeq: "32",
+        laneSeq,
         messageId: "msg_exact_after_gap",
         occurredAt: "2026-04-23T00:00:03.000Z",
         receivedAt: "2026-04-23T00:00:04.000Z",
@@ -484,7 +487,8 @@ describe("createHostedAssistantInputSource", () => {
       sourceId: "linq",
     });
 
-    expect(exact.inputs).toEqual([]);
+    expect(exact.inputs.map((candidate) => candidate.event.inputId))
+      .toEqual(admitted ? [afterGap.inputId] : []);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       anchor.inputId,
       afterGap.inputId,
@@ -1456,13 +1460,23 @@ describe("selectHostedAssistantInputIds", () => {
     );
   });
 
-  it("ends a same-conversation batch at a causal-sequence gap", async () => {
+  it.each([
+    { mode: "foreground" as const, threadIsDirect: true },
+    { mode: "background" as const, threadIsDirect: true },
+    { mode: "foreground" as const, threadIsDirect: false },
+    { mode: "background" as const, threadIsDirect: false },
+  ])("hands conversation neighbors across system events to one batch: $mode/direct=$threadIsDirect", async ({ mode, threadIsDirect }) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-24T00:00:00.000Z"));
     const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
     const first = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
         causalSeq: "7",
         dedupeKey: "dedupe_causal_gap_first",
+        threadIsDirect,
+        routeAuthority: true,
         eventId: "evt_causal_gap_first",
         itemId: "item_causal_gap_first",
         laneSeq: "10",
@@ -1475,6 +1489,8 @@ describe("selectHostedAssistantInputIds", () => {
       event: createAssistantInputEvent({
         causalSeq: "9",
         dedupeKey: "dedupe_causal_gap_second",
+        threadIsDirect,
+        routeAuthority: true,
         eventId: "evt_causal_gap_second",
         itemId: "item_causal_gap_second",
         laneSeq: "11",
@@ -1483,13 +1499,23 @@ describe("selectHostedAssistantInputIds", () => {
       }),
     });
 
-    const selection = await selectHostedAssistantInputIds({
-      freshAssistantInputIds: [first.inputId, afterGap.inputId],
-      mode: "foreground",
+    for (const inputId of [first.inputId, afterGap.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+    const selection = await selectHostedAssistantInputIds(mode === "foreground"
+      ? { freshAssistantInputIds: [first.inputId, afterGap.inputId], mode, vaultRoot }
+      : { mode, vaultRoot });
+
+    expect(selection.inputIds).toEqual([first.inputId, afterGap.inputId]);
+    const source = createHostedAssistantInputSource({
+      initialPendingInputIds: [first.inputId, afterGap.inputId],
+      pendingInputRefreshMode: "none",
+      selectedInputIds: selection.inputIds,
       vaultRoot,
     });
-
-    expect(selection.inputIds).toEqual([first.inputId]);
+    const batch = await source.listInputCandidates({ sourceId: "linq" });
+    expect(batch.inputs.map((candidate) => candidate.event.inputId))
+      .toEqual([first.inputId, afterGap.inputId]);
   });
 
   it("ends a same-conversation batch at a native reply-anchor change", async () => {
@@ -1694,6 +1720,42 @@ describe("selectHostedAssistantInputIds", () => {
     });
 
     expect(selection.inputIds).toEqual([first.inputId]);
+  });
+
+  it.each([
+    { laneSeq: "12", causalSeq: "8", lane: "conversation" as const },
+    { laneSeq: "11", causalSeq: "7", lane: "conversation" as const },
+    { laneSeq: "11", causalSeq: "6", lane: "conversation" as const },
+    { laneSeq: "11", causalSeq: "0", lane: "conversation" as const },
+    { laneSeq: "invalid", causalSeq: "8", lane: "conversation" as const },
+    { laneSeq: "11", causalSeq: "8", lane: "system" as const },
+  ])("keeps invalid conversation succession pending: $lane/$laneSeq/$causalSeq", async (next) => {
+    const vaultRoot = await createTempVault();
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "7", laneSeq: "10", itemId: "item_order_first",
+        eventId: "evt_order_first", dedupeKey: "dedupe_order_first",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+      }),
+    });
+    const second = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        ...next, itemId: "item_order_second",
+        eventId: "evt_order_second", dedupeKey: "dedupe_order_second",
+        occurredAt: "2026-04-23T00:00:02.000Z",
+      }),
+    });
+    const assistantInputIds = [first.inputId, second.inputId];
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: assistantInputIds, mode: "foreground", vaultRoot,
+    });
+    expect(selection.inputIds).toEqual([first.inputId]);
+    const accepted = await resolveHostedCurrentInputIdForAcceptedInputs({
+      assistantInputIds, vaultRoot,
+    });
+    expect(accepted.currentInputId).toBeNull();
   });
 
   it("ends a causal batch before a legacy unsequenced input", async () => {
@@ -2064,7 +2126,7 @@ describe("selectHostedAssistantInputIds", () => {
         eventId: "evt_middle",
         itemId: "item_middle",
         causalSeq: "11",
-        laneSeq: "20",
+        laneSeq: "11",
         messageId: "msg_middle",
         occurredAt: "2026-04-23T00:00:03.000Z",
         receivedAt: "2026-04-23T00:00:04.000Z",
@@ -2078,7 +2140,7 @@ describe("selectHostedAssistantInputIds", () => {
         eventId: "evt_newest",
         itemId: "item_newest",
         causalSeq: "12",
-        laneSeq: "30",
+        laneSeq: "12",
         messageId: "msg_newest",
         occurredAt: "2026-04-23T00:00:05.000Z",
         receivedAt: "2026-04-23T00:00:06.000Z",
@@ -2123,7 +2185,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
     });
   });
 
-  it("uses the terminal input id of an exact-successor batch", async () => {
+  it("uses the terminal input id across intervening system events", async () => {
     const vaultRoot = await createTempVault();
     const first = await upsertAssistantInputEvent({
       vault: vaultRoot,
@@ -2138,7 +2200,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
     const second = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
-        causalSeq: "8",
+        causalSeq: "12",
         dedupeKey: "dedupe_causal_batch_second",
         eventId: "evt_causal_batch_second",
         itemId: "item_causal_batch_second",
@@ -2160,7 +2222,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
     });
   });
 
-  it("fails closed instead of crossing a causal-sequence gap", async () => {
+  it("fails closed instead of skipping a conversation message", async () => {
     const vaultRoot = await createTempVault();
     const first = await upsertAssistantInputEvent({
       vault: vaultRoot,
@@ -2179,7 +2241,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
         dedupeKey: "dedupe_causal_batch_gap_second",
         eventId: "evt_causal_batch_gap_second",
         itemId: "item_causal_batch_gap_second",
-        laneSeq: "42",
+        laneSeq: "43",
       }),
     });
 

@@ -48,11 +48,13 @@ describe('assistant personalization tool', () => {
   it('advertises sparse updates with paired persona fields and preserves runtime admission', () => {
     expect(MURPH_PERSONALIZATION_TOOL.inputSchema.oneOf[1]).toMatchObject({
       type: 'object', additionalProperties: false, required: ['action'], minProperties: 2,
+      not: { required: ['message_ref'], maxProperties: 2 },
       dependentRequired: {
         mainPersona: ['supportingPersona'], supportingPersona: ['mainPersona'],
       },
     })
     expect(MURPH_PERSONALIZATION_TOOL.description).toContain('send only the fields the user wants changed')
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain('call update once without read; its result reports the saved value')
     const fields = ['mainPersona', 'supportingPersona', 'tone', 'voice'] as const
     for (const supportingPersona of ['classic', null]) {
       const values = { mainPersona: 'scientist', supportingPersona, tone: 'formal', voice: 'upbeat' }
@@ -67,6 +69,66 @@ describe('assistant personalization tool', () => {
         } })
         expect(parsed?.kind, JSON.stringify(argumentsValue)).toBe(valid ? 'personalization' : 'invalid-personalization-arguments')
       }
+    }
+  })
+
+  it.each([
+    { messageRef: `ain_${'1'.repeat(32)}`, accepted: true },
+    { messageRef: `ain_${'2'.repeat(32)}`, accepted: true },
+    { messageRef: `ain_${'3'.repeat(32)}`, accepted: false },
+    { messageRef: undefined, accepted: false },
+  ])('binds a personalization batch update to selected source $messageRef', async ({ messageRef, accepted }) => {
+    const args = {
+      action: 'update', tone: 'formal',
+      ...(messageRef === undefined ? {} : { message_ref: messageRef }),
+    }
+    expect(advertisedInput(args)).toBe(true)
+    const request = readTestMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: { arguments: args, namespace: 'murph', tool: 'personalization' },
+    })
+    if (!request) throw new Error('Expected a personalization request.')
+    const personalizationTool = { request: vi.fn(async () => ({ action: 'read' as const, result: {
+      mainPersona: 'classic' as const, model: 'gpt-5.6-terra' as const,
+      solAvailable: true, supportingPersona: null, tone: 'formal' as const, voice: 'warm' as const,
+    } })) }
+    const result = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null, request,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentAssistantInputId: () => `ain_${'2'.repeat(32)}`,
+        currentUserActionScope: () => ({
+          acceptedInputIds: [`ain_${'1'.repeat(32)}`, `ain_${'2'.repeat(32)}`],
+          conversationId: 'conversation_personalization', conversationScope: 'direct',
+          inboundMailboxItemIds: [], originSessionId: 'session_personalization', recipientKey: null,
+        }),
+        currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+        personalizationTool, vaultFileSendAvailable: false,
+        sendVaultFile: async () => { throw new Error('unavailable') },
+      },
+    })
+    expect(result.rpcResult.success).toBe(accepted)
+    if (accepted) {
+      expect(personalizationTool.request).toHaveBeenCalledExactlyOnceWith(
+        { action: 'update', tone: 'formal' },
+        { assistantInputId: messageRef, toolCallId: 'call-test' },
+      )
+    } else {
+      expect(personalizationTool.request).not.toHaveBeenCalled()
+    }
+  })
+
+  it('rejects source-only updates, malformed refs, and refs on reads', () => {
+    for (const args of [
+      { action: 'update', message_ref: `ain_${'1'.repeat(32)}` },
+      { action: 'update', tone: 'casual', message_ref: 'invalid' },
+      { action: 'read', message_ref: `ain_${'1'.repeat(32)}` },
+    ]) {
+      expect(advertisedInput(args)).toBe(false)
+      expect(readTestMurphDynamicToolRequest({
+        method: 'item/tool/call',
+        params: { arguments: args, namespace: 'murph', tool: 'personalization' },
+      })?.kind).toBe('invalid-personalization-arguments')
     }
   })
 
@@ -97,6 +159,9 @@ describe('assistant personalization tool', () => {
     )
     expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
       'lowercase means casual',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'Confirm casing as sentence case or lowercase in the reply.',
     )
     expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
       'rather than an unsupported setting',

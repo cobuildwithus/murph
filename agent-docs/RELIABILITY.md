@@ -642,8 +642,9 @@ to apply after cutover.
 
 - Web recovery sweeps spread each selected due-device wake and shared mailbox
   handoff across a stable zero-to-five-second per-user jitter window. The
-  existing 25-item default, 250-item limit, and five-operation concurrency cap
-  remain; selection/access checks stay bounded and selected items are ordered
+  device sweep defaults to 100 items; the shared mailbox handoff remains at
+  25. Both retain the 250-item limit and five-operation concurrency cap;
+  selection/access checks stay bounded and selected items are ordered
   by offset before taking execution slots. Pacing happens before transaction or
   signal entry and holds no pooled connection. Offsets use monotonic elapsed
   time within each batch, so delays do not accumulate per item. The shared
@@ -654,7 +655,13 @@ to apply after cutover.
   interrupted work remains discoverable through existing due state and mailbox
   ownership. Direct ingress, exact reminders, and runtime/provider retry
   deadlines do not enter this executor. Jitter reduces recovery bursts, not
-  total work or a guaranteed global requests-per-second ceiling.
+  total work or a guaranteed global requests-per-second ceiling. The device
+  sweep reports its limit-plus-one sentinel as `hasMoreDueConnections`, not an
+  exact backlog count. Optional device preflights stop starting after 60 seconds
+  of monotonic batch time, including jitter; already-started preflights are
+  awaited and provider calls retain their existing timeout. Remaining connections
+  use the ordinary scheduled wake path. This admission budget does not bound the full
+  callback or alter provider cadence, retry ownership, or live authority checks.
 
 ## Runtime Expectations
 
@@ -1760,15 +1767,21 @@ to apply after cutover.
   deadlines. This transfers the hints to
   the existing durable continuation before dirty input is fetched; it never discards its provider jobs or backoff. A
   Same-epoch connection-established work may join this admission when its
-  initial jobs have explicit, non-colliding identities and fit the existing
-  pass admission bound. The atomic claim adds those jobs, preserving their
+  initial jobs have explicit identities and fit the existing pass admission bound.
+  If a canonical Web job key collides with an older retained job, the incoming
+  connection event scopes a new deterministic key before atomic transfer. This
+  admits repeated source completions sharing a provider day-window key without
+  overwriting the older cursor or retry deadline. Duplicate incoming identities,
+  collisions with the recovered key, and noncanonical key collisions remain
+  barriers. Producer payloads and replay identities stay unchanged. The atomic
+  claim adds those jobs, preserving their
   original availability, to the existing owner's exact retry hints before
   removing the covered input. It carries the latest supplied scopes and later
   cadence hint; canonical snapshot hydration still owns connection authority.
   Foreground preemption, execution failure and cold restore retain the merged
   wake, including every older cursor and retry deadline. A distinct epoch,
   disconnect or reauthorization event, other explicit job, scoped manual request,
-  recording or attempted item, unknown hint semantics, colliding job identity,
+  recording or attempted item, unknown hint semantics, ambiguous job identity,
   or newer scheduled cadence remains a same-connection ordering barrier.
   A pristine same-epoch manual reconcile request with only its reason and
   optional occurrence hint also joins the owner immediately. Its atomic claim
@@ -3450,9 +3463,12 @@ client timestamp and re-signals an exact duplicate. Admission and terminal
 outcome recording prepare provider-backed mailbox crypto before opening their
 transactions, then use only the exact prepared root while database locks are
 held; root drift retries the full preparation once with a fresh request cache.
-Runtime applies the closed action through its canonical domain owner. Fresh
-conversation work keeps its foreground priority. A safe-prefix prefetch imports
-a closed member action before a dirty runtime begins its long idle snapshot,
+Runtime applies the closed action through its canonical domain owner. Workout
+action and snapshot target lookups read the canonical event family
+directly, preserving event lifecycle collapse and exact binding/replay checks
+without hydrating or rebuilding the shared full-vault query projection.
+Fresh conversation work keeps its foreground priority. A safe-prefix prefetch
+imports a closed member action before a dirty runtime begins its long idle snapshot,
 and the first successful reply checkpoint includes one
 bounded selection restricted to due `member.action.requested` work. That
 provider-free service point ignores unrelated system backlog and a newly
