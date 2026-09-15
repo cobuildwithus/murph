@@ -360,7 +360,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
     }
   });
 
-  test("round1: durable-effect wake survives a due-assistant service pass that reschedules", async () => {
+  test("durable-effect wake survives rescheduled assistant service without another quiet window", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -474,8 +474,6 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
       await waitForFakeTimerScheduled(() => events.join(","));
       await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-      await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
       await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
       const result = await resultPromise;
 
@@ -499,7 +497,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
     }
   });
 
-  test("round3: later durable wake still waits after due assistant service", async () => {
+  test("later durable wake survives due assistant service without restarting the spent quiet window", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -626,19 +624,13 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
       await waitForFakeTimerScheduled(() => events.join(","));
       await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-      await waitForFakeTimerScheduled(() => events.join(","));
-
-      assert.equal(checkpointRequests.length, 2, events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
-      assert.equal(checkpointRequests.length, 2, events.join(","));
-      await vi.advanceTimersByTimeAsync(1);
       const result = await resultPromise;
 
       assert.equal(durableEffect.mock.calls.length, 1);
       assert.deepEqual(checkpointStartedAtMs, [
         Date.parse(TEST_NOW) + idleCheckpointDelayMs,
         Date.parse(TEST_NOW) + idleCheckpointDelayMs,
-        Date.parse(TEST_NOW) + idleCheckpointDelayMs * 2,
+        Date.parse(TEST_NOW) + idleCheckpointDelayMs,
       ]);
       expect([...new Set(latencyTraceRequests
         .map((request) => request.event)
@@ -648,7 +640,6 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         )
         .map((event) => event.at))]).toEqual([
         "2026-04-27T00:27:00.000Z",
-        "2026-04-27T00:30:00.000Z",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => [
@@ -2141,7 +2132,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         ]),
         [
           ["idle_shutdown", "0", mintedWakeAt, "assistant"],
-          ["idle_shutdown", "1", null, null],
+          ["idle_shutdown", "1", replacementWakeAt, "assistant"],
+          ["idle_shutdown", "2", null, null],
         ],
       );
       assert.ok(
@@ -2154,11 +2146,15 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
       );
       assert.ok(
         requireEventIndex(events, "assistant:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown:2"),
+      );
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown:2")
           < requireEventIndex(events, "assistant:3"),
       );
       assert.ok(
         requireEventIndex(events, "assistant:3")
-          < requireEventIndex(events, "snapshot:idle_shutdown:2"),
+          < requireEventIndex(events, "snapshot:idle_shutdown:3"),
       );
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
