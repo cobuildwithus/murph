@@ -115,6 +115,8 @@ The live v2 checkpoint and canonical-replica freshness correction is tracked in
 Foreground promotion batch reuse and completion/wake race preservation are owned
 by `agent-docs/references/hosted-runtime-protocol.md`; focused admission, import
 overlap, and recovery proof is indexed in `agent-docs/references/testing-ci-map.md`.
+Promotion also reuses the combined mailbox response for its pre-assistant system
+prefix, avoiding a second fetch after established conversation input is staged.
 
 Active crypto-root preparation reuses one bounded metadata snapshot while
 preserving locked authority revalidation; its contract is owned by

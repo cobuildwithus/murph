@@ -875,6 +875,13 @@ runtime work. Device sync, provider cleanup, browser-vault refresh, system
 maintenance, and idle checkpointing are idle-only lanes; they must not make a
 user message wait for background work to finish.
 
+When a system-mailbox invocation promotes to conversation work, qualification
+uses the same bounded conversation/system prefetch as an ordinary foreground
+pass. Import the conversation first, then reuse that response for the existing
+pre-assistant system prefix. An established workspace must not make staged
+input wait for a second system-only fetch; the importer's first-owner activation
+refresh and stale-prefetch checks still apply.
+
 When a foreground wake arrives before idle maintenance commits to a snapshot,
 the maintenance lane must yield, abort, or reschedule. Once a direct-R2 snapshot
 has been built and its workspace-version compare-and-swap is still valid, web

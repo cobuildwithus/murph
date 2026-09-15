@@ -797,6 +797,10 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const conversation = createMailboxItem({ id: "mailbox_item_synthetic_upgrade", laneSeq: "1" });
+    const preferences = createMailboxItem({
+      id: "mailbox_item_synthetic_upgrade_preferences",
+      kind: "member.preferences.updated", lane: "system", laneSeq: "2",
+    });
     const items: HostedMailboxItem[] = [];
     const deviceItem = createMailboxItem({
       id: "mailbox_item_synthetic_upgrade_device", dedupeKey: "device-sync.wake:upgrade",
@@ -807,11 +811,12 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     const sendForeground = () => {
       if (items.length > 0) return;
-      items.push(conversation);
+      items.push(conversation, preferences);
       runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
     };
     let assistantCalls = 0;
     let qualifiedConversationReads = 0;
+    let postStagingSystemReads = 0;
     let foregroundInputId: string | null = null;
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -835,6 +840,10 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
             return { snapshotRef: createSnapshotFixtureRef({ hash: "d".repeat(64), size: 512 }) };
           },
           async importItem({ item }) {
+            if (item.id === preferences.id) {
+              events.push("preferences.imported");
+              return { status: "imported" };
+            }
             assert.equal(item.id, conversation.id);
             events.push("foreground.imported");
             foregroundInputId = await stagePendingLinqAssistantInputForMailboxItem({ item, vaultRoot });
@@ -851,6 +860,9 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
             mailboxPort: {
               ...mailbox,
               async fetch(request) {
+                if (foregroundInputId && request.lanes.some(({ lane }) => lane === "system")) {
+                  postStagingSystemReads += 1;
+                }
                 const response = await mailbox.fetch(request);
                 if (response.items.some((item) => item.id === conversation.id)) {
                   qualifiedConversationReads += 1;
@@ -869,6 +881,8 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
             assistantCalls += 1;
             assert.ok(events.includes("foreground.imported"),
               "Foreground promotion entered the assistant with the old system-only import.");
+            assert.ok(events.includes("preferences.imported"),
+              "The shared response must retain pre-assistant system input.");
             assert.ok(foregroundInputId);
             assert.ok(input.initialMailboxImport.importResult.assistantInputIds?.includes(foregroundInputId));
             admitted.resolve();
@@ -882,6 +896,8 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       ]), 15_000, () => events.join(","));
       assert.ok(assistantCalls > 0);
       assert.equal(qualifiedConversationReads, 1);
+      assert.equal(postStagingSystemReads, 0,
+        "Staged foreground input must not wait for a second system mailbox fetch.");
       assert.ok(events.includes("foreground.imported"));
     } finally {
       controller.abort();

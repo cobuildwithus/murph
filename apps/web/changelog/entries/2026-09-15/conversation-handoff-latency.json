@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "conversation-handoff-latency",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting when you start a conversation",
+    "summary": "Murph skips an extra check before responding when your message arrives during background work.",
+    "details": "This improvement applies to established private conversations and group chats.",
+    "relevanceTags": ["conversations", "performance"],
+    "sourcePullRequests": []
+  }
+}
