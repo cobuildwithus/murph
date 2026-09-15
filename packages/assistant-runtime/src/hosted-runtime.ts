@@ -1699,7 +1699,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   let selectedSystemMailboxOwnerItem: HostedSystemMailboxPendingItem | null = null;
   let imageGenerationController: HostedImageGenerationController | null = null;
   let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
-  let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
   let closeDetachedAssistantAskBeforeWorkspaceRelease = async (): Promise<void> => undefined;
   const pauseDetachedAssistantAskOnRuntimeAbort = () => {
     detachedAssistantAskController?.requestPauseAndRequeue();
@@ -4766,19 +4765,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         clinicalEnrichmentController?.pauseAndRequeue(),
       ]);
     };
-    resumeDetachedAssistantAskAfterWorkspaceBoundary = () => {
-      if (
-        !runtimeAbortController.signal.aborted
-        && options.shutdownSignal?.aborted !== true
-      ) {
-        detachedAssistantAskController?.resume();
-        // A reread dirties the vault. Drain checkpoint-ready effects before
-        // reclaiming clinical work, or a spent window can repeatedly cancel it.
-        if (readyDurableCheckpointEffects.length === 0) {
-          clinicalEnrichmentController?.resume();
-        }
-      }
-    };
     closeDetachedAssistantAskBeforeWorkspaceRelease = async () => {
       await Promise.all([
         detachedAssistantAskController?.closeAndRequeue(),
@@ -7149,7 +7135,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               checkpointWakeInterruption.takeNotification();
           }
         } catch (error) {
-          resumeDetachedAssistantAskAfterWorkspaceBoundary();
           workspaceSystemWork.resume();
           if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
             activePhaseLogger.close("workspace.checkpoint.idle_shutdown");
@@ -7260,7 +7245,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         // createHostedWorkspaceSnapshotCheckpointRequestBuilder.recordCheckpoint;
         // re-mutating it here would be a duplicate state owner and is the seam
         // that previously let inboxMediaRetentionWakeAt drift.
-        resumeDetachedAssistantAskAfterWorkspaceBoundary();
+        // Quiesced reads stay paused through effect drain and return. Their
+        // durable successor owns any unfinished work after this checkpoint.
         workspaceSystemWork.resume();
         return {
           checkpoint,

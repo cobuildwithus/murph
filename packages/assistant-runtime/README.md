@@ -165,9 +165,10 @@ window and proceeds directly to its required follow-up checkpoint. Provider
 cleanup still runs only after its saved intent, and required post-checkpoint
 effects are not removed or collapsed into an unsafe single snapshot. Active
 background-work waits use their existing work deadlines and remain wakeable,
-without moving the conversation or checkpoint clocks. Clinical reads stay paused
-while checkpoint-ready effects drain; unfinished extraction retains its durable
-successor instead of repeatedly reclaiming and cancelling the same page.
+without moving the conversation or checkpoint clocks. Once a checkpoint pauses
+background reads, they stay paused through checkpoint retries, effect drain and
+return. Foreground work still proceeds; unfinished asks and clinical extraction
+retain their durable successors instead of repeatedly reclaiming canceled work.
 
 The conversation-activity callback carries the original persisted
 `AssistantInputEvent.receivedAt` epoch milliseconds (mailbox `createdAt`), not
