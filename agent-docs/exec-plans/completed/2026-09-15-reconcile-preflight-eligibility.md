@@ -1,6 +1,6 @@
 # Avoid unnecessary scheduled device reconciliation wakes
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-15
 
@@ -50,7 +50,19 @@ Provider preflight and scheduling tests; Web admission/unit and real PostgreSQL 
   preflight/sweeper tests: 44 passed. Real PostgreSQL retained-retry and
   source/checkpoint/mailbox races: 42 passed, including existing retention
   regressions. Package and Web typechecks, documentation drift, and complexity checks passed.
-  Parent candidate review is complete; exact-head PR CI and ReviewGPT remain.
+  Parent candidate and final reviews are complete. ReviewGPT round one passed
+  on the implementation commit with no qualifying findings. The final
+  documentation-only commit still requires exact-head CI before merge readiness.
 - Remaining exclusions are meaningful: outstanding dirty/mailbox work, missing
   or expired baseline, and due profile/history/day repair require their existing
   owner. A fallback count does not prove provider contents changed.
+
+## Completion
+
+- Implemented and committed the three reproduced fixes with 246 focused tests,
+  both owner typechecks, documentation drift, and complexity checks passing.
+- Final external review: round one PASS; no accepted or rejected findings and
+  no remediation required. Production source shape: 44 lines added, 12 removed.
+- No new runtime state, proof format, scheduler, or metadata capacity was added.
+- Live deployment and post-deploy wake measurements remain outside this task.
+Completed: 2026-09-15
