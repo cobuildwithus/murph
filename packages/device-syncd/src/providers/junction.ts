@@ -1136,7 +1136,7 @@ export function createJunctionDeviceSyncProvider(
     providers: readonly JunctionProviderConnection[],
   ): string {
     return hashJunctionReconcileValue(config.clientUserIdSecret, [
-      "junction-reconcile-v1", runtimeConfig, reconcileDays, config.environment,
+      "junction-reconcile-v2", runtimeConfig, reconcileDays, config.environment,
       config.region, config.apiBaseUrl ?? null, account.connectedAt,
       account.externalAccountId,
       (account.sources ?? []).map((source) => [

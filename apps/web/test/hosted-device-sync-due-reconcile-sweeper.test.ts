@@ -40,7 +40,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
     });
   });
 
-  it("avoids only proven unchanged ordinary wakes, bounds probes, and retains recovery", async () => {
+  it("checks every selected ordinary wake and retains dirty recovery", async () => {
     vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
     try {
       const rows = Array.from({ length: 8 }, (_, index) => ({
@@ -55,16 +55,43 @@ describe("hosted device-sync due reconcile sweeper", () => {
       const logger = buildLogger();
       const run = runHostedDeviceSyncDueReconcileSweeper({ logger, store: buildStore(rows), wakeLimit: 8 });
       await vi.runAllTimersAsync();
-      expect(await run).toMatchObject({ wakeAccepted: 3, wakeAttempted: 3 });
-      expect(mocks.preflight).toHaveBeenCalledTimes(5);
+      expect(await run).toMatchObject({ wakeAccepted: 1, wakeAttempted: 1 });
+      expect(mocks.preflight).toHaveBeenCalledTimes(7);
       expect(mocks.preflight.mock.calls.every(([input]) => input.connection.connectionId !== rows[0].connectionId)).toBe(true);
       expect(mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls.some(([wake]) => wake.connectionId === rows[0].connectionId)).toBe(true);
       expect(logger.info).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ preflight: {
-        attempted: 5, eligible: 5, avoidedWakes: 5, logicalCollectionReads: 10,
-        decodedRecordCount: 15, decodedRecordBytes: 2000, elapsedMs: 25,
-        reasons: { content_unchanged: 5, budget_exhausted: 2 },
-        webhookAgeOutcomes: { "unavailable:unchanged": 5 },
+        attempted: 7, eligible: 7, avoidedWakes: 7, logicalCollectionReads: 14,
+        decodedRecordCount: 21, decodedRecordBytes: 2800, elapsedMs: 35,
+        reasons: { content_unchanged: 7 },
+        webhookAgeOutcomes: { "unavailable:unchanged": 7 },
       } }));
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("checks unchanged candidates after five ineligible accounts without starving them", async () => {
+    vi.useFakeTimers();
+    try {
+      const rows = Array.from({ length: 25 }, (_, index) => ({
+        connectionId: `synthetic-preflight-${index}`, userId: `synthetic-member-${index}`,
+        provider: "junction", connectedAt: "2026-01-01T00:00:00.000Z", nextReconcileAt: "2026-01-02T00:00:00.000Z",
+      }));
+      const ineligible = new Set(rows.slice(0, 5).map((row) => row.connectionId));
+      mocks.preflight.mockImplementation(async ({ connection }) => ({
+        ...(ineligible.has(connection.connectionId)
+          ? { outcome: "ineligible", reason: "checkpoint_work_unsettled", wakeAvoided: false }
+          : { outcome: "unchanged", reason: "content_unchanged", wakeAvoided: true }),
+        requestCount: 0, recordCount: 0, responseBytes: 0, elapsedMs: 0,
+      }));
+      const logger = buildLogger();
+      const run = runHostedDeviceSyncDueReconcileSweeper({ logger, store: buildStore(rows) });
+      await vi.runAllTimersAsync();
+      expect(await run).toMatchObject({ wakeAttempted: 5, wakeAccepted: 5 });
+      expect(mocks.preflight).toHaveBeenCalledTimes(25);
+      expect(mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls.every(([wake]) => ineligible.has(wake.connectionId))).toBe(true);
+      expect(logger.info).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({
+        preflight: expect.objectContaining({ attempted: 25, avoidedWakes: 20,
+          reasons: { checkpoint_work_unsettled: 5, content_unchanged: 20 } }),
+      }));
     } finally { vi.useRealTimers(); }
   });
 

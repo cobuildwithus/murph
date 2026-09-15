@@ -81,7 +81,7 @@ import {
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
   hydrateHostedDeviceSyncControlPlaneState,
   promoteHostedCompletedDirtyPayloadAcks,
-  publishHostedDeviceSyncCompletionFence,
+  publishHostedDeviceSyncCheckpointedProgress,
   reconcileHostedDeviceSyncControlPlaneState,
   resolveHostedDeviceSyncSchedulerAccountId,
   resolveHostedDeviceSyncWakeRecovery,
@@ -12941,6 +12941,54 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test.each([
+    { epoch: null, hinted: "2026-04-04T15:00:00.000Z", expected: null },
+    { epoch: "2026-04-03T09:00:00.000Z", hinted: "2026-04-04T15:00:00.000Z", expected: null },
+    { epoch: "2026-04-04T09:00:00.000Z", hinted: "2026-04-04T12:00:00.000Z", expected: null },
+    { epoch: "2026-04-04T09:00:00.000Z", hinted: "2026-04-04T13:30:00.000Z", expected: "2026-04-04T13:30:00.000Z" },
+    { epoch: "2026-04-04T09:00:00.000Z", hinted: "2026-04-04T15:00:00.000Z", expected: "2026-04-04T14:00:00.000Z" },
+  ])("fences retained cadence publication by epoch and local due time: %j", async ({ epoch, hinted, expected }) => {
+    const workspace = await createHostedRuntimeWorkspace("hosted-checkpointed-cadence-");
+    const service = createDeviceSyncServiceForVault(workspace.vaultRoot);
+    const updates: ApplyUpdatesRequest["updates"][number][] = [];
+    const connectionId = "synthetic-retained-cadence";
+    const port: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async fetchSnapshot() {
+        return buildRuntimeSnapshot({ connectionId, externalAccountId: "synthetic-source",
+          localState: { nextReconcileAt: "2026-04-04T13:00:00.000Z" } });
+      },
+      async applyUpdates(input) {
+        updates.push(...input.updates);
+        return { appliedAt: "2026-04-04T12:00:00.000Z", userId: "member_123", updates: input.updates.map((update) => ({
+          connection: null, connectionId: update.connectionId, status: "updated",
+          tokenUpdate: "unchanged", writeUpdate: "applied",
+        })) };
+      },
+      async createConnectLink() { throw new Error("Unexpected connect link"); },
+    };
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service,
+        wake: buildCronWake("2026-04-04T12:00:00.000Z"),
+      });
+      const accountId = state.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(accountId);
+      getStore(service).patchAccount(accountId, { nextReconcileAt: "2026-04-04T14:00:00.000Z" });
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deferNextReconcileAtForLocalAccountId: accountId,
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, state,
+        wake: buildDeviceSyncWake({ connectionId, expectedConnectedAt: epoch,
+          occurredAt: "2026-04-04T12:00:00.000Z", reason: "reconcile_due",
+          hint: { nextReconcileAt: hinted } }),
+      });
+      assert.equal(updates.find((update) => update.localState?.nextReconcileAt)?.localState?.nextReconcileAt ?? null, expected);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await workspace.cleanup();
+    }
+  });
+
   test("rebuilds a real Strava scheduler retry from manifest-shaped durable fields", async () => {
     const occurredAt = "2026-04-04T09:10:00.000Z";
     const retryAt = "2026-04-04T09:10:15.000Z";
@@ -13202,6 +13250,7 @@ describe("hosted device-sync runtime", () => {
           kind: "backfill", maxAttempts: 3, payload: { windowStart: "2026-01-01T00:00:00.000Z" }, priority: 30,
         }] },
       });
+      let publishedCadence = cadenceAt;
       const scheduledAt: string[] = [];
       const executedKinds: string[] = [];
       const [stravaProvider] = createConfiguredDeviceSyncProvidersFromConfigs({ strava: {
@@ -13225,7 +13274,7 @@ describe("hosted device-sync runtime", () => {
       vi.useFakeTimers();
       try {
         // Each pass starts without the machine-local job store. Only the exact
-        // durable wake survives; Web still carries the original cadence.
+        // durable wake survives. Web may publish only the prior checkpointed cadence.
         for (let tick = 0; tick < 3; tick += 1) {
           const now = new Date(Date.parse(cadenceAt) + tick * 21_600_000).toISOString();
           vi.setSystemTime(new Date(now));
@@ -13234,9 +13283,17 @@ describe("hosted device-sync runtime", () => {
           const port: HostedRuntimeDeviceSyncPort = {
             ...createNoDirtyStateDeviceSyncPortMethods(),
             async fetchSnapshot() {
-              return buildRuntimeSnapshot({ connectionId, provider: "strava", externalAccountId: "retained-cadence", localState: { nextReconcileAt: cadenceAt } });
+              return buildRuntimeSnapshot({ connectionId, provider: "strava", externalAccountId: "retained-cadence", localState: { nextReconcileAt: publishedCadence } });
             },
-            async applyUpdates() { throw new Error("Cadence must remain behind its completion checkpoint."); },
+            async applyUpdates(input) {
+              for (const update of input.updates) {
+                if (update.localState?.nextReconcileAt) publishedCadence = update.localState.nextReconcileAt;
+              }
+              return { appliedAt: now, userId: "member_123", updates: input.updates.map((update) => ({
+                connection: null, connectionId: update.connectionId, status: "updated",
+                tokenUpdate: "unchanged", writeUpdate: "applied",
+              })) };
+            },
             async createConnectLink() { throw new Error("Unexpected connect link."); },
           };
           try {
@@ -13265,6 +13322,13 @@ describe("hosted device-sync runtime", () => {
             // Replaying the same admission does not enqueue the cadence twice.
             await service.runSchedulerOnce(accountId);
             assert.equal(await service.drainWorker(100, accountId), 0);
+            await reconcileHostedDeviceSyncControlPlaneState({
+              deferNextReconcileAtForLocalAccountId: accountId,
+              deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, state, wake,
+            });
+            assert.equal(publishedCadence, now,
+              "Publish the prior checkpointed cadence despite future history; withhold this pass's new cadence");
+            assert.equal([...getStore(service).iteratePendingJobsForAccount(accountId)].length, 1);
             wake = recovery.wake;
           } finally {
             closeHostedRuntimeDeviceSyncService(service);
@@ -15609,11 +15673,11 @@ describe("hosted device-sync runtime", () => {
     const wake = buildDeviceSyncWake({ connectionId, expectedConnectedAt: connectedAt,
       occurredAt: nextReconcileAt, provider: "junction", reason: "reconcile_due",
       hint: { jobs: [], reason: "retained_completion_fence", nextReconcileAt, junctionReconcileProof: proof } });
-    await publishHostedDeviceSyncCompletionFence({ deviceSyncPort: port, wake });
+    await publishHostedDeviceSyncCheckpointedProgress({ deviceSyncPort: port, wake });
     assert.deepEqual(applied[0]?.updates[0]?.connection?.metadata, {
       unrelatedProgress: "preserved", junctionReconcileProofV1: proof,
     });
-    await publishHostedDeviceSyncCompletionFence({ deviceSyncPort: port,
+    await publishHostedDeviceSyncCheckpointedProgress({ deviceSyncPort: port,
       wake: { ...wake, expectedConnectedAt: "2026-03-01T00:00:00.000Z" } });
     assert.equal(applied.length, 1);
   });
@@ -15643,11 +15707,11 @@ describe("hosted device-sync runtime", () => {
       provider: "junction", reason: "reconcile_due",
       hint: { jobs: [], reason: "retained_completion_fence", nextReconcileAt, junctionTemporalSweepKey: marker },
     });
-    await publishHostedDeviceSyncCompletionFence({ deviceSyncPort: port, wake });
+    await publishHostedDeviceSyncCheckpointedProgress({ deviceSyncPort: port, wake });
     assert.deepEqual(applied[0]?.updates[0]?.connection?.metadata, {
       unrelatedProgress: "preserved", junctionTemporalSweepV1: marker,
     });
-    await publishHostedDeviceSyncCompletionFence({
+    await publishHostedDeviceSyncCheckpointedProgress({
       deviceSyncPort: port, wake: { ...wake, expectedConnectedAt: "2026-03-01T00:00:00.000Z" },
     });
     assert.equal(applied.length, 1);

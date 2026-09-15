@@ -472,19 +472,20 @@ export function isHostedDeviceSyncCompletionFenceWake(
     && normalizeHostedDeviceSyncJobHints(wakeContext.hint).length === 0;
 }
 
-export async function publishHostedDeviceSyncCompletionFence(input: {
+export async function publishHostedDeviceSyncCheckpointedProgress(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort;
   signal?: AbortSignal | null;
   wake: HostedExecutionDeviceSyncWake;
 }): Promise<void> {
   const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
   if (
-    wakeContext.hint?.reason !== HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
+    !wakeContext.hint
     || !Object.hasOwn(wakeContext.hint, "nextReconcileAt")
-    || normalizeHostedDeviceSyncJobHints(wakeContext.hint).length > 0
+    || (!isHostedDeviceSyncCompletionFenceWake(input.wake)
+      && normalizeHostedDeviceSyncJobHints(wakeContext.hint).length === 0)
   ) {
     throw new TypeError(
-      "Hosted device-sync completion fence requires its canonical cadence and no retained jobs.",
+      "Hosted device-sync checkpoint publication requires its canonical cadence and retained work or completion.",
     );
   }
   const connectionId = wakeContext.connectionId;
@@ -808,6 +809,7 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       deferNextReconcileAtToBaseline:
         input.deferNextReconcileAtForLocalAccountId === localAccountId,
       hostedConnectionId,
+      checkpointedNextReconcileAt: checkpointedHint?.nextReconcileAt,
       checkpointedTemporalSweepKey: checkpointedHint?.junctionTemporalSweepKey,
       checkpointedReconcileProof: checkpointedHint?.junctionReconcileProof,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
@@ -1927,6 +1929,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   account: StoredDeviceSyncAccount;
   baseline: HostedDeviceSyncRuntimeConnectionSnapshot | null;
   codec: ReturnType<typeof createSecretCodec>;
+  checkpointedNextReconcileAt?: string | null;
   checkpointedTemporalSweepKey?: string;
   checkpointedReconcileProof?: string;
   deferNextReconcileAtToBaseline: boolean;
@@ -2019,6 +2022,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
       account: input.account,
       baseline: baselineLocalState,
       deferToBaseline: input.deferNextReconcileAtToBaseline,
+      checkpointedNextReconcileAt: input.checkpointedNextReconcileAt,
     });
     assignMonotonicTimestampUpdate(
       update,
@@ -2034,6 +2038,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     account: input.account,
     baseline: baselineLocalState,
     deferToBaseline: input.deferNextReconcileAtToBaseline,
+    checkpointedNextReconcileAt: input.checkpointedNextReconcileAt,
   });
 
   if (!equalHostedDeviceSyncRuntimeCredentials(credential, baselineCredential)) {
@@ -3004,11 +3009,19 @@ function assignCanonicalNextReconcileAtUpdate(
     account: Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "status">;
     baseline: HostedDeviceSyncRuntimeLocalStateSnapshot | null;
     deferToBaseline: boolean;
+    checkpointedNextReconcileAt?: string | null;
   },
 ): void {
   const baselineValue = input.baseline?.nextReconcileAt ?? null;
+  // A retained wake already checkpointed the preceding pass's provider cadence.
+  // Future history jobs must not hold that proven progress at an old Web date.
+  // Never publish this pass's later cadence or bypass an earlier local due time.
+  const checkpointedNextReconcileAt = input.account.status === "active"
+    && input.account.nextReconcileAt && input.checkpointedNextReconcileAt
+    ? earliestIsoTimestamp(input.account.nextReconcileAt, input.checkpointedNextReconcileAt)
+    : null;
   const nextReconcileAt = input.deferToBaseline
-    ? baselineValue
+    ? resolveHostedWakeNextReconcileAt(baselineValue, checkpointedNextReconcileAt) ?? baselineValue
     : input.account.nextReconcileAt ?? null;
 
   if (

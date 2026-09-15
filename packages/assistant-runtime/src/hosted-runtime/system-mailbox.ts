@@ -23,7 +23,7 @@ import type {
 import { HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT } from "../hosted-device-sync-limits.ts";
 import {
   isHostedDeviceSyncCompletionFenceWake,
-  publishHostedDeviceSyncCompletionFence,
+  publishHostedDeviceSyncCheckpointedProgress,
 } from "../hosted-device-sync-runtime.ts";
 import {
   createHostedAssistantChannelTypingDependencies,
@@ -940,6 +940,7 @@ export function resolveHostedDeviceSyncCompletionRecordInput(input: {
 }): { deviceSyncCompletionAcceptedInCurrentAdmission?: true } {
   if (
     input.preparation?.status !== "processed"
+    || input.preparation.metrics.backgroundMaintenanceYielded === true
     || input.preparation.item.itemId !== input.item.itemId
     || input.item.routeAction !== "run-device-sync-wake"
   ) {
@@ -1184,14 +1185,16 @@ function resolveHostedDeviceSyncMailboxRetentionAt(
   return item.postCheckpointRecord.retainMailboxItemUntil ?? null;
 }
 
-function resolveHostedDeviceSyncCompletionFenceWake(
+function resolveHostedDeviceSyncCheckpointedWake(
   item: HostedSystemMailboxPendingItem,
 ) {
   if (
     item.routeAction !== "run-device-sync-wake"
     || item.postCheckpointRecord?.kind !== "device-sync.dirty-processed-batch"
     || !item.postCheckpointRecord.retainedWake
-    || !isHostedDeviceSyncCompletionFenceWake(item.postCheckpointRecord.retainedWake)
+    || item.postCheckpointRecord.retainedWake.kind !== "device-sync.wake"
+    || ((item.postCheckpointRecord.retainedWake.hint?.jobs?.length ?? 0) === 0
+      && !isHostedDeviceSyncCompletionFenceWake(item.postCheckpointRecord.retainedWake))
   ) {
     return null;
   }
@@ -1206,8 +1209,8 @@ async function finalizeHostedDeviceSyncMailboxAfterCheckpoint(input: {
   stillDirty: boolean;
 }): Promise<string | null> {
   const retainUntil = resolveHostedDeviceSyncMailboxRetentionAt(input.item);
-  const completionWake = resolveHostedDeviceSyncCompletionFenceWake(input.item);
-  if (!input.acceptedInCurrentAdmission || !completionWake || input.stillDirty) {
+  const checkpointedWake = resolveHostedDeviceSyncCheckpointedWake(input.item);
+  if (!input.acceptedInCurrentAdmission || !checkpointedWake || input.stillDirty) {
     return retainUntil;
   }
 
@@ -1217,12 +1220,13 @@ async function finalizeHostedDeviceSyncMailboxAfterCheckpoint(input: {
       "Hosted device-sync completion fence requires a configured runtime port.",
     );
   }
-  await publishHostedDeviceSyncCompletionFence({
+  await publishHostedDeviceSyncCheckpointedProgress({
     deviceSyncPort,
     signal: input.signal ?? null,
-    wake: completionWake,
+    wake: checkpointedWake,
   });
-  return null;
+  // Cadence publication never completes the future jobs carried by this owner.
+  return isHostedDeviceSyncCompletionFenceWake(checkpointedWake) ? null : retainUntil;
 }
 
 function hostedDeviceSyncRetainedWakeHasCapacity(

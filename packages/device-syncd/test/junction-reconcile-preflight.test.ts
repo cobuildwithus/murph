@@ -12,7 +12,7 @@ import { createJsonResponse, readUrl } from "./helpers.ts";
 const NOW = "2026-04-03T14:00:00.000Z";
 const LATER = "2026-04-03T15:00:00.000Z";
 
-function harness(options: { bounded?: boolean; timeseries?: boolean; resources?: string[]; sdkActivity?: boolean } = {}) {
+function harness(options: { bounded?: boolean; timeseries?: boolean; resources?: string[]; sdkEnvelope?: boolean } = {}) {
   let rows: unknown[] = [{ id: "activity-1", date: "2026-04-02", steps: 1234, source: { provider: "garmin" } }];
   let timeseriesValue = 99;
   let malformed = false;
@@ -26,7 +26,7 @@ function harness(options: { bounded?: boolean; timeseries?: boolean; resources?:
       id: "provider-garmin-1", slug: "garmin", status: "connected", resource_availability: { activity: true },
     }] });
     if (url.pathname.includes("/summary/")) return createJsonResponse(malformed ? null
-      : options.sdkActivity ? { activity: rows } : { data: rows });
+      : options.sdkEnvelope ? { [url.pathname.split("/summary/")[1]!.split("/")[0]!]: rows } : { data: rows });
     if (url.pathname.includes("/timeseries/")) return createJsonResponse({ groups: { garmin: [{
       source: { provider: "garmin", type: "watch" }, data: [{ timestamp: "2026-04-02T12:00:00.000Z", value: timeseriesValue, unit: "mg/dL" }],
     }] } });
@@ -106,7 +106,7 @@ test("Junction detects a correction with unchanged count, id and date", async ()
 });
 
 test("SDK-decoded timestamp corrections invalidate the imported content proof", async () => {
-  const h = harness({ sdkActivity: true });
+  const h = harness({ sdkEnvelope: true });
   const row = {
     id: "activity-sdk-1", user_id: "synthetic-junction-user",
     date: "2026-04-02T00:00:00.000Z", calendar_date: "2026-04-02",
@@ -118,6 +118,18 @@ test("SDK-decoded timestamp corrections invalidate the imported content proof", 
   assert.equal((await h.probe()).outcome, "unchanged");
   h.setRows([{ ...row, updated_at: "2026-04-03T14:30:00.000Z" }]);
   assert.equal((await h.probe()).outcome, "changed");
+});
+
+test("SDK summary collections complete an unchanged preflight", async () => {
+  const h = harness({ sdkEnvelope: true, resources: ["activity", "sleep", "sleep_cycle", "workouts", "body", "meal", "menstrual_cycle", "electrocardiogram"] });
+  h.setRows([]);
+  await h.importBaseline();
+  assert.ok(readJunctionReconcileProof(h.account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY]));
+  const imports = h.imports();
+  const probe = await h.probe();
+  assert.equal(probe.outcome, "unchanged");
+  assert.equal(probe.requestCount, 9);
+  assert.equal(h.imports(), imports);
 });
 
 test("failed import does not publish unchanged evidence", async () => {
@@ -239,4 +251,22 @@ test("comparison binds the original window and expiry instead of accepting edite
     ...proof, validUntil: "2026-04-04T12:00:00.000Z",
   });
   assert.equal((await h.probe()).outcome, "changed");
+});
+
+
+test("incompatible content bindings fall back and cannot finish a partial proof", async () => {
+  const h = harness({ bounded: true });
+  await h.importBaseline();
+  const proof = readJunctionReconcileProof(h.account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY]);
+  assert.ok(proof);
+  const incompatibleProof = encodeJunctionReconcileProof({ ...proof, binding: "f".repeat(64) });
+  h.account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY] = incompatibleProof;
+  const probe = await h.probe();
+  assert.equal(probe.reason, "authority_or_inventory_changed");
+  assert.equal(probe.requestCount, 1);
+  const result = await executeJunctionJob(h.provider, h.context, createJob("reconcile", {
+    summaryPhaseComplete: true, reconcileProof: incompatibleProof,
+    windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
+  }));
+  assert.equal(result.metadataPatch?.[JUNCTION_RECONCILE_PROOF_METADATA_KEY], undefined);
 });
