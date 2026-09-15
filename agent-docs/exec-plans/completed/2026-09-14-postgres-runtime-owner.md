@@ -1,6 +1,6 @@
 # Replace UserRunner coordination with Postgres authority
 
-Status: active
+Status: completed
 Created: 2026-09-14
 Updated: 2026-09-15
 
@@ -317,3 +317,44 @@ Updated: 2026-09-15
 - Current main was reconciled with an ordinary merge. The two conflict
   resolutions retain main's newer handoff tests and this branch's purge mocks,
   and retain both documentation index entries. Focused merge checks passed.
+
+## Clean CI integration fixes and final composed proof
+
+- Fresh full runtime build and composed Postgres journey passed with cold reply,
+  warm typing before delivery, same-container reuse, no mailbox lag, and no
+  interventions or provider authorization failures. Local stub timings were
+  23,134 ms cold reply, 401 ms warm typing, and 1,684 ms warm reply; these are
+  diagnostic values, not production latency claims.
+- Clean CI exposed seven missing Web source-path mappings for the newly public
+  entrypoints. Existing built declarations had masked them locally. With dist
+  resolution disabled, the production TypeScript resolver goes from 0/7 to
+  7/7 after adding the declared entrypoints to the existing Web path map. The
+  production TypeScript 5 check passes.
+- The new remote authority dependency exposed a cycle through the pure header
+  writer, authority errors, fetch transport, and diagnostics. Moved the pure
+  writer/error/token to the existing header module; runtime-platform header
+  callers no longer import the remote authority owner. No transport or error
+  behavior changed. All 48 affected diagnostics tests pass.
+- Malformed workspace versions again fail before external owner validation.
+  Callback tests now assert the complete signed authority query, preserving
+  signature verification rather than discarding it. Outbound tests (321),
+  runtime-platform tests (215), migration baseline (10), both app typechecks,
+  Cloudflare build, and complexity guard pass.
+- Updated existing migration and control route/export inventories for the
+  five new migrations and the purge endpoint. Required final-head CI and the
+  final external review remain completion gates.
+
+## Implementation closeout
+
+- Final parent review completed after the bounded CI corrections above.
+  The control package tests (78) and typecheck pass; complexity passes with
+  89 changed source files and 15 inherited/moved hotspots.
+- Round 2 GPT-6 Pro returned PASS on the media/freeze corrections and confirmed
+  both original findings resolved. Its complete review covered authority,
+  warm reuse, resources, deletion, and fleet cutover without another qualifying
+  finding. The final CI-integration commit receives round 3 and exact-head CI
+  concurrently. Their results are recorded in PR evidence after this closeout.
+- Private companion PR #151 has both mandatory GPT-6 Pro passes, green exact-head
+  CI, and a clean mergeability proof. No merge, deployment, activation, or
+  production mutation was performed.
+Completed: 2026-09-15

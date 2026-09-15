@@ -168,6 +168,24 @@
       "@murphai/hosted-execution/runtime-control": [
         "../../packages/hosted-execution/src/runtime-control.ts"
       ],
+      "@murphai/hosted-execution/runtime-media": [
+        "../../packages/hosted-execution/src/runtime-media.ts"
+      ],
+      "@murphai/hosted-execution/runtime-migration": [
+        "../../packages/hosted-execution/src/runtime-migration.ts"
+      ],
+      "@murphai/hosted-execution/runtime-owner": [
+        "../../packages/hosted-execution/src/runtime-owner.ts"
+      ],
+      "@murphai/hosted-execution/runtime-resource-purge": [
+        "../../packages/hosted-execution/src/runtime-resource-purge.ts"
+      ],
+      "@murphai/hosted-execution/runtime-resources": [
+        "../../packages/hosted-execution/src/runtime-resources.ts"
+      ],
+      "@murphai/hosted-execution/storage-paths": [
+        "../../packages/hosted-execution/src/storage-paths.ts"
+      ],
       "@murphai/hosted-execution/temporal-env": [
         "../../packages/hosted-execution/src/temporal-env.ts"
       ],
@@ -176,6 +194,9 @@
       ],
       "@murphai/hosted-execution/workspace-snapshot-v2": [
         "../../packages/hosted-execution/src/workspace-snapshot-v2.ts"
+      ],
+      "@murphai/hosted-execution/workspace-snapshot-store": [
+        "../../packages/hosted-execution/src/workspace-snapshot-store.ts"
       ],
       "@murphai/messaging-ingress/linq-webhook": [
         "../../packages/messaging-ingress/src/linq-webhook.ts"
