@@ -115,3 +115,16 @@ percentages.
 Shared query entity-family metadata now lives on the dedicated `@murphai/query/entity-families` subpath so CLI and contract callers do not need the full query root barrel just to validate record-family flags.
 
 For health registry families, query now consumes the shared projection metadata exported from `@murphai/contracts` instead of maintaining a second per-kind taxonomy table locally.
+
+### Journal mirrored sessions
+
+Journal collapses matching cross-provider session copies within an existing
+human event before aggregating activity or rendering Records. Matching requires
+an explicit absolute interval, the same activity/sleep classification, duration
+and interval endpoints within one minute, and at least 90% interval overlap.
+Date-only, floating-time, generic-source, same-provider, and conflicting evidence
+remains separate. The direct provider is preferred over an Apple Health relay;
+the existing source string lists both providers. Canonical evidence and the
+source-record count stay unchanged. The existing 1,500-record bound limits this
+in-memory comparison. Existing projection refresh publishes the revised view;
+there is no new persisted state or client schema.

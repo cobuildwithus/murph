@@ -1,3 +1,5 @@
+import { normalizeWearableQueryProviderSlug } from "@murphai/health-metrics";
+import { formatProviderName } from "./wearables/provider-policy.ts";
 import { readJournalTiming, type JournalTiming } from "@murphai/contracts/journal-presentation";
 import {
   isValidIanaTimeZone,
@@ -120,6 +122,7 @@ interface JournalCandidate extends JournalRecord {
   metricKey: string | null;
   metricValue: number | null;
   relatedIds: string[];
+  sessionWindow?: { start: number; end: number } | null;
   sleepType: "main_sleep" | "nap" | "unknown" | null;
   timing: JournalEventTiming;
 }
@@ -224,6 +227,7 @@ function journalCandidateFromEvent(
           ...event.links.map((link) => link.targetId),
         ]),
       ],
+      sessionWindow: journalSessionWindow(event, durationMinutes),
       sleepType,
       source: readEventSource(event),
       summary: eventSummary(event),
@@ -655,8 +659,9 @@ function groupJournalCandidates(
 
   return [...groups.values()].map((records) => {
     const sorted = records.sort(compareCandidates);
-    const lead = selectLeadRecord(sorted);
-    const presentation = buildEventPresentation(sorted, lead);
+    const displayRecords = collapseMirroredJournalSessions(sorted);
+    const lead = selectLeadRecord(displayRecords);
+    const presentation = buildEventPresentation(displayRecords, lead);
     return {
       date: lead.date,
       details: presentation.details,
@@ -667,7 +672,7 @@ function groupJournalCandidates(
       kind: eventGroupKind(sorted),
       metrics: presentation.metrics,
       occurredAt: lead.occurredAt,
-      records: sorted.map(
+      records: displayRecords.map(
         ({
           activityKey: _activityKey,
           date: _date,
@@ -678,6 +683,7 @@ function groupJournalCandidates(
           metricKey: _metricKey,
           metricValue: _metricValue,
           relatedIds: _related,
+          sessionWindow: _sessionWindow,
           sleepType: _sleepType,
           timing: _timing,
           ...record
@@ -1117,6 +1123,80 @@ function eventGroupTitle(
   if (records.some((record) => record.groupHint?.startsWith("sleep:")))
     return "Sleep";
   return lead.label;
+}
+
+// Session evidence remains canonical. Only the derived presentation collapses
+// cross-provider mirrors, before both metric aggregation and record rendering.
+function journalSessionWindow(
+  event: CanonicalEntity,
+  duration: number | null,
+): JournalCandidate["sessionWindow"] {
+  if (duration === null || duration <= 0) return null;
+  const workout = readRecord(event.attributes.workout);
+  const start = event.kind === "sleep_session"
+    ? readString(event.attributes.startAt)
+    : event.kind === "activity_session"
+    ? readString(workout?.startedAt) ?? event.occurredAt
+    : null;
+  const end = event.kind === "sleep_session"
+    ? readString(event.attributes.endAt)
+    : readString(workout?.endedAt);
+  if (event.kind === "sleep_session" && !end) return null;
+  // A date or floating clock cannot establish that two providers saw one session.
+  const instant = (value: string | null | undefined) =>
+    value && /T.*(?:Z|[+-]\d{2}:\d{2})$/iu.test(value) ? Date.parse(value) : NaN;
+  const startMs = instant(start);
+  const endMs = end ? instant(end) : startMs + duration * 60_000;
+  return Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs
+    ? { start: startMs, end: endMs }
+    : null;
+}
+
+function collapseMirroredJournalSessions(records: readonly JournalCandidate[]): JournalCandidate[] {
+  const groups: JournalCandidate[][] = [];
+  for (const record of records) {
+    const group = groups.find((members) => members.every((other) => mirroredJournalSession(other, record)));
+    if (group) group.push(record);
+    else groups.push([record]);
+  }
+  return groups.map((members) => {
+    if (members.length === 1) return members[0]!;
+    // Prefer the original provider over an Apple Health relay. Stable IDs break ties.
+    const ordered = members.slice().sort((left, right) =>
+      Number(journalSessionProvider(left) === "apple-health-kit")
+      - Number(journalSessionProvider(right) === "apple-health-kit")
+      || left.id.localeCompare(right.id));
+    return {
+      ...ordered[0]!,
+      source: uniqueStrings(ordered.map((record) => {
+        const provider = journalSessionProvider(record)!;
+        return provider === "apple-health-kit" ? "Apple Health" : formatProviderName(provider);
+      })).join(" · "),
+      exerciseNames: uniqueStrings(ordered.flatMap((record) => record.exerciseNames)),
+    };
+  });
+}
+
+function journalSessionProvider(record: JournalCandidate): string | null {
+  const provider = record.source ? normalizeWearableQueryProviderSlug(record.source) : null;
+  return provider && !["device", "manual", "murph", "unknown"].includes(provider) ? provider : null;
+}
+
+function mirroredJournalSession(left: JournalCandidate, right: JournalCandidate): boolean {
+  const provider = journalSessionProvider(left);
+  const otherProvider = journalSessionProvider(right);
+  return provider !== null && otherProvider !== null && provider !== otherProvider
+    && left.kind === right.kind && left.activityKey === right.activityKey
+    && left.sleepType === right.sleepType
+    && left.sessionWindow != null && right.sessionWindow != null
+    && left.durationMinutes !== null && right.durationMinutes !== null
+    && Math.abs(left.durationMinutes - right.durationMinutes) <= 1
+    && Math.abs(left.sessionWindow.start - right.sessionWindow.start) <= 60_000
+    && Math.abs(left.sessionWindow.end - right.sessionWindow.end) <= 60_000
+    && Math.min(left.sessionWindow.end, right.sessionWindow.end)
+      - Math.max(left.sessionWindow.start, right.sessionWindow.start)
+      >= 0.9 * Math.max(left.sessionWindow.end - left.sessionWindow.start,
+        right.sessionWindow.end - right.sessionWindow.start);
 }
 
 function buildEventPresentation(
