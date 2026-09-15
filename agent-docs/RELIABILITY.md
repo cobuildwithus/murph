@@ -3456,9 +3456,12 @@ client timestamp and re-signals an exact duplicate. Admission and terminal
 outcome recording prepare provider-backed mailbox crypto before opening their
 transactions, then use only the exact prepared root while database locks are
 held; root drift retries the full preparation once with a fresh request cache.
-Runtime applies the closed action through its canonical domain owner. Fresh
-conversation work keeps its foreground priority. A safe-prefix prefetch imports
-a closed member action before a dirty runtime begins its long idle snapshot,
+Runtime applies the closed action through its canonical domain owner. Workout
+action and snapshot target lookups read the canonical event family
+directly, preserving event lifecycle collapse and exact binding/replay checks
+without hydrating or rebuilding the shared full-vault query projection.
+Fresh conversation work keeps its foreground priority. A safe-prefix prefetch
+imports a closed member action before a dirty runtime begins its long idle snapshot,
 and the first successful reply checkpoint includes one
 bounded selection restricted to due `member.action.requested` work. That
 provider-free service point ignores unrelated system backlog and a newly
