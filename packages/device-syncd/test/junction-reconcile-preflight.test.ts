@@ -13,6 +13,7 @@ const NOW = "2026-04-03T14:00:00.000Z";
 const LATER = "2026-04-03T15:00:00.000Z";
 
 function harness(options: { bounded?: boolean; timeseries?: boolean; resources?: string[]; sdkEnvelope?: boolean } = {}) {
+  let providers = [{ id: "provider-garmin-1", slug: "garmin", status: "connected", resource_availability: { activity: true } }];
   let rows: unknown[] = [{ id: "activity-1", date: "2026-04-02", steps: 1234, source: { provider: "garmin" } }];
   let timeseriesValue = 99;
   let malformed = false;
@@ -22,9 +23,7 @@ function harness(options: { bounded?: boolean; timeseries?: boolean; resources?:
   const provider = createJunctionProvider(async (input) => {
     calls += 1;
     const url = new URL(readUrl(input));
-    if (url.pathname.includes("/user/providers/")) return createJsonResponse({ providers: [{
-      id: "provider-garmin-1", slug: "garmin", status: "connected", resource_availability: { activity: true },
-    }] });
+    if (url.pathname.includes("/user/providers/")) return createJsonResponse({ providers });
     if (url.pathname.includes("/summary/")) return createJsonResponse(malformed ? null
       : options.sdkEnvelope ? { [url.pathname.split("/summary/")[1]!.split("/")[0]!]: rows } : { data: rows });
     if (url.pathname.includes("/timeseries/")) return createJsonResponse({ groups: { garmin: [{
@@ -59,6 +58,7 @@ function harness(options: { bounded?: boolean; timeseries?: boolean; resources?:
   } });
   return {
     account, context, provider,
+    setProviders: (value: typeof providers) => { providers = value; },
     setRows: (value: unknown[]) => { rows = value; },
     setMalformed: () => { malformed = true; },
     setTimeseriesValue: (value: number) => { timeseriesValue = value; },
@@ -269,4 +269,33 @@ test("incompatible content bindings fall back and cannot finish a partial proof"
     windowStart: "2026-03-27T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
   }));
   assert.equal(result.metadataPatch?.[JUNCTION_RECONCILE_PROOF_METADATA_KEY], undefined);
+});
+
+test("an explicitly empty admitted inventory can reuse completed content proof", async () => {
+  const h = harness();
+  h.account.sources = [];
+  h.setRows([]);
+  await h.importBaseline();
+  assert.ok(readJunctionReconcileProof(h.account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY]));
+  assert.equal((await h.probe()).outcome, "unchanged");
+  h.account.sources = [{ ...createConnectionSource(), resourceCount: 1 }];
+  assert.equal((await h.probe()).reason, "authority_or_inventory_changed");
+});
+
+test("empty live inventory remains comparable until a provider connects", async () => {
+  const h = harness();
+  h.account.sources = [];
+  h.setProviders([]);
+  h.setRows([]);
+  await h.importBaseline();
+  assert.equal((await h.probe()).outcome, "unchanged");
+  h.setProviders([{ id: "provider-new", slug: "garmin", status: "connected", resource_availability: { activity: true } }]);
+  assert.equal((await h.probe()).reason, "authority_or_inventory_changed");
+});
+
+test("missing admitted source authority still requires runtime reconciliation", async () => {
+  const h = harness();
+  await h.importBaseline();
+  h.account.sources = undefined;
+  assert.equal((await h.probe()).reason, "sources_missing");
 });
