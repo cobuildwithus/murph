@@ -124,6 +124,43 @@ test("persists content-free relay milestones through the real Worker egress log 
   expect(JSON.stringify(diagnostics)).not.toContain("PRIVATE_");
 });
 
+test("persists acknowledgement after metadata and separate progress and terminal forwarding", async () => {
+  const { client, provider, diagnostics } = await openImageGateSocket();
+  const sent = nextMessage(provider);
+  client.send(JSON.stringify({
+    type: "response.create", client_metadata: { turn_id: "PRIVATE_SYNTHETIC_TURN" },
+  }));
+  await sent;
+  await vi.waitFor(() => expect(diagnostics).toHaveLength(2));
+  const frames = [
+    { type: "codex.response.metadata" },
+    { type: "response.created", response: { id: "PRIVATE_RESPONSE" } },
+    { type: "response.output_text.delta", delta: "PRIVATE_TEXT" },
+    { type: "response.completed", response: { id: "PRIVATE_RESPONSE" } },
+  ];
+  for (const [index, frame] of frames.entries()) {
+    const received = nextMessage(client);
+    provider.send(JSON.stringify(frame));
+    await received;
+    await vi.waitFor(() => expect(diagnostics).toHaveLength(4 + index * 2));
+  }
+  expect(diagnostics[3]?.redactedJson.responseAcknowledged).toBe(false);
+  expect(diagnostics[5]?.redactedJson).toMatchObject({
+    websocketMilestone: "response_forwarded", responseMilestone: "acknowledged",
+    responseAcknowledged: true, responseAssociationKind: "single-request",
+    codexTurnCorrelation: expect.any(Number),
+  });
+  expect(diagnostics[7]?.redactedJson.responseMilestone).toBe("progress");
+  expect(diagnostics[9]?.redactedJson).toMatchObject({
+    responseMilestone: "terminal", responseTerminalKind: "response.completed",
+  });
+  const closed = nextClose(client);
+  provider.close(1000, "Synthetic completion");
+  await closed;
+  await vi.waitFor(() => expect(diagnostics).toHaveLength(11));
+  expect(JSON.stringify(diagnostics)).not.toContain("PRIVATE_");
+});
+
 test("bounds pending diagnostic writes without delaying forwarding when persistence stalls or fails", async () => {
   const logGate = deferred<number>();
   const { client, provider, diagnostics } = await openImageGateSocket(false, logGate.promise);

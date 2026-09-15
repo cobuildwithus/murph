@@ -3706,6 +3706,10 @@ async function runCodexAppServerTurnOnProcess(
   let codexTimingTurnStartAckElapsedMs: number | null = null
   let codexTimingTurnStartedNotificationElapsedMs: number | null = null
   let codexTimingTurnCompletedNotificationElapsedMs: number | null = null
+  let firstProviderReceiptElapsedMs: number | null = null
+  let firstAssistantReceiptElapsedMs: number | null = null
+  let lastProviderReceiptElapsedMs: number | null = null
+  let providerReceiptCount = 0
   let currentTurnStartedNotificationObserved = false
   let liveInterruptRequested = false
   let terminalNoReplyInterruptRequested = false
@@ -3955,6 +3959,10 @@ async function runCodexAppServerTurnOnProcess(
                 ...(turnId === null
                   ? {}
                   : { codexTimingTurnCorrelation: buildCodexTurnCorrelation(turnId) }),
+                codexTimingFirstProviderReceiptElapsedMs: firstProviderReceiptElapsedMs,
+                codexTimingFirstAssistantReceiptElapsedMs: firstAssistantReceiptElapsedMs,
+                codexTimingLastProviderReceiptElapsedMs: lastProviderReceiptElapsedMs,
+                codexTimingProviderReceiptCount: providerReceiptCount,
                 // This ends when the completion trace is emitted after local
                 // dynamic-tool/progress drains. The outer provider-result
                 // boundary is recorded separately by assistant.turn.timing.
@@ -3980,6 +3988,53 @@ async function runCodexAppServerTurnOnProcess(
       })
     } catch {
       // Timing traces are diagnostic-only and must not block assistant turns.
+    }
+  }
+
+  const recordProviderReceipt = (kind: 'assistant' | 'reasoning' | 'tool') => {
+    if (!input.onTraceEvent || turnId === null || codexProviderRequestStartedAtMs === null) return
+    const elapsedMs = Math.max(0, Date.now() - codexProviderRequestStartedAtMs)
+    const first = firstProviderReceiptElapsedMs === null
+    const firstAssistant = kind === 'assistant' && firstAssistantReceiptElapsedMs === null
+    firstProviderReceiptElapsedMs ??= elapsedMs
+    if (firstAssistant) firstAssistantReceiptElapsedMs = elapsedMs
+    lastProviderReceiptElapsedMs = elapsedMs
+    providerReceiptCount += 1
+    if (!first && !firstAssistant) return
+    try {
+      input.onTraceEvent({
+        codexThreadId,
+        rawEvent: {
+          schema: CODEX_APP_SERVER_TIMING_TRACE_SCHEMA,
+          type: CODEX_APP_SERVER_TIMING_TRACE_TYPE,
+          codexTimingStage: first ? 'provider-output-received' : 'assistant-output-received',
+          codexTimingReceiptKind: kind,
+          codexTimingTurnCorrelation: buildCodexTurnCorrelation(turnId),
+          codexTimingProviderRequestOrdinal: input.providerRequestOrdinal,
+          codexTimingFirstProviderReceiptElapsedMs: firstProviderReceiptElapsedMs,
+          codexTimingFirstAssistantReceiptElapsedMs: firstAssistantReceiptElapsedMs,
+          codexTimingLastProviderReceiptElapsedMs: lastProviderReceiptElapsedMs,
+          codexTimingProviderReceiptCount: providerReceiptCount,
+          codexTimingThreadIdPresent: codexThreadId !== null,
+          codexTimingTurnIdPresent: true,
+        },
+        updates: [],
+      })
+    } catch {
+      // Receipt observations cannot change output consumption or tool dispatch.
+    }
+  }
+
+  const recordProviderEventReceipt = (normalizedEvent: ReturnType<typeof normalizeCodexEvent>) => {
+    if (normalizedEvent.kind === 'assistant_delta' || normalizedEvent.kind === 'assistant_message') {
+      recordProviderReceipt('assistant')
+    } else if (normalizedEvent.kind === 'reasoning_delta') {
+      recordProviderReceipt('reasoning')
+    } else if (
+      normalizedEvent.kind === 'tool_call' || normalizedEvent.kind === 'web_search'
+      || (normalizedEvent.kind === 'status_item' && normalizedEvent.itemType === 'commandExecution')
+    ) {
+      recordProviderReceipt('tool')
     }
   }
 
@@ -4647,6 +4702,7 @@ async function runCodexAppServerTurnOnProcess(
       })
       return
     }
+    recordProviderReceipt('tool')
 
     const dynamicToolRequestDeliveryContextOrdinal =
       currentDeliveryContextOrdinal()
@@ -5477,6 +5533,7 @@ async function runCodexAppServerTurnOnProcess(
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
 
     const normalizedEvent = normalizeCodexEvent(message)
+    recordProviderEventReceipt(normalizedEvent)
     const runtimeIssueInput = actionRuntimeIssueTracker.recordEvent({
       activeTurnId: turnId,
       normalizedEvent,

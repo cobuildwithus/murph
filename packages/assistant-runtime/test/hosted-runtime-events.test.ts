@@ -691,6 +691,37 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
+  it.each(["provider-output-received", "assistant-output-received", "turn-completed"])(
+    "projects bounded native response receipt diagnostics (%s)", (stage) => {
+      const wake = buildHostedExecutionMemberActivatedWake({
+        eventId: "evt_receipt", memberId: "member_123",
+        memberChannels: { email: false, linq: true, telegram: false }, occurredAt: "2026-04-08T00:00:00.000Z",
+      });
+      const entry = emitHostedAssistantProviderTraceLog({
+        event: { rawEvent: {
+          schema: "murph.assistant-codex-app-server-timing.v1",
+          type: "assistant.codex.app_server_timing",
+          codexTimingStage: stage, codexTimingReceiptKind: "reasoning",
+          codexTimingTurnCorrelation: 1234, codexTimingProviderRequestOrdinal: 2,
+          codexTimingFirstProviderReceiptElapsedMs: 250,
+          codexTimingFirstAssistantReceiptElapsedMs: null,
+          codexTimingLastProviderReceiptElapsedMs: 700,
+          codexTimingProviderReceiptCount: 4,
+          rawTurnId: "PRIVATE_TURN", response: "PRIVATE_RESPONSE",
+        } }, wake,
+      });
+      expect(entry?.redacted).toMatchObject({
+        codexTimingStage: stage, codexTimingReceiptKind: "reasoning",
+        codexTimingTurnCorrelation: 1234, codexTimingProviderRequestOrdinal: 2,
+        codexTimingFirstProviderReceiptElapsedMs: 250,
+        codexTimingLastProviderReceiptElapsedMs: 700,
+        codexTimingProviderReceiptCount: 4,
+      });
+      expect(entry?.redacted).toHaveProperty("codexTimingFirstAssistantReceiptElapsedMs", null);
+      expect(JSON.stringify(entry)).not.toContain("PRIVATE_");
+    },
+  );
+
   it("captures hosted Codex app-server timing without raw identifiers", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_codex_timing",
