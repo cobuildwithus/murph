@@ -22,3 +22,10 @@ Run a protected-main admission workflow with a matching imported GitHub check. C
 ## Context
 
 Missing delivery of completed check results stalls verified releases and forces manual recovery.
+
+## Cancellation follow-up
+
+Superseding a pending admission run can cancel it before any jobs start. Its
+in-workflow finalizer then cannot publish a terminal status, leaving the imported
+Vercel check running. An independent completion-event notifier must settle the
+exact canceled attempt without overwriting a newer attempt or approved result.

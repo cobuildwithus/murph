@@ -2238,6 +2238,13 @@ never authorize promotion or disable the configured Deployment Check. The
 finalizer requires proof from the same workflow attempt: rerun the whole
 admission workflow after notification failure, not only its publishing job.
 
+A separate `Temporal Web Admission Cancellation` workflow consumes completed
+cancellation events outside the admission concurrency group. Superseded waiting
+runs never start their own finalizer, so this notifier publishes failure for the
+exact canceled candidate after checking current run identity and attempt. It
+skips newer attempts and existing successful admission, never publishes success,
+and does not check out candidate code or use private deployment credentials.
+
 Do not deploy production from the local CLI, promote an existing deployment,
 use Instant Rollback, or force-promote past a Deployment Check. Those paths do
 not create fresh compatibility evidence against current private `main` and live
