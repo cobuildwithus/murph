@@ -601,11 +601,13 @@ export const MURPH_SUBSCRIPTION_TOOL = {
   },
 } as const
 
+export const ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN = '^ain_[0-9a-f]{32}$'
+
 export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
   description:
-    'For updates, send only the fields the user wants changed; omit unchanged fields. A tone-only or voice-only update needs no read. Send both personas only when changing that pair. Read the current hosted conversation runtime\'s effective Murph main personality, optional supporting personality, tone, voice, and model context, or atomically update those fields. Persona changes require current accepted user input plus both mainPersona and supportingPersona; use read first when either current value must be preserved, and pass null to remove support. Exact scheduled automation occurrences may update tone and voice but never personas. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Treat a request about how Murph should keep writing or show up as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
+    'For a conversation update, pass message_ref from the accepted message requesting these changes; never borrow a later message\'s ref. Split changes requested by different messages into separate calls. Omit it for scheduled actions. For updates, send only the fields the user wants changed; omit unchanged fields. For an exact tone-only or voice-only request, call update once without read; its result reports the saved value. Send both personas only when changing that pair. Read the current hosted conversation runtime\'s effective Murph main personality, optional supporting personality, tone, voice, and model context, or atomically update those fields. Persona changes require current accepted user input plus both mainPersona and supportingPersona; use read first when either current value must be preserved, and pass null to remove support. Exact scheduled automation occurrences may update tone and voice but never personas. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Confirm casing as sentence case or lowercase in the reply. Treat a request about how Murph should keep writing or show up as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
   inputSchema: {
     oneOf: [
       {
@@ -626,6 +628,10 @@ export const MURPH_PERSONALIZATION_TOOL = {
           action: {
             type: 'string',
             enum: ['update'],
+          },
+          message_ref: {
+            type: 'string',
+            pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
           },
           mainPersona: {
             type: 'string',
@@ -656,6 +662,9 @@ export const MURPH_PERSONALIZATION_TOOL = {
         },
         required: ['action'],
         minProperties: 2,
+        // Keep properties here so generated tool arguments stay concrete.
+        // Source metadata alone cannot make an update nonempty.
+        not: { required: ['message_ref'], maxProperties: 2 },
         dependentRequired: {
           mainPersona: ['supportingPersona'],
           supportingPersona: ['mainPersona'],
@@ -909,7 +918,6 @@ export const MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL = {
   },
 } as const
 
-export const ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN = '^ain_[0-9a-f]{32}$'
 const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,

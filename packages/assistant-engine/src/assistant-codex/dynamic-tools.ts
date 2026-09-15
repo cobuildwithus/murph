@@ -1584,6 +1584,7 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'personalization'
+      messageRef?: string
       request: HostedRuntimeAssistantPersonalizationModelToolRequest
       toolCallId?: string
     }
@@ -1988,6 +1989,7 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'personalization',
+        messageRef: parsed.messageRef,
         request: parsed.request,
         ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
@@ -3684,6 +3686,7 @@ async function dispatchMurphDynamicToolRequest(
       return await executeAssistantStyleDynamicTool({
         authority: resolveHostedAssistantPersonalizationToolAuthority(
           hostedToolContext,
+          input.request.messageRef,
         ),
         hosted: hostedToolContext != null,
         hostedPersonalizationTool:
@@ -3735,6 +3738,7 @@ async function dispatchMurphDynamicToolRequest(
     case 'personalization':
       return await executePersonalizationTool({
         hostedToolContext: input.hostedToolContext ?? null,
+        messageRef: input.request.messageRef,
         request: input.request.request,
         toolCallId: input.request.toolCallId ?? null,
       })
@@ -4286,24 +4290,37 @@ function isHostedBillingPlanQuoteStaleError(error: unknown): boolean {
 
 function resolveHostedAssistantPersonalizationToolAuthority(
   hostedToolContext: AssistantHostedToolContext | null,
+  messageRef?: string,
 ): HostedRuntimeAssistantPersonalizationToolAuthority | null {
-  const invocationScope: AssistantHostedInvocationScope | null =
-    hostedToolContext?.currentInvocationScope?.() ?? null
-  if (invocationScope?.origin.kind === 'accepted_input') {
-    return { assistantInputId: invocationScope.origin.assistantInputId }
+  if (!hostedToolContext) return null
+  const scope = hostedToolContext.currentUserActionScope?.()
+  if (scope) {
+    if (scope.conversationScope === 'unverified-external') return null
+    const inputIds = scope.acceptedInputIds
+    const assistantInputId = messageRef ?? (inputIds.length === 1 ? inputIds[0] : undefined)
+    return assistantInputId !== undefined && inputIds.includes(assistantInputId)
+      ? { assistantInputId }
+      : null
   }
+  if (messageRef !== undefined) return null
+  const invocationScope: AssistantHostedInvocationScope | null =
+    hostedToolContext.currentInvocationScope?.() ?? null
   if (invocationScope?.origin.kind === 'automation_occurrence') {
     return {
       automationId: invocationScope.origin.automationId,
       occurrenceAt: invocationScope.origin.occurrenceAt,
     }
   }
+  // Legacy single-input contexts have no accepted-input scope accessor.
+  // A present accessor is authoritative even when it returns no inputs.
+  if (hostedToolContext.currentUserActionScope) return null
   const assistantInputId =
-    hostedToolContext?.currentAssistantInputId?.() ?? null
+    hostedToolContext.currentAssistantInputId?.() ?? null
   return assistantInputId ? { assistantInputId } : null
 }
 
 async function executePersonalizationTool(input: {
+  messageRef?: string
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedRuntimeAssistantPersonalizationModelToolRequest
   toolCallId: string | null
@@ -4316,6 +4333,7 @@ async function executePersonalizationTool(input: {
   const authority = input.request.action === 'update'
     ? resolveHostedAssistantPersonalizationToolAuthority(
         input.hostedToolContext,
+        input.messageRef,
       )
     : null
   if (input.request.action === 'update' && authority === null) {
@@ -7450,15 +7468,30 @@ function parsePersonalizationArguments(
   value: unknown,
 ):
   | {
+      messageRef?: string
       request: HostedRuntimeAssistantPersonalizationModelToolRequest
       ok: true
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const parsed = parseDynamicToolArguments({
-    schema: hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
+    schema: z.object({
+      message_ref: z.string().regex(new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u')).optional(),
+    }).passthrough().transform(({ message_ref, ...request }, context) => {
+      const parsed = hostedRuntimeAssistantPersonalizationModelToolRequestSchema.safeParse(request)
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) context.addIssue({ ...issue })
+        return z.NEVER
+      }
+      if (message_ref !== undefined && parsed.data.action !== 'update') {
+        context.addIssue({ code: 'custom', path: ['message_ref'], message: 'Message ref is only valid for updates.' })
+        return z.NEVER
+      }
+      return { messageRef: message_ref, request: parsed.data }
+    }),
     value,
     schemaRootKeys: [
       'action',
+      'message_ref',
       'mainPersona',
       'supportingPersona',
       'tone',
@@ -7472,7 +7505,8 @@ function parsePersonalizationArguments(
 
   return {
     ok: true,
-    request: parsed.args,
+    request: parsed.args.request,
+    ...(parsed.args.messageRef === undefined ? {} : { messageRef: parsed.args.messageRef }),
   }
 }
 

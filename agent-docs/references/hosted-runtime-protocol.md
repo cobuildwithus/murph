@@ -2477,6 +2477,15 @@ preference items during enqueue or checkpoint preparation. This ordering is
 what preserves two adjacent changes to different personality dials without a
 merge queue or second state owner.
 
+Conversation batching across system events does not reattribute preference
+intent: `assistant_style` and `personalization` updates select the requesting
+accepted `message_ref`. Both prompt builders expose validated input IDs across
+transports, independently of native reply/reaction eligibility. The runtime
+checks membership in the current accepted scope, including inputs admitted live, and passes that input through the
+existing signed authority callback. An ambiguous batch without a selected ref
+fails closed. Web still reloads the selected message's canonical timestamp and
+causal sequence before comparing each preference against newer Settings state.
+
 Mailbox append also allocates one immutable per-member causal sequence under a
 user-scoped transaction lock, shared by the conversation and system lanes.
 That acceptance sequence, not lane import order or wall-clock time, orders
@@ -3623,12 +3632,20 @@ source-less wake preempts those drains only after the resumed import proves new
 conversation work; a no-progress or system-only nudge must not starve bounded
 maintenance or the idle checkpoint.
 The assistant engine admits the frozen same-wake compound batch before provider
-start without broad hosted mailbox rediscovery. While a Codex turn is live,
+start without broad hosted mailbox rediscovery. Initial selection, recovered
+pending selection, live admission, and terminal accepted-input revalidation use
+the existing conversation lane sequence for adjacency. Intervening system work,
+including device-sync wakes, does not split neighboring conversation inputs.
+Positive increasing shared causal sequences remain required, and the terminal
+accepted input retains its canonical causal sequence for field-level mutations.
+System-fact application and effect authority remain with their existing owners;
+batching does not wait for, consume, or grant authority to system work. While a Codex turn is live,
 later mailbox input may still be imported and staged. Its exact staged input ID
 may join through the generic live-steering path while the current provider
 request is open, only while the turn remains below the cumulative 50-message
 initial-plus-live bound, and only when the stored event is the next positive
-causal-sequence successor and preserves the direct actor and native reply
+conversation-lane successor with increasing positive causal order and preserves
+the direct actor and native reply
 anchor, or for an authenticated non-direct group preserves the room, delivery
 route, account/audience, projection readiness, and reaction boundary. Every
 completed provider text or media segment remains deliverable for ordinary
@@ -3654,7 +3671,7 @@ provider steering but keeps conversation admission registered until an atomic
 quiet cutoff or one reconsideration admission. A successfully committed live
 steer during request 0 also selects reconsideration and keeps registration open
 through request 1, which closes at its first completed response. Missing input,
-a causal gap, a boundary change, capacity
+a conversation-lane gap, a boundary change, capacity
 overflow, or input arriving after the final cutoff remains pending for a normal
 later assistant turn. Strict active-turn-targeted input still fails closed
 instead of falling through. Reconsideration is capped at provider request 1 and
