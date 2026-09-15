@@ -3,8 +3,10 @@ import { HOSTED_ASSISTANT_SOL_MODEL } from "@murphai/hosted-execution/assistant-
 import { createHash } from "node:crypto";
 
 import type { AutomationRoute } from "@murphai/contracts";
+import { deterministicContractId, ID_PREFIXES } from "@murphai/core";
 import {
   buildHostedAssistantContextFingerprintDetails,
+  buildManualMealEstimationInstructions,
   initializeAssistantGroupRoomModel,
   reconcileMurphManagedOnboardingFollowup,
   sendAssistantNotification,
@@ -19,6 +21,7 @@ import type {
   HostedExecutionLogLevel,
   HostedExecutionLogPhase,
   HostedExecutionMemberActivatedWake,
+  HostedExecutionMealPhotoCapturedWake,
   HostedExecutionOperatorTaskNotification,
   HostedExecutionRedactedLogEntry,
   HostedExecutionStructuredLogDetails,
@@ -45,6 +48,7 @@ import {
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { emitHostedAssistantContextTraceLog } from "../context-diagnostics.ts";
 import { readHostedMailboxImportState } from "../mailbox-state.ts";
+import { isHostedManualMealPhotoWake } from "../meal-photo-import.ts";
 import type { HostedRuntimeEffectsPort } from "../platform.ts";
 import { HOSTED_ASSISTANT_WAKE_REASON } from "../wake-candidates.ts";
 import {
@@ -331,11 +335,63 @@ export async function executeHostedMemberActivatedWake(input: {
   return outcome;
 }
 
+export async function executeHostedManualMealPhotoWake(input: {
+  wake: HostedExecutionMealPhotoCapturedWake;
+  executionContext: AssistantExecutionContext;
+  forceQueueOnly?: boolean;
+  sourceMailboxItemId?: string | null;
+  turnEnvironment?: AssistantTurnEnvironment | null;
+  vaultRoot: string;
+}): Promise<HostedMailboxOutcome> {
+  if (!isHostedManualMealPhotoWake(input.wake)) {
+    throw new TypeError("Automatic meal photos must remain import-only.");
+  }
+  if (input.executionContext.hosted?.memberId !== input.wake.userId) {
+    throw new TypeError("Manual meal estimation requires the bound member runtime.");
+  }
+  const route = input.wake.directRoute;
+  const email = route.channel === "email";
+  const eventId = `assistant.notification.requested:${input.wake.eventId}`;
+  return executeHostedAssistantNotificationWake({
+    ...input,
+    manualMealEstimation: true,
+    wake: buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId,
+      memberId: input.wake.userId,
+      occurredAt: input.wake.occurredAt,
+      notification: {
+        deliveryDedupeToken: eventId,
+        deliveryIdempotencyKey: eventId,
+        instructions: buildManualMealEstimationInstructions({
+          capturedAt: input.wake.mealPhoto.capturedAt,
+          mealId: deterministicContractId(
+            ID_PREFIXES.meal,
+            `meal-photo-capture:meal:${input.wake.mealPhoto.captureId}`,
+          ),
+        }),
+        responsePolicy: { kind: "require_send" },
+        route: {
+          actorId: null,
+          channel: route.channel,
+          delivery: {
+            kind: email ? "explicit" : "thread",
+            target: email ? route.deliveryTarget : route.threadId,
+          },
+          identityId: null,
+          threadId: email ? null : route.threadId,
+          threadIsDirect: true,
+        },
+      },
+    }),
+  });
+}
+
 export async function executeHostedAssistantNotificationWake(input: {
   effectsPort?: Pick<HostedRuntimeEffectsPort, "controlOperatorTask">;
   wake: HostedExecutionAssistantNotificationRequestedWake;
   executionContext: AssistantExecutionContext;
   forceQueueOnly?: boolean;
+  manualMealEstimation?: true;
   sourceMailboxItemId?: string | null;
   turnEnvironment?: AssistantTurnEnvironment | null;
   vaultRoot: string;
@@ -372,6 +428,7 @@ export async function executeHostedAssistantNotificationWake(input: {
 
   try {
     const notificationResult = await sendAssistantNotification({
+      manualMealEstimation: input.manualMealEstimation,
       ...buildAssistantNotificationInput(
         input.wake,
         input.executionContext,

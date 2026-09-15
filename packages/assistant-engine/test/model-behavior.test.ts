@@ -2243,7 +2243,9 @@ describe('assistant system prompt cache stability', () => {
     // verify the actionable next step and prevent ineffective context handoffs.
     // Nutrition guidance adds 287 characters; six focused Terra journeys cover
     // first-card invitation, suppression, routine logging and scheduled closeout.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(73_090)
+    // Selected-date meal recovery adds 164 characters; five focused Terra
+    // journeys cover manual estimation, clarification, and nonnumeric tracking.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(73_254)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

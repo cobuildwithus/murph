@@ -183,7 +183,7 @@ const ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
 }
-const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
+const ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
   nativeResumePolicy: 'disabled',
@@ -293,6 +293,8 @@ export interface AssistantNotificationInput
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
   /** Trusted runtime welcome policy; never accepted from notification wire data. */
   connectedChannelGreeting?: boolean
+  /** Trusted manual app capture; never accepted from notification wire data. */
+  manualMealEstimation?: true
   instructions: string
   onGroupEmailPendingDeliveryIntentId?: ((intentId: string) => void) | null
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
@@ -1908,8 +1910,14 @@ function resolveAssistantNotificationTurnProfile(
   if (input.notificationPromptProfile === 'operator-message') {
     return ASSISTANT_OPERATOR_MESSAGE_NOTIFICATION_TURN_PROFILE
   }
+  if (input.manualMealEstimation) {
+    if (input.threadIsDirect !== true) {
+      throw new TypeError('Manual meal estimation requires a private direct route.')
+    }
+    return ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
+  }
   if (isAssistantOnboardingGoalCheckinNotification(input)) {
-    return ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE
+    return ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
   }
   return isAssistantNotificationScheduledOccurrence(input)
     ? null
@@ -2148,7 +2156,7 @@ export function parseAssistantNotificationDecision(
   }
 }
 
-function resolveAssistantNotificationDecision(input: {
+export function resolveAssistantNotificationDecision(input: {
   providerAuthoredResponse: string
   runtimeReplacesFinalPresentation: boolean
   runtimeResponse: string

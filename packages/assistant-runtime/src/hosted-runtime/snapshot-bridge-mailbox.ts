@@ -3,6 +3,7 @@ import {
   isHostedTelegramConversationMessageWake,
   type HostedExecutionConversationMessageWake,
   type HostedExecutionSystemWake,
+  type HostedExecutionMealPhotoCapturedWake,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 
@@ -11,6 +12,7 @@ import {
 } from "./mailbox-conversation-import.ts";
 import {
   importHostedMealPhotoCapturedMailboxItem,
+  isHostedManualMealPhotoWake,
 } from "./meal-photo-import.ts";
 import {
   importHostedReportedDailyMetricMailboxItem,
@@ -293,12 +295,7 @@ async function importHostedWorkspaceBridgeMailboxItem(
     input.item.route.action === "import-meal-photo" &&
     wake.kind === "meal-photo.captured"
   ) {
-    return await importHostedMealPhotoCapturedMailboxItem({
-      effectsPort: input.runtime.platform.effectsPort,
-      item: input.item,
-      vaultRoot: input.vaultRoot,
-      wake,
-    });
+    return importHostedWorkspaceBridgeMealPhoto(input, wake);
   }
 
   if (
@@ -432,4 +429,32 @@ function hostedMailboxInstantsMatch(left: string, right: string): boolean {
   return Number.isFinite(leftTimestamp)
     && Number.isFinite(rightTimestamp)
     && leftTimestamp === rightTimestamp;
+}
+
+async function importHostedWorkspaceBridgeMealPhoto(
+  input: HostedWorkspaceBridgeMailboxImportInput,
+  wake: HostedExecutionMealPhotoCapturedWake,
+): ReturnType<HostedWorkspaceRuntimeBridgeImportItem> {
+  const outcome = await importHostedMealPhotoCapturedMailboxItem({
+    effectsPort: input.runtime.platform.effectsPort,
+    item: input.item,
+    vaultRoot: input.vaultRoot,
+    wake,
+  });
+  if (
+    outcome.status === "imported"
+    && !input.item.durablyConsumed
+    && isHostedManualMealPhotoWake(wake)
+  ) {
+    const queued = await enqueueHostedSystemMailboxItem({
+      item: {
+        ...input.item,
+        route: { ...input.item.route, action: "dispatch-assistant-notification" },
+      },
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+    if (queued.status !== "imported") return queued;
+  }
+  return outcome;
 }

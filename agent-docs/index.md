@@ -13,6 +13,11 @@ service restart/retry proof lives in
 
 ## Purpose
 
+Immediate manual meal estimation and ordinary incomplete-meal recovery are
+owned by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
+`agent-docs/SECURITY.md`. Their focused proof covers canonical import replay,
+private notification tools, model admission, and real assistant replies.
+
 Empty automatic meal closeout admission is owned by `ARCHITECTURE.md`;
 canonical queue, scheduler, and focused real-Codex proof are indexed in
 `agent-docs/references/testing-ci-map.md`.
@@ -49,6 +54,8 @@ Runtime progress diagnostics (aggregate alerts, per-message warm/cold typing
 alerts with turn-admission and provider-lifetime evidence, and code-only
 first-pending evidence) are specified in
 [`agent-docs/RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
+That owner also specifies cold-restore download transport milestones,
+process-activity timing, and bounded Cloudflare/R2 request correlation.
 
 Automation edit schema discovery and attended progress guidance are owned by
 `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`. Real Codex native-schema and

@@ -4032,6 +4032,57 @@ test.each(['linq', 'telegram', 'email'] as const)(
   },
 )
 
+test('manual meal estimation has isolated vault tools and one private reply', async () => {
+  const response = JSON.stringify({
+    kind: 'send_message', text: 'About how large was the serving?',
+    privateSummary: 'Asked for the missing portion.',
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult: createProviderResult({ response }),
+      turnId: 'turn-manual-meal-estimation',
+    })
+  await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Complete the already saved meal from its photo.',
+    manualMealEstimation: true,
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: true,
+    vault: '/vaults/manual-meal',
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(1)
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      profile: {
+        nativeResumePolicy: 'disabled', promptProfile: 'conversation',
+        threadScope: 'isolated-thread', toolProfile: 'provider-turn',
+      },
+    }),
+  )
+  expect(deliverMessage).toHaveBeenCalledTimes(1)
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    message: 'About how large was the serving?',
+  }))
+})
+
+test('manual meal estimation cannot enable tools in a group', async () => {
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult: createProviderResult({ response: '{}' }),
+      turnId: 'turn-manual-meal-group-denied',
+    })
+  await expect(sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Complete the already saved meal.',
+    manualMealEstimation: true,
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: false,
+    vault: '/vaults/manual-meal',
+  })).rejects.toThrow('Manual meal estimation requires a private direct route')
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
 test('sendAssistantNotificationLocal delivers ordinary context handoff text through the existing output-only path', async () => {
   const response = 'The final round stayed controlled. Nice work.'
   const providerResult = createProviderResult({

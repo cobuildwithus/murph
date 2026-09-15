@@ -68,10 +68,10 @@ describe('assistant automatic meal capture skill', () => {
       'Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.',
     )
     expect(prompt).toContain(
-      'Food-journal owns requested-card incomplete-meal recovery: edit the exact meal from accepted evidence or ask one missing-detail question.',
+      'Food-journal owns selected-date incomplete-meal recovery on meal logging, estimation, and daily-card turns: inspect and edit existing meals from supported evidence or ask one focused missing-detail question.',
     )
     expect(prompt).toContain(
-      'Load automatic-meal-capture for device meals; imports are canonical, never duplicate them, and do not start model turns.',
+      'Explicit manual app submissions request immediate estimation; background captures wait for a meal-related turn or closeout.',
     )
     expect(prompt).toContain(
       'In a private direct conversation, when someone asks how to start recurring meal tracking or how Murph can track meals, load both automatic-meal-capture and food-journal even when they do not say "automatic."',
@@ -129,9 +129,9 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(skill).toContain('iOS may delay or skip any background\nopportunity')
     expect(skill).toContain(
-      'Automatic capture does not itself require a chat reply and its import does not\nstart a model turn.',
+      'Automatic background capture does not itself require a chat reply and its import\ndoes not start a model turn.',
     )
-    expect(skill).toContain('next eligible interactive turn')
+    expect(skill).toContain('next eligible meal-related interactive turn')
     expect(skill).toContain('scoped upload\ncredential may require renewal')
     expect(skill).toContain('vault-cli meal list --from <YYYY-MM-DD>')
     expect(skill).toContain('vault-cli meal show <meal-id> --format json')

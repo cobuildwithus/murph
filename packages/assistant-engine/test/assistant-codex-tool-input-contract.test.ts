@@ -290,6 +290,57 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     }
   })
 
+  it.skipIf(process.env.MURPH_MEASURE_MEAL_INPUT !== '1').each(['direct', 'group'] as const)(
+    'meal recovery: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true,
+        automationAvailable: true,
+        personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group',
+        groupChallengeResponseCardsAvailable: scope === 'group',
+        responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: false,
+        progressUpdatesAvailable: false,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-09-14',
+        currentInstant: '2026-09-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      stub.captureProviderRequestDiagnostics({ completeInput: true })
+      stub.queue({ text: CONTRACT_CAPTURE_DONE })
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput, dynamicTools: tools, developerInstructions,
+        groupConversation: scope === 'group',
+        prompt: [layers.dynamicTurnContextPrompt, 'Log a bowl of vegetable soup for lunch.'].join('\n\n'),
+        env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+      })
+      const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+      assert.ok(captured)
+      assert.equal(stub.requestCountSinceBaseline(), 1)
+      assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+      assert.equal(tools.includes(MURPH_ATTACH_RESPONSE_CARD_TOOL), scope === 'direct')
+      process.stdout.write('[meal-input-proof] ' + JSON.stringify({
+        scope, decodedRequestUtf8Bytes: Buffer.byteLength(captured.json),
+        requestSha256: createHash('sha256').update(captured.json).digest('hex'),
+        registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+        instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, layers.dynamicTurnContextPrompt].join('\n\n')),
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured; scripted usage is not tokenization.',
+        exclusions: captured.excludedTransportFields,
+      }) + '\n')
+    },
+  )
+
   it.skipIf(process.env.MURPH_MEASURE_AUTOMATION_INPUT !== '1').each(['direct', 'group'] as const)(
     'automation edit: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {
       stub ??= await startScriptedResponsesStub()
