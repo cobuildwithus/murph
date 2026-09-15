@@ -193,16 +193,16 @@ describe("ReviewGPT repository config", () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("count=6\n");
+    expect(result.stdout).toContain("count=5\n");
     expect(result.stdout).toContain(
-      "pool=eragon phlebas hercules mountain vonneumann apollo\n",
+      "pool=eragon hercules mountain vonneumann apollo\n",
     );
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });
 
   it("keeps an explicit per-run lane count above local preferences", () => {
     const harness = createHarness(
-      "REVIEW_GPT_BROWSER_LANE_COUNT=6\nMURPH_REVIEW_GPT_BROWSER_LANE_COUNT=5\n",
+      "REVIEW_GPT_BROWSER_LANE_COUNT=5\nMURPH_REVIEW_GPT_BROWSER_LANE_COUNT=4\n",
     );
     const result = runConfig(harness, {
       REVIEW_GPT_BROWSER_LANE: "auto",
@@ -211,12 +211,12 @@ describe("ReviewGPT repository config", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("count=2\n");
-    expect(result.stdout).toContain("pool=eragon phlebas\n");
+    expect(result.stdout).toContain("pool=eragon hercules\n");
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });
 
   it("keeps the direct compatibility count above a local standard preference", () => {
-    const harness = createHarness("REVIEW_GPT_BROWSER_LANE_COUNT=6\n");
+    const harness = createHarness("REVIEW_GPT_BROWSER_LANE_COUNT=5\n");
     const result = runConfig(harness, {
       MURPH_REVIEW_GPT_BROWSER_LANE_COUNT: "3",
       REVIEW_GPT_BROWSER_LANE: "auto",
@@ -224,20 +224,20 @@ describe("ReviewGPT repository config", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("count=3\n");
-    expect(result.stdout).toContain("pool=eragon phlebas hercules\n");
+    expect(result.stdout).toContain("pool=eragon hercules mountain\n");
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });
 
   it("uses the local count only when the invocation supplies no count", () => {
-    const harness = createHarness("REVIEW_GPT_BROWSER_LANE_COUNT=6\n");
+    const harness = createHarness("REVIEW_GPT_BROWSER_LANE_COUNT=5\n");
     const result = runConfig(harness, {
       REVIEW_GPT_BROWSER_LANE: "auto",
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("count=6\n");
+    expect(result.stdout).toContain("count=5\n");
     expect(result.stdout).toContain(
-      "pool=eragon phlebas hercules mountain vonneumann apollo\n",
+      "pool=eragon hercules mountain vonneumann apollo\n",
     );
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });

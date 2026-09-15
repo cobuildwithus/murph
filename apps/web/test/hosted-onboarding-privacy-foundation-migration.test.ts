@@ -6,6 +6,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMemberApprovalCredentials: [
     'memberId String @id @map("member_id")',
     'credentialsEncrypted String @map("credentials_encrypted")',
+    'recoveryHashEncrypted String? @map("recovery_hash_encrypted")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -1200,6 +1201,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260908190000_feedback_operator_tasks",
       "20260909210000_hosted_approval_credentials",
       "20260909220000_hosted_auth_records",
+      "20260910040000_approval_recovery_key",
       "20260910190000_message_typing_latency_alerts",
       "20260911143000_checkpoint_runtime_recheck_receipt",
       "migration_lock.toml",

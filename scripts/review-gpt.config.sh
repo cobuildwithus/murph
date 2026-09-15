@@ -14,14 +14,13 @@ if [[ -r "$review_gpt_local_config" ]]; then
 fi
 
 review_gpt_invalid_browser_lane() {
-  echo "Error: unsupported ReviewGPT browser lane '$1'. Use main, random, eragon, phlebas, hercules, mountain, vonneumann, or apollo." >&2
+  echo "Error: unsupported ReviewGPT browser lane '$1'. Use main, random, eragon, hercules, mountain, vonneumann, or apollo." >&2
 }
 
 review_gpt_browser_lane_display_name() {
   case "$1" in
     main) printf '%s\n' "Main" ;;
     eragon) printf '%s\n' "Eragon" ;;
-    phlebas) printf '%s\n' "Phlebas" ;;
     hercules) printf '%s\n' "Hercules" ;;
     mountain) printf '%s\n' "Mountain" ;;
     vonneumann) printf '%s\n' "Vonneumann" ;;
@@ -37,7 +36,6 @@ review_gpt_browser_lane_port() {
   case "$1" in
     main) printf '%s\n' "9452" ;;
     eragon) printf '%s\n' "9448" ;;
-    phlebas) printf '%s\n' "9442" ;;
     hercules) printf '%s\n' "9444" ;;
     mountain) printf '%s\n' "9450" ;;
     vonneumann) printf '%s\n' "9446" ;;
@@ -158,7 +156,7 @@ if [[ -n "$review_gpt_direct_browser_lane_count" ]]; then
 elif [[ -n "$review_gpt_direct_compat_browser_lane_count" ]]; then
   review_gpt_browser_lane_count="$review_gpt_direct_compat_browser_lane_count"
 else
-  review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-6}}"
+  review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-5}}"
 fi
 
 if [[ "$review_gpt_reuses_existing_thread" == "1" ]]; then
@@ -170,8 +168,8 @@ if [[ "$review_gpt_reuses_existing_thread" == "1" ]]; then
   esac
 fi
 
-if [[ ! "$review_gpt_browser_lane_count" =~ ^[1-6]$ ]]; then
-  echo "Error: REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 6." >&2
+if [[ ! "$review_gpt_browser_lane_count" =~ ^[1-5]$ ]]; then
+  echo "Error: REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 5." >&2
   return 1 2>/dev/null || exit 1
 fi
 
@@ -180,7 +178,7 @@ case "$review_gpt_requested_browser_lane" in
     review_gpt_selected_browser_lane="main"
     ;;
   "" | auto | random)
-    review_gpt_all_browser_lanes=(eragon phlebas hercules mountain vonneumann apollo)
+    review_gpt_all_browser_lanes=(eragon hercules mountain vonneumann apollo)
     review_gpt_browser_lanes=("${review_gpt_all_browser_lanes[@]:0:review_gpt_browser_lane_count}")
     review_gpt_usable_browser_lanes=()
 
@@ -200,7 +198,7 @@ case "$review_gpt_requested_browser_lane" in
   aragon | eragon)
     review_gpt_selected_browser_lane="eragon"
     ;;
-  phlebas | hercules | mountain | vonneumann | apollo)
+  hercules | mountain | vonneumann | apollo)
     review_gpt_selected_browser_lane="$review_gpt_requested_browser_lane"
     ;;
   *)

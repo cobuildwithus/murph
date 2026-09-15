@@ -1208,7 +1208,10 @@ export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
   envelope: HostedExecutionMealPhotoCapturedWake;
   prepared: PreparedHostedMailboxItemAppendCrypto;
   tx: HostedMailboxMutationTx;
-}): Promise<AppendHostedMailboxItemResult & { claimedMealPhotoKey: string }> {
+}): Promise<AppendHostedMailboxItemResult & {
+  claimedMealPhotoKey: string;
+  captureReceipt?: { captureId: string; capturedAt: string };
+}> {
   await acquireHostedMailboxDedupeAppendLockTx({
     dedupeKey: input.envelope.eventId,
     tx: input.tx,
@@ -1231,6 +1234,19 @@ export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
   return {
     ...appended,
     claimedMealPhotoKey: canonicalEnvelope.mealPhoto.mealPhotoKey,
+    // A retry may render an edited version of a photo whose first response was
+    // lost. Preserve strict payload binding, but let its authenticated owner
+    // recover the original acceptance without replacing or re-enqueuing it.
+    ...(appended.dedupeConflict
+      && existing?.kind === "meal-photo.captured"
+      && existing.userId === input.envelope.userId
+      && existing.eventId === input.envelope.eventId
+      && existing.mealPhoto.captureId === input.envelope.mealPhoto.captureId
+      ? { captureReceipt: {
+        captureId: existing.mealPhoto.captureId,
+        capturedAt: existing.mealPhoto.capturedAt,
+      } }
+      : {}),
   };
 }
 

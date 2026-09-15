@@ -947,6 +947,7 @@ export async function syncHostedMemberVerifiedEmailAuthorization(
 
 export async function prepareHostedMemberVerifiedEmailReplyAlias(input: {
   address: string;
+  afterRemoval?: true;
   memberId: string;
   prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberVerifiedEmailReplyAliasPreparation> {
@@ -960,7 +961,7 @@ export async function prepareHostedMemberVerifiedEmailReplyAlias(input: {
     }),
     input.prisma.hostedMemberRouting.findUnique({
       where: { memberId: input.memberId },
-      select: { replyAliasGeneration: true },
+      select: { replyAliasGeneration: true, replyAliasLookupKey: true },
     }),
   ]);
   const currentGeneration = requireHostedMemberReplyAliasGeneration(
@@ -974,8 +975,9 @@ export async function prepareHostedMemberVerifiedEmailReplyAlias(input: {
     && currentAuthorization.verifiedEmailLookupKey
     && verifiedEmailLookupKeys.includes(currentAuthorization.verifiedEmailLookupKey),
   );
-  const generation = currentAuthorization?.verifiedEmailVerifiedAt
-    && !sameVerifiedAddress
+  const rotate = input.afterRemoval ? Boolean(currentRouting?.replyAliasLookupKey)
+    : Boolean(currentAuthorization?.verifiedEmailVerifiedAt && !sameVerifiedAddress);
+  const generation = rotate
     ? incrementHostedMemberReplyAliasGeneration(currentGeneration)
     : currentGeneration;
   const route = await createHostedMemberReplyAliasRoute({

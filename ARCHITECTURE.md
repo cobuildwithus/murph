@@ -2103,6 +2103,17 @@ Schema-v2 enrollment is two-phase on that same row. Identity-authenticated `POST
 
 Web stores only hashes of the bearer and installation UUID plus an encrypted idempotency secret, validates a bounded metadata-free JPEG, and stages the bytes through the internal Cloudflare control client. Prepared and active enrollment rows have the complete credential triple; only active rows have `activatedAt`, while revoked rows retain neither activation nor credentials. Upload reads fail closed on prepared, expired, revoked, or incomplete state. The nullable revision-and-activation schema expansion deploys before fence-aware Web code. Revision-zero rows with a null activation marker remain active during rollout for old-Web compatibility. After the fence-aware deployment is live and prior Web functions drain, the contract migration marks those final legacy rows active, scrubs historical revoked credentials and activation, and validates the row-shape constraints. Only then may a schema-v2 iOS writer ship. Once a positive revision exists, fence-aware Web is the rollback floor. Each upload attempt owns a distinct staged object. Before the metadata-only mailbox append commits, Web prepares the existing ingress-root mailbox crypto outside the transaction, then locks the hosted member and any active sponsorship membership/group rows. Automatic upload rechecks the exact enrollment, active access, and historical launch consent. Manual upload instead rechecks the verified Privy blind-index core binding, active access, and the same historical consent without projecting private identity fields or touching enrollment state. The direct route and any verified-email fallback are projected outside the transaction, then the exact raw routing owner rows are locked and compared after those final authority checks but before append; a change fails with the typed route-required conflict. Only database root revalidation, local authenticated encryption, authority reads, and the metadata append remain inside the bounded transaction. Both paths enter one shared staging, mailbox, wake, and cleanup owner. The first accepted mailbox item chooses the canonical object for exact duplicate attempts; losing or failed attempts delete only their own unclaimed object, while ambiguous commit cleanup first reconciles against the mailbox. Postgres, Temporal, and the hosted mailbox receive metadata only.
 
+Conflicting meal-photo retries retain strict immutable payload binding. When the
+existing encrypted envelope matches the authenticated member, event, and capture
+ID, Web adds only the original capture ID and capture time to the existing 422
+error as `error.details.captureReceipt`. It never replaces the original object
+or appends another item. The same original item is re-signaled outside the
+transaction before returning its receipt, and unclaimed staging is cleaned up.
+No receipt is issued for another capture or an unavailable payload. This is
+additive for published clients; deploy Web before an iOS reader that can restore
+its Sent tile from that receipt. Receipt-less conflicts remain visible and
+pending in the new native reader.
+
 The post-drain credential-shape constraint is itself a database rollback floor because older Web revocation code retained credential columns on revoked rows. A positive schema-v2 revision independently makes older Web logically unsafe because it could ignore the high-water mark and reactivate a tombstone. Rolling back below the fence-aware deployment therefore requires a forward schema/code repair rather than an ordinary application rollback.
 
 `apps/cloudflare` encrypts each staged JPEG into a private per-user R2 object. Object deletion derives the user-namespaced R2 path directly and does not require the user's encryption context to remain available. The metadata-only `meal-photo.captured` mailbox item wakes `packages/assistant-runtime`, which verifies the object's length and digest, imports one idempotent photo-only meal through `packages/core`, and schedules object deletion only after the workspace checkpoint succeeds. The R2 lifecycle rule makes staged meal-photo objects eligible for asynchronous deletion at 31 days, one day beyond mailbox recovery retention; successful imports still delete staging immediately after the checkpoint, and 31 days is not a guaranteed physical-deletion deadline. Neither the enrollment row nor R2 is canonical meal truth; the member's encrypted hosted workspace remains the canonical record.
@@ -3104,6 +3115,23 @@ the same member. Protected commits compare authenticated snapshots under locks.
 Current signup, consent, billing and admission owners remain shared. The rollout
 and eventual deletion of compatibility code belong to `docs/hosted-auth-migration.md`.
 
+The first-party Web login panel is shared by the main dialog and invite entry.
+Confirmed login commits before retryable product completion; consent and billing
+retain their existing owners. An hourly visible-tab check uses the fixed session
+renewal route, whose legacy branch never extends an old cookie. Account contact
+controls share one implementation between dashboard Settings and the independent
+`/settings/accounts` page, so unfinished signups and native browser handoffs do
+not enter a paid-access redirect loop. Native return links are fixed, contain no
+credential or member identity, and confer no admission authority.
+
+Credential changes bind approval to the method, operation, old/new identity,
+canonical member and current browser session. New contact proof, canonical and
+encrypted login records, challenge consumption and channel wake commit together.
+Adding a method preserves sessions; replacement/removal preserves only the
+authorizing first-party browser and revokes other sessions, including legacy
+native admission. The existing last-method and cross-member ownership guards
+remain authoritative.
+
 Approval passkeys live with the sensitive-action owner. One encrypted aggregate
 per canonical member holds at most eight WebAuthn credentials; the existing
 member crypto owner binds its confidentiality and integrity. Browser options
@@ -3116,6 +3144,16 @@ stale proof. The counter update and approved mutation share the challenge's
 transaction. Unmigrated members retain the legacy wallet verifier; enrolled
 members cannot fall back. The reader-first rollout and original browser-session
 drain are owned by `docs/hosted-auth-migration.md`.
+
+The same approval aggregate holds one optional encrypted digest for a saved
+recovery key. A current Murph passkey authorizes generation; fresh first-party
+primary proof plus the previously saved random key authorizes replacement.
+Recovery reuses the one-use challenge, atomically replaces all approval
+credentials, consumes the key and revokes other sessions through the existing
+auth owners. It creates no login session, contact claim, separate ledger or
+operator override. Existing protected accounts cannot bootstrap recovery from
+primary login alone. The rollout owner defines unresolved-factor retirement
+gates and the additive nullable-column deployment order.
 
 Hosted browser wearable OAuth is a same-browser, same-member, same-host
 boundary. Start issues one short-lived, host-only callback proof bound to the

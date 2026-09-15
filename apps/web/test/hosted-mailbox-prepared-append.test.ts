@@ -810,7 +810,7 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
     expect(fixture.events).toContain("retained-root-local");
   });
 
-  it("rejects conflicting reuse through the prepared meal-photo append", async () => {
+  it("keeps the original payload and returns only its same-capture receipt on conflict", async () => {
     const fixture = createMailboxFixture();
     mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot
       .mockImplementation(async (input: { value?: string | null }) =>
@@ -856,10 +856,30 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
 
       expect(conflict).toMatchObject({
         claimedMealPhotoKey: "meal-photo-attempt-b",
+        captureReceipt: {
+          captureId: firstEnvelope.mealPhoto.captureId,
+          capturedAt: firstEnvelope.mealPhoto.capturedAt,
+        },
         dedupeConflict: true,
         duplicate: true,
         inserted: false,
       });
+      expect(await readHostedMailboxWakeByDedupeKey({
+        dedupeKey: firstEnvelope.eventId,
+        prisma: fixture.tx as never,
+        userId: USER_ID,
+      })).toEqual(firstEnvelope);
+
+      const otherCapture = await appendHostedMealPhotoMailboxEnvelopeTx({
+        envelope: {
+          ...firstEnvelope,
+          mealPhoto: { ...firstEnvelope.mealPhoto, captureId: "d".repeat(64) },
+        },
+        prepared,
+        tx: fixture.tx as never,
+      });
+      expect(otherCapture.dedupeConflict).toBe(true);
+      expect(otherCapture.captureReceipt).toBeUndefined();
     });
   });
 
