@@ -7,6 +7,7 @@ import {
   buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
@@ -130,6 +131,52 @@ function createQueuedNotificationResult(intentId = "intent_notification") {
     },
   };
 }
+
+it.each([
+  { channel: "linq", threadId: "private_thread" },
+  { channel: "telegram", threadId: "private_thread" },
+  { channel: "email", deliveryTarget: "member@example.test" },
+] as const)("estimates a manual meal through one private notification on $channel", async (directRoute) => {
+  const captureId = "a".repeat(64);
+  const wake = buildHostedExecutionMealPhotoCapturedWake({
+    byteLength: 4, captureId, capturedAt: "2026-08-21T15:00:00Z",
+    directRoute, eventId: `meal-photo:manual:${captureId}`,
+    mealPhotoKey: "meal_photo_synthetic", memberId: "member_123",
+    occurredAt: "2026-08-21T15:00:00Z", sha256: "b".repeat(64),
+  });
+  const result = await executeHostedMailboxEvent({
+    wake, executionContext, runtime: createRuntime(), runtimeEnv: {},
+    forceQueueOnlyAssistantNotification: true,
+    sourceMailboxItemId: "manual_meal_item", vaultRoot: "/vaults/manual-meal",
+  });
+  expect(mocks.sendAssistantNotification).toHaveBeenCalledTimes(1);
+  expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(expect.objectContaining({
+    manualMealEstimation: true,
+    channel: directRoute.channel,
+    threadIsDirect: true,
+    deliveryDispatchMode: "queue-only",
+    responsePolicy: { kind: "require_send" },
+    deliveryIdempotencyKey: `assistant.notification.requested:${wake.eventId}`,
+    hostedDeliveryIdempotency: expect.objectContaining({
+      inboundMailboxItemIds: ["manual_meal_item"],
+    }),
+    instructions: expect.stringContaining("do not wait for nightly closeout"),
+  }));
+  expect(result.deliveryIntentIds).toEqual(["intent_notification"]);
+  mocks.sendAssistantNotification.mockClear();
+  await expect(executeHostedMailboxEvent({
+    wake: { ...wake, eventId: `meal-photo:automatic:${captureId}` },
+    executionContext, runtime: createRuntime(), runtimeEnv: {},
+    vaultRoot: "/vaults/manual-meal",
+  })).rejects.toThrow("Automatic meal photos must remain import-only");
+  expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+  await expect(executeHostedMailboxEvent({
+    wake: { ...wake, userId: "member_other" },
+    executionContext, runtime: createRuntime(), runtimeEnv: {},
+    vaultRoot: "/vaults/manual-meal",
+  })).rejects.toThrow("Manual meal estimation requires the bound member runtime");
+  expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+});
 
 function createReadyOnboardingFollowupResult(nextWakeAt: string) {
   return { created: 1, updated: 0, skipped: 0, nextWakeAt };

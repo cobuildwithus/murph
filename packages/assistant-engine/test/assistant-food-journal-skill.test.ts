@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
+import { buildManualMealEstimationInstructions } from '../src/assistant/manual-meal-estimation.js'
 
 function compact(value: string): string {
   return value.replace(/\s+/gu, ' ').trim()
@@ -34,6 +35,23 @@ function buildPrompt(
 }
 
 describe('assistant food journal skill', () => {
+  it('composes manual estimation with ordinary meal recovery and numeric preferences', async () => {
+    const instructions = [
+      buildPrompt(),
+      buildManualMealEstimationInstructions({
+        mealId: 'meal_synthetic', capturedAt: '2026-06-24T12:00:00Z',
+      }),
+      await readFile(path.join(resolveAssistantSkillsRoot(), 'food-journal/SKILL.md'), 'utf8'),
+      await readFile(path.join(resolveAssistantSkillsRoot(), 'automatic-meal-capture/SKILL.md'), 'utf8'),
+    ].join('\n')
+    expect(instructions).toContain('Complete that existing meal now')
+    expect(instructions).toContain('ask one concise follow-up')
+    expect(instructions).toContain('without estimate-enabling questions')
+    expect(instructions).toContain('do not wait for nightly closeout or add a duplicate')
+    expect(instructions).not.toContain('do not inspect or edit a different meal')
+    expect(instructions).not.toContain('Only an explicit day-card request')
+  })
+
   it('keeps food journaling discoverable in the compact skill router', () => {
     const prompt = buildPrompt()
 
@@ -224,10 +242,10 @@ describe('assistant food journal skill', () => {
       'Use `--nutrition-source inherited` for\ncopied prior-meal totals',
     )
     expect(skill).toContain(
-      'Use this all-meal recovery only when the member explicitly requests a daily\nnutrition card or daily summary',
+      'Use this selected-date recovery during private meal logging and estimation,',
     )
-    expect(skill).toContain(
-      'Default\nattachment intent after a meal mutation does not authorize reading, editing,\nor asking about another meal.',
+    expect(compact(skill)).not.toContain(
+      'does not authorize reading, editing, or asking about another meal',
     )
     expect(skill).toContain(
       'A similar\ninformal name alone is not: require matching saved ingredients and portion\nevidence or ask instead of copying nutrition.',

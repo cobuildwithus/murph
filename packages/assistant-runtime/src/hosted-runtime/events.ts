@@ -454,12 +454,23 @@ async function executeHostedSystemWake(input: {
       throw new TypeError(
         "Retired hosted vault-share revoke wakes must never reach system wake execution.",
       );
-    case "meal-photo.captured":
-      // Meal photos become canonical meal records at mailbox import so their
-      // staged object can be cleaned up only after the workspace checkpoint.
-      throw new TypeError(
-        "Hosted meal-photo wakes are landed at mailbox import and must never reach system wake execution.",
+    case "meal-photo.captured": {
+      const { executeHostedManualMealPhotoWake } = await import(
+        "./events/assistant-notification.ts"
       );
+      return executeHostedManualMealPhotoWake({
+        wake: input.wake,
+        executionContext: input.executionContext,
+        forceQueueOnly: input.forceQueueOnlyAssistantNotification,
+        sourceMailboxItemId: input.sourceMailboxItemId,
+        turnEnvironment: createHostedAssistantTurnEnvironment({
+          operatorHomeRoot: input.operatorHomeRoot,
+          runtimeEnv: input.runtimeEnv,
+          vaultRoot: input.vaultRoot,
+        }),
+        vaultRoot: input.vaultRoot,
+      });
+    }
     case "health.daily-metric.reported":
       // The canonical observation landed at mailbox import. After that write
       // checkpoints, refresh any already-granted group projections.

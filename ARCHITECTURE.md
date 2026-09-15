@@ -2099,6 +2099,26 @@ normalizes the caller's UUID idempotency key into a member-bound SHA-256 capture
 id so the existing hosted wake contract and per-member mailbox dedupe remain
 unchanged. It stores no manual queue or new product record.
 
+After canonical import, an unconsumed manual capture (the server-owned
+`meal-photo:manual:<captureId>` event identity) queues that same mailbox item
+through the existing model-capable notification lane. The runtime constructs
+an isolated, tool-enabled private turn to inspect and enrich the saved meal,
+or ask for essential missing identity or amount. It retains the original meal
+and a stable delivery identity across retries. Automatic captures remain
+import-only until a meal-related turn or closeout. Ordinary private meal
+logging also recovers incomplete meals for the selected date before attempting
+a complete daily card, while preserving nonnumeric tracking preferences.
+
+No wire or storage schema changes are needed. Once a snapshot contains a
+manual photo under `dispatch-assistant-notification`, the compatible runtime
+is the rollback floor until those pending items drain; older runtimes reject
+meal-photo execution. Existing foreground priority and model-usage admission
+still apply, and import-only admission leaves estimation pending.
+Existing Web and Worker capture producers remain compatible. Deploy the new
+runtime and converge warm containers before relying on immediate estimation;
+old importers still defer enrichment, and this change does not replay their
+already-consumed submissions.
+
 Schema-v2 enrollment is two-phase on that same row. Identity-authenticated `POST` prepares a complete credential at the requested revision with `activatedAt = null` and returns the existing bearer, idempotency secret, and expiry response shape unchanged. The foreground iOS app must durably save that credential before a bodyless scoped-bearer `PUT` activates it, and it enables background capture only after activation succeeds. Upload rejects a prepared credential. Exact-token activation replay is idempotent; activation and scoped bodyless `DELETE` serialize on the member lock and reread the exact current token, so activation followed by deletion ends revoked while deletion followed by activation fails authorization. Activation also locks any active Family membership and group access rows before rechecking consent and access. Family billing locks its owner and active roster members in stable order before changing those rows, so a sponsor or group access loss cannot commit between the activation guard and success and the existing owners cannot deadlock across member and sponsorship locks. A lost enrollment response or a delayed `POST` after trust-boundary teardown can therefore create at most unusable prepared state, never unknown upload authority. Revision conflicts report the current revision and active, prepared, or revoked state without returning credential material.
 
 Web stores only hashes of the bearer and installation UUID plus an encrypted idempotency secret, validates a bounded metadata-free JPEG, and stages the bytes through the internal Cloudflare control client. Prepared and active enrollment rows have the complete credential triple; only active rows have `activatedAt`, while revoked rows retain neither activation nor credentials. Upload reads fail closed on prepared, expired, revoked, or incomplete state. The nullable revision-and-activation schema expansion deploys before fence-aware Web code. Revision-zero rows with a null activation marker remain active during rollout for old-Web compatibility. After the fence-aware deployment is live and prior Web functions drain, the contract migration marks those final legacy rows active, scrubs historical revoked credentials and activation, and validates the row-shape constraints. Only then may a schema-v2 iOS writer ship. Once a positive revision exists, fence-aware Web is the rollback floor. Each upload attempt owns a distinct staged object. Before the metadata-only mailbox append commits, Web prepares the existing ingress-root mailbox crypto outside the transaction, then locks the hosted member and any active sponsorship membership/group rows. Automatic upload rechecks the exact enrollment, active access, and historical launch consent. Manual upload instead rechecks the verified Privy blind-index core binding, active access, and the same historical consent without projecting private identity fields or touching enrollment state. The direct route and any verified-email fallback are projected outside the transaction, then the exact raw routing owner rows are locked and compared after those final authority checks but before append; a change fails with the typed route-required conflict. Only database root revalidation, local authenticated encryption, authority reads, and the metadata append remain inside the bounded transaction. Both paths enter one shared staging, mailbox, wake, and cleanup owner. The first accepted mailbox item chooses the canonical object for exact duplicate attempts; losing or failed attempts delete only their own unclaimed object, while ambiguous commit cleanup first reconciles against the mailbox. Postgres, Temporal, and the hosted mailbox receive metadata only.

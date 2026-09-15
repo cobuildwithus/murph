@@ -94,7 +94,7 @@ When a numeric safety exception already applies, save the meal without calorie
 or macro estimates. Do not force a nutrition lookup, clarification, or safety
 preflight just to capture the meal.
 
-- After every verified private meal mutation, apply default attachment intent for its eligible daily nutrition card. This includes an ordinary meal reply to an ordinary scheduled check-in; the reply is interactive meal intent, not target acceptance or new scheduled authority. Read fresh canonical same-date totals with `--resolve-goals`. When numeric suitability, complete stored-meal coverage, private routing, and bounded-card checks pass and the card completely answers the turn, attach it. `goalContext.status: ready` uses the unchanged five accepted snapshots; `missing` uses five explicit null goals, even when a subset of compatible targets exists. Never author a mixed bundle or derive, propose, accept, activate, or mutate goals to send a summary. Conflict, incompatible, capacity, incomplete totals, or other failed prerequisites retain the short truthful fallback. Never replace a failed gate with improvised totals, targets, analysis, or a second response surface.
+- After every verified private meal mutation, apply default attachment intent for its eligible daily nutrition card. This includes an ordinary meal reply to an ordinary scheduled check-in; the reply is interactive meal intent, not target acceptance or new scheduled authority. Read fresh canonical same-date totals with `--resolve-goals`. When numeric suitability, complete stored-meal coverage, private routing, and bounded-card checks pass and the card completely answers the turn, attach it. `goalContext.status: ready` uses the unchanged five accepted snapshots; `missing` uses five explicit null goals, even when a subset of compatible targets exists. Never author a mixed bundle or derive, propose, accept, activate, or mutate goals to send a summary. Conflict, incompatible, capacity, incomplete totals after the recovery below, or other failed prerequisites retain the short truthful fallback. Never replace a failed gate with improvised totals, targets, analysis, or a second response surface.
 
 ### Optional introduction, not an onboarding requirement
 
@@ -143,11 +143,14 @@ or target-resolution mechanics.
 
 ### Complete an interactive day before attaching its card
 
-Use this all-meal recovery only when the member explicitly requests a daily
-nutrition card or daily summary in the current interactive turn. Default
-attachment intent after a meal mutation does not authorize reading, editing,
-or asking about another meal. If fresh totals remain incomplete on that default
-path, use the short truthful meal-log fallback with no card.
+Use this selected-date recovery during private meal logging and estimation,
+including explicit app submissions, as well as daily nutrition card or summary
+requests. A separate request to estimate an already-saved meal is unnecessary.
+When totals expose incomplete meals, inspect and complete those existing records
+from available evidence, or ask one focused follow-up for essential missing
+identity or amount. Do not end with a missing-estimate refusal before trying
+this recovery. Keep reads bounded to the selected date; unrelated conversation
+does not trigger meal recovery.
 
 After the fresh selected-date `vault-cli meal totals` read, compare every
 metric's `mealCount` with the top-level `mealCount`. When any metric has lower

@@ -6,6 +6,10 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 
 Current responsibilities:
 
+- import each manual app meal photo once, then queue its existing mailbox item
+  for a private estimation or clarification turn through ordinary model
+  admission and delivery idempotency; automatic photos remain import-only
+
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
 - preserve independent system-work completion across empty runtime nudges during projection discovery/delivery, browser-vault publication, recording, and snapshotting; qualify notifications against the bounded conversation mailbox and reuse that fetched batch for a real foreground handoff
 - settle independent system-work writes before a clean foreground return so late
