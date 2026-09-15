@@ -766,6 +766,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const workingDirectory = await createTempDir('assistant-codex-local-stale-turn-id-work-')
     const codexHome = await createTempDir('assistant-codex-local-stale-turn-id-home-')
     const progressDelivery = createProgressDeliveryMock()
+    const receiptTraces: Record<string, unknown>[] = []
     const spawnedChildren: MockChildProcess[] = []
     mockProcessGroupSignalsForChildren(spawnedChildren)
 
@@ -866,6 +867,12 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
             },
           })
 
+          for (const staleTurnId of ['turn-local-stale-turn-id-1', undefined]) {
+            child.stdout.write(jsonLine({
+              method: 'item/agentMessage/delta',
+              params: { itemId: 'stale-item', delta: 'Stale output', threadId: 'thread-local-stale-turn-id', turnId: staleTurnId },
+            }))
+          }
           child.stdout.write(jsonLine({
             method: 'item/agentMessage/delta',
             params: { itemId: 'assistant-local-stale-turn-id-2', delta: 'Current turn survived stale output', threadId: 'thread-local-stale-turn-id', turnId: 'turn-local-stale-turn-id-2' },
@@ -911,12 +918,20 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       executeCodexAppServerTurn({
         ...stableInput,
         prompt: 'second local turn should ignore stale same-thread output after start',
+        onTraceEvent: (event) => {
+          const raw = event.rawEvent as Record<string, unknown>
+          if (raw.codexTimingStage === 'provider-output-received' || raw.codexTimingStage === 'turn-completed') receiptTraces.push(raw)
+        },
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Current turn survived stale output',
       sessionId: 'thread-local-stale-turn-id',
       turnId: 'turn-local-stale-turn-id-2',
     })
+    expect(receiptTraces).toEqual([
+      expect.objectContaining({ codexTimingStage: 'provider-output-received', codexTimingReceiptKind: 'assistant', codexTimingProviderReceiptCount: 1 }),
+      expect.objectContaining({ codexTimingStage: 'turn-completed', codexTimingProviderReceiptCount: 1 }),
+    ])
     expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
   })

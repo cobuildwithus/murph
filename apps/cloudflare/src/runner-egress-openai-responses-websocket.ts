@@ -132,15 +132,16 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   ): void => {
     if (!upstreamClosed) {
       input.upstream.send(data);
-      diagnostics.upstreamSent(observation);
+      diagnostics.upstreamSent(observation, data);
     }
   };
   const forwardToDownstream = (
     data: HostedOpenAiWebSocketMessage,
+    observation?: ReturnType<typeof diagnostics.upstreamReceived>,
   ): void => {
     if (!downstreamClosed) {
       input.downstream.send(data);
-      diagnostics.downstreamSent();
+      diagnostics.downstreamSent(observation);
     }
   };
 
@@ -204,7 +205,7 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
 
   input.upstream.onMessage((data) => {
     if (stopped || upstreamClosed) return;
-    diagnostics.upstreamReceived(data);
+    const observation = diagnostics.upstreamReceived(data);
     const bytes = frameByteLength(data);
     if (!reserveMessage(bytes)) {
       // Stop admission now, but let already accepted terminal accounting and
@@ -221,7 +222,7 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
     }
     void enqueue(async () => {
       if (!input.persistUsage || typeof data !== "string") {
-        forwardToDownstream(data);
+        forwardToDownstream(data, observation);
         return;
       }
 
@@ -236,11 +237,11 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
       }
       if (frame.kind === "terminal-error") {
         activeRequest = null;
-        forwardToDownstream(data);
+        forwardToDownstream(data, observation);
         return;
       }
       if (frame.kind !== "response-terminal") {
-        forwardToDownstream(data);
+        forwardToDownstream(data, observation);
         return;
       }
       if (activeRequest === null) {
@@ -267,7 +268,7 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
           );
           return;
         }
-        forwardToDownstream(data);
+        forwardToDownstream(data, observation);
         return;
       }
 
@@ -292,7 +293,7 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
         }
       }
       if (!stopped) {
-        forwardToDownstream(data);
+        forwardToDownstream(data, observation);
       }
     }, true).then(() => {
       pendingBytes -= bytes;

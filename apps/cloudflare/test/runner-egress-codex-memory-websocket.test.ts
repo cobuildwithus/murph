@@ -82,6 +82,166 @@ const createdAt = 1_775_000_000;
 
 afterEach(() => vi.useRealTimers());
 
+test("separates metadata, acknowledgement, progress and forwarding with bounded content-free observations", async () => {
+  vi.useFakeTimers();
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
+  const request = JSON.stringify({
+    type: "response.create", input: "PRIVATE_INPUT",
+    client_metadata: { turn_id: "synthetic-turn" },
+  });
+  downstream.emitMessage(request);
+  await controller.drain();
+  upstream.emitMessage(JSON.stringify({ type: "codex.response.metadata", private: "PRIVATE_METADATA" }));
+  await controller.drain();
+  expect(reportDiagnostic.mock.calls.at(-1)?.[0]).toMatchObject({ responseAcknowledged: false });
+  await vi.advanceTimersByTimeAsync(250);
+  upstream.emitMessage(JSON.stringify({ type: "response.created", response: { id: "PRIVATE_RESPONSE_ID" } }));
+  await controller.drain();
+  expect(reportDiagnostic.mock.calls.at(-1)?.[0]).toMatchObject({
+    websocketMilestone: "response_forwarded", responseMilestone: "acknowledged",
+    responseAcknowledged: true, responseAcknowledgementElapsedMs: 250,
+    responseRequestKind: "generation", responseAssociationKind: "single-request",
+    responseClientMessageOrdinal: 1, codexTurnCorrelation: expect.any(Number),
+  });
+  await vi.advanceTimersByTimeAsync(21_000);
+  const delta = JSON.stringify({ type: "response.output_text.delta", delta: "PRIVATE_OUTPUT" });
+  upstream.emitMessage(delta);
+  await controller.drain();
+  const countAfterProgress = reportDiagnostic.mock.calls.length;
+  for (let index = 0; index < 50; index++) upstream.emitMessage(delta);
+  await controller.drain();
+  expect(reportDiagnostic.mock.calls).toHaveLength(countAfterProgress);
+  upstream.emitMessage(JSON.stringify({ type: "response.completed", response: { id: "PRIVATE_RESPONSE_ID" } }));
+  await controller.drain();
+  expect(reportDiagnostic.mock.calls.at(-1)?.[0]).toMatchObject({
+    responseMilestone: "terminal", responseTerminalKind: "response.completed",
+    responseFirstProgressElapsedMs: 21_250, responseMaxFrameGapMs: 21_000,
+    responseTerminalElapsedMs: 21_250, responseForwardElapsedMs: 0,
+    responseClientMessageOrdinal: 1,
+  });
+  expect(upstream.sent).toEqual([request]);
+  expect(downstream.sent).toHaveLength(54);
+  expect(JSON.stringify(reportDiagnostic.mock.calls)).not.toMatch(/PRIVATE_|synthetic-turn/);
+});
+
+test("keeps a queued terminal observation attached to the request received at the relay", async () => {
+  vi.useFakeTimers();
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const gate = deferred<Response | null>();
+  const authorizeClientFrame = vi.fn().mockResolvedValueOnce(null).mockReturnValueOnce(gate.promise);
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic, authorizeClientFrame });
+  downstream.emitMessage(JSON.stringify({ type: "response.create" }));
+  await controller.drain();
+  upstream.emitMessage(JSON.stringify({ type: "response.created", response: { id: "resp_first" } }));
+  await controller.drain();
+  downstream.emitMessage(JSON.stringify({ type: "response.create" }));
+  await vi.advanceTimersByTimeAsync(0);
+  upstream.emitMessage(JSON.stringify({ type: "response.completed", response: { id: "resp_first" } }));
+  await vi.advanceTimersByTimeAsync(250);
+  gate.resolve(null);
+  await controller.drain();
+  expect(reportDiagnostic.mock.calls.at(-1)?.[0]).toMatchObject({
+    websocketMilestone: "downstream_sent", responseMilestone: "terminal",
+    responseClientMessageOrdinal: 1, activeClientMessageOrdinal: 2,
+    responseForwardElapsedMs: 250, responseTerminalKind: "response.completed",
+  });
+  expect(downstream.sent).toHaveLength(2);
+  expect(upstream.sent).toHaveLength(2);
+});
+
+test("distinguishes native prewarm from generation and resets acknowledgement for a reused socket", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
+  downstream.emitMessage(JSON.stringify({ type: "response.create", generate: false }));
+  await controller.drain();
+  upstream.emitMessage(JSON.stringify({ type: "response.completed", response: { id: "resp_prewarm" } }));
+  await controller.drain();
+  expect(reportDiagnostic.mock.calls.at(-1)?.[0]).toMatchObject({
+    responseRequestKind: "prewarm", responseAcknowledged: false,
+    responseTerminalKind: "response.completed",
+  });
+  downstream.emitMessage(JSON.stringify({ type: "response.create" }));
+  await controller.drain();
+  expect(reportDiagnostic.mock.calls.at(-1)?.[0]).toMatchObject({
+    responseRequestKind: "generation", responseAcknowledged: false,
+    responseTerminalKind: null, responseClientMessageOrdinal: 2,
+    responseAssociationKind: "single-request",
+  });
+});
+
+test("does not assign acknowledgement to overlapping requests", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
+  downstream.emitMessage(JSON.stringify({ type: "response.create" }));
+  await controller.drain();
+  downstream.emitMessage(JSON.stringify({ type: "response.create" }));
+  await controller.drain();
+  upstream.emitMessage(JSON.stringify({ type: "response.created", response: { id: "resp_uncertain" } }));
+  await controller.drain();
+  expect(reportDiagnostic.mock.calls.at(-1)?.[0]).toMatchObject({
+    responseAssociationKind: "ambiguous", responseAcknowledged: false,
+  });
+  expect(downstream.sent).toHaveLength(1);
+});
+
+test.each([
+  { type: "response.created", response: { id: "resp_other" } },
+  { type: "response.output_text.delta", response_id: "resp_other", delta: "PRIVATE_OUTPUT" },
+  { type: "response.completed", response: { id: "resp_other" } },
+])("marks mismatched response identity ambiguous without changing forwarding (%j)", async (frame) => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
+  downstream.emitMessage(JSON.stringify({ type: "response.create" }));
+  await controller.drain();
+  upstream.emitMessage(JSON.stringify({ type: "response.created", response: { id: "resp_expected" } }));
+  await controller.drain();
+  upstream.emitMessage(JSON.stringify(frame));
+  await controller.drain();
+  upstream.emitClose();
+  expect(reportDiagnostic.mock.calls.at(-1)?.[0]).toMatchObject({
+    responseAssociationKind: "ambiguous", responseFirstProgressElapsedMs: null,
+    responseTerminalKind: null,
+  });
+  expect(downstream.sent).toEqual([
+    JSON.stringify({ type: "response.created", response: { id: "resp_expected" } }), JSON.stringify(frame),
+  ]);
+  expect(JSON.stringify(reportDiagnostic.mock.calls)).not.toMatch(/PRIVATE_|resp_other|resp_expected/);
+});
+
+test("forwards uninspectable and malformed frames without claiming acknowledgement", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
+  downstream.emitMessage(JSON.stringify({ type: "response.create" }));
+  await controller.drain();
+  const frames = [
+    JSON.stringify({ type: "response.created" }),
+    JSON.stringify({ type: "response.completed" }),
+    JSON.stringify({ type: "response.created", response: { id: "x".repeat(257) } }),
+    JSON.stringify({ type: "response.created", private: "x".repeat(65_536) }),
+    "invalid json", new ArrayBuffer(8),
+  ];
+  for (const frame of frames) upstream.emitMessage(frame);
+  await controller.drain();
+  upstream.emitClose();
+  expect(reportDiagnostic.mock.calls.at(-1)?.[0]).toMatchObject({
+    responseAcknowledged: false, responseTerminalKind: null, responseInspectionIncomplete: true,
+  });
+  expect(downstream.sent).toEqual(frames);
+});
+
 test("records a forwarded request with no upstream messages when a silent socket closes", async () => {
   vi.useFakeTimers();
   const downstream = new FakeSocket();

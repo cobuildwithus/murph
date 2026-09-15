@@ -1,7 +1,8 @@
 import type { HostedRunnerDiagnosticJson } from "./runner-egress-responses-diagnostics.ts";
+import { createHostedWebSocketResponseDiagnostics } from "./runner-egress-websocket-response-diagnostics.ts";
 
 type Milestone = "client_received" | "upstream_sent" | "upstream_received"
-  | "downstream_sent" | "closed" | "failed";
+  | "downstream_sent" | "response_received" | "response_forwarded" | "closed" | "failed";
 
 const MESSAGE_KINDS = new Set([
   "response.created", "response.in_progress", "response.completed", "response.failed",
@@ -28,6 +29,7 @@ export function createHostedWebSocketDiagnostics(
 ) {
   const startedAt = Date.now();
   const correlation = crypto.randomUUID();
+  const responses = createHostedWebSocketResponseDiagnostics();
   let clientMessages = 0;
   let upstreamSends = 0;
   let activeClientMessageOrdinal: number | null = null;
@@ -70,6 +72,7 @@ export function createHostedWebSocketDiagnostics(
         upstreamFrameObserved: receivedAt !== null,
         firstUpstreamMessageKind,
         downstreamSendObserved: forwardedAt !== null,
+        ...responses.snapshot(now),
         ...extra,
       });
     } catch {
@@ -84,11 +87,12 @@ export function createHostedWebSocketDiagnostics(
       emit("client_received", { observedClientMessageOrdinal: observation.ordinal });
       return observation;
     },
-    upstreamSent(observation: { receivedAt: number; ordinal: number }) {
+    upstreamSent(observation: { receivedAt: number; ordinal: number }, data: ArrayBuffer | string) {
       requestAt = observation.receivedAt;
       activeClientMessageOrdinal = observation.ordinal;
       upstreamSends += 1;
       sentAt = Date.now();
+      responses.sent(data, observation.ordinal, sentAt);
       receivedAt = forwardedAt = null;
       firstUpstreamMessageKind = null;
       emit("upstream_sent");
@@ -96,17 +100,30 @@ export function createHostedWebSocketDiagnostics(
     upstreamReceived(data: ArrayBuffer | string) {
       upstreamMessages += 1;
       lastUpstreamAt = Date.now();
-      if (receivedAt !== null) return;
-      receivedAt = lastUpstreamAt;
-      firstUpstreamMessageKind = readMessageKind(data);
-      emit("upstream_received");
+      const observation = responses.received(data, lastUpstreamAt);
+      if (receivedAt === null) {
+        receivedAt = lastUpstreamAt;
+        firstUpstreamMessageKind = readMessageKind(data);
+        emit("upstream_received", { ...observation.details, responseMilestone: observation.milestone });
+      } else if (observation.milestone) {
+        emit("response_received", { ...observation.details, responseMilestone: observation.milestone });
+      }
+      return observation;
     },
-    downstreamSent() {
+    downstreamSent(observation?: ReturnType<typeof responses.received>) {
       downstreamMessages += 1;
       lastDownstreamAt = Date.now();
-      if (forwardedAt !== null) return;
-      forwardedAt = lastDownstreamAt;
-      emit("downstream_sent");
+      const details = observation ? {
+        ...observation.details,
+        responseMilestone: observation.milestone,
+        responseForwardElapsedMs: Math.max(0, lastDownstreamAt - observation.receivedAt),
+      } : {};
+      if (forwardedAt === null) {
+        forwardedAt = lastDownstreamAt;
+        emit("downstream_sent", details);
+      } else if (observation?.milestone) {
+        emit("response_forwarded", details);
+      }
     },
     terminal(milestone: "closed" | "failed", side: "client" | "provider" | "relay", code: number | null, phase: "persistence" | "protocol" | "transport" | null = null) {
       if (terminalEmitted) return;

@@ -293,9 +293,12 @@ The Worker also writes `runner.provider_egress_diagnostic` records with
 `transportKind: websocket` through the existing runtime-log route. The
 `websocketMilestone` values describe actual relay boundaries:
 `client_received`, `upstream_sent`, first `upstream_received`, first
-`downstream_sent`, and one observed `closed` or `failed` event. First-frame
-observations reset after each forwarded client frame; token frames only update
-in-memory counts and last-frame times.
+`downstream_sent`, `response_received`, `response_forwarded`, and one observed
+`closed` or `failed` event. First-frame observations reset after each forwarded
+client frame. A later acknowledgement, first semantic output, or terminal event
+emits one receive/forward pair; further token frames update constant-size state
+without emitting per-token records. When the first frame is itself a milestone,
+it shares the existing first-frame record.
 
 Each connection gets a random `websocketConnectionCorrelation`. Counts include
 `clientFrameCount`, `upstreamSends`, `upstreamFrameCount`, and
@@ -319,10 +322,58 @@ Interpret these as connection observations, not model-health or exact-request
 proof. A forwarded request followed by no upstream frames supports upstream
 silence; a received frame without its corresponding forward supports relay
 delay. Unsolicited metadata and overlapping frames can weaken attribution.
-A `response.created` observation establishes an acknowledgement, not continued
-inference progress. The runtime-log attempt/fence belongs to the socket upgrade
+A valid, associated `response.created` establishes an acknowledgement, not
+continued inference progress. The runtime-log attempt/fence belongs to the socket upgrade
 and may precede later turns on a reused socket; it must not be treated as the
 current turn ID. Existing write-fence validation is preserved.
+
+`responseMilestone` is `acknowledged`, `progress`, or `terminal` for an observed
+response lifecycle boundary. `responseAcknowledged` requires `response.created`
+with a bounded response ID; metadata alone cannot set it. Lifecycle inspection
+parses text frames up to 65,536 characters and request frames up to 6 MiB.
+Malformed, binary, and oversized frames still pass through the relay and set
+`responseInspectionIncomplete`; missing evidence is never a health verdict.
+
+`responseRequestKind` distinguishes generation and `generate: false` prewarm.
+`responseClientMessageOrdinal` binds captured receive and forward observations
+to a forwarded request, even when forwarding is queued. Only a single outstanding
+recognized request permits `responseAssociationKind: single-request`. Overlap,
+unknown requests, or conflicting response IDs make subsequent attribution
+ambiguous for that socket. Response IDs are used only in memory and never logged.
+
+`responseAcknowledgementElapsedMs`, `responseFirstProgressElapsedMs`, and
+`responseTerminalElapsedMs` start at upstream send. `responseProgressIdleMs`
+measures time since the last recognized output event; `responseMaxFrameGapMs`
+tracks the largest observed data-frame gap, including send to first frame.
+`responseTerminalKind` uses a fixed terminal-event allowlist.
+`responseForwardElapsedMs` measures a captured milestone's receive-to-send delay.
+These fields distinguish acknowledgement, output, and forwarding; silence can
+still mean healthy reasoning, provider queuing, or a stalled stream.
+
+The request's `client_metadata.turn_id` supplies `codexTurnCorrelation` using the
+existing 48-bit SHA-256 correlation convention. It joins native
+`codexTimingTurnCorrelation` within the same runtime context. It is a diagnostic
+join hint, not an authority key; several provider requests can share a turn.
+The socket correlation and request ordinal retain the finer relay scope.
+
+Native `provider-output-received` and `assistant-output-received` timing records
+observe accepted, current-turn assistant/reasoning output or tool activity at
+Murph's app-server consumer. At most two extra records are emitted per turn.
+`codexTimingReceiptKind` is `assistant`, `reasoning`, or `tool`;
+`codexTimingFirstProviderReceiptElapsedMs`,
+`codexTimingFirstAssistantReceiptElapsedMs`,
+`codexTimingLastProviderReceiptElapsedMs`, and `codexTimingProviderReceiptCount`
+also appear on turn completion. These timings start at the local `turn/start`
+write, unlike relay timings. Reused-turn scope checks run before receipt tracking.
+Tool activity includes native tool execution events; the count is native events,
+not provider frames. Pinned Codex discards the response ID from its internal
+created event, so these records cannot prove delivery of a particular raw
+`response.created` frame. A downstream send alone is not native receipt.
+
+The additions are optional diagnostics: older readers drop new receipt stages
+and ignore new fields, and newer readers accept older records. Deploy the runtime
+projection before producers for complete visibility; mixed versions and rollback
+can lose diagnostics without changing responses or transport behavior.
 
 Persistence is best effort: at most four log writes are in flight per connection,
 with no diagnostic queue or awaited write on the forwarding path. Structured
@@ -344,13 +395,29 @@ Each case completed the answer and the next resumed turn, which stayed on HTTPS.
 This proves the synthetic failure mechanism, not the cause of an earlier
 production incident.
 
-The smallest proposed recovery change is a 20-second
-`stream_idle_timeout_ms` with the existing `stream_max_retries = 0`: native
-Codex detects stream silence and owns its one HTTPS fallback. Twenty seconds is
-a proposed latency tradeoff, not a measured health threshold. The five-second
-comparison proves the knob works; a healthy model can still remain quiet longer
-than that. An idle deadline bounds silence in a stream read, not end-to-end turn
-latency across HTTP setup, retries, tools, or reasoning with continuing events.
+A separate credential-free local experiment runs the same pinned binary against
+healthy scripted responses that acknowledge immediately, stay quiet for 22 seconds,
+and then finish. It changes only the fixture's idle setting:
+
+| Local scenario | Idle setting | Result |
+| --- | --- | --- |
+| Healthy 22-second response silence | 90 seconds | Completed in 22,428 ms; no fallback |
+| Healthy 22-second response silence on both attempts | 20 seconds | WebSocket and HTTPS attempts timed out; failed after 40,320 ms |
+| Native tool taking 22 seconds | 20 seconds | Completed in 22,986 ms; no fallback |
+
+Reproduce with `MURPH_RUN_CODEX_TIMEOUT_SAFETY=1 pnpm exec vitest run --config
+vitest.config.ts --no-coverage test/assistant-codex-idle-timeout-safety.test.ts`
+from `packages/assistant-engine`. The default lane runs shorter versions of all
+three cases. These use a local scripted provider, not production or live OpenAI.
+They assert actual native timeout/fallback, successful tool execution, and the
+wire-to-consumer turn correlation.
+
+The 20-second setting can interrupt healthy generation and its HTTPS replacement.
+Long local tool execution occurs outside the response-stream idle wait and is
+not itself interrupted by that setting. This proves a concrete unsafe case for
+lowering the limit; it does not measure real provider silence frequency or prove
+90 seconds is universally safe. An idle deadline bounds stream-read silence,
+not total latency across HTTP setup, retries, tools, or continuing response events.
 
 A test-only alternative closes the socket after five seconds without its first
 upstream data frame; the same native fallback began at 5,010 ms while native idle

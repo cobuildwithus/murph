@@ -155,7 +155,10 @@ const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "warm-abort-poisoned",
   "warm-idle",
   "warm-reused",
+  "provider-output-received",
+  "assistant-output-received",
 ]);
+const HOSTED_ASSISTANT_CODEX_RECEIPT_KIND_VALUES = new Set(["assistant", "reasoning", "tool"]);
 const HOSTED_ASSISTANT_CODEX_APP_SERVER_COLD_START_REASON_VALUES = new Set([
   "node-process-first-use",
   "previous-explicit-stop",
@@ -1061,7 +1064,7 @@ function readHostedAssistantCodexAppServerTimingTrace(
     "codexTimingProviderActionCount",
     readHostedAssistantProviderDiagnosticNonnegativeNumber(record, "codexTimingProviderActionCount"),
   );
-  if (stage === "turn-completed") {
+  if (stage === "turn-completed" || stage === "provider-output-received" || stage === "assistant-output-received") {
     for (const key of [
       "codexTimingProviderRequestOrdinal",
       "codexTimingTurnCorrelation",
@@ -1069,6 +1072,10 @@ function readHostedAssistantCodexAppServerTimingTrace(
       "codexTimingTurnStartedNotificationElapsedMs",
       "codexTimingTurnCompletedNotificationElapsedMs",
       "codexTimingTurnCompleteElapsedMs",
+      "codexTimingFirstProviderReceiptElapsedMs",
+      "codexTimingFirstAssistantReceiptElapsedMs",
+      "codexTimingLastProviderReceiptElapsedMs",
+      "codexTimingProviderReceiptCount",
     ] as const) {
       maybeSetHostedAssistantProviderDiagnosticDetail(
         details,
@@ -1076,6 +1083,11 @@ function readHostedAssistantCodexAppServerTimingTrace(
         readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
       );
     }
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      "codexTimingReceiptKind",
+      readHostedAssistantProviderDiagnosticAllowedString(record, "codexTimingReceiptKind", HOSTED_ASSISTANT_CODEX_RECEIPT_KIND_VALUES),
+    );
   }
   maybeSetHostedAssistantProviderDiagnosticDetail(
     details,
