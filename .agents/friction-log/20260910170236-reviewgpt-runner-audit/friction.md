@@ -27,3 +27,7 @@ Encountered while lowering the ReviewGPT marked-response minimum. The wrapper-pr
 ## Push reconciliation
 
 The review-duration change was isolated onto the latest remote `main`, which still has the matching six-lane configuration. The unrelated local lane-removal commit is excluded from this push. This report records the original local mismatch, not a failure in the current remote configuration.
+
+## Release reconciliation
+
+The five-lane configuration subsequently reached main while the release audit retained six-lane expectations. Update the inventory, default and maximum counts, explicit correction-thread lane, and managed-port assertions together. Preserve executable checks for local preferences, unavailable lanes, bounded lane selection, invalid counts, and correction-thread ownership.
