@@ -435,13 +435,35 @@ still fires after the first-frame guard has been cancelled. Ping/pong similarly
 proves a responsive transport peer, not inference;
 Murph's Worker relay also separates the client and upstream transport legs.
 
-Production policy remains unchanged in this diagnostic change. Before adopting
-the shorter native timeout, prove fresh-process config adoption, acknowledged
-quiet responses, partial output/tool-effect recovery without duplicate delivery,
-and operator/child/compaction behavior that shares the configuration. Use the
-new relay observations and native timeout phases to distinguish timeout-driven
-recovery from normal model latency. Keep cancellation, retry, and delivery under
-their existing owners; do not introduce a second turn retry loop.
+The current hosted policy uses a provisional 30-second native stream-idle
+timeout for OpenAI, including its HTTPS fallback and operator requests. Child
+requests and streaming compaction inherit the same provider configuration.
+Native Codex also uses this knob for WebSocket sends; it does not replace the
+separate connection and HTTP request budgets.
+Venice and custom inference retain 90 seconds. `codex.prepare` reports the
+selected provider's idle timeout and request/stream retry limits. Native Codex
+still owns the single WebSocket attempt and HTTPS fallback; request retries,
+Murph cancellation, accepted work, and delivery ownership are unchanged.
+
+Local subscription measurements on 2026-09-15 completed eight Terra low turns
+at 90- and 20-second idle settings; the longest provider data gap was 9.377
+seconds. Sol high and extra-high stress runs stayed active through local test
+budgets with maximum gaps of 11.576 and 12.847 seconds, but did not finish an
+answer. No 90-second silence was reproduced. These selected WebSocket samples
+do not establish production latency tails, live HTTPS fallback behavior, or the
+cause of the original delayed reply. Genuine provider silence over 30 seconds
+can interrupt useful work; continuing events reset the idle wait, while local
+tool work occurs outside it. This is not a total reply deadline.
+
+The opt-in `MURPH_RUN_CODEX_30S_PROOF=1` cases in the two fixture files above
+exercise the full 30-second setting: silence before/after acknowledgement or partial text,
+22-second quiet completion, reasoning events and local tools spanning 35
+seconds, continuation recovery after a completed tool, and a resumed next turn.
+Routine CI runs short native equivalents and checks the rendered hosted config.
+Rollout needs fresh-process config adoption; mixed old/new containers retain
+their respective native windows without a wire or persisted-state change.
+Observe selected timeout, acknowledgement/forwarding gaps, native timeout phase,
+fallback frequency, and terminal failures through the existing diagnostics.
 
 ### Web-control preflight rejection attribution
 
