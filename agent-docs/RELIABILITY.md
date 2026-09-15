@@ -2219,7 +2219,7 @@ Last verified: 2026-09-04
   stage-owner suppression sees both resources; their one-attempt page timeout
   is five seconds, bounding the paired six-page worst case at 30 seconds. A
   typed provider failure therefore reaches ordinary job backoff before the
-  hosted 120-second device-pass cancellation can release it as an unclassified
+  hosted device-pass cancellation can release it as an unclassified
   yield. Full-job timeseries work groups up to 16 consecutive complete units
   of the same resource into one durable job, stopping before another unit
   after five seconds or foreground/abort notification. Each import still owns

@@ -2986,9 +2986,12 @@ payloads or become the device-sync queue. Active foreground wake handling stays
 conversation-focused; system-lane work runs through normal invocation and
 reconciliation when no fresh conversation input is pending, and reschedules a
 short `device-sync.reconcile` wake if foreground work preempts that background
-pass. A device-sync pass has its own 120-second budget, independent of the shared
-Web/checkpoint request timeout; the foreground-yield and invocation-abort paths
-may still end it sooner at cooperative boundaries. Dense-raw cleanup retains a
+pass. A device-sync pass has its own five-minute budget, independent of the shared
+Web/checkpoint request timeout, to amortize restore and checkpoint work across
+large backlogs. The 100-job cap, foreground-yield, and invocation-abort paths
+may still end it sooner at cooperative boundaries. This increases the maximum
+work replayed after an unexpected container loss; exact retained-job continuation
+and idempotent imports remain the recovery owners. Dense-raw cleanup retains a
 45-second admission cap. A bounded raw cleanup pass attempts the canonical lock
 without waiting; contention returns `hasMore: true` without mutation so the existing
 maintenance continuation remains due. The live foreground-yield predicate reaches
