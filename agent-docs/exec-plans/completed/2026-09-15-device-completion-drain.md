@@ -1,6 +1,6 @@
 # Drain covered device schedules after completion publication
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-15
 
@@ -30,4 +30,6 @@ Absorb redundant scheduled device requests arriving during checkpoint and comple
 - New checkpoint/publication arrival regressions fail against the base and pass with the fix; cold restore preserves future jobs without a repeat provider pass.
 - Runtime entrypoint (82 tests), mailbox notification (163 tests), and runtime typecheck pass. Web unit tests (222), real Postgres tests (38), and Web typecheck also pass. Docs drift passes.
 - Parent review found no new state owner or unbounded work. Complexity guard passes with unchanged hotspot debt and one less recovery branch.
-- Final PR, exact-head CI, and ReviewGPT remain pending.
+- PR #3484 is open. ReviewGPT passed on 869cf343dda97ef715dedec236646aabf92aa15f with verified model/response identity and no findings; parent final review agrees.
+- Implementation and focused proof are complete. Final exact-head CI remains a PR gate after this documentation-only closeout; no production deployment is included.
+Completed: 2026-09-15
