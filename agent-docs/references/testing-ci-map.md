@@ -9,6 +9,11 @@ without a second conversation fetch. The workspace-runner suite covers concurren
 completion/wake acceptance, empty-hint qualification, and retained wakes on failed
 completion. The concurrent-device-import integration suite proves reply delivery
 while downloads remain held and subsequent canonical import/acknowledgment.
+The `hosted-runtime-promoted-foreground-priority.test.ts` suite follows three
+conversation inputs after system-owner promotion, repeated default wakes,
+snapshot-time arrival, the full quiet window after the latest reply, and eventual
+deferred-effect checkpoints. Provider changes and shutdown still force a prompt handoff.
+It exercises the production entrypoint and mailbox importer.
 
 ## Current Repo Checks
 
