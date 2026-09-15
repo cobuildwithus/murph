@@ -8,6 +8,7 @@ import type {
 import {
   parseHostedOperatorTaskControlResponse,
 } from "@murphai/hosted-execution";
+import { parseHostedExternalThreadRouteAuthorityResponse } from "@murphai/hosted-execution/parsers";
 import {
   parseHostedExecutionResolvedLinqDeliveryRoute,
   HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES,
@@ -284,35 +285,7 @@ export function createCloudflareEffectsPort(input: {
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
             });
-            const assistantAskFallbackRequired =
-              (payload as { assistantAskFallbackRequired?: unknown } | null)
-                ?.assistantAskFallbackRequired;
-            const threadIsDirect =
-              (payload as { threadIsDirect?: unknown } | null)?.threadIsDirect;
-            if (
-              !payload
-              || typeof payload !== "object"
-              || Array.isArray(payload)
-              || (payload as { authorized?: unknown }).authorized !== true
-              || (
-                assistantAskFallbackRequired !== undefined
-                && typeof assistantAskFallbackRequired !== "boolean"
-              )
-              || (threadIsDirect !== undefined && typeof threadIsDirect !== "boolean")
-            ) {
-              throw new TypeError(
-                "Hosted external thread route authority response is invalid.",
-              );
-            }
-            if (threadIsDirect === undefined && assistantAskFallbackRequired === undefined) {
-              return;
-            }
-            return {
-              ...(typeof assistantAskFallbackRequired === "boolean"
-                ? { assistantAskFallbackRequired }
-                : {}),
-              ...(typeof threadIsDirect === "boolean" ? { threadIsDirect } : {}),
-            };
+            return parseHostedExternalThreadRouteAuthorityResponse(payload);
           },
           async controlOperatorTask(request, context) {
             return parseHostedOperatorTaskControlResponse(

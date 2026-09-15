@@ -811,7 +811,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     }));
 
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested", "assistant.ask.completed"],
+      }),
+    );
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
   });
 

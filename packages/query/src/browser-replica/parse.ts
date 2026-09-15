@@ -688,6 +688,14 @@ function parsePersonalPatternFactor(value: unknown, label: string): PersonalPatt
     kind,
     label: requireString(record.label, `${label}.label`),
     observedDays: requireNonNegativeInteger(record.observedDays, `${label}.observedDays`),
+    ...(record.lastObservedDate === undefined
+      ? {}
+      : {
+          lastObservedDate: requireString(
+            record.lastObservedDate,
+            `${label}.lastObservedDate`,
+          ),
+        }),
   };
 }
 

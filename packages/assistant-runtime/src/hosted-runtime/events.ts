@@ -55,9 +55,7 @@ export async function executeHostedMailboxEvent(input: {
   operatorHomeRoot?: string | null;
   preferenceAppliedAt?: string;
   preferenceCausalSeq?: string;
-  shouldYieldAssistantAskCompletion?: (() => boolean) | null;
-  shouldYieldClinicalRecords?: (() => boolean) | null;
-  shouldYieldDeviceSync?: (() => boolean) | null;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   sourceMailboxItemId?: string | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
   runtime: Pick<
@@ -88,7 +86,7 @@ export async function executeHostedMailboxEvent(input: {
       wake: input.wake,
       vaultRoot: input.vaultRoot,
       signal: input.signal,
-      shouldYield: input.shouldYieldClinicalRecords,
+      shouldYield: input.shouldYieldBackgroundMaintenance,
     });
     return { bootstrapResult: null, ...outcome };
   }
@@ -119,14 +117,8 @@ export async function executeHostedMailboxEvent(input: {
     runtimeLogContext: input.runtimeLogContext ?? null,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal ?? null,
-    ...(input.shouldYieldClinicalRecords
-      ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
-      : {}),
-    ...(input.shouldYieldAssistantAskCompletion
-      ? { shouldYieldAssistantAskCompletion: input.shouldYieldAssistantAskCompletion }
-      : {}),
-    ...(input.shouldYieldDeviceSync
-      ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
+    ...(input.shouldYieldBackgroundMaintenance
+      ? { shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance }
       : {}),
     sourceMailboxItemId: input.sourceMailboxItemId ?? null,
     vaultRoot: input.vaultRoot,
@@ -167,9 +159,7 @@ async function handleHostedMailboxEvent(input: {
   > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
-  shouldYieldAssistantAskCompletion?: (() => boolean) | null;
-  shouldYieldClinicalRecords?: (() => boolean) | null;
-  shouldYieldDeviceSync?: (() => boolean) | null;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
   runtimeLogContext: HostedRuntimeLogContext | null;
   vaultRoot: string;
@@ -189,14 +179,8 @@ async function handleHostedMailboxEvent(input: {
     runtimeLogContext: input.runtimeLogContext,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
-    ...(input.shouldYieldClinicalRecords
-      ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
-      : {}),
-    ...(input.shouldYieldAssistantAskCompletion
-      ? { shouldYieldAssistantAskCompletion: input.shouldYieldAssistantAskCompletion }
-      : {}),
-    ...(input.shouldYieldDeviceSync
-      ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
+    ...(input.shouldYieldBackgroundMaintenance
+      ? { shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance }
       : {}),
     sourceMailboxItemId: input.sourceMailboxItemId,
     vaultRoot: input.vaultRoot,
@@ -216,9 +200,7 @@ async function executeHostedSystemWake(input: {
   > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
-  shouldYieldAssistantAskCompletion?: (() => boolean) | null;
-  shouldYieldClinicalRecords?: (() => boolean) | null;
-  shouldYieldDeviceSync?: (() => boolean) | null;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
   runtimeLogContext: HostedRuntimeLogContext | null;
   vaultRoot: string;
@@ -230,6 +212,7 @@ async function executeHostedSystemWake(input: {
       );
       return executeHostedMemberActivatedWake({
         wake: input.wake,
+        shouldYield: input.shouldYieldBackgroundMaintenance,
         executionContext: input.executionContext,
         sourceMailboxItemId: input.sourceMailboxItemId,
         turnEnvironment: createHostedAssistantTurnEnvironment({
@@ -295,7 +278,7 @@ async function executeHostedSystemWake(input: {
       return executeHostedAssistantAskCompletedWake({
         wake: input.wake,
         executionContext: input.executionContext,
-        shouldYield: input.shouldYieldAssistantAskCompletion ?? null,
+        shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
         signal: input.signal,
         sourceMailboxItemId: input.sourceMailboxItemId,
         turnEnvironment: createHostedAssistantTurnEnvironment({
@@ -312,8 +295,8 @@ async function executeHostedSystemWake(input: {
       } = await loadHostedClinicalRecordsMaintenanceModule();
       const clinicalRecordsMetrics = await runHostedClinicalRecordsSyncWakeLane({
         clinicalRecordsPort: input.runtime.platform.clinicalRecordsPort ?? null,
-        ...(input.shouldYieldClinicalRecords
-          ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
+        ...(input.shouldYieldBackgroundMaintenance
+          ? { shouldYieldClinicalRecords: input.shouldYieldBackgroundMaintenance }
           : {}),
         signal: input.signal,
         vaultRoot: input.vaultRoot,
@@ -349,7 +332,7 @@ async function executeHostedSystemWake(input: {
         runtimeLogContext: input.runtimeLogContext,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
-        shouldYieldDeviceSync: input.shouldYieldDeviceSync,
+        shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance,
         signal: input.signal,
         timeoutMs: HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
         vaultRoot: input.vaultRoot,
@@ -357,7 +340,7 @@ async function executeHostedSystemWake(input: {
       });
       const shouldSkipActivityAutomation = deviceSyncMetrics.deviceSyncSkipped
         || input.signal?.aborted === true
-        || input.shouldYieldDeviceSync?.() === true;
+        || input.shouldYieldBackgroundMaintenance?.() === true;
       const activityAutomation = shouldSkipActivityAutomation
         ? { matched: 0, nextWakeAt: null, scheduled: 0 }
         : await scheduleDeviceActivityTriggeredAutomations({

@@ -43,6 +43,34 @@ The isolated database does not store the raw hosted member id and has no
 cross-database foreign key. Attempt ids and other existing redacted operational
 correlation fields retain their current contract and limits.
 
+### Device import no-op counts
+
+`device-sync.pass_finished` includes whole-pass persistence outcome counts:
+`deviceSyncImportAppliedCount`, `deviceSyncImportNoopCount`,
+`deviceSyncImportFailedCount`, and `deviceSyncImportUnknownCount`.
+The matching `deviceSyncCompleteSourceDayImport*Count` fields count only
+imports supplied with complete-source-day authority, including imports inside
+reconciliation jobs. These subset counts measure the oxygen/stress temporal
+feature rereads; they are not all initial historical backfill work.
+
+An explicit importer `applied: false` is a no-op. Explicit `true` means
+persistence changed, which can include evidence-only writes rather than new
+health facts. A rejected import is failed even if its job later recovers; a
+resolved result without a boolean `applied` is unknown. Jobs that perform no
+import contribute zero counts. Job completion, provider response record counts,
+and returned canonical event counts cannot establish a persistence no-op.
+
+Counts aggregate every retained diagnostic before the existing slowest-job
+sample. The service buffer covers at least the hosted pass job limit.
+Compute the classified success no-op rate as `noop / (noop + applied)`, and
+report failed and unknown counts alongside it. Use the complete-source-day
+fields for that subset; do not sum them into the overall counts again.
+The sampled `deviceSyncJobTimingSummaries` remain timing evidence, not a
+rate denominator. These additions use the existing shallow scalar log contract
+and existing best-effort event; no extra callback, health payload, source id,
+window date, or durable scheduling state is added. Old log rows lack the fields
+and must be excluded from the measured cohort rather than treated as zeros.
+
 ### Ensure-processing summaries
 
 `runner.processing_finished` is one best-effort summary per completed
@@ -232,6 +260,117 @@ as `low`, `medium`, `high`, `xhigh`, or `null`. The value is captured after
 conversation and turn-scoped automation overrides resolve and is the normalized
 value passed to the Codex provider attempt. Raw provider configuration, prompts,
 messages, credentials, and paths remain excluded.
+
+### Warm Codex transport diagnostics
+
+The existing `codex.transport_diagnostics` provider trace includes
+`codexTransportScope` (`turn`, `thread`, or `unscoped`),
+`codexTransportElapsedMs` since the current provider turn request,
+`codexTransportProviderRequestOrdinal`, `codexTransportWarmReused`, and the
+content-free `codexTransportTurnCorrelation` shared with action and completion
+timing. Together with fallback, idle-timeout and retry classifications, these
+distinguish transport recovery from the encompassing model-turn duration.
+Elapsed time is measured when the notification is observed, not when buffered
+logs are persisted; it is not an upstream response-header measurement.
+
+Native fallback warnings contain a thread ID without a turn ID. Reused sessions
+observe only recognized transport warnings from the exact bound thread after
+the current turn-start notification. They emit sanitized metadata while still
+discarding raw warning text and all unscoped output, requests and completion.
+The scope describes identifiers carried by the notification; the correlation
+describes the active turn at observation time. A delayed thread-scoped warning
+cannot be attributed conclusively to that turn or an earlier WebSocket frame. POST egress
+diagnostics do not observe WebSocket frames, and absence of a warning is not
+proof that no recovery occurred. `codexTransportTimeoutPhase` distinguishes
+`websocket-send`, `websocket-read`, and `http-read` when native warning text
+identifies the operation; missing or unknown phases are omitted by the runtime
+projection. No endpoint, raw thread or turn ID, prompt,
+response, or additional provider error text enters the diagnostic record.
+
+#### Responses WebSocket relay observations
+
+The Worker also writes `runner.provider_egress_diagnostic` records with
+`transportKind: websocket` through the existing runtime-log route. The
+`websocketMilestone` values describe actual relay boundaries:
+`client_received`, `upstream_sent`, first `upstream_received`, first
+`downstream_sent`, and one observed `closed` or `failed` event. First-frame
+observations reset after each forwarded client frame; token frames only update
+in-memory counts and last-frame times.
+
+Each connection gets a random `websocketConnectionCorrelation`. Counts include
+`clientFrameCount`, `upstreamSends`, `upstreamFrameCount`, and
+`downstreamFrameCount`. `activeClientMessageOrdinal` identifies the most recently
+forwarded client frame; `observedClientMessageOrdinal` on receipt can describe
+a newer frame still awaiting admission. `requestElapsedMs` starts at receipt of
+the latest forwarded frame, `upstreamSendElapsedMs` measures its admission/relay
+delay, and `firstUpstreamElapsedMs` and `firstDownstreamElapsedMs` measure the
+next receive and forward boundaries. `upstreamIdleMs` and `downstreamIdleMs`
+measure connection-wide time since the last data frame on each boundary.
+
+`firstUpstreamMessageKind` contains only a fixed event-type allowlist or
+`other`, `invalid_json`, `too_large`, or `binary`. Only the first frame is
+parsed for this field, with a 65,536-character limit. No raw frames, arbitrary
+event types, provider IDs, or close reasons enter the records. Close observations
+contain only side, numeric code, and a fixed failure phase. A provider close can
+be observed before queued downstream forwarding finishes; existing relay drain
+ordering remains authoritative.
+
+Interpret these as connection observations, not model-health or exact-request
+proof. A forwarded request followed by no upstream frames supports upstream
+silence; a received frame without its corresponding forward supports relay
+delay. Unsolicited metadata and overlapping frames can weaken attribution.
+A `response.created` observation establishes an acknowledgement, not continued
+inference progress. The runtime-log attempt/fence belongs to the socket upgrade
+and may precede later turns on a reused socket; it must not be treated as the
+current turn ID. Existing write-fence validation is preserved.
+
+Persistence is best effort: at most four log writes are in flight per connection,
+with no diagnostic queue or awaited write on the forwarding path. Structured
+Worker logs retain the observation even when the durable write is skipped.
+`runtimeLogScheduled` and cumulative `droppedRecords` expose local admission
+and failed writes on subsequent observations, without guaranteeing persistence.
+Failures and closes after a send with no upstream frame receive warning
+retention; ordinary milestones remain debug. Missing rows are missing evidence.
+
+#### Stall reproduction and recovery design
+
+The credential-free `assistant-codex-websocket-stall.test.ts` fixture runs the
+pinned Codex 0.153.4 binary against a local WebSocket/SSE provider. After a
+successful warm turn, the provider keeps the socket open, receives a pong, and
+sends no response data. The full 90-second test measured 90,006 ms from stalled
+request to the single native HTTPS fallback. A five-second native idle setting
+measured 5,021 ms; an explicit close with the 90-second setting measured 116 ms.
+Each case completed the answer and the next resumed turn, which stayed on HTTPS.
+This proves the synthetic failure mechanism, not the cause of an earlier
+production incident.
+
+The smallest proposed recovery change is a 20-second
+`stream_idle_timeout_ms` with the existing `stream_max_retries = 0`: native
+Codex detects stream silence and owns its one HTTPS fallback. Twenty seconds is
+a proposed latency tradeoff, not a measured health threshold. The five-second
+comparison proves the knob works; a healthy model can still remain quiet longer
+than that. An idle deadline bounds silence in a stream read, not end-to-end turn
+latency across HTTP setup, retries, tools, or reasoning with continuing events.
+
+A test-only alternative closes the socket after five seconds without its first
+upstream data frame; the same native fallback began at 5,010 ms while native idle
+remained 90 seconds. A separate healthy case emitted `response.created`
+promptly, waited one second for text, and completed without fallback despite a
+500 ms prototype deadline. This alternative preserves acknowledged quiet
+reasoning, but any first frame cancels it: it cannot recover a post-acknowledgement
+stall or establish model progress. It is not a complete replacement for the idle
+deadline. A post-acknowledgement stall fixture confirms native idle recovery
+still fires after the first-frame guard has been cancelled. Ping/pong similarly
+proves a responsive transport peer, not inference;
+Murph's Worker relay also separates the client and upstream transport legs.
+
+Production policy remains unchanged in this diagnostic change. Before adopting
+the shorter native timeout, prove fresh-process config adoption, acknowledged
+quiet responses, partial output/tool-effect recovery without duplicate delivery,
+and operator/child/compaction behavior that shares the configuration. Use the
+new relay observations and native timeout phases to distinguish timeout-driven
+recovery from normal model latency. Keep cancellation, retry, and delivery under
+their existing owners; do not introduce a second turn retry loop.
 
 ### Web-control preflight rejection attribution
 
@@ -831,7 +970,7 @@ bounds describe the retained samples, not the complete population.
 ### Finite CLI failure counts (optional, same timing identity)
 
 Each non-successful invocation from a new producer contributes at most one
-`failures: [{ code, stage, count }]` observation inside its existing
+`failures: [{ code, stage, count, validation? }]` observation inside its existing
 command/outcome entry. For example, a synthetic `experiment session log` throw
 with code `invalid_payload` and context stage `validation` produces that exact
 pair with count 1. A successful invocation has no failure fields. An observed
@@ -846,10 +985,58 @@ CLI/knowledge codes, fixed validation types and selected Node/transport codes;
 other values collapse to `unknown`. Capture reads only own data properties for
 `code`, `context.stage`, direct `stage`, and (when code is absent) three exact
 validation type names. It does not call getters, enumerate objects, inspect
-messages/field errors, follow prototypes/causes, or retain original errors or
-contexts. Code-only observations are diagnostic hints, not authorization or a
-claim that a reported stage is independently verified. Existing dynamic-tool
-finite stage/reason/category diagnostics remain separate and unchanged.
+messages, arguments or result output, follow prototypes/causes, or retain original
+errors or contexts. The optional schema detail below reads only bounded own
+`publicIssues` data at that same original-error seam. Code-only observations are
+diagnostic hints, not authorization or a claim that a reported stage is independently verified. Existing dynamic-tool
+finite stage/reason/category diagnostics remain separate.
+
+Memory read diagnostics admit exactly `memory_not_found` and
+`memory_document_invalid`, both emitted by the existing CLI owner at `read`.
+The assistant's existing `tool-failure-diagnostics.ts` category map classifies
+these as `not_found` and `invalid_result`, respectively: a missing record is
+not invalid input, and an unreadable canonical document is invalid stored state,
+not proof of a caller argument defect. Other memory codes (including
+`memory_persistence_invalid`), arbitrary strings, and prefix/suffix/lookalike
+variants remain `unknown`. This only classifies existing errors; it does not
+change output, exit status, model-visible recovery guidance, reads, writes or
+retries. Messages, source paths, record ids and values never enter this vocabulary.
+
+Knowledge source diagnostics additionally admit exactly
+`knowledge_source_unreadable` (`unavailable`), `knowledge_invalid_source_path`
+(`invalid_input`), and `knowledge_invalid_library_slug` (`invalid_input`). These
+are existing service errors, not new validation or source behavior. Unreadable
+source does not prove corruption; invalid source/library references do not
+establish why the caller supplied them. No stage is inferred when absent.
+Unfamiliar codes and lookalikes still normalize to `unknown`.
+
+#### Optional schema-validation detail
+
+For `VALIDATION_ERROR` only, `validation: { field, code, missing? }` is one finite
+selected issue, never another failure observation. `cliTimingValidationFailure`
+in the portable owner selects the first admissible issue within the first **8**
+own array entries. It reads `publicIssues` on the original error, `fieldErrors`
+in the assistant's existing complete **16 KiB** error envelope, or `validation`
+on the timing wire. All reads use own data descriptors; getters, prototypes,
+causes, iterators and arbitrary nested paths are not consulted. Only exact full
+static field names are admitted:
+
+- `food search-labels`: query, limit.
+- `knowledge upsert`: body, slug, title, pageType, status, clearLibraryLinks,
+  relatedSlug, librarySlug, sourcePath.
+- `knowledge append-section`: slug, heading, body, title, position, sourcePath.
+
+Issue codes use the closed standard vocabulary in `CliValidationDiagnostic`;
+`missing` is retained only when explicitly boolean. Absent is not false, and
+neither is inferred from a message, expected/received type or value. Array paths,
+indices, prefixes, substrings, lookalikes and unknown/malformed details are
+omitted. No original path, message, value, argument or source object is retained.
+The assistant requires positive registered-command attribution and adds only
+`vaultCliValidationField`, `vaultCliValidationCode`, and optional boolean
+`vaultCliValidationMissing` to existing issue metadata. Success has no diagnostic.
+The producer never parses stdout or argv; command attribution and categories
+otherwise remain unchanged. Synthetic probes establish information loss, **not**
+the behavioral root cause of actual member argument errors.
 
 The existing Incur error bridge observes ordinary handler throws **before** its
 public error projection can discard typed fields. Dispatch and invocation
@@ -859,13 +1046,15 @@ retain their own scopes; the container is not an additional failure sample.
 Stop-on-error and the existing rejection of nested batch before child entry are
 unchanged. An unentered child has no invented diagnostic.
 
-There are at most **8 code/stage pairs per command/outcome**, within the existing
-32-command limit. Additional distinct pairs increment optional `droppedFailures`
-by their observation count; repeats of already-retained pairs still aggregate.
+There are at most **8 failure variants per command/outcome**, within the existing
+32-command limit. Identity is code/stage plus optional validation field/code/missing,
+including absence versus explicit false. Additional distinct variants increment
+optional `droppedFailures` by their observation count; retained variants still aggregate.
 `sum(failures.count) + droppedFailures <= calls`. These are safe positive counts
 (or a safe nonnegative drop count), not extra CLI calls. Malformed optional
 failure details are removed independently, retaining valid timing and usage.
-Unknown future codes/stages normalize to constants; resulting duplicate pairs
+Malformed optional validation alone never removes valid code/stage/count evidence.
+Unknown future codes/stages normalize to constants; identical normalized variants
 coalesce. Old entries without these fields remain unchanged, including mixed
 old/new merges: missing old detail is **not** backfilled with fabricated unknown
 observations. Counts can therefore cover fewer than the entry's error calls.
@@ -908,13 +1097,29 @@ history-backed test uses `MURPH_CLI_FAILURE_COMPAT_BASE=4949045492c` to load bot
 actual pre-change owners; the older `MURPH_CLI_TIMING_COMPAT_BASE` test remains a
 separate, pre-timing rollout proof.
 
+Additional failure codes on the same `murph.cli-timing.v1` schema, including the
+two memory read codes and three knowledge source codes, and optional validation
+detail also roll out **reader before writer**: first update the
+portable normalizer in downstream Web/hosted usage and engine/profile consumers
+and the assistant category reader, then update CLI producers. Warm older
+failure-aware readers normalize unfamiliar codes to `unknown`, discard unknown
+validation metadata and coalesce equal code/stage pairs while retaining command
+identity, outcomes, calls, phases and report counts. New readers still accept old
+reports without failure details and cannot recover classifications already collapsed by old writers. A reader
+rollback loses diagnostic specificity, not valid timing or usage accounting;
+no protocol bump or coordinated pause is needed. The history-backed runtime-state
+test uses `MURPH_CLI_MEMORY_FAILURE_COMPAT_BASE` to load the actual pre-admission
+portable reader; it must be run with the base named in the active rollout plan,
+not replaced with a copy of the old parser or a current-reader round trip.
+
 ### Bounded failure-frequency inspection and decision threshold
 
 Run on the **primary usage database** after compatible consumers and producers
 are present. This query caps input at 10,000 usage rows over 72 hours and output
 at 50 finite command/code/stage groups. It uses existing turn IDs only internally
-for aggregation; no IDs or private content are returned. The maximum observed
-count per turn/pair avoids adding repeated provider-request/profile snapshots;
+for aggregation; no IDs or private content are returned. Sum validation variants
+within each command summary before taking the maximum count per turn/code/stage
+to avoid adding repeated provider-request/profile snapshots;
 `observed_failures_lower_bound` is conservative, not an exact all-attempt total.
 A row-cap hit requires a narrower fixed window before making coverage claims.
 
@@ -936,11 +1141,15 @@ WITH rows AS MATERIALIZED (
     AND c ->> 'outcome' = 'error'
 ), per_turn AS (
   SELECT turn_id, c ->> 'command' AS command,
-         f ->> 'code' AS code, f ->> 'stage' AS stage,
-         max((f ->> 'count')::numeric) AS observations
+         f.code, f.stage, max(f.observations) AS observations
   FROM commands
-  CROSS JOIN LATERAL jsonb_array_elements(c -> 'failures') f
-  GROUP BY turn_id, c ->> 'command', f ->> 'code', f ->> 'stage'
+  CROSS JOIN LATERAL (
+    SELECT e ->> 'code' AS code, e ->> 'stage' AS stage,
+           sum((e ->> 'count')::numeric) AS observations
+    FROM jsonb_array_elements(c -> 'failures') e
+    GROUP BY e ->> 'code', e ->> 'stage'
+  ) f
+  GROUP BY turn_id, c ->> 'command', f.code, f.stage
 )
 SELECT command, code, stage, count(*) AS independent_turns,
        sum(observations) AS observed_failures_lower_bound,

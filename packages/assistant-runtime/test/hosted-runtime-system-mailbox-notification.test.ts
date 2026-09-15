@@ -78,6 +78,7 @@ import {
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   readHostedSystemMailboxState,
+  setHostedDeviceSyncMaintenanceMailboxWakeAt,
   resolveHostedSystemMailboxHandledThroughSeq,
   resolveHostedSystemMailboxProgress,
   resolveHostedSystemMailboxWakeCandidates,
@@ -3581,7 +3582,7 @@ describe("hosted system mailbox notification execution context", () => {
       assert.equal(prepared?.status, "processed");
       expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
         expect.objectContaining({
-          shouldYieldDeviceSync: shouldYieldBackgroundMaintenance,
+          shouldYieldBackgroundMaintenance,
           sourceMailboxItemId: "mailbox_item_system_device_sync",
           wake: expect.objectContaining({
             kind: "device-sync.wake",
@@ -3793,7 +3794,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("publishes a durable device-sync completion without retaining another runtime wake", async () => {
+  it.each([null, "2026-04-27T00:00:30.000Z"])("publishes device cadence without a runtime wake and preserves maintenance retry %s", async (maintenanceRetryAt) => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const connectionId = "dsc_completion_same_admission";
     const connectedAt = "2026-04-01T00:00:00.000Z";
@@ -3856,6 +3857,16 @@ describe("hosted system mailbox notification execution context", () => {
     });
 
     try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(FIXED_NOW);
+      if (maintenanceRetryAt) {
+        await setHostedDeviceSyncMaintenanceMailboxWakeAt({
+          nextWakeAt: maintenanceRetryAt,
+          now: () => FIXED_NOW,
+          userId: "member_123",
+          vaultRoot: workspace.vaultRoot,
+        });
+      }
       await enqueueHostedSystemMailboxItem({
         item: createResolvedDeviceSyncItem({
           id: "mailbox_item_system_device_sync_completion_same_admission",
@@ -3881,13 +3892,10 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
-        deviceSyncWake: {
-          at: nextReconcileAt,
-          reason: "device-sync.reconcile",
-        },
+        deviceSyncWake: undefined,
         failed: 0,
-        nextWakeAt: nextReconcileAt,
-        nextWakeReason: "device-sync.reconcile",
+        nextWakeAt: maintenanceRetryAt,
+        ...(maintenanceRetryAt ? { nextWakeReason: "device-sync.reconcile" } : {}),
         recorded: 0,
       });
       expect(fetchSnapshot).toHaveBeenCalledWith({
@@ -3904,8 +3912,12 @@ describe("hosted system mailbox notification execution context", () => {
           observedUpdatedAt: updatedAt,
         }],
       });
-      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
+      const remaining = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+      expect(remaining.map((item) => item.nextAttemptAt)).toEqual(
+        maintenanceRetryAt ? [maintenanceRetryAt] : [],
+      );
     } finally {
+      vi.useRealTimers();
       await workspace.cleanup();
     }
   });
@@ -4070,13 +4082,9 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
-        deviceSyncWake: {
-          at: nextReconcileAt,
-          reason: "device-sync.reconcile",
-        },
+        deviceSyncWake: undefined,
         failed: 0,
-        nextWakeAt: nextReconcileAt,
-        nextWakeReason: "device-sync.reconcile",
+        nextWakeAt: null,
         recorded: 0,
       });
       expect(fetchSnapshot).toHaveBeenCalledTimes(2);
@@ -4427,11 +4435,16 @@ describe("hosted system mailbox notification execution context", () => {
     },
   );
 
-  it.each([false, true].flatMap((newerDirtyRevision) =>
+  it.each([...[false, true].flatMap((newerDirtyRevision) =>
     [undefined, "companion_health_metadata", "companion_hrv_rmssd"].flatMap((hintReason) =>
-      [false, true].map((allDeferred) => ({ newerDirtyRevision, hintReason, allDeferred }))
+      [false, true].map((allDeferred) => ({
+        newerDirtyRevision, hintReason, allDeferred, futureSource: "none",
+      }))
     )
-  ))("drains admitted wake hints across checkpoint restore (new dirty revision: $newerDirtyRevision, reason: $hintReason, deferred: $allDeferred)", async ({ newerDirtyRevision, hintReason, allDeferred }) => {
+  ), ...["hint", "owner"].map((futureSource) => ({
+    newerDirtyRevision: false, hintReason: "webhook_dirty_transition",
+    allDeferred: true, futureSource,
+  }))])("drains admitted wake hints across checkpoint restore (new dirty revision: $newerDirtyRevision, reason: $hintReason, deferred: $allDeferred, future source: $futureSource)", async ({ newerDirtyRevision, hintReason, allDeferred, futureSource }) => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const connectionId = "dsc_synthetic_retained_drain";
     const retryAt = "2026-04-28T00:00:00.000Z";
@@ -4443,9 +4456,9 @@ describe("hosted system mailbox notification execution context", () => {
       expectedConnectedAt,
       hint: { nextReconcileAt: retryAt, jobs: [{ availableAt: retryAt, dedupeKey: "synthetic-history-retry",
         kind: "resource", maxAttempts: 1, payload: {}, priority: 30 }] },
-      occurredAt: FIXED_NOW,
+      occurredAt: futureSource === "owner" ? retryAt : FIXED_NOW,
       provider: "junction",
-      reason: "reconcile_due",
+      reason: futureSource === "owner" ? "webhook_hint" : "reconcile_due",
       userId: "member_123",
     });
     const immediateAt = "2026-04-27T00:10:01.000Z";
@@ -4463,14 +4476,17 @@ describe("hosted system mailbox notification execution context", () => {
       for (const [index, reason] of (["reconcile_due", "reconcile_due", "webhook_hint", "webhook_hint"] as const).entries()) {
         const wake = index === 0 ? retainedWake : buildHostedExecutionDeviceSyncWake({
           connectionId, eventId: `device-sync.wake:synthetic-hint-${index}`,
-          expectedConnectedAt, occurredAt: FIXED_NOW, provider: "junction",
+          expectedConnectedAt,
+          occurredAt: futureSource === "hint" && index === 2 ? retryAt : FIXED_NOW,
+          provider: "junction",
           reason, userId: "member_123",
           hint: reason === "reconcile_due" ? { nextReconcileAt: FIXED_NOW }
             : { reason: hintReason },
         });
         await enqueueHostedSystemMailboxItem({
           item: createResolvedDeviceSyncItem({ dedupeKey: wake.eventId,
-            id: `mailbox_synthetic_drain_${index}`, laneSeq: String(index + 1) }),
+            id: `mailbox_synthetic_drain_${index}`, laneSeq: String(index + 1),
+            occurredAt: wake.occurredAt }),
           vaultRoot: workspace.vaultRoot, wake,
         });
       }
@@ -4766,8 +4782,8 @@ describe("hosted system mailbox notification execution context", () => {
   });
 
   it.each([
-    "epoch", "manual", "jobs", "scopes", "revoke", "unknown_reason", "attempted", "recording", "disconnect",
-    "reauthorization", "connected", "future_schedule", "equal_schedule", "undated_schedule", "unbound_owner", "other_connection",
+    "epoch", "jobs", "scopes", "revoke", "unknown_reason", "attempted", "recording", "disconnect",
+    "reauthorization", "connected", "future_schedule", "future_occurrence", "equal_schedule", "undated_schedule", "unbound_owner", "other_connection",
   ].flatMap((boundary) => [false, true].map((deferred) => ({ boundary, deferred }))))(
     "preserves $boundary work when a retained device owner admits hints (deferred: $deferred)", async ({ boundary, deferred }) => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
@@ -4783,7 +4799,6 @@ describe("hosted system mailbox notification execution context", () => {
       occurredAt: FIXED_NOW, provider: "junction", reason: "webhook_hint", userId: "member_123",
     });
     if (boundary === "epoch") candidate.expectedConnectedAt = "2026-04-02T00:00:00.000Z";
-    if (boundary === "manual") { candidate.reason = "reconcile_due"; candidate.hint = { reason: "manual_reconcile" }; }
     if (boundary === "jobs") candidate.hint = { jobs: [{ kind: "resource", dedupeKey: "synthetic-distinct-job" }] };
     if (boundary === "scopes") candidate.hint = { reason: "companion_health_metadata", scopes: [] };
     if (boundary === "revoke") candidate.hint = { reason: "companion_hrv_rmssd", revokeWarning: { code: "synthetic_warning", message: "Synthetic warning" } };
@@ -4792,6 +4807,11 @@ describe("hosted system mailbox notification execution context", () => {
     if (boundary === "reauthorization") candidate.reason = "reauthorization_required";
     if (boundary === "connected") candidate.reason = "connected";
     if (boundary === "future_schedule") { candidate.reason = "reconcile_due"; candidate.hint = { nextReconcileAt: "2026-04-29T00:00:00.000Z" }; }
+    if (boundary === "future_occurrence") {
+      candidate.reason = "reconcile_due";
+      candidate.hint = { nextReconcileAt: "2026-04-26T00:00:00.000Z" };
+      candidate.occurredAt = "2026-04-29T00:00:00.000Z";
+    }
     if (boundary === "equal_schedule") { candidate.reason = "reconcile_due"; candidate.hint = { nextReconcileAt: FIXED_NOW }; }
     if (boundary === "undated_schedule") { candidate.reason = "reconcile_due"; candidate.hint = {}; }
     if (boundary === "other_connection") candidate.connectionId = "dsc_synthetic_other";
@@ -7174,6 +7194,7 @@ function createResolvedDeviceSyncItem(overrides: Partial<{
   dedupeKey: string;
   id: string;
   laneSeq: string;
+  occurredAt: string;
 }> = {}): HostedMailboxResolvedImportItem {
   const item: HostedMailboxItem = {
     createdAt: FIXED_NOW,
@@ -7183,7 +7204,7 @@ function createResolvedDeviceSyncItem(overrides: Partial<{
     kind: "device-sync.wake",
     lane: "system",
     laneSeq: overrides.laneSeq ?? "1",
-    occurredAt: FIXED_NOW,
+    occurredAt: overrides.occurredAt ?? FIXED_NOW,
     payloadBytes: 64,
     payloadInlineCiphertext: "ciphertext",
     payloadRef: null,

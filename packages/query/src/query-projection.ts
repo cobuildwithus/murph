@@ -83,6 +83,7 @@ import {
 } from "./metrics/index.ts";
 import {
   rebuildQueryProjectionFromCanonicalSource,
+  readFreshWearableSummaryRows,
 } from "./projection/rebuild.ts";
 import {
   searchQueryProjection,
@@ -369,8 +370,10 @@ export async function summarizeWearableSourceHealthRuntime(
   vaultRoot: string,
   filters: WearableSummaryFilters = {},
 ): Promise<ProjectedWearableSourceHealthSummary[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
-  const bundle = readStoredPublicWearableSummaryBundle(location, filters);
+  const rows = await readFreshWearableSummaryRows(vaultRoot, { providers: filters.providers });
+  const bundle = composePublicWearableSummaryBundleFromStoredRows(rows, filters, {
+    sourceHealthOnly: true,
+  });
   return summarizeWearableSourceHealthFromBundle(bundle, filters);
 }
 

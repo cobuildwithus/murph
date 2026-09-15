@@ -201,9 +201,30 @@ const dismissAutomationLocalAtRecoveryArgumentsSchema = z.object({
     ),
 }).strict()
 
+const automationAuthoringCronSchema = automationScheduleCronSchema.extend({
+  expression: automationScheduleCronSchema.shape.expression
+    .refine((expression) => {
+      const fields = expression.trim().split(/\s+/u)
+      return fields.length !== 5 || fields[2] === '*' || fields[4] === '*'
+    }, {
+      message: 'Cron combines restricted day-of-month and day-of-week fields with OR, not AND. Leave at least one of those fields as literal *. For finite weekday reminders, use * for day-of-month (for example, 0 9 * * 1-5) and activeUntil for expiration.',
+      params: { murphExpectedShape: 'calendar_day_or_weekday' },
+    })
+    .describe(
+      'Five-field cron: minute hour day-of-month month day-of-week. At least one of day-of-month or day-of-week must be literal *. For weekdays use day-of-month=* and day-of-week=1-5; express expiration separately with activeUntil.',
+    ),
+})
+
+const automationAuthoringActiveUntilSchema = automationActiveUntilSchema
+  .nullable()
+  .optional()
+  .describe(
+    'Optional exclusive delivery cutoff. For a finite recurrence, express the repeating days in schedule and expiration here, after the final desired occurrence. Omit it for an ordinary one-shot; when supplied for a one-shot, it must be strictly after the scheduled occurrence. On patch, omit to preserve the existing cutoff or pass null to clear it.',
+  )
+
 const automationDynamicToolScheduleSchema = z.union([
   automationScheduleEverySchema,
-  automationScheduleCronSchema,
+  automationAuthoringCronSchema,
   automationScheduleDailyLocalSchema,
   automationScheduleDeviceActivitySchema,
   automationLocalAtScheduleSchema,
@@ -231,12 +252,7 @@ function validateAutomationSupportOwnershipPair(
 
 const saveAutomationArgumentsSchema = z.object({
   action: z.literal('save'),
-  activeUntil: automationActiveUntilSchema
-    .nullable()
-    .optional()
-    .describe(
-      "Optional delivery cutoff. Omit it for an ordinary one-shot; when supplied, it must be strictly after that automation's scheduled occurrence.",
-    ),
+  activeUntil: automationAuthoringActiveUntilSchema,
   assistantTargetOverride: hostedAutomationAssistantTargetOverrideSchema
     .nullable()
     .optional(),
@@ -291,12 +307,7 @@ const inspectAutomationArgumentsSchema = z.object({
 
 const patchAutomationArgumentsSchema = z.object({
   action: z.literal('patch'),
-  activeUntil: automationActiveUntilSchema
-    .nullable()
-    .optional()
-    .describe(
-      "Optional delivery cutoff. Omit it for an ordinary one-shot; when supplied, it must be strictly after that automation's scheduled occurrence.",
-    ),
+  activeUntil: automationAuthoringActiveUntilSchema,
   assistantTargetOverride: hostedAutomationAssistantTargetOverrideSchema
     .nullable()
     .optional(),

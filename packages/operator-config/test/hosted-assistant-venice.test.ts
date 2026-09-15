@@ -11,14 +11,17 @@ import {
 } from "../src/hosted-assistant-config.ts";
 import { readOperatorConfig } from "../src/operator-config.ts";
 
-test("hosted assistant configuration accepts the registered Venice Codex provider", async () => {
+test.each([
+  { model: "gpt-5.6-terra", provider: "venice" },
+  { model: "murph-custom-r3", provider: "hosted-custom-inference" },
+])("hosted assistant configuration accepts registered provider $provider", async ({ model, provider }) => {
   const homeDirectory = await mkdtemp(path.join(tmpdir(), "murph-venice-provider-"));
   try {
     const result = await ensureHostedAssistantOperatorDefaults({
       allowMissing: false,
       env: {
-        HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
-        HOSTED_ASSISTANT_PROVIDER: "venice",
+        HOSTED_ASSISTANT_MODEL: model,
+        HOSTED_ASSISTANT_PROVIDER: provider,
       },
       homeDirectory,
     });
@@ -34,8 +37,8 @@ test("hosted assistant configuration accepts the registered Venice Codex provide
     const providerConfig = resolveHostedAssistantProviderConfig(
       operatorConfig?.hostedAssistant,
     );
-    assert.equal(providerConfig?.model, "gpt-5.6-terra");
-    assert.equal(providerConfig?.modelProvider, "venice");
+    assert.equal(providerConfig?.model, model);
+    assert.equal(providerConfig?.modelProvider, provider);
   } finally {
     await rm(homeDirectory, { force: true, recursive: true });
   }

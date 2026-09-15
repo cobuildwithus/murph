@@ -1277,8 +1277,12 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(automation.instructions).toContain('Do not save assistant speculation')
   })
 
-  it('creates managed health automations for hosted email targets without a local sender identity', async () => {
+  it('creates health automations and onboarding follow-up for hosted email without a local sender identity', async () => {
     const vaultRoot = await createVaultRoot()
+    await startAssistantOnboarding({
+      startedAt: '2026-06-09T12:00:00.000Z',
+      vault: vaultRoot,
+    })
     const hostedEmailTarget = serializeHostedEmailThreadTarget({
       subject: 'Hosted reminder',
       to: ['member@example.test'],
@@ -1291,12 +1295,13 @@ describe('applyMurphManagedAutomations core integration', () => {
         identityId: 'hid_email_identity',
         participantId: null,
         threadId: null,
+        threadIsDirect: true,
       },
       now: new Date('2026-06-09T12:00:00.000Z'),
       routeValidationProfile: 'hosted',
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -1313,6 +1318,17 @@ describe('applyMurphManagedAutomations core integration', () => {
         threadId: null,
       },
       slug: 'weekly-health-digest',
+      status: 'active',
+    })
+    await expect(showAutomation({
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: {
+        channel: 'email',
+        deliveryTarget: hostedEmailTarget,
+        threadIsDirect: true,
+      },
       status: 'active',
     })
   })

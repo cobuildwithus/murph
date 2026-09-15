@@ -1291,17 +1291,32 @@ describe("hosted current-sender Assistant Ask authority", () => {
     })).resolves.toMatchObject({
       response: { action: "complete", status: "already_completed" },
     });
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      now: NOW,
+      request: { action: "prepare", requestId },
+    })).resolves.toEqual({
+      mailboxWake: {
+        expectedUserId: GROUP_RUNTIME_MEMBER_ID,
+        mailboxItemId: completionId,
+      },
+      response: { action: "prepare", status: "already_completed" },
+    });
     expect(storedItems.size).toBe(2);
   });
 
-  it("requires the fixed fallback when personal access is lost after group completion", async () => {
+  it.each([
+    { resultKind: "answer", supportsSafeFallback: false },
+    { resultKind: "answer", supportsSafeFallback: true },
+    { resultKind: "fixed fallback", supportsSafeFallback: false },
+    { resultKind: "fixed fallback", supportsSafeFallback: true },
+  ])("preserves $resultKind delivery after personal access loss with fallback support $supportsSafeFallback", async ({ resultKind, supportsSafeFallback }) => {
     const { requestId } = await admit({
       text: "Murph, ask my Murph how my synthetic activity has changed?",
     });
-    const result = {
-      answer: "Synthetic activity increased.",
-      outcome: "answered" as const,
-    };
+    const result = resultKind === "answer"
+      ? { answer: "Synthetic activity increased.", outcome: "answered" as const }
+      : { answer: null, outcome: "cannot_answer" as const };
     await handleHostedRuntimeAssistantAskControl({
       boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
       now: NOW,
@@ -1320,20 +1335,31 @@ describe("hosted current-sender Assistant Ask authority", () => {
       },
     );
 
-    await expect(
-      assertHostedAssistantAskCompletionDeliveryAuthorityTx({
-        answeredMailboxItemIds: [completionId],
+    const delivery = assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      answeredMailboxItemIds: [completionId],
+      ...(supportsSafeFallback ? {
         assistantAskCompletionExpiresAt: completionWake.ask.expiresAt,
         assistantAskFallback: false,
-        boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-        idempotencyKey:
-          createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
-            completionId,
-          ),
-        now: new Date(NOW.getTime() + 1_000),
-        tx: asPrismaTransactionClient(fakeTx),
-      }),
-    ).resolves.toEqual({ assistantAskFallbackRequired: true });
+      } : {}),
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          completionId,
+        ),
+      now: new Date(NOW.getTime() + 1_000),
+      tx: asPrismaTransactionClient(fakeTx),
+    });
+    if (resultKind === "fixed fallback") {
+      await expect(delivery).resolves.toBeUndefined();
+    } else if (supportsSafeFallback) {
+      await expect(delivery).resolves.toEqual({ assistantAskFallbackRequired: true });
+    } else {
+      await expect(delivery).rejects.toMatchObject({
+        code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+        httpStatus: 403,
+        retryable: false,
+      });
+    }
   });
 
   it.each([

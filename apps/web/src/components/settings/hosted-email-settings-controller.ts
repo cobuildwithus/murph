@@ -6,6 +6,7 @@ import type {
   PrivyLinkedAccountLike,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 import {
+  extractHostedPrivyVerifiedEmailAccount,
   isHostedPrivyEmailAccountVerified,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
@@ -28,6 +29,7 @@ export interface HostedEmailSettingsInitialEmail {
 export function useHostedEmailSettingsController(input: {
   authenticated: boolean;
   initialEmail: HostedEmailSettingsInitialEmail | null;
+  recoverEmailSync?: boolean;
   /** Called when the server session exists but this browser has no Privy user yet. */
   onClientAuthRequired?: () => void;
   /** Called when the member dismisses Privy's link modal without linking. */
@@ -86,6 +88,16 @@ export function useHostedEmailSettingsController(input: {
   const effectiveCurrentEmail = overrideDisplayState.currentEmail;
   const effectiveVerifiedEmail = overrideDisplayState.currentVerifiedEmail;
   const normalizedCurrentEmail = overrideDisplayState.normalizedCurrentEmail;
+  const providerVerifiedEmail = input.recoverEmailSync
+    ? extractHostedPrivyVerifiedEmailAccount(readPrivyLinkedAccounts(privyUser) ?? [])
+    : null;
+  const emailSyncAddress = pendingEmailSyncAddress ?? (
+    providerVerifiedEmail
+    && (!effectiveVerifiedEmail
+      || normalizeComparableEmail(providerVerifiedEmail.address) !== normalizedCurrentEmail)
+      ? providerVerifiedEmail.address
+      : null
+  );
   const canManageEmail = input.authenticated;
   const canSendEmailUpdateCode = Boolean(effectiveCurrentEmail?.address);
   const clientAuthenticated = privyUser !== null;
@@ -279,7 +291,6 @@ export function useHostedEmailSettingsController(input: {
       return;
     }
 
-    setPendingEmailSyncAddress(linkedEmailAddress);
     setEmailAddress(linkedEmailAddress);
     await syncVerifiedEmailAddress(linkedEmailAddress, "verify");
   }
@@ -289,12 +300,12 @@ export function useHostedEmailSettingsController(input: {
     setNoticeMessage(null);
     setSuccessMessage(null);
 
-    if (!pendingEmailSyncAddress) {
+    if (!emailSyncAddress) {
       setErrorMessage("Link your email before trying to save it again.");
       return;
     }
 
-    await syncVerifiedEmailAddress(pendingEmailSyncAddress, "verify");
+    await syncVerifiedEmailAddress(emailSyncAddress, "verify");
   }
 
   async function handleSyncVerifiedEmail() {
@@ -311,6 +322,7 @@ export function useHostedEmailSettingsController(input: {
   }
 
   async function syncVerifiedEmailAddress(verifiedEmailAddress: string, mode: "resync" | "verify") {
+    setPendingEmailSyncAddress(verifiedEmailAddress);
     setIsSyncingEmailRoute(true);
 
     try {
@@ -347,14 +359,14 @@ export function useHostedEmailSettingsController(input: {
     code,
     effectiveCurrentEmail,
     effectiveVerifiedEmail,
-    emailAddress,
+    emailAddress: emailSyncAddress ?? emailAddress,
     errorMessage,
     isBusy,
     isPrivyLinkModalActive,
     isSendingCode,
     isSubmittingCode,
     isSyncingEmailRoute,
-    hasPendingEmailSync: pendingEmailSyncAddress !== null,
+    hasPendingEmailSync: emailSyncAddress !== null,
     canSendEmailUpdateCode,
     noticeMessage,
     pendingEmailAddress,

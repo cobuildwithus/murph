@@ -30,6 +30,8 @@ test("pattern cards show available comparisons on phones and retain result detai
   const populated = study.locator("section[aria-labelledby]");
   const mobile = populated.locator('[data-patterns-layout="mobile"]');
   await expect(mobile).toBeVisible();
+  await expect(populated.getByText("Single session", { exact: true })).toHaveCount(0);
+  await expect(populated.getByText("Inactive activity", { exact: true })).toHaveCount(0);
   await expect(mobile.locator("li")).toHaveCount(15);
   await expect(mobile.locator("select")).toHaveCount(0);
   const running = mobile.locator('[data-pattern-factor-row="running"]');
@@ -72,8 +74,7 @@ test("pattern cards show available comparisons on phones and retain result detai
   const dates = drawer.getByRole("group", { name: "Comparison dates" });
   await expect(dates).toBeVisible();
   await expect(dates.getByRole("button")).toHaveCount(120);
-  await expect(drawer).toContainText("Some dates unavailable");
-  await expect(drawer).toContainText("No running record doesn't mean no running.");
+  await expect(drawer.locator("summary")).toContainText("Partial dates");
   await dates.getByRole("button", { name: "May 10, 2026 · Running", exact: true }).tap();
   await expect(drawer.getByRole("status")).toHaveText("May 10, 2026 · Running");
   await expect(drawer).not.toContainText("Tap a day");
@@ -211,8 +212,8 @@ test("pattern cards show available comparisons on phones and retain result detai
       const date = calendar.getByRole("button", { name: "May 10, 2026 · Running", exact: true });
       await date.focus();
       await page.keyboard.press("ArrowRight");
-      await expect(calendar.getByRole("button", { name: "May 17, 2026 · No comparison date shown", exact: true })).toBeFocused();
-      await expect(popover.getByRole("status")).toHaveText("May 17, 2026 · No comparison date shown");
+      await expect(calendar.getByRole("button", { name: "May 17, 2026 · No comparison recorded", exact: true })).toBeFocused();
+      await expect(popover.getByRole("status")).toHaveText("May 17, 2026 · No comparison recorded");
       if (process.env.DESIGN_PROOF_OUTPUT_DIR && width === 1440) {
         await popover.screenshot({ path: path.join(process.env.DESIGN_PROOF_OUTPUT_DIR, "patterns-evidence-desktop.png"), animations: "disabled" });
       }

@@ -116,7 +116,8 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "../src/hosted-runtime/pending-assistant-input.ts";
 
-describe("hosted workspace runtime entrypoint", () => {test.each([false, true])("e2e preserves device-sync follow-up wake alongside a future connection retry: %s", async (futureConnectionRetry) => {
+describe("hosted workspace runtime entrypoint", () => {
+  test.each([false, true])("e2e leaves provider cadence to Web while preserving a future connection retry: %s", async (futureConnectionRetry) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const firstCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -125,6 +126,8 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
     const firstNextWakeAt = "2026-04-27T00:01:00.000Z";
     const secondNow = "2026-04-27T00:01:01.000Z";
     const secondNextWakeAt = "2026-04-27T00:02:00.000Z";
+    const expectedWakeAt = futureConnectionRetry ? "2099-01-01T00:00:00.000Z" : null;
+    const expectedWakeReason = futureConnectionRetry ? "device-sync.reconcile" : null;
     const firstDeviceSyncPort = createSnapshotDeviceSyncPort({
       connectionId,
       nextReconcileAt: firstNextWakeAt,
@@ -197,10 +200,10 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
       const firstCheckpoint = firstCheckpointRequests.at(-1);
       assert.ok(firstCheckpoint);
       assert.equal(firstDeviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(firstResult.status, "scheduled");
-      assert.equal(firstResult.nextWakeAt, firstNextWakeAt);
-      assert.equal(firstCheckpoint.nextWakeAt, firstNextWakeAt);
-      assert.equal(firstCheckpoint.nextWakeReason, "device-sync.reconcile");
+      assert.equal(firstResult.status, futureConnectionRetry ? "scheduled" : "idle");
+      assert.equal(firstResult.nextWakeAt, expectedWakeAt);
+      assert.equal(firstCheckpoint.nextWakeAt, expectedWakeAt);
+      assert.equal(firstCheckpoint.nextWakeReason, expectedWakeReason);
 
       vi.setSystemTime(new Date(secondNow));
       const secondCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -239,7 +242,7 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
               workspace: createWorkspaceState({
                 snapshotRef: firstCheckpoint.snapshotRef,
                 nextWakeAt: firstCheckpoint.nextWakeAt,
-                nextWakeReason: "device-sync.reconcile",
+                nextWakeReason: firstCheckpoint.nextWakeReason,
                 version: "1",
               }),
             }),
@@ -248,13 +251,11 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
         },
       );
 
-      const secondCheckpoint = secondCheckpointRequests.at(-1);
-      assert.ok(secondCheckpoint);
-      assert.equal(secondDeviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(secondResult.status, "scheduled");
-      assert.equal(secondResult.nextWakeAt, secondNextWakeAt);
-      assert.equal(secondCheckpoint.nextWakeAt, secondNextWakeAt);
-      assert.equal(secondCheckpoint.nextWakeReason, "device-sync.reconcile");
+      // Restoring after provider cadence passes must not create device work.
+      assert.equal(secondDeviceSyncPort.fetchSnapshotCalls, 0);
+      assert.equal(secondResult.status, futureConnectionRetry ? "scheduled" : "idle");
+      assert.equal(secondResult.nextWakeAt, expectedWakeAt);
+      assert.deepEqual(secondCheckpointRequests, []);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -498,10 +499,10 @@ describe("hosted workspace runtime entrypoint", () => {test.each([false, true])(
       const followUpCheckpoint = followUpCheckpointRequests.at(-1);
       assert.ok(followUpCheckpoint);
       assert.equal(followUpDeviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(followUpResult.status, "scheduled");
-      assert.equal(followUpResult.nextWakeAt, followUpWakeAt);
-      assert.equal(followUpCheckpoint.nextWakeAt, followUpWakeAt);
-      assert.equal(followUpCheckpoint.nextWakeReason, "device-sync.reconcile");
+      assert.equal(followUpResult.status, "idle");
+      assert.equal(followUpResult.nextWakeAt, null);
+      assert.equal(followUpCheckpoint.nextWakeAt, null);
+      assert.equal(followUpCheckpoint.nextWakeReason, null);
     } finally {
       shutdownController.abort();
       vi.useRealTimers();

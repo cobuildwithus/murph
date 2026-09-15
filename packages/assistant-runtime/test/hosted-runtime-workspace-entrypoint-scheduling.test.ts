@@ -381,6 +381,65 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     }
   });
 
+  test.each([
+    { limit: 1, decline: false, expectedPairs: 0 },
+    { limit: 2, decline: false, expectedPairs: 1 },
+    { limit: 2, decline: true, expectedPairs: 1 },
+  ])("reserves/refunds audio pair slots through the workspace owner: $limit/$decline", async ({ limit, decline, expectedPairs }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-audio-budget-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const imported: string[] = [];
+    let pairCalls = 0;
+    const items = [1, 2, 3].map((ordinal) => createMailboxItem({
+      id: `mailbox_audio_budget_${ordinal}`, laneSeq: String(ordinal), causalSeq: String(ordinal),
+    }));
+    const importItem: HostedWorkspaceRuntimeJobOptions["importItem"] = Object.assign(
+      async (item: Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0]) => {
+        imported.push(item.item.id);
+        return { status: "imported" as const };
+      },
+      {
+        importAudioPair: async (
+          pair: readonly [Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0], Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0]],
+          context?: Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[1],
+        ) => {
+          pairCalls += 1;
+          assert.ok(context); // Both wrappers must forward the runtime import context.
+          if (decline) return null;
+          imported.push(...pair.map((item) => item.item.id));
+          return [{ status: "imported" }, { status: "imported" }] as const;
+        },
+      },
+    );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
+    try {
+      const result = await withRealTimeout(runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({ request: { budget: { maxMailboxItems: limit }, idleCheckpointDelayMs: 1 } }),
+        {
+          vaultRoot, importItem,
+          async createCheckpointSnapshot() {
+            return { snapshotRef: createSnapshotFixtureRef({ hash: "b".repeat(64), size: 512 }) };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items }),
+            workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState({ version: "0" }) }),
+          }),
+          async runAssistantPhase() { return { progressed: false, redactedStatus: { hostedAssistantProgressed: false } }; },
+        },
+      ), 15_000, () => events.join(","));
+      assert.equal(pairCalls, expectedPairs);
+      assert.deepEqual(imported, items.slice(0, limit).map((item) => item.id));
+      assert.equal(result.status, "budget_exhausted");
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, String(limit));
+      assert.equal(result.redactedStatus?.hostedMailboxImportedCount, limit);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("schedules a system-mailbox wake when import checkpoints before assistant phase", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -844,7 +903,16 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     }
   });
 
-  test("hands a pending turn to a fresh invocation before servicing a later wake", async () => {
+  test.each([
+    { name: "managed provider changed", invocationRevision: null, selectedRevision: null },
+    { name: "custom endpoint selected", invocationRevision: null, selectedRevision: 2 },
+    { name: "custom endpoint replaced and reselected", invocationRevision: 1, selectedRevision: 2 },
+    { name: "custom endpoint deselected or deleted", invocationRevision: 1, selectedRevision: null },
+    { name: "custom identity absent from older Web", invocationRevision: 1, selectedRevision: undefined },
+  ])("hands a pending turn to a fresh invocation without a settings wake: $name", async ({
+    invocationRevision,
+    selectedRevision,
+  }) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(TEST_NOW));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-handoff-"));
@@ -857,6 +925,14 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     try {
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
+          ...(invocationRevision === null ? {} : {
+            forwardedEnv: {
+              HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
+              HOSTED_ASSISTANT_MODEL: `murph-custom-r${invocationRevision}`,
+              HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
+              MURPH_CUSTOM_INFERENCE_API_KEY: "synthetic-sentinel",
+            },
+          }),
           request: {
             attemptId: "attempt_provider_handoff",
             idleCheckpointDelayMs: 180_000,
@@ -902,7 +978,12 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                 };
               },
             },
-            mailboxPort: createMailboxPort({ assistantProvider: "venice", events: [], items: mailboxItems }),
+            mailboxPort: createMailboxPort({
+              assistantCustomInferenceRevision: selectedRevision,
+              assistantProvider: selectedRevision == null ? "venice" : "openai",
+              events: [],
+              items: mailboxItems,
+            }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               checkpointWorkspace: (request) => {
@@ -964,7 +1045,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     }
   });
 
-  test("uses an empty mailbox's provider fact without rereading unavailable settings", async () => {
+  test.each([null, 3])("uses matching mailbox route identity without rereading settings (custom revision %s)", async (revision) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(TEST_NOW));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-authority-"));
@@ -974,6 +1055,14 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     try {
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
+          ...(revision === null ? {} : {
+            forwardedEnv: {
+              HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
+              HOSTED_ASSISTANT_MODEL: `murph-custom-r${revision}`,
+              HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
+              MURPH_CUSTOM_INFERENCE_API_KEY: "synthetic-sentinel",
+            },
+          }),
           request: {
             attemptId: "attempt_provider_authority_unavailable",
             idleCheckpointDelayMs: 180_000,
@@ -995,7 +1084,12 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
                 throw new Error("control plane unavailable");
               },
             },
-            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            mailboxPort: createMailboxPort({
+              assistantCustomInferenceRevision: revision,
+              assistantProvider: revision === null ? "openai" : "venice",
+              events: [],
+              items: [],
+            }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events: [],
@@ -3036,9 +3130,12 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       expectedWorkspaceVersion: "1",
       label: "post-checkpoint with earlier future assistant work",
     },
-  ])(
-    "preserves continuation priority in the $label path when forced browser-vault refresh maintenance times out",
-    async ({ assistantWakeAt, checkpointed, expectedWorkspaceVersion, label }) => {
+  ].flatMap((scenario) => [false, true].map((withSourceReadTiming) => ({
+    ...scenario,
+    withSourceReadTiming,
+  }))))(
+    "preserves continuation priority in the $label path when forced browser-vault refresh maintenance times out (source timing: $withSourceReadTiming)",
+    async ({ assistantWakeAt, checkpointed, expectedWorkspaceVersion, label, withSourceReadTiming }) => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
       const attemptId = `attempt_synthetic_browser_vault_marker_force_${label}`;
       const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -3048,8 +3145,12 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
       const retryAt = new Date(Date.parse(TEST_NOW) + 60_000).toISOString();
 
+      const sourceReadAtDeadline = withSourceReadTiming
+        ? { step: "read_model_construction" as const, elapsedMs: 11_000 }
+        : undefined;
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockResolvedValueOnce({
+        ...(sourceReadAtDeadline ? { sourceReadAtDeadline } : {}),
         attempt: "initial",
         configuredTimeoutMs: 30_000,
         currentStepElapsedMs: 12_000,
@@ -3144,6 +3245,10 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           browserVaultRefreshConfiguredTimeoutMs: 30_000,
           browserVaultRefreshCurrentStepElapsedMs: 12_000,
           browserVaultRefreshElapsedMs: 30_000,
+          ...(sourceReadAtDeadline ? {
+            browserVaultRefreshSourceReadStep: "read_model_construction",
+            browserVaultRefreshSourceReadStepElapsedMs: 11_000,
+          } : {}),
           browserVaultRefreshStage: "replica_write",
           browserVaultRefreshStatus: "deferred_timeout",
           browserVaultRefreshStep: "replica_write",

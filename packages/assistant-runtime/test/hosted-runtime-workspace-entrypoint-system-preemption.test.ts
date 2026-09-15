@@ -21,6 +21,7 @@ import {
   removeTempRoot,
   requireEventIndex,
   runHostedWorkspaceRuntimeJobInProcess,
+  stagePendingLinqAssistantInputForMailboxItem,
   waitUntil,
   withRealTimeout,
   writeMailboxImportStateFile,
@@ -117,7 +118,7 @@ import {
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   readHostedSystemMailboxState,
-  setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
+  setHostedDeviceSyncMaintenanceMailboxWakeAt,
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
@@ -790,6 +791,106 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     }
   });
 
+  test.each(["device completion", "checkpoint"] as const)("system owner imports its qualified foreground batch after %s", async (arrival) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-foreground-upgrade-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const conversation = createMailboxItem({ id: "mailbox_item_synthetic_upgrade", laneSeq: "1" });
+    const items: HostedMailboxItem[] = [];
+    const deviceItem = createMailboxItem({
+      id: "mailbox_item_synthetic_upgrade_device", dedupeKey: "device-sync.wake:upgrade",
+      kind: "device-sync.wake", lane: "system", laneSeq: "1",
+    });
+    const controller = new AbortController();
+    const admitted = createDeferred<void>();
+    let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    const sendForeground = () => {
+      if (items.length > 0) return;
+      items.push(conversation);
+      runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
+    };
+    let assistantCalls = 0;
+    let qualifiedConversationReads = 0;
+    let foregroundInputId: string | null = null;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueDeviceSyncSystemMailboxItemForTest({ item: deviceItem, vaultRoot });
+      const state = createEmptyHostedMailboxImportState();
+      state.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, state);
+      const restored = await createVaultSnapshotBundle({ vaultRoot });
+      const mailbox = createMailboxPort({ events, items });
+      runtimeCompletion = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: { processingMode: "system_mailbox", workspaceVersion: "0", idleCheckpointDelayMs: 0 },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          vaultRoot, runtimeWakeSignal, signal: controller.signal,
+          async createCheckpointSnapshot() {
+            if (arrival === "checkpoint") sendForeground();
+            return { snapshotRef: createSnapshotFixtureRef({ hash: "d".repeat(64), size: 512 }) };
+          },
+          async importItem({ item }) {
+            assert.equal(item.id, conversation.id);
+            events.push("foreground.imported");
+            foregroundInputId = await stagePendingLinqAssistantInputForMailboxItem({ item, vaultRoot });
+            return { assistantInputId: foregroundInputId, status: "imported" };
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restored.hash, restored.bytes]]),
+            deviceSyncPort: createSnapshotDeviceSyncPort({
+              connectionId: "synthetic-upgrade-connection", nextReconcileAt: "2099-01-01T00:00:00.000Z",
+              onApplyUpdates() {
+                if (arrival === "device completion") sendForeground();
+              },
+            }),
+            mailboxPort: {
+              ...mailbox,
+              async fetch(request) {
+                const response = await mailbox.fetch(request);
+                if (response.items.some((item) => item.id === conversation.id)) {
+                  qualifiedConversationReads += 1;
+                  assert.equal(qualifiedConversationReads, 1,
+                    "The qualified foreground batch must be consumed without another mailbox fetch.");
+                }
+                return response;
+              },
+            },
+            workspacePort: createWorkspacePort({
+              events, checkpointRequests,
+              workspace: createWorkspaceState({ version: "0", snapshotRef: restored.snapshotRef }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantCalls += 1;
+            assert.ok(events.includes("foreground.imported"),
+              "Foreground promotion entered the assistant with the old system-only import.");
+            assert.ok(foregroundInputId);
+            assert.ok(input.initialMailboxImport.importResult.assistantInputIds?.includes(foregroundInputId));
+            admitted.resolve();
+            return { progressed: false };
+          },
+        },
+      );
+      await withRealTimeout(Promise.race([
+        admitted.promise,
+        runtimeCompletion.then(() => assert.fail("Runtime returned before foreground admission.")),
+      ]), 15_000, () => events.join(","));
+      assert.ok(assistantCalls > 0);
+      assert.equal(qualifiedConversationReads, 1);
+      assert.ok(events.includes("foreground.imported"));
+    } finally {
+      controller.abort();
+      await runtimeCompletion?.catch(() => undefined);
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("host abort after system device-sync apply still checkpoints canonical progress", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -935,12 +1036,10 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       );
       const retainedState = await readHostedSystemMailboxState(vaultRoot);
       const retained = retainedState.pending.find((item) => item.itemId === deviceItem.id);
-      assert.equal(retained?.status, "recording");
-      assert.deepEqual(retained?.postCheckpointRecord, {
-        kind: "device-sync.dirty-processed-batch",
-        nextWakeAt: "2026-04-27T00:05:00.000Z",
-        records: [],
-      });
+      // No dirty record or job deadline exists; the abort retains a retry owner.
+      assert.equal(retained?.status, "pending");
+      assert.equal(retained?.nextAttemptAt, "2026-04-27T00:00:30.000Z");
+      assert.equal(retained?.postCheckpointRecord, null);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -1696,8 +1795,11 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
           return { snapshotRef: snapshot.snapshotRef };
         },
-        async importItem() {
-          throw new Error("Already-imported recording work should not import a new row.");
+        async importItem({ item }: { item: HostedMailboxItem }) {
+          assert.equal(item.lane, "conversation");
+          const assistantInputId = await stagePendingLinqAssistantInputForMailboxItem({ item, vaultRoot });
+          events.push("foreground.imported");
+          return { assistantInputId, status: "imported" as const };
         },
         platform: createPlatform({
           artifactBytesByHash,
@@ -1711,6 +1813,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         }),
         runtimeWakeSignal: wakeSignal,
         async runAssistantPhase() {
+          assert.ok(events.includes("foreground.imported"));
           throw foregroundReached;
         },
         vaultRoot,
@@ -1884,8 +1987,11 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
           return { snapshotRef: snapshot.snapshotRef };
         },
-        async importItem() {
-          throw new Error("Already-imported recording work should not import a new row.");
+        async importItem({ item }: { item: HostedMailboxItem }) {
+          assert.equal(item.lane, "conversation");
+          const assistantInputId = await stagePendingLinqAssistantInputForMailboxItem({ item, vaultRoot });
+          events.push("foreground.imported");
+          return { assistantInputId, status: "imported" as const };
         },
         platform: createPlatform({
           artifactBytesByHash,
@@ -1944,6 +2050,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         }),
         runtimeWakeSignal: wakeSignal,
         async runAssistantPhase() {
+          assert.ok(events.includes("foreground.imported"));
           foregroundStarted.resolve();
           throw foregroundReached;
         },
@@ -2177,7 +2284,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           } : item),
         }));
       }
-      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+      await setHostedDeviceSyncMaintenanceMailboxWakeAt({
         nextWakeAt: now,
         now: () => staleDeviceSyncWakeAt,
         userId: TEST_USER_ID,

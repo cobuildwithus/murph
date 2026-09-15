@@ -180,6 +180,7 @@ describe("prisma module", () => {
       connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 5_000,
+      options: "-c timezone=UTC",
       max: 15,
     });
     expect(mocks.attachDatabasePool).toHaveBeenCalledOnce();
@@ -234,12 +235,14 @@ describe("prisma module", () => {
       connectionString: "postgresql://example.invalid/first?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 5_000,
+      options: "-c timezone=UTC",
       max: 1,
     });
     expect(mocks.Pool).toHaveBeenNthCalledWith(2, {
       connectionString: "postgresql://example.invalid/second?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 5_000,
+      options: "-c timezone=UTC",
       max: 1,
     });
     expect(mocks.attachDatabasePool).toHaveBeenNthCalledWith(1, poolA);
@@ -295,6 +298,7 @@ describe("prisma module", () => {
       connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 5_000,
+      options: "-c timezone=UTC",
       max: 15,
     });
   });
@@ -336,6 +340,7 @@ describe("prisma module", () => {
       connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
       idleTimeoutMillis: 5_000,
+      options: "-c timezone=UTC",
       max: 9,
     });
   });

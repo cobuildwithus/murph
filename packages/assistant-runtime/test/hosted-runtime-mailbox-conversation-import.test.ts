@@ -5,6 +5,9 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import * as channelAdapters from "@murphai/assistant-engine/assistant-channel-adapters";
+import type { AssistantChannelActivityHandle } from "@murphai/assistant-engine/assistant-channel-adapters";
+
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
@@ -50,6 +53,7 @@ import {
 } from "@murphai/runtime-state";
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 
+import { createHostedAssistantChannelTypingDependencies } from "../src/hosted-runtime/channel-activity.ts";
 import {
   createHostedConversationMailboxImportItem,
   importHostedConversationMailboxItem,
@@ -107,6 +111,7 @@ const tempRoots: string[] = [];
 
 afterEach(async () => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   await Promise.all(
     tempRoots.splice(0).map((root) =>
       rm(root, {
@@ -384,7 +389,8 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(afterProjection.events[0]?.attachmentEvidence.attachments.length, 0);
   });
 
-  test("waits for audio attachment evidence before notifying active turn input while staging stays early", async () => {
+  test("starts typing during blocked audio evidence without admitting a model input", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(TEST_NOW) });
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-audio-evidence-notify-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -419,34 +425,53 @@ describe("hosted mailbox conversation import adapter", () => {
     const rawPath =
       "raw/inbox/linq/cap_audio_evidence_notify/attachments/01__voice.m4a";
     await writeVaultFile(vaultRoot, rawPath, Buffer.from("audio bytes"));
-    const notificationObserved = createDeferred<void>();
+    const notificationObserved = createDeferred<unknown>();
     const projectionStarted = createDeferred<void>();
     const projectionRelease = createDeferred<void>();
     const signalController = new AbortController();
+    const providerResponse = createDeferred<Response>();
+    const providerFetch = vi.fn<typeof fetch>(async () => providerResponse.promise);
+    const startTyping = vi.spyOn(channelAdapters, "startLinqTypingIndicator");
+    const typingAccepted = createDeferred<string>();
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+    const runtime = createRuntime({ forwardedEnv: { LINQ_API_TOKEN: "synthetic-token" }, platform: {
+      providerFetch,
+      latencyTracePort: { async record(request) {
+        latencyTraceRequests.push(request);
+        if (request.event.type === "assistant_milestone"
+          && request.event.milestone === "linq_typing_accepted") {
+          typingAccepted.resolve(request.event.at);
+        }
+        return { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+      } },
+    } });
+    let turnTyping: AssistantChannelActivityHandle | void = undefined;
     const order: string[] = [];
     let notificationCount = 0;
     const controller = createAssistantActiveTurnInputController({
       admissionHook: async (input) => {
-        assert.equal(input.signal, signalController.signal);
-        notificationCount += 1;
-        const listed = await listAssistantInputEvents({ vault: vaultRoot });
-        const evidence = listed.events[0]?.attachmentEvidence;
-        assert.equal(evidence?.status, "available");
-        assert.equal(evidence?.attachments[0]?.kind, "audio");
-        assert.equal(evidence?.attachments[0]?.raw?.path, rawPath);
-        assert.deepEqual(evidence?.attachments[0]?.inlineFragments, [
-          {
-            kind: "attachment_transcript",
-            label: "attachment-1-transcript",
-            text: "Synthetic voice memo transcript.",
-            truncated: false,
-          },
-        ]);
-        order.push("notify");
-        notificationObserved.resolve(undefined);
-        return {
-          kind: "no-new-input",
-        };
+        try {
+          assert.equal(input.signal, signalController.signal);
+          notificationCount += 1;
+          const listed = await listAssistantInputEvents({ vault: vaultRoot });
+          const evidence = listed.events[0]?.attachmentEvidence;
+          assert.equal(evidence?.status, "available");
+          assert.equal(evidence?.attachments[0]?.kind, "audio");
+          assert.equal(evidence?.attachments[0]?.raw?.path, rawPath);
+          assert.deepEqual(evidence?.attachments[0]?.inlineFragments, [
+            {
+              kind: "attachment_transcript",
+              label: "attachment-1-transcript",
+              text: "Synthetic voice memo transcript.",
+              truncated: false,
+            },
+          ]);
+          order.push("notify");
+          notificationObserved.resolve(undefined);
+        } catch (error) {
+          notificationObserved.resolve(error);
+        }
+        return { kind: "no-new-input" };
       },
       conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
       sessionId: "session_audio_evidence_notify",
@@ -502,14 +527,35 @@ describe("hosted mailbox conversation import adapter", () => {
         assert.equal(channel, "linq");
         order.push("staged-callback");
       },
-      runtime: createRuntime(),
+      runtime,
+      runtimeAttemptId: "attempt_attachment_typing",
       signal: signalController.signal,
       vaultRoot,
     });
 
     try {
       await projectionStarted.promise;
+      await vi.waitFor(() => expect(providerFetch).toHaveBeenCalledOnce());
+      assert.equal(latencyTraceRequests.some(({ event }) =>
+        event.type === "assistant_milestone" && event.milestone === "linq_typing_accepted"), false);
+      const [request, options] = providerFetch.mock.calls[0]!;
+      assert.ok(String(request).endsWith("/chats/chat_audio_evidence_notify/typing"));
+      assert.equal(options?.method, "POST");
+      providerResponse.resolve(new Response(null, { status: 204 }));
+      const acceptedAt = await typingAccepted.promise;
+      expect(startTyping).toHaveBeenCalledOnce();
+      expect(startTyping.mock.calls[0]?.[0]).toEqual({ target: "chat_audio_evidence_notify" });
       assert.equal(notificationCount, 0);
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+      assert.deepEqual((await selectHostedAssistantInputIds({
+        mode: "background", vaultRoot,
+      })).inputIds, []);
+      const staged = (await listAssistantInputEvents({ vault: vaultRoot })).events[0]!;
+      expect(latencyTraceRequests).toContainEqual({ event: {
+        assistantInputIds: [staged.inputId], at: acceptedAt,
+        milestone: "linq_typing_accepted", runtimeAttemptId: "attempt_attachment_typing",
+        source: "linq", type: "assistant_milestone",
+      } });
       assert.deepEqual(order, [
         "activity-callback",
         "staged-callback",
@@ -518,14 +564,24 @@ describe("hosted mailbox conversation import adapter", () => {
       ]);
 
       projectionRelease.resolve(undefined);
-      const [outcome] = await Promise.all([
+      const [outcome, admissionError] = await Promise.all([
         importPromise,
         notificationObserved.promise,
       ]);
+      assert.ifError(admissionError);
       if (outcome.status !== "imported") {
         throw new Error("Expected imported mailbox outcome.");
       }
       assert.equal(notificationCount, 1);
+      const typing = createHostedAssistantChannelTypingDependencies({
+        forwardedEnv: {}, userEnv: {}, providerFetch,
+        linqDeliveryContexts: outcome.linqDeliveryContext ? [outcome.linqDeliveryContext] : [],
+      });
+      turnTyping = await typing.startLinqTyping?.({ target: "chat_audio_evidence_notify" });
+      assert.ok(turnTyping);
+      assert.equal(turnTyping.acceptedAt, acceptedAt);
+      expect(startTyping).toHaveBeenCalledOnce();
+      expect(providerFetch).toHaveBeenCalledOnce();
       assert.deepEqual(order, [
         "activity-callback",
         "staged-callback",
@@ -537,9 +593,100 @@ describe("hosted mailbox conversation import adapter", () => {
       ]);
       assert.equal(typeof outcome.conversationImportTiming?.attachmentEvidenceMs, "number");
     } finally {
+      providerResponse.resolve(new Response(null, { status: 204 }));
       projectionRelease.resolve(undefined);
       controller.close();
       await importPromise.catch(() => undefined);
+      await turnTyping?.stop({ providerStop: false });
+      signalController.abort();
+    }
+  });
+
+  test.each([
+    "pending-start", "failed-start", "parser-retry", "unsettled", "abort",
+    "failed-stage", "self-authored", "consumed-replay",
+  ])("attachment typing preserves importer lifecycle for %s", async (scenario) => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-attachment-typing-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const wake = createConversationWake({ message: {
+      channel: "linq",
+      linqMessage: {
+        chatId: `chat_attachment_${scenario}`,
+        from: "synthetic_sender",
+        isFromMe: scenario === "self-authored",
+        messageId: `message_attachment_${scenario}`,
+        parts: [{
+          attachmentId: "synthetic_attachment", fileName: "fixture.png",
+          mimeType: "image/png", size: 1, type: "media", url: "synthetic_attachment",
+        }],
+        threadIsDirect: true,
+      },
+      phoneLookupKey: "synthetic_lookup",
+    } });
+    const stop = vi.fn(async () => {});
+    const handle: AssistantChannelActivityHandle = { stop, isActive: () => true };
+    const providerReady = createDeferred<AssistantChannelActivityHandle>();
+    const start = vi.spyOn(channelAdapters, "startLinqTypingIndicator");
+    if (scenario === "pending-start") start.mockReturnValue(providerReady.promise);
+    else if (scenario === "failed-start") start.mockRejectedValue(new Error("synthetic start failure"));
+    else start.mockResolvedValue(handle);
+    const signal = new AbortController();
+    const enqueuePendingReply = vi.fn(async () => {});
+    const staged = createDeferred<void>();
+    const releaseStage = createDeferred<void>();
+    const importing = importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(wake),
+      item: { ...createResolvedConversationMailboxItem(), durablyConsumed: scenario === "consumed-replay" },
+      runtime: createRuntime({ platform: { providerFetch: vi.fn<typeof fetch>() } }),
+      signal: signal.signal,
+      vaultRoot,
+      async prepareWakeContext() {},
+      async stageAssistantInputEvent() {
+        staged.resolve(undefined);
+        await releaseStage.promise;
+        if (scenario === "failed-stage") throw new Error("synthetic staging failure");
+        return {
+          inputId: `input_attachment_${scenario}`,
+          attachmentDescriptorCount: 1,
+          attachmentEvidenceRequired: true,
+          enqueuePendingReply,
+          async recordProjection() {},
+          async recordAttachmentEvidence() { return scenario !== "unsettled"; },
+        };
+      },
+      async importConversationWake() {
+        if (scenario === "abort") signal.abort();
+        return {
+          captureId: "synthetic_capture",
+          metrics: { nextWakeAt: scenario === "parser-retry" ? TEST_NOW : null, parserProcessed: 0 },
+        };
+      },
+      async loadAttachmentEvidenceCapture() { return { captureId: "synthetic_capture", attachments: [] }; },
+    });
+    try {
+      await staged.promise;
+      expect(start).not.toHaveBeenCalled();
+      releaseStage.resolve(undefined);
+      if (scenario === "abort" || scenario === "failed-stage") {
+        await expect(importing).rejects.toThrow();
+      } else {
+        const outcome = await importing;
+        assert.equal(outcome.status, ["parser-retry", "unsettled"].includes(scenario) ? "blocked" : "imported");
+      }
+      const shouldAdmit = ["pending-start", "failed-start"].includes(scenario);
+      expect(enqueuePendingReply).toHaveBeenCalledTimes(shouldAdmit ? 1 : 0);
+      const shouldStart = !["failed-stage", "self-authored", "consumed-replay"].includes(scenario);
+      expect(start).toHaveBeenCalledTimes(shouldStart ? 1 : 0);
+      if (["parser-retry", "unsettled", "abort"].includes(scenario)) {
+        await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+      }
+    } finally {
+      releaseStage.resolve(undefined);
+      signal.abort();
+      providerReady.resolve(handle);
+      await importing.catch(() => undefined);
+      if (scenario === "pending-start") await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
     }
   });
 

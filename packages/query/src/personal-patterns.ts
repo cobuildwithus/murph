@@ -84,6 +84,7 @@ export interface PersonalPatternFactor {
   kind: "activity" | "intervention" | "mixed";
   label: string;
   observedDays: number;
+  lastObservedDate?: string;
   confirmedAbsentDays?: number;
   episodeCount?: number;
 }
@@ -382,6 +383,7 @@ function collectFactors(
           : ("intervention" as const),
       label: presentation?.label ?? humanizeFactorToken(factor.token),
       observedDays,
+      lastObservedDate: [...factor.dates].sort().at(-1),
     };
   });
 }

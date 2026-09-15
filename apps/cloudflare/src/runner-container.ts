@@ -685,6 +685,7 @@ export class RunnerContainer extends Container {
     timeoutMs: number;
   }): Promise<{
     prepared: true;
+    runnerImage: { bundleFingerprint: string; sourceFingerprint: string };
     releaseId: string;
     region: HostedRunnerRegion;
     slotName: string;
@@ -721,13 +722,14 @@ export class RunnerContainer extends Container {
         if (!response.ok) throw new Error("Hosted standby Codex CLI preflight failed.");
         health = await this.readStandbyHealth(deadlineAtEpochMs);
       }
-      this.assertPristineStandbyHealth(health, input);
+      const runnerImage = this.assertPristineStandbyHealth(health, input);
       const after = store.read();
       if (after.state !== "unbound") {
         throw new Error("Hosted standby slot binding changed during preparation.");
       }
       return {
         prepared: true,
+        runnerImage,
         releaseId: after.releaseId,
         region: after.region,
         slotName: after.slotName,
@@ -933,16 +935,23 @@ export class RunnerContainer extends Container {
       releaseId: string;
       region: HostedRunnerRegion;
     },
-  ): void {
-    const expectedBundleFingerprint = readRunnerSlotRequiredEnvironmentString(
+  ): { bundleFingerprint: string; sourceFingerprint: string } {
+    // Pristine inventory still requires configured image identity. Admission of
+    // complete image pairs belongs to the same owner as ordinary runner health.
+    readRunnerSlotRequiredEnvironmentString(
       this.environment.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT,
       "HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT",
     );
-    const expectedSourceFingerprint = readRunnerSlotRequiredEnvironmentString(
+    readRunnerSlotRequiredEnvironmentString(
       this.environment.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT,
       "HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT",
     );
     const runnerBundle = isRunnerSlotHealthRecord(payload.runnerBundle) ? payload.runnerBundle : null;
+    const bundleFingerprint = runnerBundle?.bundleFingerprint;
+    const sourceFingerprint = runnerBundle?.sourceFingerprint;
+    if (typeof bundleFingerprint !== "string" || typeof sourceFingerprint !== "string") {
+      throw new Error("Hosted standby slot failed pristine readiness proof: runner_image_fingerprints.");
+    }
     const failedChecks: string[] = [];
     if (payload.activeJobCount !== 0) failedChecks.push("active_job_count");
     if (payload.codexShellPreflightStatus !== "ready") {
@@ -964,17 +973,17 @@ export class RunnerContainer extends Container {
     if (payload.workspaceInvocationAcceptedCount !== 0) {
       failedChecks.push("workspace_invocation_accepted_count");
     }
-    if (runnerBundle?.bundleFingerprint !== expectedBundleFingerprint) {
-      failedChecks.push("runner_bundle_fingerprint");
-    }
-    if (runnerBundle?.sourceFingerprint !== expectedSourceFingerprint) {
-      failedChecks.push("runner_source_fingerprint");
+    if (!hostedRunnerImageMatches(
+      this.environment, bundleFingerprint, sourceFingerprint,
+    )) {
+      failedChecks.push("runner_image_fingerprints");
     }
     if (failedChecks.length > 0) {
       throw new Error(
         `Hosted standby slot failed pristine readiness proof: ${failedChecks.join(", ")}.`,
       );
     }
+    return { bundleFingerprint, sourceFingerprint };
   }
 
   async invoke(
@@ -2074,6 +2083,45 @@ export class RunnerContainer extends Container {
       || this.containerInteractionGeneration !== input.expectedInteractionGeneration
     ) {
       renewActivityTimeout("cleanup-retained");
+      return;
+    }
+    this.retireStoppedMemberSlot();
+  }
+
+  private retireStoppedMemberSlot(): void {
+    const binding = this.readRunnerSlotBindingOptional();
+    if (binding?.state !== "bound") return;
+    // The caller holds the lifecycle lock and has proved native destruction
+    // without a newer interaction. Fence late admissions before notifying the
+    // user owner; this immutable target can never be restarted or rebound.
+    const store = this.requireRunnerSlotStore();
+    store.beginRetirement({ claimId: binding.claimId });
+    store.finishRetirement();
+    // Never await the user owner's consent lock from the slot lifecycle lock:
+    // an arriving ensure may already hold it while reading this exact slot.
+    this.ctx.waitUntil(this.notifyMemberSlotRetired(binding));
+  }
+
+  private async notifyMemberSlotRetired(
+    binding: Extract<HostedStandbySlotBinding, { state: "bound" }>,
+  ): Promise<void> {
+    try {
+      const namespace = readRunnerContainerMetadataRecordProperty(this.environment.USER_RUNNER);
+      if (typeof namespace.getByName !== "function") return;
+      const runner = readRunnerContainerMetadataRecordProperty(namespace.getByName(binding.userId));
+      if (typeof runner.recordRunnerContainerRetired !== "function") return;
+      await runner.recordRunnerContainerRetired({
+        runnerContainerName: binding.slotName,
+        userId: binding.userId,
+      });
+    } catch {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        level: "warn",
+        message: "Hosted runner retirement notification failed; preserving admission reconciliation fallback.",
+        phase: "container.ready",
+        userId: binding.userId,
+      });
     }
   }
 

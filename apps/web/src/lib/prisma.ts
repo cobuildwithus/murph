@@ -211,6 +211,9 @@ function createPrismaPool(input: CreatePrismaClientInput): PgPool {
     connectionString: normalizePrismaConnectionString(input.databaseUrl),
     connectionTimeoutMillis: PG_CONNECTION_TIMEOUT_MS,
     idleTimeoutMillis: PG_IDLE_TIMEOUT_MS,
+    // Prisma decodes PostgreSQL timestamps as UTC; establish that session
+    // convention during startup, before any pooled query can run.
+    options: `${process.env.PGOPTIONS ?? ""} -c timezone=UTC`.trim(),
     max: poolMax,
   });
 
@@ -582,6 +585,14 @@ export function normalizePrismaConnectionString(databaseUrl: string): string {
       parsed.searchParams.delete(key);
       changed = true;
     }
+  }
+
+  const options = parsed.searchParams.get("options");
+  if (options !== null) {
+    // pg gives URL options precedence over Pool.options. Keep other settings
+    // while enforcing the same timezone on this connection path.
+    parsed.searchParams.set("options", `${options} -c timezone=UTC`.trim());
+    changed = true;
   }
 
   return changed ? parsed.toString() : databaseUrl;

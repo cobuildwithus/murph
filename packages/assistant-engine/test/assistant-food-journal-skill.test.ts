@@ -136,28 +136,28 @@ describe('assistant food journal skill', () => {
       'default attachment intent for its eligible daily nutrition card',
     )
     expect(skill).toContain(
-      'the card alone completely answers the turn',
+      "the card completely answers the turn",
     )
     expect(skill).toContain(
-      'attach that card as the complete response with no companion prose',
+      "Never add analysis,\nnumeric values, a second summary, or a follow-up question around that fixed copy.",
     )
     expect(skill).toContain(
-      'this is not an explicit numeric-card request and does not authorize target derivation, a paused proposal, or any Goal mutation',
+      "Never author a mixed bundle or derive, propose, accept, activate, or mutate goals to send a summary.",
     )
     expect(skill).toContain(
-      'Without an already accepted complete bundle',
+      "`missing` uses five explicit null goals, even when a subset of compatible targets exists.",
     )
     expect(skill).not.toContain(
       'Do not turn every meal confirmation into analysis or a nutrition report.',
     )
     expect(compactCardGoals).toContain(
-      'An ordinary verified private meal log carries default attachment intent only.',
+      "including ordinary meal replies and replies to scheduled check-ins.",
     )
     expect(compactCardGoals).toContain(
-      'it does not authorize this proposal workflow, target setting, or any Goal mutation.',
+      "Only explicit target-setting intent authorizes the proposal workflow below.",
     )
     expect(compactCardGoals).toContain(
-      "When that accepted bundle is absent or any card gate fails, return the owning food-journal skill's short truthful fallback.",
+      "Conflict, incompatible and capacity remain text-only; never relabel them missing.",
     )
     expect(skill).not.toContain('daily-nutrition-card-safety.md')
     expect(skill).toContain(
@@ -173,13 +173,13 @@ describe('assistant food journal skill', () => {
       'target-authority and complete active-Goal discovery contract',
     )
     expect(skill).toContain(
-      'before deciding that the accepted active bundle is complete for the card',
+      "before selecting the all-null or accepted all-five presentation.",
     )
     expect(skill).not.toContain(
       'before deciding that the five canonical daily goals are complete',
     )
     expect(skill).toContain(
-      'Use its\nproposal workflow only if a target is genuinely missing after that read and the\nmember made an explicit numeric-card or target-setting request. Default meal-card\nintent never invokes it.',
+      "Use its\nproposal workflow only for an explicit target-setting request, never merely a\nmeal log, daily summary, numeric-card request, or scheduled closeout.",
     )
     expect(skill).toContain(
       'Treat a routine daily-card request, including a requested meal estimate needed\nfor that card, as one fulfillment workflow.',
@@ -248,14 +248,14 @@ describe('assistant food journal skill', () => {
       'partial-card schema and\nrendering remain compatibility surfaces, not the normal interactive closeout.',
     )
     expect(skill).toContain(
-      'first setup response explains a paused canonical proposal in ordinary text',
+      "An explicit target-setting response still explains a paused canonical proposal\nin ordinary text, not a card.",
     )
-    expect(skill).toContain('does not attach a goal-less card')
+    expect(skill).toContain("Ordinary summary requests use\nall-null goals when accepted authority is missing;")
     expect(skill).toContain(
-      'An unambiguous acceptance may complete the\npending explicit card request in that next response after the known-context',
+      "When an explicit combined target-setting and card\nrequest remains pending, the acceptance response may complete it after suitability,",
     )
     expect(skill).toContain(
-      'suitability rule passes, activation and readback succeed, and a fresh same-date totals\nread completes.',
+      "activation/readback, and fresh same-date totals.",
     )
     expect(skill).toContain('vault-cli food search-labels`')
     expect(skill).toContain('vault-cli food search-labels-batch`')

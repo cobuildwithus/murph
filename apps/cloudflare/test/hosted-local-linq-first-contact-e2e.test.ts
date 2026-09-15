@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -59,6 +59,7 @@ import {
   HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
+  postHostedLocalLinqWebhook,
   startHostedLocalLinqStub,
   type ObservedLinqRequest,
   type HostedLocalLinqStub,
@@ -1863,27 +1864,11 @@ function buildActivationWake(userId: string) {
 }
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
-  const rawBody = JSON.stringify(event);
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const signature = signLinqWebhook(linqWebhookSecret, rawBody, timestamp);
-
-  return await fetch(`${requireScenario().harness.webBaseUrl}/api/hosted-onboarding/linq/webhook`, {
-    body: rawBody,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "x-webhook-signature": signature,
-      "x-webhook-timestamp": timestamp,
-    },
-    method: "POST",
+  return postHostedLocalLinqWebhook({
+    event,
+    secret: linqWebhookSecret,
+    webBaseUrl: requireScenario().harness.webBaseUrl,
   });
-}
-
-function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
-  const signature = createHmac("sha256", secret)
-    .update(`${timestamp}.${payload}`)
-    .digest("hex");
-
-  return `sha256=${signature}`;
 }
 
 function requireLinqStub(): HostedLocalLinqStub {

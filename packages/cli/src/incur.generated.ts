@@ -1,15 +1,6 @@
 declare module 'incur' {
   interface Register {
     commands: {
-      'age calculate': { args: {}; options: { input: string; mode: "product" | "research"; modelCardArtifactRoot?: string } }
-      'age calculate-bundle': { args: {}; options: { input: string; includeResearchPreview: boolean; modelCardArtifactRoot?: string } }
-      'age evidence': { args: {}; options: { input?: string; includeTemplates: boolean; includeBenchmarkCards: boolean; includeNsrrRequests: boolean } }
-      'age inputs': { args: {}; options: { requestId?: string; asOf: string } }
-      'age model-cards': { args: {}; options: { requestId?: string; modelCardArtifactRoot?: string } }
-      'age preview': { args: {}; options: { input: string; modelCardArtifactRoot?: string } }
-      'age preview-view': { args: {}; options: { input: string; modelCardArtifactRoot?: string } }
-      'age report': { args: {}; options: { requestId?: string; asOf: string; chronologicalAgeYears: number; sex: "female" | "male"; mode: "product" | "research"; cardId?: "l1b_glycemia_body_10y_acm_research" | "l1_tiny_glycemia_10y_acm_research" | "lab5_bp_bmi_transport_research" | "lab9_bp_body_10y_acm_research" | "r399_nhis_proxy_10y_acm_research"; modelCardArtifactRoot?: string } }
-      'age scaffold': { args: {}; options: {} }
       'allergy import-json': { args: {}; options: { requestId?: string; input: string } }
       'allergy list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
       'allergy save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; substance: string; status?: "active" | "inactive" | "resolved"; criticality?: "low" | "high" | "unable_to_assess"; reaction?: string; recordedOn?: string; relatedConditionId?: string[]; note?: string } }

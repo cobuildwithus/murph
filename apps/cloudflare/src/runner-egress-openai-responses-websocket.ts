@@ -1,3 +1,5 @@
+import { createHostedWebSocketDiagnostics } from "./runner-egress-websocket-diagnostics.ts";
+import type { HostedRunnerDiagnosticJson } from "./runner-egress-responses-diagnostics.ts";
 import {
   HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
   hasHostedCodexMemoryBillableUsage,
@@ -40,6 +42,7 @@ const RESPONSES_TOO_LARGE_CLOSE_CODE = 1009;
 const RESPONSES_PROTOCOL_CLOSE_REASON = "Responses WebSocket protocol error";
 const RESPONSES_RELAY_CLOSE_REASON = "Responses WebSocket relay failed";
 const RESPONSES_TOO_LARGE_CLOSE_REASON = "Responses WebSocket frame too large";
+const RESPONSES_MAX_PENDING_MESSAGES = 4_096;
 
 export function startHostedOpenAiResponsesWebSocketRelay(input: {
   authorizeClientFrame?: (
@@ -50,17 +53,28 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   persistUsage?(
     completion: HostedCodexMemoryWebSocketCompletion,
   ): Promise<void>;
+  reportDiagnostic?: (diagnostic: HostedRunnerDiagnosticJson) => void;
   reportFailure?: (failure: {
     phase: HostedOpenAiWebSocketFailurePhase;
   }) => void;
   upstream: HostedOpenAiSocketPort;
 }): HostedOpenAiWebSocketRelayController {
+  const diagnostics = createHostedWebSocketDiagnostics(input.reportDiagnostic);
   let activeRequest: HostedCodexMemoryRequestMetadata | null = null;
   let downstreamClosed = false;
   let upstreamClosed = false;
   let stopped = false;
   let queue = Promise.resolve();
-  let pendingClientBytes = 0;
+  let pendingBytes = 0;
+  let pendingMessages = 0;
+
+  const reserveMessage = (bytes: number): boolean => {
+    if (bytes + pendingBytes > HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES
+      || pendingMessages >= RESPONSES_MAX_PENDING_MESSAGES) return false;
+    pendingBytes += bytes;
+    pendingMessages += 1;
+    return true;
+  };
 
   const reportFailure = (
     phase: HostedOpenAiWebSocketFailurePhase,
@@ -89,6 +103,7 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   ): void => {
     if (stopped) return;
     stopped = true;
+    diagnostics.terminal("failed", "relay", code, phase);
     reportFailure(phase);
     closeDownstream(code, reason);
     closeUpstream(code, reason);
@@ -113,13 +128,20 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   };
   const forwardToUpstream = (
     data: HostedOpenAiWebSocketMessage,
+    observation: { receivedAt: number; ordinal: number },
   ): void => {
-    if (!upstreamClosed) input.upstream.send(data);
+    if (!upstreamClosed) {
+      input.upstream.send(data);
+      diagnostics.upstreamSent(observation);
+    }
   };
   const forwardToDownstream = (
     data: HostedOpenAiWebSocketMessage,
   ): void => {
-    if (!downstreamClosed) input.downstream.send(data);
+    if (!downstreamClosed) {
+      input.downstream.send(data);
+      diagnostics.downstreamSent();
+    }
   };
 
   try {
@@ -134,9 +156,10 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   }
 
   input.downstream.onMessage((data) => {
-    if (stopped) return;
+    if (stopped || upstreamClosed) return;
+    const observation = diagnostics.clientReceived();
     const bytes = frameByteLength(data);
-    if (bytes + pendingClientBytes > HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES) {
+    if (!reserveMessage(bytes)) {
       fail(
         "protocol",
         RESPONSES_TOO_LARGE_CLOSE_CODE,
@@ -144,7 +167,6 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
       );
       return;
     }
-    pendingClientBytes += bytes;
     void enqueue(async () => {
       if (input.authorizeClientFrame) {
         const denied = await input.authorizeClientFrame(data);
@@ -173,23 +195,31 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
           activeRequest = frame.metadata;
         }
       }
-      forwardToUpstream(data);
+      forwardToUpstream(data, observation);
     }).then(() => {
-      pendingClientBytes -= bytes;
+      pendingBytes -= bytes;
+      pendingMessages -= 1;
     });
   });
 
   input.upstream.onMessage((data) => {
-    if (stopped) return;
-    enqueue(async () => {
-      if (!hasAllowedFrameSize(data)) {
+    if (stopped || upstreamClosed) return;
+    diagnostics.upstreamReceived(data);
+    const bytes = frameByteLength(data);
+    if (!reserveMessage(bytes)) {
+      // Stop admission now, but let already accepted terminal accounting and
+      // delivery finish before Codex sees the close and considers retrying.
+      closeUpstream(RESPONSES_TOO_LARGE_CLOSE_CODE, RESPONSES_TOO_LARGE_CLOSE_REASON);
+      void enqueue(() => {
         fail(
           "protocol",
           RESPONSES_TOO_LARGE_CLOSE_CODE,
           RESPONSES_TOO_LARGE_CLOSE_REASON,
         );
-        return;
-      }
+      }, true);
+      return;
+    }
+    void enqueue(async () => {
       if (!input.persistUsage || typeof data !== "string") {
         forwardToDownstream(data);
         return;
@@ -264,11 +294,15 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
       if (!stopped) {
         forwardToDownstream(data);
       }
-    }, true);
+    }, true).then(() => {
+      pendingBytes -= bytes;
+      pendingMessages -= 1;
+    });
   });
 
   input.downstream.onClose(({ code, reason }) => {
     if (downstreamClosed) return;
+    diagnostics.terminal("closed", "client", code);
     downstreamClosed = true;
     stopped = true;
     const close = sanitizePeerClose(code, reason);
@@ -277,6 +311,7 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   });
   input.upstream.onClose(({ code, reason }) => {
     if (upstreamClosed) return;
+    diagnostics.terminal("closed", "provider", code);
     upstreamClosed = true;
     const close = sanitizePeerClose(code, reason);
     // Finish the provider-facing handshake immediately, then preserve message
@@ -319,6 +354,7 @@ export function relayHostedOpenAiResponsesWebSocketUpgrade(input: {
   persistUsage?(
     completion: HostedCodexMemoryWebSocketCompletion,
   ): Promise<void>;
+  reportDiagnostic?: (diagnostic: HostedRunnerDiagnosticJson) => void;
   reportFailure?: (failure: {
     phase: HostedOpenAiWebSocketFailurePhase;
   }) => void;
@@ -340,6 +376,7 @@ export function relayHostedOpenAiResponsesWebSocketUpgrade(input: {
     downstream: adaptCloudflareWebSocket(downstreamServer),
     ...(input.persistUsage ? { persistUsage: input.persistUsage } : {}),
     ...(input.reportFailure ? { reportFailure: input.reportFailure } : {}),
+    ...(input.reportDiagnostic ? { reportDiagnostic: input.reportDiagnostic } : {}),
     upstream: adaptCloudflareWebSocket(upstreamSocket),
   });
 
@@ -393,12 +430,6 @@ function copyWebSocketApplicationHeaders(headers: Headers): Headers {
     copied.delete(name);
   }
   return copied;
-}
-
-function hasAllowedFrameSize(
-  data: HostedOpenAiWebSocketMessage,
-): boolean {
-  return frameByteLength(data) <= HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES;
 }
 
 async function readDeniedClientFrame(response: Response): Promise<string> {

@@ -7,10 +7,10 @@ on:
     branches:
       - main
 
-# One CI run per ref per workflow: a new push to a PR or main cancels the
-# superseded run immediately, freeing org-level concurrency slots.
+# PR updates supersede their previous proof. Main commits keep independent
+# proof so later merges cannot cancel a production candidate.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -145,6 +145,10 @@ jobs:
       - name: Test pull-request exact-head CI contract
         if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
         run: node --test scripts/ci-markdown-docs-scope.test.mjs scripts/pull-request-ci-policy.test.mjs
+
+      - name: Test canary, review fetch, and container probe helpers
+        if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
+        run: node --test scripts/linq-production-canary-ci.test.mjs scripts/review-gpt-pr-base-fetch.test.mjs scripts/container-resource-probe.test.mjs
 
       - name: Test native iOS hosted E2E control contract
         if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}

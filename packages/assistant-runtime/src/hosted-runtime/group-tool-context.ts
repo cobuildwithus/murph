@@ -68,10 +68,7 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         return buildHostedGroupEmailRestrictedActionUnavailable(request);
       }
       if (request.action === "read_shared") {
-        const sharedReadRequest = {
-          action: request.action,
-          projectionScopes: request.projectionScopes,
-        };
+        const sharedReadRequest = buildSharedReadContextRequest(request, emailIngressPresent);
         // Hosted email reply aliases authenticate a route, not the human From
         // header, so email ingress never carries sender evidence.
         const senderHandles = emailIngressPresent
@@ -605,4 +602,18 @@ function normalizeHostedGroupToolLinqService(
   return normalized === "imessage" || normalized === "sms"
     ? normalized
     : null;
+}
+
+/** Retain only shared-read inputs; email route aliases cannot request sync effects. */
+function buildSharedReadContextRequest(
+  request: Extract<HostedRuntimeGroupToolRequest, { action: "read_shared" }>,
+  emailIngressPresent: boolean,
+): Extract<HostedRuntimeGroupToolRequest, { action: "read_shared" }> {
+  return {
+    action: "read_shared",
+    projectionScopes: request.projectionScopes,
+    ...(!emailIngressPresent && request.freshness !== undefined
+      ? { freshness: request.freshness }
+      : {}),
+  };
 }

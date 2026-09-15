@@ -8,7 +8,7 @@ import {
 } from "../scripts/deploy-automation.js";
 import { parseJsoncObject } from "./helpers/jsonc.js";
 
-const EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD = 300;
+const EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD = 0;
 const EXPECTED_CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100];
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
   CF_PUBLIC_BASE_URL: "https://murph-hosted.cobuildwithus.workers.dev",
@@ -80,7 +80,7 @@ describe("Cloudflare container rollout config", () => {
     ]));
   });
 
-  it("renders conservative rollout defaults for hosted runner containers", () => {
+  it("renders native rollout steps without extra connection-age protection", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
@@ -89,11 +89,19 @@ describe("Cloudflare container rollout config", () => {
     });
     const renderedConfig = buildHostedWranglerDeployConfig(environment) as {
       containers: Array<{
+        class_name: string;
         rollout_active_grace_period?: number;
         rollout_step_percentage?: number[];
       }>;
     };
 
+    expect(renderedConfig.containers.map(container => ({
+      class_name: container.class_name,
+      grace: container.rollout_active_grace_period,
+    }))).toEqual([
+      "RunnerContainer", "NextRunnerContainer", "DeploySmokeRunnerContainer",
+      "StandbyRunnerContainer", "SmallRunnerContainer",
+    ].map(class_name => ({ class_name, grace: EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD })));
     expect(renderedConfig.containers[0]).toMatchObject({
       rollout_active_grace_period: EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD,
       rollout_step_percentage: EXPECTED_CONTAINER_ROLLOUT_STEP_PERCENTAGE,
@@ -135,6 +143,7 @@ describe("Cloudflare container rollout config", () => {
     });
     const renderedConfig = buildHostedWranglerDeployConfig(environment) as {
       containers: Array<{
+        class_name: string;
         rollout_active_grace_period?: number;
         rollout_step_percentage?: number[];
       }>;
@@ -143,22 +152,18 @@ describe("Cloudflare container rollout config", () => {
       await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
     ) as {
       containers: Array<{
+        class_name: string;
         rollout_active_grace_period?: number;
         rollout_step_percentage?: number[];
       }>;
     };
 
-    expect(checkedInConfig.containers[0]).toMatchObject({
-      rollout_active_grace_period: renderedConfig.containers[0]?.rollout_active_grace_period,
-      rollout_step_percentage: renderedConfig.containers[0]?.rollout_step_percentage,
-    });
-    expect(checkedInConfig.containers[1]).toMatchObject({
-      rollout_active_grace_period: renderedConfig.containers[1]?.rollout_active_grace_period,
-    });
-    expect(checkedInConfig.containers[3]).toMatchObject({
-      rollout_active_grace_period: renderedConfig.containers[3]?.rollout_active_grace_period,
-    });
-    expect(renderedConfig.containers[3]).not.toHaveProperty("rollout_step_percentage");
-    expect(checkedInConfig.containers[3]).not.toHaveProperty("rollout_step_percentage");
+    expect(checkedInConfig.containers.map(container => container.class_name))
+      .toEqual(renderedConfig.containers.map(container => container.class_name));
+    for (const rendered of renderedConfig.containers) {
+      const checkedIn = checkedInConfig.containers.find(container => container.class_name === rendered.class_name);
+      expect(checkedIn?.rollout_active_grace_period).toBe(rendered.rollout_active_grace_period);
+      expect(checkedIn?.rollout_step_percentage).toEqual(rendered.rollout_step_percentage);
+    }
   });
 });

@@ -2,7 +2,24 @@
 
 Last verified: 2026-09-11
 
+Foreground promotion regression proof lives in the assistant-runtime entrypoint
+system-preemption suite: a conversation arriving during device completion or
+checkpointing is imported from its qualified batch before assistant admission,
+without a second conversation fetch. The workspace-runner suite covers concurrent
+completion/wake acceptance, empty-hint qualification, and retained wakes on failed
+completion. The concurrent-device-import integration suite proves reply delivery
+while downloads remain held and subsequent canonical import/acknowledgment.
+
 ## Current Repo Checks
+
+Automatic meal closeout admission is covered by
+`packages/assistant-engine/test/automatic-meal-closeout-eligibility.test.ts`
+and `assistant-cron-runtime.test.ts`: empty and manual-only queues suppress
+model entry, retained historical photos and same-occurrence removal revisions
+remain eligible, occurrence-local dates exclude later captures, and read errors
+retry without losing the original occurrence. The focused real-Codex journey
+`keeps historical automatic meal closeout silent through empty-queue preflight`
+combines canonical eligibility with production-instruction cleanup and silence.
 
 The canary outcome suite controls Date.now relative to its replica fixture
 timestamp and restores it after each case. An explicit clock advance proves the production
@@ -66,6 +83,11 @@ executed case per file, and no skipped, pending, or failed cases. Missing files,
 collection errors, interrupted runs, and an empty inventory fail the existing
 required `Release checks (ubuntu)` aggregator. Consent and supplement search
 retain their separate required database lanes below.
+
+`prisma-timezone-postgres.test.ts` is discovered by the same PostgreSQL owner.
+It creates and removes its own synthetic database with a non-UTC default, then
+proves UTC instants through fresh and reused Prisma pool connections, including
+URL startup overrides that retain other settings.
 
 For local proof, use an isolated loopback `murph_test_<slug>` database, run
 `pnpm --dir apps/web prisma:generate` and
@@ -628,6 +650,16 @@ one successful direct automation call, and one exact record reference.
 
 ### Codex tool input contracts and CLI upgrades
 
+Automation cron authoring is covered by
+`assistant-automation-model-input-schema.test.ts` and
+`assistant-dynamic-tool-failure-boundary.test.ts`: combined calendar-day and
+weekday restrictions are rejected before the owner port, with repair guidance;
+canonical cron semantics and non-schedule legacy edits remain supported.
+Focused live proof uses
+`-- --test 'changes a finite calendar reminder to weekdays while preserving its cutoff'`
+and verifies one inspected, versioned edit, a next occurrence after the weekend,
+the preserved expiration, and a truthful confirmation.
+
 The tool-contract suite inventories all exported and route-only registrations
 (currently 56) across eager native, deferred native, and code mode. It compares
 complete canonical JSON from the actual provider boundary and separately checks
@@ -716,6 +748,25 @@ pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-cove
   apps/cloudflare/test/codex-openai-egress-conformance.test.ts \
   apps/cloudflare/test/container-image-contract.test.ts
 ```
+
+The credential-free `assistant-codex-websocket-stall.test.ts` suite runs the
+pinned binary through a local WebSocket fault proxy. It proves warm-socket silent
+stall detection, one native HTTPS fallback, sticky transport reuse, explicit-close
+recovery, and a test-only first-frame deadline that preserves acknowledged slow
+output. Short cases run in the ordinary assistant-engine lane. The opt-in full
+90-second reproduction and five-second comparisons run with:
+
+```sh
+MURPH_RUN_CODEX_STALL_REPRO=1 MURPH_VITEST_MAX_WORKERS=1 \
+  pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts \
+  --no-coverage test/assistant-codex-websocket-stall.test.ts
+```
+
+The Cloudflare Node and Workers
+`runner-egress-codex-memory-websocket.test.ts` suites prove content-free relay
+milestones, actual runtime-log parser/persistence routing, bounded outstanding
+writes, and forwarding despite failed diagnostics. These fixtures require no
+provider credentials; they do not prove production model health.
 
 The planner characterization retains its pre-adapter identity projection only
 for the existing broad snapshot; it separately asserts the new fingerprint
@@ -942,6 +993,11 @@ limits, and local proof distinctions are owned by
   broad contracts/vault-share source closures. Package tests separately lock
   the failure modes and the explicit 100-Workflow reusable-V8 cache policy.
 - `.github/workflows/cloudflare-runner-base-image.yml` runs only on protected `main` pushes or manual dispatches from protected `main` and publishes stable and source-fingerprinted GHCR native runner base image tags through `pnpm --dir apps/cloudflare runner:docker:base -- --push`. The workflow grants `packages: write` and deliberately has no pull-request trigger.
+- The Linq first-contact E2E sender redelivers an identical signed fixture once
+  only for the handler's HTTP 503 `HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED`
+  response with `retryable: true`. Its existing Linq support helper tests prove
+  that persistent, unrelated, malformed, and transport failures remain visible,
+  and that response bodies remain readable. Delivery assertions stay in the E2E.
 - The foreground-reply priority continuation observer treats imported mailbox
   sequences as monotonic frontiers. Its focused
   `apps/cloudflare/test/helpers/hosted-local-mailbox-progress.test.ts` proof
@@ -951,7 +1007,25 @@ limits, and local proof distinctions are owned by
   later background processing may use that owner or a successor after normal
   completion. Recovery evidence must follow actual provider start and identify
   an attempted, successful seeded wake with no recording failure.
-- Private `cobuildwithus/murph-cloud`'s `Public Murph Integration` workflow runs focused hosted-local E2E jobs on GitHub-hosted Ubuntu for every private pull request and `main` push. One private JSON manifest owns the thirteen scenario groups used by automatic full integration and by the public cross-repository coverage guard. A shared preparation job builds the hosted-local runner bundle, workspace `dist` outputs, and production hosted-web dist once per run with `MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY=4`; scenario-group jobs download those artifacts and use `--no-bundle`. Each group passes one or more named scenarios to a single `pnpm hosted-local e2e` suite invocation. The suite runs scenarios serially, keeps dedicated/test-control scenarios isolated, reuses generated artifacts plus the current-build runner image and smoke proof where isolation allows, and owns final image cleanup. This avoids rebuilding the same image and rerunning the same smoke proof between compatible scenarios. Before that expensive assembly boundary, `packages/device-syncd/test/package-boundary.test.ts` walks the runner runtime-config static source graph and fails if provider runtime modules, importer modules, or the Junction SDK enter the boot closure; bundle assembly keeps the final esbuild-metafile guard as the authoritative packed-artifact check. The routine Linq reminder/onboarding leg uses the explicit fast-gate profile on pull requests and `main` for the scheduled reminder's 90-second setup lead and 1ms idle checkpoint. The onboarding scenario uses the shared hosted-local harness checkpoint default to prove signup welcome seeding, foreground completion, and deterministic managed archival, while the sibling Linq reminder scenario retains the timed alarm-to-provider-to-Linq send proof. The protected deployment gate does not set the reminder fast profile; its full profile preserves the production-like 10-second idle checkpoint and uses the same 90-second setup lead so checkpoint/wake preservation work still leaves more than the enforced 5-second Temporal scheduling runway. The thirteen matrix legs preserve the established provider, messaging, checkpoint, webhook, device-connect, and Temporal scenarios while adding deterministic same-wake Linq batching, canonical-receipt recovery, snapshot-publication fallback, shutdown checkpoint ordering, retryable-outbox restart, usage-limit ambiguity, Linq group/home-line authority, Family sponsorship, unknown first-contact fallback, vault approval resume, Retell call results, computer handoff roundtrips, and the foreground reply priority gate. The Junction wearable direct-resource replay is a 35-minute leg in this shared-artifact workflow instead of rebuilding the runner bundle in a standalone workflow; its proof also covers signed-webhook retry semantics, historical-backfill evidence, and device-activity experiment adherence with a single non-nagging Linq nudge. The shared bundle includes the E2E parser toolchain; `linq-webhook-audio` proves the Worker-mediated Workers AI transcription path through the container parser drain, remote-transcription provider, and `murph-transcribe.worker` egress handler with the deterministic fake `AI` binding. Every leg provisions loopback `postgres:17` from `public.ecr.aws/docker/library/postgres:17` with an explicit `pg_isready` probe, installs the pinned Codex and Temporal CLIs, uses deterministic CI-only hosted-web placeholders, avoids GHCR authentication before PR-controlled code, uses anonymous public runner-base pulls, and always uploads its focused log plus redacted hosted-local `state.json` files. The always-run `Temporal orchestration E2E` job depends on the shared bundle and complete scenario matrix, including the Junction replay leg, and fails when either prerequisite fails, is canceled, or does not complete. It is the private repository's stable cross-repository integration gate. The separate `release_admission` dispatch accepts only current public and private `main`, selects the five canonical `production_core` lanes (Linq delivery, scheduled reminder, hosted-web browser smoke, foreground reply priority, and foreground checkpoint ordering), forces and observes standby allocation, runs the live-reader proof in isolated protected jobs, and emits five unique successful lane receipts plus the exact-pair hosted release digest consumed by public production admission. Every receipt binds the same requested digest; omitted, skipped, failed, duplicated, or stale lanes fail closed. Private scope support must deploy before the public controller, which never falls back to foreground-only proof. Public pull-request compatibility remains fixture-only. The local aggregate `pnpm --dir apps/cloudflare test:e2e:local` also runs the Workers-runtime lane through `test:e2e:workers:local`; CI keeps that narrower Workers proof inside `apps/cloudflare verify` / `test:workers` rather than duplicating it in every hosted-local leg.
+- Private `cobuildwithus/murph-cloud`'s `Public Murph Integration` workflow runs focused hosted-local E2E jobs on GitHub-hosted Ubuntu for every private pull request and `main` push. One private JSON manifest owns the scenario groups used by automatic full integration and by the public cross-repository coverage guard. A shared preparation job builds the hosted-local runner bundle, workspace `dist` outputs, and production hosted-web dist once per run with `MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY=4`; scenario-group jobs download those artifacts and use `--no-bundle`. Each group passes one or more named scenarios to a single `pnpm hosted-local e2e` suite invocation. The suite runs scenarios serially, keeps dedicated/test-control scenarios isolated, reuses generated artifacts plus the current-build runner image and smoke proof where isolation allows, and owns final image cleanup. This avoids rebuilding the same image and rerunning the same smoke proof between compatible scenarios. Before that expensive assembly boundary, `packages/device-syncd/test/package-boundary.test.ts` walks the runner runtime-config static source graph and fails if provider runtime modules, importer modules, or the Junction SDK enter the boot closure; bundle assembly keeps the final esbuild-metafile guard as the authoritative packed-artifact check. The routine Linq reminder/onboarding leg uses the explicit fast-gate profile on pull requests and `main` for the scheduled reminder's 90-second setup lead and 1ms idle checkpoint. The onboarding scenario uses the shared hosted-local harness checkpoint default to prove signup welcome seeding, foreground completion, and deterministic managed archival, while the sibling Linq reminder scenario retains the timed alarm-to-provider-to-Linq send proof. The protected deployment gate does not set the reminder fast profile; its full profile preserves the production-like 10-second idle checkpoint and uses the same 90-second setup lead so checkpoint/wake preservation work still leaves more than the enforced 5-second Temporal scheduling runway. The declared matrix legs preserve the established provider, messaging, checkpoint, webhook, device-connect, and Temporal scenarios while adding deterministic same-wake Linq batching, canonical-receipt recovery, snapshot-publication fallback, shutdown checkpoint ordering, retryable-outbox restart, usage-limit ambiguity, Linq group/home-line authority, Family sponsorship, unknown first-contact fallback, vault approval resume, Retell call results, computer handoff roundtrips, and the foreground reply priority gate. The Junction wearable direct-resource replay is a 35-minute leg in this shared-artifact workflow instead of rebuilding the runner bundle in a standalone workflow; its proof also covers signed-webhook retry semantics, historical-backfill evidence, and device-activity experiment adherence with a single non-nagging Linq nudge. The shared bundle includes the E2E parser toolchain; `linq-webhook-audio` proves the Worker-mediated Workers AI transcription path through the container parser drain, remote-transcription provider, and `murph-transcribe.worker` egress handler with the deterministic fake `AI` binding. Every leg provisions loopback `postgres:17` from `public.ecr.aws/docker/library/postgres:17` with an explicit `pg_isready` probe, installs the pinned Codex and Temporal CLIs, uses deterministic CI-only hosted-web placeholders, avoids GHCR authentication before PR-controlled code, uses anonymous public runner-base pulls, and always uploads its focused log plus redacted hosted-local `state.json` files. The always-run `Temporal orchestration E2E` job depends on the shared bundle and complete scenario matrix, including the Junction replay leg, and fails when either prerequisite fails, is canceled, or does not complete. It is the private repository's stable cross-repository integration gate. The separate `release_admission` dispatch accepts only current public and private `main`, selects the five canonical `production_core` lanes (Linq delivery, scheduled reminder, hosted-web browser smoke, foreground reply priority, and foreground checkpoint ordering), forces and observes standby allocation, runs the live-reader proof in isolated protected jobs, and emits five unique successful lane receipts plus the exact-pair hosted release digest consumed by public production admission. Every receipt binds the same requested digest; omitted, skipped, failed, duplicated, or stale lanes fail closed. Private scope support must deploy before the public controller, which never falls back to foreground-only proof. Public pull-request compatibility remains fixture-only. The local aggregate `pnpm --dir apps/cloudflare test:e2e:local` also runs the Workers-runtime lane through `test:e2e:workers:local`; CI keeps that narrower Workers proof inside `apps/cloudflare verify` / `test:workers` rather than duplicating it in every hosted-local leg.
+- Scheduled Telegram delivery has its own required full-integration scenario,
+  `telegram-scheduled-reminder`; the `telegram` first-contact alias does not
+  satisfy it. `packages/hosted-local-harness/src/cross-repo-ci.ts` resolves the
+  public requirement against the private selecting manifest, and
+  `scripts/check-hosted-local-cross-repo-ci.test.ts` rejects first-contact-only
+  selection. The real journey saves current automation-tool input, restores its
+  scheduled wake and observes direct and group provider sends without manual
+  nudges. Fixture save acknowledgement alone is insufficient. Ship a public
+  fixture prerequisite before the private selecting change, prove that exact
+  selected public source, then merge the public requirement. This full lane runs
+  on private PRs and main pushes; public production admission retains its
+  separately bounded five-lane production-core contract.
+- Live consumer compatibility is independently enforced at hosted activation.
+  `apps/cloudflare/DEPLOY.md` owns the signed serving-Web audience and runtime-log
+  admission protocol. Its actual parser/encoder witnesses reject unsupported
+  deployed/candidate pairs; current-checkout tests, container convergence and
+  Temporal compatibility each prove different boundaries. A new independent
+  protocol obligation needs corresponding evidence at its deployment owner.
 - Automatic churn regressions complement the fairness scenario below.
   `hosted-runtime-mailbox-state.test.ts` and
   `hosted-runtime-workspace-entrypoint-system-mailbox.test.ts` prove that
@@ -962,13 +1036,16 @@ limits, and local proof distinctions are owned by
   bypasses, and runs that projection through its native quiescence E2E.
   Its synthetic old-history fixture fails if the ownership patch is applied
   unconditionally during replay.
-- The dedicated manual-only
+- The explicitly selected
   `linq-reminder-device-sync-non-starvation` hosted-local scenario is the
   cross-owner regression gate for recurring automation fairness during a
   device-sync backlog. It admits 113 distinct valid Junction resources, holds
   the first receipt-bounded positive device pass at the existing publication
   barrier, then releases that barrier only after the recurring Linq reminder
-  is due. Its admission observer binds the accepted wake's runtime attempt and
+  is due. Before that positive pass, completed or yielded zero-job passes release
+  and re-arm the barrier within the same reminder deadline; failed, unavailable,
+  superseded, malformed, or indefinitely empty observations cannot satisfy proof.
+  Its admission observer binds the accepted wake's runtime attempt and
   requires exactly one owner across the full 30-second window, including a
   helper-started or already active owner. Focused fake-clock tests in
   `apps/cloudflare/test/helpers/hosted-local-runtime-admission-window.test.ts`
@@ -1214,8 +1291,14 @@ limits, and local proof distinctions are owned by
   explicit contention receipts and replay only a contended milestone after
   both writers finish, before checking the complete atomic JSON merge.
 - `apps/web/test/hosted-runtime-latency-alert-query-postgres.test.ts` is an
-  opt-in local-PostgreSQL plan and cardinality proof for the five-minute reply
-  latency monitor. It runs the production query against 50,000 stale rows per
+  opt-in local-PostgreSQL correctness, plan, and cardinality proof for the
+  five-minute reply latency monitor. Select `-t 'small correctness fixture'`
+  to exercise all five candidate branches and usage-denial restart chronology
+  with one stale row per owner, independently of the stress work. For example:
+  `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-runtime-latency-alert-query-postgres.test.ts -t 'small correctness fixture'`.
+  Use an isolated loopback test database; the fixture uses transaction-local
+  temporary tables. Omit `-t` to retain the full CI proof, including canary
+  exclusion. The stress variant runs the production query against 50,000 stale rows per
   trace, delivery, and mailbox owner, admits one row through each recent
   accepted, staged, provider-started, delivery-accepted, and mailbox-consumed
   branch, and requires PostgreSQL to use the matching time indexes without a
@@ -1256,14 +1339,22 @@ limits, and local proof distinctions are owned by
   paging without losing the complementary baseline, failed-confirmation
   retention, positive recovered-counter deltas, persistent-gap telemetry
   paging, and the scheduled Durable Object boundary for that retry,
-  SQLite sample persistence and 30-day pruning, concrete
-  connection thresholds, two-failure collection hysteresis, one acknowledged
-  page per unresolved telemetry-notification window, recovered threshold
-  coalescing before acknowledgment, truthful partial-then-unavailable,
+  SQLite sample persistence and 30-day pruning, completed-slot and older-slot
+  replay without counter/evidence mutation, six-distinct-check telemetry and
+  pressure admission across replay/restart, same-slot pending delivery retry
+  under the hourly fence, replay after recovery using the newest sample,
+  inherited replay-count repair from synthetic pre-PR-writer SQLite fixtures
+  with and without older recovered failures, truthful six-distinct-sample
+  windows and pressure delivery after upgrade, preserved acknowledged-outage
+  one-shot state, concrete
+  connection thresholds, six-failure collection hysteresis, one acknowledged
+  page per unresolved telemetry-notification window, recovered unadmitted threshold
+  withdrawal before delivery, truthful partial-then-unavailable,
   unavailable-then-partial, and different-family partial-window summaries with
   bounded observed evidence, failed-scrape incident preservation,
   telemetry obligation retention behind older pending and connection-error-only
-  pages across restart and recovery, current-pressure priority at the first
+  pages across restart, withdrawal on recovery before admission, and immutable
+  admitted telemetry retry through recovery, current-pressure priority at the first
   eligible provider slot with historical observation time, exact combined
   pressure, telemetry, and category-specific connection-error retention when
   concrete evidence appears at or after the unadmitted threshold across
@@ -1691,3 +1782,25 @@ actual Stripe frozen time. No global application clock is replaced. Mutable run-
 Sessions, Schedules, Subscriptions, Customers, and PaymentMethods are cleaned
 up, while Stripe's immutable paid invoices, events, and terminal records remain
 as bounded provider audit history.
+
+## Verification selection integrity
+
+`workspace-verify.test.ts` composes the real diff classifier and shell dispatcher.
+An explicit CLI artifact requirement survives the internal fast path; root package,
+TypeScript and Vitest configuration selects workspace proof, and smoke fixtures
+select the existing fixture owner. Local acceptance includes repository-tool tests
+once. `node-test-inventory.test.ts` checks Node test ownership against executable
+package/workflow commands; Repo Hygiene owns the canary, review-base-fetch and
+container-resource-probe regressions.
+
+Hosted process filters use installed Vitest collection with the scenario's execution
+environment before test hooks can start the stack. A filtered process must select
+runnable tests. Multiple declared processes must cover the complete runnable file
+inventory exactly once; a selected shard still checks the complete partition.
+The real-collection regression covers dynamic titles, intentional skips, empty
+selection, overlap and omissions without starting a stack.
+
+`stale-deferred-replay` registers the existing cold stale-invocation recovery
+fixture and is required independently of warm restart by the cross-repository
+coverage guard. Murph Cloud's delivery/restart lane owns its automatic execution;
+its manifest companion must land before this public requirement.

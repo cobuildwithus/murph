@@ -18,12 +18,15 @@ import {
   withRealTimeout,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
+
 import assert from "node:assert/strict";
 import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   addCaptureWithLookup,
+  appendJsonlRecord,
   CURRENT_VAULT_FORMAT_VERSION,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   buildIntegrationEvidencePart,
@@ -1230,6 +1233,78 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       assert.equal(JSON.stringify(laterTurn).includes(contentPhrase), false);
     } finally {
       await removeTempRoot(workspaceRoot);
+    }
+  });
+
+  test("checkpoints a daily blocked-retention wake and exports only safe blocker diagnostics", async () => {
+    const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-retention-source-"));
+    const liveVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-retention-live-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const events: string[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const now = "2026-07-05T00:00:00.000Z";
+    const assistantWake = "2026-07-05T02:00:00.000Z";
+    const sourceDirectory = "raw/inbox/email/2026/06/cap_synthetic_legacy";
+    const envelopePath = `${sourceDirectory}/envelope.json`;
+    const ledgerPath = "ledger/inbox-captures/2026/2026-06.jsonl";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(now));
+    try {
+      await initializeVault({ createdAt: "2026-06-01T00:00:00.000Z", vaultRoot: sourceVaultRoot });
+      await appendJsonlRecord({ vaultRoot: sourceVaultRoot, relativePath: ledgerPath, record: {
+        schemaVersion: "murph.inbox-capture.v1", captureId: "cap_synthetic_legacy",
+        identityKey: "email:self", eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3VB98",
+        source: "email", externalId: "synthetic-legacy", thread: { id: "synthetic", isDirect: true },
+        actor: { isSelf: false }, occurredAt: "2026-06-01T00:00:00.000Z",
+        recordedAt: "2026-06-01T00:00:00.000Z", raw: {}, sourceDirectory,
+        rawRefs: [envelopePath], attachments: [], text: "Synthetic confidential fixture text", envelopePath,
+      } });
+      const original = await readFile(path.join(sourceVaultRoot, ledgerPath), "utf8");
+      const bundle = await snapshotHostedBundleRoots({
+        kind: "vault", roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
+      });
+      assert.ok(bundle);
+      const hash = sha256HostedBundleHex(bundle);
+      artifactBytesByHash.set(hash, bundle);
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({ request: {
+          attemptId: "attempt_synthetic_retention_blocker", leaseGeneration: "7",
+          processingMode: "inbox_media_retention", userId: TEST_USER_ID, workspaceVersion: "0",
+        } }),
+        {
+          async createCheckpointSnapshot() {
+            return { snapshotRef: createSnapshotFixtureRef({ hash: "2".repeat(64), size: 512 }) };
+          },
+          async importItem() { throw new Error("Retention must not import mailbox items."); },
+          platform: createPlatform({
+            artifactBytesByHash, logRequests,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState({
+              snapshotRef: createSnapshotFixtureRef({ hash, size: bundle.byteLength }), version: "0",
+              nextWakeAt: assistantWake, nextWakeReason: "assistant_due",
+            }) }),
+          }),
+          async runAssistantPhase() { throw new Error("Retention must not run the assistant."); },
+          vaultRoot: liveVaultRoot,
+        },
+      );
+      expect(result.status).toBe("scheduled");
+      expect(result.nextWakeAt).toBe(assistantWake);
+      expect(checkpointRequests.at(-1)?.inboxMediaRetentionWakeAt).toBe("2026-07-06T00:00:00.000Z");
+      expect(await readFile(path.join(liveVaultRoot, ledgerPath), "utf8")).toBe(original);
+      await drainHostedRuntimeLogWritesBestEffort();
+      const issues = logRequests.flatMap((request) => request.entries)
+        .filter((entry) => entry.eventCode === "runtime.retention_issue");
+      expect(issues).toHaveLength(1);
+      expect(issues[0]?.redactedJson).toEqual({
+        stage: "envelope_migration", outcome: "blocked",
+        legacyCapturesSkipped: 1, migrationBlockerCount: 0,
+      });
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(sourceVaultRoot);
+      await removeTempRoot(liveVaultRoot);
     }
   });
 

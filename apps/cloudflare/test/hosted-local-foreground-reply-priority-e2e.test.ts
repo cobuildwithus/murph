@@ -220,6 +220,111 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     linqStub = null;
   }, 120_000);
 
+  // This suite shares its provider stub. Keep the exact provider-count proof
+  // before other members seed background work that can call the same stub later.
+  it("drains queued Environment work after the active foreground turn", async () => {
+    await seedProbe(environmentHandoffProbe);
+    const baselineStatus = await requireScenario().harness.readUserStatus(
+      environmentHandoffProbe.userId,
+    );
+    const baselineReplicaRef = baselineStatus.workspace?.browserVaultReplicaRef;
+    expect(baselineReplicaRef).toBeDefined();
+    const providerRequestBaseline =
+      requireScenario().assistantProviderRequests.length;
+    const foregroundText =
+      "Finish this foreground turn before applying my queued Environment answer.";
+    const foregroundReply =
+      "The foreground turn finished before Environment work took ownership.";
+    const replyPath = replyPathFor(environmentHandoffProbe);
+    const replyMatcher = matchLinqMessageText(foregroundReply);
+    const replyBaseline = requireLinqStub().countAcceptedSends(
+      replyPath,
+      replyMatcher,
+    );
+    const heldProviderResponse = createHeldAssistantProviderTextResponse(
+      foregroundReply,
+    );
+    requireScenario().queueAssistantResponses(
+      [heldProviderResponse.response],
+      { matchInputContains: foregroundText },
+    );
+
+    const foregroundResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(
+        environmentHandoffProbe.userId,
+        environmentHandoffProbe.chatId,
+        {
+          eventId: `evt_priority_environment_handoff_${runId}`,
+          messageId: `msg_priority_environment_handoff_${runId}`,
+          text: foregroundText,
+        },
+      ),
+    );
+    expect(foregroundResponse.status).toBe(202);
+    await expect(foregroundResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    await heldProviderResponse.started;
+    await waitForRuntimeInFlight(
+      environmentHandoffProbe.userId,
+      "foreground work before Environment handoff",
+      "default",
+    );
+
+    const environmentCompletion = await appendEnvironmentInterviewCompletion(
+      environmentHandoffProbe,
+      "handoff",
+    );
+    const runtimeWakeBefore = await readRuntimeWakeObservation({
+      scenario: requireScenario(),
+      userId: environmentHandoffProbe.userId,
+    });
+    let providerReleased = false;
+    try {
+      await signalTemporalRuntime(environmentHandoffProbe.userId, {
+        kind: "mailbox_appended",
+        lane: "system",
+        laneSeq: environmentCompletion.append.wake.seq,
+        mailboxItemId: environmentCompletion.append.wake.id,
+      });
+      await waitForRuntimeWakeExecution({
+        previous: runtimeWakeBefore,
+        scenario: requireScenario(),
+        userId: environmentHandoffProbe.userId,
+      });
+      await expect(
+        readActiveRuntimeFenceForTest(environmentHandoffProbe.userId),
+      ).resolves.toMatchObject({
+        processingMode: "default",
+      });
+      heldProviderResponse.release();
+      providerReleased = true;
+    } finally {
+      if (!providerReleased) {
+        heldProviderResponse.release();
+      }
+    }
+
+    await waitForAcceptedReplyInScenario({
+      baselineCount: replyBaseline,
+      identity: environmentHandoffProbe,
+      label: "foreground-to-Environment handoff",
+      linqStub: requireLinqStub(),
+      matcher: replyMatcher,
+      replyPath,
+      scenario: requireScenario(),
+    });
+    await waitForEnvironmentCompletion({
+      baselineReplicaRef,
+      completion: environmentCompletion,
+      identity: environmentHandoffProbe,
+    });
+    expect(requireScenario().assistantProviderRequests).toHaveLength(
+      providerRequestBaseline + 1,
+    );
+  }, 300_000);
+
   it("retains the authorized foreground owner and preserves durable system continuation", async () => {
     // Production maintains the memberless standby before member traffic arrives.
     // Establish that real precondition before starting the deliberately heavy
@@ -429,109 +534,6 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     }
 
     writeLatencyProof("system_mailbox", latencyMs);
-  }, 300_000);
-
-  it("drains queued Environment work after the active foreground turn", async () => {
-    await seedProbe(environmentHandoffProbe);
-    const baselineStatus = await requireScenario().harness.readUserStatus(
-      environmentHandoffProbe.userId,
-    );
-    const baselineReplicaRef = baselineStatus.workspace?.browserVaultReplicaRef;
-    expect(baselineReplicaRef).toBeDefined();
-    const providerRequestBaseline =
-      requireScenario().assistantProviderRequests.length;
-    const foregroundText =
-      "Finish this foreground turn before applying my queued Environment answer.";
-    const foregroundReply =
-      "The foreground turn finished before Environment work took ownership.";
-    const replyPath = replyPathFor(environmentHandoffProbe);
-    const replyMatcher = matchLinqMessageText(foregroundReply);
-    const replyBaseline = requireLinqStub().countAcceptedSends(
-      replyPath,
-      replyMatcher,
-    );
-    const heldProviderResponse = createHeldAssistantProviderTextResponse(
-      foregroundReply,
-    );
-    requireScenario().queueAssistantResponses(
-      [heldProviderResponse.response],
-      { matchInputContains: foregroundText },
-    );
-
-    const foregroundResponse = await postSignedLinqWebhook(
-      buildHostedLinqInboundEvent(
-        environmentHandoffProbe.userId,
-        environmentHandoffProbe.chatId,
-        {
-          eventId: `evt_priority_environment_handoff_${runId}`,
-          messageId: `msg_priority_environment_handoff_${runId}`,
-          text: foregroundText,
-        },
-      ),
-    );
-    expect(foregroundResponse.status).toBe(202);
-    await expect(foregroundResponse.json()).resolves.toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
-    await heldProviderResponse.started;
-    await waitForRuntimeInFlight(
-      environmentHandoffProbe.userId,
-      "foreground work before Environment handoff",
-      "default",
-    );
-
-    const environmentCompletion = await appendEnvironmentInterviewCompletion(
-      environmentHandoffProbe,
-      "handoff",
-    );
-    const runtimeWakeBefore = await readRuntimeWakeObservation({
-      scenario: requireScenario(),
-      userId: environmentHandoffProbe.userId,
-    });
-    let providerReleased = false;
-    try {
-      await signalTemporalRuntime(environmentHandoffProbe.userId, {
-        kind: "mailbox_appended",
-        lane: "system",
-        laneSeq: environmentCompletion.append.wake.seq,
-        mailboxItemId: environmentCompletion.append.wake.id,
-      });
-      await waitForRuntimeWakeExecution({
-        previous: runtimeWakeBefore,
-        scenario: requireScenario(),
-        userId: environmentHandoffProbe.userId,
-      });
-      await expect(
-        readActiveRuntimeFenceForTest(environmentHandoffProbe.userId),
-      ).resolves.toMatchObject({
-        processingMode: "default",
-      });
-      heldProviderResponse.release();
-      providerReleased = true;
-    } finally {
-      if (!providerReleased) {
-        heldProviderResponse.release();
-      }
-    }
-
-    await waitForAcceptedReplyInScenario({
-      baselineCount: replyBaseline,
-      identity: environmentHandoffProbe,
-      label: "foreground-to-Environment handoff",
-      linqStub: requireLinqStub(),
-      matcher: replyMatcher,
-      replyPath,
-      scenario: requireScenario(),
-    });
-    await waitForEnvironmentCompletion({
-      baselineReplicaRef,
-      completion: environmentCompletion,
-      identity: environmentHandoffProbe,
-    });
-    expect(requireScenario().assistantProviderRequests).toHaveLength(
-      providerRequestBaseline + 1,
-    );
   }, 300_000);
 
   it("replies promptly while retention-only work owns the runner", async () => {

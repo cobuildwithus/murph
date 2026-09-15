@@ -139,6 +139,14 @@ are not a reason to restore pre-consent readers.
 
 ## Browser-vault dashboard loading
 
+Signed-out visits to the shared `(dashboard)` route group automatically open
+the existing auth dialog once per pathname. Dismissing it keeps the page usable;
+visiting another dashboard page prompts again. Successful sign-in resumes the
+current path, query, and anchor when the member's stage allows dashboard access.
+Signed-in and authentication-unavailable states do not trigger the prompt.
+The root auth provider derives this scope from Next's selected layout segment,
+so dashboard pages do not maintain separate route lists or dialog owners.
+
 Browser-vault dashboard sessions and public-homepage preparation read only the
 published replica ref and workspace version. Refresh orchestration is imported
 only when the existing after-response refresh path needs it. The browser loader
@@ -2209,7 +2217,26 @@ The Vercel Git integration is the only production deployment owner. Every
 commit pushed to `main` creates one managed production candidate; no
 repository ignore command may suppress that candidate. The candidate remains
 off the production domains until its configured Deployment Checks, including
-`Temporal Web production admission`, pass for that exact current commit.
+`Temporal Web production admission`, pass for that exact candidate commit. Required main checks retain independent
+SHA-scoped proof. Web admission finishes its active candidate and keeps only the
+newest waiting run, using GitHub's existing concurrency group. Public main may
+advance during proof: both controllers require the tested SHA to remain an
+ancestor of the observed protected-main tip. Private main and live Temporal
+reader/routing/target freshness remain required. Vercel's managed Git integration
+continues to own production ordering and promotion; admission never promotes an
+artifact itself. Deploy the private ancestry-aware consumer before this public
+controller. Verify one candidate reaches production while a later merge is still
+being checked, then verify a delayed older check cannot replace a newer release.
+
+Admission explicitly publishes the `Temporal Web production admission` commit
+status for the exact candidate SHA: pending before proof, then success only after
+the entire admission job succeeds. A dependent finalizer publishes failure for
+failed, canceled, or skipped admission. This delivers the final result through
+Vercel's supported commit-status channel when its imported GitHub check remains
+running after job completion. Status publication failures fail their job; they
+never authorize promotion or disable the configured Deployment Check. The
+finalizer requires proof from the same workflow attempt: rerun the whole
+admission workflow after notification failure, not only its publishing job.
 
 Do not deploy production from the local CLI, promote an existing deployment,
 use Instant Rollback, or force-promote past a Deployment Check. Those paths do
@@ -2463,6 +2490,10 @@ Current hosted billing assumptions:
   correlation.
 - `Reset everyone` requires the exact typed phrase, ignores any active search,
   and walks ascending hosted IDs in authenticated same-origin batches of 10.
+  Partly used as well as exhausted Starter accounts receive only the deficit
+  between their remaining Starter grants and the standard $4.50 allowance;
+  separate purchased and referral credit stays intact. Current period spend
+  is cleared, while already-full zero-spend Starter accounts are unchanged.
   Members are reset sequentially through the same canonical transaction; one
   stale re-read is allowed, the batch stops before acknowledging a remaining
   failure, and each runtime wake begins only after that member commits. The page

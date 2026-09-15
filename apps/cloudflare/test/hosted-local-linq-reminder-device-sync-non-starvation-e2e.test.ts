@@ -642,12 +642,12 @@ async function holdPositiveDeviceSyncPassCheckpoint(input: {
       return pass;
     }
     expect(pass.redactedJson).toMatchObject({
-      outcome: "yielded",
       processedJobs: 0,
     });
-    // A cooperative yield after the retry fence can precede all job progress.
-    // Publish that checkpoint so its scheduled retry can establish the backlog
-    // boundary this test needs; retaining the barrier here would deadlock it.
+    expect(["completed", "yielded"]).toContain(pass.redactedJson?.outcome);
+    // A completed empty pass or a cooperative yield can precede job progress.
+    // Publish that checkpoint so later work can establish the positive backlog
+    // boundary this test requires; retaining the barrier here would deadlock it.
     await expect(requireScenario().harness
       .releaseShutdownCheckpointPublicationBarrierForTest(userId))
       .resolves.toEqual({ ok: true, released: true });

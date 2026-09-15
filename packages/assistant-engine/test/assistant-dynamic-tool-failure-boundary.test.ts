@@ -54,6 +54,23 @@ function expectPrivateClassification(result: Awaited<ReturnType<typeof executeMu
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('common dynamic-tool failure boundary', () => {
+  it.each(['save', 'patch'] as const)('rejects ambiguous cron on %s before calling the automation owner', async (action) => {
+    const request = vi.fn<NonNullable<HostedTools['automationTool']>['request']>()
+    const result = await executeMurphDynamicToolRequest(dispatchInput('automation', {
+      ...(action === 'save'
+        ? { action, title: 'Stretch break', instructions: 'Take a stretch break.' }
+        : { action, lookup: 'automation_stretch', expectedUpdatedAt: '2026-10-09T16:00:00.000Z' }),
+      schedule: { kind: 'cron', expression: '0 14 9-15 10 1-5', timeZone: 'America/New_York' },
+    }, { hostedToolContext: hostedTools({ automationTool: { request } }) }))
+    expect(request).not.toHaveBeenCalled()
+    expect(result.rpcResult.success).toBe(false)
+    const feedback = JSON.stringify(result.rpcResult.contentItems)
+    expect(feedback).toContain('OR, not AND')
+    expect(feedback).toContain('0 9 * * 1-5')
+    expect(feedback).toContain('activeUntil')
+    expect(result.failureDiagnostic).toEqual({ failureStage: 'validation', failureReason: 'invalid_input' })
+  })
+
   it('explains how to repair a missing automation version without calling the owner', async () => {
     const request = vi.fn<NonNullable<HostedTools['automationTool']>['request']>()
     const result = await executeMurphDynamicToolRequest(dispatchInput('automation', {

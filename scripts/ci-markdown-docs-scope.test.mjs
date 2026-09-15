@@ -111,7 +111,7 @@ test("allows only dated release-note records", () => {
     "agent-docs/generated/catalog.md",
     "agent-docs/prompts/reviewer.md",
     "agent-docs/research/2026-08-25-audit.md",
-    "agent-docs/research/murph-age-autoresearch.md",
+    "agent-docs/research/example-research-workflow.md",
     "docs/incidents/2026-08-25-incident.md",
     "docs/release-notes/README.md",
     "docs/release-notes/change.md",

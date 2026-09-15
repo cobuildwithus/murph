@@ -1,4 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 
 import {
   relayHostedOpenAiResponsesWebSocketUpgrade,
@@ -20,23 +21,43 @@ import {
   createHostedExecutionTestEnv,
 } from "../hosted-execution-fixtures.ts";
 
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+}
+
 const createdAt = 1_775_000_000;
 const memberId = "member_123";
 
-async function openImageGateSocket(nativeMemory = false) {
+async function openImageGateSocket(nativeMemory = false, logStatus?: Promise<number>) {
   const pair = new WebSocketPair();
   const provider = pair[1];
   provider.accept({ allowHalfOpen: true });
   provider.addEventListener("close", (event) => provider.close(event.code, event.reason), { once: true });
+  const diagnostics: Array<{ eventCode: string; redactedJson: Record<string, unknown> }> = [];
   let subscriptionAllowed = false;
   const subscriptionAccess = vi.fn(async () => Response.json({
     allowed: subscriptionAllowed,
     reason: subscriptionAllowed ? "allowed" : "subscription_required",
   }));
-  vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (target) => {
-    const url = new URL(target instanceof Request ? target.url : String(target));
+  vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (target, init) => {
+    const outgoing = new Request(target, init);
+    const url = new URL(outgoing.url);
     if (url.hostname === "api.openai.com") {
       return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+    if (url.pathname === "/api/internal/hosted-runtime/log") {
+      const body = parseHostedRuntimeLogRequest(await outgoing.json());
+      diagnostics.push(...body.entries.map((entry) => ({
+        eventCode: entry.eventCode, redactedJson: entry.redactedJson ?? {},
+      })));
+      return Response.json({ ok: true }, { status: logStatus ? await logStatus : 200 });
     }
     expect(url.pathname).toBe("/api/internal/hosted-execution/image-generation/access");
     return await subscriptionAccess();
@@ -66,7 +87,7 @@ async function openImageGateSocket(nativeMemory = false) {
   if (!client) throw new Error("Expected image-gated Responses socket.");
   client.accept({ allowHalfOpen: true });
   client.addEventListener("close", (event) => { client.close(event.code, event.reason); }, { once: true });
-  return { subscriptionAccess, client, provider, setSubscription: (allowed: boolean) => { subscriptionAllowed = allowed; } };
+  return { diagnostics, subscriptionAccess, client, provider, setSubscription: (allowed: boolean) => { subscriptionAllowed = allowed; } };
 }
 
 const imageFrame = JSON.stringify({
@@ -74,6 +95,67 @@ const imageFrame = JSON.stringify({
   model: "gpt-5.6-terra",
   input: "Draw a synthetic geometric pattern.",
   tools: [{ type: "image_generation" }],
+});
+
+test("persists content-free relay milestones through the real Worker egress log route", async () => {
+  const { client, provider, diagnostics } = await openImageGateSocket();
+  const request = JSON.stringify({ type: "response.create", model: "gpt-5.6-terra", input: "PRIVATE_REQUEST_FIXTURE" });
+  const upstreamMessage = nextMessage(provider);
+  client.send(request);
+  await upstreamMessage;
+  await vi.waitFor(() => expect(diagnostics).toHaveLength(2));
+  const response = nextMessage(client);
+  provider.send(JSON.stringify({ type: "response.created", private: "PRIVATE_RESPONSE_FIXTURE" }));
+  await response;
+  await vi.waitFor(() => expect(diagnostics).toHaveLength(4));
+  const closed = nextClose(client);
+  provider.close(1000, "PRIVATE_CLOSE_REASON_FIXTURE");
+  await closed;
+  await vi.waitFor(() => expect(diagnostics).toHaveLength(5));
+  expect(diagnostics.map((entry) => entry.eventCode)).toEqual(Array(5).fill("runner.provider_egress_diagnostic"));
+  expect(diagnostics.map((entry) => entry.redactedJson.websocketMilestone)).toEqual([
+    "client_received", "upstream_sent", "upstream_received", "downstream_sent", "closed",
+  ]);
+  expect(diagnostics.at(-1)?.redactedJson).toMatchObject({
+    clientFrameCount: 1, upstreamSends: 1, upstreamFrameCount: 1, downstreamFrameCount: 1,
+    upstreamSendObserved: true, upstreamFrameObserved: true, closeSide: "provider",
+    firstUpstreamMessageKind: "response.created",
+  });
+  expect(JSON.stringify(diagnostics)).not.toContain("PRIVATE_");
+});
+
+test("bounds pending diagnostic writes without delaying forwarding when persistence stalls or fails", async () => {
+  const logGate = deferred<number>();
+  const { client, provider, diagnostics } = await openImageGateSocket(false, logGate.promise);
+  try {
+    const request = JSON.stringify({ type: "response.create", input: "Synthetic request." });
+    const firstRequest = nextMessage(provider);
+    client.send(request);
+    await expect(firstRequest).resolves.toBe(request);
+    const firstResponse = nextMessage(client);
+    provider.send(JSON.stringify({ type: "response.created" }));
+    await firstResponse;
+    await vi.waitFor(() => expect(diagnostics).toHaveLength(4));
+
+    // The four log writes are still held. The next request and response pass.
+    const nextRequest = nextMessage(provider);
+    client.send(request);
+    await expect(nextRequest).resolves.toBe(request);
+    const nextResponse = nextMessage(client);
+    provider.send(JSON.stringify({ type: "response.completed" }));
+    await nextResponse;
+    expect(diagnostics).toHaveLength(4);
+    logGate.resolve(503);
+
+    const finalResponse = nextMessage(client);
+    provider.send(JSON.stringify({ type: "response.output_text.delta", delta: "Synthetic output." }));
+    await finalResponse;
+  } finally {
+    logGate.resolve(503);
+    const closed = nextClose(client);
+    provider.close(1000, "Synthetic close.");
+    await closed;
+  }
 });
 
 test.each([false, true])("blocks native image frames before provider spend (memory=%s)", async (nativeMemory) => {
@@ -157,6 +239,55 @@ function nextMessage(socket: WebSocket): Promise<string | ArrayBuffer> {
     }, { once: true });
   });
 }
+
+test("drains a metered terminal through real WebSockets before closing an overflowing provider stream", async () => {
+  const pair = new WebSocketPair();
+  const provider = pair[1];
+  provider.accept({ allowHalfOpen: true });
+  provider.addEventListener("close", (event) => provider.close(event.code, event.reason), { once: true });
+  const persistence = deferred<void>();
+  const started = deferred<void>();
+  const persistUsage = vi.fn(() => {
+    started.resolve();
+    return persistence.promise;
+  });
+  const response = relayHostedOpenAiResponsesWebSocketUpgrade({
+    persistUsage,
+    upstreamResponse: new Response(null, { status: 101, webSocket: pair[0] }),
+  });
+  const client = response.webSocket;
+  if (!client) throw new Error("Expected relayed WebSocket.");
+  client.accept({ allowHalfOpen: true });
+  client.addEventListener("close", (event) => client.close(event.code, event.reason), { once: true });
+  const request = JSON.stringify({ type: "response.create", model: "gpt-5.6-terra" });
+  const forwarded = nextMessage(provider);
+  client.send(request);
+  await expect(forwarded).resolves.toBe(request);
+  const completed = JSON.stringify({
+    type: "response.completed",
+    response: {
+      id: "resp_synthetic_overflow", model: "gpt-5.6-terra", created_at: createdAt,
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    },
+  });
+  const received: Array<string | ArrayBuffer> = [];
+  client.addEventListener("message", (event) => { received.push(event.data); });
+  let clientClosed = false;
+  const closed = nextClose(client).then((event) => { clientClosed = true; return event; });
+  const providerClosed = nextClose(provider);
+  provider.send(completed);
+  await started.promise;
+  // Tiny messages exercise actual event delivery without allocating huge payloads.
+  for (let index = 0; index < 4096; index++) provider.send("");
+  await expect(providerClosed).resolves.toMatchObject({ code: 1009 });
+  expect(clientClosed).toBe(false);
+  expect(received).toHaveLength(0);
+  persistence.resolve();
+  await expect(closed).resolves.toMatchObject({ code: 1009 });
+  expect(received[0]).toBe(completed);
+  expect(received).toHaveLength(4096);
+  expect(persistUsage).toHaveBeenCalledOnce();
+}, 15_000);
 
 test("terminates only the two relay legs and preserves application headers", async () => {
   const upstreamPair = new WebSocketPair();

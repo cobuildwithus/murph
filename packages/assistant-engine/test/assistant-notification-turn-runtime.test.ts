@@ -285,6 +285,37 @@ test.each([
   }
 })
 
+test('connected-channel greeting selects isolated output-only continuation and removes exact onboarding instructions', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-greeting-policy-'))
+  try {
+    const providerResult = createProviderResult({ response: JSON.stringify({
+      kind: 'send_message', privateSummary: 'Greet the connected phone.', text: 'Hey, you can text me here now.',
+    }) })
+    const { sendAssistantNotificationLocal, deliverMessage, mocks } = await loadNotificationTurnHarness({
+      providerResult, turnId: 'turn-connected-channel-greeting',
+    })
+    await sendAssistantNotificationLocal({
+      channel: 'linq', threadIsDirect: true, connectedChannelGreeting: true,
+      executionContext: { hosted: null }, instructions: 'PREMADE_WELCOME_SENTINEL',
+      responsePolicy: { kind: 'require_send_exact_text', text: 'PREMADE_WELCOME_SENTINEL' },
+      vault,
+    })
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+    const request = mocks.executeCodexTurnWithRecovery.mock.calls[0]![0]
+    expect(request.profile).toEqual({
+      nativeResumePolicy: 'disabled', promptProfile: 'operator-message',
+      threadScope: 'isolated-thread', toolProfile: 'output-only-turn',
+    })
+    expect(request.input.prompt).toContain('Do not restart onboarding')
+    expect(request.input.prompt).not.toContain('PREMADE_WELCOME_SENTINEL')
+    expect(request.hostedToolContext).toBeNull()
+    expect(deliverMessage).toHaveBeenCalledOnce()
+    expect(mocks.applyAssistantSessionCodexResumeStateAction).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
 test('sendAssistantNotificationLocal scopes cron output history to the resolved conversation session', async () => {
   const session = createAssistantSession({
     sessionId: 'session-current-cron-history',

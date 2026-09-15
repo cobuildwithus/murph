@@ -851,12 +851,13 @@ export async function appendHostedMailboxEnvelopeTx(input: {
  */
 export async function appendHostedScheduledDeviceSyncWakeEnvelopeTx(input: {
   envelope: HostedExecutionDeviceSyncWake;
+  prepared: PreparedHostedMailboxItemAppendCrypto;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedScheduledDeviceSyncWakeResult> {
   const result = await appendHostedMailboxEnvelopeInternalTx({
     acceptRuntimeOwnedRetiredDuplicate:
       isHostedScheduledDeviceSyncWakeV3(input.envelope),
-    encryption: { mode: "legacy-transaction" },
+    encryption: { mode: "prepared-root", prepared: input.prepared },
     envelope: input.envelope,
     tx: input.tx,
   });
@@ -3030,7 +3031,7 @@ async function allocateHostedMailboxCausalSeqTx(input: {
   return rows[0].seq;
 }
 
-async function acquireHostedMailboxCausalAppendLockTx(input: {
+export async function acquireHostedMailboxCausalAppendLockTx(input: {
   tx: HostedMailboxMutationTx;
   userId: string;
 }): Promise<void> {

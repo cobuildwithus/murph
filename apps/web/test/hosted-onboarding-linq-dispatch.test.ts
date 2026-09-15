@@ -1127,6 +1127,10 @@ async function createDirectPreparationTransitionFixture(input: {
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getHostedLinqChatSummary.mockReset().mockResolvedValue({
+      handles: [],
+      isGroup: false,
+    });
     mocks.enforceDirectMailboxPreparation = false;
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockReset();
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
@@ -2010,7 +2014,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
   );
 
-  it.each([false, true])("keeps active-member iMessage ingress direct with opening continuation %s", async (continuation) => {
+  it.each([
+    { continuation: false, service: "iMessage" },
+    { continuation: true, service: "iMessage" },
+    { continuation: false, service: "sms" },
+    { continuation: false, service: "RCS" },
+  ])("admits signed-direct $service without chat HTTP (opening continuation $continuation)", async ({ continuation, service }) => {
     const supportedLongText = continuation ? "Yes, ready." : `${"Context ".repeat(290)}Final question?`;
     if (continuation) {
       mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
@@ -2033,10 +2042,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         },
       }));
     }
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
-      handles: [],
-      isGroup: false,
-    });
+    mocks.getHostedLinqChatSummary.mockRejectedValue(
+      new Error("Chat HTTP must not be an ordinary direct-message dependency"),
+    );
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -2068,7 +2076,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         data: {
           parts: [{ type: "text", value: supportedLongText }],
         },
-        service: "iMessage",
+        service,
       }),
       signature: null,
       timestamp: null,
@@ -2078,13 +2086,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
-    expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
-      chatId: "chat_123",
-      timeoutMs: 1_500,
-    });
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
       "hosted-onboarding.webhook.linq.chat-classification",
-      { outcome: "canonical-direct" },
+      { outcome: "webhook-direct" },
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2092,7 +2097,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           message: expect.objectContaining({
             linqMessage: expect.objectContaining({
               parts: [{ type: "text", value: supportedLongText }],
-              service: "iMessage",
+              service,
               threadIsDirect: true,
             }),
           }),
@@ -2134,7 +2139,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         isGroup: null,
       },
     },
-  ])("fails before planning when canonical classification is unavailable", async ({
+  ])("fails closed when an unknown audience cannot be classified", async ({
     lookupError,
     summary,
   }) => {
@@ -2157,7 +2162,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
-        chatIsGroup: false,
         service: "iMessage",
       }),
       signature: null,
@@ -2180,7 +2184,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it.each(["sms", "RCS"] as const)(
-    "fails before planning when canonical %s classification is unavailable",
+    "fails closed when an unknown %s audience cannot be classified",
     async (service) => {
       const lookupError = new TypeError("Linq chat read unavailable");
       mocks.getHostedLinqChatSummary.mockRejectedValueOnce(lookupError);
@@ -2199,7 +2203,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       await expect(handleHostedOnboardingLinqWebhook({
         prisma,
         rawBody: buildHostedLinqWebhookBody({
-          chatIsGroup: false,
           service,
         }),
         signature: null,
@@ -4452,7 +4455,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     try {
       await expect(handleHostedOnboardingLinqWebhook({
         prisma,
-        rawBody: buildHostedLinqWebhookBody({ eventId: "evt_clean_home_count" }),
+        rawBody: buildHostedLinqWebhookBody({ chatIsGroup: false, eventId: "evt_clean_home_count" }),
         signature: null, timestamp: null,
       })).resolves.toMatchObject({ reason: "wake-appended-active-member" });
       expect(prisma.hostedMemberIdentity!.findMany).toHaveBeenCalledOnce();
@@ -4466,7 +4469,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(prisma.$executeRaw.mock.calls.filter((args) =>
         args.includes("hosted-linq-routing:chat"),
       )).toHaveLength(1);
-      expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledOnce();
+      expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
+      expect(prisma.hostedMemberIdentity!.findUnique).not.toHaveBeenCalled();
       expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
       expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledOnce();
     } finally {
@@ -5699,6 +5703,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           prisma,
           rawBody: buildHostedLinqWebhookBody({
             eventId: `evt_null_preflight_${authority}`,
+            service: authority === "duplicate" ? "iMessage" : undefined,
           }),
           signature: null,
           timestamp: null,
@@ -5731,7 +5736,69 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(
           authority === "consent" ? 1 : 0,
         );
+        if (authority === "duplicate") {
+          const { completeHostedLinqInstantFirstTurn } = await vi.importActual<
+            typeof import("@/src/lib/hosted-onboarding/linq-instant-first-turn")
+          >("@/src/lib/hosted-onboarding/linq-instant-first-turn");
+          const wakeHandoff: Parameters<typeof completeHostedLinqInstantFirstTurn>[0]["wakeHandoff"]
+            | undefined = mocks.maybeHandoffHostedExecutionWebhookWake.mock.calls.at(-1)?.[0]?.wakeHandoff;
+          const participantContact = createHostedLinqParticipantContact({
+            kind: "phone",
+            value: "+15551234567",
+          });
+          if (!wakeHandoff || !participantContact) {
+            throw new Error("Expected a duplicate wake and valid participant contact.");
+          }
+          expect(wakeHandoff).toMatchObject({
+            eventId: "evt_null_preflight_duplicate",
+            mailboxItemId: "mailbox_existing_null_preflight",
+            source: "linq",
+            userId: "member_123",
+          });
+          expect(wakeHandoff).not.toHaveProperty("wakeMailboxCheckpoint");
+          const acceptedMailboxItem = {
+            id: "mailbox_accepted_first_turn",
+            lane: "conversation" as const,
+            laneSeq: "7",
+          };
+          mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce(acceptedMailboxItem);
+
+          // Feed the real duplicate planner's handoff to the real completion
+          // owner. An already-saved reply must reconcile without another send.
+          await expect(completeHostedLinqInstantFirstTurn({
+            generation: { kind: "completed" },
+            inboundMessageId: "msg_123",
+            participantContact,
+            // The completed branch uses the mocked mailbox port; this ingress
+            // fixture intentionally omits unrelated Prisma client methods.
+            // @ts-expect-error -- deliberate narrow fixture for this owner boundary.
+            prisma,
+            recipientPhoneNumber: "+15550000000",
+            service: "iMessage",
+            wakeHandoff,
+          })).resolves.toEqual({
+            kind: "accepted",
+            wakeHandoff: {
+              eventId: "evt_null_preflight_duplicate",
+              linqChatId: "chat_123",
+              mailboxItemId: acceptedMailboxItem.id,
+              source: "linq",
+              userId: "member_123",
+              wakeMailboxCheckpoint: { lane: "conversation", laneSeq: "7" },
+            },
+          });
+          expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenLastCalledWith({
+            dedupeKey: expect.stringMatching(/^linq\.instant-first-turn\./u),
+            prisma,
+            userId: "member_123",
+          });
+          expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+          expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx)
+            .not.toHaveBeenCalled();
+          expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+        }
       } finally {
+        mocks.readHostedMailboxItemByDedupeKey.mockReset().mockResolvedValue(null);
         restoreRootMock();
       }
     },
@@ -6071,6 +6138,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
+        chatIsGroup: false,
         eventId: "evt_home_chat_owner_mismatch",
       }),
       signature: null,
@@ -6082,6 +6150,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "home-chat-owner-mismatch",
     });
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
@@ -6146,6 +6215,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
+        chatIsGroup: false,
         eventId: "evt_prepared_home_chat_owner_mismatch",
       }),
       signature: null,
@@ -6159,6 +6229,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
       .toHaveBeenCalledTimes(2);
     expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).toHaveBeenCalledOnce();
+    expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();

@@ -363,7 +363,7 @@ test("signs hosted domain root envelopes before the provisioning transaction ope
   });
 
   assert.deepEqual(steps, [
-    "db.read-active-domains",
+    "db.read-active-root-snapshot",
     "kms.encrypt",
     "kms.asymmetric-sign",
     "transaction.begin",
@@ -612,7 +612,7 @@ test("legacy transaction provisioning prepares every candidate before its first 
 
   const firstAdvisoryLock = steps.indexOf("db.advisory-lock");
   assert.notEqual(firstAdvisoryLock, -1);
-  assert.equal(steps[0], "db.read-active-domains");
+  assert.equal(steps[0], "db.read-active-root-snapshot");
   assert.ok(
     steps.slice(0, firstAdvisoryLock).some((step) => step.startsWith("kms.")),
   );
@@ -2477,7 +2477,12 @@ test.each(["create", "replace", "consent_revoked", "suspended", "root_race"] as 
   },
 );
 
-test.each([true, false])("discovers a control/ingress preparation batch once (existing roots: %s)", async (existing) => {
+test.each([
+  { existing: [] },
+  { existing: ["control"] },
+  { existing: ["ingress"] },
+  { existing: ["control", "ingress"] },
+] as const)("prepares control/ingress from one metadata snapshot: $existing", async ({ existing }) => {
   const steps: string[] = [];
   const { tx, decryptMetrics } = await createHostedWebCryptoTransactionFixture(
     () => createStepRecordingTransaction(steps),
@@ -2493,12 +2498,10 @@ test.each([true, false])("discovers a control/ingress preparation batch once (ex
   );
   const userId = "member-test-batch-discovery";
   const domains = ["control", "ingress"] as const;
-  if (existing) {
-    for (const domain of domains) {
-      await provisionActiveHostedDomainRootEnvelopeForUserOnly({
-        domain, prisma: tx.prisma, reason: "test.seed", userId,
-      });
-    }
+  for (const domain of existing) {
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain, prisma: tx.prisma, reason: "test.seed", userId,
+    });
   }
   steps.length = 0;
   await runWithHostedDomainRootUnwrapCache(async () => {
@@ -2510,14 +2513,14 @@ test.each([true, false])("discovers a control/ingress preparation batch once (ex
         domain, preparedCandidates, prisma: tx.prisma, reason: "test.batch", userId,
       }),
     ));
-    expect(steps).toEqual(existing
-      ? ["db.read-active-domains", "db.read-active-envelope", "db.read-active-envelope"]
-      : ["db.read-active-domains"]);
+    expect(steps).toEqual(["db.read-active-root-snapshot"]);
     expect(decryptMetrics.calls).toHaveLength(2);
     for (const prepared of preparedRoots) {
       await revalidatePreparedHostedDomainRootForWebTx({ prepared, tx: tx.prisma });
     }
     expect(decryptMetrics.calls).toHaveLength(2);
+    expect(steps.filter((step) => step === "db.advisory-lock")).toHaveLength(2);
+    expect(steps.filter((step) => step === "db.read-active-envelope")).toHaveLength(2);
     expect(tx.persistedEnvelopes).toHaveLength(2);
   });
   expect(decryptMetrics.returnedPlaintexts.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
@@ -2622,6 +2625,127 @@ test("dirty payload revision rebinding preserves real ciphertext AAD without ano
     });
   });
 });
+
+test("maximum active-root snapshot serves all Web domains without further metadata reads", async () => {
+  const { tx, decryptMetrics, encryptCalls, signCalls } = await createHostedWebCryptoTransactionFixture();
+  const store = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const userId = "member-test-snapshot-maximum";
+  for (const domain of ["control", "device", "ingress", "runtime"] as const) {
+    await store.provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain, prisma: tx.prisma, reason: "test.seed", userId,
+    });
+  }
+  const query = vi.spyOn(tx.prisma, "$queryRaw");
+  const signingBefore = [encryptCalls.length, signCalls.length];
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const preparedCandidates = await store.prepareHostedCryptoDomainRootCandidates({
+      prisma: tx.prisma, userId,
+    });
+    for (const domain of ["control", "device", "ingress"] as const) {
+      const input = { domain, preparedCandidates, prisma: tx.prisma, reason: "test.maximum", userId };
+      const first = await store.prepareHostedDomainRootForWeb(input);
+      expect(await store.prepareHostedDomainRootForWeb(input)).toEqual(first);
+    }
+    expect(query).toHaveBeenCalledOnce();
+    expect(query.mock.calls[0]!.slice(1)).toEqual([userId, ["control", "device", "ingress", "runtime"], 4]);
+    expect(decryptMetrics.calls).toHaveLength(3);
+    expect([encryptCalls.length, signCalls.length]).toEqual(signingBefore);
+  });
+  expect(decryptMetrics.returnedPlaintexts.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
+  query.mockClear();
+  await expect(store.prepareHostedCryptoDomainRootCandidates({
+    domains: [], prisma: tx.prisma, userId,
+  })).resolves.toEqual(new Map());
+  expect(query).not.toHaveBeenCalled();
+});
+
+test("active-root snapshot is bounded to requested domains and preserves rotation revalidation", async () => {
+  const { tx, decryptMetrics } = await createHostedWebCryptoTransactionFixture();
+  const store = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const userId = "member-test-snapshot-rotation";
+  for (const domain of ["control", "device", "ingress", "runtime"] as const) {
+    await store.provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain, prisma: tx.prisma, reason: "test.seed", userId,
+    });
+  }
+  const query = vi.spyOn(tx.prisma, "$queryRaw");
+  const preparedCandidates = await store.prepareHostedCryptoDomainRootCandidates({
+    domains: ["control", "control", "ingress"], prisma: tx.prisma, userId,
+  });
+  expect(query).toHaveBeenCalledOnce();
+  const snapshotQuery = query.mock.calls[0]!;
+  expect(snapshotQuery.slice(1)).toEqual([userId, ["control", "ingress"], 2]);
+  expect((snapshotQuery[0] as TemplateStringsArray).join("?")).toContain(
+    "domain = ANY(?::hosted_crypto_domain[])",
+  );
+  expect(preparedCandidates.size).toBe(0);
+  const original = tx.persistedEnvelopes.find((root) => root.domain === "control")!;
+  // Replace the fixture's active row; the preparation snapshot retains the old envelope.
+  tx.persistedEnvelopes.splice(tx.persistedEnvelopes.indexOf(original), 1);
+  const winner = await store.provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control", prisma: tx.prisma, reason: "test.rotate", userId,
+  });
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    query.mockClear();
+    const prepared = await store.prepareHostedDomainRootForWeb({
+      domain: "control", preparedCandidates, prisma: tx.prisma, reason: "test.snapshot", userId,
+    });
+    expect(prepared.rootKeyId).toBe(original.rootKeyId);
+    expect(query).not.toHaveBeenCalled();
+    expect(decryptMetrics.calls).toHaveLength(1);
+    await expect(store.revalidatePreparedHostedDomainRootForWebTx({
+      prepared, tx: tx.prisma,
+    })).rejects.toBeInstanceOf(store.HostedDomainRootPreparationMismatchError);
+    expect(decryptMetrics.calls).toHaveLength(1);
+  });
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const prepared = await store.prepareHostedDomainRootForWeb({
+      domain: "control", prisma: tx.prisma, reason: "test.fresh", userId,
+    });
+    expect(prepared.rootKeyId).toBe(winner.rootKeyId);
+    await expect(store.revalidatePreparedHostedDomainRootForWebTx({
+      prepared, tx: tx.prisma,
+    })).resolves.toMatchObject({ rootKeyId: winner.rootKeyId });
+  });
+  expect(decryptMetrics.returnedPlaintexts.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
+});
+
+test.each(["member", "domain", "signature"] as const)(
+  "snapshot preparation rejects invalid %s before KMS",
+  async (invalid) => {
+    const { tx, decryptMetrics } = await createHostedWebCryptoTransactionFixture();
+    const store = await import("../src/lib/hosted-crypto/domain-root-store");
+    const { runWithHostedDomainRootUnwrapCache } = await import(
+      "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+    );
+    const userId = "member-test-snapshot-invalid";
+    await store.provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain: "control", prisma: tx.prisma, reason: "test.seed", userId,
+    });
+    const envelope = tx.persistedEnvelopes[0]!;
+    const preparedCandidates = await store.prepareHostedCryptoDomainRootCandidates({
+      domains: ["control"], prisma: tx.prisma, userId,
+    });
+    if (invalid === "signature") {
+      envelope.authoritySignature.signature = "AA";
+    } else if (invalid === "domain") {
+      envelope.domain = "ingress";
+    }
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      await expect(store.prepareHostedDomainRootForWeb({
+        domain: "control", preparedCandidates, prisma: tx.prisma, reason: "test.invalid",
+        userId: invalid === "member" ? "member-test-another-snapshot" : userId,
+      })).rejects.toThrow();
+      expect(decryptMetrics.calls).toHaveLength(0);
+    });
+  },
+);
 
 test("the prepared Web root token rejects an exact winner drift", async () => {
   const { tx } = await createHostedWebCryptoTransactionFixture();
@@ -3276,6 +3400,96 @@ test("hosted Privy member creation provisions the control root before private id
   );
 });
 
+test.each([false, true])("phone channel welcome prepares real routing and mailbox crypto before its transaction (quota full: %s)", async (quotaFull) => {
+  const { tx, decryptMetrics } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithFreshHostedDomainRootUnwrapCache, areHostedDomainRootProviderCallsDisabled } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const { ensureHostedMemberChannelWelcome } = await import("../src/lib/hosted-onboarding/channel-welcome");
+  const { createHostedPhoneLookupKey } = await import("../src/lib/hosted-onboarding/contact-privacy");
+  const { encryptHostedLinqLinePhoneNumber } = await import("../src/lib/hosted-onboarding/linq-line-phone-codec");
+  const memberId = "member-test-channel-root-preparation";
+  const phone = "+15550001001";
+  const line = "+15550001002";
+  for (const domain of ["control", "ingress"] as const) {
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain, prisma: tx.prisma, userId: memberId, reason: "test.channel-root",
+    });
+  }
+  const identity = await buildHostedMemberIdentityPrivateColumns({
+    memberId, phoneNumber: phone, prisma: tx.prisma, privyUserId: null,
+    signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null, signupPhoneNumber: null,
+  });
+  const member = {
+    id: memberId, billingStatus: HostedBillingStatus.active, suspendedAt: null,
+    createdAt: new Date(), updatedAt: new Date(), billingRef: null, emailAuthorization: null,
+    routing: null, threadContainer: null, accountGroupMemberships: [], assistantProviderPreference: null,
+    identity: { ...identity, memberId, phoneLookupKey: createHostedPhoneLookupKey(phone), phoneNumberVerifiedAt: new Date() },
+  };
+  const routingWrite = vi.fn(async (_input: { create: { linqRecipientPhoneEncrypted: string } }) => {
+    expect(areHostedDomainRootProviderCallsDisabled()).toBe(true);
+    return {};
+  });
+  const claimQuota = vi.fn(async () => ({ count: 1 }));
+  const readEnvelope = tx.prisma.$queryRaw.bind(tx.prisma);
+  let mailboxCiphertext: string | null = null;
+  let kmsBeforeTransaction = -1;
+  // Keep the real root-store, cache, member decryption, route writer and mailbox
+  // encryption. Only SQL persistence and the existing fixture's KMS are synthetic.
+  const prisma = Object.assign(tx.prisma, {
+    hostedMember: { findUnique: vi.fn(async () => member) },
+    hostedMemberRouting: { findUnique: vi.fn(async () => null), groupBy: vi.fn(async () => []), upsert: routingWrite },
+    hostedThreadRoute: { groupBy: vi.fn(async () => []) },
+    hostedMailboxItem: { findUnique: vi.fn(async () => null) },
+    hostedWorkspace: { upsert: vi.fn(async () => ({})) },
+    hostedLinqLine: {
+      findMany: vi.fn(async () => [{ phoneNumberLookupKey: createHostedPhoneLookupKey(line),
+        phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(line), phoneNumberHint: "*** test",
+        assignmentWeight: 100, maxNewConversationsPerDay: 1,
+        proactiveConversationCount: quotaFull ? 1 : 0,
+        proactiveConversationDayUtc: new Date(new Date().toISOString().slice(0, 10)) }]),
+      updateMany: claimQuota,
+    },
+    $queryRaw: async (...args: Parameters<Prisma.TransactionClient["$queryRaw"]>) => {
+      const query = args[0] as TemplateStringsArray;
+      const sql = Array.isArray(query) ? query.join("?") : "";
+      if (sql.includes("INSERT INTO hosted_mailbox_lane_counter")) return [{ seq: 1n }];
+      if (sql.includes("INSERT INTO hosted_mailbox_item")) {
+        expect(areHostedDomainRootProviderCallsDisabled()).toBe(true);
+        mailboxCiphertext = String(args[12]);
+        // Stop at the external persistence boundary after real mailbox encryption.
+        throw new Error("synthetic mailbox persistence unavailable");
+      }
+      return readEnvelope(...args);
+    },
+    $transaction: async (run: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+      kmsBeforeTransaction = decryptMetrics.calls.length;
+      try {
+        return await run(prisma);
+      } finally {
+        expect(decryptMetrics.calls.length).toBe(kmsBeforeTransaction);
+      }
+    },
+  });
+  decryptMetrics.calls.length = 0;
+  await runWithFreshHostedDomainRootUnwrapCache(async () => {
+    const run = ensureHostedMemberChannelWelcome({ channel: "linq", memberId, prisma: prisma as never });
+    if (quotaFull) {
+      await expect(run).resolves.toBeUndefined();
+      expect(claimQuota).not.toHaveBeenCalled();
+      expect(mailboxCiphertext).toBeNull();
+    } else {
+      await expect(run).rejects.toThrow("synthetic mailbox persistence unavailable");
+      expect(claimQuota).toHaveBeenCalledOnce();
+      expect(parseSerializedHostedSecureBoxEnvelope(String(mailboxCiphertext)).domain).toBe("ingress");
+    }
+    expect(routingWrite).toHaveBeenCalledOnce();
+    expect(parseSerializedHostedSecureBoxEnvelope(routingWrite.mock.calls[0]![0].create.linqRecipientPhoneEncrypted).domain)
+      .toBe("control");
+    expect(kmsBeforeTransaction).toBe(2);
+  });
+});
+
 async function createHostedWebCryptoTransactionFixture(
   createTransaction: () => HostedCryptoTestTransaction = createCapturingTransaction,
 ): Promise<{
@@ -3495,14 +3709,21 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
       const userIds = values.filter((value): value is string =>
         typeof value === "string" && (value.startsWith("member-") || value.startsWith("hbm_")));
       const userId = userIds[0];
-      if (sql.includes("SELECT DISTINCT domain")) {
-        const domains = new Set(
-          persistedEnvelopes
-            .filter((candidate) => candidate.userId === userId)
-            .filter((candidate) => !inactiveEnvelopeKeys.has(createEnvelopeStatusKey(candidate)))
-            .map((candidate) => candidate.domain),
-        );
-        return [...domains].map((domain) => ({ domain })) as T;
+      if (sql.includes("domain = ANY(")) {
+        const domains = values.find(Array.isArray);
+        return persistedEnvelopes
+          .filter((candidate) => candidate.userId === userId
+            && domains?.includes(candidate.domain)
+            && !inactiveEnvelopeKeys.has(createEnvelopeStatusKey(candidate)))
+          .map((envelope) => ({
+            domain: envelope.domain,
+            id: `row-${envelope.domain}`,
+            rootKeyId: envelope.rootKeyId,
+            signedEnvelopeJson: envelope,
+            status: "active",
+            updatedAt: envelope.updatedAt,
+            userId: envelope.userId,
+          })) as T;
       }
 
       if (sql.includes("HAVING COUNT(DISTINCT domain)")) {
@@ -3670,8 +3891,8 @@ function describeHostedCryptoSql(query: unknown): string {
   if (sql.includes("INSERT INTO hosted_user_crypto_audit")) {
     return "db.insert-audit";
   }
-  if (sql.includes("SELECT DISTINCT domain")) {
-    return "db.read-active-domains";
+  if (sql.includes("domain = ANY(")) {
+    return "db.read-active-root-snapshot";
   }
   if (sql.includes("FROM hosted_user_crypto_envelope")) {
     return "db.read-active-envelope";

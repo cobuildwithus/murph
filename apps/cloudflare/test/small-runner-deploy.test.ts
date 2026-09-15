@@ -23,7 +23,7 @@ const config = {
     instance_type: class_name === "SmallRunnerContainer"
       ? { vcpu: 1, memory_mib: 3072, disk_mb: 6000 } : { vcpu: 2, memory_mib: 6144, disk_mb: 6000 },
     max_instances: class_name === "RunnerContainer" ? 12 : class_name === "SmallRunnerContainer" ? 10 : 1,
-    rollout_active_grace_period: 300, rollout_step_percentage: [100], ssh: { enabled: false },
+    rollout_active_grace_period: 0, rollout_step_percentage: [100], ssh: { enabled: false },
   })),
 };
 
@@ -123,7 +123,7 @@ describe("small runner protected deployment", () => {
       currentVersionId: "worker-live", releaseSha: "1".repeat(40), listApplications: listApplications(exists) });
     const small = staged.applications.find(entry => entry.className === "SmallRunnerContainer");
     expect(small).toMatchObject({ applicationId: exists ? "app-SmallRunnerContainer" : null,
-      namespaceId: "ns-SmallRunnerContainer", specification: { max_instances: 10,
+      namespaceId: "ns-SmallRunnerContainer", specification: { max_instances: 10, rollout_active_grace_period: 0,
         configuration: { image: newImage, vcpu: 1, memory_mib: 3072, disk: { size_mb: 6000 } } } });
     const stage = JSON.parse(await readFile(staged.configPath, "utf8"));
     const promotion = JSON.parse(await readFile(staged.promotionConfigPath, "utf8"));
@@ -139,7 +139,7 @@ describe("small runner protected deployment", () => {
     const staged = await stageHostedRunnerRelease({ ...input, listApplications: listApplications(true) });
     expect(staged.applications.map(entry => entry.className)).toEqual(["DeploySmokeRunnerContainer"]);
     const retained = JSON.parse(await readFile(staged.configPath, "utf8"));
-    expect(retained.containers[2]).toMatchObject({ image: oldImage,
+    expect(retained.containers[2]).toMatchObject({ image: oldImage, rollout_active_grace_period: 300,
       instance_type: { vcpu: 1, memory_mib: 3072, disk_mb: 6000 } });
   });
 

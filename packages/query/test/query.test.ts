@@ -4996,9 +4996,9 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
     });
 
     try {
-      // Pin the literal version: visibility and schema changes must invalidate
-      // carried stores before ordinary reads can serve stale projection rows.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 26);
+      // The index-removal migration must invalidate v24 stores while allowing
+      // later projection versions to retain the same compatibility guarantee.
+      assert.ok(QUERY_PROJECTION_SQLITE_VERSION > 24);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database

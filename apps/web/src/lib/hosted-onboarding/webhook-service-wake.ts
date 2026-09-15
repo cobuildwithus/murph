@@ -7,10 +7,7 @@ import type {
   CloudflareHostedControlRuntimeEnsureProcessingTiming,
 } from "@murphai/cloudflare-hosted-control/client";
 
-import { startHostedDirectRuntimeWakeBestEffort } from "../hosted-execution/direct-runtime-wake";
-import {
-  signalHostedMailboxAppendRuntime,
-} from "../hosted-orchestration/signal-runtime";
+import { handoffHostedMailboxWake } from "../hosted-orchestration/mailbox-wake";
 import {
   recordHostedIngressAcceptedFromMailboxItem,
   recordHostedIngressDirectEnsureTiming,
@@ -22,10 +19,6 @@ import {
   startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
-import {
-  createHostedPostCommitDeadline,
-  waitForHostedPostCommitOperation,
-} from "./bounded-post-commit";
 import type {
   HostedWebhookServiceResponse,
   HostedWebhookWakeHandoff,
@@ -90,35 +83,23 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     },
   );
 
-  let directEnsureWake: Promise<void> | null = null;
-  let signal: Awaited<ReturnType<typeof signalHostedMailboxAppendRuntime>>;
+  let signal: Awaited<ReturnType<typeof handoffHostedMailboxWake>>;
   let temporalSignalAcceptedAt: Date | null = null;
   try {
-    signal = await waitForHostedPostCommitOperation({
-      deadlineMs: createHostedPostCommitDeadline(input.timeoutMs),
-      operation: (abortSignal) => signalHostedMailboxAppendRuntime({
-        abortSignal,
-        expectedUserId: userId,
-        ...(knownCheckpoint ? { knownCheckpoint } : {}),
+    signal = await handoffHostedMailboxWake({
+      directWakeSource: source,
+      expectedUserId: userId,
+      ...(knownCheckpoint ? { knownCheckpoint } : {}),
+      mailboxItemId,
+      onDirectWakeTiming: (timing) => recordHostedDirectEnsureWakeTimingBestEffort({
         mailboxItemId,
-        // The signal owner validates the durable checkpoint and active access
-        // before this callback, whether the checkpoint was cached or reread.
-        onSignalStarted: () => {
-          directEnsureWake = startHostedDirectRuntimeWakeBestEffort({
-            onTiming: async (timing) => {
-              await recordHostedDirectEnsureWakeTimingBestEffort({
-                mailboxItemId,
-                source,
-                timing,
-                userId,
-              });
-            },
-            source,
-            userId,
-          });
-        },
+        source,
+        timing,
+        userId,
       }),
+      scheduleAfterResponse: input.scheduleAfterResponse,
       signal: input.signal,
+      timeoutMs: input.timeoutMs,
     });
     temporalSignalAcceptedAt = new Date();
   } catch (error) {
@@ -133,17 +114,9 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     });
     const errorName = deriveHostedOnboardingTimingErrorName(error);
     finishHostedOnboardingTiming(handoffTiming, "failed", {
-      directEnsureWakeStarted: Boolean(directEnsureWake),
       errorName,
     });
     throw error;
-  } finally {
-    // Keep an authorized hint alive on both acknowledgement and signal failure.
-    // The webhook still reports Temporal failure so the provider can retry.
-    const wake = directEnsureWake;
-    if (wake && input.scheduleAfterResponse) {
-      input.scheduleAfterResponse(() => wake);
-    }
   }
 
   scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
@@ -157,7 +130,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   });
 
   finishHostedOnboardingTiming(handoffTiming, "temporal-signaled", {
-    directEnsureWakeStarted: Boolean(directEnsureWake),
     workflowIdSuffix: toHostedOnboardingLogIdSuffix(signal.workflowId),
   });
   return {

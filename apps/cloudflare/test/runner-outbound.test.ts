@@ -4378,6 +4378,176 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  it.each(["before dispatch", "after persistence"])(
+    "recovers container transport loss %s through the encrypted artifact route", async (when) => {
+      const test = await createArtifactPutRecoveryFixture();
+      const original = test.bytes.slice();
+      const requests: ReturnType<Request["clone"]>[] = [];
+      const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+        const request = new Request(url, init);
+        requests.push(request.clone());
+        if (requests.length === 1 && when === "before dispatch") {
+          test.bytes.fill(99);
+          throw new TypeError("fetch failed");
+        }
+        const response = await handleRunnerOutboundRequest(request, test.env, "member_123");
+        if (requests.length === 1) {
+          expect(response.status).toBe(200);
+          expect(test.put).toHaveBeenCalledOnce();
+          test.bytes.fill(99);
+          throw new TypeError("fetch failed");
+        }
+        return response;
+      });
+      const readCurrentLease = vi.fn(() => ({
+        attemptId: "attempt_1", leaseGeneration: "9", userId: "member_123", workspaceVersion: "4",
+      }));
+      const store = createCloudflareArtifactStore({
+        fetchImpl, timeoutMs: 5_000, workspaceCheckpointBridge: { readCurrentLease },
+      });
+      const artifact = { bytes: test.bytes, sha256: test.sha256 };
+      await Promise.all([store.put(artifact), store.put(artifact)]);
+      await store.put(artifact);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(readCurrentLease).toHaveBeenCalledOnce();
+      expect(test.put).toHaveBeenCalledTimes(when === "before dispatch" ? 1 : 2);
+      const key = await hostedArtifactObjectKey({ sha256: test.sha256, userId: "member_123" });
+      for (const [objectKey] of test.put.mock.calls) expect(objectKey).toBe(key);
+      for (const request of requests) {
+        expect(request.url).toBe(test.request.url);
+        expect(request.method).toBe("PUT");
+        expect(new Uint8Array(await request.arrayBuffer())).toEqual(original);
+        expect([...request.headers]).toEqual([...requests[0]!.headers]);
+        expect(request.headers.get(HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER))
+          .toBe(String(test.now + 5_000));
+      }
+      expect(await test.env.BUNDLES.head?.(key)).toMatchObject({ key });
+      const stored = await test.env.BUNDLES.get(key);
+      expect(stored).not.toBeNull();
+      expect(new Uint8Array(await stored!.arrayBuffer())).not.toEqual(original);
+      const readback = await store.get(test.sha256, { purpose: "workspace_restore" });
+      expect(readback).toEqual(original);
+      expect(sha256Hex(readback!)).toBe(test.sha256);
+      expect(test.put).toHaveBeenCalledTimes(when === "before dispatch" ? 1 : 2);
+    },
+  );
+
+  it("lets a future explicit upload reach storage after two container transport failures", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    const first = new TypeError("fetch failed");
+    const second = new Error("socket hang up");
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) =>
+      handleRunnerOutboundRequest(new Request(url, init), test.env, "member_123"))
+      .mockRejectedValueOnce(first).mockRejectedValueOnce(second);
+    const store = createCloudflareArtifactStore({
+      fetchImpl, timeoutMs: 5_000,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({ attemptId: "attempt_1", leaseGeneration: "9", userId: "member_123", workspaceVersion: "4" }),
+      },
+    });
+    const artifact = { bytes: test.bytes, sha256: test.sha256 };
+    const failures = await Promise.all([
+      store.put(artifact).catch((error: unknown) => error),
+      store.put(artifact).catch((error: unknown) => error),
+    ]);
+    expect(failures[0]).toBeInstanceOf(HostedRuntimeArtifactWriteError);
+    expect(failures[0]).toMatchObject({ retryable: true, cause: { cause: second } });
+    expect(failures[1]).toBe(failures[0]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(test.put).not.toHaveBeenCalled();
+    await store.put(artifact);
+    await store.put(artifact);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(test.put).toHaveBeenCalledOnce();
+    expect(await store.get(test.sha256, { purpose: "workspace_restore" })).toEqual(test.bytes);
+  });
+
+  it.each(["before dispatch", "after persistence"])(
+    "does not restamp a revoked fence after transport loss %s", async (when) => {
+      const test = await createArtifactPutRecoveryFixture();
+      let currentAttemptId = "attempt_1";
+      test.validate.mockImplementation(async ({ attemptId }) => attemptId === currentAttemptId);
+      const readCurrentLease = vi.fn(() => ({
+        attemptId: currentAttemptId, leaseGeneration: "9", userId: "member_123", workspaceVersion: "4",
+      }));
+      const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+        if (fetchImpl.mock.calls.length === 1) {
+          if (when === "after persistence") {
+            const response = await handleRunnerOutboundRequest(new Request(url, init), test.env, "member_123");
+            expect(response.status).toBe(200);
+          }
+          currentAttemptId = "attempt_2";
+          throw new TypeError("fetch failed");
+        }
+        return handleRunnerOutboundRequest(new Request(url, init), test.env, "member_123");
+      });
+      const store = createCloudflareArtifactStore({
+        fetchImpl, timeoutMs: 5_000, workspaceCheckpointBridge: { readCurrentLease },
+      });
+      await expect(store.put({ bytes: test.bytes, sha256: test.sha256 })).rejects.toMatchObject({
+        retryable: false, cause: { status: 401 },
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(readCurrentLease).toHaveBeenCalledOnce();
+      expect(test.put).toHaveBeenCalledTimes(when === "before dispatch" ? 0 : 1);
+      expect(test.validate).toHaveBeenLastCalledWith({
+        attemptId: "attempt_1", generation: "9", userId: "member_123",
+      });
+      const key = await hostedArtifactObjectKey({ sha256: test.sha256, userId: "member_123" });
+      if (when === "before dispatch") expect(await test.env.BUNDLES.get(key)).toBeNull();
+      else expect(await store.get(test.sha256, { purpose: "workspace_restore" })).toEqual(test.bytes);
+    },
+  );
+
+  it.each([
+    { timeoutMs: 5_000, elapsedMs: 1_000 },
+    { timeoutMs: 500, elapsedMs: 500 },
+  ])("does not replay a lost persisted response after the container budget is consumed: %j", async ({ timeoutMs, elapsedMs }) => {
+    const test = await createArtifactPutRecoveryFixture();
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+      const response = await handleRunnerOutboundRequest(new Request(url, init), test.env, "member_123");
+      expect(response.status).toBe(200);
+      test.clock.mockReturnValue(test.now + elapsedMs);
+      throw new TypeError("fetch failed");
+    });
+    const store = createCloudflareArtifactStore({
+      fetchImpl, timeoutMs,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({ attemptId: "attempt_1", leaseGeneration: "9", userId: "member_123", workspaceVersion: "4" }),
+      },
+    });
+    await expect(store.put({ bytes: test.bytes, sha256: test.sha256 })).rejects.toBeInstanceOf(HostedRuntimeArtifactWriteError);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(test.put).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { code: 10001, asHttp: false }, { code: 10043, asHttp: false },
+    { code: 10001, asHttp: true }, { code: 10043, asHttp: true },
+  ])("does not multiply exhausted R2 retries ($code, HTTP: $asHttp)", async ({ code, asHttp }) => {
+    const test = await createArtifactPutRecoveryFixture();
+    test.put.mockRejectedValue(new Error(`put: Synthetic network service failure (${code})`));
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+      try {
+        return await handleRunnerOutboundRequest(new Request(url, init), test.env, "member_123");
+      } catch (error) {
+        if (asHttp) return new Response(null, { status: 503 });
+        throw error;
+      }
+    });
+    const store = createCloudflareArtifactStore({
+      fetchImpl, timeoutMs: 5_000,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({ attemptId: "attempt_1", leaseGeneration: "9", userId: "member_123", workspaceVersion: "4" }),
+      },
+    });
+    await expect(store.put({ bytes: test.bytes, sha256: test.sha256 })).rejects.toMatchObject({
+      retryable: true, ...(asHttp ? { cause: { status: 503 } } : {}),
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(test.put).toHaveBeenCalledTimes(2);
+  });
+
   it("authorizes artifact PUTs after live lease validation", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const ownsActiveInvocationLease = vi.fn(async () => true);

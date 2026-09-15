@@ -39,6 +39,7 @@ import {
   readHostedMemberCoreState,
 } from "./hosted-member-store";
 import {
+  reconcileHostedMemberLinqPhoneBindingsTx,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
   tryCreateHostedMemberPendingLinqParticipantContactTx,
   upsertHostedMemberPendingLinqParticipantContactTx,
@@ -764,6 +765,12 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
+  });
+  await reconcileHostedMemberLinqPhoneBindingsTx({
+    memberId: currentMember.id,
+    previousIdentity: currentIdentity,
+    nextPhone: phoneToPersist,
+    prisma: input.prisma,
   });
   return {
     identity,

@@ -1646,6 +1646,7 @@ run_test_coverage() {
 
 run_verify_acceptance() {
   run_typecheck
+  run_timed_step "Repo tools tests" pnpm test:repo-tools
   run_test_coverage 1
 }
 
@@ -1689,7 +1690,7 @@ run_test_diff() {
     return 0
   fi
 
-  if [[ "$diff_repo_internal_fast_path" == "1" ]]; then
+  if [[ "$diff_repo_internal_fast_path" == "1" && "$diff_run_verify_cli" != "1" ]]; then
     verify_log "diff-aware verification selected the repo-internal fast path"
     run_diff_repo_internal_fast_path
     if [[ "$run_repo_tools_tests" == "1" ]]; then
@@ -1730,6 +1731,10 @@ run_test_diff() {
 
   if [[ "${#test_dirs[@]}" -gt 0 ]]; then
     run_timed_step "Affected package tests" run_test_diff_package_tests "${test_dirs[@]}"
+  fi
+
+  if [[ "${diff_run_fixture_smoke:-0}" == "1" ]]; then
+    run_timed_step "Fixture smoke verification" run_fixture_smoke_verification
   fi
 
   if [[ "${#affected_app_dirs[@]}" -gt 0 ]]; then

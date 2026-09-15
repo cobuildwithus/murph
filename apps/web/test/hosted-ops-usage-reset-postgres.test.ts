@@ -838,6 +838,114 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it.each([
+      { label: "exhausted", remainingUsdMicros: 0n, referralUsdMicros: 0n },
+      { label: "partly used", remainingUsdMicros: 500_000n, referralUsdMicros: 0n },
+      { label: "unused", remainingUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS, referralUsdMicros: 0n },
+      { label: "partly used with referral credit", remainingUsdMicros: 500_000n, referralUsdMicros: 1_200_000n },
+    ])(
+      "reset everyone restores $label Starter capacity and preserves later usage on replay",
+      async ({ remainingUsdMicros, referralUsdMicros }) => {
+        const fixtureId = randomUUID();
+        const memberId = `hbm_reset_partial_${fixtureId}`;
+        const grantId = `huce_partial_${fixtureId}`;
+        const referralId = `hur_partial_${fixtureId}`;
+        const operationId = randomUUID();
+        const resetAt = new Date("2026-08-18T16:00:00.000Z");
+        const period = buildHostedStarterUsageLifetimePeriod();
+        const spentUsdMicros = HOSTED_STARTER_USAGE_GRANT_USD_MICROS - remainingUsdMicros;
+        const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+        try {
+          await prisma.hostedMember.create({ data: {
+            id: memberId, billingStatus: HostedBillingStatus.active,
+            usageCreditBalanceUsdMicros: remainingUsdMicros + referralUsdMicros,
+            usageCreditLedgerVersion: (spentUsdMicros > 0n ? 2n : 1n) + (referralUsdMicros > 0n ? 1n : 0n),
+            hostedAiUsagePeriods: { create: {
+              billingPlanCode: "launch_monthly", limitUsdMicros: 0n, spentUsdMicros,
+              ...period, blockedAt: remainingUsdMicros === 0n ? resetAt : null,
+            } },
+          } });
+          await prisma.hostedUsageCreditEntry.create({ data: {
+            id: grantId, beneficiaryMemberId: memberId, beneficiarySequence: 1n,
+            kind: "starter_grant", amountUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+            effectiveAt: new Date(resetAt.getTime() - 60_000),
+            semanticSourceKey: buildHostedStarterUsageSemanticSourceKey(memberId),
+            sourceReferenceLookupKey: buildHostedStarterUsageSourceReferenceLookupKey("web_onboarding"),
+            grant: { create: { beneficiaryMemberId: memberId, beneficiarySequence: 1n, remainingUsdMicros } },
+          } });
+          if (spentUsdMicros > 0n) {
+            await prisma.hostedUsageCreditEntry.create({ data: {
+              id: `huce_partial_debit_${fixtureId}`, beneficiaryMemberId: memberId,
+              beneficiarySequence: 2n, kind: "usage_debit", amountUsdMicros: -spentUsdMicros,
+              effectiveAt: new Date(resetAt.getTime() - 30_000), parentGrantEntryId: grantId,
+              semanticSourceKey: `hosted-usage-credit:partial:${fixtureId}`,
+              sourceUsageId: `usage_partial_${fixtureId}`,
+            } });
+          }
+          if (referralUsdMicros > 0n) {
+            await prisma.hostedUsageReferral.create({ data: {
+              id: referralId, beneficiaryMemberId: memberId, referrerMemberId: memberId,
+              policyCode: "new_person_activation_v1", policyVersion: "synthetic-reset-proof",
+              rewardUsdMicros: referralUsdMicros, status: "rewarded", referrerSubjectKey: "authenticated-member",
+              armedAt: new Date(resetAt.getTime() - 60_000),
+              expiresAt: new Date(resetAt.getTime() + 86_400_000), rewardedAt: resetAt,
+              targetBoundAt: new Date(resetAt.getTime() - 30_000), qualifiedAt: resetAt,
+            } });
+            await prisma.hostedUsageCreditEntry.create({ data: {
+              id: `huce_partial_referral_${fixtureId}`, beneficiaryMemberId: memberId,
+              beneficiarySequence: 3n, kind: "referral_grant", amountUsdMicros: referralUsdMicros,
+              effectiveAt: resetAt, semanticSourceKey: `hosted-usage-credit:referral:${fixtureId}`, referralId,
+              grant: { create: {
+                beneficiaryMemberId: memberId, beneficiarySequence: 3n, remainingUsdMicros: referralUsdMicros,
+              } },
+            } });
+          }
+          const historyBefore = await prisma.hostedUsageCreditEntry.findMany({
+            where: { beneficiaryMemberId: memberId }, orderBy: { beneficiarySequence: "asc" },
+          });
+          const result = await resetHostedOpsMemberUsageForResetAll({ memberId, now: resetAt, operationId }, prisma);
+          expect(result).toMatchObject({
+            outcome: spentUsdMicros > 0n ? "reset" : "unchanged", resetMode: "starter_allowance",
+          });
+          await expect(readHostedAiUsageGate({ memberId, now: resetAt, prisma })).resolves.toMatchObject({
+            allowed: true, allowanceSource: "direct_starter", spentUsdMicros: 0n,
+            remainingUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS + referralUsdMicros,
+          });
+          const historyAfter = await prisma.hostedUsageCreditEntry.findMany({
+            where: { beneficiaryMemberId: memberId }, orderBy: { beneficiarySequence: "asc" },
+          });
+          expect(historyAfter.slice(0, historyBefore.length)).toEqual(historyBefore);
+          expect(historyAfter.slice(historyBefore.length).map((entry) => entry.amountUsdMicros))
+            .toEqual(spentUsdMicros > 0n ? [spentUsdMicros] : []);
+
+          const usageAt = new Date(resetAt.getTime() + 1_000);
+          const record = makeIncludedUsageRecord({
+            fixtureId, memberId, occurredAt: usageAt, usageId: `usage_after_partial_${fixtureId}`,
+          });
+          await insertIncludedUsageRecord({ prisma, record });
+          await prisma.$transaction(async (tx) => {
+            await accountHostedAiUsageForAllowanceTx({ memberId, now: usageAt, record, tx });
+          });
+          const afterNewUsage = await readHostedAiUsageGate({ memberId, now: usageAt, prisma });
+          expect(afterNewUsage.spentUsdMicros).toBeGreaterThan(0n);
+          expect(afterNewUsage.remainingUsdMicros).toBeLessThan(HOSTED_STARTER_USAGE_GRANT_USD_MICROS + referralUsdMicros);
+          await expect(resetHostedOpsMemberUsageForResetAll({
+            memberId, now: new Date(usageAt.getTime() + 1_000), operationId,
+          }, prisma)).resolves.toEqual(result);
+          await expect(readHostedAiUsageGate({ memberId, now: usageAt, prisma })).resolves.toEqual(afterNewUsage);
+        } finally {
+          await prisma.hostedUsageCreditGrant.deleteMany({ where: { beneficiaryMemberId: memberId } });
+          await prisma.hostedUsageCreditEntry.deleteMany({
+            where: { beneficiaryMemberId: memberId, parentGrantEntryId: { not: null } },
+          });
+          await prisma.hostedUsageCreditEntry.deleteMany({ where: { beneficiaryMemberId: memberId } });
+          await prisma.hostedUsageReferral.deleteMany({ where: { id: referralId } });
+          await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+          await prisma.$disconnect();
+        }
+      },
+    );
+
     it("restores exhausted Starter capacity without rewriting prior credit history", async () => {
       const fixtureId = randomUUID();
       const memberId = `hbm_ops_starter_reset_${fixtureId}`;

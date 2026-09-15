@@ -498,11 +498,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   the irreversible-effect boundary. Later authority loss takes a typed durable
   disposition rather than retroactively erasing accepted work or spawning
   repair machinery. Invocation configuration remains a separate lifecycle
-  responsibility: a warm provider-specific invocation checks the saved provider
-  at provider entry to recover missed settings-change wakes. A mismatch hands
-  accepted work to a fresh invocation without consuming or rejecting it; an
-  unavailable settings read retains the work for retry. This check does not
-  reauthorize the accepted inputs.
+  responsibility: a warm provider-specific invocation observes the saved route
+  through normal work reads before provider entry; inference settings changes
+  alone do not schedule execution. A mismatch hands accepted work to a fresh
+  invocation without consuming or rejecting it; an unavailable read retains
+  the work for retry. This check does not reauthorize the accepted inputs.
 - When provider target identity and audience privacy are coupled, one live
   owner resolves the effective target and audience class atomically before
   model work. Persisted routes, snapshots, and legacy markers are hints, never
@@ -540,7 +540,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   user or automation turn. It runs as isolated output-only formatting with no
   conversation history, private context, resume mutation, tools, network, or
   delegated work. Provider, webhook, and other external values remain
-  untrusted data, and the platform alone owns final delivery.
+  untrusted data, and the platform alone owns final delivery. The canonical
+  direct channel-connection greeting is a narrow context exception: exact
+  hosted-member/channel/destination validation permits bounded committed
+  direct-private transcript excerpts, with all output-only capability and
+  delivery restrictions preserved. Group and unknown audiences are excluded.
   Its restrictive configuration belongs to a fresh ephemeral thread on the
   resident App Server. It must not change provider process launch identity,
   replace the resident process, or persist a resumable notification thread.

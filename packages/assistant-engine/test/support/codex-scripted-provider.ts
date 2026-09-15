@@ -20,6 +20,7 @@ interface ScriptedResponseRoute {
   beforeRespond?: () => Promise<void>
   completionLabel?: string
   delayMs?: number
+  delayAfterCreatedMs?: number
   requestExcludes?: readonly string[]
   requestIncludes?: readonly string[]
   usageInputTokens?: number
@@ -103,6 +104,7 @@ export async function prepareScriptedTurnScenario(
   scriptedStub: ScriptedStub,
   temporaryPaths: string[],
   options: {
+    websocket?: { streamIdleTimeoutMs: number }
     additionalTomlLines?: readonly string[]
     model?: string
     modelProvider?: string
@@ -164,6 +166,7 @@ export async function prepareScriptedTurnScenario(
 function buildScriptedCodexConfigToml(
   baseUrl: string,
   options: {
+    websocket?: { streamIdleTimeoutMs: number }
     additionalTomlLines?: readonly string[]
     modelProvider?: string
     multiAgentV2?: boolean
@@ -188,7 +191,11 @@ function buildScriptedCodexConfigToml(
     'wire_api = "responses"',
     'requires_openai_auth = false',
     'request_max_retries = 4',
-    'stream_max_retries = 5',
+    `stream_max_retries = ${options.websocket ? 0 : 5}`,
+    ...(options.websocket ? [
+      'supports_websockets = true',
+      `stream_idle_timeout_ms = ${options.websocket.streamIdleTimeoutMs}`,
+    ] : []),
     '',
     ...(options.multiAgentV2
       ? [
@@ -357,11 +364,12 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
                     type: 'message',
                   },
         ]
-    writeScriptedSseResponse({
+    await writeScriptedSseResponse({
       outputItems,
       response,
       responseId,
       usageInputTokens: scripted.usageInputTokens,
+      delayAfterCreatedMs: scripted.delayAfterCreatedMs,
     })
     if (scripted.completionLabel) {
       completedResponseLabels.push(scripted.completionLabel)
@@ -572,12 +580,13 @@ function readProviderToolOutputText(value: unknown): string | null {
   return textItems.length > 0 ? textItems.join('\n') : null
 }
 
-function writeScriptedSseResponse(input: {
+async function writeScriptedSseResponse(input: {
   outputItems: readonly Record<string, unknown>[]
   response: ServerResponse
   responseId: string
   usageInputTokens?: number
-}): void {
+  delayAfterCreatedMs?: number
+}): Promise<void> {
   const inputTokens = input.usageInputTokens ?? 12
   const usage = {
     input_tokens: inputTokens,
@@ -606,6 +615,7 @@ function writeScriptedSseResponse(input: {
     },
     type: 'response.created',
   })
+  if (input.delayAfterCreatedMs) await delay(input.delayAfterCreatedMs)
   for (const [outputIndex, outputItem] of input.outputItems.entries()) {
     writeScriptedSseEvent(input.response, 'response.output_item.added', {
       item: {

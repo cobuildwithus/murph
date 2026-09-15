@@ -4,6 +4,7 @@ import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
+import { preflightHostedScheduledReconcile } from "./scheduled-reconcile-preflight";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
   buildHostedDeviceSyncScheduledReconcileWakeEventId,
@@ -12,6 +13,7 @@ import {
 const DEFAULT_WAKE_LIMIT = 25;
 const DUE_RECONCILE_WAKE_BUCKET_MS = 5 * 60_000;
 const MAX_WAKE_LIMIT = 250;
+const MAX_PREFLIGHTS_PER_SWEEP = 5;
 
 export interface HostedDeviceSyncDueReconcileSweeperResult {
   dueConnections: number;
@@ -31,6 +33,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   logger?: HostedDeviceSyncDueReconcileSweeperLogger;
   now?: Date;
   requestWake?: HostedDeviceSyncScheduledReconcileWakeRequest;
+  preflight?: typeof preflightHostedScheduledReconcile;
   store?: Pick<PrismaDeviceSyncControlPlaneStore, "listDueReconcileConnectionsForSweep">;
   wakeLimit?: number;
 } = {}): Promise<HostedDeviceSyncDueReconcileSweeperResult> {
@@ -68,10 +71,42 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   let wakeAttempted = 0;
   let wakeFailed = 0;
   let wakeNotAccepted = 0;
+  const preflightTotals = {
+    attempted: 0, eligible: 0, avoidedWakes: 0, logicalCollectionReads: 0,
+    decodedRecordCount: 0, decodedRecordBytes: 0, elapsedMs: 0,
+    reasons: {} as Record<string, number>,
+    webhookAgeOutcomes: {} as Record<string, number>,
+  };
 
   await runHostedRecoveryBatch(
     selectedDueConnections,
     async (dueConnection) => {
+      const canProbe = dueConnection.provider === "junction"
+        && dueConnection.orphanedDirtyRecoveryKey === undefined;
+      if (canProbe && preflightTotals.attempted >= MAX_PREFLIGHTS_PER_SWEEP) {
+        preflightTotals.reasons.budget_exhausted = (preflightTotals.reasons.budget_exhausted ?? 0) + 1;
+      } else if (canProbe) {
+        preflightTotals.attempted += 1;
+        try {
+          const probe = await (input.preflight ?? preflightHostedScheduledReconcile)({ connection: dueConnection, now });
+          preflightTotals.eligible += Number(probe.outcome !== "ineligible");
+          preflightTotals.logicalCollectionReads += probe.requestCount;
+          preflightTotals.decodedRecordCount += probe.recordCount;
+          preflightTotals.decodedRecordBytes += probe.responseBytes;
+          preflightTotals.elapsedMs += probe.elapsedMs;
+          const webhookAgeOutcome = `${probe.webhookAgeBucket ?? "unavailable"}:${probe.outcome}`;
+          preflightTotals.webhookAgeOutcomes[webhookAgeOutcome] = (preflightTotals.webhookAgeOutcomes[webhookAgeOutcome] ?? 0) + 1;
+          const reason = /^[a-z_]{1,64}$/.test(probe.reason) ? probe.reason : "other";
+          preflightTotals.reasons[reason] = (preflightTotals.reasons[reason] ?? 0) + 1;
+          if (probe.outcome === "unchanged" && probe.wakeAvoided) {
+            preflightTotals.avoidedWakes += 1;
+            return;
+          }
+        } catch {
+          // No provider payload or raw error crosses the aggregate log boundary.
+          preflightTotals.reasons.failed = (preflightTotals.reasons.failed ?? 0) + 1;
+        }
+      }
       wakeAttempted += 1;
 
       let wake;
@@ -148,6 +183,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     wakeLimit,
     wakeNotAccepted,
     skippedDueConnections,
+    preflight: preflightTotals,
   });
 
   return {

@@ -128,14 +128,10 @@ function formatHostedEmailSyncSuccessMessage(
   mode: HostedEmailSyncMode,
 ): string {
   if (mode === "verify") {
-    return syncResult.runTriggered
-      ? `Email verified and connected: ${syncResult.emailAddress}`
-      : `Email verified and saved: ${syncResult.emailAddress}. Murph will finish connecting it shortly.`;
+    return `Email verified and connected: ${syncResult.emailAddress}`;
   }
 
-  return syncResult.runTriggered
-    ? `Email connected: ${syncResult.emailAddress}`
-    : `Email saved: ${syncResult.emailAddress}. Murph will finish connecting it shortly.`;
+  return `Email connected: ${syncResult.emailAddress}`;
 }
 
 async function syncHostedEmailConnection(
@@ -182,6 +178,6 @@ function toHostedEmailSyncErrorMessage(error: unknown): string {
 
   return toErrorMessage(
     error,
-    "Your email is verified, but we couldn't finish connecting it to Murph. Refresh and try again.",
+    "Your email is verified, but we couldn't finish connecting it to Murph. Try saving again.",
   );
 }

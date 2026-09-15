@@ -5,6 +5,7 @@ import { buildHostedRunnerContainerEnv } from "../../src/hosted-env-policy.ts";
 import {
   buildHostedLinqInboundEvent,
   HOSTED_LOCAL_LINQ_API_TOKEN,
+  postHostedLocalLinqWebhook,
   startHostedLocalLinqStub,
   type HostedLocalLinqWaitScenario,
 } from "./hosted-local-linq-support.js";
@@ -18,6 +19,70 @@ const passiveWaitScenario = {
     summaryLines.join("\n"),
 } satisfies HostedLocalLinqWaitScenario;
 const providerHeaders = { authorization: `Bearer ${HOSTED_LOCAL_LINQ_API_TOKEN}` };
+
+describe("hosted local Linq webhook redelivery", () => {
+  const input = {
+    event: { event_id: "evt_fixture", event_type: "message.received" },
+    secret: "synthetic-webhook-key",
+    webBaseUrl: "http://127.0.0.1:8123",
+  };
+  const staleRoute = () => Response.json({
+    error: { code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED", retryable: true },
+  }, { status: 503 });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("redelivers the identical signed event once after retryable route preparation", async () => {
+    const accepted = Response.json({ ok: true }, { status: 202 });
+    const send = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(staleRoute())
+      .mockResolvedValueOnce(accepted);
+    const response = await postHostedLocalLinqWebhook(input);
+
+    expect(response).toBe(accepted);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
+    expect(send.mock.calls[0]?.[1]?.body).toBe(JSON.stringify(input.event));
+  });
+
+  it("returns a persistent route failure after one redelivery", async () => {
+    const finalFailure = staleRoute();
+    const send = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(staleRoute())
+      .mockResolvedValueOnce(finalFailure);
+    const response = await postHostedLocalLinqWebhook(input);
+
+    expect(response).toBe(finalFailure);
+    expect(response.bodyUsed).toBe(false);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { status: 202, body: '{"ok":true}' },
+    { status: 500, body: '{"error":{"code":"HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED","retryable":true}}' },
+    { status: 503, body: '{"error":{"code":"OTHER_FAILURE","retryable":true}}' },
+    { status: 503, body: '{"error":{"code":"HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED","retryable":false}}' },
+    { status: 503, body: '{"error":{"code":"HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED"}}' },
+    { status: 503, body: 'null' },
+    { status: 503, body: 'not json' },
+  ])("preserves terminal or unrecognized response $status / $body", async ({ status, body }) => {
+    const original = new Response(body, { status });
+    const send = vi.spyOn(globalThis, "fetch").mockResolvedValue(original);
+    const response = await postHostedLocalLinqWebhook(input);
+
+    expect(response).toBe(original);
+    await expect(response.text()).resolves.toBe(body);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves transport failures visible without redelivery", async () => {
+    const failure = new Error("Synthetic transport failure");
+    const send = vi.spyOn(globalThis, "fetch").mockRejectedValue(failure);
+    await expect(postHostedLocalLinqWebhook(input)).rejects.toBe(failure);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("hosted local Linq provider stub", () => {
   it.each([

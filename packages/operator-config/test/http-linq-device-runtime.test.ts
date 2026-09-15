@@ -6,6 +6,8 @@ import { afterEach, expect, test, vi } from 'vitest'
 import {
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
+  DAILY_NUTRITION_OPTIONAL_GOALS_INTRO,
+  renderAssistantResponseCardText,
   renderAssistantWorkoutResponseCardText,
   type CompactTableWorkoutResponseCardV1,
 } from '../src/assistant-response-cards.ts'
@@ -4227,4 +4229,54 @@ test('device sync client wraps transport and http failures with control-plane co
       (error.context as { stage?: string }).stage === 'response' &&
       (error.context as { path?: string }).path === undefined,
   )
+})
+
+
+test('linq totals-only card requests one interactive message and keeps the bounded fallback introduction', async () => {
+  const card = { ...NUTRITION_CARD, mealCount: 1,
+    totals: { calories: { total: 610, mealCount: 1 }, proteinGrams: { total: 28, mealCount: 1 },
+      carbsGrams: { total: 84, mealCount: 1 }, fatGrams: { total: 17, mealCount: 1 }, fiberGrams: { total: 14, mealCount: 1 } },
+    goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null } }
+  let request: Record<string, unknown> | null = null
+  const fetchImplementation: LinqFetch = vi.fn(async (_url, init) => {
+    request = parseJsonRequestBody(init.body)
+    return createJsonResponse({ message: { id: 'totals-only-message' } })
+  })
+  await sendLinqIMessageAppCard({ card, chatId: 'synthetic-lunch-thread', idempotencyKey: 'totals-intro',
+    companionMessage: renderAssistantResponseCardText(card, DAILY_NUTRITION_OPTIONAL_GOALS_INTRO),
+  }, { env: { LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3', LINQ_API_TOKEN: 'linq-token' }, fetchImplementation })
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  expect(request).toMatchObject({ message: { idempotency_key: 'totals-intro', parts: [{
+    type: 'imessage_app', interactive: true,
+    layout: { subcaption: DAILY_NUTRITION_OPTIONAL_GOALS_INTRO },
+  }] } })
+  expect((request as { message?: { parts?: unknown[] } } | null)?.message?.parts).toHaveLength(1)
+})
+
+
+test('linq five-goal cards retain the native interactive request and existing layout', async () => {
+  const card = {
+    ...NUTRITION_CARD,
+    goals: {
+      calories: { target: 2100, status: 'unavailable' as const },
+      proteinGrams: { target: 100, status: 'unavailable' as const },
+      carbsGrams: { target: 220, status: 'unavailable' as const },
+      fatGrams: { target: 40, status: 'unavailable' as const },
+      fiberGrams: { target: 30, status: 'unavailable' as const },
+    },
+  }
+  const fetchImplementation: LinqFetch = vi.fn(async (_url, init) => {
+    expect(parseJsonRequestBody(init.body)).toMatchObject({ message: { parts: [{
+      interactive: true,
+      layout: {
+        caption: 'Jul 28 · 4 meals',
+        subcaption: 'Some calorie and nutrition estimates were partial.',
+      },
+    }] } })
+    return createJsonResponse({ message: { id: 'goal-aware-message' } })
+  })
+  await sendLinqIMessageAppCard({ card, chatId: 'synthetic-thread', idempotencyKey: 'goal-aware',
+    companionMessage: DAILY_NUTRITION_OPTIONAL_GOALS_INTRO,
+  }, { env: { LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3', LINQ_API_TOKEN: 'linq-token' }, fetchImplementation })
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
 })

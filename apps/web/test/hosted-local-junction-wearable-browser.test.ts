@@ -297,7 +297,10 @@ describe("hosted-local Junction wearable browser authorization", () => {
       waitForResponse: () => new Promise(() => undefined),
       waitForURL: vi.fn(async () => undefined),
     };
+    let releaseCleanup = () => {};
+    const cleanupPending = new Promise<void>((resolve) => { releaseCleanup = resolve; });
     const close = vi.fn(async () => {
+      await cleanupPending;
       url = "about:blank";
       throw new Error("private cleanup error");
     });
@@ -321,15 +324,26 @@ describe("hosted-local Junction wearable browser authorization", () => {
       MURPH_E2E_PROVIDER_TIMEOUT_MS: "30000",
     };
     for (const [key, value] of Object.entries(environment)) vi.stubEnv(key, value);
+    const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const failedRun = expect(runHostedLocalJunctionBrowserForTest()).rejects.toThrow(
+      "Authorization action failed (timeout)",
+    );
     try {
-      await expect(runHostedLocalJunctionBrowserForTest()).rejects.toThrow(
-        "Authorization action failed (timeout)",
-      );
+      await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+      // The browser has not exited: cleanup is still pending. Its original
+      // authorization boundary and cleanup handoff must already be observable.
+      expect(write).toHaveBeenCalledWith("MURPH_E2E_WEARABLE_STAGE=junction_garmin_authorization\n");
+      expect(write).toHaveBeenCalledWith("MURPH_E2E_WEARABLE_STAGE=browser_cleanup\n");
+      releaseCleanup();
+      await failedRun;
       expect(close).toHaveBeenCalledOnce();
       expect(clicks).toBe(1);
       expect(formatHostedLocalJunctionBrowserFailureForTest(new Error("later error")))
         .toBe("Junction wearable browser E2E failed at junction_garmin_authorization (browser_error): Authorization action failed (timeout); action=authorization_button; before=garmin.com/other; after=browser_error.");
     } finally {
+      releaseCleanup();
+      await failedRun;
+      write.mockRestore();
       vi.unstubAllEnvs();
     }
   });

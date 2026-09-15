@@ -8,7 +8,8 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   readHostedInferenceConnectionView: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
-  scheduleHostedInferenceRuntimeWake: vi.fn(),
+  after: vi.fn(),
+  signalHostedRuntimeWakeRuntime: vi.fn(),
   setHostedInferenceConnectionSelected: vi.fn(),
 }));
 
@@ -25,9 +26,13 @@ vi.mock(
   }),
 );
 
-vi.mock("@/src/lib/hosted-inference/runtime-wake", () => ({
-  scheduleHostedInferenceRuntimeWake:
-    mocks.scheduleHostedInferenceRuntimeWake,
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  after: mocks.after,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedRuntimeWakeRuntime: mocks.signalHostedRuntimeWakeRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -78,10 +83,12 @@ describe("assistant inference mode settings route", () => {
   });
 
   afterEach(() => {
+    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeWakeRuntime).not.toHaveBeenCalled();
     vi.unstubAllEnvs();
   });
 
-  it("selects a verified custom connection and wakes the runtime", async () => {
+  it("selects a verified custom connection without scheduling runtime work", async () => {
     const response = await route.POST(request({ mode: "custom" }));
 
     expect(response.status).toBe(200);
@@ -94,9 +101,6 @@ describe("assistant inference mode settings route", () => {
       memberId: "member_assistant_mode",
       selected: true,
     });
-    expect(mocks.scheduleHostedInferenceRuntimeWake).toHaveBeenCalledWith(
-      "member_assistant_mode",
-    );
   });
 
   it("leaves managed mode unchanged when no custom connection exists", async () => {
@@ -110,7 +114,6 @@ describe("assistant inference mode settings route", () => {
       updated: false,
     });
     expect(mocks.setHostedInferenceConnectionSelected).not.toHaveBeenCalled();
-    expect(mocks.scheduleHostedInferenceRuntimeWake).not.toHaveBeenCalled();
   });
 
   it("does not select a Chat Completions connection while that adapter is disabled", async () => {
@@ -123,7 +126,6 @@ describe("assistant inference mode settings route", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.setHostedInferenceConnectionSelected).not.toHaveBeenCalled();
-    expect(mocks.scheduleHostedInferenceRuntimeWake).not.toHaveBeenCalled();
   });
 
   it("returns a conflict when the connection changed between read and select", async () => {
@@ -137,7 +139,6 @@ describe("assistant inference mode settings route", () => {
     const response = await route.POST(request({ mode: "custom" }));
 
     expect(response.status).toBe(409);
-    expect(mocks.scheduleHostedInferenceRuntimeWake).not.toHaveBeenCalled();
   });
 
   it("rejects extra routing fields instead of accepting hidden state", async () => {

@@ -203,6 +203,7 @@ export function buildAssistantRealCodexVitestArgs(
     '--config',
     'vitest.config.ts',
     '--no-coverage',
+    '--reporter=default',
     'test/assistant-codex-real-e2e.test.ts',
     '--testNamePattern',
     `^${escapeRegularExpression(matcherName)}$`,

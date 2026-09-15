@@ -64,6 +64,8 @@ export function composePublicWearableSummaryBundleFromStoredRows(
   filters: WearableSummaryFilters | WearableMetricSummaryFilters,
   options: {
     retainSourceHealthOutsideDateFilters?: boolean;
+    /** Resolve all health evidence, but do not serialize discarded public days. */
+    sourceHealthOnly?: boolean;
   } = {},
 ): ProjectedWearableSummaryBundle {
   if (stored.providerFilterWasProvided && stored.providers.length === 0) {
@@ -81,6 +83,7 @@ export function composePublicWearableSummaryBundleFromStoredRows(
     : composePublicWearableSummaryBundleFromProviderRows(
         providerBundle,
         activityEvidenceRows,
+        options.sourceHealthOnly ?? false,
       );
 }
 
@@ -151,23 +154,10 @@ function publicWearableSummaryBundleFromRows(
             }
 
             const rowKey = `${provider}\u0000${row.summaryDate}`;
-            if (
-              activityRowKeys.has(rowKey)
-              || parsed.metricCandidates.some((candidate) =>
-                candidate.date !== row.summaryDate
-                || normalizeWearableProviders([candidate.publicProvider])[0]
-                  !== provider
-                || resolveStoredActivityMetricCandidatePublicProvider(candidate)
-                  !== provider
-              )
-              || parsed.sessions.some((session) =>
-                session.date !== row.summaryDate
-                || normalizeWearableProviders([session.provider])[0]
-                  !== provider
-              )
-            ) {
+            if (activityRowKeys.has(rowKey)) {
               throw invalidStoredActivityEvidenceError();
             }
+            assertActivityEvidenceScope(parsed, provider, row.summaryDate);
 
             activityRowKeys.add(rowKey);
             bundle.activityDays.push(parsed.summary);
@@ -201,15 +191,18 @@ function publicWearableSummaryBundleFromRows(
 }
 
 function composePublicWearableSummaryBundleFromProviderRows(
-  providerBundle: ProjectedWearableSummaryBundle,
+  providerBundle: WearableSummaryBundle,
   activityEvidenceRows: readonly StoredActivityEvidenceRow[],
+  sourceHealthOnly: boolean,
 ): ProjectedWearableSummaryBundle {
   const dataset = wearableDatasetFromProjectedBundle(
     providerBundle,
     activityEvidenceRows,
   );
   const composed = mergeStoredMetricConflictEvidence(
-    buildWearableSummaryBundleFromDataset(dataset),
+    // Health must be calculated after stored conflicts have been merged. The
+    // earlier calculation in the ordinary bundle builder would be discarded.
+    buildWearableSummaryBundleFromDataset(dataset, { includeSourceHealth: false }),
     providerBundle,
   );
   const recomputedSourceHealth = buildWearableSourceHealth({
@@ -220,15 +213,18 @@ function composePublicWearableSummaryBundleFromProviderRows(
     sleepNights: composed.sleepNights,
   });
 
-  return projectPublicWearableSummaryBundle(mergeStoredSourceHealthContext({
+  const merged = mergeStoredSourceHealthContext({
     ...composed,
     sourceHealth: recomputedSourceHealth,
-  }, providerBundle.sourceHealth));
+  }, providerBundle.sourceHealth);
+  return projectPublicWearableSummaryBundle(sourceHealthOnly
+    ? { ...emptyProjectedWearableSummaryBundle(), sourceHealth: merged.sourceHealth }
+    : merged);
 }
 
 function mergeStoredMetricConflictEvidence(
   bundle: WearableSummaryBundle,
-  stored: ProjectedWearableSummaryBundle,
+  stored: WearableSummaryBundle,
 ): WearableSummaryBundle {
   return {
     ...bundle,
@@ -597,7 +593,7 @@ function compareSourceHealthSummaries(
 }
 
 function wearableDatasetFromProjectedBundle(
-  bundle: ProjectedWearableSummaryBundle,
+  bundle: WearableSummaryBundle,
   activityEvidenceRows: readonly StoredActivityEvidenceRow[],
 ): WearableDataset {
   const metricCandidates: WearableMetricCandidate[] = [];
@@ -662,6 +658,23 @@ function wearableDatasetFromProjectedBundle(
 interface StoredActivityEvidenceRow {
   metricCandidates: readonly WearableActivityMetricCandidateEvidence[];
   sessions: readonly WearableActivitySessionEvidence[];
+}
+
+function assertActivityEvidenceScope(
+  evidence: StoredActivityEvidenceRow,
+  provider: string,
+  date: string,
+): void {
+  if (
+    evidence.metricCandidates.some((candidate) =>
+      candidate.date !== date
+      || normalizeWearableProviders([candidate.publicProvider])[0] !== provider
+      || resolveStoredActivityMetricCandidatePublicProvider(candidate) !== provider)
+    || evidence.sessions.some((session) =>
+      session.date !== date || normalizeWearableProviders([session.provider])[0] !== provider)
+  ) {
+    throw invalidStoredActivityEvidenceError();
+  }
 }
 
 function storedRowProvider(row: QueryWearableSummaryRow): string | undefined {
@@ -844,7 +857,10 @@ function projectedMetricCandidateFromResolvedMetric(
     paths: [],
     provider,
     recordedAt: selection.recordedAt,
-    recordIds: [...selection.recordIds],
+    // Stored public selections already have empty recordIds. Apply that same
+    // projection when the provider bundle is still request-local; raw canonical
+    // provenance must not affect reconstructed evidence or escape this path.
+    recordIds: [],
     sourceFamily: projectedSourceFamily(selection.sourceFamily),
     sourceKind: selection.sourceKind ?? `projected-${summaryKind}`,
     title: selection.title,
@@ -853,7 +869,7 @@ function projectedMetricCandidateFromResolvedMetric(
   };
 }
 
-function projectedSleepWindows(summary: ProjectedWearableSleepSummary): WearableSleepWindowCandidate[] {
+function projectedSleepWindows(summary: WearableSleepNight): WearableSleepWindowCandidate[] {
   const evidence = summary.sleepWindowEvidence ?? [];
   if (evidence.length > 0) {
     return evidence.map((window, index) => ({
@@ -888,7 +904,7 @@ function projectedSleepWindows(summary: ProjectedWearableSleepSummary): Wearable
 }
 
 function projectedSelectedSleepWindow(
-  summary: ProjectedWearableSleepSummary,
+  summary: WearableSleepNight,
 ): WearableSleepWindowCandidate | null {
   const provider = normalizeWearableProviders([
     summary.sleepWindowProvider ?? summary.sessionMinutes.selection.provider ?? "",
@@ -929,7 +945,7 @@ function projectedSelectedSleepWindow(
   };
 }
 
-function sleepResolvedMetrics(summary: ProjectedWearableSleepSummary): WearableResolvedMetric[] {
+function sleepResolvedMetrics(summary: WearableSleepNight): WearableResolvedMetric[] {
   return [
     summary.averageHeartRate,
     summary.awakeMinutes,
@@ -952,7 +968,7 @@ function sleepResolvedMetrics(summary: ProjectedWearableSleepSummary): WearableR
   ];
 }
 
-function recoveryResolvedMetrics(summary: ProjectedWearableRecoverySummary): WearableResolvedMetric[] {
+function recoveryResolvedMetrics(summary: WearableRecoveryDay): WearableResolvedMetric[] {
   return [
     summary.bodyBattery,
     summary.hrv,
@@ -967,7 +983,7 @@ function recoveryResolvedMetrics(summary: ProjectedWearableRecoverySummary): Wea
   ];
 }
 
-function bodyStateResolvedMetrics(summary: ProjectedWearableBodyStateSummary): WearableResolvedMetric[] {
+function bodyStateResolvedMetrics(summary: WearableBodyStateDay): WearableResolvedMetric[] {
   return [
     summary.bmi,
     summary.bodyFatPercentage,

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { compileToolInputSchema } from './support/tool-input-schema-validation.ts'
-import { automationDeviceActivitySourceValues } from '@murphai/contracts'
+import { automationDeviceActivitySourceValues, automationScheduleCronSchema } from '@murphai/contracts'
+import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.js'
+import { buildToolCallValidationFeedback } from '../src/assistant/tool-validation-feedback.js'
 
 import {
   MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
@@ -9,6 +11,57 @@ import {
 } from '../src/assistant-codex/dynamic-tools/automation.js'
 
 type JsonSchemaObject = Record<string, unknown>
+
+describe('assistant cron authoring semantics', () => {
+  const parse = (args: unknown) => readAutomationDynamicToolRequest({
+    arguments: args, tool: MURPH_AUTOMATION_TOOL.name,
+  })
+  const patch = {
+    action: 'patch', lookup: 'automation_stretch',
+    expectedUpdatedAt: '2026-10-09T16:00:00.000Z',
+  }
+  const save = { action: 'save', title: 'Stretch break', instructions: 'Take a stretch break.' }
+
+  it.each([save, patch])('rejects combined calendar-day and weekday restrictions for $action with repair feedback', (args) => {
+    for (const expression of ['0 14 9-15 10 1-5', '0 14 1,15 * 1', '0 14 */2 * 1-5', '0 14 */1 * 1-5', '0 14 1 * */1']) {
+      const schedule = { kind: 'cron', expression, timeZone: 'America/New_York' }
+      // Canonical cron retains its intentional OR semantics, including legacy reads.
+      expect(automationScheduleCronSchema.safeParse(schedule).success).toBe(true)
+      const parsed = parse({ ...args, schedule })
+      expect(parsed?.kind).toBe('invalid-automation-arguments')
+      if (parsed?.kind !== 'invalid-automation-arguments') throw new Error('Expected rejected authoring.')
+      const feedback = buildToolCallValidationFeedback(parsed.validationDigest, 'invalid_automation_arguments')
+      expect(feedback).toContain('expression')
+      expect(feedback).toContain('OR')
+      expect(feedback).toContain('activeUntil')
+      expect(feedback).toContain('day-of-month')
+    }
+  })
+
+  it.each([save, patch])('accepts weekday, monthly, and annual recurrences for $action', (args) => {
+    for (const expression of ['0 14 * * 1-5', '0 14 15 * *', '0 14 15 2 *', '0 14 * * *', '0 14 * 10 1-5']) {
+      expect(parse({ ...args, schedule: { kind: 'cron', expression } })?.kind).toBe('automation')
+    }
+  })
+
+  it('allows inspecting and editing legacy automations without resubmitting their schedule', () => {
+    expect(parse({ action: 'inspect', lookup: patch.lookup })?.kind).toBe('automation')
+    for (const fields of [{ status: 'paused' }, { status: 'archived' }, { instructions: 'Stand up and stretch.' }]) {
+      expect(parse({ ...patch, ...fields })?.kind).toBe('automation')
+    }
+  })
+
+  it('accepts a finite weekday correction whose next occurrence skips the weekend', () => {
+    const schedule = { kind: 'cron' as const, expression: '0 14 * * 1-5', timeZone: 'America/New_York' }
+    const activeUntil = '2026-10-16T00:00:00-04:00'
+    const parsed = parse({ ...patch, schedule, activeUntil })
+    expect(parsed).toMatchObject({ kind: 'automation', request: { schedule, activeUntil } })
+    const after = new Date('2026-10-09T19:00:00.000Z')
+    expect(computeAssistantCronNextRunAt({ ...schedule, expression: '0 14 9-15 10 1-5' }, after))
+      .toBe('2026-10-10T18:00:00.000Z')
+    expect(computeAssistantCronNextRunAt(schedule, after)).toBe('2026-10-12T18:00:00.000Z')
+  })
+})
 
 function asObject(value: unknown): JsonSchemaObject {
   expect(value).toBeTypeOf('object')

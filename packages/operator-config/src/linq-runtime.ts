@@ -709,6 +709,7 @@ export async function sendLinqIMessageAppCard(
     card: AssistantResponseCard
     chatId: string
     idempotencyKey: string
+    companionMessage?: string | null
   },
   dependencies: {
     env?: NodeJS.ProcessEnv
@@ -737,7 +738,7 @@ export async function sendLinqIMessageAppCard(
         interactive: true,
         url: buildLinqIMessageAppCardUrl(input.card),
         fallback_text: buildLinqIMessageAppFallbackText(input.card),
-        layout: buildLinqIMessageAppLayout(input.card),
+        layout: buildLinqIMessageAppLayout(input.card, input.companionMessage),
       }],
     },
   }

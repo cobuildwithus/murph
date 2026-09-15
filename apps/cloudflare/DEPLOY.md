@@ -32,6 +32,75 @@ additional deploy-smoke slot. The unused member application stays at zero.
 The scaffold declares the budget on `RunnerContainer`; staging moves that budget
 to `NextRunnerContainer` when the live release selects that namespace.
 
+### Live Web protocol admission
+
+`deploy-worker-version.cli.ts` admits the **served** `HOSTED_WEB_BASE_URL` before
+release work and again before each namespace bootstrap, native retirement or
+application admission, compatibility activation, and final promotion. Each
+boundary then rechecks the current Worker identity. Uploading an inactive version
+is not admission; artifact/fleet smoke and native convergence receipts remain
+required and do not attest Web compatibility. Retries and worker-only releases
+must obtain fresh admission; there is no persisted compatibility receipt or skip
+flag.
+
+The signed, bodyless GET `/api/internal/hosted-runtime/protocol-admission` uses
+existing Web callback signature verification and replay protection, with its own
+system nonce owner (not the Temporal binding-admission contract). The request
+binds the protocol version and a fresh nonce in the signed query. The no-store
+reply echoes that nonce and contains executable evidence from two existing owners:
+
+- The Web runtime-log reader parses synthetic entries for its actual event-code
+  enum. The candidate requires its declared producer vocabulary to be a subset
+  of the reader's; a future reader's extra codes are allowed. The actual log route and
+  probe use the same parser, including `runner.processing_finished`.
+- The normal thread-route authority handler and probe share their response
+  builder. The candidate uses the actual Worker response parser on both direct
+  and group witnesses, requiring explicit `true` and `false`. Denial, malformed
+  audience and inverted direct/group semantics fail closed. The Worker parser
+  still accepts legacy authorized responses for callers that do not need an
+  audience; the runtime's scheduled-delivery boolean requirement and independent
+  callback reauthorization are unchanged.
+
+Worker-only releases run both checks too: retaining an image does not prove that
+it lacks the audience requirement. Without an attested contract for that retained
+artifact, mode alone cannot safely lower the consumer floor. The declared log
+vocabulary is conservative (not pruned to call-site reachability); a legacy Web
+must gain the compatible reader/response encoding before this CLI can activate it.
+Old callers remain compatible with the additive Web response. Neither check
+requires equal or monotonically ordered source revisions.
+
+Each admission requires three successful samples, one second apart. Any failed
+sample ends the attempt, rather than retrying until a compatible replica happens
+to answer. Every sample has a ten-second end-to-end deadline and a 16 KiB streamed
+response limit. Only HTTPS origin requests, non-redirected HTTP 200, JSON, no-store
+and absent/zero Age are admitted. Authentication failures, unavailable Web,
+unknown protocol versions, stale nonce, malformed evidence and missing contracts
+fail closed. Diagnostics contain fixed reason codes or locally owned event codes,
+not remote response bodies, URLs, signatures or deployment identities.
+
+**Bootstrap:** deploy the additive Web endpoint and compatible readers to the
+actual serving Web origin first and finish propagation before deploying this
+CLI. A Web revision with no admission endpoint returns 404 and is deliberately
+not admitted, even when otherwise compatible. Backport the endpoint with evidence
+from that revision's real owners when retaining an older compatible Web; do not
+copy a newer revision's claimed evidence. Missing or incorrect callback signing
+configuration must be repaired through the existing protected deployment path.
+An already-incompatible live pair still needs a compatible Web forward fix; this
+guard prevents the next mutation, not damage already in progress.
+
+This is a bounded directed-contract check, not a Git SHA ordering rule or a claim
+of global atomic rollout. Three observations cannot prove every Web replica has
+converged, nor prevent an independent Web rollback after the check. Keep the
+serving alias stable and preserve the required reader floor throughout activation
+and subsequent operation. Admission tests event-code parsing and the authority
+response encoding, not database route correctness, every log field, or all
+Web-to-runtime features. In particular, selected custom-inference revisions flow
+in the opposite direction: the **Custom Inference Activation** procedure below
+still owns flag enablement, selected-state migration and the runtime rollback
+floor. This GET neither reads member selection nor authorizes that feature's
+activation. New wire obligations need narrowly derived executable witnesses at
+their actual owners, not labels in a general capability registry.
+
 ### Selected-account size experiment
 
 `SmallRunnerContainer` has a ten-instance ceiling outside the regular fleet
@@ -115,7 +184,7 @@ timing coverage separate. Deployment success alone is not latency evidence.
    mode sends one 100-percent step. Neither mode is an atomic switch.
 6. Wait for completed native distribution, then run signed smoke against the
    target image and serving namespace. A final Worker-only activation removes the
-   old image from admission and resumes configured pristine standby inventory.
+   old image from admission while preserving configured pristine standby inventory.
    Verify that this publication did not mutate native applications and record
    the effective config for private release verification.
 
@@ -169,9 +238,12 @@ images. Promotion changes the executing image without aging out member bindings.
 The other bank's previous descriptor remains available solely for existing
 retained ownership and cleanup; fresh allocation selects the serving bank.
 
-While a candidate is pending, fresh pristine standby preparation pauses and
-unbound inventory drains. Existing exact claim replay remains available.
-Configured standby inventory resumes after promotion. Worker-only deployments
+During an in-place image transition, configured pristine standby inventory stays
+eligible for preparation, claims, and refill. Both health gates admit the same
+complete active or candidate image pair; all pristine and immutable member-binding
+checks remain required. Native replacement can still require a slot to restart
+and reprove readiness. Promotion narrows admission to the candidate image.
+Worker-only deployments
 preserve an existing pending pair and all member images and capacities; only the
 smoke artifact changes. They never silently cancel a pending image rollout.
 
@@ -2344,12 +2416,28 @@ That command:
 - prepares the stable native runner base image with Docker's local cache; production deploy paths force that build from source, while hosted-local E2E lanes may reuse the GHCR-published runner base image when the source fingerprint matches the current checkout
 - publishes the compatible Worker through Wrangler version commands, proves the isolated artifact behavior, and updates the serving image through native gradual rollout by default; explicit immediate and Worker-only releases use the same guarded owner
 
-The serving application retains a 300-second connection-age grace and native
-10/25/50/100 percentage targets. Pristine standby preparation pauses during the
-mixed-image window. The isolated `DeploySmokeRunnerContainer` uses zero active
-grace and a single 100-percent step. The private workflow's `container_rollout`
-input defaults to gradual; selecting immediate targets 100 percent in one step.
-Both image modes can interrupt a selected process and require checkpoint recovery.
+Fresh deployment configuration uses zero additional connection-age grace for
+runner containers, matching Cloudflare's default. Native 10/25/50/100 percentage
+targets and the separate SIGTERM checkpoint/drain path remain unchanged. A
+recently connected runner may therefore be selected for replacement sooner;
+connection age is not a checkpoint deadline. Pristine standby preparation remains
+enabled during the mixed-image window. The isolated `DeploySmokeRunnerContainer`
+uses zero grace and one 100-percent step. The private workflow's
+`container_rollout` input defaults to gradual; immediate targets 100 percent in
+one step. Both image modes can interrupt a selected process and require recovery.
+
+Apply changed grace only from a stable release: grace is part of the admitted
+execution identity, so an existing pending candidate must finish through its
+exact retry path before changing that target. Worker-only releases and retained
+applications preserve their observed native grace, image and resources.
+
+After an authorized full rollout, verify zero native grace on the serving and
+small applications, completed matching rollouts, and post-promotion smoke with
+the promoted Worker context and configured standby target. Measure standby loss
+through restored ready inventory, including refill after promotion; compare like
+rollout modes and observe checkpoint failures, shutdown rejections and recovery.
+Removing this optional wait does not establish a fixed deployment duration or a
+measured fourfold improvement.
 
 Worker replacement is checkpoint-safe at the runtime fence rather than through rollout timing alone. The snapshot-session handshake has one six-second total deadline; the runtime starts its first exact durable upload-session heartbeat immediately after that response, then keeps serialized attempts on a two-second start-to-start cadence throughout publication. `UserRunner` retains the fence and retries after one second only for that exact attempt and lease generation while its heartbeat is less than 10 seconds old and completion is absent. Successful foreground preemption bypasses this preservation and stops heartbeat liveness before detached cleanup. After Web accepts the checkpoint, the runtime stops heartbeating and best-effort marks completion; marker failure falls back to stale-heartbeat expiry. Other starts remain immediate; live snapshots have no artificial publication deadline, while a dead runtime can defer replacement for the 10-second liveness window plus at most one additional retry interval (one second) after its final heartbeat.
 
@@ -2587,9 +2675,14 @@ check because foreground traffic can consume a previously verified slot. This
 proves a ready inventory snapshot; the migration checks above still own failed
 preparation recovery, drain, foreground allocation and background exclusion.
 
-When ready inventory is disabled or targets zero slots, the initial smoke prepares
-and retires one synthetic unbound slot in the actual candidate namespace. A
-separate smoke application alone is not evidence that the candidate image is ready.
+Regardless of cached ready inventory, the initial smoke prepares and retires one
+synthetic unbound slot in the actual candidate namespace. Preparation returns its
+attested image pair; smoke requires the exact candidate pair (or active pair when
+stable), rejecting missing attestation from an older Worker. Retirement is awaited
+on success and failure. This fresh proof is independent of cached coordinator
+rows and the separate smoke application; neither proves the serving candidate
+image on its own. Artifact-only and live-model-only phases do not touch serving
+inventory.
 
 Optional smoke env:
 

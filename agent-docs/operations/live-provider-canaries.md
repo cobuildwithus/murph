@@ -1,6 +1,6 @@
 # Live provider canaries
 
-Last verified: 2026-09-10
+Last verified: 2026-09-14
 
 A passing live canary means its actual journey and business assertions completed.
 A successful scheduler, skipped job, connection-only result, or unavailable
@@ -19,9 +19,22 @@ age of an executed run; this system adds no product-state receipt database.
   The fixed canary account is reset through its existing input-free owner.
   After onboarding, the journey requires zero goals, one canonical fixed-goal
   write, a later model readback, and exactly one persisted goal. Pending
-  conversation work or a checkpoint change prevents accepting an older replica. The fixed-target read-only outcome route returns counts/readiness only.
+  conversation work or a checkpoint change during the read prevents accepting
+  the result. The observer parses the live v2 checkpoint and compares its complete
+  fingerprint before and after decryption. Published-replica freshness uses the
+  existing Browser Vault generation/age policy; the runtime owns canonical-content
+  hashing. A checkpoint archive fingerprint is never compared with the replica's
+  independent canonical source hash. The fixed-target read-only outcome route
+  returns counts/readiness only.
   It cannot choose another member or enqueue a refresh. Deployment movement,
   absent support, stale projection, missing effect, or duplicate effects fail.
+  Each canonical observation allows five minutes, with at most 300 serial
+  one-second polling attempts and a ten-second per-request cap inside that
+  overall deadline. This accommodates production's required three-minute quiet
+  window before checkpointing and subsequent replica publication. The separate
+  send-to-reply and inter-reply budgets remain 20 seconds; canonical observation
+  time is excluded. The workflow has a 30-minute cap covering reset, all three
+  observations, replies, setup, and final exact-deployment verification.
 - Stripe retains its protected sandbox browser matrix. After the browser
   schedules Edge to Pulse, a real owned test clock advances through renewal and
   invoice collection. A different paid subscription-cycle invoice, reconciled

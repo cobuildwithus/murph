@@ -69,3 +69,39 @@ during residue maintenance and retains rows only while their input events
 survive. This database is not a disposable projection: loss or corruption fails
 closed. The first database write establishes a SQLite-capable runner rollback
 floor; old runners cannot consume converted workspace metadata.
+
+## CLI timing transport and optional failure detail
+
+`@murphai/runtime-state/cli-timing` owns the finite timing schema, registered
+command catalog, code/stage vocabularies, normalization and bounds.
+`@murphai/runtime-state/node/cli-timing` owns one best-effort authenticated
+loopback UDP datagram per subprocess. The CLI exit owner observes the existing
+exit code before calling `process.exit`; it does not await telemetry. Bundled
+and source entrypoints continue to share the existing timing owner.
+
+The sender uses a fixed synchronous `127.0.0.1` lookup for both bind and send,
+and an exclusive ephemeral bind. Node's default numeric-address lookup still
+schedules asynchronous work; a following `process.exit` can otherwise discard
+that work even after the socket has bound. Exclusive binding also avoids the
+cluster shared-handle path. The socket remains unreferenced and closes on send
+completion or error. Missing/invalid endpoints, native bind/send failure, a dead
+receiver and send-buffer pressure remain best-effort loss, never delayed exits,
+command errors, output, retries or keepalive. There is no flush wait, timer,
+queue, persisted file, process supervisor or parallel reporting channel.
+
+`murph.cli-timing.v1` is unchanged. Per-command `failures` and `droppedFailures`
+remain optional; older producers without them are accepted. New codes
+`exercise_not_found`, `exercise_catalog_unavailable` and `exercise_catalog_invalid`
+are exact existing source-owned errors, not new domain behavior. Prefer
+consumer-first deployment of catalog additions: older finite readers collapse
+unrecognized codes to `unknown`, retaining timing, outcome and failure counts.
+Unknown strings/extra fields are never forwarded. Assistant shell diagnostics
+reuse these catalogs; they do not establish another timing or error vocabulary.
+
+`test/cli-timing-process.test.ts` uses actual terminating subprocesses, the
+production source module and a live loopback receiver, including immediate and
+already-bound failures, nested termination and failed/dead transports. CLI
+entrypoint tests in `packages/cli/test/cli-timing-subprocess.test.ts` separately
+cover domain/validation rejection and nearby successes with isolated synthetic
+state, fake food lookup and byte-identical output/exit checks. They neither
+identify historical production arguments nor require a real-model journey.

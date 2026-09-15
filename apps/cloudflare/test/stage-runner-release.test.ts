@@ -83,6 +83,27 @@ describe("runner deployment staging", () => {
     expect(staged.applications[0]?.applicationId).toContain("id-");
   });
 
+  it.each([false, true])("applies zero grace only to updated applications (workerOnly=%s)", async retainServingRunner => {
+    await writeFile(path.join(directory, "source.json"), JSON.stringify({ ...config,
+      containers: config.containers.map(entry => ({ ...entry, rollout_active_grace_period: 0 })),
+    }));
+    const staged = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40),
+      configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
+      currentVersion: version({ active: primary, candidate: null, previous: next }),
+      retainServingRunner, listApplications,
+    });
+    for (const application of staged.applications) {
+      expect(application.specification.rollout_active_grace_period).toBe(0);
+    }
+    const effective: { containers: Array<{ class_name: string; rollout_active_grace_period: number; image: string }> }
+      = JSON.parse(await readFile(staged.configPath, "utf8"));
+    for (const container of effective.containers) {
+      const updated = staged.applications.some(application => application.className === container.class_name);
+      expect(container.rollout_active_grace_period).toBe(updated ? 0 : 300);
+      expect(container.image).toBe(updated ? image : "registry.example.test/previous@sha256:old");
+    }
+  });
+
   it("bootstraps from the existing Worker fingerprint without changing its release identity", async () => {
     const staged = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40),
       configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
@@ -111,6 +132,18 @@ describe("runner deployment staging", () => {
     expect(second.deployment).toEqual(first.deployment);
     await writeFile(path.join(directory, "source.json"), JSON.stringify({ ...config, vars: { ...config.vars, HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "a".repeat(64) } }));
     await expect(stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications })).rejects.toThrow("different candidate");
+  });
+
+  it("rejects a grace-only change to a pending candidate while allowing an exact retry", async () => {
+    const input = { releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"),
+      currentVersionId: "worker-live", currentVersion: version(), listApplications };
+    const first = await stageHostedRunnerRelease(input);
+    const retry = { ...input, currentVersionId: "staged-worker", currentVersion: version(first.deployment) };
+    expect((await stageHostedRunnerRelease(retry)).deployment).toEqual(first.deployment);
+    await writeFile(input.configPath, JSON.stringify({ ...config,
+      containers: config.containers.map(entry => ({ ...entry, rollout_active_grace_period: 0 })),
+    }));
+    await expect(stageHostedRunnerRelease(retry)).rejects.toThrow("different candidate");
   });
 
   it("reuses already admitted pending inventory after an interrupted staging smoke", async () => {

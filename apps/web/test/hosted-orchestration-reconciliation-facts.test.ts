@@ -11,6 +11,7 @@ const MEMBER_ID = "member_orch_1";
 const UNSAFE_SENTINEL = "UNSAFE_STATUS_SENTINEL";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
   getPrisma: vi.fn(),
   hasHostedMailboxAutomationEngagementSince: vi.fn(),
@@ -35,6 +36,11 @@ const mocks = vi.hoisted(() => ({
   sendClaimedHostedAiUsageLimitNoticeToLinqChat: vi.fn(),
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread: vi.fn(),
   tryMarkHostedMailboxConversationAiUsageDenied: vi.fn(),
+}));
+
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  after: mocks.after,
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -1556,6 +1562,35 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("observes authoritative usage-limited=%s without changing admission", async (usageLimited) => {
+    const onUsageGateDecision = vi.fn();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW, nextWakeReason: "assistant_due",
+    }));
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue(usageLimited
+      ? { status: "denied", decision: buildUsageLimitExceededGateDecision() }
+      : { status: "allowed" });
+    const { readHostedRuntimeReconciliationFacts } = await import(
+      "../src/lib/hosted-orchestration/runtime-reconciliation-facts"
+    );
+    const facts = await readHostedRuntimeReconciliationFacts({ userId: MEMBER_ID, onUsageGateDecision });
+    expect(onUsageGateDecision).toHaveBeenCalledExactlyOnceWith({ at: FIXED_NOW, usageLimited });
+    expect(facts.blocked?.reason ?? null).toBe(usageLimited ? "ai_usage_denied" : null);
+    onUsageGateDecision.mockClear();
+    await readHostedRuntimeReconciliationFacts({ userId: MEMBER_ID, usageGateMode: "read_only", onUsageGateDecision });
+    expect(onUsageGateDecision).not.toHaveBeenCalled();
+    mocks.readSelectedHostedInferenceConnectionOverride.mockResolvedValue({ kind: "synthetic_override" });
+    const overrideFacts = await readHostedRuntimeReconciliationFacts({ userId: MEMBER_ID, onUsageGateDecision });
+    expect(overrideFacts.blocked).toBeNull();
+    expect(onUsageGateDecision).toHaveBeenCalledExactlyOnceWith({ at: FIXED_NOW, usageLimited: false });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await expect(readHostedRuntimeReconciliationFacts({
+        userId: MEMBER_ID, onUsageGateDecision: () => { throw new Error("synthetic scheduling failure"); },
+      })).resolves.toMatchObject({ blocked: null });
+    } finally { warning.mockRestore(); }
   });
 
   it("does not gate future model-capable workspace wakes", async () => {

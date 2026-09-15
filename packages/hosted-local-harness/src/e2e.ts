@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import process from "node:process";
 
+import { assertHostedLocalVitestSelection } from "./e2e-test-selection.ts";
+
 import {
   removeHostedLocalWebAuthorityFromProcessEnvironment,
   sanitizeHostedLocalGenericEnvironment,
@@ -117,6 +119,7 @@ export type HostedLocalE2eScenarioName =
   | "snapshot-publication-fallback"
   | "snapshot-stress"
   | "stripe-billing-browser-matrix"
+  | "stale-deferred-replay"
   | "stuck-invocation-recovery"
   | "timezone-injection"
   | "usage-limit-ambiguous-send"
@@ -478,6 +481,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
       "^hosted local foreground checkpoint ordering e2e",
     ],
   },
+  {
+    file: "apps/cloudflare/test/hosted-local-stale-deferred-replay-e2e.test.ts",
+    name: "stale-deferred-replay",
+    testControls: true,
+  },
 ] as const;
 
 export interface HostedLocalE2eSuiteInput {
@@ -675,6 +683,18 @@ export async function runHostedLocalE2eSuite(
           scenarios,
         });
       });
+      if (liveWearableEnvironment.vitestEnvOverlay[JUNCTION_WEARABLE_LIVE_ENV] === "1") {
+        suiteEnv.NEXT_DIST_DIR_MODE = "smoke";
+        await runAdmittedStep(async () => {
+          await runForegroundCommand({
+            args: ["--dir", "apps/web", "build:hosted-local"],
+            command: "pnpm",
+            cwd: hostedLocalHarnessRepoRoot,
+            env: suiteEnv,
+            label: "Hosted local wearable production Web preparation",
+          });
+        });
+      }
       await runAdmittedStep(async () => {
         await runHostedLocalVitest({
           assertWorkAdmission,
@@ -945,6 +965,19 @@ async function runHostedLocalVitestForScenarios(input: {
   const testNamePatterns = input.scenarios.length === 1
     ? input.scenarios[0]?.vitestProcessTestNamePatterns ?? [null]
     : [null];
+
+  const scenario = input.scenarios.length === 1 ? input.scenarios[0] : undefined;
+  if (scenario?.vitestProcessTestNamePatterns) {
+    await assertHostedLocalVitestSelection({
+      config: "apps/cloudflare/vitest.e2e.config.ts",
+      cwd: hostedLocalHarnessRepoRoot,
+      env: buildHostedLocalVitestScenarioEnv(input),
+      files: [scenario.file],
+      // Shard admission still validates the complete registry partition.
+      patterns: resolveHostedLocalE2eScenarios(scenario.name)[0]?.vitestProcessTestNamePatterns
+        ?? scenario.vitestProcessTestNamePatterns,
+    });
+  }
 
   for (let index = 0; index < testNamePatterns.length; index += 1) {
     const testNamePattern = testNamePatterns[index] ?? null;

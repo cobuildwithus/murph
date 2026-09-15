@@ -3660,9 +3660,14 @@ test("Junction mixed temporal and sparse backfills keep separate day owners", as
     windowEnd: ownerWindowEnd,
     windowStart: ownerWindowStart,
   });
+  const temporalChild = requireValue(firstResult.scheduledJobs?.find((job) =>
+    job.payload?.temporalAuthorityTimeZone
+  ));
+  assert.equal(firstRequests.some((url) => url.includes("/v2/timeseries/")), false);
+  await executeJunctionJob(provider, context, createJobFromInput(temporalChild));
   const temporalRequest = requireValue(
     firstRequests.find((url) => url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")),
-    "Mixed Junction backfill should import the newest authoritative temporal day inline.",
+    "Mixed Junction backfill should execute its queued newest authoritative temporal day.",
   );
   assertJunctionWindowQuery(
     temporalRequest,
@@ -3679,7 +3684,10 @@ test("Junction mixed temporal and sparse backfills keep separate day owners", as
   const secondTimeseriesRequests = firstRequests
     .filter((url) => url.includes("/v2/timeseries/"))
     .map((url) => new URL(url));
-  assert.equal(secondTimeseriesRequests.length, 1);
+  assert.equal(secondTimeseriesRequests.length, 16);
+  assert.equal(new Set(secondTimeseriesRequests.map((url) =>
+    url.searchParams.get("start_date")
+  )).size, 16);
   assert.equal(
     secondTimeseriesRequests[0]?.pathname,
     "/v2/timeseries/junction-user-1/blood_oxygen/grouped",
@@ -3691,7 +3699,7 @@ test("Junction mixed temporal and sparse backfills keep separate day owners", as
   );
   assert.equal(
     secondResult.scheduledJobs?.[0]?.payload?.timeseriesCursor,
-    "2026-01-02T00:00:00.000Z",
+    "2026-01-17T00:00:00.000Z",
   );
 
   firstRequests.length = 0;

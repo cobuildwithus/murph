@@ -83,6 +83,83 @@ const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS = 5_000;
 
+function writeHostedRuntimeWakeResponse(
+  response: ServerResponse,
+  { accepted, absent, mismatch, pending, identityPresent }: {
+    accepted: boolean;
+    absent: boolean;
+    mismatch: boolean;
+    pending: boolean;
+    identityPresent: boolean;
+  },
+): void {
+  if (accepted) {
+    response.setHeader("x-runtime-wake-accepted-at-ms", String(Date.now()));
+    response.setHeader("x-runtime-wake-accepted", "1");
+  } else {
+    response.setHeader("x-runtime-wake-accepted", "0");
+  }
+  if (identityPresent && accepted && !mismatch) {
+    response.setHeader("x-runtime-wake-identity-checked", "1");
+  }
+  if (pending) {
+    response.setHeader("x-runtime-wake-pending", "1");
+  }
+  if (absent) {
+    response.setHeader("x-runtime-wake-absent", "1");
+  }
+  if (mismatch) {
+    response.setHeader("x-runtime-wake-mismatch", "1");
+  }
+  response.statusCode = 204;
+  response.end();
+}
+
+async function runHostedLiveModelSmokeRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  signal: AbortSignal,
+  hydrateHeavyRuntime: () => Promise<HostedContainerHeavyRuntime>,
+): Promise<void> {
+  discardUnreadRequestBody(request);
+  let heavyRuntime: HostedContainerHeavyRuntime | null = null;
+  try {
+    heavyRuntime = await hydrateHeavyRuntime();
+    const result = await heavyRuntime.runLiveModelTurnSmoke({
+      model: heavyRuntime.deployLiveModelTurnSmokeModel,
+      signal: signal,
+    });
+    writeJsonResponse(response, 200, {
+      liveModelTurn: result,
+      ok: true,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      error,
+      level: "error",
+      message: "Hosted container entrypoint failed the live model turn smoke.",
+      phase: "failed",
+      userId: null,
+    });
+    if (signal.aborted || response.destroyed) {
+      return;
+    }
+    // Live-turn smoke diagnostics carry locally constructed labels plus
+    // capped, redacted Codex stdout/stderr excerpts so CI can show the
+    // provider-side reason without dumping raw JSONL or credentials.
+    writeJsonResponse(response, 500, {
+      error: "Hosted live model turn smoke failed.",
+      ok: false,
+      smokeErrorMessage: heavyRuntime
+        ? heavyRuntime.buildLiveModelTurnSmokeSafeText(
+            error instanceof Error ? error.message : String(error),
+          )
+        : "Hosted live model turn smoke failed before runtime hydration.",
+    });
+  }
+}
+
 interface HostedContainerProcessApi {
   readFile(path: string, encoding: BufferEncoding): Promise<string>;
 }
@@ -537,26 +614,13 @@ export async function startHostedContainerEntrypoint(input: {
           phase: "wake.running",
           userId: null,
         });
-        if (accepted) {
-          response.setHeader("x-runtime-wake-accepted-at-ms", String(Date.now()));
-          response.setHeader("x-runtime-wake-accepted", "1");
-        } else {
-          response.setHeader("x-runtime-wake-accepted", "0");
-        }
-        if (wakeRequest && accepted && !mismatch) {
-          response.setHeader("x-runtime-wake-identity-checked", "1");
-        }
-        if (pending) {
-          response.setHeader("x-runtime-wake-pending", "1");
-        }
-        if (absent) {
-          response.setHeader("x-runtime-wake-absent", "1");
-        }
-        if (mismatch) {
-          response.setHeader("x-runtime-wake-mismatch", "1");
-        }
-        response.statusCode = 204;
-        response.end();
+        writeHostedRuntimeWakeResponse(response, {
+          accepted,
+          absent,
+          mismatch,
+          pending,
+          identityPresent: wakeRequest !== null,
+        });
         return;
       }
 
@@ -722,43 +786,12 @@ export async function startHostedContainerEntrypoint(input: {
         }
         activeHostedRunnerJobCount += 1;
         claimedRunnerSlot = true;
-        discardUnreadRequestBody(request);
-        let heavyRuntime: HostedContainerHeavyRuntime | null = null;
-        try {
-          heavyRuntime = await hydrateHeavyRuntime();
-          const result = await heavyRuntime.runLiveModelTurnSmoke({
-            model: heavyRuntime.deployLiveModelTurnSmokeModel,
-            signal: requestAbort.signal,
-          });
-          writeJsonResponse(response, 200, {
-            liveModelTurn: result,
-            ok: true,
-          });
-        } catch (error) {
-          emitHostedExecutionStructuredLog({
-            component: "container",
-            error,
-            level: "error",
-            message: "Hosted container entrypoint failed the live model turn smoke.",
-            phase: "failed",
-            userId: null,
-          });
-          if (requestAbort.signal.aborted || response.destroyed) {
-            return;
-          }
-          // Live-turn smoke diagnostics carry locally constructed labels plus
-          // capped, redacted Codex stdout/stderr excerpts so CI can show the
-          // provider-side reason without dumping raw JSONL or credentials.
-          writeJsonResponse(response, 500, {
-            error: "Hosted live model turn smoke failed.",
-            ok: false,
-            smokeErrorMessage: heavyRuntime
-              ? heavyRuntime.buildLiveModelTurnSmokeSafeText(
-                  error instanceof Error ? error.message : String(error),
-                )
-              : "Hosted live model turn smoke failed before runtime hydration.",
-          });
-        }
+        await runHostedLiveModelSmokeRequest(
+          request,
+          response,
+          requestAbort.signal,
+          hydrateHeavyRuntime,
+        );
         return;
       }
 

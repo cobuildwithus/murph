@@ -185,6 +185,14 @@ export type DeviceSyncJobTimingOutcome =
   | "failed"
   | "yielded";
 
+/** Importer persistence outcomes; applied can include evidence-only writes. */
+export type DeviceSyncImportOutcomeCounts = {
+  applied: number;
+  noop: number;
+  failed: number;
+  unknown: number;
+};
+
 /**
  * Bounded metadata for one claimed worker attempt. This intentionally omits
  * account/job ids, payloads, cursors, provider responses, and health values so
@@ -215,6 +223,8 @@ export interface DeviceSyncJobTimingDiagnostic {
   providerUnattributedElapsedMs: number | null;
   resource?: string;
   snapshotImportCount: number;
+  snapshotImportOutcomes: DeviceSyncImportOutcomeCounts;
+  completeSourceDayImportOutcomes: DeviceSyncImportOutcomeCounts;
   snapshotImportElapsedMs: number;
   snapshotCanonicalCoreElapsedMs: number;
   snapshotCanonicalWriteElapsedMs: number;
@@ -1148,7 +1158,24 @@ export interface DeviceWebhookHandler {
   verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult>;
 }
 
+export interface ScheduledReconcileProbeResult {
+  outcome: "unchanged" | "changed" | "ineligible";
+  reason: string;
+  nextReconcileAt?: string;
+  /** Complete logical collection reads, including inventory; not HTTP pages. */
+  requestCount: number;
+  recordCount: number;
+  /** Serialized decoded records, not transport/billing bytes. */
+  responseBytes: number;
+  elapsedMs: number;
+}
+
 export interface DeviceJobExecutor {
+  probeScheduledReconcile?(
+    account: StoredDeviceSyncAccount,
+    now: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<ScheduledReconcileProbeResult>;
   // Optional execution scope for one bounded worker drain. Never retains live
   // authorization; a new drain or standalone worker call gets a fresh scope.
   createPassExecutor?(): DeviceJobExecutor;

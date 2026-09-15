@@ -1,4 +1,4 @@
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import {
   startHostedOpenAiResponsesWebSocketRelay,
@@ -67,7 +67,247 @@ class FakeSocket implements HostedOpenAiSocketPort {
   }
 }
 
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+}
+
 const createdAt = 1_775_000_000;
+
+afterEach(() => vi.useRealTimers());
+
+test("records a forwarded request with no upstream messages when a silent socket closes", async () => {
+  vi.useFakeTimers();
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
+  downstream.emitMessage("PRIVATE_REQUEST_FIXTURE");
+  await controller.drain();
+  await vi.advanceTimersByTimeAsync(90_000);
+  downstream.emitClose(1006, "PRIVATE_CLOSE_REASON_FIXTURE");
+  const diagnostics = reportDiagnostic.mock.calls.map(([value]) => value);
+  expect(diagnostics.map((value) => value.websocketMilestone)).toEqual([
+    "client_received", "upstream_sent", "closed",
+  ]);
+  expect(diagnostics.at(-1)).toMatchObject({
+    clientFrameCount: 1, upstreamFrameCount: 0, downstreamFrameCount: 0,
+    requestElapsedMs: 90_000, upstreamSendElapsedMs: 0,
+    firstUpstreamElapsedMs: null, firstDownstreamElapsedMs: null,
+    upstreamSendObserved: true, upstreamFrameObserved: false,
+    downstreamSendObserved: false, closeSide: "client", closeCode: 1006,
+  });
+  expect(new Set(diagnostics.map((value) => value.websocketConnectionCorrelation)).size).toBe(1);
+  expect(JSON.stringify(diagnostics)).not.toContain("PRIVATE_");
+  expect(upstream.sent).toEqual(["PRIVATE_REQUEST_FIXTURE"]);
+});
+
+test("records first upstream latency and last frame age without logging every token", async () => {
+  vi.useFakeTimers();
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
+  downstream.emitMessage("request");
+  await controller.drain();
+  await vi.advanceTimersByTimeAsync(250);
+  upstream.emitMessage("PRIVATE_RESPONSE_FIXTURE");
+  await controller.drain();
+  await vi.advanceTimersByTimeAsync(200);
+  upstream.emitMessage("second response frame");
+  await controller.drain();
+  await vi.advanceTimersByTimeAsync(100);
+  upstream.emitClose(1000);
+  await controller.drain();
+  const diagnostics = reportDiagnostic.mock.calls.map(([value]) => value);
+  expect(diagnostics.map((value) => value.websocketMilestone)).toEqual([
+    "client_received", "upstream_sent", "upstream_received", "downstream_sent", "closed",
+  ]);
+  expect(diagnostics.at(-1)).toMatchObject({
+    firstUpstreamElapsedMs: 250, firstDownstreamElapsedMs: 0,
+    upstreamIdleMs: 100, downstreamIdleMs: 100,
+    upstreamFrameCount: 2, downstreamFrameCount: 2, closeSide: "provider",
+  });
+  expect(JSON.stringify(diagnostics)).not.toContain("PRIVATE_");
+});
+
+test.each([
+  { data: JSON.stringify({ type: "PRIVATE_EVENT_TYPE", text: "PRIVATE_CONTENT" }), kind: "other" },
+  { data: "PRIVATE_INVALID_JSON", kind: "invalid_json" },
+  { data: "PRIVATE_CONTENT".repeat(5_000), kind: "too_large" },
+  { data: new TextEncoder().encode("PRIVATE_BINARY_CONTENT").buffer, kind: "binary" },
+])("keeps first-frame diagnostics bounded and content-free ($kind)", async ({ data, kind }) => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
+  downstream.emitMessage("request");
+  await controller.drain();
+  upstream.emitMessage(data);
+  await controller.drain();
+  expect(downstream.sent).toEqual([data]);
+  expect(reportDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
+    websocketMilestone: "upstream_received", firstUpstreamMessageKind: kind,
+  }));
+  expect(JSON.stringify(reportDiagnostic.mock.calls)).not.toContain("PRIVATE_");
+});
+
+test("throwing diagnostic callbacks preserve relay forwarding and failure handling", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({
+    downstream, upstream, reportDiagnostic: () => { throw new Error("offline"); },
+  });
+  downstream.emitMessage("request");
+  upstream.emitMessage("response");
+  await controller.drain();
+  expect(upstream.sent).toEqual(["request"]);
+  expect(downstream.sent).toEqual(["response"]);
+  upstream.emitError();
+  await controller.drain();
+  expect(downstream.closes).toEqual([{ code: 1011, reason: "Responses WebSocket relay failed" }]);
+});
+
+test("bounds provider bytes before enqueue and drains accepted frames before closing Codex", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const authorization = deferred<Response | null>();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({
+    authorizeClientFrame: () => authorization.promise,
+    downstream,
+    upstream,
+  });
+  downstream.emitMessage("request");
+  await Promise.resolve();
+  const frame = new ArrayBuffer(2 * 1024 * 1024);
+  for (let index = 0; index < 15; index++) upstream.emitMessage(frame);
+  expect(upstream.closes).toHaveLength(0);
+  upstream.emitMessage(frame);
+  expect(upstream.closes).toEqual([expect.objectContaining({ code: 1009 })]);
+  expect(downstream.closes).toHaveLength(0);
+  for (let index = 0; index < 80; index++) upstream.emitMessage(frame);
+  authorization.resolve(null);
+  await controller.drain();
+  expect(downstream.sent).toHaveLength(15);
+  expect(upstream.sent).toHaveLength(0);
+  expect(downstream.closes).toEqual([expect.objectContaining({ code: 1009 })]);
+});
+
+test.each(["client", "provider"] as const)("bounds empty %s messages while authorization waits", async (direction) => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const authorization = deferred<Response | null>();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({
+    authorizeClientFrame: () => authorization.promise,
+    downstream,
+    upstream,
+  });
+  downstream.emitMessage("request");
+  await Promise.resolve();
+  const sender = direction === "client" ? downstream : upstream;
+  for (let index = 0; index < 4095; index++) sender.emitMessage("");
+  expect(upstream.closes).toHaveLength(0);
+  sender.emitMessage("");
+  expect(upstream.closes).toEqual([expect.objectContaining({ code: 1009 })]);
+  authorization.resolve(null);
+  await controller.drain();
+  expect(downstream.closes).toEqual([expect.objectContaining({ code: 1009 })]);
+});
+
+test("counts provider UTF-8 bytes before its serial queue is available", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const authorization = deferred<Response | null>();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({
+    authorizeClientFrame: () => authorization.promise,
+    downstream,
+    upstream,
+  });
+  downstream.emitMessage("request");
+  await Promise.resolve();
+  // Each message is 17 MiB in UTF-8 despite being much shorter in UTF-16 code units.
+  const frame = "🙂".repeat(17 * 1024 * 1024 / 4);
+  upstream.emitMessage(frame);
+  upstream.emitMessage(frame);
+  expect(upstream.closes).toEqual([expect.objectContaining({ code: 1009 })]);
+  authorization.resolve(null);
+  await controller.drain();
+  expect(downstream.sent).toEqual([frame]);
+});
+
+test("releases byte and message reservations after each drained batch", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream });
+  const frame = new ArrayBuffer(16 * 1024 * 1024);
+  for (let batch = 0; batch < 3; batch++) {
+    upstream.emitMessage(frame);
+    upstream.emitMessage(frame);
+    await controller.drain();
+    for (let index = 0; index < 4096; index++) upstream.emitMessage("");
+    await controller.drain();
+  }
+  expect(downstream.sent).toHaveLength(3 * (2 + 4096));
+  expect(downstream.closes).toHaveLength(0);
+  expect(upstream.closes).toHaveLength(0);
+});
+
+test.each([false, true])("preserves a billed terminal when overflow races accounting (write fails=%s)", async (writeFails) => {
+  const persistence = deferred<void>();
+  const persistUsage = vi.fn(() => persistence.promise);
+  const { controller, downstream, reportFailure, upstream } = setup({ persistUsage });
+  downstream.emitMessage(createFrame());
+  await controller.drain();
+  const completed = completedFrame();
+  upstream.emitMessage(completed);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(persistUsage).toHaveBeenCalledOnce();
+  const frame = new ArrayBuffer(2 * 1024 * 1024);
+  for (let index = 0; index < 16; index++) upstream.emitMessage(frame);
+  expect(upstream.closes).toEqual([expect.objectContaining({ code: 1009 })]);
+  expect(downstream.closes).toHaveLength(0);
+  downstream.emitMessage(createFrame());
+  upstream.emitClose(1009, "overflow");
+  if (writeFails) persistence.reject(new Error("synthetic accounting failure"));
+  else persistence.resolve();
+  await controller.drain();
+  expect(persistUsage).toHaveBeenCalledOnce();
+  expect(upstream.sent).toHaveLength(1);
+  expect(downstream.sent[0]).toBe(completed);
+  expect(downstream.sent).toHaveLength(16);
+  expect(downstream.closes).toEqual([expect.objectContaining({ code: 1009 })]);
+  expect(reportFailure.mock.calls).toEqual([
+    ...(writeFails ? [[{ phase: "persistence" }]] : []),
+    [{ phase: "protocol" }],
+  ]);
+});
+
+test("rejects a single oversized provider message before waiting for authorization", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const authorization = deferred<Response | null>();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({
+    authorizeClientFrame: () => authorization.promise, downstream, upstream,
+  });
+  downstream.emitMessage("request");
+  await Promise.resolve();
+  upstream.emitMessage(new ArrayBuffer(32 * 1024 * 1024 + 1));
+  expect(upstream.closes).toEqual([expect.objectContaining({ code: 1009 })]);
+  downstream.emitClose(1000, "client left during overload");
+  authorization.resolve(null);
+  await controller.drain();
+  expect(downstream.sent).toHaveLength(0);
+  expect(upstream.sent).toHaveLength(0);
+  expect(downstream.closes).toHaveLength(1);
+  expect(upstream.closes).toHaveLength(1);
+});
 
 test("bounds queued client bytes while image authorization is pending", async () => {
   const downstream = new FakeSocket();

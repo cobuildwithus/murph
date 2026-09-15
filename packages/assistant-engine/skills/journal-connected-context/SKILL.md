@@ -37,7 +37,9 @@ category opt-out in the ledger. Confirm briefly. Do not disconnect the account.
 ## Calendar pass
 
 Use only active `googlecalendar` or `outlook` accounts marked `notice-sent`.
-Read only the next 36 hours. Search each exact account and calendar separately.
+Read only the next 36 hours. When the engine supplies `timeMin` and `timeMax`,
+copy those UTC instants exactly instead of calculating offsets or dates.
+Search each exact account and calendar separately.
 Do not combine identities or infer that a calendar belongs to another account.
 
 Include training, matches, races, sauna, recovery sessions, long travel,
@@ -56,7 +58,9 @@ and its pending follow-up. Never create a second plan for the same provider id.
 
 Before a follow-up, check passive Journal or wearable evidence. If it already
 shows what happened, do not ask. Otherwise schedule one private check-in one
-hour after the event. Save that one-shot check-in with `murph.automation` in
+hour after the event ends, using its end timestamp rather than its start.
+For example, an 18:00–19:00 event gets a 20:00 check-in in the event timezone.
+Save that one-shot check-in with `murph.automation` in
 the same pass that creates the plan. Bind it to the current private
 conversation and include the new Journal event id as a context reference. Its
 instructions must check passive evidence first and stay quiet when that
@@ -83,6 +87,9 @@ per segment.
 
 ## Finish
 
-Rewrite the ledger after successful reads and canonical writes. If there is no
-new account, relevant plan, update, cancellation, or due check-in, return skip.
-Never send a process report.
+Rewrite the ledger after successful reads and canonical writes. Routine plan
+saves, updates, cancellations, and scheduling a future check-in stay silent:
+return the scheduled `skip` decision, with an internal `privateSummary` only.
+Send a message only for a new connection notice, a necessary clarification, or
+a currently due check-in that passive evidence has not resolved. A new saved
+plan or trip alone is never a reason to send. Never send a process report.

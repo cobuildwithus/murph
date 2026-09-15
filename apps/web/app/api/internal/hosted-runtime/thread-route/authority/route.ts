@@ -6,6 +6,7 @@ import {
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import { buildHostedThreadRouteAuthorityResponse } from "@/src/lib/hosted-execution/runtime-protocol";
 import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
@@ -99,13 +100,10 @@ export const POST = withJsonError(async (request: Request) => {
       : undefined;
     return { threadIsDirect, assertion };
   });
-  return jsonOk({
-    authorized: true,
-    threadIsDirect: result.threadIsDirect,
-    ...(result.assertion?.assistantAskFallbackRequired
-      ? { assistantAskFallbackRequired: true }
-      : {}),
-  });
+  return jsonOk(buildHostedThreadRouteAuthorityResponse(
+    result.threadIsDirect,
+    result.assertion?.assistantAskFallbackRequired,
+  ));
 });
 
 interface AssistantAskCompletionAuthority {

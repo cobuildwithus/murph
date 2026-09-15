@@ -134,8 +134,8 @@ describe("hosted Stripe billing workflow guard", () => {
 
   it("rejects workflow-level cancellation that can interrupt cleanup", async () => {
     const source = (await readWorkflow()).replace(
-      "concurrency:\n  group: ${{ github.workflow }}-${{ github.event.pull_request.number || 'main-push' }}\n  cancel-in-progress: false",
-      "concurrency:\n  group: ${{ github.workflow }}-${{ github.event.pull_request.number || 'main-push' }}\n  cancel-in-progress: true",
+      "concurrency:\n  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}\n  cancel-in-progress: false",
+      "concurrency:\n  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}\n  cancel-in-progress: true",
     );
     expect(issueCodes(source)).toContain("unsafe-workflow-cancellation");
   });

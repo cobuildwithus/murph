@@ -21,6 +21,8 @@ import {
   type HostedRuntimeLogSqlResult,
 } from "@/src/lib/hosted-runtime-log/store";
 
+import { findHostedUsageLimitedPersonalPatternsOccurrences } from "@/src/lib/hosted-runtime-log/usage-gate";
+
 const { Client: PgClient, Pool: PgPool } = pg;
 const primaryDatabaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof = process.env.MURPH_TEST_RUNTIME_LOG_POSTGRES === "1";
@@ -200,6 +202,56 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     await admin?.query(`DROP DATABASE IF EXISTS "${testDatabaseName}" WITH (FORCE)`);
     await admin?.end();
   }, 30_000);
+
+  it("classifies usage-pause expirations across recovery with tenant isolation", async () => {
+    const userId = `usage_gate_${randomToken()}`;
+    const otherUserId = `usage_gate_other_${randomToken()}`;
+    const db = requireDatabase(database);
+    for (const member of [userId, otherUserId]) subjectKeys.add(hostedRuntimeLogSubjectKey(member));
+    const recordGate = (member: string, hour: number, usageLimited: boolean) => recordHostedRuntimeLogs({
+      database: db, isUserActive: async () => true, userId: member,
+      entries: [{ at: `2026-08-01T${String(hour).padStart(2, "0")}:00:00.000Z`,
+        component: "runtime", eventCode: "assistant.automation_detail", level: "info", phase: "invoke",
+        redactedJson: { type: "runtime.ai_usage_gate", usageLimited } }],
+    });
+    await recordGate(userId, 8, true);
+    await recordGate(userId, 12, false);
+    await recordGate(userId, 15, true);
+    await recordGate(userId, 17, false);
+    await recordGate(otherUserId, 13, true);
+    // Same-millisecond contradictory evidence stays conservative, irrespective
+    // of insertion order. A provider quota retry is evidence for its exact run.
+    await recordGate(userId, 21, false);
+    await recordGate(userId, 21, true);
+    await recordHostedRuntimeLogs({
+      database: db, isUserActive: async () => true, userId,
+      entries: [{ at: "2026-08-01T05:15:00.000Z", component: "assistant",
+        eventCode: "assistant.automation_detail", level: "info", phase: "invoke",
+        redactedJson: { type: "cron.job.completed", failureAutomationSlug: "personal-patterns-update",
+          failureRunOutcome: "failed", failureRetryScheduled: true,
+          failureOccurrenceAt: "2026-08-01T05:00:00.000Z", failureErrorCode: "ASSISTANT_CODEX_USAGE_LIMIT" } }],
+    });
+    const at = (hour: number) => `2026-08-01T${String(hour).padStart(2, "0")}:00:00.000Z`;
+    await expect(findHostedUsageLimitedPersonalPatternsOccurrences({ database: db, userId, occurrences: [
+      { occurrenceAt: at(9), observedAt: at(13) }, // paused at occurrence, since reset
+      { occurrenceAt: at(13), observedAt: at(14) }, // allowed; other member denied
+      { occurrenceAt: at(14), observedAt: at(18) }, // denial during the wait
+      { occurrenceAt: at(18), observedAt: at(20) }, // recovery before occurrence
+      { occurrenceAt: at(6), observedAt: at(7) }, // unrelated occurrence, no evidence
+      { occurrenceAt: at(5), observedAt: at(7) }, // provider quota before expiry
+      { occurrenceAt: at(21), observedAt: at(22) }, // contradictory boundary observations
+    ] })).resolves.toEqual(new Set([at(5), at(9), at(14)]));
+    await expect(findHostedUsageLimitedPersonalPatternsOccurrences({ database: db, userId,
+      occurrences: Array.from({ length: 50 }, () => ({ occurrenceAt: at(9), observedAt: at(13) })),
+    })).resolves.toEqual(new Set([at(9)]));
+    await expect(findHostedUsageLimitedPersonalPatternsOccurrences({ database: db, userId,
+      occurrences: Array.from({ length: 51 }, () => ({ occurrenceAt: at(9), observedAt: at(13) })),
+    })).rejects.toThrow("Too many alert occurrences.");
+    await expect(findHostedUsageLimitedPersonalPatternsOccurrences({
+      database: db, userId: `unknown_${randomToken()}`,
+      occurrences: [{ occurrenceAt: at(9), observedAt: at(20) }],
+    })).resolves.toEqual(new Set());
+  });
 
   it("rejects a second logical database on the primary physical cluster", async () => {
     const runtimeDatabaseUrl = postgresDatabaseUrl(

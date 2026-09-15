@@ -339,6 +339,8 @@ function HostedSettingsIdentityAuthorizedContent({
           authenticated
           changeFlow={hasExisting}
           initialEmail={toInitialEmail(account.email)}
+          recoverEmailSync={account.privySignInStates?.email.status === "mismatched"
+            || (account.privySignInStates?.email.status === "matched" && !account.email.verifiedAt)}
           murphEmailAddress={account.email.murphEmailAddress}
           onClientAuthRequired={onClientAuthRequired}
           onSynced={onSynced}

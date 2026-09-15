@@ -49,6 +49,8 @@ import { PersonalPatternsComponentStudy } from "../app/design/personal-patterns-
 import { JournalViewContent } from "../src/components/journal/journal-view";
 import {
   getOutcomeDescription,
+  PersonalPatternsSection,
+  selectVisiblePatternReport,
   sortPersonalPatternReport,
 } from "../src/components/overview/personal-patterns-section";
 import { renderClientComponent } from "./render-client-component";
@@ -681,6 +683,60 @@ test("Personal Patterns comparison controls use plain result language", () => {
   assert.doesNotMatch(markup, />~</u);
   assert.doesNotMatch(markup, /font-mono font-semibold tabular-nums/u);
   assert.doesNotMatch(markup, /Scroll sideways/u);
+});
+
+test("Patterns hides sparse cells and inactive activities before either layout renders", () => {
+  const report: PersonalPatternReport = {
+    asOfDate: "2026-08-31", lagDays: 1, notes: [], windowDays: 120,
+    repeatableCellCount: 0, testedCellCount: 8,
+    outcomes: [
+      { id: "hrv", label: "HRV", unit: "ms" },
+      { id: "deep-sleep", label: "Deep sleep", unit: "min" },
+    ],
+    factors: [
+      { ...patternFactor("one-day", 1), lastObservedDate: "2026-08-30" },
+      { ...patternFactor("one-match", 5), lastObservedDate: "2026-08-30" },
+      { ...patternFactor("old", 8), lastObservedDate: "2026-05-30" },
+      { ...patternFactor("boundary", 2), lastObservedDate: "2026-05-31" },
+      { ...patternFactor("resumed", 8), lastObservedDate: "2026-08-30" },
+      patternFactor("legacy", 5),
+      { ...patternFactor("neutral", 5), lastObservedDate: "2026-08-30" },
+    ],
+    cells: [
+      ...["one-day", "one-match", "old", "boundary", "resumed", "legacy"]
+        .map((id) => ({ ...patternCell(id, 10, "new_clue"),
+          exposedDays: id === "one-match" ? 1 : 2,
+          comparisonDays: 2,
+          lastExposedDate: id === "legacy" ? "2026-06-01" : "2026-05-01",
+        })),
+      { ...patternCell("boundary", 20, "new_clue"), outcomeId: "deep-sleep", exposedDays: 1 },
+      { ...patternCell("resumed", 20, "new_clue"), outcomeId: "deep-sleep", comparisonDays: 1 },
+      patternCell("neutral", 0, "no_clear_pattern"),
+    ],
+  };
+  const visible = selectVisiblePatternReport(report);
+  assert.deepEqual(visible.factors.map((factor) => factor.id), ["boundary", "resumed", "legacy", "neutral"]);
+  assert.deepEqual(visible.outcomes.map((outcome) => outcome.id), ["hrv"]);
+  assert.ok(visible.cells.every((cell) => cell.exposedDays >= 2 && cell.comparisonDays >= 2));
+  const markup = renderToStaticMarkup(createElement(PersonalPatternsSection, { report }));
+  assert.match(markup, /data-patterns-layout="mobile"/u);
+  assert.match(markup, /data-patterns-layout="desktop"/u);
+  assert.match(markup, /data-pattern-factor-row="boundary"/u);
+  assert.doesNotMatch(markup, /one-day|one-match|>old<|Deep sleep/u);
+  assert.match(markup, /data-pattern-factor-row="neutral"/u);
+
+  const sparseReport = { ...report, factors: report.factors.slice(0, 3) };
+  const emptyMarkup = renderToStaticMarkup(createElement(PersonalPatternsSection, { report: sparseReport }));
+  assert.match(emptyMarkup, /Your first patterns are taking shape/u);
+  assert.doesNotMatch(emptyMarkup, /data-patterns-layout/u);
+
+  // Month-end subtraction clamps to February instead of rolling into March.
+  const clamped = { ...report, asOfDate: "2026-05-31", factors: [
+    { ...patternFactor("boundary", 2), lastObservedDate: "2026-02-28" },
+    { ...patternFactor("old", 2), lastObservedDate: "2026-02-27" },
+  ] };
+  assert.deepEqual(selectVisiblePatternReport(clamped).factors.map((factor) => factor.id), ["boundary"]);
+  assert.equal(report.cells.length, 9);
 });
 
 test("Personal Patterns sorts comparable results and keeps missing results last", () => {

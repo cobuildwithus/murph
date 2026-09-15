@@ -18,7 +18,7 @@ for (const width of [412, 1440]) {
       if (request.resourceType() === "script") scripts.push(request.url());
     });
     const output = process.env.DESIGN_PROOF_OUTPUT_DIR;
-    for (const route of ["/experiments", "/goals", "/"]) {
+    for (const route of ["/changelog", "/goals", "/"]) {
       scripts.length = 0;
       expect((await page.goto(route, { waitUntil: "load", timeout: 90_000 }))?.status()).toBe(200);
       await page.waitForTimeout(5_000);

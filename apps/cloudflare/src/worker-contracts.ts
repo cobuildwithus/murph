@@ -143,6 +143,10 @@ export interface WorkerRunnerContainerNamespaceLike<
 }
 
 export interface WorkerUserRunnerStubLike {
+  recordRunnerContainerRetired?(input: {
+    runnerContainerName: string;
+    userId: string;
+  }): Promise<{ cleared: boolean }>;
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
   reconcileRuntimeHealthDataConsentForUser?(userId: string): Promise<unknown>;

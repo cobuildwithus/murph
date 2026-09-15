@@ -4,6 +4,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   buildHostedPrivySessionState: vi.fn(),
+  ensureHostedMemberPhoneWelcome: vi.fn(),
   deleteHostedPrivyPhoneTransferSourceAccountData: vi.fn(),
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn(),
   getPrisma: vi.fn(),
@@ -22,6 +23,10 @@ const mocks = vi.hoisted(() => ({
   reconcileHostedPrivyIdentityOnMemberTx: vi.fn(),
   requireFreshPrivyMemberAuthForHostedAppSession: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/phone-welcome", () => ({
+  ensureHostedMemberPhoneWelcome: mocks.ensureHostedMemberPhoneWelcome,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({

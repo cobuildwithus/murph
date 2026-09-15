@@ -472,6 +472,7 @@ test('root help exposes the Incur built-ins and simple health CRUD command group
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
   assert.match(help, /Integrations:/u)
   assert.doesNotMatch(help, /^  chat\s+/mu)
+  assert.doesNotMatch(help, /^\s+age\s+/mu)
   assert.match(help, /commons\s+Read-only Health Commons commands/u)
   assert.match(help, /search\s+Search commands for the shared local query projection/u)
   assert.match(help, /timeline\s+Build a descending cross-record timeline/u)
@@ -524,16 +525,28 @@ test('built CLI discovery surfaces remain available', async () => {
   ) as {
     commands: Array<{ name: string }>
   }
+  const compactManifest = JSON.parse(
+    await runRawCli(['--llms', '--format', 'json'], { env: builtCliEnv }),
+  ) as {
+    commands: Array<{ name: string }>
+  }
   const completions = await runRawCli(['completions', 'bash'], {
     env: builtCliEnv,
   })
 
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
+  assert.doesNotMatch(help, /^\s+age\s+/mu)
   assert.equal('query' in schema.args.properties, true)
   assert.equal(
     manifest.commands.some((command) => command.name === 'search query'),
     true,
   )
+  for (const discovery of [manifest, compactManifest]) {
+    assert.equal(
+      discovery.commands.some((command) => /^age(?: |$)/u.test(command.name)),
+      false,
+    )
+  }
   assert.match(completions, /_incur_complete_vault_cli/u)
 }, INCUR_ROOT_HELP_TIMEOUT_MS)
 
@@ -1692,6 +1705,7 @@ test('published config schema artifact stays on the native incur shape', async (
   assert.ok(
     schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.ask?.properties?.options?.properties?.model,
   )
+  assert.equal(Object.hasOwn(schema.properties?.commands?.properties ?? {}, 'age'), false)
   assert.equal(schemaText.includes('"x-incur-'), false)
 })
 
@@ -2189,64 +2203,27 @@ test('experiment descriptor describes the explicit start source choice', () => {
   assert.doesNotMatch(startCommand?.description ?? '', /protocol key is supplied/u)
 })
 
-test('murph age descriptor exposes metadata-only input readiness', () => {
-  const descriptor = vaultCliCommandDescriptors.find(
-    (candidate) => candidate.id === 'murph-age',
-  )
+test('retired age commands follow the existing unsupported-command behavior', async () => {
+  const cli = createVaultCli()
+  for (const leaf of [
+    '',
+    'report',
+    'scaffold',
+    'preview',
+    'preview-view',
+    'calculate',
+    'calculate-bundle',
+    'inputs',
+    'model-cards',
+    'evidence',
+  ]) {
+    const args = leaf ? ['age', leaf] : ['age']
+    const result = await runJsonCli(cli, [...args, '--no-config'])
 
-  if (!descriptor || !('leafCommands' in descriptor) || !descriptor.leafCommands) {
-    throw new Error('The Murph Age descriptor is missing leaf commands.')
+    assert.equal(result.exitCode, 1, args.join(' '))
+    assert.equal(result.envelope.ok, false, args.join(' '))
+    assert.match(result.envelope.error?.code ?? '', /^COMMAND_NOT_FOUND$/iu, args.join(' '))
   }
-
-  const inputsCommand = descriptor.leafCommands.find(
-    (leafCommand) => leafCommand.path.join(' ') === 'age inputs',
-  )
-
-  if (!inputsCommand) {
-    throw new Error('expected age inputs descriptor')
-  }
-  assert.match(inputsCommand.description, /metadata-only/u)
-  assert.equal('hint' in inputsCommand, true)
-  assert.match(String(('hint' in inputsCommand ? inputsCommand.hint : '') ?? ''), /does not calculate an age/u)
-  assert.equal('output' in inputsCommand, true)
-
-  const scaffoldCommand = descriptor.leafCommands.find(
-    (leafCommand) => leafCommand.path.join(' ') === 'age scaffold',
-  )
-
-  if (!scaffoldCommand) {
-    throw new Error('expected age scaffold descriptor')
-  }
-  assert.match(scaffoldCommand.description, /research-preview JSON payload/u)
-  assert.match(String(('hint' in scaffoldCommand ? scaffoldCommand.hint : '') ?? ''), /Wearable values/u)
-  assert.equal('output' in scaffoldCommand, true)
-
-  const previewCommand = descriptor.leafCommands.find(
-    (leafCommand) => leafCommand.path.join(' ') === 'age preview',
-  )
-
-  if (!previewCommand) {
-    throw new Error('expected age preview descriptor')
-  }
-  assert.match(previewCommand.description, /submitted JSON payload/u)
-  assert.match(String(('hint' in previewCommand ? previewCommand.hint : '') ?? ''), /research-only/u)
-  assert.equal('output' in previewCommand, true)
-
-  const modelCardsCommand = descriptor.leafCommands.find(
-    (leafCommand) => leafCommand.path.join(' ') === 'age model-cards',
-  )
-
-  if (!modelCardsCommand) {
-    throw new Error('expected age model-cards descriptor')
-  }
-  assert.match(modelCardsCommand.description, /metadata-only/u)
-  assert.match(modelCardsCommand.description, /model-card/u)
-  assert.equal('hint' in modelCardsCommand, true)
-  assert.match(
-    String(('hint' in modelCardsCommand ? modelCardsCommand.hint : '') ?? ''),
-    /does not expose model internals/u,
-  )
-  assert.equal('output' in modelCardsCommand, true)
 })
 
 test('workout descriptor does not expose the removed workout measurement alias', () => {
@@ -3895,6 +3872,7 @@ test('compact llms json manifest remains available', async () => {
   }
 
   assert.equal(manifest.version, 'incur.v1')
+  assert.equal(manifest.commands.some((command) => /^age(?: |$)/u.test(command.name)), false)
   assert.equal(manifest.commands.some((command) => command.name === 'init'), true)
   assert.equal(manifest.commands.some((command) => command.name === 'chat'), false)
   assert.equal(
@@ -3972,14 +3950,7 @@ test('full llms json manifest remains available for schema-rich commands', async
     manifest.commands.some((command) => command.name === 'search query'),
     true,
   )
-  const ageInputsCommand = manifest.commands.find(
-    (command) => command.name === 'age inputs',
-  )
-  assert.notEqual(ageInputsCommand, undefined)
-  assert.match(
-    String(ageInputsCommand?.description ?? ''),
-    /metadata-only/u,
-  )
+  assert.equal(manifest.commands.some((command) => /^age(?: |$)/u.test(command.name)), false)
   const automationSaveCommand = manifest.commands.find(
     (command) => command.name === 'automation save',
   )
@@ -3996,18 +3967,6 @@ test('full llms json manifest remains available for schema-rich commands', async
   )
   assert.doesNotMatch(String(automationSaveCommand?.description ?? ''), /update/u)
   assert.doesNotMatch(String(automationImportCommand?.description ?? ''), /bulk-edit/u)
-  assert.equal(
-    manifest.commands.some((command) => command.name === 'age model-cards'),
-    true,
-  )
-  assert.equal(
-    manifest.commands.some((command) => command.name === 'age preview'),
-    true,
-  )
-  assert.equal(
-    manifest.commands.some((command) => command.name === 'age scaffold'),
-    true,
-  )
   assert.equal(
     manifest.commands.some((command) => command.name === 'commons protocol list'),
     true,

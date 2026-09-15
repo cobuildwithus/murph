@@ -4694,3 +4694,151 @@ test("prepareDeviceProviderSnapshotImport covers WHOOP fallback ids and workout 
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role.startsWith("cycle:cycle-")));
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role.startsWith("workout:workout-")));
 });
+
+test("WHOOP record emitters preserve event-count ids and evidence-only records", () => {
+  const start = "2026-04-22T01:00:00.000Z";
+  const end = "2026-04-22T02:00:00.000Z";
+  const sleeps = [
+    {
+      id: "synthetic-sleep",
+      start,
+      end,
+      nap: false,
+      score: {
+        sleep_performance_percentage: 0,
+        stage_summary: { total_awake_time_milli: 0 },
+      },
+    },
+    { score: { sleep_efficiency_percentage: 80 } },
+    { score: {} },
+  ];
+  const recoveries = [{ score: { recovery_score: 0 } }, { score: {} }];
+  const cycles = [{ score: { strain: 0 } }];
+  const workouts = [
+    { start, end: start, score: {} },
+    { start, end, sport_name: " Run ", score: { distance_meter: 0 } },
+  ];
+  const payload = normalizeWhoopSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    sleeps, recoveries, cycles, workouts,
+  });
+
+  assert.deepEqual(payload.events?.map((event) => [
+    event.externalRef?.resourceType, event.externalRef?.resourceId, event.externalRef?.facet,
+  ]), [
+    ["sleep", "synthetic-sleep", undefined],
+    ["sleep", "synthetic-sleep", "sleep-performance"],
+    ["sleep", "synthetic-sleep", "sleep-awake-minutes"],
+    ["sleep", "sleep-4", "sleep-efficiency"],
+    ["recovery", "recovery-5", "recovery-score"],
+    ["cycle", "cycle-6", "day-strain"],
+    ["workout", "workout-7", undefined],
+  ]);
+  assert.deepEqual(payload.evidenceParts?.map((part) => part.role), [
+    "sleep:synthetic-sleep", "sleep:sleep-4", "sleep:sleep-5",
+    "recovery:recovery-5", "recovery:recovery-6", "cycle:cycle-6",
+    "workout:workout-7", "workout:workout-7",
+  ]);
+  assert.deepEqual(payload.evidenceParts?.map((part) => part.content), [
+    ...sleeps, ...recoveries, ...cycles, ...workouts,
+  ]);
+  assert.equal(payload.events?.[0]?.fields?.sleepType, "main_sleep");
+  assert.equal(payload.events?.[1]?.fields?.value, 0);
+  assert.equal(payload.events?.[2]?.fields?.value, 0);
+  assert.equal(payload.events?.at(-1)?.fields?.distanceKm, 0);
+});
+
+test("WHOOP record emitters retain last-id recovery joins and cycle-day precedence", () => {
+  const payload = normalizeWhoopSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    sleeps: [
+      { id: 7, start: "2026-04-20T01:00:00.000Z", end: "2026-04-20T02:00:00.000Z" },
+      { id: 7, start: "2026-04-21T01:00:00.000Z", end: "2026-04-21T02:00:00.000Z", timezone_offset: "Z" },
+    ],
+    cycles: [
+      { id: 8, end: "2026-04-20T02:00:00.000Z", timezone_offset: "Z" },
+      { id: 8, end: "2026-04-23T02:00:00.000Z", timezone_offset: "-05:00" },
+    ],
+    recoveries: [
+      { sleep_id: 7, cycle_id: 8, score: { recovery_score: 0 } },
+      { sleep_id: 7, score: { hrv_rmssd_milli: 0 } },
+    ],
+  });
+  const recoveries = payload.events?.filter((event) => event.externalRef?.resourceType === "recovery");
+  assert.deepEqual(recoveries?.map((event) => [
+    event.externalRef?.resourceId, event.occurredAt, event.dayKey, event.fields?.value,
+  ]), [
+    ["7", "2026-04-23T02:00:00.000Z", "2026-04-22", 0],
+    ["7", "2026-04-21T02:00:00.000Z", "2026-04-21", 0],
+  ]);
+});
+
+test("WHOOP identity resolution preserves lazy nullish reads and separate provenance reads", () => {
+  for (const primary of [undefined, null, false, 0]) {
+    const reads: string[] = [];
+    const profile = {
+      get user_id() { reads.push("user_id"); return primary; },
+      get userId() { reads.push("userId"); return "synthetic-profile"; },
+      get id(): never { throw new Error("lower-priority identity must not be read"); },
+    };
+    const payload = normalizeWhoopSnapshot({
+      importedAt: "2026-04-24T12:00:00.000Z", profile,
+    });
+    const expected = primary === false ? undefined : primary === 0 ? "0" : "synthetic-profile";
+    assert.equal(payload.accountId, expected);
+    assert.equal(payload.provenance?.whoopUserId, expected);
+    assert.deepEqual(reads, primary === undefined || primary === null
+      ? ["user_id", "userId", "user_id", "userId"]
+      : ["user_id", "user_id"]);
+
+    reads.length = 0;
+    const explicit = normalizeWhoopSnapshot({
+      importedAt: "2026-04-24T12:00:00.000Z", accountId: 0, profile,
+    });
+    assert.equal(explicit.accountId, "0");
+    assert.equal(explicit.provenance?.whoopUserId, expected);
+    assert.deepEqual(reads, primary === undefined || primary === null
+      ? ["user_id", "userId"] : ["user_id"]);
+  }
+});
+
+test("WHOOP record emitters keep lookup indexing before the first record exception", () => {
+  const reads: string[] = [];
+  const failure = new Error("synthetic sleep failure");
+  assert.throws(() => normalizeWhoopSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    profile: {
+      get user_id() {
+        reads.push("profile");
+        return "synthetic-profile";
+      },
+    },
+    sleeps: [{
+      get id() {
+        reads.push("sleep.id");
+        return "synthetic-sleep";
+      },
+      get start(): never {
+        reads.push("sleep.start");
+        throw failure;
+      },
+    }],
+    cycles: [{
+      get id() {
+        reads.push("cycle.id");
+        return "synthetic-cycle";
+      },
+    }],
+    recoveries: [{
+      get updated_at(): never {
+        throw new Error("later recovery was read");
+      },
+    }],
+    workouts: [{
+      get id(): never {
+        throw new Error("later workout was read");
+      },
+    }],
+  }), (error: unknown) => error === failure);
+  assert.deepEqual(reads, ["profile", "sleep.id", "cycle.id", "sleep.id", "sleep.start"]);
+});

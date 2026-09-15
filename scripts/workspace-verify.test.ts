@@ -1725,3 +1725,69 @@ run_test_diff_app_verification apps/web apps/cloudflare
     expect(rootPackage.scripts.clean).toContain("tsconfig.tools.tsbuildinfo");
   });
 });
+
+describe("composed verification selection", () => {
+  function dispatch(files: string[]) {
+    const quoted = files.map((file) => `'${file}'`).join(" ");
+    return runShellHarness(`set -euo pipefail
+${extractWorkspaceVerifyFunction("load_diff_scope")}
+${extractWorkspaceVerifyFunction("run_test_diff")}
+verify_log() { :; }
+run_timed_step() { shift; printf '%s\\n' "$*"; }
+run_typecheck() { printf 'run_typecheck\\n'; }
+run_diff_repo_internal_fast_path() { printf 'internal-guards\\n'; }
+run_test_diff ${quoted}
+`);
+  }
+
+  it("executes an explicit CLI requirement even for an internal script", () => {
+    const result = dispatch(["scripts/build-test-runtime-prepared.mjs"]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("run_verify_cli\n");
+    expect(result.stdout).toContain("run_test_diff_repo_tools_tests\n");
+  });
+
+  it.each(["package.json", "tsconfig.json", "tsconfig.base.json", "vitest.config.ts"])(
+    "routes shared configuration %s through package, app, CLI and fixture proof", (file) => {
+      const result = dispatch([file]);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("run_verify_cli\n");
+      expect(result.stdout).toContain("run_typecheck_packages ");
+      expect(result.stdout).toContain("run_test_diff_package_tests ");
+      expect(result.stdout).toContain("run_test_diff_app_verification apps/cloudflare apps/web");
+      expect(result.stdout).toContain("run_fixture_smoke_verification\n");
+      expect(result.stdout).toContain("run_test_diff_repo_tools_tests\n");
+    },
+  );
+
+  it("runs the smoke owner for fixture changes without unrelated app checks", () => {
+    const result = dispatch(["e2e/smoke/scenarios/synthetic/input.json"]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("run_fixture_smoke_verification\n");
+    expect(result.stdout).not.toContain("run_test_diff_app_verification");
+  });
+
+  it("retains the inexpensive docs-only path", () => {
+    const result = dispatch(["agent-docs/PLANS.md"]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("internal-guards\n");
+    expect(result.stdout).not.toContain("run_verify_cli");
+    expect(result.stdout).not.toContain("run_fixture_smoke_verification");
+  });
+
+  it("includes repository tools once in acceptance and propagates failure", () => {
+    for (const status of [0, 23]) {
+      const result = runShellHarness(`set -euo pipefail
+${extractWorkspaceVerifyFunction("run_verify_acceptance")}
+run_typecheck() { printf 'typecheck\\n'; }
+run_timed_step() { shift; "$@"; }
+pnpm() { printf '%s\\n' "$*"; return ${status}; }
+run_test_coverage() { printf 'coverage\\n'; }
+run_verify_acceptance
+`);
+      expect(result.status, result.stderr).toBe(status);
+      expect(result.stdout.match(/test:repo-tools/g)).toHaveLength(1);
+      expect(result.stdout.includes("coverage\n")).toBe(status === 0);
+    }
+  });
+});

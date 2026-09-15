@@ -1273,13 +1273,15 @@ test("prior Oura note coverage receives one current semantic reimport while dens
     initialResult: boundedResult,
     provider,
   });
-  // Bounded dual-owner shape: seven ordinary UTC provider-date requests from
-  // the broad correction sweep plus one exact vault-local temporal window for
-  // the newest lag-closed day.
+  // Ordinary history stays at seven provider dates. Complete-day authority is
+  // separately queued for the same bounded horizon, without an inline request.
   assert.equal(
     requests.filter((request) => request.resource === "stress_level").length,
-    8,
+    7,
   );
+  assert.equal(boundedResult.scheduledJobs?.filter((job) =>
+    job.payload?.resource === "stress_level" && job.payload?.temporalAuthorityTimeZone
+  ).length, 7);
 
   const completed = createScheduledJobs(
     createStoredAccount({ metadata: result.metadataPatch, sources }),

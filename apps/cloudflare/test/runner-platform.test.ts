@@ -10371,7 +10371,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   });
 
   it.each([undefined, "ECONNRESET", "UND_ERR_SOCKET"])(
-    "keeps artifact upload behavior and existing logs with network code %s",
+    "bounds artifact upload transport replay and preserves safe logs with network code %s",
     async (code) => {
       const cause = {
         code,
@@ -10406,7 +10406,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       expect(rejectedError).toBeInstanceOf(HostedRuntimeArtifactWriteError);
       expect(rejectedError).toMatchObject({ retryable: true, cause: { cause: failure } });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
       const logs = mocks.emitHostedExecutionStructuredLog.mock.calls.map(([input]) => input);
       expect(logs.map((input) => input.message)).toEqual([
         "Hosted runtime artifact upload started.",
@@ -10414,26 +10414,35 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "Hosted runtime internal request started.",
         "Hosted runtime internal request failed.",
         "Hosted runtime upstream request failed.",
+        "Hosted runtime artifact upload transport recovery backoff.",
+        "Hosted runtime internal request started.",
+        "Hosted runtime internal request failed.",
+        "Hosted runtime upstream request failed.",
         "Hosted runtime artifact upload failed before response.",
       ]);
-      expect(logs[5]).toMatchObject({
-        component: "hosted.runtime.artifact-store",
-        level: "warn",
-        phase: "checkpoint",
-        details: {
-          errorCode: code ? "type_error" : "runtime_error",
-          fetchCauseCode: code ? "type_error" : "runtime_error",
-          fetchCauseKind: "fetch_failed",
-          fetchCauseName: code ? "TypeError" : "Error",
-          fetchCallerSignalAborted: false,
-          fetchRequestSignalAborted: false,
-          fetchTimeoutSignalAborted: false,
-          ...(code ? { fetchNetworkErrorCode: code } : {}),
-        },
-      });
-      if (!code) {
-        expect(logs[5].details).not.toHaveProperty("fetchNetworkErrorCode");
+      for (const [index, attempt] of [[5, 1], [9, 2]] as const) {
+        expect(logs[index]).toMatchObject({
+          component: "hosted.runtime.artifact-store",
+          level: "warn",
+          phase: "checkpoint",
+          details: {
+            artifactUploadAttempt: attempt,
+            errorCode: code ? "type_error" : "runtime_error",
+            fetchCauseCode: code ? "type_error" : "runtime_error",
+            fetchCauseKind: "fetch_failed",
+            fetchCauseName: code ? "TypeError" : "Error",
+            fetchCallerSignalAborted: false,
+            fetchRequestSignalAborted: false,
+            fetchTimeoutSignalAborted: false,
+            ...(code ? { fetchNetworkErrorCode: code } : {}),
+          },
+        });
+        if (!code) {
+          expect(logs[index].details).not.toHaveProperty("fetchNetworkErrorCode");
+        }
       }
+      expect(logs[5].details).not.toHaveProperty("responseOrigin");
+      expect(JSON.stringify(logs[5])).not.toContain("https://");
       const serialized = JSON.stringify(logs);
       for (const hidden of [
         "192.0.2.10", "43210", "192.0.2.11", "example.invalid",
@@ -10445,9 +10454,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fail = false;
       await platform.artifactStore.put(artifact);
       await platform.artifactStore.put(artifact);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(12);
-      for (const [input] of mocks.emitHostedExecutionStructuredLog.mock.calls.slice(6)) {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(16);
+      for (const [input] of mocks.emitHostedExecutionStructuredLog.mock.calls.slice(10)) {
         expect(input.details).not.toHaveProperty("fetchNetworkErrorCode");
       }
     },

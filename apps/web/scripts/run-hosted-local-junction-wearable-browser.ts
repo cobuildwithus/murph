@@ -13,6 +13,8 @@ import {
   type Response,
 } from "@playwright/test";
 
+import { writeWearableStage, type WearableStage } from "@murphai/hosted-local-harness/wearable-progress";
+
 import { KernelComputerClient } from "../src/lib/computer-use/kernel-client.ts";
 import {
   buildHostedLocalBrowserSessionCookie,
@@ -131,13 +133,20 @@ const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "OURA_CLIENT_SECRET",
 ] as const;
 
-let stage = "configuration";
+let stage: WearableStage = "configuration";
+
 let activePage: Page | null = null;
 let activeConfig: BrowserConfig | null = null;
 let failureDiagnostic: string | null = null;
 
+function setStage(nextStage: WearableStage): void {
+  stage = nextStage;
+  writeWearableStage(nextStage);
+}
+
+
 async function main(): Promise<void> {
-  stage = "configuration";
+  setStage("configuration");
   activePage = null;
   activeConfig = null;
   failureDiagnostic = null;
@@ -145,7 +154,7 @@ async function main(): Promise<void> {
   activeConfig = config;
   clearHostedLocalBrowserEnvironment(SENSITIVE_BROWSER_ENVIRONMENT_KEYS);
 
-  stage = "browser_launch";
+  setStage("browser_launch");
   const session = await openBrowserSession(config);
   let failure: unknown;
   let failed = false;
@@ -163,7 +172,7 @@ async function main(): Promise<void> {
 
     await navigateToHostedLocalStart(page, config, session.kernelTunnel);
 
-    stage = "murph_vital_disclosure";
+    setStage("murph_vital_disclosure");
     await page
       .getByRole("dialog")
       .getByRole("button", {
@@ -172,15 +181,15 @@ async function main(): Promise<void> {
       })
       .click({ timeout: config.timeoutMs });
 
-    stage = "murph_connect_start";
+    setStage("murph_connect_start");
     await page.waitForURL((url) => url.origin !== config.webOrigin, {
       timeout: config.timeoutMs,
     });
 
-    stage = `junction_${config.source}_authorization`;
+    setStage(`junction_${config.source}_authorization`);
     await completeAuthorizationAndRequireCallback(page, config);
 
-    stage = "murph_connected_completion";
+    setStage("murph_connected_completion");
     await page.waitForURL(
       (url) => url.origin === config.webOrigin && url.pathname === "/home",
       { timeout: config.timeoutMs },
@@ -189,16 +198,10 @@ async function main(): Promise<void> {
       timeout: config.timeoutMs,
     });
 
-    stage = "murph_persisted_connect_page";
-    await page.goto(new URL("/connect", config.webBaseUrl).toString(), {
-      waitUntil: "domcontentloaded",
-    });
-    await assertWearableConnectionState(page, config, "connected");
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await assertWearableConnectionState(page, config, "connected");
+    await requirePersistedWearableConnection(page, config);
 
     if (config.awaitCanonicalData) {
-      stage = "garmin_canonical_data";
+      setStage("garmin_canonical_data");
       await waitForCanonicalDataCheck({
         input: process.stdin,
         onReady: () => process.stdout.write("MURPH_E2E_GARMIN_CONNECTED=1\n"),
@@ -206,7 +209,7 @@ async function main(): Promise<void> {
       });
     }
 
-    stage = "junction_cleanup";
+    setStage("junction_cleanup");
     await disconnectJunctionAccount(page, config);
 
   } catch (error) {
@@ -216,7 +219,7 @@ async function main(): Promise<void> {
   }
 
   try {
-    if (!failed) stage = "browser_cleanup";
+    setStage("browser_cleanup");
     await closeBrowserSession(session, config);
   } catch (error) {
     if (!failed) {
@@ -358,12 +361,15 @@ async function closeBrowserSession(
   }
 
   const cleanupErrors: unknown[] = [];
+  writeWearableStage("browser_cookie_cleanup");
   await session.context.clearCookies({
     domain: new URL(config.webBaseUrl).hostname,
   }).catch((error: unknown) => cleanupErrors.push(error));
+  writeWearableStage("browser_tunnel_cleanup");
   await stopKernelTunnel(session.kernelTunnel)
     .catch((error: unknown) => cleanupErrors.push(error));
   try {
+    writeWearableStage("browser_remote_cleanup");
     await session.kernelClient.deleteBrowserByIdOrName(session.kernelSessionId);
   } catch (error) {
     cleanupErrors.push(error);
@@ -467,11 +473,11 @@ async function navigateToHostedLocalStart(
   tunnel: OwnedKernelTunnel | null,
 ): Promise<void> {
   if (tunnel) {
-    stage = "kernel_tunnel_ready";
+    setStage("kernel_tunnel_ready");
     await waitForKernelTunnelReady(page, config, tunnel);
   }
 
-  stage = "murph_connect_intent";
+  setStage("murph_connect_intent");
   try {
     await page.goto(config.startUrl, {
       timeout: config.timeoutMs,
@@ -1141,6 +1147,30 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
   ].join(" ");
 }
 
+async function requirePersistedWearableConnection(
+  page: Page,
+  config: BrowserConfig,
+): Promise<void> {
+  for (const phase of ["navigation", "reload"] as const) {
+    setStage(`murph_persisted_connect_${phase}`);
+    const response = phase === "navigation"
+      ? await page.goto(new URL("/connect", config.webBaseUrl).toString(), {
+        waitUntil: "domcontentloaded",
+      })
+      : await page.reload({ waitUntil: "domcontentloaded" });
+    // Chromium can finish navigation on an HTTP error page. Do not replace
+    // that failure with a full connection-state wait or accept stale markup.
+    if (!response?.ok()) {
+      throw new Error(`Persisted connect navigation returned HTTP ${response?.status() ?? "none"}.`);
+    }
+    const url = new URL(page.url());
+    if (url.origin !== config.webOrigin || url.pathname !== "/connect") {
+      throw new Error("Persisted connect navigation left the expected page.");
+    }
+    await assertWearableConnectionState(page, config, "connected");
+  }
+}
+
 async function assertWearableConnectionState(
   page: Page,
   config: BrowserConfig,
@@ -1322,6 +1352,7 @@ export {
   navigateToHostedLocalStart as navigateToHostedLocalJunctionStartForTest,
   openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
+  requirePersistedWearableConnection as requireHostedLocalJunctionPersistedConnectionForTest,
   sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,
   stopKernelTunnel as stopHostedLocalJunctionKernelTunnelForTest,
   waitForCanonicalDataCheck as waitForHostedLocalJunctionCanonicalDataCheckForTest,

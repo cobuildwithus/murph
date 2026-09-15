@@ -275,45 +275,20 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
    Use fresh canonical totals and `goalContext` points. `conflict`, `incompatible`,
    or `capacity` means ordinary compact closeout, no Goal or measurement
    mutation, no question, and no card. `ready` still requires the suitability,
-   intent, and meal-completeness gates. Only `missing` permits the existing
-   first-run proposal exception below. Historical compatibility is read-only
-   display authority. This active-target authority read is separate from any
-   all-status Goal lookup used to reuse or honor Murph's managed paused or
-   abandoned proposal; never substitute that lookup here. If active authority
-   is ambiguous, unit-incompatible, comparator-incompatible, or otherwise
-   cannot support either a card or responsible proposal, keep the ordinary
-   compact closeout without the unrelated safety fanout. Only when compatible
-   authority is incomplete after those reads does the first eligible managed
-   closeout have one proposal-only exception. Read and follow
-   `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`,
-   then run `vault-cli goal list --limit 200 --format json` and detail-read only
-   candidate managed records. If that read fails, is unreadable, is saturated,
-   or finds any Goal with slug `murph-daily-nutrition-starting-targets` in any
-   status, do not create, change, or automatically repeat a numeric proposal.
-   Keep the ordinary compact closeout and attach no card. The absence of that
-   managed Goal is the first-run authority; add no flag or second state owner.
-   If responsible inputs are missing or the bundle is infeasible, write nothing
-   and keep the ordinary closeout. When either one complete accepted card bundle
-   or this responsible first-run proposal candidate remains, apply the concise
-   known-context numeric-suitability rule in the
-   `murph.attach_response_card` prompt before deriving or presenting numeric
-   values, any Goal write, or a card. Do not run a universal medical
-   history or measurement checklist. When known context suppresses numeric
-   output or suitability remains unresolved, keep the ordinary compact closeout,
-   perform no Goal or measurement mutation, ask no question, and attach no card.
-   When the complete all-status
-   lookup proves absence, known context permits numeric guidance, compatible
-   explicit targets are unambiguous,
-   and already-known inputs prove one responsible five-target bundle, create
-   that single canonical Goal as
-   `paused`, with `window.startAt` equal to the occurrence local date.
-   Read it back, then explain all five provisional values, their material facts
-   and assumptions, and the effective date in ordinary text. Ask no question,
-   attach no card, and never activate it on the scheduled turn. Member
-   correction, acceptance, or decline remains an
-   interactive turn. If numeric presentation is suppressed, or the active
-   target bundle is ambiguous, unit-incompatible, or comparator-incompatible,
-   retain the ordinary compact closeout and do not attach a card. Keep the occurrence
+   intent, and meal-completeness gates. `missing` permits totals-only with all
+   five goals null, never a proposal. Historical compatibility is read-only
+   display authority. A scheduled closeout never creates, changes, repeats,
+   accepts or activates goals, including on its first run. Do not perform an
+   all-status proposal lookup; leave paused/abandoned Goals alone. Read the
+   shared `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
+   for compatibility rules, not permission to enter its explicit target-setting
+   workflow. Target conflicts, incompatible authority and capacity stay text-only;
+   never relabel them missing or acceptance. Apply the concise known-context
+   numeric-suitability rule in the `murph.attach_response_card` prompt. Do not run
+   a universal medical-history or measurement checklist. Number-sensitive context
+   or unresolved suitability retains ordinary nonnumeric closeout, no card,
+   Goal/measurement mutation, or target-setup question. A constraint affecting
+   target advice does not alone suppress benign logged totals. Keep the occurrence
    local date from step 1 as both the work boundary and the only scheduled card
    `localDate`. Historical captures are cleanup-only and never card inputs. A target
    qualifies only when that card date is on or after the containing Goal's
@@ -321,7 +296,9 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
    target's optional inclusive `startAt`/`targetAt` interval. Ignore an
    out-of-window target for current authority and conflict resolution; never
    copy, expose, derive from, or mutate a Goal because of it. If fewer than five
-   applicable targets remain, ask no question and use ordinary closeout text.
+   compatible applicable targets remain and the query reports `missing`, use
+   all-null goals subject to complete totals and suitability, without questions
+   or target mutations.
    New authoring uses `dietary-calories`. Resolve that canonical owner first;
    when it exists, use it and ignore every globally ambiguous `calories`
    target. Only without a canonical owner may an applicable exact-point
@@ -352,8 +329,7 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
    replace, or remove a managed target around it. On a scheduled occurrence,
    ask no question, perform no Goal or measurement mutation, and use ordinary
    closeout text without a card.
-7. Only when the complete target-authority read in step 6 resolves one
-   unambiguous card-authorizing bundle, use its fresh canonical totals
+7. When step 6 reports `ready` or `missing`, use its fresh canonical totals
    immediately before any response-card attachment. If a meal or Goal changed
    after that read, rerun `vault-cli meal totals --from <occurrence-local-date>
    --to <occurrence-local-date> --resolve-goals --format json` first; otherwise
@@ -364,7 +340,12 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
    manual, conversation, provider, or device meal not selected by this
    closeout. Do not widen the scheduled-question exception above: a scheduled
    run follows its existing compact closeout when an unselected meal remains
-   incomplete. When the canonical read includes a calorie total and
+   incomplete. Totals-only scheduled cards require non-null totals and metric
+   `mealCount` equal to the top-level `mealCount` for all five nutrients. Equal
+   counts describe stored records, not every meal eaten that day. Preserve
+   food-journal's informed explicit partial-request behavior and the existing
+   goal-aware partial behavior. Missing nutrition is unknown, never zero.
+   When the canonical read includes a calorie total and
    the card-time safety gate from step 6 still passes, call
    `murph.attach_response_card` with this exact mapping:
    `card: { kind: "daily_nutrition", version: 2, localDate:
@@ -372,7 +353,8 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
    proteinGrams, carbsGrams, fatGrams, fiberGrams }, goals: { calories,
    proteinGrams, carbsGrams, fatGrams, fiberGrams } }`. Copy every metric's
    complete `{ total, mealCount }` pair unchanged from the canonical read,
-   including `fiberGrams`. Each goal entry is
+   including `fiberGrams`. For `missing`, every goal entry is null; never mix
+   snapshots and nulls or derive targets. For `ready`, each goal entry is
    `{ target: <exact canonical daily target>, status: <assessment> }`. Never
    translate a threshold or range comparator into this point-target payload.
    The assessment must be one of `far_under_target`, `under_target`, `on_target`,
@@ -388,11 +370,14 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
    replaces that text with the deterministic closeout derived from the card.
    Do not author a second nutrition summary. The runtime labels partial totals
    as partial and identifies missing or under-supported nutrition honestly. For
-   missing calories, an incomplete or conflicting active target bundle, or
-   numerical suppression, retain the current compact text, one-question, or
+   missing calories, incomplete totals-only coverage, conflicting or incompatible
+   active authority, capacity, or numerical suppression, retain the current compact text, one-question, or
    non-numeric behavior and do not attach a card. Never attach the photos.
    Historical-only work already returned the required skip before this step;
    historical captures never become presentation inputs for current-date work.
+   Scheduled closeouts do not add goal invitations or questions. An ordinary
+   interactive reply to a scheduled check-in uses food-journal's meal-log path,
+   not this scheduled authority; a meal reply never accepts goals.
 
 ## Handle edge cases
 

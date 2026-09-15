@@ -3980,6 +3980,46 @@ describe("resolveHostedAiUsageGate", () => {
 });
 
 describe("readHostedAiUsageGate", () => {
+  it("reads an allowed projected member without opening a transaction or rereading admission", async () => {
+    const database = createGatePrisma({ spentUsdMicros: 0n });
+    const memberState = await database.hostedMember.findUnique();
+    database.hostedMember.findUnique.mockClear();
+    const transaction = vi.fn(async () => { throw new Error("unexpected transaction"); });
+    const prisma = { ...database, $transaction: transaction };
+
+    await expect(checkHostedAiUsageGate({
+      memberId: "member_123",
+      memberState,
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ allowed: true });
+    expect(transaction).not.toHaveBeenCalled();
+    expect(database.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(database.hostedAiUsagePeriod.findUnique).toHaveBeenCalledTimes(1);
+    expect(database.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(database.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(database.$queryRaw).not.toHaveBeenCalled();
+    expect(database.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("opens only the authoritative transaction when a projected denial needs confirmation", async () => {
+    const oldDatabase = createGatePrisma({ spentUsdMicros: 0n, suspendedAt: new Date() });
+    const memberState = await oldDatabase.hostedMember.findUnique();
+    const database = createGatePrisma({ spentUsdMicros: 0n });
+    const transaction = vi.fn(async (run: (tx: typeof database) => Promise<unknown>) => run(database));
+    const prisma = { ...database, $transaction: transaction };
+
+    await expect(checkHostedAiUsageGate({
+      memberId: "member_123",
+      memberState,
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ allowed: true });
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(database.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(database.$queryRaw).toHaveBeenCalled();
+  });
+
   it("confirms a projected denial with freshly read billing state", async () => {
     const oldPrisma = createGatePrisma({ spentUsdMicros: 0n, suspendedAt: new Date() });
     const memberState = await oldPrisma.hostedMember.findUnique();

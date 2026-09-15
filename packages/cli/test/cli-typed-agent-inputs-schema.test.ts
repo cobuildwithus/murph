@@ -552,11 +552,6 @@ test('capture import-json exposes a paired Incur-discoverable payload-schema sib
 test('agent-visible input-file command surfaces stay explicitly reviewed', async () => {
   const commands = await loadFullLlmCommands()
   const reviewedInputCommands = [
-    'age calculate',
-    'age calculate-bundle',
-    'age evidence',
-    'age preview',
-    'age preview-view',
     'allergy import-json',
     'assertion import-json',
     'automation import-json',
@@ -598,7 +593,7 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
   assert.deepEqual(inputCommands, reviewedInputCommands)
 })
 
-test('murph age submitted-data commands stay in generated agent artifacts', async () => {
+test('retired Murph Age commands are absent from generated agent artifacts', async () => {
   const commands = await loadFullLlmCommands()
   const generatedTypes = await readFile(
     new URL('../src/incur.generated.ts', import.meta.url),
@@ -608,55 +603,15 @@ test('murph age submitted-data commands stay in generated agent artifacts', asyn
     await readFile(new URL('../config.schema.json', import.meta.url), 'utf8'),
     'config schema',
   )
-  const previewCommand = requireManifestCommand(commands, {
-    label: 'age preview',
-    commandNames: ['age preview'],
-    fieldHints: ['input', 'modelCardArtifactRoot'],
-  })
-  const calculateCommand = requireManifestCommand(commands, {
-    label: 'age calculate',
-    commandNames: ['age calculate'],
-    fieldHints: ['input', 'mode', 'modelCardArtifactRoot'],
-  })
-  const calculateBundleCommand = requireManifestCommand(commands, {
-    label: 'age calculate-bundle',
-    commandNames: ['age calculate-bundle'],
-    fieldHints: ['input', 'includeResearchPreview', 'modelCardArtifactRoot'],
-  })
-  const scaffoldCommand = requireManifestCommand(commands, {
-    label: 'age scaffold',
-    commandNames: ['age scaffold'],
-    fieldHints: [],
-  })
+  const rootCommands = requireRecord(
+    requireRecord(configSchema.properties, 'config schema properties').commands,
+    'config schema commands',
+  )
+  const commandProperties = requireRecord(rootCommands.properties, 'config schema command properties')
 
-  assert.equal(schemaIncludesProperty(calculateCommand.schema, 'input'), true)
-  assert.equal(schemaIncludesProperty(calculateCommand.schema, 'mode'), true)
-  assert.equal(schemaIncludesProperty(calculateCommand.schema, 'modelCardArtifactRoot'), true)
-  assert.equal(schemaIncludesProperty(calculateBundleCommand.schema, 'input'), true)
-  assert.equal(schemaIncludesProperty(calculateBundleCommand.schema, 'includeResearchPreview'), true)
-  assert.equal(schemaIncludesProperty(calculateBundleCommand.schema, 'modelCardArtifactRoot'), true)
-  assert.equal(schemaIncludesProperty(previewCommand.schema, 'input'), true)
-  assert.equal(schemaIncludesProperty(previewCommand.schema, 'modelCardArtifactRoot'), true)
-  assert.equal(schemaIncludesProperty(scaffoldCommand.schema, 'input'), false)
-  assert.match(generatedTypes, /'age calculate': \{ args: \{\}; options: \{ input: string; mode: "product" \| "research"; modelCardArtifactRoot\?: string \} \}/u)
-  assert.match(generatedTypes, /'age calculate-bundle': \{ args: \{\}; options: \{ input: string; includeResearchPreview: boolean; modelCardArtifactRoot\?: string \} \}/u)
-  assert.match(generatedTypes, /'age preview': \{ args: \{\}; options: \{ input: string; modelCardArtifactRoot\?: string \} \}/u)
-  assert.match(generatedTypes, /'age scaffold': \{ args: \{\}; options: \{\} \}/u)
-  assert.deepEqual(commandConfigOptionNames(configSchema, 'age calculate').sort(), [
-    'input',
-    'mode',
-    'modelCardArtifactRoot',
-  ])
-  assert.deepEqual(commandConfigOptionNames(configSchema, 'age calculate-bundle').sort(), [
-    'includeResearchPreview',
-    'input',
-    'modelCardArtifactRoot',
-  ])
-  assert.deepEqual(commandConfigOptionNames(configSchema, 'age preview').sort(), [
-    'input',
-    'modelCardArtifactRoot',
-  ])
-  assert.deepEqual(commandConfigOptionNames(configSchema, 'age scaffold'), [])
+  assert.equal(commands.some((command) => /^age(?: |$)/u.test(command.name)), false)
+  assert.doesNotMatch(generatedTypes, /^\s*['"]age(?: |['"])/mu)
+  assert.equal(Object.hasOwn(commandProperties, 'age'), false)
 })
 
 test('wearables activity list exposes explicit bounded workout detail on demand', async () => {

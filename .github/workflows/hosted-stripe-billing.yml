@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || 'main-push' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -144,6 +144,8 @@ jobs:
     concurrency:
       group: hosted-stripe-billing-sandbox
       cancel-in-progress: false
+      # Preserve queued candidate proof while serializing the shared sandbox.
+      queue: max
     services:
       postgres:
         image: public.ecr.aws/docker/library/postgres:17

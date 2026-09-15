@@ -10,6 +10,7 @@
     "dev": "vercel env run -- pnpm dev:local-env",
     "dev:local-env": "bash -c 'pnpm legal:pdf && pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"' --",
     "dev:prepared-local-env": "bash -c 'pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"' --",
+    "build:hosted-local": "pnpm --dir ../.. exec tsx apps/web/scripts/build-hosted-local-production.ts",
     "prebuild": "pnpm --dir ../../packages/runtime-state build",
     "build": "pnpm public-routes:waf-check && pnpm product-labels:env-check && pnpm hosted-crypto:env-check && pnpm legal:pdf && pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate:build && pnpm typecheck:prepared && bash scripts/run-production-next-build.sh && pnpm --dir ../.. workflow:clean-web-artifacts -- --quiet && pnpm health-commons:trace-check && pnpm og-assets:trace-check && pnpm og-assets:runtime-check",
     "changelog:generate": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-changelog-fragments.ts",

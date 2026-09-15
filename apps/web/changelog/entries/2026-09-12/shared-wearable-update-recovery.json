@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 200,
+  "item": {
+    "id": "shared-wearable-update-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer updates when wearable data is late",
+    "summary": "Group wearable updates can request a sync and briefly recheck missing days before reporting what is available.",
+    "details": "Murph uses recent shared history to distinguish an unexpectedly missing result from an ongoing absence. Long-standing gaps do not hold up everyone else. If sleep is unexpectedly late, Murph gives the check time and can offer to send future updates later. The schedule changes only after you agree. Device uploads can still arrive later.",
+    "relevanceTags": [
+      "groups",
+      "wearables",
+      "automations"
+    ],
+    "sourcePullRequests": [
+      3377
+    ]
+  }
+}

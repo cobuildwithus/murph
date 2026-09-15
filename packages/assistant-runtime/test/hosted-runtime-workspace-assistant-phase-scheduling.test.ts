@@ -1196,12 +1196,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     events.push("checkpoint");
     await result.afterCheckpoint?.();
 
-    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledOnce();
-    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledWith({
-      shouldYield: null,
-      signal: null,
-      vault: "/tmp/murph-vault",
-    });
+    expect(mocks.maintainAssistantAutoReplyRouteState).not.toHaveBeenCalled();
 
     expect(events).toEqual([
       "assistant",
@@ -1355,8 +1350,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledOnce();
   });
 
-  it("does not turn migration-only foreground progress into managed automation work", async () => {
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+  it("leaves route migration to a background pass when foreground work makes no progress", async () => {
+    mocks.runHostedAssistantAutomationLane.mockResolvedValue({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: false,
       nextWakeAt: null,
@@ -1367,15 +1362,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       trusted: true,
     });
 
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+    const foreground = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
     }));
 
-    expect(result).toEqual(expect.objectContaining({
+    expect(foreground.progressed).toBe(false);
+    expect(mocks.maintainAssistantAutoReplyRouteState).not.toHaveBeenCalled();
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+
+    const background = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+    expect(background).toEqual(expect.objectContaining({
       checkpointReason: "assistant_runtime_commit",
       progressed: true,
     }));
-    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+    expect(mocks.maintainAssistantAutoReplyRouteState).toHaveBeenCalledOnce();
   });
 
   it("keeps device-sync options out of the assistant lane when active input is fresh", async () => {
@@ -1432,7 +1432,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("keeps browser-vault refresh control work behind fresh conversation input", async () => {
-    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce(null).mockResolvedValueOnce({
       item: createBrowserVaultRefreshSystemMailboxItem(),
       itemId: "system_mailbox_item_browser_vault_refresh",
       metrics: {
@@ -1447,7 +1447,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 1,
     }));
 
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested", "assistant.ask.completed"],
+      }),
+    );
     expect(result).not.toHaveProperty("browserVaultReplicaRefreshRequested");
     expectAssistantLaneCallWithoutDeviceSyncOptions({
       freshAssistantInputIds: ["ain_00000000000000000000000000000001"],

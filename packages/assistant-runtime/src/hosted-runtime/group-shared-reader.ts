@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { createHash } from "node:crypto";
 import { lstat } from "node:fs/promises";
 
@@ -9,6 +10,8 @@ import {
   type AssistantHostedGroupSharedReader,
 } from "@murphai/assistant-engine";
 import {
+  hostedGroupSharedNeedsWearableRecovery,
+  parseHostedGroupSharedFreshnessRequirements,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
@@ -91,33 +94,85 @@ interface HostedGroupParticipantDisplayNameCacheRead {
  */
 export function createHostedGroupSharedReader(input: {
   groupToolPort: HostedRuntimeGroupToolPort | null;
+  /** Omit for read-only callers. Explicitly set to admit sync requests. */
+  freshnessWaitMs?: number;
 }): AssistantHostedGroupSharedReader {
+  const waitMs = Math.min(5 * 60_000, Math.max(0, input.freshnessWaitMs ?? 0));
   return {
-    async request(request) {
-      const projectionScopes = normalizeHostedGroupSharedProjectionScopes(
-        request.projectionScopes,
-      );
-      if (!projectionScopes) {
+    async request(request, context) {
+      const projectionScopes = normalizeHostedGroupSharedProjectionScopes(request.projectionScopes);
+      if (!projectionScopes) return unavailable(GROUP_SHARED_REQUEST_INVALID);
+      if (!input.groupToolPort) return unavailable(GROUP_TOOL_UNAVAILABLE);
+      if (request.freshness !== undefined && input.freshnessWaitMs === undefined) {
         return unavailable(GROUP_SHARED_REQUEST_INVALID);
       }
-      if (!input.groupToolPort) {
-        return unavailable(GROUP_TOOL_UNAVAILABLE);
-      }
-
+      let requirements;
       try {
-        const response = await input.groupToolPort.request({
-          action: "read_shared",
-          projectionScopes,
-        });
-        if (response.action !== "read_shared") {
-          return unavailable(GROUP_SHARED_RESULT_INVALID);
-        }
-        return response.result;
+        requirements = request.freshness === undefined ? undefined
+          : parseHostedGroupSharedFreshnessRequirements(request.freshness, projectionScopes);
       } catch {
+        return unavailable(GROUP_SHARED_REQUEST_INVALID);
+      }
+      const signal = context?.signal ?? undefined;
+      try {
+        return await readSharedGroupWithFreshness({
+          groupToolPort: input.groupToolPort, projectionScopes, requirements, signal, waitMs,
+        });
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        // Older Web producers reject the additive request. Preserve an ordinary
+        // current read without claiming the requested refresh was completed.
+        if (requirements) {
+          try {
+            const response = await input.groupToolPort.request({ action: "read_shared", projectionScopes },
+              ...(signal ? [{ signal }] : []));
+            if (response.action === "read_shared" && response.result.status === "ok") {
+              return { ...response.result, freshness: {
+                checkedAt: new Date().toISOString(), refreshStatus: "unavailable",
+              } };
+            }
+          } catch (fallbackError) {
+            if (signal?.aborted) throw fallbackError;
+          }
+        }
         return unavailable(GROUP_SHARED_READ_FAILED);
       }
     },
   };
+}
+
+/** One refresh request per operation; polling only rereads the authorized snapshot. */
+async function readSharedGroupWithFreshness(input: {
+  groupToolPort: HostedRuntimeGroupToolPort;
+  projectionScopes: HostedVaultShareSelectableProjectionScope[];
+  requirements: ReturnType<typeof parseHostedGroupSharedFreshnessRequirements> | undefined;
+  signal: AbortSignal | undefined;
+  waitMs: number;
+}) {
+  const { signal, requirements, projectionScopes, groupToolPort } = input;
+  const deadline = Date.now() + input.waitMs;
+  signal?.throwIfAborted();
+  let response = await groupToolPort.request({
+    action: "read_shared", projectionScopes,
+    ...(requirements ? { freshness: requirements } : {}),
+  }, ...(signal ? [{ signal }] : []));
+  if (response.action !== "read_shared") return unavailable(GROUP_SHARED_RESULT_INVALID);
+  let result = response.result;
+  if (!requirements) return result;
+  while (result.status === "ok"
+    && result.freshness?.refreshStatus === "requested"
+    && hostedGroupSharedNeedsWearableRecovery(result, requirements)
+    && Date.now() < deadline) {
+    await delay(Math.min(15_000, deadline - Date.now()), undefined, { signal });
+    signal?.throwIfAborted();
+    response = await groupToolPort.request({ action: "read_shared", projectionScopes },
+      ...(signal ? [{ signal }] : []));
+    if (response.action !== "read_shared") return unavailable(GROUP_SHARED_RESULT_INVALID);
+    result = response.result.status === "ok" ? { ...response.result, freshness: {
+      checkedAt: new Date().toISOString(), refreshStatus: "requested",
+    } } : response.result;
+  }
+  return result;
 }
 
 export function normalizeHostedGroupSharedProjectionScopes(

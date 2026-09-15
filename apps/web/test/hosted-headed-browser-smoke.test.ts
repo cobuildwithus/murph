@@ -10,6 +10,7 @@ import {
   disconnectHostedLocalJunctionAccountForTest,
   navigateToHostedLocalJunctionStartForTest,
   readHostedLocalJunctionBrowserConfigForTest,
+  requireHostedLocalJunctionPersistedConnectionForTest,
 } from "../scripts/run-hosted-local-junction-wearable-browser";
 
 const smokeEnabled = process.env.MURPH_E2E_HEADED_BROWSER_SMOKE === "1";
@@ -47,6 +48,83 @@ function createGarminConfig() {
 }
 
 describe("hosted headed browser boundary", () => {
+  it.runIf(smokeEnabled).each(["navigation", "reload"] as const)(
+    "rejects a failed persisted connect %s before accepting rendered connection state",
+    async (phase) => {
+      const browser = await chromium.launch({ headless: false });
+      try {
+        const page = await browser.newPage();
+        let requests = 0;
+        await page.route("https://app.example.test/connect", (route) => {
+          requests += 1;
+          return route.fulfill({
+            status: requests === (phase === "navigation" ? 1 : 2) ? 503 : 200,
+            contentType: "text/html",
+            body: '<div><h2>Garmin</h2><span data-connection-state="connected" style="display:block;width:10px;height:10px"></span></div>',
+          });
+        });
+        await expect(requireHostedLocalJunctionPersistedConnectionForTest(
+          page,
+          createGarminConfig(),
+        )).rejects.toThrow("Persisted connect navigation returned HTTP 503.");
+        expect(requests).toBe(phase === "navigation" ? 1 : 2);
+      } finally {
+        await browser.close();
+      }
+    },
+  );
+
+  it.runIf(smokeEnabled)("rejects a persisted connect redirect even with connected markup", async () => {
+    const server = createServer((request, response) => {
+      if (request.url === "/connect") {
+        response.writeHead(302, { location: "/signin?private=synthetic" });
+        response.end();
+      } else {
+        response.writeHead(200, { "Content-Type": "text/html" });
+        response.end('<div><h2>Garmin</h2><span data-connection-state="connected" style="display:block;width:10px;height:10px"></span></div>');
+      }
+    });
+    const browser = await chromium.launch({ headless: false });
+    try {
+      server.listen(0, "127.0.0.1");
+      await once(server, "listening");
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Missing test port.");
+      const webBaseUrl = `http://127.0.0.1:${address.port}`;
+      const page = await browser.newPage();
+      await expect(requireHostedLocalJunctionPersistedConnectionForTest(page, {
+        ...createGarminConfig(),
+        webBaseUrl,
+        webOrigin: webBaseUrl,
+      })).rejects.toThrow("Persisted connect navigation left the expected page.");
+    } finally {
+      await browser.close();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it.runIf(smokeEnabled)("requires connected state after both successful persisted page loads", async () => {
+    const browser = await chromium.launch({ headless: false });
+    try {
+      const page = await browser.newPage();
+      let requests = 0;
+      await page.route("https://app.example.test/connect", (route) => {
+        requests += 1;
+        return route.fulfill({
+          contentType: "text/html",
+          body: '<div><h2>Garmin</h2><span data-connection-state="connected" style="display:block;width:10px;height:10px"></span></div>',
+        });
+      });
+      await expect(requireHostedLocalJunctionPersistedConnectionForTest(
+        page,
+        createGarminConfig(),
+      )).resolves.toBeUndefined();
+      expect(requests).toBe(2);
+    } finally {
+      await browser.close();
+    }
+  });
+
   it.runIf(smokeEnabled)(
     "reaches warm transport health before a connect response slower than five seconds",
     async () => {

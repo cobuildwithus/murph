@@ -131,9 +131,12 @@ provider value or credential, and `runtime_recheck_requested` remains a
 facts-read-only signal for its existing callers.
 
 For admitted Linq and Telegram appends, Web starts its existing payloadless direct wake when
-its authorized Temporal signal request begins. Current member/participant access,
-exact mailbox ownership, and cancellation checks precede both requests. The hint
-uses the same validated callback whether checkpoint facts were cached or reread;
+its authorized Temporal signal request begins. The appending transaction proves
+member/participant access and workspace admission. Its known checkpoint skips
+post-commit database rediscovery; the signal still checks exact mailbox ownership
+and cancellation. Callers without append facts retain workspace admission.
+Current mailbox-fetch, new-session, and effect gates remain authoritative. The hint
+uses the same callback whether checkpoint facts were supplied or reread;
 provider and cache availability do not separately gate the wake. It
 overlaps acknowledgement, while webhook success still waits for Temporal. A
 failed acknowledgement keeps the provider retry path; durable mailbox input and
@@ -478,6 +481,49 @@ their separate granted snapshot. Authority, decryption, parse, and bound
 failures return typed unavailability without shared records or identity-bearing
 infrastructure fields.
 
+Ordinary shared reads may additionally request one to twenty-one unique
+`freshness` scope/date pairs for daily wearable metrics already in that read.
+Missing granted dates in the recent reconcile window cause Web to recheck the
+exact member/scope grants, current membership, active access and health consent,
+then request existing personal manual-reconcile wakes. This does not force a
+watch upload. Connection selection is capped at 32, with four concurrent wake
+requests, and uses a five-minute identity bucket fenced to the connection
+incarnation. Oversized or ineligible requests report refresh unavailability.
+All returned health values still come from a new ordinary consent-aware read.
+No private connection metadata is added to the result.
+
+The optional result `freshness.checkedAt` records the shared-data read time,
+not an upstream upload or completed provider refresh. `refreshStatus=requested`
+means a wake was accepted; `not_needed` means no granted requested date was
+missing; `unavailable` means the refresh could not be confirmed. The runtime
+requests sync once per tool call, then performs ordinary reads at fifteen-second
+intervals while recoverable requested dates remain missing: up to fifteen seconds in a
+foreground turn and five minutes in a scheduled group turn, subject to the
+invocation's cancellation signal and existing transport deadlines. Every reread
+uses current authority. Older producers rejecting the additive request receive
+one ordinary-read fallback, marked refresh-unavailable without claiming a sync.
+Read-only detached schemas and group email reads do not expose freshness.
+The runtime also rejects freshness unless its trusted caller explicitly enables
+it; ordinary email reads and detached consultations retain read-only readers.
+
+Recovery derives each missing scope/date from the current shared snapshot.
+A record in the seven preceding calendar days means `recent_reporting`; an older
+grant with no record in that window means `no_recent_reporting`. Pending, new,
+or legacy grants without sufficient age evidence remain `unknown_history`.
+This is evidence of shared reporting only, never a device-connection diagnosis.
+The runtime waits for recent or unknown gaps; established nonreporters do not
+extend the wait after those gaps resolve. Web still makes its single bounded
+sync request for eligible missing sources, so returning contributors can recover.
+The assistant adapter adds these derived `reportingGaps` to each dated projection
+only for freshness requests. It introduces no Web transport field or history store.
+
+Scheduled missing-sleep replies include available results and the actual shared
+check time in the known schedule timezone. Only a missing current sleep date with
+recent reporting evidence may trigger a thirty-minute delay offer; unknown or
+long-absent reporters alone do not justify moving the group schedule. Only an authorized affirmative reply changes the
+existing automation through canonical inspect and versioned patch; timezone,
+recurrence, content and destination remain owned by that automation.
+
 The Web response is complete. For the model boundary, the assistant-engine
 adapter keys every retained projection by its exact scope and collapses the
 grant/data pair to `not_granted`, `pending`, `missing`, or `available`.
@@ -521,8 +567,8 @@ The runtime's shared reader is a synchronous no-I/O adapter. Constructing it,
 starting or resuming App Server, and admitting foreground, scheduled,
 notification, or detached read-only model work adds no group, grant, snapshot,
 device, projection, configuration, or attribution read before the model starts;
-existing accepted-input and route-binding work is unchanged. The only Web read
-occurs inside the adapter's request method after the model invokes `read_shared`.
+existing accepted-input and route-binding work is unchanged. Web reads occur
+inside the adapter's request method after the model invokes `read_shared`.
 No roster or authority snapshot is preloaded into scheduled context.
 
 Interactive Linq and Telegram group turns are room-scoped for batching while
@@ -789,8 +835,10 @@ AI usage evaluation. Conversation batches still read current usage periods;
 denials are confirmed by the mutating allowance owner with a new member read.
 Group owner/participant authority and Family sponsorship keep their canonical
 readers. Read-only group allowance derives owner access from its supplied member
-state rather than reloading the same container. Locking and spend accounting are
-unchanged. The encrypted mailbox response and runtime contract are unchanged.
+state rather than reloading the same container. The read-only allowance owner
+uses ordinary reads without opening an interactive transaction: read-committed
+BEGIN/COMMIT added no shared snapshot or locks. Caller-owned report transactions
+remain intact. Denial confirmation, locking, and spend accounting are unchanged. The encrypted mailbox response and runtime contract are unchanged.
 
 ### Foreground Priority Rule
 
@@ -816,6 +864,13 @@ it does not wait for provider cleanup or another exact automation inventory
 scan. A conversation import that lands while foreground-owned maintenance is
 in flight aborts that work through the runner-scoped background-maintenance
 signal so the new message can enter assistant admission immediately.
+
+Freshly staged assistant input IDs already prove foreground work. Before that
+lane starts, derive the immediate pending wake from the phase clock instead of
+reading the pending index, automation state, and indexed event/terminal evidence
+again. Still read the oldest occurrence among those exact current IDs to bound
+causal Ask completion ordering. Explicit maintenance wake overrides take
+precedence; without fresh IDs, pending discovery and recovery remain unchanged.
 
 Foreground wake projection is read-only unless the foreground turn itself
 committed a canonical write under `bank/automations`. That write arms an
@@ -904,8 +959,12 @@ foreground priority. A default request behind `system_mailbox`, including
 an authenticated Web-direct request, wakes the exact active child with the
 requested default mode. An accepted wake retains that child's fence and lets
 its runtime qualify actual conversation input before serving foreground in
-place. If the exact child has already settled, the existing inactive-fence
-path may start a replacement. A `system_mailbox` request behind an active
+place. Promotion consumes the conversation batch that qualified the handoff;
+it must not reuse the invocation's earlier system-only import or depend on a
+second wake/refetch. When independent completion races a wake, the waiter joins
+its consumed notification and qualifies it before declaring completion; failure
+retains an accepted notification for the existing recovery owner. If the exact
+child has already settled, the existing inactive-fence path may start a replacement. A `system_mailbox` request behind an active
 default owner sends a normal wake to that exact child, preserving its default
 mode and fence. It sends no
 requested mode handoff and never interrupts foreground work. Wake acceptance
@@ -1795,12 +1854,11 @@ The relational latency phase records the final parsed direct result kind and,
 only for `runtime_processing_accepted`, its bounded action and runtime attempt
 id. Retry reasons and raw errors stay out of the trace; Cloudflare structured
 logs carry retry reasons under the direct orchestration attempt id.
-Linq first proves the committed known-checkpoint owner and
-canonical live active access; Assistant Ask first completes its normal
-server-bound append checks. Web always awaits the applicable Temporal
-`signalWithStart`; only after Temporal accepts that durable signal does Web
-start the direct ensure. An access failure or Temporal acceptance failure starts
-no direct wake. Linq instant start follows the same rule: enrollment returns the
+Linq reuses the appending transaction's admission and checks the committed
+known-checkpoint owner; its direct hint overlaps the Temporal request as described
+above. Assistant Ask first completes its normal server-bound append checks and
+awaits Temporal acceptance before its direct ensure. A signal failure preserves
+the existing provider retry path and never acknowledges the webhook as successful. Linq instant start follows the same rule: enrollment returns the
 newly committed activation as an explicit per-request wake continuation instead
 of signaling it first. Web sends no member-specific shell-prewarm request during
 enrollment, message routing, or typing. The retired `runtime/shell-prewarm`
@@ -1865,6 +1923,20 @@ breakdown and structured log. The selection log records the same metadata
 before fence or readiness work so a later caller-budget exit remains
 diagnosable without adding member or container identifiers. Failed, retried, or
 superseded starts do not emit an accepted attribution.
+
+Normal idle or completed-invocation cleanup retires the immutable member slot
+only after native destruction succeeds and the interaction generation remains
+unchanged. It then sends a best-effort retirement notification to the existing
+user owner without awaiting that owner from the slot lifecycle lock. The user
+owner reads the exact slot's durable retired binding outside its admission lock,
+then conditionally clears only the matching pending target under that lock. An
+active write fence or replacement target prevents the clear. No retirement hint
+alone grants authority, and the notification adds no remote wait under the
+foreground admission lock. A missed notification retains ordinary next-admission
+reconciliation; the already-retired slot can answer without another native
+liveness or destroy request. Warm reuse and uncertain stops retain their existing
+ownership and recovery behavior. This uses existing slot states and bindings and
+requires no Web, Temporal, or container-image wire change.
 
 Fresh allocation records `runnerTargetReconcileElapsedMs`, `standbyClaimElapsedMs`,
 and `runnerTargetBindElapsedMs` separately within the existing orchestration
@@ -2264,8 +2336,15 @@ Scheduled-job completion diagnostics expose `retryScheduled` after the cron
 owner finalizes durable runtime state. Web prefixes that field as
 `failureRetryScheduled` in persisted redacted log details. Personal Patterns
 operator email ignores failed events unless this field is explicitly `false`;
-missing fields from an older runtime stay quiet, while occurrence-expired
-events remain terminal. Every terminal event for one scheduled occurrence uses
+missing fields from an older runtime stay quiet. Explicit provider usage-limit
+failures stay quiet too. Occurrence-expired events remain terminal, but Web
+suppresses their operator email when retained `runtime.ai_usage_gate` observations
+establish a platform usage pause at the occurrence or before expiry detection.
+These Web-owned observations use the existing `assistant.automation_detail` event
+with type `runtime.ai_usage_gate`, carry only time and a usage-limited boolean, survive
+an allowance reset under normal diagnostic retention, and never change runtime
+admission. Missing history preserves the ordinary alert. The alert callback uses
+its authenticated member identity for the bounded lookup before coalescing. Every terminal event for one scheduled occurrence uses
 one member-independent email body and Resend idempotency key, so concurrent
 member failures coalesce without a new alert queue or persistence owner.
 The generic email describes either expiry or terminal failure without asserting
@@ -2875,6 +2954,18 @@ It omits member/account/job identifiers, payloads,
 cursors, provider responses, health values, and raw errors. The marker declares
 the total observed count, sample limit, and truncation state. The Web parser must
 accept the object-array field before a runner capable of emitting it is deployed.
+
+Hosted runtime wake projection reads unfinished job deadlines only. Provider
+cadence remains in Web's `DeviceConnection.nextReconcileAt`; completing a
+checkpointed connection pass publishes that cadence without returning it as a
+runtime wake. The global scheduled reconciler supplies the next connection-scoped
+handoff. Local job retries, dirty acknowledgements, completion barriers, and
+dense-raw retention retain their existing runtime wake owners. Pending or failed
+Fitbit cutovers use the existing connectionless maintenance mailbox successor;
+they do not rewrite provider cadence to arrange a local retry. Already-published
+legacy timers may drain through the existing recovery path without rearming
+provider cadence.
+
 The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
 scheduled reconciler workflow, but web owns the signed legacy-named command that
@@ -2955,12 +3046,24 @@ schedule hints retire when that advanced cadence is retained after recording.
 A cold idle pass can also checkpoint retirement of already-covered eligible
 schedule hints without running a provider job; it first gives runnable work its
 normal priority. Webhook hints still require dirty-work admission, and equal
-cadences, explicit jobs, manual requests, and connection-epoch barriers remain
+cadences, explicit jobs, attempted or scoped manual requests, and connection-epoch barriers remain
 pending. When a pass cannot progress, already-due eligible schedule hints share
 the owner retry backoff so they cannot repeatedly readmit it.
 If a pristine webhook or companion dirty hint was deferred to an owner's future
 retry, an otherwise idle pass may readmit the validated owner only when the
 existing compactor proves an eligible hint can retire during that admission.
+Pristine manual-reconcile requests for the same member, provider, connection
+and epoch use this existing owner admission too. The request must contain only
+`reason: manual_reconcile` and an optional occurrence hint. The atomic claim
+carries `manual_reconcile_pending` in the retained wake before removing covered
+requests, preserving the exact retained jobs. Hydration first restores those
+jobs and then calls the provider-owned manual job creator. Recovery carries
+the resulting exact jobs with the ordinary `manual_reconcile` reason, which
+does not recreate roots when jobs are present. A pre-hydration yield or failed
+creation preserves pending intent. Old snapshots remain readable; snapshots
+with the new pending reason require corrected restore consumers. Roll out the
+runner coherently before admitting transfers and retain that runtime rollback
+floor until all pending reasons have drained. Web requires no schema change.
 Invocation filters and substantive-work barriers still apply. The owner fetches
 canonical dirty work before acknowledgement; exact job retry times stay intact,
 and removing the admitted hints prevents repeated idle admissions.
@@ -3811,6 +3914,15 @@ all other immutable-field mismatches still fail closed.
 The assistant runtime owns the refresh build. It computes a stable canonical
 query-source hash from sorted source-relative paths, byte sizes, and content
 hashes; mtimes, generatedAt, user ids, and runtime cache paths are excluded.
+Each freshness hash still covers all canonical source bytes, but parses only
+experiments through query's cancellation-aware `readBrowserVaultReplicaExperiments`
+export to find referenced outcomes. That narrow read retains strict parsing,
+canonical paths, default visibility, and entity ordering without building a full
+vault read model. Referenced outcome bytes (including duplicate references and
+malformed or mismatched files) and validated Pattern vocabulary retain their
+existing hash identity and accounting; missing outcomes are omitted and
+unreferenced outcome files are not scanned. Full-snapshot strict parsing remains
+in replica construction, not the three freshness hashes.
 Ordinary background system work uses that existing source hash, generation, and
 max-age policy to skip a current replica. Only an exact Browser Vault refresh
 request forces reconstruction of a metadata-current replica, including its
@@ -3833,7 +3945,7 @@ owner's cancellation and is aborted and joined before release; a notification
 accepted during that boundary remains available to foreground handling. An empty
 scheduler hint therefore cannot abandon a dirty replica refresh after its
 recording item has already completed.
-The default refresh deadline is 30 seconds and remains bounded by any earlier
+The default refresh deadline is 60 seconds and remains bounded by any earlier
 invocation deadline. Cancellation reaches the direct canonical reads, replica
 build checkpoints, content hashing, and size serialization; parallel source
 reads share that signal and every started child settles before the lane returns,
@@ -3886,13 +3998,31 @@ Once the initial source hash finishes, the deferred result and
 log retain the existing numeric source file-count and byte-total summary; before
 then both remain zero.
 
-These additions reuse `Date.now()` and the existing single phase log. They add
-no database or provider call, telemetry backend, metric owner, sampling system,
-or retention change, and only update an in-memory closed step marker at the
-existing stage boundaries. The event never includes paths, filenames, source
-hashes, content, messages, prompts, transcripts, health values, member or
-workspace identifiers, credentials, provider payloads, raw errors, or
-distinctive private scenarios.
+When a source operation spans the effective deadline, the timeout result also
+carries optional `sourceReadAtDeadline: { step, elapsedMs }`. The same done event
+adds `details.browserVaultRefreshSourceReadStep` and
+`details.browserVaultRefreshSourceReadStepElapsedMs`. The closed source labels
+are `canonical_source_read` (`readVaultSourceStrict`), `read_model_construction`
+(`createVaultReadModel`), `personal_pattern_vocabulary_read`, `metric_projection`
+(`buildMetricProjection`), and `default_entity_projection`. Source elapsed time
+is a bounded, finite, non-negative integer measured through the first operation
+boundary at or after the deadline, or through timeout observation while active.
+The effective deadline includes an earlier caller deadline, not just the
+configured timeout. A synchronous overrun is retained even if later operations
+finish before the timer runs; this attribution need not equal the broad step
+current when the timer fires. Gaps and cancellation yields have no active source
+operation and are not attributed to a later operation. Missing observation or
+a deadline outside source operations omits both fields, not a guessed label.
+
+`readBrowserVaultReplicaSource` exposes synchronous, best-effort `onSourceStep`
+boundaries through `@murphai/query/browser-replica-server`; null marks completion.
+Throwing observers do not change results or cancellation. Timing remains owned
+by the existing refresh cancellation owner using `Date.now()` and the single
+phase log. No await, I/O, timer, deadline enforcement, retry, publication,
+selection policy, persisted state, or monitoring owner is added or changed.
+The event never includes paths, filenames, source hashes, content, messages,
+prompts, transcripts, health values, member or workspace identifiers,
+credentials, provider payloads, raw errors, or distinctive private scenarios.
 
 A later bounded post-deploy natural-traffic query filters
 `details.browserVaultRefreshStatus = deferred_timeout`, aggregates counts and
@@ -3974,7 +4104,7 @@ acknowledgement stay within that offer. A runtime-wake interruption or timeout
 returns through the existing invocation continuation owner, preserving immediate
 foreground admission or the bounded requested-refresh retry and earlier pending
 assistant wakes. Ordinary due work without a fresh runtime wake can wait for
-the existing 30-second Browser refresh budget and a successor invocation;
+the existing 60-second Browser refresh budget and a successor invocation;
 fresh conversations and the exact due-assistant durability barrier retain
 priority ahead of that offer.
 
@@ -4170,6 +4300,20 @@ due-time projection on the workspace/status surface. Assistant work uses
 `nextWakeAt` and `nextWakeReason`; inbound message and media retention share the
 independent `inboxMediaRetentionWakeAt` field. Web does not materialize timer
 rows, and Cloudflare does not persist timer work items.
+
+Idle retention immediately continues actionable bounded batches, but an envelope
+migration blocked before apply is not actionable continuation. Unmigrated legacy
+captures and migration blockers recheck after 24 hours, matching protected media.
+Cleanup exceptions retry after one hour so an unchanged failure does not keep the
+runner inside its idle window. Foreground/shutdown interruption retains its short
+five-minute retry. Earlier expiry deadlines already discovered by completed passes
+remain scheduled, and ordinary idle maintenance may retry sooner. These schedules
+do not bypass migration equivalence checks or claim that blocked content expired.
+Retention-only invocations report `runtime.retention_issue` through the existing
+best-effort runtime-log owner: closed stage/outcome values, safe error codes, and
+legacy/migration blocker counts only. Log failures do not affect checkpoints.
+The additive event is safe with an older consumer, which may drop its diagnostics;
+release the Web log consumer first when complete diagnostic coverage is required.
 
 If the runner needs a synthetic in-process object for logging or execution
 plumbing, it may use an internal-only `runtime.timer` wake. That object is not a

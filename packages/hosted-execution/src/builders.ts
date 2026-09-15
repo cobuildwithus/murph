@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   MemberActionOutcomeV1,
   MemberActionRequestV1,
@@ -587,6 +588,56 @@ export function buildHostedMemberSignupWelcomeInstructions(text: string): string
     "Use this user-facing reply only:",
     text,
   ].join("\n\n");
+}
+
+// A later phone connection gets its own welcome without colliding with the
+// original email delivery. Keep the original identity valid for queued work.
+export function buildHostedMemberPhoneWelcomeDeliveryIdentity(memberId: string): string {
+  return `signup-welcome:${memberId}:linq`;
+}
+
+export function buildHostedMemberChannelWelcomeDeliveryIdentity(input: {
+  memberId: string;
+  channel: "email" | "linq";
+  destinationLookupKey: string;
+}): string {
+  const destination = createHash("sha256")
+    .update(input.destinationLookupKey)
+    .digest("hex");
+  return `signup-welcome:${input.memberId}:${input.channel}:${destination}`;
+}
+
+export function buildHostedMemberSignupWelcomeNotificationWake(input: {
+  memberId: string;
+  occurredAt: string;
+  route: HostedExecutionAssistantNotificationRoute;
+  text: string;
+  deliveryIdentity?: string;
+  eventId?: string;
+}): HostedExecutionAssistantNotificationRequestedWake {
+  const deliveryIdentity = input.deliveryIdentity ?? `signup-welcome:${input.memberId}`;
+  return buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId: input.eventId ?? `assistant.notification.requested:${deliveryIdentity}`,
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    notification: {
+      deliveryDedupeToken: deliveryIdentity,
+      deliveryIdempotencyKey: deliveryIdentity,
+      deliveryDispatchMode: "queue-only",
+      firstContact: { markSeenOnDeliveryAccepted: true },
+      instructions: buildHostedMemberSignupWelcomeInstructions(input.text),
+      responsePolicy: { kind: "require_send_exact_text", text: input.text },
+      route: input.route,
+    },
+  });
+}
+
+export function isHostedMemberSignupWelcomeDeliveryIdentity(
+  value: string | null | undefined,
+  memberId?: string,
+): boolean {
+  const match = /^signup-welcome:([^:]+)(?::linq|:(?:email|linq):[a-f0-9]{64})?$/u.exec(value?.trim() ?? "");
+  return match !== null && (memberId === undefined || match[1] === memberId);
 }
 
 function cloneMemberActivationSignupWelcome(

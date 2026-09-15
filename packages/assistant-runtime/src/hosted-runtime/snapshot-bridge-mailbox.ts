@@ -101,14 +101,17 @@ export function createHostedWorkspaceBridgeMailboxImporter(input: {
   runtime: HostedRuntimeBridgeNormalizedRuntime;
   vaultRoot: string;
 }): HostedWorkspaceRuntimeBridgeImportItem {
-  return async (item, context) => {
-    const importConversationItem = createHostedConversationMailboxImportItem({
+  const createConversationImporter = (
+    items: readonly HostedWorkspaceRuntimeBridgeImportItemInput[],
+    context?: HostedWorkspaceRuntimeBridgeImportItemContext,
+  ) => createHostedConversationMailboxImportItem({
       assistantBootstrap: context?.assistantBootstrap ?? null,
       assistantTarget: context?.assistantTarget ?? null,
       decodePayload: {
         decode: async (decodeInput) => {
-          const decoded = item.payload.decodedWake
-            ? { status: "decoded" as const, wake: item.payload.decodedWake }
+          const decodedWake = items.find((item) => item.item.id === decodeInput.itemRef.id)?.payload.decodedWake;
+          const decoded = decodedWake
+            ? { status: "decoded" as const, wake: decodedWake }
             : await input.decodeMailboxPayload.decode({
                 itemRef: decodeInput.itemRef,
                 payloadCiphertext: decodeInput.payloadCiphertext,
@@ -140,17 +143,32 @@ export function createHostedWorkspaceBridgeMailboxImporter(input: {
           resolveHostedDeviceSyncMessagingReturnTarget(wake),
         );
       },
-      runtime: input.runtime,
+      runtime: {
+        ...input.runtime,
+        platform: {
+          ...input.runtime.platform,
+          // Preparation and the foreground turn share one invocation authority.
+          providerFetch: context?.providerFetch === undefined
+            ? input.runtime.platform.providerFetch
+            : context.providerFetch,
+        },
+      },
       vaultRoot: input.vaultRoot,
     });
 
-    return importHostedWorkspaceBridgeMailboxItem({
-      ...input,
-      context,
-      importConversationItem,
-      item,
-    });
-  };
+  return Object.assign(
+    (item: HostedWorkspaceRuntimeBridgeImportItemInput, context?: HostedWorkspaceRuntimeBridgeImportItemContext) =>
+      importHostedWorkspaceBridgeMailboxItem({
+        ...input, context, item,
+        importConversationItem: createConversationImporter([item], context),
+      }),
+    {
+      importAudioPair: (
+        items: readonly [HostedWorkspaceRuntimeBridgeImportItemInput, HostedWorkspaceRuntimeBridgeImportItemInput],
+        context?: HostedWorkspaceRuntimeBridgeImportItemContext,
+      ) => createConversationImporter(items, context).importAudioPair(items, context),
+    },
+  );
 }
 
 async function importHostedWorkspaceBridgeMailboxItem(
