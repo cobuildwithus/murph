@@ -1,6 +1,6 @@
 # Recover automatic meal capture and Photos permission status
 
-Status: active
+Status: completed
 Created: 2026-09-14
 Updated: 2026-09-14
 
@@ -85,5 +85,23 @@ Updated: 2026-09-14
 - Changelog decision: this backend PR adds compatibility metadata for a native
   reader that has not shipped. Published clients keep their current response
   behavior, so the backend change alone has no new member-visible release note.
-- Remaining: paired PRs, required independent reviews and exact-head checks; close
-  this plan after those completion gates. No release or deployment is included.
+
+## Outcome and PR handoff
+
+- Implementation and focused proof are complete in server PR #3452 and native
+  PR cobuildwithus/murph-ios#153. Parent final review found no additional changes
+  needed to the capture, permission, identity, cancellation, or cleanup owners.
+- Server ReviewGPT passed at its first-reviewed source head with no qualifying
+  findings. This plan archive changes only explanatory task evidence.
+- Native independent review is retrying a model-verification tooling failure;
+  its local build, tests, hosted Review Tooling, and iOS Visual Proof pass.
+- Server release CI is retrying an unchanged runtime scheduler integration test
+  that failed its one-replica assertion. The focused local scheduler case passes;
+  all other applicable checks passed on the reviewed source head.
+- The paired PR bodies own the final review and exact-head CI ledger. Those
+  gates remain required before merge; archiving this implementation record does
+  not count a pending or failed check as passing.
+- Signed physical-device capture and deployment remain outside this task's
+  verified evidence. Deploy Web before releasing the native reader; the currently
+  published app remains unchanged.
+Completed: 2026-09-14
