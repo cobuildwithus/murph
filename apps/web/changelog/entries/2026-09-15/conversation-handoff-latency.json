@@ -8,7 +8,12 @@
     "title": "Less waiting when you start a conversation",
     "summary": "Murph skips an extra check before responding when your message arrives during background work.",
     "details": "This improvement applies to established private conversations and group chats.",
-    "relevanceTags": ["conversations", "performance"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "conversations",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      3485
+    ]
   }
 }
