@@ -99,6 +99,7 @@ export interface WorkerEnvironmentSource
   RUNNER_CONTAINER_SMOKE: HostedExecutionContainerNamespaceLike;
   STANDBY_COORDINATOR?: HostedStandbyCoordinatorNamespaceLike;
   STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
+  SMALL_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
 }
 
 export interface WorkerExecutionContext {

@@ -4292,9 +4292,10 @@ routing.
 
 ### Cloudflare Owns
 
-Fresh member allocations use the regular runner fleet. Removal of the retired
-single-account container namespace requires checkpointed retirement of every
-stored target before the delete migration; the deployment sequence is owned by
+Fresh member allocations use the regular runner fleet. The retired experiment
+namespace remains drain-only for stored targets; normal releases preserve its
+native application and ship no deletion migration. Physical deletion requires
+checkpointed retirement of every stored target; the deployment contract is owned by
 [`apps/cloudflare/DEPLOY.md`](../../apps/cloudflare/DEPLOY.md#retiring-the-selected-account-size-experiment).
 
 - per-user Durable Object routing
