@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -889,6 +889,43 @@ test("a stale snapshot cannot re-arm a card after a hidden same-name reorder", a
       reason: "workout_changed",
       status: "rejected",
     });
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+test.each(["absent", "unavailable"])("workout refresh, save, and replay leave an %s shared query projection untouched", async (projectionState) => {
+  const fixture = await createLoggedWorkout([10, 10]);
+  const projectionPath = path.join(fixture.vault, ".runtime/projections/query.sqlite");
+  try {
+    if (projectionState === "unavailable") {
+      await mkdir(projectionPath, { recursive: true });
+    }
+    const expectProjectionUntouched = async () => {
+      if (projectionState === "unavailable") {
+        expect((await stat(projectionPath)).isDirectory()).toBe(true);
+      } else {
+        await expect(stat(projectionPath)).rejects.toMatchObject({ code: "ENOENT" });
+      }
+    };
+    await expectProjectionUntouched();
+    const snapshot = snapshotAction(fixture);
+    await expect(readLiveWorkoutCardSnapshot({
+      action: snapshot,
+      vault: fixture.vault,
+    })).resolves.toMatchObject({ status: "unchanged" });
+    await expectProjectionUntouched();
+
+    const request = {
+      acceptedAt: ACCEPTED_AT,
+      action: putFirstSetAction({ actionBinding: snapshot.workoutBinding, reps: 12 }),
+      vault: fixture.vault,
+    };
+    await expect(applyLiveWorkoutMemberAction(request)).resolves.toEqual({ status: "applied" });
+    await expectStoredReps(fixture.vault, fixture.workoutId, [12, 10]);
+    await expectProjectionUntouched();
+    await expect(applyLiveWorkoutMemberAction(request)).resolves.toEqual({ status: "unchanged" });
+    await expectProjectionUntouched();
   } finally {
     await rm(fixture.vault, { force: true, recursive: true });
   }
