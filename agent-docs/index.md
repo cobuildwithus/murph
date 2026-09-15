@@ -49,6 +49,8 @@ Runtime progress diagnostics (aggregate alerts, per-message warm/cold typing
 alerts with turn-admission and provider-lifetime evidence, and code-only
 first-pending evidence) are specified in
 [`agent-docs/RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
+That owner also specifies cold-restore download transport milestones,
+process-activity timing, and bounded Cloudflare/R2 request correlation.
 
 Automation edit schema discovery and attended progress guidance are owned by
 `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`. Real Codex native-schema and

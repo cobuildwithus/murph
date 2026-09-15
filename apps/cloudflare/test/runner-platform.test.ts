@@ -4101,6 +4101,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               },
             }, { highWaterMark: 0 }), {
               headers: {
+                "cf-ray": "abcdef0123456781-IAD",
+                "x-amz-request-id": "0123456789ABCDE1",
                 "content-length": String(encrypted.encryptedByteSize),
                 "content-type": "application/octet-stream",
               },
@@ -4121,6 +4123,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             },
           }, { highWaterMark: 0 }), {
             headers: {
+              "cf-ray": "abcdef0123456782-IAD",
+              "x-amz-request-id": "0123456789ABCDE2",
               "content-length": String(encrypted.encryptedByteSize),
               "content-type": "application/octet-stream",
             },
@@ -4179,6 +4183,24 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         log.message === "Hosted workspace snapshot body read settled."
       );
       expect(bodyLogs).toHaveLength(2);
+      const headerLogs = readWorkspaceSnapshotDiagnosticLogs().filter((log) =>
+        log.message === "Hosted workspace snapshot response headers settled."
+      );
+      expect(headerLogs).toHaveLength(2);
+      for (const [index, headerLog] of headerLogs.entries()) {
+        const correlation = {
+          workspaceSnapshotRestoreAttempt: index + 1,
+          workspaceSnapshotRestoreStep: "object_fetch",
+          cfRay: `abcdef012345678${index + 1}-IAD`,
+          r2RequestId: `0123456789ABCDE${index + 1}`,
+        };
+        expect(headerLog.details).toMatchObject({
+          ...correlation,
+          responseStatus: 200,
+          transportObserved: false,
+        });
+        expect(bodyLogs[index]?.details).toMatchObject(correlation);
+      }
       expect(bodyLogs[1]?.details).toMatchObject({
         complete: true,
         bytesRead: encrypted.encryptedByteSize,
