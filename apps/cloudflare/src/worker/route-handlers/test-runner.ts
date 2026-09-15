@@ -190,7 +190,6 @@ async function beginActiveHostedLocalTestRunnerGracefulStop(input: {
   const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
     exactUser: input.context.env.RUNNER_CONTAINER,
     next: input.context.env.NEXT_RUNNER_CONTAINER,
-    small: input.context.env.SMALL_RUNNER_CONTAINER,
     standby: input.context.env.STANDBY_RUNNER_CONTAINER ?? null,
   });
   if (!runnerContainerNamespace) {

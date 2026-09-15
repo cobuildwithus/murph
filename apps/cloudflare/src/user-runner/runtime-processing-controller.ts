@@ -12,7 +12,6 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedExecutionEnvironment } from "../env.js";
-import { isSmallRunnerMember } from "../small-runner-profile.ts";
 import type {
   WorkerAnalyticsEngineDatasetLike,
 } from "../worker-contracts.js";
@@ -1037,7 +1036,6 @@ export class RuntimeProcessingController {
     }
 
     const releaseId = resolveHostedRunnerReleaseId(this.input.runnerRuntimeEnvSource);
-    const small = await isSmallRunnerMember(this.input.runnerRuntimeEnvSource, userId);
     const cold = (reason: RunnerAllocationReason, outcome: "disabled" | "fallback" = "disabled") =>
       measureRunnerAllocationStep(input.timings, "runnerTargetBindElapsedMs", () => this.bindFreshRunnerTarget({
         claimId: createHostedStandbyClaimId(),
@@ -1046,11 +1044,8 @@ export class RuntimeProcessingController {
         reason,
         releaseId,
         runtimeInput: input.input,
-        slotName: createHostedRunnerSlotName(releaseId, small ? "small" : "default"),
+        slotName: createHostedRunnerSlotName(releaseId),
       }));
-    // The experiment has no shared pristine inventory. Warm retention above
-    // remains exact-target based, including after selection is disabled.
-    if (small) return await cold("mode_not_allocate");
     if (readHostedStandbyMode(this.input.runnerRuntimeEnvSource) !== "allocate") {
       return await cold("mode_not_allocate");
     }

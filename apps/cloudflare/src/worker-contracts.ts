@@ -380,7 +380,6 @@ export interface WorkerEnvironmentContract<
   MURPH_ELEVENLABS_VOICE_ID?: string;
   RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
   NEXT_RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
-  SMALL_RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
   RUNNER_CONTAINER_SMOKE?: WorkerRunnerContainerNamespaceLike<
     WorkerDeploySmokeRunnerContainerStubLike
   >;

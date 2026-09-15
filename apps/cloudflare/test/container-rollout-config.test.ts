@@ -55,10 +55,9 @@ describe("Cloudflare container rollout config", () => {
       { class_name: "NextRunnerContainer", max_instances: 0 },
       { class_name: "DeploySmokeRunnerContainer", max_instances: 1 },
       { class_name: "StandbyRunnerContainer", max_instances: expectedLegacy },
-      { class_name: "SmallRunnerContainer", max_instances: 10 },
     ]);
     expect(containers.reduce((sum, container) => sum + container.max_instances, 0))
-      .toBe(Number(total ?? "1000") + 11);
+      .toBe(Number(total ?? "1000") + 1);
     expect(containers[0]).not.toHaveProperty("constraints");
     expect(config.vars).toMatchObject({
       HOSTED_EXECUTION_STANDBY_MODE: "off",
@@ -100,7 +99,7 @@ describe("Cloudflare container rollout config", () => {
       grace: container.rollout_active_grace_period,
     }))).toEqual([
       "RunnerContainer", "NextRunnerContainer", "DeploySmokeRunnerContainer",
-      "StandbyRunnerContainer", "SmallRunnerContainer",
+      "StandbyRunnerContainer",
     ].map(class_name => ({ class_name, grace: EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD })));
     expect(renderedConfig.containers[0]).toMatchObject({
       rollout_active_grace_period: EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD,

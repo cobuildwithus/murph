@@ -1,12 +1,10 @@
 import { createHash } from "node:crypto";
 import { isObjectRecord } from "./deploy-automation/shared.ts";
 
-/** New images require digests. Only a namespace-only bootstrap may preserve an
- * exact image reference already observed on the native application. */
-export function runnerApplicationSpecification(container: Record<string, unknown>, logsEnabled: boolean, retainedImage?: string) {
+export function runnerApplicationSpecification(container: Record<string, unknown>, logsEnabled: boolean) {
   const image = container.image;
   const size = container.instance_type;
-  if (typeof image !== "string" || (!/@sha256:[a-f0-9]{64}$/u.test(image) && image !== retainedImage)
+  if (typeof image !== "string" || !/@sha256:[a-f0-9]{64}$/u.test(image)
     || !Number.isSafeInteger(container.max_instances) || Number(container.max_instances) < 0) throw invalid();
   const resources = typeof size === "string" ? { instance_type: size }
     : isObjectRecord(size) ? {

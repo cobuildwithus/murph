@@ -1,5 +1,4 @@
 import { hostedRunnerImageMatches, readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
-import { isSmallRunnerMember } from "./small-runner-profile.ts";
 import { Container, type StopParams } from "@cloudflare/containers";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -29,7 +28,6 @@ import {
 } from "./runner-container-ca-env.ts";
 import {
   isHostedRunnerSlotName,
-  isHostedSmallRunnerSlotName,
   isHostedRunnerTargetName,
   isHostedStandbySlotName,
   readHostedStandbyReleaseId,
@@ -639,7 +637,7 @@ export class RunnerContainer extends Container {
 
   protected readonly environment: RunnerContainerEnvironmentSource;
   // This discriminator is namespace identity, not a second lifecycle owner.
-  protected readonly slotNamespace: "runner" | "standby" | "small" = "runner";
+  protected readonly slotNamespace: "runner" | "standby" = "runner";
   private slotStore: RunnerSlotBindingStore | null = null;
   private readonly durableObjectName: string | null;
   private lifecycleLock: Promise<void> = Promise.resolve();
@@ -694,7 +692,6 @@ export class RunnerContainer extends Container {
     if (this.slotNamespace === "standby") {
       throw new Error("Legacy standby inventory is drain-only.");
     }
-    if (this.slotNamespace === "small") throw new Error("Small runners do not provide shared standby inventory.");
     if (readHostedRunnerDeployment(this.environment)?.previous?.id === input.releaseId) {
       throw new Error("Previous runner inventory is drain-only.");
     }
@@ -756,10 +753,6 @@ export class RunnerContainer extends Container {
       const store = this.requireRunnerSlotStore();
       if (this.slotNamespace === "standby" && store.readOptional()?.state !== "bound") {
         throw new Error("Legacy standby allocation is drain-only.");
-      }
-      if (this.slotNamespace === "small" && store.readOptional()?.state !== "bound"
-        && !await isSmallRunnerMember(this.environment, input.userId)) {
-        throw new Error("The member is not eligible for a small runner binding.");
       }
       const deployment = readHostedRunnerDeployment(this.environment);
       if (deployment && input.releaseId !== deployment.active.id && store.readOptional()?.state !== "bound") {
@@ -900,8 +893,7 @@ export class RunnerContainer extends Container {
   private assertRunnerSlotNamespace(slotName: string): void {
     const valid = this.slotNamespace === "standby"
       ? isHostedStandbySlotName(slotName)
-      : this.slotNamespace === "small" ? isHostedSmallRunnerSlotName(slotName)
-        : isHostedRunnerSlotName(slotName) && !isHostedSmallRunnerSlotName(slotName);
+      : isHostedRunnerSlotName(slotName);
     if (!valid) throw new Error("Hosted runner slot belongs to a different namespace.");
     if (this.durableObjectName !== null && this.durableObjectName !== slotName) {
       throw new Error("Hosted runner slot does not match the addressed Durable Object.");

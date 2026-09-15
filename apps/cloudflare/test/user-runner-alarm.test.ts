@@ -1143,32 +1143,28 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
-  it.each([true, false])("allocates a small runner only for the selected account (selected=%s)", async selected => {
+  it("allocates a regular runner after a standby miss", async () => {
     const claimReadyStandby = vi.fn(async () => ({ outcome: "no_ready_slot" as const }));
     const h = createRunnerHarness({
       runnerRuntimeEnvSource: { ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
         CF_VERSION_METADATA: { id: "release_1" }, HOSTED_EXECUTION_STANDBY_MODE: "allocate",
-        HOSTED_EXECUTION_SMALL_RUNNER_ENABLED: "true",
-        HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256: createHash("sha256")
-          .update(selected ? TEST_USER_ID : "member-other-synthetic").digest("hex"),
       },
       standbyCoordinatorNamespace: { getByName: () => ({ claimReadyStandby,
         ensureReadyStandby: async () => ({ accepted: true as const }),
       }) },
     });
     await expect(h.runner.ensureRuntimeProcessingForUser({
-      userId: TEST_USER_ID, orchestrationAttemptId: "small-allocation-synthetic",
+      userId: TEST_USER_ID, orchestrationAttemptId: "regular-allocation-synthetic",
       conversationWorkPending: true,
     })).resolves.toMatchObject({ kind: "runtime_processing_accepted" });
     await h.flushWaitUntil();
     expect(h.invoke).toHaveBeenCalledOnce();
-    expect(h.runnerContainerNames[0]).toMatch(selected
-      ? /^runner-small--v-release_1--[a-f0-9]{32}$/u : /^runner--v-release_1--[a-f0-9]{32}$/u);
-    expect(claimReadyStandby).toHaveBeenCalledTimes(selected ? 0 : 1);
+    expect(h.runnerContainerNames[0]).toMatch(/^runner--v-release_1--[a-f0-9]{32}$/u);
+    expect(claimReadyStandby).toHaveBeenCalledOnce();
   });
 
-  it.each(["runner", "runner-small"])("invokes a retained %s slot with selection disabled and no extra binding RPC", async prefix => {
-    const slotName = `${prefix}--v-release_1--${"d".repeat(32)}`;
+  it("invokes a retained runner slot with no extra binding RPC", async () => {
+    const slotName = `runner--v-release_1--${"d".repeat(32)}`;
     const binding: HostedStandbySlotBinding = {
       claimId: "standby-claim-12345678-1234-4123-8123-123456789abc",
       releaseId: "release_1", region: "GLOBAL", slotName,
@@ -9798,7 +9794,6 @@ function createRunnerHarness(input: {
     input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,
     createHostedRunnerContainerNamespaceRouter({
       exactUser: input.runnerContainerNamespace === undefined ? namespace : input.runnerContainerNamespace,
-      small: namespace,
       standby: input.standbyContainerNamespace ?? {
         getByName(name) {
           const container = namespace.getByName(name);

@@ -4237,15 +4237,10 @@ routing.
 
 ### Cloudflare Owns
 
-The optional single-account size experiment allocates opaque
-`runner-small--v-<release>--<random>` targets in `SmallRunnerContainer`.
-Selection is private and consulted only for fresh allocation; the container
-independently validates initial member eligibility. Namespace routing, retained
-sessions, cleanup and deletion use the stored exact target even after selection
-is disabled. Small runners share the serving release and existing binding/fence
-lifecycle, but never enter shared standby inventory. Resource shape, protected
-provisioning and the reader rollback floor are owned by
-[`apps/cloudflare/DEPLOY.md`](../../apps/cloudflare/DEPLOY.md#selected-account-size-experiment).
+Fresh member allocations use the regular runner fleet. Removal of the retired
+single-account container namespace requires checkpointed retirement of every
+stored target before the delete migration; the deployment sequence is owned by
+[`apps/cloudflare/DEPLOY.md`](../../apps/cloudflare/DEPLOY.md#retiring-the-selected-account-size-experiment).
 
 - per-user Durable Object routing
 - lease/fencing generation
