@@ -208,7 +208,9 @@ function buildStarterUsageErrorState(error: unknown): StarterUsageErrorState {
     return {
       action: resolveStarterUsageErrorAction(error),
       checkoutErrorMessage: null,
-      message,
+      message: error.code === "LINQ_CONVERSATION_PHONE_REQUIRED"
+        ? "Murph’s messaging connection is not ready yet. Contact support to finish setup."
+        : message,
     };
   }
 

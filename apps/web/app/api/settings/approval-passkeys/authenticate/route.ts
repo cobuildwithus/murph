@@ -8,6 +8,7 @@ import { readApprovalPasskeyState } from "@/src/lib/sensitive-actions/passkey-st
 import { buildSensitiveActionMessage, buildSettingsSensitiveActionBinding } from "@/src/lib/sensitive-actions/server";
 import { isSensitiveActionKind, isSensitiveActionToken, isSettingsSensitiveActionKind } from "@/src/lib/sensitive-actions/shared";
 import { approvalPasskeyAuthenticationOptions } from "@/src/lib/sensitive-actions/webauthn";
+import { hostedCredentialChangeBinding, parseHostedCredentialChange } from "@/src/lib/better-auth/credential-change";
 
 export const POST = withJsonError(async (request: Request) => {
   const { body, prisma, session } = await readApprovalPasskeyRequest(request);
@@ -18,7 +19,9 @@ export const POST = withJsonError(async (request: Request) => {
   const origin = resolveHostedPublicOrigin();
   if (!challenge || challenge.memberId !== session.member.id || challenge.expiresAt <= new Date()
     || !isSensitiveActionKind(challenge.kind) || !origin) throw unavailable();
-  const bindingHash = isSettingsSensitiveActionKind(challenge.kind)
+  const bindingHash = challenge.kind === "account.credential.change"
+    ? hostedCredentialChangeBinding({ change: parseHostedCredentialChange(body.credentialChange), memberId: session.member.id, sessionId: session.sessionId })
+    : isSettingsSensitiveActionKind(challenge.kind)
     ? buildSettingsSensitiveActionBinding({ kind: challenge.kind, memberId: session.member.id, sessionId: session.sessionId })
     : challenge.approvalKey && challenge.actionId && challenge.actionHash && challenge.approvalStatus === "pending"
       ? buildHostedActionApprovalBinding({
@@ -28,7 +31,13 @@ export const POST = withJsonError(async (request: Request) => {
       : null;
   if (bindingHash !== challenge.bindingHash) throw unavailable();
   const state = await readApprovalPasskeyState({ memberId: session.member.id, prisma });
-  if (state.credentials.length === 0) return jsonOk({ method: "wallet" });
+  if (state.credentials.length === 0) {
+    if (!session.privyUserId) throw hostedOnboardingError({
+      code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403,
+      message: "Set up a passkey in account settings before approving this action.",
+    });
+    return jsonOk({ method: "wallet", privyUserId: session.privyUserId });
+  }
   return jsonOk({
     method: "passkey",
     options: await approvalPasskeyAuthenticationOptions({

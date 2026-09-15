@@ -194,6 +194,7 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentComputerHandoffUrl(payload)
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
     || shouldResumeCurrentSettingsDataPrivacyUrl()
+    || (typeof window !== "undefined" && window.location.pathname === "/settings/accounts")
     || shouldResumeCurrentSettingsFamilyInviteReturnUrl(payload)
     || shouldResumeCurrentSettingsFamilyRecoveryUrl(payload)
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)

@@ -7,6 +7,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(() => ({ database: "test" })),
   readHostedActionApproval: vi.fn(),
+  readApprovalPasskeyState: vi.fn(),
   redirect: vi.fn(),
   requireActiveHostedAppSession: vi.fn(),
   requireHostedActionApprovalId: vi.fn((approvalId: string) => approvalId),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/src/lib/sensitive-actions/passkey-store", () => ({ readApprovalPasskeyState: mocks.readApprovalPasskeyState }));
 
 vi.mock("next/navigation", () => ({
   redirect: mocks.redirect,
@@ -47,6 +49,7 @@ describe("action approval page", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readApprovalPasskeyState.mockReset().mockResolvedValue({ credentials: [] });
     mocks.requireActiveHostedAppSession.mockResolvedValue({
       member: { id: "member_test" },
     });
@@ -106,6 +109,22 @@ describe("action approval page", () => {
       },
       preferredKind: "text",
     });
+  });
+
+  it.each([false, true])("selects SDK loading from current factor ownership (migrated=%s)", async (migrated) => {
+    mocks.requireActiveHostedAppSession.mockResolvedValue({ member: { id: "member_test" }, privyUserId: "did:privy:synthetic" });
+    mocks.readHostedActionApproval.mockResolvedValue({ approvalId: "haa_test", status: "pending" });
+    mocks.readApprovalPasskeyState.mockResolvedValue({ credentials: migrated ? [{ id: "synthetic" }] : [] });
+    const view = await actionApprovalPage.default({ params: Promise.resolve({ approvalId: "haa_test" }) });
+    expect(view.props).toHaveProperty("legacyApprovalRequired", !migrated);
+  });
+
+  it("keeps the decision card available during an optional factor read outage", async () => {
+    mocks.readHostedActionApproval.mockResolvedValue({ approvalId: "haa_test", status: "pending" });
+    mocks.readApprovalPasskeyState.mockRejectedValue(new Error("storage unavailable"));
+    const view = await actionApprovalPage.default({ params: Promise.resolve({ approvalId: "haa_test" }) });
+    expect(view.props).toHaveProperty("legacyApprovalRequired", false);
+    expect(view.props.children.props.approval).toEqual({ approvalId: "haa_test", status: "pending" });
   });
 
   it("shows the recovery reply when contact resolution is unavailable", async () => {
