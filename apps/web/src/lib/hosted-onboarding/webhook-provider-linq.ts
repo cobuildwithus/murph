@@ -14,7 +14,6 @@ import {
 
 import { issueHostedInviteTx } from "./invite-service";
 import {
-  hasHostedMemberOwnActiveAccess,
   isHostedMemberSuspended,
 } from "./entitlement";
 import {
@@ -308,14 +307,6 @@ export async function resolveHostedLinqDirectPreparationMemberId(input: {
   event: HostedLinqWebhookEvent;
   prisma: HostedOnboardingReadClient;
 }): Promise<string | null> {
-  return (await resolveHostedLinqDirectPreparationTarget(input))?.memberId ?? null;
-}
-
-/** This snapshot selects crypto work only; admission rechecks live access. */
-export async function resolveHostedLinqDirectPreparationTarget(input: {
-  event: HostedLinqWebhookEvent;
-  prisma: HostedOnboardingReadClient;
-}): Promise<{ memberId: string; prepareIngressFromOwnAccess: boolean } | null> {
   if (input.event.event_type !== "message.received") {
     return null;
   }
@@ -372,14 +363,11 @@ export async function resolveHostedLinqDirectPreparationTarget(input: {
     return null;
   }
 
-  if (!candidate || candidate.core.suspendedAt) {
+  if (candidate?.core.suspendedAt) {
     return null;
   }
 
-  return {
-    memberId: candidate.memberId,
-    prepareIngressFromOwnAccess: hasHostedMemberOwnActiveAccess(candidate.core),
-  };
+  return memberId;
 }
 
 /**

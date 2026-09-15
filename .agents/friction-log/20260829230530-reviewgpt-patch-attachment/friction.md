@@ -37,3 +37,13 @@ target to the public downloader recovered the patch without another model send.
 The original capture metadata remained unchanged, and the recovery target was
 closed after use. The downloader should wait for rehydration using the same
 identity-aware behavior as the exporter.
+
+With the pinned 0.5.147 toolchain, a waited implementation request also remained
+in its waiting loop after a settled response exposed the requested completion
+marker and patch button. The original metadata still had no assistant identity,
+so the CLI downloader rejected it. After stopping only the proven task-owned
+stalled capture process, exact-metadata export recovered the accepted turn.
+The public identity-completion helper validated that exported response and
+produced separate recovery metadata; the ordinary exact-metadata downloader
+then recovered the patch. The original metadata was preserved. Recovery should
+complete identity from a verified export without another model request.

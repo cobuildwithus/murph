@@ -287,7 +287,6 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
   const actual = await importOriginal<
     typeof import("@/src/lib/hosted-onboarding/webhook-provider-linq")
   >();
-  const resolveMemberId = vi.fn(async (): Promise<string | null> => "member_direct_prewarm");
   return {
     ...actual,
     planHostedOnboardingLinqWebhook: vi.fn(async () => {
@@ -297,11 +296,9 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
         response: { ok: true as const, reason: "prewarm-owner-boundary-plan" },
       };
     }),
-    resolveHostedLinqDirectPreparationMemberId: resolveMemberId,
-    resolveHostedLinqDirectPreparationTarget: vi.fn(async () => {
-      const memberId = await resolveMemberId();
-      return memberId ? { memberId, prepareIngressFromOwnAccess: false } : null;
-    }),
+    resolveHostedLinqDirectPreparationMemberId: vi.fn(
+      async () => "member_direct_prewarm",
+    ),
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId: vi.fn(
       async ({ threadRoute }: {
         threadRoute: { containerMemberId: string } | null;
@@ -569,38 +566,6 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       retainFailureInScopedCache: true,
       userId: "member_direct_prewarm",
     });
-  });
-
-  it.each([false, true])("uses the own-access preparation hint without dropping sponsored access (hint: %s)", async (prepareIngressFromOwnAccess) => {
-    const { resolveHostedLinqDirectPreparationTarget } = await import(
-      "@/src/lib/hosted-onboarding/webhook-provider-linq"
-    );
-    const { readActiveHostedMemberAccess } = await import(
-      "@/src/lib/hosted-onboarding/member-access"
-    );
-    const { readHostedThreadRouteByThreadIdentity } = await import(
-      "@/src/lib/hosted-routing/thread-route-store"
-    );
-    const { prepareHostedDomainRootForWeb } = await import(
-      "@/src/lib/hosted-crypto/domain-root-store"
-    );
-    vi.mocked(readHostedThreadRouteByThreadIdentity).mockResolvedValueOnce(null);
-    vi.mocked(resolveHostedLinqDirectPreparationTarget).mockResolvedValueOnce({
-      memberId: "member_direct_prewarm",
-      prepareIngressFromOwnAccess,
-    });
-    const prisma = buildPrewarmPrisma();
-    await expect(handleHostedOnboardingLinqWebhook({
-      prisma: prisma as never,
-      rawBody: buildLinqMessageWebhookBody({ chatIsGroup: false }),
-      signature: null,
-      timestamp: null,
-    })).resolves.toMatchObject({ ok: true, reason: "prewarm-owner-boundary-plan" });
-    expect(readActiveHostedMemberAccess).toHaveBeenCalledTimes(prepareIngressFromOwnAccess ? 0 : 1);
-    expect(vi.mocked(prepareHostedDomainRootForWeb).mock.calls.map(([input]) => input.domain).sort())
-      .toEqual(["control", "ingress"]);
-    expect(calls.indexOf("unwrap")).toBeLessThan(calls.indexOf("begin"));
-    expect(issuedRootKeys.every((root) => root.every((byte) => byte === 0))).toBe(true);
   });
 
   it("warms a historical direct routing root and projects its plaintext before BEGIN", async () => {

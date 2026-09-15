@@ -216,7 +216,9 @@ const mocks = vi.hoisted(() => {
     resolveHostedFamilyPhoneInvitePreparation: vi.fn(),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(),
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
-      vi.fn<() => Promise<string | null>>(async () => null),
+      vi.fn<
+        typeof import("@/src/lib/hosted-onboarding/webhook-provider-linq").resolveHostedLinqDirectPreparationMemberId
+      >(async () => null),
     lockAndReadActiveHostedDomainRootKeyIdTx:
       vi.fn<(input: {
         domain: "control" | "ingress";
@@ -297,10 +299,6 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
       mocks.planHostedLinqMessageEditedWebhook,
     resolveHostedLinqDirectPreparationMemberId:
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
-    resolveHostedLinqDirectPreparationTarget: vi.fn(async () => {
-      const memberId = await mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId();
-      return memberId ? { memberId, prepareIngressFromOwnAccess: false } : null;
-    }),
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   };
@@ -342,6 +340,11 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", async () => {
 
   return {
     ...actual,
+    // These dispatch fixtures return state rows rather than executing Prisma
+    // relation filters. The PostgreSQL access proof covers the boolean query.
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
     readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
   };
 });
@@ -4430,8 +4433,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("admits a clean established home with one live discovery and one member/chat lock", async () => {
-    const { prisma, hostedMemberRouting, hostedLinqDeliveryFindMany, restoreRootMock } =
+  it.each([false, true])("admits a clean established home with one preflight discovery and one live discovery (continuation candidate: %s)", async (continuationCandidate) => {
+    if (continuationCandidate) {
+      mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    }
+    const { resolveHostedLinqDirectPreparationMemberId } = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/webhook-provider-linq")
+    >("@/src/lib/hosted-onboarding/webhook-provider-linq");
+    const { prisma, hostedMemberRouting, hostedLinqDeliveryFindMany, providerDomainsAfterTransactionStart, restoreRootMock } =
       await createDirectPreparationTransitionFixture();
     const record = await hostedMemberRouting.findUnique({ where: { memberId: "member_123" } });
     if (!record) throw new Error("Expected the existing routing fixture.");
@@ -4455,16 +4464,30 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     hostedMemberRouting.findUnique.mockClear();
     hostedMemberRouting.upsert.mockClear();
     hostedLinqDeliveryFindMany.mockResolvedValue([]);
-    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue("member_123");
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockImplementation(
+      resolveHostedLinqDirectPreparationMemberId,
+    );
     try {
       await expect(handleHostedOnboardingLinqWebhook({
         prisma,
         rawBody: buildHostedLinqWebhookBody({ chatIsGroup: false, eventId: "evt_clean_home_count" }),
         signature: null, timestamp: null,
       })).resolves.toMatchObject({ reason: "wake-appended-active-member" });
-      expect(prisma.hostedMemberIdentity!.findMany).toHaveBeenCalledOnce();
-      expect(hostedMemberRouting.findMany).toHaveBeenCalledOnce();
+      // Real discovery owners: one speculative pair, one locked live pair.
+      // Continuation eligibility must not add another speculative pair.
+      expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId).toHaveBeenCalledOnce();
+      expect(prisma.hostedMemberIdentity!.findMany).toHaveBeenCalledTimes(2);
+      expect(hostedMemberRouting.findMany).toHaveBeenCalledTimes(2);
       expect(hostedMemberRouting.findUnique).toHaveBeenCalledTimes(2);
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+      expect(providerDomainsAfterTransactionStart).toEqual([]);
+      if (continuationCandidate) {
+        expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({ continuationMemberId: "member_123" }),
+        );
+      } else {
+        expect(mocks.claimHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
+      }
       expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
       expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
       expect(prisma.$queryRaw.mock.calls.filter(([sql]) =>
@@ -4482,7 +4505,40 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }
   });
 
-  it("re-prepares once when the direct mailbox ingress root changes under lock", async () => {
+  it("does not reuse a missing continuation member when direct preparation can discover it", async () => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    const { prisma, hostedLinqDeliveryFindMany, providerDomainsAfterTransactionStart, restoreRootMock } =
+      await createDirectPreparationTransitionFixture();
+    hostedLinqDeliveryFindMany.mockResolvedValue([]);
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("member_123");
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          chatIsGroup: false,
+          eventId: "evt_continuation_member_missing_then_found",
+        }),
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({ reason: "wake-appended-active-member" });
+      expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ continuationMemberId: null }),
+      );
+      expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId).toHaveBeenCalledTimes(2);
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+      expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+      expect(providerDomainsAfterTransactionStart).toEqual([]);
+    } finally {
+      restoreRootMock();
+    }
+  });
+
+  it.each([false, true])("re-prepares once when the direct mailbox ingress root changes under lock (continuation candidate: %s)", async (continuationCandidate) => {
+    if (continuationCandidate) {
+      mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    }
     mocks.enforceDirectMailboxPreparation = true;
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing: vi.fn(async () => ({ accepted: true as const })),
@@ -5892,19 +5948,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }
   });
 
-  it.each([false, true])("settles consent withdrawn after root failure with own-access preparation hint %s", async (prepareIngressFromOwnAccess) => {
+  it("settles consent withdrawn when direct root preparation raced with access drift", async () => {
     const {
       hostedMemberRouting,
       prisma,
       restoreRootMock,
     } = await createDirectRootPreparationFailureFixture();
-    const { resolveHostedLinqDirectPreparationTarget } = await import(
-      "@/src/lib/hosted-onboarding/webhook-provider-linq"
-    );
-    vi.mocked(resolveHostedLinqDirectPreparationTarget).mockResolvedValueOnce({
-      memberId: "member_123",
-      prepareIngressFromOwnAccess,
-    });
     mocks.readHostedRuntimeAiAccessDecision.mockResolvedValueOnce({
       allowed: false,
       reason: "health_data_consent_withdrawn",
@@ -5934,7 +5983,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       });
 
       expect(prisma.$transaction).toHaveBeenCalled();
-      expect(mocks.readHostedRuntimeAiAccessDecision).toHaveBeenCalledTimes(1);
       expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(1);
       expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
@@ -6178,8 +6226,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     "member_123",
     "member_other",
   ])(
-    "retries once then terminates when preparation targeted %s before authority conflicts",
+    "retries once then terminates when continuation preparation targeted %s before authority conflicts",
     async (preparedMemberId) => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     mocks.enforceDirectMailboxPreparation = true;
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId
       .mockResolvedValueOnce(preparedMemberId)

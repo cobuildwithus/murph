@@ -10,6 +10,18 @@ const mocks = vi.hoisted(() => ({
   isHostedMemberActivationPending: vi.fn(),
 }));
 
+// The row fixtures do not execute Prisma relation filters. Preserve their
+// state-based access decisions; the PostgreSQL proof covers the boolean query.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
     contactPrivacyKeyring: {

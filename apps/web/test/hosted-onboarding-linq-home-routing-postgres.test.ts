@@ -254,7 +254,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           });
           checkpointLocked.resolve();
           await releaseCheckpoint.promise;
-        }, { ...transactionOptions, timeout: 2_000 })]);
+        }, transactionOptions)]);
         await checkpointLocked.promise;
         for (const duplicate of [false, true]) {
           workspaceQueries.length = 0;

@@ -52,7 +52,6 @@ import {
   prewarmHostedLinqMessageEditPreparation,
   readHostedLinqMessageEditPreparation,
   resolveHostedLinqDirectPreparationMemberId,
-  resolveHostedLinqDirectPreparationTarget,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   type HostedLinqMessageEditPreparation,
   type HostedOnboardingLinqWebhookResponse,
@@ -492,6 +491,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             prisma,
           })
         : null;
+      // A positive continuation lookup can seed the first direct preparation.
+      // This is only a speculative member ID, never locked admission authority.
+      let initialDirectPreparationMemberId: string | undefined;
       const startInstantFirstTurnGeneration = async (continuationOnly = false): Promise<void> => {
         if (
           instantFirstTurnGeneration
@@ -508,13 +510,17 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           event: planningEvent,
           participantContact: context.participantContact,
         });
-        const claim = await claimHostedLinqInstantFirstTurn({
-          ...(continuationOnly ? {
-            continuationMemberId: await resolveHostedLinqDirectPreparationMemberId({
+        const continuationMemberId = continuationOnly
+          ? await resolveHostedLinqDirectPreparationMemberId({
               event: planningEvent,
               prisma,
-            }),
-          } : {}),
+            })
+          : null;
+        if (continuationMemberId) {
+          initialDirectPreparationMemberId = continuationMemberId;
+        }
+        const claim = await claimHostedLinqInstantFirstTurn({
+          ...(continuationOnly ? { continuationMemberId } : {}),
           linqChatId: context.summary.chatId,
           prisma,
           request,
@@ -542,6 +548,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         const {
           instantStartAllowed = true,
         } = options;
+        // Consume once: cold misses, preparation retries, and later plans after
+        // activation must discover their own member instead of reusing this ID.
+        const directPreparationMemberId = initialDirectPreparationMemberId;
+        initialDirectPreparationMemberId = undefined;
         let reusableDirectCryptoDomainRoots: {
           memberId: string;
           preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
@@ -635,6 +645,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           },
           prepare: async ({ attempt }) => {
             const preparation = await prepareHostedLinqThreadRoutingCrypto({
+              ...(attempt === 0 && directPreparationMemberId
+                ? { directPreparationMemberId }
+                : {}),
               event: planningEvent,
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
@@ -2373,6 +2386,7 @@ async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
 }
 
 async function prepareHostedLinqThreadRoutingCrypto(input: {
+  directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
   pendingGroupRosterUnavailable: boolean;
@@ -2477,6 +2491,9 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     return {
       preparedDirectMailboxPayloadRoot:
         await prepareHostedLinqDirectMailboxPayloadRoot({
+          ...(input.directPreparationMemberId
+            ? { directPreparationMemberId: input.directPreparationMemberId }
+            : {}),
           event: input.event,
           prisma: input.prisma,
           ...(input.reusableDirectCryptoDomainRoots
@@ -2987,6 +3004,7 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
 }
 
 async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
+  directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   prisma: PrismaClient;
   reusableDirectCryptoDomainRoots?: {
@@ -3005,23 +3023,20 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   routingRecord: HostedMemberRoutingRecord | null;
   routingState: HostedMemberRoutingStateSnapshot | null;
 } | null> {
-  const target = await resolveHostedLinqDirectPreparationTarget({
-    event: input.event,
-    prisma: input.prisma,
-  });
-  if (!target) {
+  const memberId = input.directPreparationMemberId
+    ?? await resolveHostedLinqDirectPreparationMemberId({
+      event: input.event,
+      prisma: input.prisma,
+    });
+  if (!memberId) {
     return null;
   }
-  const { memberId } = target;
 
   const context = resolveHostedOnboardingLinqMessageContext(input.event);
-  // Routing already read this member's own access status. It is sufficient to
-  // select speculative ingress crypto work, never to authorize admission.
-  // Sponsored access still uses the canonical derivation; the transaction
-  // independently rechecks current runtime access for every member.
-  const activeMemberAccess = target.prepareIngressFromOwnAccess
-    ? Promise.resolve(true)
-    : readActiveHostedMemberAccess({ memberId, prisma: input.prisma });
+  const activeMemberAccess = readActiveHostedMemberAccess({
+    memberId,
+    prisma: input.prisma,
+  });
   const [routingRecord, accessAllowed, preparedFamilyInvite] =
     await Promise.all([
       readHostedMemberRoutingRecord({
