@@ -110,10 +110,14 @@ opportunity. Do not promise immediate logging, guaranteed capture, or that the
 member never needs to open the app. After a long idle period, the scoped upload
 credential may require renewal by opening Murph.
 
-Automatic capture does not itself require a chat reply and its import does not
-start a model turn. If the member asks whether a photo arrived, verify the meal
-record instead of using conversation silence as evidence of failure. Inspect and
-enrich unresolved device meals on the next eligible interactive turn. The 9pm
+Automatic background capture does not itself require a chat reply and its import
+does not start a model turn. Explicit manual submissions through Send to Murph
+request immediate estimation of the existing meal in the private conversation;
+inspect the photo, estimate from supported evidence, or ask one focused
+follow-up for essential missing identity or amount. Do not wait for closeout. If the member asks whether a photo arrived, verify
+the meal record instead of using conversation silence as evidence of failure. Inspect and
+enrich unresolved device meals on the next eligible meal-related interactive turn,
+including ordinary meal logging without a separate request for a daily card. The 9pm
 closeout handles the same unresolved work independently. Do not claim enrichment
 happened at import time.
 
@@ -399,8 +403,10 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
 - **Several photos of one meal:** they can become separate meal records. Do not
   silently sum, delete, or merge them; identify the likely duplicate and ask
   only if it would materially change tracking.
-- **App says Sent but the assistant did not mention it:** conversation silence
-  is normal. Query meals by captured time.
+- **App says Sent but the assistant did not mention it:** automatic background
+  imports may stay quiet. A manual Send to Murph submission requests estimation;
+  query meals by captured time and complete the existing meal or clarify missing
+  information instead of treating silence as completion.
 - **Setup loops or errors:** confirm supported iOS, the current App Store app,
   the same Murph account, network access, and Full Photos permission. Avoid
   repeated blind retries; if one fresh setup attempt still fails, state the

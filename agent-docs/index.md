@@ -13,6 +13,11 @@ service restart/retry proof lives in
 
 ## Purpose
 
+Immediate manual meal estimation and ordinary incomplete-meal recovery are
+owned by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
+`agent-docs/SECURITY.md`. Their focused proof covers canonical import replay,
+private notification tools, model admission, and real assistant replies.
+
 Empty automatic meal closeout admission is owned by `ARCHITECTURE.md`;
 canonical queue, scheduler, and focused real-Codex proof are indexed in
 `agent-docs/references/testing-ci-map.md`.

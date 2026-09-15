@@ -1029,10 +1029,10 @@ describe('murph.attach_response_card', () => {
       /condition list|regimen list|measurement entry list|event list --kind (?:procedure|encounter|test)/u,
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Only on a member-explicit interactive daily-card or daily-summary request, if any metric mealCount is below the top-level mealCount, follow food-journal selected-date incomplete-meal recovery before attaching a card',
+      'During private meal logging or estimation, including an explicit manual app submission, and daily-card or daily-summary requests, if any metric mealCount is below the top-level mealCount, follow food-journal selected-date incomplete-meal recovery before finishing',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Default attachment intent after a meal mutation does not authorize reading, editing, or asking about another meal',
+      'Never stop at a missing-estimate refusal before trying recovery',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Use accepted current equivalence or matching saved ingredient and portion evidence, not an informal name alone.',

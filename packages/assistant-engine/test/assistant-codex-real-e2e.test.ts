@@ -1,3 +1,4 @@
+import { buildManualMealEstimationInstructions } from '../src/assistant/manual-meal-estimation.js'
 import { executeGenerateImageTool } from '../src/assistant-codex/generate-image-tool.js'
 
 import { applyAssistantSelfDeliveryTargetDefaults } from '@murphai/operator-config/operator-config'
@@ -269,6 +270,7 @@ import {
   sendAssistantNotificationLocal,
   type AssistantNotificationInput,
   parseAssistantNotificationDecision,
+  resolveAssistantNotificationDecision,
 } from '../src/assistant/notification-turn.ts'
 import {
   buildAssistantMaintenanceConversationEvidence,
@@ -31397,37 +31399,67 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
     },
   )
 
-  it(
-    'keeps default meal-log attachment intent out of unrelated-meal recovery',
-    { timeout: 1_800_000 },
-    async () => {
-      const config = await resolveRealCodexE2eConfig()
-
-      try {
-        const result = await runRealDefaultMealAttachmentBoundary({ config })
-        const commands = expandRecordedVaultCommands(result.commands)
-        expect(commands.filter((command) =>
-          command.startsWith('meal add ')
-          && !command.endsWith(' --help')
-        )).toHaveLength(1)
-        expect(recordedVaultCommandStartsWith(
-          result.commands,
-          ['meal', 'totals'],
+  it.each([
+    { name: 'asks about an incomplete earlier meal during ordinary meal logging', manualSubmission: false, supportedEvidence: false, protectedContext: false },
+    { name: 'estimates an incomplete earlier meal during ordinary meal logging', manualSubmission: false, supportedEvidence: true, protectedContext: false },
+    { name: 'estimates a manual app photo without another meal record', manualSubmission: true, supportedEvidence: true, protectedContext: false },
+    { name: 'asks for essential missing information on a manual app photo', manualSubmission: true, supportedEvidence: false, protectedContext: false },
+    { name: 'preserves nonnumeric tracking on a manual app photo', manualSubmission: true, supportedEvidence: true, protectedContext: true },
+  ])('$name', { timeout: 900_000 }, async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    try {
+      const result = await runRealDefaultMealAttachmentBoundary({ config, ...scenario })
+      const commands = expandRecordedVaultCommands(result.commands)
+      process.stdout.write(`[manual-meal-estimation-e2e] ${JSON.stringify({
+        scenario: scenario.name, reply: result.message, cardAttached: result.card !== null,
+        savedMealCount: result.savedMealCount, savedCalories: result.savedIncompleteCalories,
+      })}\n`)
+      expect(commands.filter((command) =>
+        command.startsWith('meal add ') && !command.endsWith(' --help')
+      )).toHaveLength(scenario.manualSubmission ? 0 : 1)
+      expect(result.savedMealCount).toBe(scenario.manualSubmission ? 1 : 2)
+      if (scenario.manualSubmission) {
+        expect(commands).toContain(`meal show ${result.incompleteMealId}`)
+      } else {
+        expect(commands.some((command) =>
+          command.startsWith('meal list --from 2026-08-21 --to 2026-08-21')
         )).toBe(true)
-        expect(recordedVaultCommandStartsWith(
-          result.commands,
-          ['meal', 'edit', result.incompleteMealId],
-        )).toBe(false)
+      }
+      if (scenario.protectedContext) {
         expect(result.savedIncompleteCalories).toBeNull()
         expect(result.card).toBeNull()
+        expect(commands.some((command) => /--nutrition-(?:calories|protein|carbs|fat|fiber)/u.test(command))).toBe(false)
+        expect(result.message).not.toMatch(/calories|macros|grams|\?/iu)
+      } else if (scenario.supportedEvidence) {
+        const editIndexes = commands.flatMap((command, index) =>
+          command.startsWith(`meal edit ${result.incompleteMealId} `)
+            && /--nutrition-(?:calories|protein|carbs|fat|fiber)/u.test(command)
+            && !command.endsWith(' --help') ? [index] : []
+        )
+        expect(editIndexes).toHaveLength(1)
+        const editIndex = editIndexes[0] ?? -1
+        const readbackIndex = commands.findIndex((command, index) =>
+          index > editIndex && command === `meal show ${result.incompleteMealId}`
+        )
+        expect(readbackIndex).toBeGreaterThan(editIndex)
+        expect(commands.findIndex((command, index) =>
+          index > readbackIndex && command.startsWith('meal totals ')
+        )).toBeGreaterThan(readbackIndex)
+        expect(result.savedIncompleteCalories).toBeGreaterThan(0)
+        expect(result.card).not.toBeNull()
         expect(result.message).not.toMatch(/\?/u)
-        expect(result.message).not.toMatch(/breakfast|toast/iu)
-        expect(result.message).toMatch(/lunch|logged|saved/iu)
-      } finally {
-        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      } else {
+        expect(result.savedIncompleteCalories).toBeNull()
+        expect(result.card).toBeNull()
+        expect(result.message).toMatch(/\?/u)
+        expect(result.message).toMatch(/what|how (?:much|many|large|big)|portion|serving|amount/iu)
+        expect(result.message).not.toMatch(/(?:can.t|cannot|unable to) (?:send|show).{0,30}card/iu)
       }
-    },
-  )
+      expect(commands.some((command) => /^(?:goal|measurement) (?:add|edit|import|upsert)/u.test(command))).toBe(false)
+    } finally {
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  })
 
   it(
     'repairs an incomplete manual meal from an explicitly equivalent prior meal',
@@ -32521,6 +32553,9 @@ async function readNumericTargetState(input: {
 
 async function runRealDefaultMealAttachmentBoundary(input: {
   config: RealCodexE2eConfig
+  manualSubmission: boolean
+  supportedEvidence: boolean
+  protectedContext: boolean
 }): Promise<{
   card: unknown
   commands: string[]
@@ -32528,6 +32563,7 @@ async function runRealDefaultMealAttachmentBoundary(input: {
   message: string
   providerActionCount: number
   savedIncompleteCalories: number | null
+  savedMealCount: number
 }> {
   const workingRoot = await mkdtemp(
     path.join(tmpdir(), 'murph-default-meal-attachment-boundary-e2e-'),
@@ -32542,14 +32578,31 @@ async function runRealDefaultMealAttachmentBoundary(input: {
     await Promise.all([
       mkdir(binDirectory, { recursive: true }),
       materializeAssistantSkill({ skillsRoot, slug: 'food-journal' }),
+      materializeAssistantSkill({ skillsRoot, slug: 'automatic-meal-capture' }),
       materializeAssistantSkill({ skillsRoot, slug: 'nutrition-strategy' }),
       writeFile(commandLog, '', 'utf8'),
     ])
+    const photoPath = path.join(workingRoot, 'synthetic-meal.jpg')
+    if (input.manualSubmission) {
+      if (input.supportedEvidence) {
+        await cp(path.resolve(path.dirname(fileURLToPath(import.meta.url)),
+          '../../../apps/web/public/meal-snap-2.jpg'), photoPath)
+      } else {
+        await writeFile(photoPath, 'synthetic undecodable meal image\n', 'utf8')
+      }
+    }
     const incompleteMeal = await addMeal({
-      ingredients: ['toast'],
-      note: 'Unresolved toast plate from breakfast.',
+      ...(input.manualSubmission ? {
+        externalRef: { resourceId: 'synthetic-manual-capture', resourceType: 'photo', system: 'meal-photo-capture', version: '7'.repeat(64) },
+        photoPath,
+      } : {
+        ingredients: ['toast'],
+        note: input.supportedEvidence
+          ? 'Two slices of toast. Saved package-label facts for this exact portion: 220 kcal, 8 g protein, 40 g carbohydrates, 4 g fat, 6 g fiber.'
+          : 'Unresolved toast plate from breakfast.',
+      }),
       occurredAt: '2026-08-21T12:10:00.000Z',
-      source: 'manual',
+      source: input.manualSubmission ? 'device' : 'manual',
       vaultRoot,
     })
     const pointTarget = (
@@ -32597,7 +32650,8 @@ async function runRealDefaultMealAttachmentBoundary(input: {
       developerInstructions:
         buildAutomaticMealClarificationDeveloperInstructions({
           currentLocalDate: '2026-08-21',
-          protectedContext: false,
+          protectedContext: input.protectedContext,
+          manualSubmission: input.manualSubmission,
           scheduled: false,
         }),
       dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
@@ -32611,7 +32665,9 @@ async function runRealDefaultMealAttachmentBoundary(input: {
       groupConversation: false,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
-      prompt: [
+      prompt: input.manualSubmission ? buildManualMealEstimationInstructions({
+        mealId: incompleteMeal.mealId, capturedAt: '2026-08-21T12:10:00.000Z',
+      }) : [
         'Log lunch for August 21: grilled chicken, rice, and green beans.',
         'The label totals are 620 calories, 45 grams protein, 70 grams carbs, 18 grams fat, and 9 grams fiber.',
       ].join(' '),
@@ -32625,11 +32681,21 @@ async function runRealDefaultMealAttachmentBoundary(input: {
       vaultRoot,
     })
 
+    const response = input.manualSubmission
+      ? resolveAssistantNotificationDecision({
+          providerAuthoredResponse: result.providerAuthoredFinalMessage ?? result.finalMessage,
+          runtimeReplacesFinalPresentation: result.responseCard !== null
+            && result.providerAuthoredFinalMessage !== result.finalMessage,
+          runtimeResponse: result.finalMessage,
+        })
+      : null
+    const saved = await readVaultRawTolerant(vaultRoot)
     return {
+      savedMealCount: new Set(saved.events.filter((event) => event.kind === 'meal').map((event) => event.entityId)).size,
       card: result.responseCard,
       commands: commandText === '' ? [] : commandText.split('\n'),
       incompleteMealId: incompleteMeal.mealId,
-      message: result.finalMessage,
+      message: response?.kind === 'send_message' ? response.text : result.finalMessage,
       providerActionCount: result.providerActionCount,
       savedIncompleteCalories: incompleteState.savedCalories,
     }
@@ -33045,6 +33111,7 @@ async function runRealAutomaticMealClarificationScenario(input: {
 
 function buildAutomaticMealClarificationDeveloperInstructions(input: {
   currentLocalDate?: string
+  manualSubmission?: boolean
   protectedContext: boolean
   scheduled: boolean
 }): string {
@@ -33073,8 +33140,8 @@ function buildAutomaticMealClarificationDeveloperInstructions(input: {
     onboardingGuidance: false,
     ...(input.scheduled
       ? { scheduledOccurrenceAt: '2026-08-25T01:00:00.000Z' }
-      : { ordinaryInboundTurn: true }),
-    turnTrigger: input.scheduled ? 'automation-cron' : null,
+      : { ordinaryInboundTurn: !input.manualSubmission }),
+    turnTrigger: input.scheduled ? 'automation-cron' : input.manualSubmission ? 'manual-deliver' : null,
   })
 }
 
