@@ -539,9 +539,11 @@ The hosted Prisma schema keeps ownership sharp and nested:
   a zero default so existing receipts and old-Web inserts remain compatible;
   after the cursor-aware Web is live and prior functions drain, the contract
   lane rejects any unexpected null before setting `NOT NULL`. Immediate
-  cleanup uses one five-second shared target deadline plus a small
+  cleanup uses one eight-second shared target deadline plus a small
   receipt-settlement margin; hourly retries use a fifteen-second shared target
-  deadline and four-receipt concurrency. Cloudflare is
+  deadline and four-receipt concurrency. Cloudflare deadline expiry logs
+  informational cleanup-pending metadata and retains its error code and retry
+  receipt; other runner deletion failures remain error logs. Cloudflare is
   terminal only when the capability-bearing Worker explicitly confirms
   `deleteAllCompleted`, so a legacy response cannot erase retry ownership.
 

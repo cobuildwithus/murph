@@ -76,10 +76,15 @@ export async function deleteHostedRunnerUserDataBestEffort(input: {
     const errorCode = describeHostedExecutionSafeLogErrorCode(error);
     const contextPresent = typeof input.context === "string" && input.context.trim().length > 0;
 
-    console.error("Hosted runner user-data deletion failed.", {
+    const details = {
       ...formatHostedExecutionSafeLogErrorDetails(error, { code: errorCode }),
       contextPresent,
-    });
+    };
+    if (errorCode === "TimeoutError") {
+      console.info("Hosted runner user-data cleanup pending after deadline.", details);
+    } else {
+      console.error("Hosted runner user-data deletion failed.", details);
+    }
     return {
       alarmCleared: null,
       configured: true,
