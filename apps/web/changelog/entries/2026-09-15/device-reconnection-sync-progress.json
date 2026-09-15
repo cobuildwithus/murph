@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "device-reconnection-sync-progress",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Device reconnection keeps syncing",
+    "summary": "Reconnecting a health source can start fresh sync work while earlier history is still importing.",
+    "details": "Existing history progress and scheduled retries are preserved.",
+    "relevanceTags": [
+      "devices",
+      "sync"
+    ],
+    "sourcePullRequests": []
+  }
+}
