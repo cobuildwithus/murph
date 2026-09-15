@@ -10,7 +10,7 @@ afterEach(async () => {
   await Promise.all(temporaryPaths.splice(0).map((target) => rm(target, { recursive: true, force: true })))
 })
 
-async function reproduce(mode: 'silent' | 'acknowledged-silent' | 'close', idleMs: number, responseStartTimeoutMs?: number) {
+async function reproduce(mode: 'silent' | 'acknowledged-silent' | 'partial-silent' | 'close', idleMs: number, responseStartTimeoutMs?: number) {
   const nativeIdleExpected = mode !== 'close'
     && (responseStartTimeoutMs === undefined || mode === 'acknowledged-silent')
   const stub = await startScriptedResponsesStub()
@@ -100,6 +100,20 @@ it('keeps an acknowledged response alive when reasoning outlasts the response-st
 it('still needs native idle recovery for a stall after acknowledgement', { timeout: 30_000 }, async () => {
   await reproduce('acknowledged-silent', 1_000, 500)
 })
+
+it('discards interrupted assistant text when native recovery completes the answer', { timeout: 30_000 }, async () => {
+  await reproduce('partial-silent', 1_000)
+})
+
+it.runIf(process.env.MURPH_RUN_CODEX_30S_PROOF === '1')(
+  'recovers silent, acknowledged, and partial streams once at 30 seconds and preserves resumed replies',
+  { timeout: 150_000 },
+  async () => {
+    await reproduce('silent', 30_000)
+    await reproduce('acknowledged-silent', 30_000)
+    await reproduce('partial-silent', 30_000)
+  },
+)
 
 it.runIf(process.env.MURPH_RUN_CODEX_STALL_REPRO === '1')('reproduces the full 90 second native stall and compares five second recovery', { timeout: 150_000 }, async () => {
   await reproduce('silent', 90_000)

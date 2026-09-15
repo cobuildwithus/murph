@@ -4,7 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 
 /** Local fault injection at the provider wire; the real binary owns recovery. */
 export async function startCodexWebSocketProxy(httpBaseUrl: string, responseStartTimeoutMs?: number) {
-  let mode: 'healthy' | 'silent' | 'acknowledged-silent' | 'close' = 'healthy'
+  let mode: 'healthy' | 'silent' | 'acknowledged-silent' | 'partial-silent' | 'close' = 'healthy'
   let httpRequests = 0
   let websocketRequests = 0
   let connections = 0
@@ -82,10 +82,21 @@ export async function startCodexWebSocketProxy(httpBaseUrl: string, responseStar
         }
         if (mode !== 'healthy') {
           stalledAt = Date.now()
-          if (mode === 'acknowledged-silent') {
+          if (mode === 'acknowledged-silent' || mode === 'partial-silent') {
             sendProviderFrame(JSON.stringify({ type: 'response.created', response: {
               id: 'resp_synthetic_stall', status: 'in_progress', output: [],
             } }))
+          }
+          if (mode === 'partial-silent') {
+            sendProviderFrame(JSON.stringify({ type: 'response.output_item.added', output_index: 0,
+              item: { id: 'msg_partial', type: 'message', role: 'assistant', status: 'in_progress', content: [] },
+            }))
+            sendProviderFrame(JSON.stringify({ type: 'response.content_part.added', item_id: 'msg_partial',
+              output_index: 0, content_index: 0, part: { type: 'output_text', text: '', annotations: [] },
+            }))
+            sendProviderFrame(JSON.stringify({ type: 'response.output_text.delta', item_id: 'msg_partial',
+              output_index: 0, content_index: 0, delta: 'DISCARDED_PARTIAL',
+            }))
           }
           // The peer still responds to control frames while its model stream stalls.
           socket.ping('synthetic-health-check')

@@ -11,7 +11,10 @@ afterEach(async () => {
   await Promise.all(temporaryPaths.splice(0).map((target) => rm(target, { recursive: true, force: true })))
 })
 
-async function healthyWork(input: { idleMs: number; workMs: number; tool?: boolean }) {
+async function healthyWork(input: {
+  idleMs: number; workMs: number; tool?: boolean;
+  reasoningIntervalMs?: number; stallAfterTool?: boolean
+}) {
   const stub = await startScriptedResponsesStub()
   const proxy = await startCodexWebSocketProxy(stub.baseUrl)
   const events: Record<string, unknown>[] = []
@@ -36,7 +39,7 @@ async function healthyWork(input: { idleMs: number; workMs: number; tool?: boole
       // Both attempts are healthy and would finish after the same quiet work.
       // The second scripted response is consumed only if native retries.
       stub.queue(
-        { text: 'HEALTHY_ORIGINAL_OK', delayAfterCreatedMs: input.workMs },
+        { text: 'HEALTHY_ORIGINAL_OK', delayAfterCreatedMs: input.workMs, reasoningIntervalMs: input.reasoningIntervalMs },
         { text: 'HEALTHY_REPLACEMENT_OK', delayAfterCreatedMs: input.workMs },
       )
     }
@@ -52,6 +55,7 @@ async function healthyWork(input: { idleMs: number; workMs: number; tool?: boole
           // Local fixture callback only: no message or external request is sent.
           await new Promise((resolve) => setTimeout(resolve, input.workMs))
           toolElapsedMs = Date.now() - toolStartedAt
+          if (input.stallAfterTool) proxy.setMode('acknowledged-silent')
           return { kind: 'sent', source: 'model' }
         },
       },
@@ -61,7 +65,7 @@ async function healthyWork(input: { idleMs: number; workMs: number; tool?: boole
         if (record) events.push(record)
       },
     })
-    const shouldTimeout = !input.tool && input.workMs > input.idleMs
+    const shouldTimeout = !input.tool && !input.reasoningIntervalMs && input.workMs > input.idleMs
     if (shouldTimeout) {
       await expect(run).rejects.toThrow(/idle timeout/i)
       expect(proxy.measurements()).toMatchObject({ websocketRequests: 1, httpRequests: 1 })
@@ -78,7 +82,11 @@ async function healthyWork(input: { idleMs: number; workMs: number; tool?: boole
       }
       expect(result.finalMessage).toBe(input.tool ? 'HEALTHY_TOOL_OK' : 'HEALTHY_ORIGINAL_OK')
       const measurements = proxy.measurements()
-      expect(measurements).toMatchObject({ websocketRequests: input.tool ? 2 : 1, httpRequests: 0 })
+      expect(measurements).toMatchObject({ websocketRequests: input.tool ? 2 : 1, httpRequests: input.stallAfterTool ? 1 : 0 })
+      if (input.stallAfterTool) {
+        expect(events.filter((event) => event.codexTransportFallbackActivated === true)).toHaveLength(1)
+        expect(measurements.recoveryMs).toBeGreaterThanOrEqual(input.idleMs - 100)
+      }
       const receipt = events.find((event) => event.codexTimingStage === 'provider-output-received')
       expect(receipt).toMatchObject({
         codexTimingReceiptKind: input.tool ? 'tool' : 'assistant',
@@ -115,6 +123,25 @@ it('shows a shorter idle timeout interrupts both healthy WebSocket and HTTP reas
 it('keeps an executed Murph tool alive beyond the response-stream idle timeout', { timeout: 30_000 }, async () => {
   await healthyWork({ idleMs: 1_000, workMs: 2_000, tool: true })
 })
+
+it('keeps reasoning data alive beyond the stream idle window without assistant text', { timeout: 30_000 }, async () => {
+  await healthyWork({ idleMs: 1_000, workMs: 2_500, reasoningIntervalMs: 300 })
+})
+
+it('recovers a silent continuation without repeating an already completed Murph tool', { timeout: 30_000 }, async () => {
+  await healthyWork({ idleMs: 1_000, workMs: 100, tool: true, stallAfterTool: true })
+})
+
+it.runIf(process.env.MURPH_RUN_CODEX_30S_PROOF === '1')(
+  'preserves quiet responses, streaming reasoning, and tool work at the 30-second idle setting',
+  { timeout: 180_000 },
+  async () => {
+    await healthyWork({ idleMs: 30_000, workMs: 22_000 })
+    await healthyWork({ idleMs: 30_000, workMs: 35_000, reasoningIntervalMs: 5_000 })
+    await healthyWork({ idleMs: 30_000, workMs: 35_000, tool: true })
+    await healthyWork({ idleMs: 30_000, workMs: 100, tool: true, stallAfterTool: true })
+  },
+)
 
 it.runIf(process.env.MURPH_RUN_CODEX_TIMEOUT_SAFETY === '1')(
   'compares healthy 22-second reasoning and executed Murph tool work with 20-second and 90-second idle settings',

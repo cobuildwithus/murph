@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "faster-stalled-reply-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster recovery when a reply gets stuck",
+    "summary": "Murph starts recovering sooner when an OpenAI response stops sending data.",
+    "details": "Longer reasoning and tool work can still continue. This change does not set a time limit for receiving a finished reply or change custom inference settings.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": []
+  }
+}

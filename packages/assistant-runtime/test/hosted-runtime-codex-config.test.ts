@@ -62,7 +62,7 @@ import {
 import {
   buildHostedCodexConfigToml,
   HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
-  HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
+  hostedCodexProviderTransportDiagnostics,
   prepareHostedCodexRuntimeEnvironment,
   resolveHostedCodexModelCatalogPath,
 } from "../src/hosted-runtime/codex-config.ts";
@@ -416,9 +416,9 @@ test("hosted Codex memory diagnostics expose only safe config metadata", () => {
 });
 
 test("hosted Codex provider transport diagnostics expose only safe config metadata", () => {
-  assert.deepEqual(HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS, {
+  assert.deepEqual(hostedCodexProviderTransportDiagnostics("hosted-openai"), {
     codexProviderRequestMaxRetries: 4,
-    codexProviderStreamIdleTimeoutMs: 90_000,
+    codexProviderStreamIdleTimeoutMs: 30_000,
     codexProviderStreamMaxRetries: 0,
     codexProviderTransportMode: "codex-native-provider-transport",
   });
@@ -440,7 +440,7 @@ test("hosted Codex uses one WebSocket attempt before native HTTPS fallback", () 
   });
 
   assert.match(config, /^supports_websockets = true$/mu);
-  assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
+  assert.match(config, /^stream_idle_timeout_ms = 30000$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
 });
@@ -615,7 +615,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /wire_api = "responses"/u);
   assert.match(config, /^supports_websockets = true$/mu);
-  assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
+  assert.match(config, /^stream_idle_timeout_ms = 30000$/mu);
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
@@ -911,7 +911,7 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /requires_openai_auth = false/u);
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
-  assert.match(config, /stream_idle_timeout_ms = 90000/u);
+  assert.match(config, /stream_idle_timeout_ms = 30000/u);
   assert.match(config, /request_max_retries = 4/u);
   assert.match(config, /stream_max_retries = 0/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
@@ -999,7 +999,7 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.doesNotMatch(config, /base_url/u);
   assert.doesNotMatch(config, /env_key/u);
   assert.match(config, /^supports_websockets = true$/mu);
-  assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
+  assert.match(config, /^stream_idle_timeout_ms = 30000$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
@@ -1185,7 +1185,7 @@ test("hosted Codex runtime config preserves managed ChatGPT auth", async () => {
   assert.doesNotMatch(config, /env_key/u);
   assert.match(config, /^supports_websockets = true$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
-  assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
+  assert.match(config, /^stream_idle_timeout_ms = 30000$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
   assert.doesNotMatch(config, /chatgpt-refresh-token/u);
@@ -1352,6 +1352,15 @@ test.each(["openai", "venice", "custom-inference"])(
     );
     assert.equal(operatorProvider, "hosted-openai");
     const section = readProviderConfigSection(config, "hosted-openai");
+    assert.match(section, /^stream_idle_timeout_ms = 30000$/mu);
+    assert.match(section, /^stream_max_retries = 0$/mu);
+    const selectedProviderId = prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]!;
+    const selectedSection = readProviderConfigSection(config, selectedProviderId);
+    const diagnostics = hostedCodexProviderTransportDiagnostics(selectedProviderId);
+    assert.equal(diagnostics.codexProviderStreamIdleTimeoutMs, provider === "openai" ? 30_000 : 90_000);
+    assert.equal(diagnostics.codexProviderRequestMaxRetries, provider === "custom-inference" ? 1 : 4);
+    assert.match(selectedSection, new RegExp(`^stream_idle_timeout_ms = ${diagnostics.codexProviderStreamIdleTimeoutMs}$`, "mu"));
+    assert.match(selectedSection, new RegExp(`^request_max_retries = ${diagnostics.codexProviderRequestMaxRetries}$`, "mu"));
     assert.match(section, /^env_key = "OPENAI_API_KEY"$/mu);
     assert.match(section, /^requires_openai_auth = false$/mu);
     assert.doesNotMatch(config, /synthetic-.*-credential/u);
@@ -2378,7 +2387,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       'base_url = "https://api.openai.com/v1"',
       'env_key = "OPENAI_API_KEY"',
       'wire_api = "responses"',
-      "stream_idle_timeout_ms = 90000",
+      "stream_idle_timeout_ms = 30000",
       "requires_openai_auth = false",
       "request_max_retries = 4",
       "stream_max_retries = 0",

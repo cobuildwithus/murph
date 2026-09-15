@@ -100,7 +100,16 @@ const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 // HTTPS. Repeating the full idle window here can outlive the enclosing hosted
 // attempt and make Codex's native transport fallback unreachable.
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 0;
-const HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS = 90_000;
+// Bound OpenAI data-stream silence, not total reasoning or local tool time.
+// Other providers retain their prior window until separately measured.
+function hostedCodexProviderStreamIdleTimeoutMs(providerId: string): number {
+  return providerId === OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id
+    || providerId === HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID
+    || providerId === HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
+    || providerId === HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
+    ? 30_000
+    : 90_000;
+}
 const HOSTED_CODEX_NATIVE_MEMORY_CONFIG = {
   featureEnabled: false,
   generateMemories: false,
@@ -115,13 +124,15 @@ export const HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS = {
   codexOperatorMemoryUseMemories:
     HOSTED_CODEX_NATIVE_MEMORY_CONFIG.useMemories,
 } as const;
-export const HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS = {
-  codexProviderRequestMaxRetries: HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
-  codexProviderStreamIdleTimeoutMs:
-    HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
-  codexProviderStreamMaxRetries: HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES,
-  codexProviderTransportMode: "codex-native-provider-transport",
-} as const;
+export function hostedCodexProviderTransportDiagnostics(providerId: string) {
+  return {
+    codexProviderRequestMaxRetries: providerId === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
+      ? 1 : HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
+    codexProviderStreamIdleTimeoutMs: hostedCodexProviderStreamIdleTimeoutMs(providerId),
+    codexProviderStreamMaxRetries: HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES,
+    codexProviderTransportMode: "codex-native-provider-transport",
+  } as const;
+}
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
@@ -579,8 +590,7 @@ function buildHostedCodexProviderTomlLines(input: {
   const modelProviderId = input.chatGptAuth
     ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
     : input.provider.id;
-  const customInferenceProvider =
-    input.provider.id === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID;
+  const transport = hostedCodexProviderTransportDiagnostics(modelProviderId);
   return [
     `[model_providers.${tomlQuotedKey(modelProviderId)}]`,
     `name = ${tomlString(input.provider.name)}`,
@@ -594,12 +604,10 @@ function buildHostedCodexProviderTomlLines(input: {
     ...(input.provider.supportsWebSockets
       ? ["supports_websockets = true"]
       : []),
-    `stream_idle_timeout_ms = ${HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS}`,
+    `stream_idle_timeout_ms = ${transport.codexProviderStreamIdleTimeoutMs}`,
     `requires_openai_auth = ${input.chatGptAuth ? "true" : "false"}`,
-    `request_max_retries = ${
-      customInferenceProvider ? 1 : HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES
-    }`,
-    `stream_max_retries = ${HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES}`,
+    `request_max_retries = ${transport.codexProviderRequestMaxRetries}`,
+    `stream_max_retries = ${transport.codexProviderStreamMaxRetries}`,
     "",
   ];
 }
