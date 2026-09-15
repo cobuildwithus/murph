@@ -4326,6 +4326,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     }
     hostedCodexRuntime = await prepareInvocationCodexRuntime();
     workspaceSystemWork.resume();
+    // A qualified conversation promotes this invocation without changing its
+    // original fence/request. Later wakes compare with the foreground owner.
+    const resolveForegroundProcessingMode = () => systemMailboxForegroundWakePrefetch
+      ? "default"
+      : input.request.processingMode ?? "default";
     committedWorkspace = checkpointRequestBuilder.latestWorkspace() ?? activeWorkspace;
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
     let browserVaultReplicaRefreshRequested = false;
@@ -6012,7 +6017,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             && !foregroundWorkPending
             && pendingDurableCheckpointEffects.length === 0
             && readyDurableCheckpointEffects.length === 0
-            && (input.request.processingMode ?? "default") === "default"
+            && resolveForegroundProcessingMode() === "default"
             && hostedRuntimeForegroundIdleWakeRequestsOwnerHandoff({
               assistantProgressed:
                 passResult.assistantPhaseResult?.progressed === true,
@@ -6372,11 +6377,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         } = {},
       ): Promise<boolean> => {
         await flushImageGenerationWork();
-        const currentProcessingMode = input.request.processingMode ?? "default";
         const requestedOwnerHandoff =
           latencySeed?.requestedProcessingMode !== undefined
           && latencySeed.requestedProcessingMode !== null
-          && latencySeed.requestedProcessingMode !== currentProcessingMode;
+          && latencySeed.requestedProcessingMode !== resolveForegroundProcessingMode();
         const finishRequestedOwnerHandoff = (ran: boolean): boolean => {
           if (requestedOwnerHandoff) {
             runtimeOwnerHandoffRequested = true;

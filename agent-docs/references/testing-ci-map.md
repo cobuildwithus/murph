@@ -9,6 +9,15 @@ without a second conversation fetch. The workspace-runner suite covers concurren
 completion/wake acceptance, empty-hint qualification, and retained wakes on failed
 completion. The concurrent-device-import integration suite proves reply delivery
 while downloads remain held and subsequent canonical import/acknowledgment.
+The `hosted-runtime-promoted-foreground-priority.test.ts` suite applies the same
+foreground contract to default owners, device-completion promotion, and
+system-checkpoint promotion. Each history exercises repeated default wakes and
+three conversation inputs, snapshot interruption, the full quiet window after
+the latest reply, eventual deferred-effect checkpoints, provider changes, and
+shutdown. Its 12 cases use the production entrypoint and mailbox importer.
+`host-support.yml` runs the matrix before the broad build in the required
+release build/typecheck job, in addition to normal package coverage. CI policy
+tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 
 ## Current Repo Checks
 

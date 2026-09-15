@@ -163,6 +163,7 @@ import {
 import {
   HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
 } from "../src/hosted-device-sync-limits.ts";
+import { HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS } from "../src/hosted-runtime/device-sync-maintenance-limits.ts";
 import {
   readHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
@@ -7183,6 +7184,81 @@ describe("runHostedDeviceSyncWakeLane", () => {
 
     assert.equal(Object.hasOwn(result, "systemProgressed"), false);
   });
+
+  it.each(["drained", "foreground", "outer", "timeout"] as const)(
+    "drains a long device backlog until %s without weakening cancellation",
+    async (stop) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      const controller = new AbortController();
+      let foregroundPending = false;
+      let shouldYieldJobExecution: (() => boolean) | null = null;
+      let markDrainStarted: () => void = () => undefined;
+      const drainStarted = new Promise<void>((resolve) => { markDrainStarted = resolve; });
+      const jobCount = stop === "drained" ? 6 : 20;
+      const drainWorker = vi.fn(async (limit: number) => {
+        markDrainStarted();
+        let completed = 0;
+        while (completed < Math.min(limit, jobCount) && !shouldYieldJobExecution?.()) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 30_000));
+          completed += 1;
+        }
+        return completed;
+      });
+      mocks.createHostedRuntimeDeviceSyncService.mockImplementation((input: {
+        config: { shouldYieldJobExecution: (() => boolean) | null };
+      }) => {
+        shouldYieldJobExecution = input.config.shouldYieldJobExecution;
+        return {
+          close: vi.fn(),
+          drainWorker,
+          getNextJobWakeAt: () => null,
+          listAccounts: () => [],
+          listJobFailureDiagnostics: () => [],
+          runSchedulerOnce: async () => undefined,
+        };
+      });
+      try {
+        const resultPromise = runHostedDeviceSyncWakeLane({
+          deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
+          resolvedConfig: { deviceSync: DEVICE_SYNC_CONFIG },
+          shouldYieldDeviceSync: () => foregroundPending,
+          signal: controller.signal,
+          timeoutMs: HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
+          vaultRoot: FIXED_MAINTENANCE_VAULT_ROOT,
+          wake: {
+            eventId: "evt_device_sync_long_drain",
+            kind: "device-sync.wake",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+            reason: "reconcile_due",
+            userId: "member_123",
+          },
+        });
+        await drainStarted;
+        if (stop === "foreground" || stop === "outer") {
+          await vi.advanceTimersByTimeAsync(149_975);
+          if (stop === "foreground") foregroundPending = true;
+          else controller.abort(new Error("workspace invocation preempted"));
+          await vi.advanceTimersByTimeAsync(25);
+        } else {
+          await vi.advanceTimersByTimeAsync(stop === "drained" ? 180_000 : 300_000);
+        }
+        const result = await resultPromise;
+        expect(result.deviceSyncProcessed).toBe(stop === "drained" ? 6 : stop === "timeout" ? 10 : 5);
+        expect(result.deviceSyncSkipped).toBe(stop !== "drained");
+        expect(drainWorker).toHaveBeenCalledWith(
+          HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT, "local_scheduled_account", expect.any(Object),
+        );
+        if (stop !== "drained") {
+          expect(result.nextWakeReason).toBe("device-sync.reconcile");
+          expect(result.nextWakeAt).not.toBeNull();
+        }
+      } finally {
+        controller.abort();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("retains queue snapshots when the worker drain yields to its timeout", async () => {
     vi.useFakeTimers();

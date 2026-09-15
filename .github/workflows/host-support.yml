@@ -263,6 +263,14 @@ jobs:
           MURPH_COMPLEXITY_HEAD_SHA: ${{ github.sha }}
         run: pnpm complexity:diff
 
+      # Exercise owner history before the broad build. A first reply alone
+      # cannot prove that later wakes still preempt checkpoints.
+      - name: Gate foreground priority across runtime transitions
+        timeout-minutes: 5
+        run: >-
+          pnpm --dir packages/assistant-runtime test
+          test/hosted-runtime-promoted-foreground-priority.test.ts
+
       - name: Validate release metadata
         run: |
           bash -n scripts/release-check.sh scripts/release.sh scripts/update-changelog.sh scripts/generate-release-notes.sh

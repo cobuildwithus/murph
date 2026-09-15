@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "foreground-reply-priority",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Keep conversations moving",
+    "summary": "Follow-up messages keep their priority when Murph switches from background updates to your conversation.",
+    "details": "Routine background saves wait for a quiet moment and yield when another message arrives.",
+    "relevanceTags": [
+      "conversations",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3481
+    ]
+  }
+}
