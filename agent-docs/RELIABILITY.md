@@ -1760,15 +1760,21 @@ Last verified: 2026-09-04
   deadlines. This transfers the hints to
   the existing durable continuation before dirty input is fetched; it never discards its provider jobs or backoff. A
   Same-epoch connection-established work may join this admission when its
-  initial jobs have explicit, non-colliding identities and fit the existing
-  pass admission bound. The atomic claim adds those jobs, preserving their
+  initial jobs have explicit identities and fit the existing pass admission bound.
+  If a canonical Web job key collides with an older retained job, the incoming
+  connection event scopes a new deterministic key before atomic transfer. This
+  admits repeated source completions sharing a provider day-window key without
+  overwriting the older cursor or retry deadline. Duplicate incoming identities,
+  collisions with the recovered key, and noncanonical key collisions remain
+  barriers. Producer payloads and replay identities stay unchanged. The atomic
+  claim adds those jobs, preserving their
   original availability, to the existing owner's exact retry hints before
   removing the covered input. It carries the latest supplied scopes and later
   cadence hint; canonical snapshot hydration still owns connection authority.
   Foreground preemption, execution failure and cold restore retain the merged
   wake, including every older cursor and retry deadline. A distinct epoch,
   disconnect or reauthorization event, other explicit job, scoped manual request,
-  recording or attempted item, unknown hint semantics, colliding job identity,
+  recording or attempted item, unknown hint semantics, ambiguous job identity,
   or newer scheduled cadence remains a same-connection ordering barrier.
   A pristine same-epoch manual reconcile request with only its reason and
   optional occurrence hint also joins the owner immediately. Its atomic claim

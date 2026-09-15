@@ -104,6 +104,45 @@ describe("retained device hint coverage", () => {
     expect(state).toEqual(before);
   });
 
+  it("admits a repeated connection root without resetting the retained retry", () => {
+    const retained = owner();
+    const candidate = connected();
+    if (retained.wake.kind !== "device-sync.wake" || candidate.wake.kind !== "device-sync.wake") throw new Error("Invalid fixture");
+    const legacyKey = `hosted-device-sync:${"a".repeat(64)}`;
+    const retry = { kind: "reconcile" as const, dedupeKey: legacyKey, availableAt: LATER,
+      maxAttempts: 2, payload: { timeseriesCursor: "2026-04-20T00:00:00.000Z" } };
+    retained.wake.hint = { jobs: [retry] };
+    candidate.wake.hint = { jobs: [{ kind: "reconcile", dedupeKey: legacyKey }] };
+    const pending = [retained, candidate, hint("dirty", "3")];
+    const before = structuredClone(pending);
+    const coverage = projectHostedDeviceHintCoverage({ now: NOW, pending }).get("owner");
+    expect([...coverage!.coveredHintIds]).toEqual([candidate.itemId, "dirty"]);
+    const jobs = coverage?.admittedWake?.hint?.jobs;
+    expect(jobs).toHaveLength(2);
+    expect(jobs?.[0]).toEqual(retry);
+    expect(jobs?.[1]).toMatchObject({ kind: "reconcile", availableAt: NOW });
+    expect(jobs?.[1]?.dedupeKey).not.toBe(legacyKey);
+    expect(projectHostedDeviceHintCoverage({ now: NOW, pending }).get("owner")?.admittedWake).toEqual(coverage?.admittedWake);
+    expect(pending).toEqual(before);
+  });
+
+  it("keeps duplicate incoming identities and recovered-key collisions blocked", () => {
+    const retained = owner();
+    const candidate = connected();
+    if (retained.wake.kind !== "device-sync.wake" || candidate.wake.kind !== "device-sync.wake") throw new Error("Invalid fixture");
+    const key = `hosted-device-sync:${"b".repeat(64)}`;
+    retained.wake.hint = { jobs: [{ kind: "reconcile", dedupeKey: key, availableAt: LATER }] };
+    candidate.wake.hint = { jobs: [{ kind: "reconcile", dedupeKey: key }] };
+    const pending = [retained, candidate];
+    const recovered = projectHostedDeviceHintCoverage({ now: NOW, pending }).get("owner")?.admittedWake?.hint?.jobs?.[1];
+    expect(recovered?.dedupeKey).toBeTruthy();
+    candidate.wake.hint.jobs?.push({ ...candidate.wake.hint.jobs[0]! });
+    expect(projectHostedDeviceHintCoverage({ now: NOW, pending }).get("owner")?.admittedWake).toBeUndefined();
+    candidate.wake.hint.jobs?.pop();
+    retained.wake.hint.jobs?.push(recovered!);
+    expect(projectHostedDeviceHintCoverage({ now: NOW, pending }).get("owner")?.admittedWake).toBeUndefined();
+  });
+
   it("composes multiple connection jobs and following dirty hints into one owner", () => {
     const pending = [owner(), connected(), connected("another-source", "3"), hint("dirty", "4")];
     const coverage = projectHostedDeviceHintCoverage({ now: NOW, pending }).get("owner");

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 import {
@@ -941,11 +942,21 @@ function admitHostedDeviceSyncWork(
     return { ...owner.wake, hint: { ...owner.wake.hint, reason: "manual_reconcile_pending" } };
   }
   const existing = owner.wake.hint?.jobs ?? [];
-  const incoming = wake.hint?.jobs ?? [];
-  // Explicit identities survive transfer to another event; retained retries
-  // remain exact and never have their deadline shortened by a duplicate job.
+  const incoming = (wake.hint?.jobs ?? []).map((job) => {
+    // Web job keys can repeat across separate source completions in
+    // one account epoch. Give the new request its own job without resetting
+    // the existing job's cursor or backoff. The atomic claim persists this key.
+    if (job.dedupeKey && /^hosted-device-sync:[a-f0-9]{64}$/u.test(job.dedupeKey)
+      && existing.some((retained) => retained.dedupeKey === job.dedupeKey)) {
+      return { ...job, dedupeKey: `hosted-device-sync-connection:${createHash("sha256")
+        .update(JSON.stringify([wake.eventId, job.dedupeKey])).digest("hex")}` };
+    }
+    return job;
+  });
+  // Explicit identities survive transfer; ambiguous collisions stay blocked.
   if (incoming.length === 0
     || existing.length + incoming.length > HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT
+    || new Set(incoming.map((job) => job.dedupeKey)).size !== incoming.length
     || incoming.some((job) => !job.dedupeKey
       || existing.some((retained) => retained.dedupeKey === job.dedupeKey))) {
     return null;

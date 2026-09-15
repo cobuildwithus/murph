@@ -4288,6 +4288,72 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it("keeps recovered connection-job identity through failed admission and cold restore", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-connection-retry-");
+    const retryAt = "2026-04-28T00:00:00.000Z";
+    const legacyKey = `hosted-device-sync:${"a".repeat(64)}`;
+    const retainedJob = { kind: "reconcile" as const, dedupeKey: legacyKey,
+      availableAt: retryAt, maxAttempts: 2,
+      payload: { windowStart: "2026-04-20T00:00:00.000Z", windowEnd: "2026-04-27T00:00:00.000Z" } };
+    const ownerWake = buildHostedExecutionDeviceSyncWake({
+      connectionId: "synthetic_connection", eventId: "device-sync.wake:synthetic-owner",
+      expectedConnectedAt: FIXED_NOW, occurredAt: FIXED_NOW,
+      provider: "junction", reason: "reconcile_due", userId: "member_123",
+      hint: { jobs: [retainedJob] },
+    });
+    const connectedWake = { ...ownerWake, eventId: "device-sync.wake:synthetic-reconnected",
+      reason: "connected" as const, hint: { scopes: ["sleep"], jobs: [{
+        kind: "reconcile" as const, dedupeKey: legacyKey, payload: retainedJob.payload,
+      }] } };
+    try {
+      for (const [index, wake] of [ownerWake, connectedWake].entries()) {
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedDeviceSyncItem({ id: `synthetic_connection_item_${index}`,
+            dedupeKey: wake.eventId, laneSeq: String(index + 1) }),
+          vaultRoot: workspace.vaultRoot, wake,
+        });
+      }
+      await updateHostedSystemMailboxState(workspace.vaultRoot, (state) => ({
+        pending: state.pending.map((item, index) => index === 0 ? {
+          ...item, deviceSyncContinuationOwner: true, attemptCount: 1,
+          lastAttemptAt: FIXED_NOW, nextAttemptAt: retryAt,
+        } : item),
+      }));
+      await writeHostedMailboxImportState({
+        state: { ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: "2" } },
+        vaultRoot: workspace.vaultRoot,
+      });
+      mocks.executeHostedMailboxEvent.mockRejectedValue(new Error("Synthetic interruption after the durable claim"));
+      const runtime = createRuntime({});
+      await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"], now: () => FIXED_NOW,
+        runtime, runtimeEnv: {}, retainProcessedItemUntilRecorded: true, vaultRoot: workspace.vaultRoot,
+      });
+      const checkpoint = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(checkpoint.pending).toHaveLength(1);
+      const retained = checkpoint.pending[0];
+      assert.ok(retained?.wake.kind === "device-sync.wake");
+      const jobs = retained.wake.hint?.jobs;
+      expect(jobs).toHaveLength(2);
+      expect(jobs?.[0]).toEqual(retainedJob);
+      expect(jobs?.[1]?.dedupeKey).not.toBe(legacyKey);
+      expect(jobs?.[1]?.availableAt).toBe(FIXED_NOW);
+      await restoreHostedSystemMailboxCheckpointRollbackState({ state: checkpoint, vaultRoot: workspace.vaultRoot });
+      assert.ok(retained.nextAttemptAt);
+      await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"], now: () => retained.nextAttemptAt!,
+        runtime, runtimeEnv: {}, retainProcessedItemUntilRecorded: true, vaultRoot: workspace.vaultRoot,
+      });
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(2);
+      expect(mocks.executeHostedMailboxEvent.mock.calls[0]?.[0].wake).toEqual(retained.wake);
+      expect(mocks.executeHostedMailboxEvent.mock.calls[1]?.[0].wake).toEqual(retained.wake);
+      expect(resolveHostedSystemMailboxProgress({ importedSeq: "2", state: checkpoint }))
+        .toMatchObject({ handledThroughSeq: "2", deviceSyncContinuationSeqs: ["1"], firstPendingSeq: null });
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("uses a fresh webhook to admit the older exact local device retry", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const retryAt = "2026-04-28T00:00:00.000Z";
