@@ -3384,9 +3384,13 @@ lifecycle decision. That result is the sole owner of the interaction generation,
 captured when its invocation enters the container; the notification carries
 identity only. The two in-memory halves accept either arrival order. A mismatch,
 newer interaction, Durable Object activation reset, RPC failure, active child,
-retained warmth, near wake, or uncertain status/health leaves the ordinary
+retained warmth, or uncertain status/health leaves the ordinary
 `sleepAfter` timer as the cleanup owner. No durable notification, retry loop,
 queue, scheduler, or second lifecycle owner is added.
+An ordinary synchronous active-fence read only observes the registered operation:
+it does not advance the interaction generation or postpone completion cleanup.
+Inactive, aborting, and transport/cleanup-uncertain reads retain their existing
+lifecycle coordination; actual readiness and wake arrivals still advance it.
 When the outer RunnerContainer active-operation pointer is missing, a container
 wake response must carry explicit identity-checked wake metadata before an
 accepted wake is trusted; identity-blind accepted responses from deploy-skewed
