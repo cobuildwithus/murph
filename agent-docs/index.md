@@ -123,6 +123,9 @@ Telegram proof creation delegates record IDs to the encrypted Better Auth adapte
 the warning regression and delivery evidence are tracked in
 [`2026-09-15-telegram-auth-id.md`](exec-plans/completed/2026-09-15-telegram-auth-id.md).
 
+The deployment unblock retaining the dormant experiment namespace is tracked in
+[`2026-09-15-defer-small-namespace-retirement.md`](exec-plans/completed/2026-09-15-defer-small-namespace-retirement.md).
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

@@ -1,3 +1,4 @@
+import { readHostedRunnerDeployment } from "./hosted-runner-release.ts";
 import {
   registerHostedRunnerContainerOutboundInterception,
   RunnerContainer,
@@ -9,3 +10,14 @@ export class StandbyRunnerContainer extends RunnerContainer {
 }
 
 registerHostedRunnerContainerOutboundInterception(StandbyRunnerContainer);
+
+/** Retained namespace only; the base class rejects fresh preparation and binding. */
+export class SmallRunnerContainer extends RunnerContainer {
+  protected override readonly slotNamespace = "small" as const;
+
+  constructor(state: unknown, env: Readonly<Record<string, unknown>>) {
+    super(state, env, readHostedRunnerDeployment(env)?.active.bank ?? "primary");
+  }
+}
+
+registerHostedRunnerContainerOutboundInterception(SmallRunnerContainer);

@@ -1163,8 +1163,8 @@ describe("HostedUserRunner execution coordination", () => {
     expect(claimReadyStandby).toHaveBeenCalledOnce();
   });
 
-  it("invokes a retained runner slot with no extra binding RPC", async () => {
-    const slotName = `runner--v-release_1--${"d".repeat(32)}`;
+  it.each(["runner", "runner-small"])("invokes a retained %s slot with no extra binding RPC", async prefix => {
+    const slotName = `${prefix}--v-release_1--${"d".repeat(32)}`;
     const binding: HostedStandbySlotBinding = {
       claimId: "standby-claim-12345678-1234-4123-8123-123456789abc",
       releaseId: "release_1", region: "GLOBAL", slotName,
@@ -1197,8 +1197,8 @@ describe("HostedUserRunner execution coordination", () => {
     expect(harness.invoke).toHaveBeenCalledOnce();
   });
 
-  it("clears a proven retirement before the next message without an old-target RPC", async () => {
-    const oldTarget = `runner--v-release_1--${"c".repeat(32)}`;
+  it.each(["runner", "runner-small"])("clears a proven %s retirement before the next message without an old-target RPC", async prefix => {
+    const oldTarget = `${prefix}--v-release_1--${"c".repeat(32)}`;
     const retired: HostedStandbySlotBinding = { slotName: oldTarget, releaseId: "release_1",
       region: "GLOBAL", state: "retired", claimId: null, userId: null };
     const readProof = vi.fn(async () => retired);
@@ -9719,6 +9719,7 @@ function createRunnerHarness(input: {
     input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,
     createHostedRunnerContainerNamespaceRouter({
       exactUser: input.runnerContainerNamespace === undefined ? namespace : input.runnerContainerNamespace,
+      small: namespace,
       standby: input.standbyContainerNamespace ?? {
         getByName(name) {
           const container = namespace.getByName(name);

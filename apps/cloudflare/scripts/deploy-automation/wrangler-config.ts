@@ -121,6 +121,12 @@ export function buildHostedWranglerDeployConfig(
         rolloutActiveGracePeriodSeconds:
           RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
+      // Existing native resources are retained by stageHostedRunnerRelease.
+      // This declaration never provisions or rolls out the retired experiment.
+      buildRunnerContainerConfig({
+        className: "SmallRunnerContainer", maxInstances: 0,
+        rolloutActiveGracePeriodSeconds: RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
+      }),
     ],
     durable_objects: {
       bindings: [
@@ -160,6 +166,7 @@ export function buildHostedWranglerDeployConfig(
           name: "STANDBY_RUNNER_CONTAINER",
           class_name: "StandbyRunnerContainer",
         },
+        { name: "SMALL_RUNNER_CONTAINER", class_name: "SmallRunnerContainer" },
       ],
     },
     version_metadata: {
@@ -202,7 +209,6 @@ export function buildHostedWranglerDeployConfig(
         new_sqlite_classes: ["NextRunnerContainer"],
       },
       { tag: "v9", new_sqlite_classes: ["SmallRunnerContainer"] },
-      { tag: "v10", deleted_classes: ["SmallRunnerContainer"] },
     ],
     triggers: {
       crons: ["*/5 * * * *"],

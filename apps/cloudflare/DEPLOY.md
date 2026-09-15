@@ -103,43 +103,30 @@ their actual owners, not labels in a general capability registry.
 
 ### Retiring the selected-account size experiment
 
-All fresh member allocations use the regular runner fleet. The temporary
-member selector, separate resource profile, namespace router and deployment
-bootstrap have been removed. Migration `v9` remains historical; `v10` deletes
-`SmallRunnerContainer`. The regular member budget and isolated smoke capacity
-are unchanged.
+All fresh member allocations use the regular runner fleet. The experiment's
+selector, custom sizing, bootstrap and dedicated rollout are removed. The
+`SmallRunnerContainer` class and binding remain solely for existing stored
+`runner-small--v-...` targets. Fresh preparation and binding are rejected;
+existing exact bindings still use the ordinary checkpoint and retirement owner.
 
-Existing deployments must complete retirement before publishing this Worker:
+Migration history ends at `v9`. Normal releases use `wrangler versions upload`
+without a namespace migration. Release staging retains the existing small
+application's exact image, resources and capacity; its zero-capacity scaffold
+entry neither provisions an absent application nor changes a live one. It is
+excluded from image admission and native rollout. The regular member budget
+and isolated smoke capacity are unchanged.
 
-1. On the previous compatible release, disable
-   `HOSTED_EXECUTION_SMALL_RUNNER_ENABLED` and verify the live variable is false.
-   Keep its binding and image while existing targets checkpoint and retire.
-2. Prove that no persisted active or pending UserRunner target references
-   `runner-small--v-...`, no small-container invocation or instance remains,
-   and the last workspace checkpoint is committed. A stopped instance alone
-   does not prove dormant routing references are gone. Use the existing
-   authenticated status and retirement owners; do not erase routing state or
-   force-stop a member invocation to make this gate pass.
-3. In the protected deployment environment, remove the drained native small
-   application. Publish the retirement Worker and `v10` once with pinned
-   Wrangler `deploy --containers-rollout=none`. Preserve the live regular
-   applications' image, resources, capacity and serving release variables in
-   that migration config, and compare native receipts before and after. This
-   step must pass ordinary Web protocol admission and verify the live Worker
-   version immediately before activation. The installed-CLI regression proves
-   the delete metadata and absence of Container API reconciliation; live drain
-   and protected activation remain operational prerequisites.
-4. Resume the normal version-based release flow with matching public and private
-   sources. Remove the retired selector secret and enable/bootstrap variables
-   from the Worker and protected environments. Verify only regular member
-   targets are allocated and ordinary checkpoint/recovery succeeds.
-
-Namespace deletion permanently removes its Durable Object data. This is a
-forward-only retirement boundary: the old experiment release cannot be rolled
-back into service after deletion. Follow Cloudflare's
-[Durable Object migrations](https://developers.cloudflare.com/durable-objects/reference/durable-object-class-migrations-legacy/)
-contract; production retirement requires its own authorized protected execution.
-Source validation and a successful ordinary release are not proof of live drain.
+Physical deletion is deferred. It is unnecessary for ordinary releases and
+permanently destroys namespace data. Before proposing a later deletion, prove
+no persisted active or pending UserRunner target references the namespace,
+no invocation or instance remains, and the last workspace checkpoint committed.
+Zero native instances alone is insufficient. A later reviewed retirement must
+use protected `wrangler deploy --containers-rollout=none`, retain regular native
+resources and serving release variables, pass Web protocol admission and recheck
+live Worker identity immediately before activation. Never force-stop member
+work or erase routing state to satisfy drain. Cloudflare's
+[Durable Object migration contract](https://developers.cloudflare.com/durable-objects/reference/durable-object-class-migrations-legacy/)
+requires this separate activation; normal version uploads cannot apply deletion.
 
 ### Migration and release order
 
