@@ -400,6 +400,20 @@ describe("hosted device-sync due reconcile sweeper", () => {
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
+  it("treats a schedule superseded during admission as a benign skip", async () => {
+    const logger = buildLogger();
+    const store = buildStore([{ connectionId: "dsc_stale", userId: "member_due_shared",
+      provider: "oura", connectedAt: "2026-05-04T12:05:00.000Z", nextReconcileAt: "2026-05-05T00:00:00.000Z" }]);
+    mocks.appendHostedDeviceSyncScheduledReconcileWake.mockResolvedValue({
+      reason: "schedule_superseded", wakeAccepted: false, wakeAppended: false,
+      wakeDuplicate: false, wakeInserted: false,
+    });
+    await expect(runHostedDeviceSyncDueReconcileSweeper({ logger, store })).resolves.toMatchObject({
+      wakeAttempted: 1, wakeNotAccepted: 1, wakeAccepted: 0, wakeFailed: 0,
+    });
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
   it("reports skipped due connections and wake failures without logging raw ids", async () => {
     const logger = buildLogger();
     const store = buildStore([
@@ -485,7 +499,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
       wakeNotAccepted: 1,
     });
     expect(logger.info).toHaveBeenCalledWith(
-      "Hosted device-sync due reconcile wake skipped after consent withdrawal.",
+      "Hosted device-sync due reconcile wake skipped before mailbox append.",
       { reason: "health_data_consent_withdrawn" },
     );
     expect(logger.warn).not.toHaveBeenCalledWith(

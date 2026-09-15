@@ -231,6 +231,7 @@ import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedSystemMailboxItemAfterCheckpoint,
   retainHostedSystemMailboxItemUntilDeliveryWake,
+  retireHostedCoveredDeviceSchedulesAfterImport,
   resolveHostedBrowserVaultRefreshAttempt,
   resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxWakeCandidates,
@@ -3339,14 +3340,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           : { outcome: "completed", result: offerResult.value };
       };
       const importSystemMailboxCompletionTail = async (): Promise<void> => {
-        if (completionTailAttempted || pendingDurableCheckpointEffects.length === 0
-          || mailboxBudgetExhausted() || backgroundWorkSignal.aborted
+        if (completionTailAttempted || mailboxBudgetExhausted() || backgroundWorkSignal.aborted
           || shouldYieldSystemMailboxWork()) return;
         completionTailAttempted = true;
-        // Admit one prefix while the completed owners are quiescent. Their
-        // original preparation still owns publication and covered-hint removal.
+        // Read once after completion publication, including arrivals during
+        // checkpointing and projection. Never execute newly imported work.
         const interruption = createHostedRuntimeCheckpointWakeInterruption({
-          enabled: true, runtimeWakeSignal: systemMailboxWakeSignal,
+          enabled: true, runtimeWakeSignal: options.runtimeWakeSignal ?? systemMailboxWakeSignal,
         });
         const fetchSignal = interruption.signal
           ? AbortSignal.any([backgroundWorkSignal, interruption.signal])
@@ -3367,6 +3367,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             requestId: `${requestId}:system-mailbox-completion-tail`,
             signal: backgroundWorkSignal,
             workspace: checkpointRequestBuilder.latestWorkspace() ?? activeWorkspace,
+          });
+          await retireHostedCoveredDeviceSchedulesAfterImport({
+            now: new Date().toISOString(), vaultRoot: restored.vaultRoot,
           });
           latestMailboxImport = tail.latestMailboxImport;
           completionTailImportEffects = latestMailboxImport;
@@ -3397,7 +3400,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           checkpointSignal ?? runtimeAbortController.signal,
         );
         checkpointSignal?.throwIfAborted();
-        await importSystemMailboxCompletionTail();
         activeWorkspace = checkpointRequestBuilder.latestWorkspace() ?? activeWorkspace;
         currentRedactedStatus = { ...currentRedactedStatus, ...checkpointRequestBuilder.readRedactedStatus() };
         const checkpointWake = await resolveCurrentSystemMailboxModeWake(extraCandidates);
@@ -3564,6 +3566,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               completion?.nextWakeReason ?? null,
             ));
           }
+          await importSystemMailboxCompletionTail();
           await checkpointSystemMailboxMode(
             "system_mailbox.checkpoint.independent_completion", [], interruption.signal,
           );

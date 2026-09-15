@@ -3444,6 +3444,10 @@ its exact identity inside the transaction, and disables provider calls while
 appending. Root drift rolls back and permits one fresh preparation retry;
 KMS failure before admission creates neither a mailbox item nor a signal.
 Consent is rechecked after preparation under the existing member lock.
+The scheduled append also revalidates the exact active connection epoch and due
+cadence under the connection lock shared with runtime publication. Superseded
+selection is a benign skip and creates no mailbox item, signal, or handoff.
+Recovery retries actual wake failures, not benign schedule or consent skips.
 Runtime signaling remains after commit. Scheduled v3 duplicate replay keeps
 its existing exact dedupe and retained runtime-continuation ownership checks;
 it does not decrypt a retired payload or create a second handoff owner.

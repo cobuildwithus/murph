@@ -946,18 +946,28 @@ Device hints, restored timers, imports, activity scheduling, and exact
 acknowledgments all use the workspace-owned mailbox path. Common durable effects
 retain their existing delivery and shutdown behavior.
 
-Before the dedicated system-mailbox lane checkpoints completed workspace work,
-it offers one additional bounded system-prefix import after those attempts
-quiesce. This uses the invocation's remaining mailbox budget and yields to
-foreground wakes, abort, receipt capacity, and assistant deadlines. It does not
-execute another device pass or change the original completion preparation's
-admission authority. The existing post-checkpoint recording publishes current
-cadence and compacts only covered later hints; its follow-up checkpoint persists
-that removal. Equal-cadence, manual, different-epoch, and unrelated connection
-requests remain actionable. Final progress and import retry projection use the
-latest imported prefix, and each import's deferred effects run at most once
-after a covering checkpoint. Input arriving after this one read remains ordinary
-durable follow-up work. No polling loop, wire field, or persisted schema changes.
+After the dedicated system-mailbox lane checkpoints completed workspace work,
+finishes projection, and records completion, it offers one additional bounded
+system-prefix import before the final completion checkpoint. This placement
+includes requests arriving during snapshot creation or cadence publication.
+It uses the invocation's remaining mailbox budget and yields to foreground
+wakes, abort, receipt capacity, and assistant deadlines. It does not execute
+another device pass or change the original completion preparation's admission
+authority. Existing retained-owner coverage retires only superseded schedules;
+dirty, equal-cadence, manual, different-epoch, and unrelated connection requests
+remain actionable. The final checkpoint persists both the imported prefix and
+covered-hint removal before deferred import effects run, at most once. Final
+progress and retry projection use the latest import. Input arriving after this
+one read remains ordinary durable follow-up work. No polling loop, wire field,
+or persisted schema changes.
+
+Web revalidates the selected connection, provider, active epoch, and exact due
+cadence inside the existing connection-locked scheduled append transaction,
+after crypto preparation. A changed tuple is a benign `schedule_superseded`
+skip with no mailbox insertion, signal record, or runtime handoff. Cadence
+publication uses the same connection lock: an old candidate either commits
+before publication and is eligible for the completion drain, or is rejected
+after publication. Recovery remains eligible while its exact due tuple is current.
 
 Scheduling preserves per-connection ordering and the imported-watermark-bounded
 continuation projection used by handling. Invalid continuation authority cannot

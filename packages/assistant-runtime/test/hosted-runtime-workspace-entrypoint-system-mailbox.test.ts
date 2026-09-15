@@ -1494,7 +1494,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test.each(["covered", "equal", "manual", "new_epoch", "other_connection", "after_bound", "budget", "foreground_fetch", "abort_fetch", "checkpoint_failure", "followup_failure"] as const)("system mailbox completion imports one bounded late device prefix: %s", async (scenario) => {
+  test.each(["covered", "during_checkpoint", "during_publication", "equal", "manual", "new_epoch", "other_connection", "after_bound", "budget", "foreground_fetch", "abort_fetch", "checkpoint_failure", "followup_failure"] as const)("system mailbox completion imports one bounded late device prefix: %s", async (scenario) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -1533,7 +1533,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       },
       async applyUpdates(request) {
         for (const update of request.updates) {
-          if (typeof update.localState?.nextReconcileAt === "string") canonicalNextReconcileAt = update.localState.nextReconcileAt;
+          if (typeof update.localState?.nextReconcileAt === "string") {
+            canonicalNextReconcileAt = update.localState.nextReconcileAt;
+            if (scenario === "during_publication" && canonicalNextReconcileAt === cadenceAt && !lateArrived) {
+              remoteItems.push(lateItem); lateArrived = true;
+            }
+          }
         }
         return { appliedAt: TEST_NOW, userId: TEST_USER_ID, updates: request.updates.map((update) => ({
           connection: null, connectionId: update.connectionId, status: "updated" as const,
@@ -1542,7 +1547,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       },
     };
     const providerFetch = vi.fn(async () => {
-      if (!lateArrived) { remoteItems.push(lateItem); lateArrived = true; }
+      if (!lateArrived && scenario !== "during_checkpoint" && scenario !== "during_publication") { remoteItems.push(lateItem); lateArrived = true; }
       return new Response(JSON.stringify({ records: [] }), {
         headers: { "content-type": "application/json" }, status: 200,
       });
@@ -1582,7 +1587,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               || (scenario === "followup_failure" && snapshotCount === 2))) {
               throw new Error("Synthetic completion checkpoint failure");
             }
-            if (scenario === "after_bound" && lateArrived && !remoteItems.some((item) => item.laneSeq === "3")) {
+            if (scenario === "during_checkpoint" && snapshotCount === 1 && !lateArrived) {
+              remoteItems.push(lateItem); lateArrived = true;
+            }
+            if (scenario === "after_bound" && snapshotCount === 2 && lateArrived && !remoteItems.some((item) => item.laneSeq === "3")) {
               remoteItems.push(makeScheduledItem("3"));
             }
             const snapshot = await createVaultSnapshotBundle({ vaultRoot });
@@ -1645,7 +1653,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           assert.equal(effectsFinished, 0);
           return;
         }
-        assert.equal(effectsFinished, scenario === "followup_failure" ? 1 : 0);
+        assert.equal(effectsFinished, 0, "late import effects wait for the final covering checkpoint");
         assert.equal(canonicalNextReconcileAt, scenario === "followup_failure" ? cadenceAt : TEST_NOW);
         failureEnabled = false;
         await rm(vaultRoot, { recursive: true, force: true });
@@ -1689,7 +1697,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(remoteItems.at(-1)?.laneSeq, "3", "unread work remains durable for owner-release reconciliation");
       }
       if (scenario === "budget") assert.equal(result.status, "budget_exhausted");
-      if (scenario === "covered") {
+      if (scenario === "covered" || scenario === "during_checkpoint" || scenario === "during_publication") {
         await rm(vaultRoot, { recursive: true, force: true });
         await mkdir(vaultRoot, { recursive: true });
         const restored = await runPass();

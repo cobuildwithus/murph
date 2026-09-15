@@ -1725,6 +1725,21 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
   });
 
+  it("does not append or signal a selected schedule superseded before its locked append", async () => {
+    mocks.prismaTx.$queryRaw.mockResolvedValueOnce([]);
+    await expect(appendHostedDeviceSyncScheduledReconcileWake({
+      connectionId: "dsc_123", userId: "user-123", provider: "oura",
+      createdAt: "2026-03-26T12:01:00.000Z",
+      eventId: "device-sync:scheduled-reconcile:stale",
+      expectedConnectedAt: "2026-03-26T12:00:00.000Z",
+      nextReconcileAt: "2026-03-26T12:00:00.000Z",
+    })).resolves.toEqual({ reason: "schedule_superseded", wakeAccepted: false,
+      wakeAppended: false, wakeDuplicate: false, wakeInserted: false });
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
   it("uses explicit scheduled wake identity and created time for inserted due-reconcile signals", async () => {
     await appendHostedDeviceSyncScheduledReconcileWake({
       connectionId: "dsc_123",
