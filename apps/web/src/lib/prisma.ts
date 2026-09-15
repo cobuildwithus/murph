@@ -217,6 +217,15 @@ function createPrismaPool(input: CreatePrismaClientInput): PgPool {
     max: poolMax,
   });
 
+  // Transaction statements reuse their acquired client. Sample only real
+  // checkouts so those statements cannot masquerade as prospective waiters.
+  // Forward both pg callback and promise forms without changing their lifetime.
+  pool.connect = new Proxy(pool.connect, {
+    apply(connect, receiver, args) {
+      reportDatabasePoolPressure(pool, poolMax, readDatabasePoolSnapshot(pool));
+      return Reflect.apply(connect, receiver, args);
+    },
+  });
   attachDatabasePool(pool);
   return pool;
 }
@@ -342,7 +351,6 @@ async function runWithDatabaseRetry<T>(
       beforeAttempt,
       poolMax,
     );
-    reportDatabasePoolPressure(pool, poolMax, beforeAttempt);
     try {
       return await run();
     } catch (error) {
@@ -370,7 +378,6 @@ async function runWithDatabaseRetry<T>(
 
       await delay(resolveDatabaseRetryDelayMs());
       const beforeRetry = readDatabasePoolSnapshot(pool);
-      reportDatabasePoolPressure(pool, poolMax, beforeRetry);
       if (hasLocalDatabasePoolPressure(beforeRetry, poolMax)) {
         if (category) {
           reportDatabasePoolFailure(beforeRetry, category, {
