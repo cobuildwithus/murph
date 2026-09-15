@@ -4267,54 +4267,6 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("calls the legacy wakeRuntime fallback directly on the container stub", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const wakeRuntime = vi.fn<NonNullable<HostedExecutionContainerStubLike["wakeRuntime"]>>(
-      async () => ({
-        action: "woken" as const,
-        kind: "accepted" as const,
-      }),
-    );
-    const { invoke, runner, sql } = createRunnerHarness({
-      wakeRuntime,
-      workspace: createWorkspaceState({ version: "7" }),
-    });
-    await runner.bindUser(TEST_USER_ID);
-    const token = writeRuntimeFenceForTest(sql, {
-      workspaceVersion: "7",
-    });
-
-    await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt",
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "woken",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: expect.any(String),
-      runtimeAttemptId: token.attemptId,
-    });
-
-    expect(wakeRuntime).toHaveBeenCalledWith({
-      attemptId: token.attemptId,
-      leaseGeneration: String(token.generation),
-      orchestration: {
-        activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
-        activeFenceTargetWasPriorVersion: false,
-        activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
-        runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
-        userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
-        runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
-        runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
-        runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
-        runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
-      },
-      processingMode: "default",
-      userId: TEST_USER_ID,
-    });
-    expect(invoke).not.toHaveBeenCalled();
-  });
-
   it.each([
     ["retention-only", "default", "default", "inbox_media_retention"],
     ["retention-only", "system-mailbox", "system_mailbox", "inbox_media_retention"],
@@ -4453,12 +4405,6 @@ describe("HostedUserRunner execution coordination", () => {
         kind: "accepted" as const,
       }),
     );
-    const wakeRuntime = vi.fn<NonNullable<HostedExecutionContainerStubLike["wakeRuntime"]>>(
-      async () => ({
-        action: "woken" as const,
-        kind: "accepted" as const,
-      }),
-    );
     const readActiveRuntimeUserFence = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
     >(async () => ({
@@ -4471,7 +4417,6 @@ describe("HostedUserRunner execution coordination", () => {
       abortWorkspaceInvocation,
       ensureProcessing,
       readActiveRuntimeUserFence,
-      wakeRuntime,
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
@@ -4498,7 +4443,6 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledTimes(recheckCount);
     expect(ensureProcessing).not.toHaveBeenCalled();
-    expect(wakeRuntime).not.toHaveBeenCalled();
     expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -9560,7 +9504,6 @@ function createRunnerHarness(input: {
     doubles?: number[];
     indexes?: string[];
   }): void };
-  wakeRuntime?: HostedExecutionContainerStubLike["wakeRuntime"];
   workspace?: HostedWorkspaceState | null;
 } = {}) {
   const durable = createDurableObjectState({
@@ -9708,24 +9651,6 @@ function createRunnerHarness(input: {
               }
               return await input.ensureProcessing?.call(this, ensureInput) ?? {
                 kind: "start-required",
-                reason: "no-active-child",
-              };
-            },
-          ),
-        }
-      : {}),
-    ...(input.wakeRuntime
-      ? {
-          wakeRuntime: createDirectOnlyRpcMethod<
-            NonNullable<HostedExecutionContainerStubLike["wakeRuntime"]>
-          >(
-            async function (
-              this: HostedExecutionContainerStubLike,
-              wakeInput,
-            ) {
-              expect(this).toBe(stub);
-              return await input.wakeRuntime?.call(this, wakeInput) ?? {
-                kind: "not-wakeable",
                 reason: "no-active-child",
               };
             },

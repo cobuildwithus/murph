@@ -313,7 +313,6 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   ): Promise<void>;
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
   smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
-  wakeRuntime?(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -1421,8 +1420,6 @@ export class RunnerContainer extends Container {
   }
 
   async ensureProcessing(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult> {
-    this.authorizeBoundUser(input.userId);
-    this.noteContainerInteraction();
     assertRunnerContainerEnsureProcessingUserIds(input);
     let startAction: Extract<RunnerContainerEnsureProcessingResult, { kind: "accepted" }>["action"] = "started";
     if (input.activeRuntime) {
@@ -1453,6 +1450,8 @@ export class RunnerContainer extends Container {
       startAction = "restarted";
     }
 
+    this.authorizeBoundUser(input.userId);
+    this.noteContainerInteraction();
     if (!input.invoke) {
       return {
         kind: "start-required",
@@ -1598,7 +1597,9 @@ export class RunnerContainer extends Container {
     try {
       diagnostics.wakeStage = "dispatch";
       diagnostics.wakeDispatchAtEpochMs = Date.now();
-      const response = await this.containerFetch(
+      // A wake probes an existing child; SDK proxying can read stale lifecycle
+      // state and enter startup before sending. Cold starts have a separate owner.
+      const response = await this.ctx.container!.getTcpPort(RUNNER_PORT).fetch(
         RUNNER_RUNTIME_WAKE_URL,
         {
           body: JSON.stringify(input),

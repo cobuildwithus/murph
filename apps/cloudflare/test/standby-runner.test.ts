@@ -268,6 +268,14 @@ describe("RunnerContainer slot lifecycle", () => {
     await expect(harness.container.ensureProcessing({
       userId: "member_456",
     })).rejects.toThrow("not bound to the runtime user");
+    await expect(harness.container.ensureProcessing({
+      activeRuntime: {
+        attemptId: "attempt_wrong_member_wake",
+        leaseGeneration: "1",
+        userId: "member_456",
+      },
+      userId: "member_456",
+    })).rejects.toThrow("not bound to the runtime user");
     await expect(harness.container.onRuntimeCompletionRecorded({
       attemptId: "attempt_wrong_member",
       leaseGeneration: "1",
