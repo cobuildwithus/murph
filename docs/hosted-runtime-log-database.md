@@ -401,16 +401,20 @@ and then finish. It changes only the fixture's idle setting:
 
 | Local scenario | Idle setting | Result |
 | --- | --- | --- |
-| Healthy 22-second response silence | 90 seconds | Completed in 22,428 ms; no fallback |
-| Healthy 22-second response silence on both attempts | 20 seconds | WebSocket and HTTPS attempts timed out; failed after 40,320 ms |
-| Native tool taking 22 seconds | 20 seconds | Completed in 22,986 ms; no fallback |
+| Healthy 22-second response silence | 90 seconds | Completed in 22,673 ms; no fallback |
+| Healthy 22-second response silence on both attempts | 20 seconds | WebSocket and HTTPS attempts timed out; failed after 40,493 ms |
+| Murph tool taking 22 seconds through native Codex | 20 seconds | Completed in 22,899 ms; no fallback |
 
 Reproduce with `MURPH_RUN_CODEX_TIMEOUT_SAFETY=1 pnpm exec vitest run --config
 vitest.config.ts --no-coverage test/assistant-codex-idle-timeout-safety.test.ts`
 from `packages/assistant-engine`. The default lane runs shorter versions of all
 three cases. These use a local scripted provider, not production or live OpenAI.
 They assert actual native timeout/fallback, successful tool execution, and the
-wire-to-consumer turn correlation.
+wire-to-consumer turn correlation. The tool case offers the registered Murph
+progress tool with a local-only delivery callback. It checks exactly one invocation,
+at least 22 seconds of actual callback work, and completion before the provider
+continues. This avoids relying on OS-dependent native shell-tool notifications;
+no message or external request is sent by the callback.
 
 The 20-second setting can interrupt healthy generation and its HTTPS replacement.
 Long local tool execution occurs outside the response-stream idle wait and is
