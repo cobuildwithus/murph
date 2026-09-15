@@ -28,6 +28,13 @@ Junction keeps its existing daily timeseries summaries as the compatibility surf
 
 The wearable raw ingest envelope is only a receipt: it stores the payload hash and the raw artifact roles for replay/audit, but it must not store another copy of the provider payload. Raw provider data belongs in the adapter's raw artifacts, and product/query surfaces should consume compact events, metric facts, or derived metric read models instead.
 
+A valid explicit snapshot `observedAt` owns the prepared receipt timestamp and
+batch `importedAt`, even for a backfill of older events. When it is absent or
+invalid, the bridge preserves its deterministic earliest timestamp fallback
+from request windows, event/sample times, and the normalized batch. That
+fallback is a replay anchor, not proof of actual arrival time. Receipt identity
+remains payload-derived and does not change with an explicit receipt time.
+
 If a provider adapter returns a non-empty snapshot without any provider-owned raw artifacts, the import bridge adds one fallback `provider-snapshot` raw artifact before building the receipt. Adapters that intentionally drop dense provider payloads must sanitize those dropped sections or emit a tiny compact artifact first, so the fallback never re-stores the firehose under a generic role.
 
 Built-in providers now share one descriptor surface in `device-providers/provider-descriptors.ts`. That descriptor is the single source for provider key, transport modes, OAuth paths/scopes, webhook support, default sync windows, metric families, and source-priority hints, so importers and `device-syncd` no longer drift on provider metadata.

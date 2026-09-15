@@ -3436,6 +3436,11 @@ describe("hosted local dev stack", () => {
       ["--dir", "apps/web", "exec", "prisma", "db", "push", "--force-reset"],
       expect.any(Object),
     );
+    expect(runCommand).toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/web", "exec", "prisma", "db", "execute", "--file", "scripts/initialize-local-runtime-cutover.sql"],
+      expect.any(Object),
+    );
     expect(runCommand).not.toHaveBeenCalledWith(
       "pnpm",
       ["--dir", "apps/web", "exec", "prisma", "db", "push", "--accept-data-loss"],

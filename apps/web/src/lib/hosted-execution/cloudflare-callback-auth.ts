@@ -3,12 +3,14 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   encodeHostedExecutionSignedRequestPayload,
+  readHostedExecutionRuntimeAuthority,
   readHostedExecutionSignatureHeaders,
 } from "@murphai/hosted-execution/auth";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readRawBodyBuffer } from "../http";
 import { getPrisma } from "../prisma";
+import { requireHostedRuntimeCallbackTx } from "./runtime-owner";
 import {
   PrismaHostedCallbackRequestNonceStore,
   type HostedCallbackRequestNonceStore,
@@ -41,6 +43,9 @@ interface HostedCloudflareCallbackRequestOptions {
   nonceStore?: HostedCallbackRequestNonceStore;
   nowMs?: number;
   payloadText?: string;
+  // Canonical publication handlers check ownership while holding their own
+  // database transaction. Other runtime effects receive fresh admission here.
+  runtimeAuthority?: "caller_transaction";
 }
 
 const publicKeyCache = new Map<string, Promise<CryptoKey>>();
@@ -63,6 +68,12 @@ export async function requireHostedCloudflareCallbackRequest(
     nonceOwner: userId,
     signatureUserId: userId,
   });
+  const authority = readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers);
+  const legacyRuntimeHeaders = request.headers.has("x-hosted-runtime-attempt-id")
+    || request.headers.has("x-hosted-runtime-lease-generation");
+  if ((authority || legacyRuntimeHeaders) && options.runtimeAuthority !== "caller_transaction") {
+    await getPrisma().$transaction((tx) => requireHostedRuntimeCallbackTx(tx, authority ? { ...authority, userId } : null));
+  }
   return userId;
 }
 
@@ -138,6 +149,11 @@ async function requireHostedCloudflareSignedRequest(
   });
 
   if (!verified) {
+    throw unauthorizedCloudflareCallbackError();
+  }
+  try {
+    readHostedExecutionRuntimeAuthority(url, request.headers);
+  } catch {
     throw unauthorizedCloudflareCallbackError();
   }
 

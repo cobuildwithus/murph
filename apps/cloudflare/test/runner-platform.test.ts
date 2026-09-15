@@ -7075,9 +7075,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       requireFetchRequest(call, `direct web-control request ${index}`)
     );
     expect(requests.map((request) => request.url)).toEqual([
-      "https://web.example.test/api/internal/hosted-runtime/log",
-      "https://web.example.test/api/internal/device-sync/runtime/snapshot",
-      "https://web.example.test/api/internal/hosted-execution/usage/record",
+      "https://web.example.test/api/internal/hosted-runtime/log?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6",
+      "https://web.example.test/api/internal/device-sync/runtime/snapshot?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6",
+      "https://web.example.test/api/internal/hosted-execution/usage/record?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6",
     ]);
     for (const request of requests) {
       expectDefaultRuntimeWriteFenceHeaders(request);
@@ -7210,7 +7210,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "direct external thread route authority request",
     );
     expect(request.url).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}`,
+      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`,
     );
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
@@ -7282,7 +7282,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "private Assistant Ask completion authority request",
     );
     expect(request.url).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}`,
+      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`,
     );
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
@@ -7377,7 +7377,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "direct email recipient authority request",
     );
     expect(request.url).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH}`,
+      `https://web.example.test${HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`,
     );
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
@@ -7495,7 +7495,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [index, call] of fetchMock.mock.calls.entries()) {
       const request = requireFetchRequest(call, `direct Linq egress authority request ${index}`);
-      expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`);
+      expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`);
       expectDefaultRuntimeWriteFenceHeaders(request);
       expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
       expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
@@ -7630,7 +7630,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "direct Linq delivery request");
-    expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH}`);
+    expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`);
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
@@ -7680,7 +7680,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "direct phone-call result delivery request",
     );
     expect(request.url).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH}`,
+      `https://web.example.test${HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`,
     );
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
@@ -7730,7 +7730,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "direct outbound message-volume receipt request",
     );
     expect(request.url).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH}`,
+      `https://web.example.test${HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`,
     );
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");

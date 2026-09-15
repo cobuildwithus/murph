@@ -1,3 +1,7 @@
+import { commandHostedRuntimeMigration } from "../runtime-migration-client.ts";
+import { requireLegacyRuntimeStorageCoverage, readLegacyRuntimeMigrationIdentity, readLegacyRuntimeExportPage, type LegacyRuntimeExportCursor } from "../user-runner/legacy-runtime-export.ts";
+import { LegacyRuntimeFreeze, LegacyRuntimeFrozenError } from "../user-runner/legacy-runtime-freeze.ts";
+import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
 import { DurableObject } from "cloudflare:workers";
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
@@ -38,6 +42,9 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   };
   private userRunnerFirstEnsureRuntimeProcessingAtEpochMs: number | null = null;
   private readonly runner: HostedUserRunner;
+  private readonly migrationFreeze: LegacyRuntimeFreeze;
+  private readonly source: WorkerEnvironmentSource;
+  private readonly migrationState: DurableObjectStateLike;
 
   constructor(
     state: DurableObjectStateLike,
@@ -46,7 +53,13 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   ) {
     const userRunnerConstructorStartedAtEpochMs = Date.now();
     super(state as never, env as never);
-    this.runner = runner ?? createHostedUserRunner(state, env);
+    this.source = env;
+    this.migrationState = state;
+    this.migrationFreeze = new LegacyRuntimeFreeze(state);
+    const trackedState: DurableObjectStateLike = { storage: state.storage, waitUntil: promise => {
+      state.waitUntil(this.migrationFreeze.track(promise));
+    } };
+    this.runner = runner ?? createHostedUserRunner(trackedState, env);
     this.activationTiming = {
       userRunnerConstructorStartedAtEpochMs,
       userRunnerConstructorFinishedAtEpochMs: Date.now(),
@@ -54,27 +67,27 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 
   async bindUser(userId: string): Promise<{ userId: string }> {
-    return this.runner.bindUser(userId);
+    return this.migrationFreeze.run(() => this.runner.bindUser(userId));
   }
 
   async deleteHostedUserData(userId: string): ReturnType<HostedUserRunner["deleteHostedUserData"]> {
-    return this.runner.deleteHostedUserData(userId);
+    return this.migrationFreeze.run(() => this.runner.deleteHostedUserData(userId));
   }
 
   async reconcileRuntimeHealthDataConsentForUser(
     userId: string,
   ): ReturnType<HostedUserRunner["reconcileRuntimeHealthDataConsentForUser"]> {
-    return this.runner.reconcileRuntimeHealthDataConsentForUser(userId);
+    return this.migrationFreeze.run(() => this.runner.reconcileRuntimeHealthDataConsentForUser(userId));
   }
 
   async publishHostedPrivateMedia(
     input: Parameters<HostedUserRunner["publishHostedPrivateMedia"]>[0],
   ): ReturnType<HostedUserRunner["publishHostedPrivateMedia"]> {
-    return this.runner.publishHostedPrivateMedia(input);
+    return this.migrationFreeze.run(() => this.runner.publishHostedPrivateMedia(input));
   }
 
   async runnerStatus(input?: { logLimit?: number }): Promise<HostedRunnerStatusResponse> {
-    return this.runner.runnerStatus(input);
+    return this.migrationFreeze.run(() => this.runner.runnerStatus(input));
   }
 
   async ensureRuntimeProcessingForUser(
@@ -86,19 +99,20 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     const userRunnerRpcStartedAtEpochMs = Date.now();
-    this.userRunnerFirstEnsureRuntimeProcessingAtEpochMs ??=
+    const firstEnsureAt = this.userRunnerFirstEnsureRuntimeProcessingAtEpochMs ??=
       userRunnerRpcStartedAtEpochMs;
 
-    return this.runner.ensureRuntimeProcessingForUser({
+    const gate = await commandHostedRuntimeOwner({ source: this.source, userId: input.userId, command: { operation: "reconcile" } });
+    if (gate.cutover !== "legacy") return { kind: "retry_later", retryAt: new Date(Date.now() + 3_000).toISOString() };
+    return this.migrationFreeze.run(() => this.runner.ensureRuntimeProcessingForUser({
       ...input,
       orchestration: {
         ...(input.orchestration ?? {}),
         ...this.activationTiming,
-        userRunnerFirstEnsureRuntimeProcessingAtEpochMs:
-          this.userRunnerFirstEnsureRuntimeProcessingAtEpochMs,
+        userRunnerFirstEnsureRuntimeProcessingAtEpochMs: firstEnsureAt,
         userRunnerRpcStartedAtEpochMs,
       },
-    });
+    }));
   }
 
   async validateRuntimeWriteFence(input: {
@@ -106,50 +120,50 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     generation: string;
     userId: string;
   }): Promise<boolean> {
-    return this.runner.validateRuntimeWriteFence(input);
+    return this.migrationFreeze.run(() => this.runner.validateRuntimeWriteFence(input));
   }
 
   async admitHostedMediaRead(
     input: Parameters<HostedUserRunner["admitHostedMediaRead"]>[0],
   ): ReturnType<HostedUserRunner["admitHostedMediaRead"]> {
-    return this.runner.admitHostedMediaRead(input);
+    return this.migrationFreeze.run(() => this.runner.admitHostedMediaRead(input));
   }
 
   async recordHostedMediaAsset(
     input: Parameters<HostedUserRunner["recordHostedMediaAsset"]>[0],
   ): ReturnType<HostedUserRunner["recordHostedMediaAsset"]> {
-    return this.runner.recordHostedMediaAsset(input);
+    return this.migrationFreeze.run(() => this.runner.recordHostedMediaAsset(input));
   }
 
   async forgetHostedMediaAsset(
     input: Parameters<HostedUserRunner["forgetHostedMediaAsset"]>[0],
   ): ReturnType<HostedUserRunner["forgetHostedMediaAsset"]> {
-    return this.runner.forgetHostedMediaAsset(input);
+    return this.migrationFreeze.run(() => this.runner.forgetHostedMediaAsset(input));
   }
 
   async revokeActiveRuntimePlatformAiUsage(
     input: Parameters<HostedUserRunner["revokeActiveRuntimePlatformAiUsage"]>[0],
   ): ReturnType<HostedUserRunner["revokeActiveRuntimePlatformAiUsage"]> {
-    return this.runner.revokeActiveRuntimePlatformAiUsage(input);
+    return this.migrationFreeze.run(() => this.runner.revokeActiveRuntimePlatformAiUsage(input));
   }
 
   async recordRunnerContainerRetired(
     input: Parameters<HostedUserRunner["recordRunnerContainerRetired"]>[0],
   ): ReturnType<HostedUserRunner["recordRunnerContainerRetired"]> {
-    return this.runner.recordRunnerContainerRetired(input);
+    return this.migrationFreeze.run(() => this.runner.recordRunnerContainerRetired(input));
   }
 
   async recordRuntimeCompletionFromContainer(
     input: Parameters<HostedUserRunner["recordRuntimeCompletionFromContainer"]>[0],
   ): ReturnType<HostedUserRunner["recordRuntimeCompletionFromContainer"]> {
-    return this.runner.recordRuntimeCompletionFromContainer(input);
+    return this.migrationFreeze.run(() => this.runner.recordRuntimeCompletionFromContainer(input));
   }
 
   async validateRuntimeProviderEgressToken(input: {
     providerEgressToken: string;
     userId: string;
   }): ReturnType<HostedUserRunner["validateRuntimeProviderEgressToken"]> {
-    return this.runner.validateRuntimeProviderEgressToken(input);
+    return this.migrationFreeze.run(() => this.runner.validateRuntimeProviderEgressToken(input));
   }
 
   async validateRuntimeProviderEgressCredential(input: {
@@ -157,73 +171,98 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     runnerContainerName: string;
     userId: string;
   }): ReturnType<HostedUserRunner["validateRuntimeProviderEgressCredential"]> {
-    return this.runner.validateRuntimeProviderEgressCredential(input);
+    return this.migrationFreeze.run(() => this.runner.validateRuntimeProviderEgressCredential(input));
   }
 
   async createHostedWorkspaceSnapshotUploadSession(
     input: Parameters<HostedUserRunner["createHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["createHostedWorkspaceSnapshotUploadSession"]> {
-    return this.runner.createHostedWorkspaceSnapshotUploadSession(input);
+    return this.migrationFreeze.run(() => this.runner.createHostedWorkspaceSnapshotUploadSession(input));
   }
 
   async heartbeatHostedWorkspaceSnapshotUploadSession(
     input: Parameters<HostedUserRunner["heartbeatHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["heartbeatHostedWorkspaceSnapshotUploadSession"]> {
-    return this.runner.heartbeatHostedWorkspaceSnapshotUploadSession(input);
+    return this.migrationFreeze.run(() => this.runner.heartbeatHostedWorkspaceSnapshotUploadSession(input));
   }
 
   async completeHostedWorkspaceSnapshotUploadSession(
     input: Parameters<HostedUserRunner["completeHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["completeHostedWorkspaceSnapshotUploadSession"]> {
-    return this.runner.completeHostedWorkspaceSnapshotUploadSession(input);
+    return this.migrationFreeze.run(() => this.runner.completeHostedWorkspaceSnapshotUploadSession(input));
   }
 
   async rememberHostedWorkspaceSnapshotReplacedRef(
     input: Parameters<HostedUserRunner["rememberHostedWorkspaceSnapshotReplacedRef"]>[0],
   ): ReturnType<HostedUserRunner["rememberHostedWorkspaceSnapshotReplacedRef"]> {
-    return this.runner.rememberHostedWorkspaceSnapshotReplacedRef(input);
+    return this.migrationFreeze.run(() => this.runner.rememberHostedWorkspaceSnapshotReplacedRef(input));
   }
 
   async rememberHostedWorkspaceSnapshotPresignedPut(
     input: Parameters<HostedUserRunner["rememberHostedWorkspaceSnapshotPresignedPut"]>[0],
   ): ReturnType<HostedUserRunner["rememberHostedWorkspaceSnapshotPresignedPut"]> {
-    return this.runner.rememberHostedWorkspaceSnapshotPresignedPut(input);
+    return this.migrationFreeze.run(() => this.runner.rememberHostedWorkspaceSnapshotPresignedPut(input));
   }
 
   async admitHostedBrowserVaultReplicaDirectPut(
     input: Parameters<HostedUserRunner["admitHostedBrowserVaultReplicaDirectPut"]>[0],
   ): ReturnType<HostedUserRunner["admitHostedBrowserVaultReplicaDirectPut"]> {
-    return this.runner.admitHostedBrowserVaultReplicaDirectPut(input);
+    return this.migrationFreeze.run(() => this.runner.admitHostedBrowserVaultReplicaDirectPut(input));
   }
 
   async releaseHostedBrowserVaultReplicaDirectPut(
     input: Parameters<HostedUserRunner["releaseHostedBrowserVaultReplicaDirectPut"]>[0],
   ): ReturnType<HostedUserRunner["releaseHostedBrowserVaultReplicaDirectPut"]> {
-    return this.runner.releaseHostedBrowserVaultReplicaDirectPut(input);
+    return this.migrationFreeze.run(() => this.runner.releaseHostedBrowserVaultReplicaDirectPut(input));
   }
 
   async readHostedWorkspaceSnapshotUploadSession(
     input: Parameters<HostedUserRunner["readHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["readHostedWorkspaceSnapshotUploadSession"]> {
-    return this.runner.readHostedWorkspaceSnapshotUploadSession(input);
+    return this.migrationFreeze.run(() => this.runner.readHostedWorkspaceSnapshotUploadSession(input));
   }
 
   async deleteHostedWorkspaceSnapshotUploadSession(
     input: Parameters<HostedUserRunner["deleteHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["deleteHostedWorkspaceSnapshotUploadSession"]> {
-    return this.runner.deleteHostedWorkspaceSnapshotUploadSession(input);
+    return this.migrationFreeze.run(() => this.runner.deleteHostedWorkspaceSnapshotUploadSession(input));
   }
 
   async recordHostedWorkspaceSnapshotOrphanCandidate(
     input: Parameters<HostedUserRunner["recordHostedWorkspaceSnapshotOrphanCandidate"]>[0],
   ): ReturnType<HostedUserRunner["recordHostedWorkspaceSnapshotOrphanCandidate"]> {
-    return this.runner.recordHostedWorkspaceSnapshotOrphanCandidate(input);
+    return this.migrationFreeze.run(() => this.runner.recordHostedWorkspaceSnapshotOrphanCandidate(input));
   }
 
   async recordHostedBrowserVaultReplicaOrphanCandidate(
     input: Parameters<HostedUserRunner["recordHostedBrowserVaultReplicaOrphanCandidate"]>[0],
   ): ReturnType<HostedUserRunner["recordHostedBrowserVaultReplicaOrphanCandidate"]> {
-    return this.runner.recordHostedBrowserVaultReplicaOrphanCandidate(input);
+    return this.migrationFreeze.run(() => this.runner.recordHostedBrowserVaultReplicaOrphanCandidate(input));
+  }
+
+  async freezeForPostgresMigration(): Promise<{ frozen: boolean }> {
+    const result = await commandHostedRuntimeMigration({ source: this.source, command: { operation: "status" } });
+    const gate = result.gate;
+    if (!gate || typeof gate !== "object" || !("phase" in gate) || gate.phase !== "draining") {
+      throw new Error("Legacy freeze requires the durable draining gate.");
+    }
+    // Derive identity from this exact object, including resource-only records.
+    return { frozen: await this.migrationFreeze.freeze({
+      stop: async () => {
+        const { userId } = await readLegacyRuntimeMigrationIdentity(this.migrationState);
+        if (userId) await this.runner.stopLegacyRuntimeForMigration(userId);
+      },
+      drained: async () => {
+        await requireLegacyRuntimeStorageCoverage(this.migrationState);
+        const { userId } = await readLegacyRuntimeMigrationIdentity(this.migrationState);
+        return userId === null || this.runner.legacyRuntimeUploadsDrained(userId);
+      },
+    }) };
+  }
+
+  async exportPostgresMigrationPage(cursor: LegacyRuntimeExportCursor) {
+    await this.migrationFreeze.assertFrozen();
+    return readLegacyRuntimeExportPage(this.migrationState, cursor);
   }
 
   async fetch(): Promise<Response> {
@@ -231,7 +270,8 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 
   async alarm(): Promise<void> {
-    await this.runner.alarm();
+    try { await this.migrationFreeze.run(() => this.runner.alarm()); }
+    catch (error) { if (!(error instanceof LegacyRuntimeFrozenError)) throw error; }
   }
 }
 

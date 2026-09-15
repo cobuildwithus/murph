@@ -1,3 +1,5 @@
+import { usesPostgresRuntimeOwner } from "../runtime-cutover.ts";
+import { beginHostedRuntimeUsageSettlement } from "../runtime-usage-settlement.ts";
 import { type readHostedExecutionEnvironment } from "../env.ts";
 import {
   jsonError,
@@ -39,6 +41,7 @@ import {
 import {
   applyRunnerRuntimeUsageSettlement,
   requireRunnerRuntimeWriteFence,
+  requireRunnerRuntimeWriteFenceHeaders,
   requireRunnerRuntimeWriteFenceWorkspaceWrite,
   RunnerRuntimeWriteFenceError,
   type RunnerRuntimeWriteFenceHeaders,
@@ -96,6 +99,8 @@ export async function handleRunnerWebControlRequest(input: {
     return methodNotAllowed();
   }
 
+  const requestMethod = input.request.method;
+
   if (input.url.pathname === HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH) {
     emitHostedExecutionStructuredLog({
       component: "runner",
@@ -149,7 +154,7 @@ export async function handleRunnerWebControlRequest(input: {
   ) && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceHeaders;
   try {
-    writeAuthority = await (
+    writeAuthority = usesPostgresRuntimeOwner(input.env) ? requireRunnerRuntimeWriteFenceHeaders(input.request) : await (
       isBrowserVaultReplicaPublishRequest
         ? requireRunnerRuntimeWriteFenceWorkspaceWrite({
           env: input.env,
@@ -235,9 +240,9 @@ export async function handleRunnerWebControlRequest(input: {
       String(vaultShareEffectDeadlineAtEpochMs),
     );
   }
-  let response: Response;
-  try {
-    response = await fetchHostedExecutionWebControlPlaneResponse({
+  const response = await forwardWithRuntimeUsageSettlement({
+    env: input.env, userId: input.userId, writeAuthority, body, usageRecord: isUsageRecordRequest,
+    forward: () => fetchHostedExecutionWebControlPlaneResponse({
       ...(input.environment.hostedWebAllowHttpHosts
         ? { allowHttpHosts: input.environment.hostedWebAllowHttpHosts }
         : {}),
@@ -245,7 +250,7 @@ export async function handleRunnerWebControlRequest(input: {
       body,
       boundUserId: input.userId,
       callbackSigning: input.environment.webCallbackSigning,
-      method: input.request.method,
+      method: requestMethod,
       path: input.url.pathname,
       search: input.url.search || null,
       headers: forwardHeaders,
@@ -262,26 +267,8 @@ export async function handleRunnerWebControlRequest(input: {
           ) - Date.now(),
         )
         : input.environment.webControlTimeoutMs,
-    });
-  } catch (error) {
-    if (isUsageRecordRequest) {
-      await applyRunnerRuntimeUsageSettlement({
-        env: input.env,
-        settlement: null,
-        userId: input.userId,
-        writeAuthority,
-      });
-    }
-    throw error;
-  }
-  if (isUsageRecordRequest) {
-    await revokeRuntimePlatformAiUsageUnlessAllowed({
-      env: input.env,
-      response,
-      userId: input.userId,
-      writeAuthority,
-    });
-  }
+    }),
+  });
   const responseBodyMetadata = response.ok || isClinicalRecordsRequest
     ? {}
     : await readHostedRunnerSafeResponseBodyMetadata(response.clone());
@@ -328,6 +315,39 @@ export async function handleRunnerWebControlRequest(input: {
     status: response.status,
     statusText: response.statusText,
   });
+}
+
+async function forwardWithRuntimeUsageSettlement(input: {
+  env: RunnerOutboundEnvironmentSource; userId: string; writeAuthority: RunnerRuntimeWriteFenceHeaders;
+  body: string | undefined; usageRecord: boolean; forward: () => Promise<Response>;
+}): Promise<Response> {
+  if (!input.usageRecord) return input.forward();
+  let receipt: Awaited<ReturnType<typeof beginHostedRuntimeUsageSettlement>> | null = null;
+  if (usesPostgresRuntimeOwner(input.env)) {
+    const payload: unknown = JSON.parse(input.body ?? "{}");
+    if (!isHostedRunnerRecord(payload) || typeof payload.usage.usageId !== "string") return jsonError("Usage identity is required.", 400);
+    receipt = await beginHostedRuntimeUsageSettlement({ env: input.env, userId: input.userId,
+      authority: input.writeAuthority, reportId: payload.usage.usageId });
+  }
+  let response: Response;
+  try {
+    response = await input.forward();
+  } catch (error) {
+    if (receipt) await receipt.finish(null);
+    else await applyRunnerRuntimeUsageSettlement({ ...input, settlement: null });
+    throw error;
+  }
+  if (receipt) {
+    let allowed: boolean | null = null;
+    if (response.ok) {
+      try { allowed = parseHostedRuntimeUsageRecordResponse(await response.clone().json()).platformAiUsageAllowedAfter; }
+      catch { /* Keep the durable pending receipt. */ }
+    }
+    await receipt.finish(allowed);
+  } else {
+    await revokeRuntimePlatformAiUsageUnlessAllowed({ ...input, response });
+  }
+  return response;
 }
 
 async function revokeRuntimePlatformAiUsageUnlessAllowed(input: {

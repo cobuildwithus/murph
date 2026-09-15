@@ -1,0 +1,359 @@
+import { HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS, HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS, type HostedBrowserVaultReplicaShardKind, type HostedBrowserVaultReplicaMetricBucketId } from "./contracts.ts";
+import { createHash } from "node:crypto";
+
+import type { HostedExecutionBundleKind } from "@murphai/runtime-state/node/hosted-bundle-codec";
+
+const HOSTED_STORAGE_NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9_-]{3,63}$/u;
+const HOSTED_MEDIA_ID_PATTERN = /^[a-f0-9]{64}$/u;
+const HOSTED_MEAL_PHOTO_KEY_PATTERN = /^[a-f0-9]{40}$/u;
+const HOSTED_WORKSPACE_SNAPSHOT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+const HOSTED_STORAGE_NAMESPACE_SALT = "murph.hosted.storage-namespace.v1";
+const HOSTED_STORAGE_PATH_SALT = "murph.hosted.storage-path.v1";
+
+export function createHostedStorageNamespaceId(userId: string): string {
+  return `hsn_${digestHex(HOSTED_STORAGE_NAMESPACE_SALT, requireStoragePathString(userId, "Hosted storage userId")).slice(0, 24)}`;
+}
+
+export async function hostedBundleObjectKey(input: {
+  hash: string;
+  kind: HostedExecutionBundleKind;
+  storageNamespaceId?: string | null;
+  userId?: string | null;
+}): Promise<string> {
+  if (typeof input.userId === "string" && input.userId.length > 0) {
+    const userSegment = resolveHostedStorageNamespaceId({
+      storageNamespaceId: input.storageNamespaceId,
+      userId: input.userId,
+    });
+    const bundleSegment = deriveHostedStoragePathId({
+      length: 48,
+      scope: "bundle-path",
+      value: `bundle:${userSegment}:${input.kind}:${input.hash}`,
+    });
+
+    return `users/${userSegment}/bundles/${input.kind}/${bundleSegment}.bundle.json`;
+  }
+
+  const bundleSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "bundle-path",
+    value: `bundle:${input.kind}:${input.hash}`,
+  });
+
+  return `bundles/${input.kind}/${bundleSegment}.bundle.json`;
+}
+
+export function isUserScopedHostedBundleObjectKey(key: string): boolean {
+  return /^users\/[a-z0-9][a-z0-9_-]{3,63}\/bundles\/[^/]+\/[0-9a-f]{48}\.bundle\.json$/u.test(key);
+}
+
+export async function hostedBundleUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `users/${resolveHostedStorageNamespaceId(input)}/bundles/`;
+}
+
+export async function hostedArtifactObjectKey(input: {
+  sha256: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const artifactSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "artifact-path",
+    value: `artifact:${userSegment}:${input.sha256}`,
+  });
+
+  return `users/${userSegment}/artifacts/${artifactSegment}.artifact.bin`;
+}
+
+export async function hostedArtifactUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `users/${resolveHostedStorageNamespaceId(input)}/artifacts/`;
+}
+
+export async function hostedMediaObjectKey(input: {
+  mediaId: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const mediaId = requireHostedMediaId(input.mediaId);
+  const mediaSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "media-path",
+    value: `media:${userSegment}:${mediaId}`,
+  });
+
+  return `users/${userSegment}/media/${mediaSegment}.media.enc`;
+}
+
+export async function hostedMediaUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `users/${resolveHostedStorageNamespaceId(input)}/media/`;
+}
+
+export async function hostedRunnerSecretsObjectKey(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+
+  return `users/${userSegment}/runner-secrets.json`;
+}
+
+export async function hostedEmailRawMessageObjectKey(input: {
+  rawMessageKey: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const rawMessageKey = requireStoragePathString(
+    input.rawMessageKey,
+    "Hosted email raw message key",
+  );
+  const messageSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "email-raw-path",
+    value: `email-raw:${userSegment}:${rawMessageKey}`,
+  });
+
+  return `hosted-email/messages/${userSegment}/${messageSegment}.eml`;
+}
+
+export async function hostedEmailRawMessageUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `hosted-email/messages/${resolveHostedStorageNamespaceId(input)}/`;
+}
+
+export async function hostedMealPhotoObjectKey(input: {
+  mealPhotoKey: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const mealPhotoKey = requireHostedMealPhotoKey(input.mealPhotoKey);
+  const photoSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "meal-photo-path",
+    value: `meal-photo:${userSegment}:${mealPhotoKey}`,
+  });
+
+  return `hosted-meal-photos/images/${userSegment}/${photoSegment}.jpg.enc`;
+}
+
+export async function hostedMealPhotoUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `hosted-meal-photos/images/${resolveHostedStorageNamespaceId(input)}/`;
+}
+
+export async function hostedEnvironmentVoiceObjectKey(input: {
+  audioKey: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const audioKey = requireHostedEnvironmentVoiceKey(input.audioKey);
+  const audioSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "environment-voice-path",
+    value: `environment-voice:${userSegment}:${audioKey}`,
+  });
+  return `hosted-environment-voice/audio/${userSegment}/${audioSegment}.audio.enc`;
+}
+
+export async function hostedEnvironmentVoiceUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `hosted-environment-voice/audio/${resolveHostedStorageNamespaceId(input)}/`;
+}
+
+export async function hostedPrivateMediaObjectKey(input: {
+  sha256: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const sha256 = requireHostedPrivateMediaSha256(input.sha256);
+  const mediaSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "private-media-path",
+    value: `private-media:${userSegment}:${sha256}`,
+  });
+
+  return `hosted-private-media/images/${userSegment}/${mediaSegment}.image.enc`;
+}
+
+export async function hostedPrivateMediaUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `hosted-private-media/images/${resolveHostedStorageNamespaceId(input)}/`;
+}
+
+export async function hostedBrowserVaultReplicaObjectKey(input: {
+  dataVersion: string;
+  generatedAt: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const replicaSegment = deriveHostedStoragePathId({
+    length: 48,
+    scope: "browser-vault-replica-path",
+    value: `replica:${userSegment}:${input.dataVersion}:${input.generatedAt}`,
+  });
+
+  return `users/${userSegment}/browser-vault-replicas/${replicaSegment}.json`;
+}
+
+export async function hostedBrowserVaultReplicaUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `users/${resolveHostedStorageNamespaceId(input)}/browser-vault-replicas/`;
+}
+
+export async function hostedWorkspaceSnapshotObjectKey(input: {
+  snapshotId: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const snapshotId = requireHostedWorkspaceSnapshotId(input.snapshotId);
+
+  return `users/${userSegment}/workspace-snapshots/${snapshotId}.snapshot.enc`;
+}
+
+export function isUserScopedHostedWorkspaceSnapshotObjectKey(key: string): boolean {
+  return /^users\/[a-z0-9][a-z0-9_-]{3,63}\/workspace-snapshots\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.snapshot\.enc$/u.test(key);
+}
+
+export async function hostedWorkspaceSnapshotUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `users/${resolveHostedStorageNamespaceId(input)}/workspace-snapshots/`;
+}
+
+function resolveHostedStorageNamespaceId(input: { storageNamespaceId?: string | null; userId: string }): string {
+  if (typeof input.storageNamespaceId === "string" && input.storageNamespaceId.trim().length > 0) {
+    const normalized = input.storageNamespaceId.trim();
+    if (!HOSTED_STORAGE_NAMESPACE_PATTERN.test(normalized)) {
+      throw new TypeError("Hosted storage namespace id is invalid.");
+    }
+    return normalized;
+  }
+
+  return createHostedStorageNamespaceId(input.userId);
+}
+
+function deriveHostedStoragePathId(input: {
+  length: number;
+  scope: string;
+  value: string;
+}): string {
+  return digestHex(HOSTED_STORAGE_PATH_SALT, input.scope, input.value).slice(0, input.length);
+}
+
+function digestHex(...parts: string[]): string {
+  const hash = createHash("sha256");
+  for (const part of parts) {
+    hash.update(part, "utf8");
+    hash.update("\0", "utf8");
+  }
+  return hash.digest("hex");
+}
+
+function requireStoragePathString(value: string, label: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+  return normalized;
+}
+
+function requireHostedWorkspaceSnapshotId(value: string): string {
+  const normalized = requireStoragePathString(value, "Hosted workspace snapshot id");
+  if (!HOSTED_WORKSPACE_SNAPSHOT_ID_PATTERN.test(normalized)) {
+    throw new TypeError("Hosted workspace snapshot id is invalid.");
+  }
+  return normalized;
+}
+
+function requireHostedMealPhotoKey(value: string): string {
+  const normalized = requireStoragePathString(value, "Hosted meal photo key");
+  if (!HOSTED_MEAL_PHOTO_KEY_PATTERN.test(normalized)) {
+    throw new TypeError("Hosted meal photo key is invalid.");
+  }
+  return normalized;
+}
+
+function requireHostedEnvironmentVoiceKey(value: string): string {
+  if (!/^[a-f0-9]{40}$/u.test(value)) {
+    throw new TypeError("Hosted environment voice key is invalid.");
+  }
+  return value;
+}
+
+function requireHostedMediaId(value: string): string {
+  const normalized = requireStoragePathString(value, "Hosted media id");
+  if (!HOSTED_MEDIA_ID_PATTERN.test(normalized)) {
+    throw new TypeError("Hosted media id is invalid.");
+  }
+  return normalized;
+}
+
+function requireHostedPrivateMediaSha256(value: string): string {
+  const normalized = requireStoragePathString(
+    value,
+    "Hosted private media sha256",
+  );
+  if (!/^[a-f0-9]{64}$/u.test(normalized)) {
+    throw new TypeError("Hosted private media sha256 is invalid.");
+  }
+  return normalized;
+}
+
+export function listHostedBrowserVaultReplicaSiblingObjectKeys(
+  objectKey: string,
+): string[] {
+  return [
+    ...HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS.map((shard) =>
+      browserVaultReplicaShardObjectKey(objectKey, shard)),
+    ...HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) =>
+      browserVaultReplicaMetricBucketObjectKey(objectKey, bucketId)),
+  ];
+}
+
+export function browserVaultReplicaShardObjectKey(
+  objectKey: string,
+  shard: HostedBrowserVaultReplicaShardKind,
+): string {
+  if (!objectKey.endsWith(".json")) {
+    throw new TypeError("Hosted browser vault replica object key must end in .json.");
+  }
+  const suffix = shard === "metricsIndex" ? "metrics-index" : shard;
+  return `${objectKey.slice(0, -".json".length)}.${suffix}.json`;
+}
+
+export function browserVaultReplicaMetricBucketObjectKey(
+  objectKey: string,
+  bucketId: HostedBrowserVaultReplicaMetricBucketId,
+): string {
+  if (!objectKey.endsWith(".json")) {
+    throw new TypeError("Hosted browser vault replica object key must end in .json.");
+  }
+  return `${objectKey.slice(0, -".json".length)}.metric-bucket-${bucketId}.json`;
+}

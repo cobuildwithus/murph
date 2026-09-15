@@ -123,6 +123,7 @@ function buildWearableMetricProjectionEvidenceFromBundle(
 
 type WearableSummaryBase = {
   date: string;
+  sleepType?: WearableSleepSummary["sleepType"];
   summaryConfidence: {
     level: WearableConfidenceLevel;
   };
@@ -217,6 +218,7 @@ function summaryMetricEvidence<TField extends string>(
       summary.summaryConfidence.level,
       entry.sourceKind,
       summary.timeZone,
+      summary.sleepType,
     )
   );
 }
@@ -460,6 +462,7 @@ function metricEvidence(
   confidence: WearableConfidenceLevel,
   sourceKind: MetricRowEvidence["sourceKind"],
   timeZone: string | null | undefined,
+  sleepType?: WearableSleepSummary["sleepType"],
 ): WearableMetricEvidenceResult {
   const selection = resolved.selection;
   const sourceCandidate = selectWearableSourceCandidate(resolved);
@@ -498,6 +501,7 @@ function metricEvidence(
         contributingRecordIds,
         exactDuplicateCount: resolved.confidence.exactDuplicateCount,
         recordedAt: selection.recordedAt,
+        sleepType,
         sourceFamily: selection.sourceFamily ?? sourceCandidate?.sourceFamily ?? null,
         sourceKind: selection.sourceKind ?? sourceCandidate?.sourceKind ?? null,
         syntheticRecordId,

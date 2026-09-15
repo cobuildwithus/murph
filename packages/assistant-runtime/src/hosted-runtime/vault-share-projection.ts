@@ -704,13 +704,17 @@ export async function readProjectableDailyMetricDays(
   if (!cutoffDate) {
     return [];
   }
-  const points = await readMetricPointsByPublicSource({
+  const sourcePoints = await readMetricPointsByPublicSource({
     cutoffDate,
     metricKeys: [spec.metricKey],
     vaultRoot,
   });
   const acceptsManualSleepStage = spec.metricKey === "deep-sleep-minutes"
     || spec.metricKey === "rem-sleep-minutes";
+  // A nap does not establish a reported night; retain other metrics from naps.
+  const points = spec.metricKey === "total-sleep-minutes" || acceptsManualSleepStage
+    ? sourcePoints.filter((point) => point.context.sleepType !== "nap")
+    : sourcePoints;
   const dayGrainPoints = acceptsManualSleepStage
     ? points.map((point) =>
         isManualSleepStageCorrection(point)
@@ -1177,14 +1181,21 @@ export async function readProjectableHeartRateZoneDays(
  * sleep timestamps stay inside the encrypted payload.
  */
 export function selectProjectableSleepNights(
-  summaries: readonly Pick<ProjectedWearableSleepSummary, "date" | "sleepEndAt" | "sleepStartAt">[],
+  summaries: readonly (
+    Pick<ProjectedWearableSleepSummary, "date" | "sleepEndAt" | "sleepStartAt">
+    & Partial<Pick<ProjectedWearableSleepSummary, "sleepType">>
+  )[],
   currentDate: string,
   source?: HostedVaultShareDataSource,
 ): HostedVaultShareDeliveryRecord[] {
   const records: HostedVaultShareDeliveryRecord[] = [];
 
   for (const summary of summaries) {
-    if (typeof summary.sleepStartAt !== "string" || typeof summary.sleepEndAt !== "string") {
+    if (
+      summary.sleepType === "nap"
+      || typeof summary.sleepStartAt !== "string"
+      || typeof summary.sleepEndAt !== "string"
+    ) {
       continue;
     }
 

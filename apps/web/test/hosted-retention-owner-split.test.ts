@@ -2,10 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   cleanupExpiredRuns: vi.fn(),
+  runHostedRuntimeResourceCleanup: vi.fn(),
   deleteExpiredHostedBrowserAssertionNonces: vi.fn(),
   deleteExpiredHostedCallbackRequestNonces: vi.fn(),
   drainHostedAccountDeletionCleanupBatch: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-execution/runtime-resource-cleanup", () => ({ runHostedRuntimeResourceCleanup: mocks.runHostedRuntimeResourceCleanup }));
 
 vi.mock("@/src/lib/computer-use/service", () => ({
   ComputerUseService: class {
@@ -41,6 +44,7 @@ import { runHostedNonceRetentionCleanup } from "@/src/lib/hosted-retention/nonce
 describe("hosted retention owner split", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.runHostedRuntimeResourceCleanup.mockResolvedValue({ configured: true, deleted: 2, failed: 0 });
     mocks.cleanupExpiredRuns.mockResolvedValue({ expiredRuns: 4 });
     mocks.deleteExpiredHostedBrowserAssertionNonces.mockResolvedValue(3);
     mocks.deleteExpiredHostedCallbackRequestNonces.mockResolvedValue(8);
@@ -100,6 +104,7 @@ describe("hosted retention owner split", () => {
         selected: 3,
       },
       expiredComputerRunsCleanedUp: 4,
+      runtimeResourceCleanup: { configured: true, deleted: 2, failed: 0 },
     });
 
     expect(mocks.drainHostedAccountDeletionCleanupBatch).toHaveBeenCalledWith({

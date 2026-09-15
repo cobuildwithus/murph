@@ -1,3 +1,6 @@
+import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
+import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
+import { authorizePostgresRuntimeProvider } from "./runtime-provider-authorization.ts";
 import { Buffer } from "node:buffer";
 
 import {
@@ -61,6 +64,7 @@ import {
 } from "./runner-outbound/shared-web-control-policy.ts";
 import {
   applyRunnerRuntimeUsageSettlement,
+  writeRunnerRuntimeWriteFenceHeaders,
   requireRunnerRuntimeWriteFence,
   RunnerRuntimeWriteFenceError,
 } from "./runner-outbound/write-fence.ts";
@@ -352,7 +356,8 @@ type HostedProviderEgressRejectReason =
   | "provider_egress_token_missing"
   | "provider_egress_token_rejected"
   | "provider_egress_token_validation_error"
-  | "validation_rpc_missing";
+  | "validation_rpc_missing"
+  | "usage_settlement_pending";
 
 interface HostedProviderEgressAuthorization {
   authorized: boolean;
@@ -1126,6 +1131,16 @@ async function recordHostedDirectRuntimeUsage(input: {
   record: AssistantUsageRecord;
   writeFence: HostedProviderEgressWriteFenceMetadata;
 }): Promise<HostedRuntimeUsageRecordResponse> {
+  if (usesPostgresRuntimeOwner(input.env)) {
+    const headers = new Headers({ "content-type": "application/json" });
+    if (!input.writeFence.workspaceVersion) throw new Error("Runtime usage workspace identity is missing.");
+    writeRunnerRuntimeWriteFenceHeaders(headers, { attemptId: input.writeFence.attemptId, leaseGeneration: input.writeFence.leaseGeneration, workspaceVersion: input.writeFence.workspaceVersion });
+    const response = await handleRunnerOutboundRequest(new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNNER_WEB_CONTROL_ROUTES.usageRecording.path}`, {
+      method: "POST", headers, body: JSON.stringify({ usage: input.record }),
+    }), input.env, input.writeFence.userId);
+    if (!response.ok) throw new Error(`Runtime usage recording returned HTTP ${response.status}.`);
+    return parseHostedRuntimeUsageRecordResponse(await response.json());
+  }
   let settlement: HostedRuntimeUsageRecordResponse | null = null;
   try {
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
@@ -3394,6 +3409,13 @@ async function authorizeHostedProviderEgress(input: {
       headers: input.request.headers,
       userId: input.userId,
     });
+    if (usesPostgresRuntimeOwner(input.env) && writeFence) {
+      const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.userId,
+        command: { operation: "authorize_effect", attemptId: writeFence.attemptId, generation: writeFence.leaseGeneration, runnerContainerName: null, managedAi: false },
+        managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
+      });
+      return postgresProviderAuthorization(validation, { startedAt, userId: input.userId, mode: "exact_headers", runtimeAuthorityHeadersPresent, providerEgressTokenPresent: false });
+    }
     try {
       await requireRunnerRuntimeWriteFence({
         env: input.env,
@@ -3430,6 +3452,7 @@ async function authorizeHostedProviderEgress(input: {
   if (input.userId && providerEgressToken) {
     return await authorizeHostedProviderEgressToken({
       activeUserId: input.userId,
+      providerKind: input.providerKind,
       env: input.env,
       providerEgressToken,
       providerEgressTokenPresent: true,
@@ -3669,6 +3692,13 @@ async function authorizeHostedProviderEgressCredential(input: {
     };
   }
 
+  if (usesPostgresRuntimeOwner(input.env)) {
+    const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: verification.claims.userId,
+      command: { operation: "authorize_provider", runnerContainerName: verification.claims.runnerContainerName, providerEgressTokenHash: null, providerKind: input.providerKind },
+      managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
+    });
+    return postgresProviderAuthorization(validation, { startedAt, userId: verification.claims.userId, mode: "provider_egress_credential", runtimeAuthorityHeadersPresent, providerEgressTokenPresent });
+  }
   const runner = input.env.USER_RUNNER.getByName(verification.claims.userId);
   if (typeof runner.validateRuntimeProviderEgressCredential !== "function") {
     return {
@@ -3724,6 +3754,7 @@ async function authorizeHostedProviderEgressCredential(input: {
 }
 
 async function authorizeHostedProviderEgressToken(input: {
+  providerKind: string;
   activeUserId: string;
   env: RunnerOutboundEnvironmentSource;
   providerEgressToken: string;
@@ -3731,6 +3762,15 @@ async function authorizeHostedProviderEgressToken(input: {
   runtimeAuthorityHeadersPresent: boolean;
   startedAt: number;
 }): Promise<HostedProviderEgressAuthorization> {
+  if (usesPostgresRuntimeOwner(input.env)) {
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input.providerEgressToken)));
+    const providerEgressTokenHash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
+    const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.activeUserId,
+      command: { operation: "authorize_provider", runnerContainerName: null, providerEgressTokenHash, providerKind: input.providerKind },
+      managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
+    });
+    return postgresProviderAuthorization(validation, { ...input, userId: input.activeUserId, mode: "provider_egress_token" });
+  }
   const runner = input.env.USER_RUNNER.getByName(input.activeUserId);
   if (typeof runner.validateRuntimeProviderEgressToken !== "function") {
     return {
@@ -3947,7 +3987,9 @@ function unauthorizedProviderEgress(input: {
   startedAt: number;
   url: URL;
 }): Response {
-  const response = new Response("Unauthorized", { status: 401 });
+  const response = input.authorization.rejectReason === "usage_settlement_pending"
+    ? new Response("Usage settlement pending.", { status: 503, headers: { "retry-after": "1" } })
+    : new Response("Unauthorized", { status: 401 });
   emitHostedProviderEgressDiagnostic({
     authorization: input.authorization,
     providerKind: input.providerKind,
@@ -4623,4 +4665,20 @@ async function checkHostedImageGenerationAccess(input: {
     code: "MURPH_IMAGE_ACCESS_UNAVAILABLE",
     message: "Image generation access could not be confirmed. Try again later.",
   } }, { status: 503 });
+}
+
+function postgresProviderAuthorization(
+  validation: Awaited<ReturnType<typeof authorizePostgresRuntimeProvider>>,
+  input: { startedAt: number; userId: string; mode: HostedProviderEgressValidationMode; providerEgressTokenPresent: boolean; runtimeAuthorityHeadersPresent: boolean },
+): HostedProviderEgressAuthorization {
+  const owner = validation?.owner;
+  return {
+    authorized: Boolean(owner) && !validation?.settlementPending,
+    durationMs: Date.now() - input.startedAt, mode: input.mode,
+    providerEgressTokenPresent: input.providerEgressTokenPresent, runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
+    userId: input.userId,
+    ...(owner ? { platformAiUsageAllowed: owner.platformAiUsageAllowed, customInferenceEnvelope: owner.customInferenceEnvelope } : {}),
+    ...(validation?.settlementPending ? { rejectReason: "usage_settlement_pending" as const } : !owner ? { rejectReason: "write_fence_mismatch" as const } : {}),
+    writeFence: owner?.attemptId ? { attemptId: owner.attemptId, leaseGeneration: owner.generation, workspaceVersion: owner.workspaceVersion, userId: input.userId } : null,
+  };
 }

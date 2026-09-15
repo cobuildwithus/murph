@@ -104,14 +104,14 @@ describe("runtime invocation transport failure fence handling", () => {
     const container = new RunnerContainer({ ...durable.state, id: { name: slotName } }, source);
     const { service } = await createTransportFailureHarness({ readActiveRuntimeUserFence: null, runnerRuntimeEnvSource: source, runnerContainerNamespace: { getByName: () => container } });
     const input = { commandBudget: null, runnerContainerName: slotName, userId: TEST_USER_ID };
-    await expect(service["resolveInvocationRunnerContainerName"](input)).resolves.toBe(slotName);
-    await expect(service["resolveInvocationRunnerContainerName"]({ ...input, userId: "foreign-member" })).rejects.toThrow("did not match");
+    await expect(service["preparation"]["resolveInvocationRunnerContainerName"](input)).resolves.toBe(slotName);
+    await expect(service["preparation"]["resolveInvocationRunnerContainerName"]({ ...input, userId: "foreign-member" })).rejects.toThrow("did not match");
     const bound = bindingStore.read();
     if (bound.state !== "bound") throw new Error("Expected bound test slot.");
     const invalidReceipt = { ...bound, claimId: "invalid" };
-    await expect(service["resolveInvocationRunnerContainerName"]({ ...input, verifiedSlotBinding: invalidReceipt })).rejects.toThrow("did not match");
+    await expect(service["preparation"]["resolveInvocationRunnerContainerName"]({ ...input, verifiedSlotBinding: invalidReceipt })).rejects.toThrow("did not match");
     bindingStore.beginRetirement({ claimId: claim.claimId });
-    await expect(service["resolveInvocationRunnerContainerName"](input)).rejects.toThrow("did not match");
+    await expect(service["preparation"]["resolveInvocationRunnerContainerName"](input)).rejects.toThrow("did not match");
   });
 
   it("persists the runtime phase for a natural generic control-plane failure", async () => {

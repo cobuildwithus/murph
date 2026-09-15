@@ -1,6 +1,8 @@
+import * as runtimeMigrationClient from "../src/runtime-migration-client.ts";
+import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
 import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   type HostedExecutionWake,
@@ -33,6 +35,9 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
 };
 
 describe("cloudflare worker queue backpressure routes", () => {
+  beforeEach(() => {
+    vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner").mockResolvedValue({ cutover: "legacy", status: "observed", owner: null });
+  });
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -153,6 +158,23 @@ describe("cloudflare worker queue backpressure routes", () => {
       orchestrationAttemptId: "rpc-entry-warm-test",
       userId: "member_123",
     });
+  });
+
+  it("blocks legacy starts during drain and freezes resource RPCs and alarms", async () => {
+    const harness = createUserRunnerDurableObject();
+    const ensure = vi.spyOn(HostedUserRunner.prototype, "ensureRuntimeProcessingForUser");
+    vi.mocked(runtimeOwnerClient.commandHostedRuntimeOwner).mockResolvedValue({ cutover: "draining", status: "observed", owner: null });
+    expect(await harness.durableObject.ensureRuntimeProcessingForUser({ userId: "member_123", orchestrationAttemptId: "synthetic-drain" }))
+      .toMatchObject({ kind: "retry_later" });
+    expect(ensure).not.toHaveBeenCalled();
+    vi.spyOn(HostedUserRunner.prototype, "stopLegacyRuntimeForMigration").mockResolvedValue();
+    vi.spyOn(HostedUserRunner.prototype, "legacyRuntimeUploadsDrained").mockResolvedValue(true);
+    vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration").mockResolvedValue({ gate: { phase: "draining" } });
+    const alarm = vi.spyOn(HostedUserRunner.prototype, "alarm");
+    expect(await harness.durableObject.freezeForPostgresMigration()).toEqual({ frozen: true });
+    await expect(harness.durableObject.bindUser("member_123")).rejects.toThrow("frozen");
+    await expect(harness.durableObject.alarm()).resolves.toBeUndefined();
+    expect(alarm).not.toHaveBeenCalled();
   });
 
   it("forwards managed AI revocation through the UserRunner Durable Object", async () => {
@@ -347,6 +369,11 @@ function createStorage() {
     },
     state: {
       storage: {
+        async list<T>(options: { prefix?: string; startAfter?: string; limit?: number } = {}): Promise<Map<string, T>> {
+          return new Map([...values].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+            .filter(([key]) => key.startsWith(options.prefix ?? "") && key > (options.startAfter ?? ""))
+            .slice(0, options.limit).map(([key, value]) => [key, value as T]));
+        },
         async delete(key: string): Promise<boolean> {
           return values.delete(key);
         },

@@ -1,3 +1,5 @@
+import { usesPostgresRuntimeOwner } from "../runtime-cutover.ts";
+import { publishPostgresRuntimePrivateMedia } from "../runtime-private-media.ts";
 import { json, jsonError, methodNotAllowed, readJsonObject, unauthorized } from "../json.ts";
 import {
   parseHostedRunnerPrivateImageUrlPublishRequest,
@@ -67,21 +69,11 @@ export async function handleRunnerPrivateImageUrlPublishRequest(input: {
   }
 
   try {
-    const stub = await resolveRunnerOutboundUserRunnerStub(
-      input.env,
-      input.userId,
-    );
-    requireRunnerOutboundUserStubMethod(
-      stub,
-      "publishHostedPrivateMedia",
-    );
-    const staged = await stub.publishHostedPrivateMedia({
-      attemptId: writeFence.attemptId,
-      bytes,
-      contentType: request.contentType,
-      generation: writeFence.generation,
-      userId: input.userId,
-    });
+    const publication = { attemptId: writeFence.attemptId, generation: writeFence.generation,
+      userId: input.userId, bytes, contentType: request.contentType };
+    const staged = usesPostgresRuntimeOwner(input.env)
+      ? await publishPostgresRuntimePrivateMedia({ ...publication, source: input.env })
+      : await publishLegacyPrivateMedia(input.env, publication);
     if (!staged.ok) {
       switch (staged.reason) {
         case "write-fence-rejected":
@@ -157,4 +149,13 @@ function privateImageBytesMatchContentType(
         && bytes[8] === 0x57 && bytes[9] === 0x45
         && bytes[10] === 0x42 && bytes[11] === 0x50;
   }
+}
+
+async function publishLegacyPrivateMedia(
+  env: RunnerOutboundEnvironmentSource,
+  publication: import("../private-media.ts").HostedPrivateMediaPublishInput,
+) {
+  const stub = await resolveRunnerOutboundUserRunnerStub(env, publication.userId);
+  requireRunnerOutboundUserStubMethod(stub, "publishHostedPrivateMedia");
+  return stub.publishHostedPrivateMedia(publication);
 }

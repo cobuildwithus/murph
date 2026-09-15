@@ -1,3 +1,5 @@
+import type { LegacyRuntimeExportCursor, LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
+import type { HostedExecutionContainerStubLike } from "./runner-container.ts";
 import type {
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
@@ -119,7 +121,9 @@ export interface WorkerRuntimeCompletionReceipt {
   userId: string;
 }
 
-export interface WorkerRunnerContainerStubLike {
+export interface WorkerRunnerContainerStubLike extends Pick<HostedExecutionContainerStubLike,
+  "beginRuntimeUsageSettlement" | "finishRuntimeUsageSettlement" | "runtimeUsageSettlementAllowsProviders" | "readSupervisedInvocation" | "recordSupervisedRuntimeCompletion"
+> {
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
 }
 
@@ -143,6 +147,8 @@ export interface WorkerRunnerContainerNamespaceLike<
 }
 
 export interface WorkerUserRunnerStubLike {
+  freezeForPostgresMigration?(): Promise<{ frozen: boolean }>;
+  exportPostgresMigrationPage?(cursor: LegacyRuntimeExportCursor): Promise<LegacyRuntimeExportPage>;
   recordRunnerContainerRetired?(input: {
     runnerContainerName: string;
     userId: string;
@@ -243,6 +249,8 @@ export interface WorkerUserRunnerNamespaceLike<
   TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
 > {
   getByName(name: string): TStub;
+  idFromString?(id: string): unknown;
+  get?(id: unknown): TStub;
 }
 
 export interface WorkerDatabaseHealthStubLike {

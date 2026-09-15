@@ -243,7 +243,7 @@ async function stopRunnerBeforeUserDataDeletion(input: {
   };
 }
 
-async function deleteHostedUserR2DataBeforeStateDeletion(input: {
+export async function deleteHostedUserR2DataBeforeStateDeletion(input: {
   bucket: HostedRunnerUserDataDeletionServiceInput["bucket"];
   userId: string;
 }): Promise<HostedRunnerUserDataDeletionCompletedResult["r2"]> {

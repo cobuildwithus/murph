@@ -56,6 +56,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "telegram/usage-limit-notice",
   },
+  runtimeResourcePurge: {
+    method: "POST",
+    suffix: "runtime/resource-purge",
+  },
   userDataDelete: {
     method: "POST",
     suffix: "account-data/delete",
@@ -70,6 +74,10 @@ export type CloudflareHostedControlUserRouteName =
   keyof typeof CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS;
 
 export type CloudflareHostedControlUserRouteParams = Readonly<Record<string, string>>;
+
+export function buildCloudflareHostedControlRuntimeResourcePurgePath(userId: string): string {
+  return buildCloudflareHostedControlUserRoutePath("runtimeResourcePurge", userId);
+}
 
 export function buildCloudflareHostedControlUserStatusPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("status", userId);

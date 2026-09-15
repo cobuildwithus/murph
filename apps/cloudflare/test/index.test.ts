@@ -1,4 +1,5 @@
 import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
+import { HOSTED_RUNTIME_OWNER_PATH, type HostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
 import { createHash, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -107,7 +108,7 @@ import type {
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
-import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
 import {
@@ -359,6 +360,7 @@ describe("cloudflare worker routes", () => {
       "service-banner",
     ]);
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
+      "runtime-migration",
       "device-webhook-enqueue",
       "temporal-worker-binding-admission",
       "deploy-artifact-smoke",
@@ -367,6 +369,7 @@ describe("cloudflare worker routes", () => {
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
+      "runtime-resource-purge",
       "telegram-usage-limit-notice",
       "environment-realtime-call",
       "environment-voice-stage",
@@ -397,6 +400,7 @@ describe("cloudflare worker routes", () => {
       "test-temporal-mailbox-signal-fault-consume",
       "test-direct-r2-presigned-put",
       "test-direct-r2-locator-marker",
+      "runtime-migration",
       "device-webhook-enqueue",
       "temporal-worker-binding-admission",
       "deploy-artifact-smoke",
@@ -405,6 +409,7 @@ describe("cloudflare worker routes", () => {
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
+      "runtime-resource-purge",
       "telegram-usage-limit-notice",
       "environment-realtime-call",
       "environment-voice-stage",
@@ -3351,6 +3356,29 @@ describe("cloudflare worker routes", () => {
   });
 
   describe("hosted runtime control", () => {
+    beforeEach(() => installOidcJwksFetch());
+    it("wakes the Postgres-owned runtime through the native adapter without activating UserRunner", async () => {
+      const wake = vi.fn(async () => ({ kind: "accepted" as const, action: "woken" as const }));
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        HOSTED_RUNTIME_POSTGRES_ENABLED: "true",
+        RUNNER_CONTAINER: { getByName: () => ({ destroyInstance: vi.fn(), invoke: vi.fn(), smokeHealth: vi.fn(), ensureProcessing: wake }) },
+        USER_RUNNER: { getByName() { throw new Error("Unexpected legacy coordinator activation"); } },
+      });
+      const request = await signWebCallbackControlRequest(new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ orchestrationAttemptId: "postgres-route-proof" }),
+      }), env);
+      installOidcJwksFetch(undefined, { cutover: "postgres", status: "existing", owner: {
+        userId: "test-user", attemptId: "attempt-native", generation: "7", phase: "active", processingMode: "default",
+        allocationId: "standby-claim-11111111-1111-4111-8111-111111111111", runnerContainerName: `runner--v-release_1--${"1".repeat(32)}`,
+        workspaceVersion: "4", customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        startedAt: new Date().toISOString(), acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null,
+      } });
+      const response = await worker.fetch(request, env);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ kind: "runtime_processing_accepted", action: "woken", runtimeAttemptId: "attempt-native" });
+      expect(wake).toHaveBeenCalledTimes(1);
+    });
+
     it.each([
       { assistantExecutionBlocked: true, processingMode: "system_mailbox" },
       { conversationWorkPending: true, processingMode: "default" },
@@ -5422,7 +5450,7 @@ async function signWebCallbackControlRequest(
   return new Request(request, { headers });
 }
 
-function installOidcJwksFetch(delegate?: typeof fetch): void {
+function installOidcJwksFetch(delegate?: typeof fetch, ownerResponse: HostedRuntimeOwnerResponse = { cutover: "legacy", status: "blocked", owner: null }): void {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input) === TEST_VERCEL_OIDC_JWKS_URL) {
       return new Response(JSON.stringify({ keys: [TEST_VERCEL_OIDC_PUBLIC_JWK] }), {
@@ -5434,6 +5462,7 @@ function installOidcJwksFetch(delegate?: typeof fetch): void {
     }
 
     const url = new URL(String(input));
+    if (url.pathname === HOSTED_RUNTIME_OWNER_PATH) return Response.json(ownerResponse);
     if (url.pathname === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH) {
       const headers = new Headers(init?.headers);
       const userId = headers.get(HOSTED_EXECUTION_USER_ID_HEADER);

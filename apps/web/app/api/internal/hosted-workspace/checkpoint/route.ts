@@ -14,17 +14,24 @@ import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   acknowledgeHostedWorkspaceRuntimeRecheck,
-  checkpointHostedWorkspace,
 } from "@/src/lib/hosted-workspace/store";
+import { checkpointHostedRuntimeWorkspace } from "@/src/lib/hosted-workspace/runtime-publication";
+import { readHostedRuntimeCallbackAuthority } from "@/src/lib/hosted-execution/runtime-write-fence";
 
 const HOSTED_WORKSPACE_CHECKPOINT_CALLBACK_BODY_LIMIT_BYTES = 256 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
+    runtimeAuthority: "caller_transaction",
     maxBodyBytes: HOSTED_WORKSPACE_CHECKPOINT_CALLBACK_BODY_LIMIT_BYTES,
   });
   const body = parseHostedWorkspaceCheckpointRequest(await readOptionalJsonObject(request));
-  const result = await checkpointHostedWorkspace({
+  const result = await checkpointHostedRuntimeWorkspace({
+    runtimeAuthority: readHostedRuntimeCallbackAuthority(request, {
+      attemptId: body.attemptId,
+      leaseGeneration: body.leaseGeneration,
+      workspaceVersion: body.expectedWorkspaceVersion,
+    }),
     expectedVersion: body.expectedWorkspaceVersion,
     ...(body.handledConversationMailboxItemIds === undefined
       ? {}
