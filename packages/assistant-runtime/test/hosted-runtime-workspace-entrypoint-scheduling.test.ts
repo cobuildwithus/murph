@@ -381,6 +381,65 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
     }
   });
 
+  test.each([
+    { limit: 1, decline: false, expectedPairs: 0 },
+    { limit: 2, decline: false, expectedPairs: 1 },
+    { limit: 2, decline: true, expectedPairs: 1 },
+  ])("reserves/refunds audio pair slots through the workspace owner: $limit/$decline", async ({ limit, decline, expectedPairs }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-audio-budget-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const imported: string[] = [];
+    let pairCalls = 0;
+    const items = [1, 2, 3].map((ordinal) => createMailboxItem({
+      id: `mailbox_audio_budget_${ordinal}`, laneSeq: String(ordinal), causalSeq: String(ordinal),
+    }));
+    const importItem: HostedWorkspaceRuntimeJobOptions["importItem"] = Object.assign(
+      async (item: Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0]) => {
+        imported.push(item.item.id);
+        return { status: "imported" as const };
+      },
+      {
+        importAudioPair: async (
+          pair: readonly [Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0], Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0]],
+          context?: Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[1],
+        ) => {
+          pairCalls += 1;
+          assert.ok(context); // Both wrappers must forward the runtime import context.
+          if (decline) return null;
+          imported.push(...pair.map((item) => item.item.id));
+          return [{ status: "imported" }, { status: "imported" }] as const;
+        },
+      },
+    );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
+    try {
+      const result = await withRealTimeout(runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({ request: { budget: { maxMailboxItems: limit }, idleCheckpointDelayMs: 1 } }),
+        {
+          vaultRoot, importItem,
+          async createCheckpointSnapshot() {
+            return { snapshotRef: createSnapshotFixtureRef({ hash: "b".repeat(64), size: 512 }) };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items }),
+            workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState({ version: "0" }) }),
+          }),
+          async runAssistantPhase() { return { progressed: false, redactedStatus: { hostedAssistantProgressed: false } }; },
+        },
+      ), 15_000, () => events.join(","));
+      assert.equal(pairCalls, expectedPairs);
+      assert.deepEqual(imported, items.slice(0, limit).map((item) => item.id));
+      assert.equal(result.status, "budget_exhausted");
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, String(limit));
+      assert.equal(result.redactedStatus?.hostedMailboxImportedCount, limit);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("schedules a system-mailbox wake when import checkpoints before assistant phase", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

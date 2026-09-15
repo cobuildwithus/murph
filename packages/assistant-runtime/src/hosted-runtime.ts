@@ -136,6 +136,8 @@ import {
   HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE,
   prefetchHostedMailboxPrefix,
   type HostedMailboxItemImportOutcome,
+  type HostedMailboxImporter,
+  type HostedMailboxAudioPairImport,
   type HostedMailboxPrefixPrefetch,
   type HostedMailboxResolvedImportItem,
 } from "./hosted-runtime/mailbox-import.ts";
@@ -777,10 +779,7 @@ function isHostedInitialBootstrapPending(input: {
 
 export interface HostedWorkspaceRuntimeJobOptions {
   createCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder;
-  importItem(
-    item: HostedMailboxResolvedImportItem,
-    context?: HostedWorkspaceRuntimeJobImportContext,
-  ): Promise<HostedMailboxItemImportOutcome>;
+  importItem: HostedMailboxImporter<HostedWorkspaceRuntimeJobImportContext>;
   platform: HostedRuntimePlatform;
   preparedWorkspaceRestore?: HostedWorkspaceRestorePreparation | null;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
@@ -1978,6 +1977,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       await kickDetachedAssistantAskAfterImport(item, outcome);
       return outcome;
     };
+    bindHostedWorkspaceMailboxAudioPairImports({
+      prepareAudioPair: options.importItem.importAudioPair,
+      assertRuntimeNotAborted, createMailboxImportContext, mailboxBudget,
+      importForegroundMailboxItem, importMailboxItem,
+    });
     const {
       restored,
       workspaceRead,
@@ -9180,11 +9184,41 @@ function createAbortGuardedHostedRuntimeMediaStore(
   };
 }
 
+/** Preserve the same context and abort boundary for ordinary and paired imports. */
+function bindHostedWorkspaceMailboxAudioPairImports(input: {
+  prepareAudioPair: HostedWorkspaceRuntimeJobOptions["importItem"]["importAudioPair"];
+  assertRuntimeNotAborted(): void;
+  createMailboxImportContext(context: HostedWorkspaceRunnerMailboxImportContext | undefined): HostedWorkspaceRuntimeJobImportContext;
+  mailboxBudget: ReturnType<typeof createHostedWorkspaceMailboxImportBudget>;
+  importForegroundMailboxItem: HostedWorkspaceRunnerInput["importItem"];
+  importMailboxItem: HostedWorkspaceRunnerInput["importItem"];
+}): void {
+  const prepareAudioPair = input.prepareAudioPair;
+  if (!prepareAudioPair) return;
+  const importAudioPair: HostedMailboxAudioPairImport<HostedWorkspaceRunnerMailboxImportContext> =
+    async (items, context) => {
+      input.assertRuntimeNotAborted();
+      const outcomes = await prepareAudioPair(items, input.createMailboxImportContext(context));
+      input.assertRuntimeNotAborted();
+      return outcomes;
+    };
+  // Only conversation items reach this method; detached/system effects are not eligible.
+  input.importForegroundMailboxItem.importAudioPair = importAudioPair;
+  input.importMailboxItem.importAudioPair = (items, context) => input.mailboxBudget.importAudioPair(
+    items, importAudioPair, context,
+  );
+}
+
 function createHostedWorkspaceMailboxImportBudget(
   maxMailboxItems: number | null | undefined,
 ): {
   readonly exhausted: boolean;
   readonly fetchLimitPerLane: number;
+  importAudioPair(
+    items: Parameters<HostedMailboxAudioPairImport>[0],
+    importPair: HostedMailboxAudioPairImport<HostedWorkspaceRunnerMailboxImportContext>,
+    context?: HostedWorkspaceRunnerMailboxImportContext,
+  ): ReturnType<HostedMailboxAudioPairImport>;
   importItem(
     item: HostedMailboxResolvedImportItem,
     importItem: HostedWorkspaceRuntimeJobOptions["importItem"],
@@ -9200,6 +9234,15 @@ function createHostedWorkspaceMailboxImportBudget(
       return exhausted;
     },
     fetchLimitPerLane: resolveHostedWorkspaceRunMailboxFetchLimit(importLimit),
+    async importAudioPair(items, importPair, context) {
+      // Reserve both before any media starts. A declined pair has no side effects.
+      // Insufficient pair capacity still allows the ordinary single-item path.
+      if (importAttempts + 2 > importLimit) return null;
+      importAttempts += 2;
+      const outcomes = await importPair(items, context);
+      if (outcomes === null) importAttempts -= 2;
+      return outcomes;
+    },
     async importItem(item, importItem, context) {
       if (importAttempts >= importLimit) {
         exhausted = true;
