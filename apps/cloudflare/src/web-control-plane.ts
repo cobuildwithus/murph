@@ -8,7 +8,7 @@ import {
 import {
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution/env";
-import { addHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
+import { addHostedExecutionRuntimeAuthority, readHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 
 import {
   createHostedWebCallbackSignatureHeaders,
@@ -52,7 +52,7 @@ export function normalizeHostedWebControlBaseUrl(
 export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   baseUrl: string;
   body?: string;
-  boundUserId: string;
+  boundUserId: string | null;
   fetchImpl?: typeof fetch;
   headers?: Headers;
   method: "GET" | "POST";
@@ -75,8 +75,13 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     targetUrl.search = input.search;
   }
 
+  // Runtime authority is derived from bound headers, never adopted from a
+  // caller-supplied search string that the Worker is about to sign.
+  if (readHostedExecutionRuntimeAuthority(targetUrl, new Headers()) !== null) {
+    throw new TypeError("Runtime authority must be derived before callback signing.");
+  }
   const headers = createHostedWebControlForwardHeaders(input.headers);
-  headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
+  if (input.boundUserId !== null) headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
   const attemptId = headers.get("x-hosted-runtime-attempt-id");
   const generation = headers.get("x-hosted-runtime-lease-generation");
   if (attemptId !== null || generation !== null) {

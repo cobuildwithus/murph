@@ -1,3 +1,4 @@
+import { HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS, HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS, type HostedBrowserVaultReplicaShardKind, type HostedBrowserVaultReplicaMetricBucketId } from "./contracts.ts";
 import { createHash } from "node:crypto";
 
 import type { HostedExecutionBundleKind } from "@murphai/runtime-state/node/hosted-bundle-codec";
@@ -323,4 +324,36 @@ function requireHostedPrivateMediaSha256(value: string): string {
     throw new TypeError("Hosted private media sha256 is invalid.");
   }
   return normalized;
+}
+
+export function listHostedBrowserVaultReplicaSiblingObjectKeys(
+  objectKey: string,
+): string[] {
+  return [
+    ...HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS.map((shard) =>
+      browserVaultReplicaShardObjectKey(objectKey, shard)),
+    ...HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) =>
+      browserVaultReplicaMetricBucketObjectKey(objectKey, bucketId)),
+  ];
+}
+
+export function browserVaultReplicaShardObjectKey(
+  objectKey: string,
+  shard: HostedBrowserVaultReplicaShardKind,
+): string {
+  if (!objectKey.endsWith(".json")) {
+    throw new TypeError("Hosted browser vault replica object key must end in .json.");
+  }
+  const suffix = shard === "metricsIndex" ? "metrics-index" : shard;
+  return `${objectKey.slice(0, -".json".length)}.${suffix}.json`;
+}
+
+export function browserVaultReplicaMetricBucketObjectKey(
+  objectKey: string,
+  bucketId: HostedBrowserVaultReplicaMetricBucketId,
+): string {
+  if (!objectKey.endsWith(".json")) {
+    throw new TypeError("Hosted browser vault replica object key must end in .json.");
+  }
+  return `${objectKey.slice(0, -".json".length)}.metric-bucket-${bucketId}.json`;
 }

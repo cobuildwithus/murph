@@ -11,16 +11,27 @@ export async function recordHostedRuntimeOwnerCompletion(input: {
   attemptId: string;
   generation: string;
   result: Pick<HostedWorkspaceInvocationResult, "immediateRecheckRequested">;
+  /** Set only after the native invocation operation itself has settled. A
+   * runtime callback alone does not prove that the outer operation is gone. */
+  settledRunnerContainerName?: string;
 }): Promise<boolean> {
   const retired = await commandHostedRuntimeOwner({
     source: input.source, userId: input.userId,
     command: { operation: "retire", attemptId: input.attemptId, generation: input.generation, completed: true },
   });
   if (retired.status !== "updated") return false;
+  if (input.settledRunnerContainerName) {
+    const released = await commandHostedRuntimeOwner({
+      source: input.source, userId: input.userId,
+      command: { operation: "release_completed", attemptId: input.attemptId,
+        generation: input.generation, runnerContainerName: input.settledRunnerContainerName },
+    });
+    if (released.status !== "updated") return false;
+  }
   const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.source));
   if (!environment.hostedWebBaseUrl) throw new Error("Hosted runtime owner URL is not configured.");
   // Scheduling remains Temporal-owned. A failed hint is recovered by its
-  // existing accepted-attempt recheck; retirement is already durable.
+  // existing accepted-attempt recheck; ownership changes are already durable.
   try {
     await fetchHostedExecutionWebControlPlaneResponse({
       baseUrl: environment.hostedWebBaseUrl,

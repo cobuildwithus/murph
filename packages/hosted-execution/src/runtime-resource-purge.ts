@@ -5,6 +5,7 @@ import type { HostedExecutionSnapshotRef } from "./contracts.ts";
 
 export type HostedRuntimeResourcePurge =
   | { kind: "snapshot" | "replica" | "media"; objectKey: string }
+  | { kind: "multipart"; objectKey: string; uploadId: string }
   | { kind: "legacy_snapshot"; snapshotRef: NonNullable<HostedExecutionSnapshotRef> };
 
 export function parseHostedRuntimeResourcePurge(value: unknown): HostedRuntimeResourcePurge {
@@ -13,6 +14,12 @@ export function parseHostedRuntimeResourcePurge(value: unknown): HostedRuntimeRe
     const snapshotRef = parseHostedExecutionSnapshotRef(record.snapshotRef);
     if (!snapshotRef || isHostedWorkspaceSnapshotV2Ref(snapshotRef)) throw new TypeError("Legacy resource purge requires a bundle reference.");
     return { kind: record.kind, snapshotRef };
+  }
+  if (record.kind === "multipart") {
+    const objectKey = requireString(record.objectKey, "Multipart object key");
+    const uploadId = requireString(record.uploadId, "Multipart upload identity");
+    if (objectKey.length > 1024 || uploadId.length > 1024) throw new TypeError("Multipart retirement identity is too long.");
+    return { kind: "multipart", objectKey, uploadId };
   }
   if (record.kind !== "snapshot" && record.kind !== "replica" && record.kind !== "media") throw new TypeError("Runtime resource purge kind is invalid.");
   const objectKey = requireString(record.objectKey, "Runtime resource object key");

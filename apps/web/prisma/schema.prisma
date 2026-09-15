@@ -1347,11 +1347,33 @@ model HostedRuntimeOwner {
 /// Finite migration gate. A shared row lock fences legacy publication and
 /// admission against the exclusive legacy -> draining -> postgres transition.
 model HostedRuntimeCutover {
-  id          String   @id
-  phase       String   @default("legacy")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id              String    @id
+  phase           String    @default("legacy")
+  namespaceId     String?   @map("namespace_id")
+  workerVersion   String?   @map("worker_version")
+  inventoryAfter  String    @default("") @map("inventory_after")
+  inventoryHash   String?   @map("inventory_hash")
+  inventoryCount Int       @default(0) @map("inventory_count")
+  inventorySealedAt DateTime? @map("inventory_sealed_at")
+  activatedAt     DateTime? @map("activated_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   @@map("hosted_runtime_cutover")
+}
+
+/// Temporary inventory and exact-page receipt, retained through the rollback
+/// window. No member FK: dormant and deleted-member objects must be covered.
+model HostedRuntimeLegacyImport {
+  objectId     String    @id @map("object_id")
+  userId       String?   @unique @map("user_id")
+  generation   BigInt?
+  nextCursor   Json      @map("next_cursor")
+  lastCursor   Json?     @map("last_cursor")
+  lastHash     String?   @map("last_hash")
+  completedAt  DateTime? @map("completed_at")
+
+  @@index([completedAt, objectId])
+  @@map("hosted_runtime_legacy_import")
 }
 
 // Runtime resource obligations outlive member deletion until physical cleanup.
@@ -1384,8 +1406,12 @@ model HostedRuntimePutDrain {
   generation  BigInt
   admittedAt  DateTime  @map("admitted_at")
   drainUntil  DateTime? @map("drain_until")
+  objectKey   String?   @map("object_key")
+  uploadId    String?   @map("upload_id")
+  reconcileAfter DateTime? @map("reconcile_after")
   completedAt DateTime? @map("completed_at")
 
+  @@index([completedAt, reconcileAfter])
   @@id([userId, writeId])
   @@index([drainUntil, userId])
   @@map("hosted_runtime_put_drain")

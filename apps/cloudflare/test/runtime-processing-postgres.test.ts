@@ -5,17 +5,22 @@ import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "../src/runtime-owner-completion.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
-import type { HostedExecutionContainerStubLike } from "../src/runner-container.ts";
+import type { HostedExecutionContainerStubLike, HostedExecutionContainerInvokeRequest } from "../src/runner-container.ts";
 import type { RunnerWriteFenceToken } from "../src/user-runner/runner-state-store.ts";
 import type { HostedStandbySlotBinding } from "../src/standby-runner-contract.ts";
 import type { RunnerInvocationReceipt } from "../src/runner-invocation-receipt.ts";
+import type { RuntimeInvocationPreparation } from "../src/runtime-invocation-preparation.ts";
 
 vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
 vi.mock("../src/runtime-owner-completion.ts", () => ({ recordHostedRuntimeOwnerCompletion: vi.fn(async () => true) }));
 vi.mock("../src/runtime-invocation-preparation.ts", () => ({
   RuntimeInvocationPreparation: class {
+    constructor(private readonly input: ConstructorParameters<typeof RuntimeInvocationPreparation>[0]) {}
     prepareForFreshStart() {
-      return async (token: RunnerWriteFenceToken) => ({ job: {}, token, input: {}, workspaceVersion: "0", workspaceCheckpointedAt: null });
+      return async (token: RunnerWriteFenceToken) => {
+        const bound = await this.input.bindInvocation({ token, workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true });
+        return { job: { request: { providerEgressToken: bound.providerEgressToken } }, token: bound, input: {}, workspaceVersion: "0", workspaceCheckpointedAt: null };
+      };
     }
   },
 }));
@@ -40,7 +45,7 @@ function harness() {
     readActiveRuntimeUserFence: vi.fn(async () => ({ active: false as const, reason: "no_active_runtime" as const })),
     ensureProcessing: vi.fn(async () => ({ kind: "accepted" as const, action: "woken" as const })),
     ensureReadyForProcessing: vi.fn(async () => ({ kind: "ready" as const })),
-    startSupervisedInvocation: vi.fn(async () => ({ accepted: true as const })),
+    startSupervisedInvocation: vi.fn(async (_input: HostedExecutionContainerInvokeRequest) => ({ accepted: true as const })),
     bindStandbySlot: vi.fn(async (input) => ({ ...input, bound: true as const })),
     prepareStandbySlot: vi.fn(),
     readStandbySlotBinding: vi.fn(async (): Promise<HostedStandbySlotBinding> => binding),
@@ -110,12 +115,20 @@ describe("Postgres runtime orchestration", () => {
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner()))
       .mockResolvedValueOnce(response(null, "updated"))
       .mockResolvedValueOnce(response(owner({ attemptId: "attempt-b", generation: "2", phase: "starting", workspaceVersion: null }), "claimed"))
-      .mockResolvedValue(response(null, "updated"));
+      .mockResolvedValue(response(owner({ attemptId: "attempt-b", generation: "2" }), "updated"));
     expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "runtime_processing_accepted", runtimeAttemptId: "attempt-b" });
     expect(recordHostedRuntimeOwnerCompletion).toHaveBeenCalledWith(expect.objectContaining({ attemptId: "attempt-a", result: { immediateRecheckRequested: true } }));
     expect(container.resolveRetainedStandbySlot).toHaveBeenCalled();
     expect(container.bindStandbySlot).not.toHaveBeenCalled();
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
     expect(container.startSupervisedInvocation).toHaveBeenCalledTimes(1);
+    const token = container.startSupervisedInvocation.mock.calls[0]?.[0]?.job.request.providerEgressToken;
+    expect(token).toMatch(/^provider-egress-[a-f0-9]{64}$/u);
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token!)));
+    const hash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({
+      command: expect.objectContaining({ operation: "prepare_launch", providerEgressTokenHash: hash }),
+    }));
+    expect(JSON.stringify(vi.mocked(commandHostedRuntimeOwner).mock.calls)).not.toContain(token);
   });
 });

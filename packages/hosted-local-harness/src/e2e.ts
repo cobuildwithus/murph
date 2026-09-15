@@ -116,6 +116,7 @@ export type HostedLocalE2eScenarioName =
   | "linq-webhook"
   | "linq-webhook-audio"
   | "runner-warm-reuse"
+  | "postgres-runtime-warm-reuse"
   | "snapshot-publication-fallback"
   | "snapshot-stress"
   | "stripe-billing-browser-matrix"
@@ -387,6 +388,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-linq-same-wake-batching-e2e.test.ts",
     name: "linq-same-wake-batching",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-postgres-runtime-e2e.test.ts",
+    manualOnly: true,
+    name: "postgres-runtime-warm-reuse",
   },
   {
     file: "apps/cloudflare/test/hosted-local-runner-warm-auth-recovery-e2e.test.ts",

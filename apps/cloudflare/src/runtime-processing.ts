@@ -213,14 +213,20 @@ function createInvocationPreparation(ctx: ProcessingContext, owner: HostedRuntim
       return parseHostedWorkspaceReadResponse(await response.json());
     },
     async bindInvocation(facts) {
+      // Provider APIs such as Linq use the invocation-scoped opaque token.
+      // Persist only its digest; the raw capability travels in the launch job.
+      const bytes = crypto.getRandomValues(new Uint8Array(32));
+      const providerEgressToken = `provider-egress-${Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("")}`;
+      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(providerEgressToken)));
+      const providerEgressTokenHash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
       const prepared = await command({ operation: "prepare_launch", ...identity,
         runnerContainerName: facts.token.runnerContainerName!, workspaceVersion: facts.workspaceVersion,
-        providerEgressTokenHash: null, customInferenceEnvelope: facts.customInferenceEnvelope,
+        providerEgressTokenHash, customInferenceEnvelope: facts.customInferenceEnvelope,
         platformAiUsageAllowed: facts.platformAiUsageAllowed !== false,
         processingMode: facts.processingMode ?? mode,
       });
       if (prepared.status !== "updated" || !prepared.owner) throw new Error("Hosted runtime preparation lost ownership.");
-      return ownerToken(prepared.owner);
+      return { ...ownerToken(prepared.owner), providerEgressToken };
     },
   });
 

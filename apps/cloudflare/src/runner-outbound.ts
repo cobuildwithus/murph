@@ -1,6 +1,7 @@
+import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
 import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, commandHostedRuntimeReplicaPut } from "./runtime-resource-client.ts";
 import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
-import { executeRunnerMediaCommand, writeRunnerMediaWithAdmission } from "./runtime-media.ts";
+import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
 import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
 import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
 import { HostedBundleGarbageCollector } from "./bundle-gc.ts";
@@ -551,7 +552,10 @@ async function handleRunnerMediaRequest(input: {
       userId: input.userId,
     });
     const mediaStore = createHostedMediaStore({
-      bucket: input.bucket,
+      bucket: usesPostgresRuntimeOwner(input.env) && descriptor ? createRuntimeMediaWriteBucket({
+        source: input.env, userId: input.userId, attemptId: writeAuthority.attemptId,
+        generation: writeAuthority.generation, media: { descriptor },
+      }) : input.bucket,
       key: crypto.rootKey,
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
@@ -748,15 +752,7 @@ async function handleRunnerMediaPutRequest(input: {
   writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<Response> {
   const bytes = new Uint8Array(await input.request.arrayBuffer());
-  const write = () => input.mediaStore.writeMedia({ ...input.descriptor, plaintext: bytes });
-  if (usesPostgresRuntimeOwner(input.env)) {
-    const admitted = await writeRunnerMediaWithAdmission({ source: input.env, userId: input.userId,
-      command: { operation: "admit_put", writeId: crypto.randomUUID(), descriptor: input.descriptor,
-        attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation }, write });
-    if (!admitted) return jsonError("Media upload was rejected.", 409);
-  } else {
-    await write();
-  }
+  await input.mediaStore.writeMedia({ ...input.descriptor, plaintext: bytes });
   const recorded = await recordHostedMediaAsset({
     descriptor: input.descriptor,
     env: input.env,
@@ -3500,8 +3496,12 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     environment: input.environment,
     userId: input.userId,
   });
+  let admittedRootObjectKey: string | null = null;
   const replicaStore = createHostedBrowserVaultReplicaStore({
-    bucket: input.bucket,
+    bucket: usesPostgresRuntimeOwner(input.env) ? createRuntimeReplicaWriteBucket({ source: input.env,
+      userId: input.userId, attemptId: writeAuthority.attemptId, generation: writeAuthority.generation,
+      readRootObjectKey: () => admittedRootObjectKey,
+    }) : input.bucket,
     keysById: crypto.keysById,
     resolveRootKeyById: crypto.resolveKeyById,
     rootKey: crypto.rootKey,
@@ -3536,6 +3536,7 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
             throw new RunnerRuntimeWriteFenceError();
           }
           activePutWriteId = writeId;
+          admittedRootObjectKey = plannedReplicaRef.objectKey;
           if (!usesPostgresRuntimeOwner(input.env)) await recordBrowserVaultReplicaOrphanCandidate(input.env, {
             createdAt: new Date().toISOString(),
             objectKey: plannedReplicaRef.objectKey,

@@ -1,7 +1,8 @@
+import { abortRuntimeMultipartUpload } from "../../runtime-object-upload.ts";
 import { parseHostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
 import { readHostedExecutionSnapshotBaseRef, readHostedExecutionSnapshotDeltaRef, readHostedExecutionSnapshotHotRef } from "@murphai/hosted-execution/parsers";
 import { matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
-import { hostedBrowserVaultReplicaUserPrefix, hostedMediaUserPrefix, hostedWorkspaceSnapshotUserPrefix } from "../../storage-paths.ts";
+import { hostedPrivateMediaUserPrefix, hostedBrowserVaultReplicaUserPrefix, hostedMediaUserPrefix, hostedWorkspaceSnapshotUserPrefix } from "../../storage-paths.ts";
 import { listHostedBrowserVaultReplicaSiblingObjectKeys } from "../../browser-vault-store.ts";
 import { HostedBundleGarbageCollector } from "../../bundle-gc.ts";
 import { RunnerStoreCache } from "../../user-runner/runner-store-cache.ts";
@@ -32,6 +33,13 @@ export async function purgeHostedRuntimeResource(input: {
   const bucket = input.source.BUNDLES;
   if (!bucket.delete) throw new Error("Runtime resource deletion is unavailable.");
   const resource = parseHostedRuntimeResourcePurge(input.resource);
+  if (resource.kind === "multipart") {
+    if (!bucket.resumeMultipartUpload) throw new Error("Runtime multipart recovery is unavailable.");
+    const prefixes = await Promise.all([hostedMediaUserPrefix({ userId: input.userId }), hostedPrivateMediaUserPrefix({ userId: input.userId }), hostedBrowserVaultReplicaUserPrefix({ userId: input.userId })]);
+    if (!prefixes.some(prefix => resource.objectKey.startsWith(prefix) && !resource.objectKey.slice(prefix.length).includes("/"))) throw new TypeError("Multipart upload is outside the member namespace.");
+    await abortRuntimeMultipartUpload(bucket.resumeMultipartUpload(resource.objectKey, resource.uploadId));
+    return;
+  }
   if (resource.kind === "legacy_snapshot") {
     const stores = await new RunnerStoreCache({ bucket, env: readHostedExecutionEnvironment(asWorkerStringEnvironment(input.source)), runnerRuntimeEnvSource: input.source }).ensure(input.userId);
     const collector = new HostedBundleGarbageCollector(bucket, stores.crypto.rootKey, stores.crypto.rootKeyId, stores.crypto.keysById);

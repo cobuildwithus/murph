@@ -1,6 +1,7 @@
+import { HOSTED_RUNTIME_ORPHAN_GRACE_MS } from "@murphai/hosted-execution/runtime-resources";
 import type { PrismaClient } from "@prisma/client";
 import { Prisma } from "@prisma/client";
-import { hostedBrowserVaultReplicaUserPrefix } from "@murphai/hosted-execution/storage-paths";
+import { hostedBrowserVaultReplicaUserPrefix, listHostedBrowserVaultReplicaSiblingObjectKeys } from "@murphai/hosted-execution/storage-paths";
 import { parseHostedRuntimeReplicaPutCommand, type HostedRuntimeReplicaPutCommand } from "@murphai/hosted-execution/runtime-resources";
 import { lockHostedRuntimeCutoverTx, requireHostedRuntimeOwnerTx } from "./runtime-owner";
 import { recordRuntimeOrphansTx, requireRuntimeResourcesPublishableTx } from "./runtime-orphans";
@@ -13,6 +14,7 @@ export async function executeHostedRuntimeReplicaPutCommand(input: {
   if (command.operation === "admit") {
     const prefix = await hostedBrowserVaultReplicaUserPrefix({ userId: input.userId });
     if (!command.objectKey.startsWith(prefix) || command.objectKey.slice(prefix.length).includes("/")) throw new TypeError("Replica PUT namespace mismatch.");
+    if (command.multipart && ![command.objectKey, ...listHostedBrowserVaultReplicaSiblingObjectKeys(command.objectKey)].includes(command.multipart.objectKey)) throw new TypeError("Replica upload is outside its root resource.");
   }
   return input.prisma.$transaction(async tx => {
     if (await lockHostedRuntimeCutoverTx(tx) !== "postgres") return { applied: false };
@@ -31,7 +33,9 @@ export async function executeHostedRuntimeReplicaPutCommand(input: {
     // Reusing a write identity must not dispatch another physical PUT whose
     // lifetime could be cleared by the first write's delayed release.
     if (existing) return { applied: false };
-    await tx.hostedRuntimePutDrain.create({ data: { userId: input.userId, writeId, kind: "replica", attemptId: command.attemptId, generation: BigInt(command.generation), admittedAt: now } });
+    await tx.hostedRuntimePutDrain.create({ data: { userId: input.userId, writeId, kind: "replica", attemptId: command.attemptId, generation: BigInt(command.generation), admittedAt: now,
+      ...(command.multipart ? { objectKey: command.multipart.objectKey, uploadId: command.multipart.uploadId,
+        reconcileAfter: new Date(now.getTime() + HOSTED_RUNTIME_ORPHAN_GRACE_MS) } : {}) } });
     await recordRuntimeOrphansTx(tx, input.userId, [candidate], now);
     return { applied: true };
   });

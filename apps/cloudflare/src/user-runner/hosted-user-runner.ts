@@ -1,3 +1,4 @@
+import { readHostedBrowserVaultReplicaPostStopDrainUntil, readHostedWorkspaceSnapshotR2PutDrainUntil } from "./workspace-snapshot-sessions.ts";
 import {
   type HostedHealthDataConsentState,
   type HostedRunnerStatusResponse,
@@ -285,6 +286,18 @@ export class HostedUserRunner {
       workspace: webStatus.workspace,
     };
     return status;
+  }
+
+  async stopLegacyRuntimeForMigration(userId: string): Promise<void> {
+    await this.runtimeProcessing.stopForHealthDataConsentWithdrawal(userId);
+    this.runnerStoreCache.clearIfUser(userId);
+  }
+
+  async legacyRuntimeUploadsDrained(userId: string): Promise<boolean> {
+    const replica = await readHostedBrowserVaultReplicaPostStopDrainUntil({ state: this.state, userId });
+    const snapshot = await readHostedWorkspaceSnapshotR2PutDrainUntil({ state: this.state, userId });
+    return (replica === null || Date.parse(replica) <= Date.now())
+      && (snapshot === null || Date.parse(snapshot) <= Date.now());
   }
 
   async deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult> {

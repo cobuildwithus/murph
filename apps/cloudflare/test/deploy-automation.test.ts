@@ -900,6 +900,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "600000",
       HOSTED_EXECUTION_STANDBY_MODE: "off",
+      HOSTED_RUNTIME_POSTGRES_ENABLED: "false",
       HOSTED_EXECUTION_STANDBY_TARGET: "2",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     });

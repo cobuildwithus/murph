@@ -16,8 +16,9 @@ export interface HostedRuntimeMediaPurge {
 }
 export type HostedRuntimeMediaCommand =
   | { operation: "read"; descriptor: HostedRuntimeMediaDescriptor }
-  | ({ operation: "admit_put"; writeId: string; descriptor: HostedRuntimeMediaDescriptor } & HostedRuntimeOwnerIdentity)
-  | { operation: "release_put"; writeId: string; mediaId: string }
+  | ({ operation: "admit_put"; writeId: string; uploadId: string; descriptor: HostedRuntimeMediaDescriptor } & HostedRuntimeOwnerIdentity)
+  | ({ operation: "admit_private_put"; writeId: string; uploadId: string; sha256: string } & HostedRuntimeOwnerIdentity)
+  | { operation: "release_put"; writeId: string; mediaId: string; scope?: "private_media" }
   | ({ operation: "register"; descriptor: HostedRuntimeMediaDescriptor } & HostedRuntimeOwnerIdentity)
   | ({ operation: "retire"; mediaId: string } & HostedRuntimeOwnerIdentity)
   | { operation: "acknowledge_purge"; purge: HostedRuntimeMediaPurge };
@@ -42,12 +43,19 @@ export function parseHostedRuntimeMediaDescriptor(value: unknown): HostedRuntime
 export function parseHostedRuntimeMediaCommand(value: unknown): HostedRuntimeMediaCommand {
   const record = requireObject(value, "Runtime media command");
   const operation = record.operation;
-  if (operation === "admit_put" || operation === "release_put") {
+  if (operation === "admit_put" || operation === "admit_private_put" || operation === "release_put") {
     const writeId = requireString(record.writeId, "Media PUT identity");
     if (!/^[A-Za-z0-9-]{1,100}$/u.test(writeId)) throw new TypeError("Media PUT identity is invalid.");
+    if (operation === "release_put") {
+      if (record.scope !== undefined && record.scope !== "private_media") throw new TypeError("Media PUT scope is invalid.");
+      return { operation, writeId, mediaId: mediaDigest(record.mediaId), ...(record.scope === "private_media" ? { scope: record.scope } : {}) };
+    }
+    const uploadId = requireString(record.uploadId, "Media multipart upload identity");
+    if (uploadId.length > 1024 || /[\s\x00-\x1f]/u.test(uploadId)) throw new TypeError("Media multipart upload identity is invalid.");
+    const identity = parseHostedRuntimeOwnerIdentity(record);
     return operation === "admit_put"
-      ? { operation, writeId, ...parseHostedRuntimeOwnerIdentity(record), descriptor: parseHostedRuntimeMediaDescriptor(record.descriptor) }
-      : { operation, writeId, mediaId: mediaDigest(record.mediaId) };
+      ? { operation, writeId, uploadId, ...identity, descriptor: parseHostedRuntimeMediaDescriptor(record.descriptor) }
+      : { operation, writeId, uploadId, ...identity, sha256: mediaDigest(record.sha256) };
   }
   if (operation === "read") return { operation, descriptor: parseHostedRuntimeMediaDescriptor(record.descriptor) };
   if (operation === "register") return { operation, ...parseHostedRuntimeOwnerIdentity(record), descriptor: parseHostedRuntimeMediaDescriptor(record.descriptor) };

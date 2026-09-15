@@ -1,3 +1,4 @@
+import { reconcileHostedRuntimeUploads } from "./runtime-upload-recovery";
 import { parseHostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
 import { readHostedExecutionControlClientIfConfigured } from "./control";
 import type { HostedRuntimeOrphan, PrismaClient } from "@prisma/client";
@@ -67,11 +68,11 @@ export async function claimHostedRuntimeResourceCleanup(input: { prisma: PrismaC
       const where = { userId_mediaId: candidate };
       const current = await tx.hostedRuntimeMedia.findUnique({ where });
       if (!current || current.purgedAt || !current.expiresAt || current.expiresAt > input.now) return null;
-      if (await hasPendingRuntimeMediaPutTx(tx, candidate.userId, candidate.mediaId, input.now)) return null;
       // The existing metadata timestamp paces retries without changing the
       // product expiry. Failed old rows cannot monopolize every bounded sweep.
       if (current.retiredAt && current.updatedAt.getTime() + 60_000 > input.now.getTime()) return null;
-      return tx.hostedRuntimeMedia.update({ where, data: { retiredAt: current.retiredAt ?? input.now, updatedAt: input.now } });
+      const retired = await tx.hostedRuntimeMedia.update({ where, data: { retiredAt: current.retiredAt ?? input.now, updatedAt: input.now } });
+      return await hasPendingRuntimeMediaPutTx(tx, candidate.userId, candidate.mediaId, input.now) ? null : retired;
     });
     if (row) media.push({ userId: row.userId, ...purgeReceipt(row) });
   }
@@ -88,6 +89,7 @@ export async function runHostedRuntimeResourceCleanup(input: { prisma: PrismaCli
   const client = readHostedExecutionControlClientIfConfigured(5_000);
   if (!client) return { configured: false, deleted: 0, failed: 0 };
   const deadline = Date.now() + 25_000;
+  await reconcileHostedRuntimeUploads({ ...input, deadlineAtMs: deadline });
   const claimed = await claimHostedRuntimeResourceCleanup({ ...input, deadlineAtMs: deadline });
   let deleted = 0;
   let failed = 0;

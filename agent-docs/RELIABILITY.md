@@ -4,6 +4,13 @@ Last verified: 2026-09-04
 
 ## Current Guardrails
 
+The activated runtime authority and migration boundary are owned by
+[Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md).
+UserRunner-specific coordination below applies only while the durable gate is
+legacy. Existing product admission, delivery, and runtime safety rules continue
+to apply after cutover.
+
+
 - Linq `providerCreatedAt` / `lastReceiptAt` order terminal events; they are not
   delivery latency. `message.delivered` uses valid `data.delivered_at` (or legacy
   `data.message.delivered_at`), falling back to the event timestamp. The parser

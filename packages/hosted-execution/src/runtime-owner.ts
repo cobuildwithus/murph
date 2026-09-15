@@ -1,4 +1,4 @@
-import { HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES, type HostedWorkspaceInvocationProcessingMode } from "./runtime-control.ts";
+import { isHostedRuntimeFailurePhaseCode, HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES, type HostedWorkspaceInvocationProcessingMode } from "./runtime-control.ts";
 import { parseAllowedString, readNullableString, requireBoolean, requireNonNegativeBigIntString, requireNonNegativeInteger, requireObject, requireString } from "./parsers/assertions.ts";
 
 export const HOSTED_RUNTIME_OWNER_PATH = "/api/internal/hosted-runtime/owner";
@@ -39,6 +39,7 @@ export type HostedRuntimeOwnerCommand =
       providerEgressTokenHash: string | null; customInferenceEnvelope: string | null;
       platformAiUsageAllowed: boolean; processingMode: HostedWorkspaceInvocationProcessingMode } & HostedRuntimeOwnerIdentity)
   | ({ operation: "accepted" | "revoke_ai_usage" } & HostedRuntimeOwnerIdentity)
+  | ({ operation: "record_failure"; errorCode: string } & HostedRuntimeOwnerIdentity)
   | ({ operation: "retire"; completed: boolean } & HostedRuntimeOwnerIdentity)
   | ({ operation: "release"; runnerContainerName: string | null } & HostedRuntimeOwnerIdentity)
   | ({ operation: "release_completed"; runnerContainerName: string } & HostedRuntimeOwnerIdentity)
@@ -56,15 +57,21 @@ export function parseHostedRuntimeOwnerCommand(value: unknown): HostedRuntimeOwn
   if (operation === "reconcile" || operation === "deletion_ready") return { operation };
   if (operation === "target_retired") return { operation, runnerContainerName: requireString(r.runnerContainerName, "Retired target") };
   if (operation === "claim") return { operation, processingMode: parseAllowedString(r.processingMode, "Runtime processing mode", HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES) };
-  if (operation === "authorize_provider") {
+  if (operation === "authorize_provider") return parseProviderAuthorization(r);
+  return parseInvocationCommand(r, operation);
+}
+
+function parseProviderAuthorization(r: Record<string, unknown>): HostedRuntimeOwnerCommand {
     const runnerContainerName = readNullableString(r.runnerContainerName, "Runtime target");
     const providerEgressTokenHash = readNullableString(r.providerEgressTokenHash, "Provider token hash");
     if (Boolean(runnerContainerName) === Boolean(providerEgressTokenHash)) throw new TypeError("Provider authorization requires exactly one credential identity.");
     if (providerEgressTokenHash && !/^[a-f0-9]{64}$/u.test(providerEgressTokenHash)) throw new TypeError("Provider token hash is invalid.");
     const providerKind = requireString(r.providerKind, "Provider kind");
     if (!/^[a-z][a-z0-9_]{0,63}$/u.test(providerKind)) throw new TypeError("Provider kind is invalid.");
-    return { operation, runnerContainerName, providerEgressTokenHash, providerKind };
-  }
+    return { operation: "authorize_provider", runnerContainerName, providerEgressTokenHash, providerKind };
+}
+
+function parseInvocationCommand(r: Record<string, unknown>, operation: string): HostedRuntimeOwnerCommand {
   const identity = parseHostedRuntimeOwnerIdentity(r);
   switch (operation) {
     case "select_target": return { operation, ...identity, runnerContainerName: requireString(r.runnerContainerName, "Runtime target") };
@@ -79,6 +86,10 @@ export function parseHostedRuntimeOwnerCommand(value: unknown): HostedRuntimeOwn
     };
     case "accepted":
     case "revoke_ai_usage": return { operation, ...identity };
+    case "record_failure": {
+      if (r.errorCode !== "runtime_error" && !isHostedRuntimeFailurePhaseCode(r.errorCode)) throw new TypeError("Unsupported runtime failure code.");
+      return { operation, ...identity, errorCode: r.errorCode };
+    }
     case "retire": return { operation, ...identity, completed: requireBoolean(r.completed, "Runtime completion") };
     case "release": return { operation, ...identity, runnerContainerName: readNullableString(r.runnerContainerName, "Retired target") };
     case "release_completed": return { operation, ...identity, runnerContainerName: requireString(r.runnerContainerName, "Completed target") };

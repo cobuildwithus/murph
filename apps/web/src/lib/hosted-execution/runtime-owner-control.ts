@@ -1,7 +1,8 @@
+import { reconcileHostedRuntimeUploads } from "./runtime-upload-recovery";
 import type { HostedRuntimeOwner, PrismaClient } from "@prisma/client";
 import { parseHostedRuntimeOwnerResponse, type HostedRuntimeOwnerCommand, type HostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
 import {
-  isHostedRuntimeDeletionReady, recordHostedRuntimeTargetRetired, authorizeHostedRuntimeProvider,
+  recordHostedRuntimeFailure, isHostedRuntimeDeletionReady, recordHostedRuntimeTargetRetired, authorizeHostedRuntimeProvider,
   claimHostedRuntime, prepareHostedRuntimeLaunch, recordHostedRuntimeAccepted,
   releaseHostedRuntimeAfterRetirement, requireHostedRuntimeOwnerTx, retireHostedRuntime,
   revokeHostedRuntimeAiUsageTx, selectHostedRuntimeTarget, releaseHostedRuntimeAfterCompletion,
@@ -24,6 +25,7 @@ async function executeCommand(input: CommandInput): Promise<CommandResult> {
     case "reconcile":
       return { status: "observed", owner: await prisma.hostedRuntimeOwner.findUnique({ where: { userId } }) };
     case "deletion_ready":
+      await reconcileHostedRuntimeUploads({ prisma, now: new Date(), deadlineAtMs: Date.now() + 5_000, deletedUserId: userId });
       return authorized(await isHostedRuntimeDeletionReady(input));
     case "claim": {
       const result = await claimHostedRuntime({ prisma, userId, processingMode: command.processingMode });
@@ -50,6 +52,8 @@ async function executeIdentityCommand(input: Omit<CommandInput, "command"> & { c
       return { status: "updated", owner: await prepareHostedRuntimeLaunch({ ...command, prisma, identity }) };
     case "accepted":
       return mutated(await recordHostedRuntimeAccepted({ prisma, identity }));
+    case "record_failure":
+      return mutated(await recordHostedRuntimeFailure({ prisma, identity, errorCode: command.errorCode }));
     case "retire":
       return mutated(await retireHostedRuntime({ prisma, identity, completed: command.completed }));
     case "release":

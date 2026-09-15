@@ -2,6 +2,15 @@
 
 Last verified: 2026-09-04
 
+## Runtime authority cutover
+
+[Hosted Postgres runtime ownership](hosted-postgres-runtime.md) owns the new
+execution authority, upload recovery, and finite fleet cutover. The Worker flag
+defaults off. The UserRunner coordination descriptions below apply to the legacy
+gate; after activation, Web/Postgres owns those facts while native containers
+and Temporal retain their execution and scheduling responsibilities. Mailbox,
+workspace, assistant, and delivery contracts below continue to apply.
+
 ## Decision
 
 Hosted execution is hard-cut to an exact-event mailbox plus

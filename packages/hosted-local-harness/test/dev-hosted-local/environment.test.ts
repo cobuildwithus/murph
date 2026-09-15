@@ -1386,6 +1386,7 @@ describe("buildWranglerVarArgs", () => {
         HOSTED_EXECUTION_STANDBY_MODE: "allocate",
         HOSTED_EXECUTION_STANDBY_TARGET: "3",
         HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
+        HOSTED_RUNTIME_POSTGRES_ENABLED: "true",
       }),
     ).toEqual([
       "--var",
@@ -1400,6 +1401,8 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_EXECUTION_STANDBY_TARGET:3",
       "--var",
       "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS:45000",
+      "--var",
+      "HOSTED_RUNTIME_POSTGRES_ENABLED:true",
     ]);
   });
 

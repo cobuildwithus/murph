@@ -1,6 +1,6 @@
 import { HOSTED_RUNTIME_ORPHAN_GRACE_MS } from "@murphai/hosted-execution/runtime-resources";
 import type { HostedRuntimeMedia, PrismaClient, Prisma } from "@prisma/client";
-import { hostedMediaObjectKey } from "@murphai/hosted-execution/storage-paths";
+import { hostedMediaObjectKey, hostedPrivateMediaObjectKey } from "@murphai/hosted-execution/storage-paths";
 import { parseHostedRuntimeMediaCommand, type HostedRuntimeMediaCommand, type HostedRuntimeMediaPurge, type HostedRuntimeMediaResponse } from "@murphai/hosted-execution/runtime-media";
 import { lockHostedRuntimeCutoverTx, requireHostedRuntimeOwnerTx } from "./runtime-owner";
 
@@ -11,13 +11,15 @@ export async function executeHostedRuntimeMediaCommand(input: {
 }): Promise<HostedRuntimeMediaResponse> {
   const command = parseHostedRuntimeMediaCommand(input.command);
   const now = input.now ?? new Date();
-  const mediaId = "descriptor" in command ? command.descriptor.mediaId : "purge" in command ? command.purge.mediaId : command.mediaId;
-  const objectKey = await hostedMediaObjectKey({ userId: input.userId, mediaId });
+  const mediaId = "sha256" in command ? command.sha256 : "descriptor" in command ? command.descriptor.mediaId : "purge" in command ? command.purge.mediaId : command.mediaId;
+  const isPrivate = command.operation === "admit_private_put" || command.operation === "release_put" && command.scope === "private_media";
+  const objectKey = isPrivate ? await hostedPrivateMediaObjectKey({ userId: input.userId, sha256: mediaId })
+    : await hostedMediaObjectKey({ userId: input.userId, mediaId });
   return input.prisma.$transaction(async (tx) => {
     const cutover = await lockHostedRuntimeCutoverTx(tx);
     const result = (applied: boolean, reason: HostedRuntimeMediaResponse["reason"] = null, purge: HostedRuntimeMediaPurge | null = null): HostedRuntimeMediaResponse => ({ cutover, applied, reason, purge });
     if (cutover !== "postgres") return result(false);
-    if (command.operation === "register" || command.operation === "retire" || command.operation === "admit_put") await requireHostedRuntimeOwnerTx(tx, { ...command, userId: input.userId });
+    if (command.operation === "register" || command.operation === "retire" || command.operation === "admit_put" || command.operation === "admit_private_put") await requireHostedRuntimeOwnerTx(tx, { ...command, userId: input.userId });
     // Also serialize reads/cleanup for resource-only members whose account row
     // has already been deleted. No account FK owns this cleanup obligation.
     await lockHostedRuntimeMediaTx(tx, input.userId, mediaId);
@@ -38,12 +40,21 @@ async function executeMediaCommandTx(input: MediaTransaction, command: HostedRun
   switch (command.operation) {
     case "release_put": {
       const released = await tx.hostedRuntimePutDrain.updateMany({ where: {
-        userId, kind: "media", writeId: mediaPutWriteId(mediaId, command.writeId), completedAt: null,
+        userId, kind: command.scope ?? "media", writeId: mediaPutWriteId(mediaId, command.writeId, command.scope), completedAt: null,
       }, data: { completedAt: now } });
       return mediaResult(released.count === 1);
     }
     case "admit_put":
       return admitMediaPutTx(input, command, row);
+    case "admit_private_put": {
+      const writeId = mediaPutWriteId(mediaId, command.writeId, "private_media");
+      await tx.hostedRuntimePutDrain.create({ data: { userId, writeId, kind: "private_media",
+        attemptId: command.attemptId, generation: BigInt(command.generation), admittedAt: now,
+        objectKey: input.objectKey, uploadId: command.uploadId, reconcileAfter: new Date(now.getTime() + HOSTED_RUNTIME_ORPHAN_GRACE_MS) } });
+      // The existing private-media bucket lifecycle owns its 24-hour lifetime.
+      // This row tracks only the physical upload for account-deletion fencing.
+      return mediaResult(true);
+    }
     case "acknowledge_purge": {
       const updated = await tx.hostedRuntimeMedia.updateMany({ where: {
         userId, mediaId, objectKey: command.purge.objectKey,
@@ -65,7 +76,8 @@ async function admitMediaPutTx(input: MediaTransaction, command: Extract<HostedR
   const writeId = mediaPutWriteId(mediaId, command.writeId);
   if (await tx.hostedRuntimePutDrain.findUnique({ where: { userId_writeId: { userId, writeId } } })) return mediaResult(false);
   await tx.hostedRuntimePutDrain.create({ data: { userId, writeId, kind: "media",
-    attemptId: command.attemptId, generation: BigInt(command.generation), admittedAt: now } });
+    attemptId: command.attemptId, generation: BigInt(command.generation), admittedAt: now,
+    objectKey, uploadId: command.uploadId, reconcileAfter: new Date(now.getTime() + HOSTED_RUNTIME_ORPHAN_GRACE_MS) } });
   if (!row) {
     const descriptor = command.descriptor;
     // An interrupted first upload expires; its independent drain prevents
@@ -115,8 +127,8 @@ export function purgeReceipt(row: HostedRuntimeMedia): HostedRuntimeMediaPurge {
   return { mediaId: row.mediaId, objectKey: row.objectKey, revision: row.revision.toString() };
 }
 
-function mediaPutWriteId(mediaId: string, writeId: string): string {
-  return `media:${mediaId}:${writeId}`;
+function mediaPutWriteId(mediaId: string, writeId: string, scope = "media"): string {
+  return `${scope}:${mediaId}:${writeId}`;
 }
 
 export async function hasPendingRuntimeMediaPutTx(tx: Prisma.TransactionClient, userId: string, mediaId: string, now: Date): Promise<boolean> {

@@ -30,14 +30,21 @@ function harness() {
   };
   const env = { ...createHostedExecutionTestEnv(), HOSTED_RUNTIME_POSTGRES_ENABLED: "true", BUNDLES: new MemoryEncryptedR2Bucket(), RUNNER_CONTAINER: { getByName: () => container }, USER_RUNNER: { getByName() { throw new Error("Unexpected UserRunner activation"); } } };
   vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "authorized", owner });
-  const request = () => new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNNER_WEB_CONTROL_ROUTES.usageRecording.path}`, { method: "POST", headers: {
+  const request = (body: unknown = { usage: { usageId: "synthetic-report" } }) => new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNNER_WEB_CONTROL_ROUTES.usageRecording.path}`, { method: "POST", headers: {
     "content-type": "application/json", "x-hosted-runtime-attempt-id": identity.attemptId, "x-hosted-runtime-lease-generation": identity.generation, "x-hosted-runtime-workspace-version": "0",
-  }, body: JSON.stringify({ usage: { usageId: "synthetic-report" } }) });
+  }, body: JSON.stringify(body) });
   return { userId, identity, receipt, owner, env, request, container };
 }
 
 describe("Postgres usage settlement with native receipts", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it.each([{}, { usage: null }, { usage: "invalid" }])("rejects malformed usage envelopes before settlement admission", async body => {
+    const h = harness();
+    expect((await handleRunnerOutboundRequest(h.request(body), h.env, h.userId)).status).toBe(400);
+    expect(h.container.beginRuntimeUsageSettlement).not.toHaveBeenCalled();
+    expect(fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+  });
 
   it("persists pending evidence before HTTP and denies later providers when settlement and revocation are unavailable", async () => {
     const h = harness();

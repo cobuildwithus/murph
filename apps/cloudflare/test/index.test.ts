@@ -360,6 +360,7 @@ describe("cloudflare worker routes", () => {
       "service-banner",
     ]);
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
+      "runtime-migration",
       "device-webhook-enqueue",
       "temporal-worker-binding-admission",
       "deploy-artifact-smoke",
@@ -368,6 +369,7 @@ describe("cloudflare worker routes", () => {
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
+      "runtime-resource-purge",
       "telegram-usage-limit-notice",
       "environment-realtime-call",
       "environment-voice-stage",
@@ -398,6 +400,7 @@ describe("cloudflare worker routes", () => {
       "test-temporal-mailbox-signal-fault-consume",
       "test-direct-r2-presigned-put",
       "test-direct-r2-locator-marker",
+      "runtime-migration",
       "device-webhook-enqueue",
       "temporal-worker-binding-admission",
       "deploy-artifact-smoke",
@@ -406,6 +409,7 @@ describe("cloudflare worker routes", () => {
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
+      "runtime-resource-purge",
       "telegram-usage-limit-notice",
       "environment-realtime-call",
       "environment-voice-stage",

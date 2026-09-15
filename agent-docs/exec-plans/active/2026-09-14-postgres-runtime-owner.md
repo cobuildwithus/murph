@@ -210,3 +210,82 @@ Updated: 2026-09-15
   inventory gate, private-media publication, uncertain direct-write recovery,
   owner documentation/telemetry, composed warm/cold message and typing proof,
   private Temporal compatibility proof, and final exact-head review/CI.
+
+
+## Frozen legacy migration checkpoint
+
+- The legacy wrapper now persists a closed freeze barrier before stopping its
+  exact target, waits for admitted RPCs and background work, reconciles again,
+  verifies capability drains, and removes queued alarms before export. SQLite
+  schema 20 rejects older writers that do not implement the freeze protocol.
+- Bounded export covers media-only and empty objects, resource metadata, and
+  generation high-water. Unknown KV state fails coverage. Active credentials,
+  attempts, and inference envelopes are never exported as authority.
+- The signed system migration endpoint owns a monotonic draining gate, ordered
+  namespace inventory, exact-page hash/cursor receipts, and atomic resource
+  import. Deleted members need no canonical member row. Activation requires
+  completed imports and the same final inventory; it cannot restore legacy
+  authority. The migration namespace remains retained through rollback proof.
+- The hosted operator helper inventories the actual Cloudflare namespace with
+  pagination and requires one serving Worker version at 100% traffic. It reads
+  every object, including objects without stored data, and separates import from
+  explicit activation. No production invocation or deployment occurred.
+- Migration proof passes on real loopback Postgres: replay, stale cursor/hash,
+  terminal media retirement, empty-object coverage, incomplete activation, and
+  generation 17 -> 18 after cutover. Legacy export/freeze and operator tests pass.
+- Private Temporal consumer typecheck and 485 focused orchestration/replay tests
+  passed against its unchanged source and exact published dependency. This is
+  compatibility evidence, not a composed new-public/private live delivery proof.
+- Private-media publication and independent recoverable multipart receipts for
+  media/private images/replica shards are implemented. Unknown aborts remain
+  pending through runtime stop and account deletion. Five physical-upload tests,
+  23 real-Postgres ownership tests, 99 harness environment tests, and Web/Worker/
+  harness typechecks pass. The full runner bundle passes its local size guard.
+- The dedicated Postgres cold/warm full-stack journey is running. Its isolated
+  schema-reset fixture now initializes the empty cutover row explicitly.
+- Remaining work includes final steady-state cleanup, telemetry review, composed
+  warm/cold reply and typing proof, deployment-variable forwarding in the private
+  consumer, final ReviewGPT, and exact-head CI. PR #3479 remains draft.
+
+
+## Final review scope requested by the user
+
+- When the implementation and focused proof are complete, run five ReviewGPT
+  audits concurrently: two independent full reviews, plus focused runtime
+  ownership, migration/cutover, and upload/cleanup lifecycle reviews.
+- Report each audit's actual findings to the user, including zero-finding
+  results, and remediate confirmed issues. These are explicitly requested final
+  audits; do not start them while implementation changes are still known.
+
+## Composed delivery and completion checkpoint
+
+- The first composed fixture omitted member activation; it now initializes the
+  canonical vault before testing a cold conversation. No product change was
+  made for that unsupported fixture state.
+- The composed run exposed a missing opaque provider token in the new launch
+  adapter. Preparation now stores its hash in Postgres and carries the raw token
+  only in the launch job. Cold and second replies and typing-before-send then
+  passed; the same-target assertion correctly caught the remaining warm issue.
+- Native completion previously left the owner retiring until reconciliation or
+  idle shutdown. The settled outer invocation now releases the attempt while
+  retaining its warm target before notifying Temporal. Early completion callbacks
+  still retain authority until native settlement. Thirteen focused native and
+  orchestration tests pass. The full composed journey passed: cold delivery,
+  warm typing-before-send, the same native target, clean mailbox progress, and
+  no provider authorization failures or harness interventions.
+- Phase-only failure metadata records the first failure of an exact attempt
+  before native stop. Duplicate and delayed reports cannot change a successor.
+  All 24 Postgres ownership tests pass. Both app typechecks, shared build, the
+  five usage tests, 85 harness startup tests, harness typecheck, migration proof,
+  and 23 freeze/import/resource/user-control tests pass.
+- Local schema pushes now initialize the legacy gate idempotently; production
+  migration ownership and fail-closed missing-gate behavior remain intact.
+- Private deployment companion PR: https://github.com/cobuildwithus/murph-cloud/pull/151.
+  Its full verification and 63 focused environment-contract tests passed.
+  Its two mandatory external reviews run alongside CI and are additional to
+  the five requested public lifecycle audits. No production deployment occurred.
+- Owner documentation now describes steady Postgres authority, bounded upload
+  recovery, and the separately authorized finite cutover. No prompt, tool schema,
+  provider-visible input builder, or group runtime was changed. Model-quality
+  live proof is not selected for this orchestration change; the composed journey
+  uses the real Codex app-server/runtime with synthetic provider responses.

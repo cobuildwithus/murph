@@ -71,6 +71,22 @@ describe("native supervised invocation", () => {
     await expect(recovered.startSupervisedInvocation({ userId, job: job("attempt-b", "2") })).rejects.toThrow("unresolved");
   });
 
+  it("releases the retained assignment only after the native invocation settles", async () => {
+    const { create, pending } = harness();
+    const container = create();
+    let finish!: (result: { status: "idle" }) => void;
+    vi.spyOn(container, "invoke").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    await container.startSupervisedInvocation({ userId, job: job() });
+    expect(recordHostedRuntimeOwnerCompletion).not.toHaveBeenCalled();
+    await container.recordSupervisedRuntimeCompletion({ userId, attemptId: "attempt-a", generation: "1", result: { status: "idle" } });
+    expect(recordHostedRuntimeOwnerCompletion).toHaveBeenLastCalledWith(expect.not.objectContaining({ settledRunnerContainerName: expect.anything() }));
+    finish({ status: "idle" });
+    await Promise.all(pending);
+    expect(recordHostedRuntimeOwnerCompletion).toHaveBeenLastCalledWith(expect.objectContaining({
+      attemptId: "attempt-a", generation: "1", settledRunnerContainerName: target,
+    }));
+  });
+
   it("rejects revoked or mismatched workspace authority before registering execution", async () => {
     const { create } = harness();
     const container = create();

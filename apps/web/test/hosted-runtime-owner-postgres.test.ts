@@ -1,8 +1,14 @@
+import { reconcileHostedRuntimeUploads } from "@/src/lib/hosted-execution/runtime-upload-recovery";
+const uploadRecovery = vi.hoisted(() => ({ purge: vi.fn() }));
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  readHostedExecutionControlClientIfConfigured: () => ({ purgeRuntimeResource: uploadRecovery.purge }),
+}));
 import { randomUUID } from "node:crypto";
 import type { HostedRuntimeOwner, PrismaClient } from "@prisma/client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
+  recordHostedRuntimeFailure,
   isHostedRuntimeDeletionReady,
   authorizeHostedRuntimeProvider,
   recordHostedRuntimeTargetRetired,
@@ -82,6 +88,32 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     if (result.status === "blocked") throw new Error(`Unexpected admission rejection: ${result.reason}`);
     return result;
   }
+
+  it("recovers uncertain media uploads by exact provider abort before deleted-member cleanup", async () => {
+    const userId = await member();
+    const owner = (await claim(userId)).owner;
+    const current = identity(owner);
+    const descriptor = { mediaId: "d".repeat(64), sha256: "e".repeat(64), mediaKind: "image" as const, byteSize: 4, expiresAt: null };
+    await executeHostedRuntimeMediaCommand({ prisma: first, userId, command: {
+      operation: "admit_put", ...current, descriptor, uploadId: "synthetic-recovery-upload", writeId: "synthetic-recovery-write",
+    } });
+    uploadRecovery.purge.mockReset();
+    expect(await reconcileHostedRuntimeUploads({ prisma: first, now: new Date(), deadlineAtMs: Date.now() + 5_000, deletedUserId: userId })).toEqual({ recovered: 0, failed: 0 });
+    expect(uploadRecovery.purge).not.toHaveBeenCalled();
+    await retireHostedRuntime({ prisma: first, identity: current });
+    await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: current, runnerContainerName: null });
+    await observer.hostedMember.delete({ where: { id: userId } });
+    expect(await isHostedRuntimeDeletionReady({ prisma: first, userId })).toBe(false);
+    uploadRecovery.purge.mockRejectedValueOnce(new Error("synthetic uncertain abort"));
+    expect(await reconcileHostedRuntimeUploads({ prisma: first, now: new Date(), deadlineAtMs: Date.now() + 5_000, deletedUserId: userId })).toEqual({ recovered: 0, failed: 1 });
+    expect(await isHostedRuntimeDeletionReady({ prisma: first, userId })).toBe(false);
+    uploadRecovery.purge.mockResolvedValueOnce(undefined);
+    expect(await reconcileHostedRuntimeUploads({ prisma: first, now: new Date(), deadlineAtMs: Date.now() + 5_000, deletedUserId: userId })).toEqual({ recovered: 1, failed: 0 });
+    expect(uploadRecovery.purge).toHaveBeenLastCalledWith({ userId, resource: {
+      kind: "multipart", uploadId: "synthetic-recovery-upload", objectKey: (await observer.hostedRuntimeMedia.findUniqueOrThrow({ where: { userId_mediaId: { userId, mediaId: descriptor.mediaId } } })).objectKey,
+    } });
+    expect(await isHostedRuntimeDeletionReady({ prisma: first, userId })).toBe(true);
+  });
 
   it("serializes competing claims on independent connections", async () => {
     const userId = await member();
@@ -485,7 +517,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const now = new Date();
     const descriptor = { mediaId: "e".repeat(64), mediaKind: "image" as const,
       byteSize: 30, sha256: "f".repeat(64), expiresAt: null };
-    const command = { operation: "admit_put" as const, ...runtime, writeId: "synthetic-media-write", descriptor };
+    const command = { operation: "admit_put" as const, uploadId: "synthetic-upload", ...runtime, writeId: "synthetic-media-write", descriptor };
     expect(await executeHostedRuntimeMediaCommand({ prisma: first, userId, command, now })).toMatchObject({ applied: true });
     expect(await executeHostedRuntimeMediaCommand({ prisma: first, userId, command, now })).toMatchObject({ applied: false });
     expect(await executeHostedRuntimeMediaCommand({ prisma: second, userId, command: {
@@ -498,11 +530,31 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await executeHostedRuntimeMediaCommand({ prisma: second, userId, command: {
       operation: "release_put", writeId: command.writeId, mediaId: descriptor.mediaId,
     }, now: sweepAt })).toMatchObject({ applied: true });
-    const cleanup = await claimHostedRuntimeResourceCleanup({ prisma: second, now: sweepAt });
+    const nextSweepAt = new Date(sweepAt.getTime() + 60_000);
+    const cleanup = await claimHostedRuntimeResourceCleanup({ prisma: second, now: nextSweepAt });
     expect(cleanup.media.filter(row => row.userId === userId)).toHaveLength(1);
     // A failed purge is paced using metadata, so it cannot dominate every sweep.
     expect((await claimHostedRuntimeResourceCleanup({ prisma: second, now: sweepAt })).media
       .filter(row => row.userId === userId)).toEqual([]);
+  });
+
+  it("records one failure per exact attempt without releasing it or touching its successor", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const failure = () => recordHostedRuntimeFailure({ prisma: first, identity: runtime, errorCode: "runtime_phase:mailbox.import.initial" });
+    expect(await failure()).toBe(true);
+    expect(await failure()).toBe(false);
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({
+      phase: "starting", attemptId: runtime.attemptId, failureCount: 1,
+      lastErrorCode: "runtime_phase:mailbox.import.initial",
+    });
+    await retireHostedRuntime({ prisma: first, identity: runtime });
+    await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: runtime, runnerContainerName: null });
+    const successor = (await claim(userId)).owner!;
+    expect(await failure()).toBe(false);
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({
+      attemptId: successor.attemptId, lastErrorCode: null, failureCount: 1,
+    });
   });
 
   it("keeps concurrent replica PUTs independent through revocation and account deletion", async () => {
@@ -518,6 +570,13 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       command: { operation: "release", writeId } });
     expect(await admit("synthetic-write-a")).toEqual({ applied: true });
     expect(await admit("synthetic-write-b")).toEqual({ applied: true });
+    expect(await executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command: {
+      operation: "admit", ...runtime, writeId: "synthetic-multipart-write", objectKey: `${prefix}synthetic-root.json`,
+      multipart: { objectKey: `${prefix}synthetic-root.json`, uploadId: "synthetic-upload" },
+    } })).toEqual({ applied: true });
+    const multipartOutstanding = () => observer.hostedRuntimePutDrain.findUniqueOrThrow({ where: {
+      userId_writeId: { userId, writeId: "replica:synthetic-multipart-write" },
+    } });
     expect(await admit("synthetic-write-a")).toEqual({ applied: false });
     expect(await release("synthetic-write-a")).toEqual({ applied: true });
     const outstanding = () => observer.hostedRuntimePutDrain.findUniqueOrThrow({ where: {
@@ -532,8 +591,11 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: runtime,
       runnerContainerName: "synthetic-replica-slot" })).toBe(true);
     expect((await outstanding()).drainUntil!.getTime()).toBeGreaterThan(Date.now());
+    expect(await multipartOutstanding()).toMatchObject({ completedAt: null, drainUntil: null, uploadId: "synthetic-upload" });
     await observer.hostedMember.delete({ where: { id: userId } });
     expect(await release("synthetic-write-b")).toEqual({ applied: true });
+    expect(await multipartOutstanding()).toMatchObject({ completedAt: null, drainUntil: null });
+    expect(await release("synthetic-multipart-write")).toEqual({ applied: true });
     expect(await outstanding()).toMatchObject({ completedAt: expect.any(Date) });
   });
 

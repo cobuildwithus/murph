@@ -984,6 +984,15 @@ export class RunnerContainer extends Container {
     return { bundleFingerprint, sourceFingerprint };
   }
 
+  private async recordRuntimeFailureBeforeStop(request: { userId: string; attemptId: string; leaseGeneration: string }, error: unknown): Promise<void> {
+    if (!usesPostgresRuntimeOwner(this.environment)) return;
+    const phaseCode = readRunnerContainerErrorDetails(error)?.[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY];
+    await commandHostedRuntimeOwner({ source: this.environment, userId: request.userId, timeoutMs: 1_000,
+      command: { operation: "record_failure", attemptId: request.attemptId, generation: request.leaseGeneration,
+        errorCode: isHostedRuntimeFailurePhaseCode(phaseCode) ? phaseCode : "runtime_error" },
+    }).catch(() => undefined);
+  }
+
   async startSupervisedInvocation(
     payload: HostedExecutionContainerInvokeRequest,
   ): Promise<{ accepted: true }> {
@@ -1015,6 +1024,7 @@ export class RunnerContainer extends Container {
         attemptId: payload.job.request.attemptId,
         generation: payload.job.request.leaseGeneration,
         result: completed,
+        settledRunnerContainerName: target.slotName,
       });
       if (recorded) await this.onRuntimeCompletionRecorded({
         attemptId: payload.job.request.attemptId,
@@ -2515,6 +2525,7 @@ export class RunnerContainer extends Container {
         phase: "failed",
         userId: routeUserId,
       });
+      await this.recordRuntimeFailureBeforeStop(input.job.request, error);
       throw error;
     } finally {
       let cleanupSettled = false;

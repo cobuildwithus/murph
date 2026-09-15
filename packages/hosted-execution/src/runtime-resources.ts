@@ -58,7 +58,7 @@ function canonicalDate(value: unknown): string {
 
 export const HOSTED_RUNTIME_REPLICA_PUT_PATH = "/api/internal/hosted-runtime/replica-put";
 export type HostedRuntimeReplicaPutCommand =
-  | ({ operation: "admit"; writeId: string; objectKey: string } & HostedRuntimeOwnerIdentity)
+  | ({ operation: "admit"; writeId: string; objectKey: string; multipart?: { objectKey: string; uploadId: string } } & HostedRuntimeOwnerIdentity)
   | { operation: "release"; writeId: string };
 export function parseHostedRuntimeReplicaPutCommand(value: unknown): HostedRuntimeReplicaPutCommand {
   const record = requireObject(value, "Runtime replica PUT command");
@@ -66,5 +66,13 @@ export function parseHostedRuntimeReplicaPutCommand(value: unknown): HostedRunti
   if (!/^[a-zA-Z0-9._:-]{1,200}$/u.test(writeId)) throw new TypeError("Replica write identity is invalid.");
   if (record.operation === "release") return { operation: "release", writeId };
   if (record.operation !== "admit") throw new TypeError("Replica PUT operation is invalid.");
-  return { operation: "admit", writeId, objectKey: requireString(record.objectKey, "Replica object key"), ...parseHostedRuntimeOwnerIdentity(record) };
+  let multipart: { objectKey: string; uploadId: string } | undefined;
+  if (record.multipart !== undefined) {
+    const upload = requireObject(record.multipart, "Replica multipart upload");
+    const objectKey = requireString(upload.objectKey, "Replica multipart object key");
+    const uploadId = requireString(upload.uploadId, "Replica multipart identity");
+    if (objectKey.length > 1024 || uploadId.length > 1024) throw new TypeError("Replica multipart identity is too long.");
+    multipart = { objectKey, uploadId };
+  }
+  return { operation: "admit", writeId, ...(multipart ? { multipart } : {}), objectKey: requireString(record.objectKey, "Replica object key"), ...parseHostedRuntimeOwnerIdentity(record) };
 }

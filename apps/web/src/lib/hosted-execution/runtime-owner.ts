@@ -67,6 +67,7 @@ export async function claimHostedRuntime(input: {
       startedAt: now,
       completedAt: null,
       acceptedAt: null,
+      lastErrorCode: null,
       platformAiUsageAllowed: false,
       workspaceVersion: null,
       providerEgressTokenHash: null,
@@ -191,6 +192,18 @@ async function requireOwnerAfterCutoverLockTx(
   return owner;
 }
 
+/** Metadata only: never releases or grants runtime authority. The first failure
+ * of an exact attempt is durable and duplicate native reports are idempotent. */
+export async function recordHostedRuntimeFailure(input: {
+  prisma: PrismaClient; identity: HostedRuntimeIdentity; errorCode: string;
+}): Promise<boolean> {
+  const result = await input.prisma.hostedRuntimeOwner.updateMany({
+    where: { ...identityWhere(input.identity), phase: { in: ["starting", "active", "retiring"] }, lastErrorCode: null },
+    data: { lastErrorCode: input.errorCode, failureCount: { increment: 1 } },
+  });
+  return result.count === 1;
+}
+
 /** Completion revokes effects but retains the exact target until adapter proof.
  * No replacement can claim while launch or stop outcomes remain uncertain.
  */
@@ -227,7 +240,7 @@ export async function releaseHostedRuntimeAfterRetirement(input: {
       },
     });
     if (result.count === 1) await tx.hostedRuntimePutDrain.updateMany({
-      where: { ...identityWhere(input.identity), kind: "replica", completedAt: null, drainUntil: null },
+      where: { ...identityWhere(input.identity), kind: "replica", uploadId: null, completedAt: null, drainUntil: null },
       data: { drainUntil: new Date(Date.now() + HOSTED_RUNTIME_REPLICA_POST_STOP_DRAIN_MS) },
     });
     return result.count === 1;
@@ -255,7 +268,7 @@ export async function releaseHostedRuntimeAfterCompletion(input: {
       },
     });
     if (result.count === 1) await tx.hostedRuntimePutDrain.updateMany({
-      where: { ...identityWhere(input.identity), kind: "replica", completedAt: null, drainUntil: null },
+      where: { ...identityWhere(input.identity), kind: "replica", uploadId: null, completedAt: null, drainUntil: null },
       data: { drainUntil: new Date(Date.now() + HOSTED_RUNTIME_REPLICA_POST_STOP_DRAIN_MS) },
     });
     return result.count === 1;
@@ -331,7 +344,7 @@ export async function recordHostedRuntimeTargetRetired(input: { prisma: PrismaCl
       workspaceVersion: null, providerEgressTokenHash: null, customInferenceEnvelope: null, platformAiUsageAllowed: false,
     } });
     if (current.attemptId) await tx.hostedRuntimePutDrain.updateMany({ where: {
-      userId: input.userId, attemptId: current.attemptId, generation: current.generation, kind: "replica", completedAt: null, drainUntil: null,
+      userId: input.userId, attemptId: current.attemptId, generation: current.generation, kind: "replica", uploadId: null, completedAt: null, drainUntil: null,
     }, data: { drainUntil: new Date(Date.now() + HOSTED_RUNTIME_REPLICA_POST_STOP_DRAIN_MS) } });
     return true;
   }, OWNER_TRANSACTION_OPTIONS);
