@@ -1,7 +1,7 @@
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
@@ -49,15 +49,102 @@ describe.skipIf(!runPostgresProof)(
       prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
     });
 
-    afterAll(async () => {
+    afterEach(async () => {
       if (prisma && memberIds.length > 0) {
         await prisma.deviceConnection.deleteMany({ where: { userId: { in: memberIds } } });
+      }
+    });
+
+    afterAll(async () => {
+      if (prisma && memberIds.length > 0) {
         await prisma.hostedMember.deleteMany({
           where: { id: { in: memberIds } },
         });
       }
       await prisma?.$disconnect();
       restoreCrypto();
+    });
+
+    it("recovers a consumed scheduled wake whose canonical cadence never advanced", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedConsumedScheduledWake({ client, memberIds });
+      const recoveryClient = createPrismaClient({ databaseUrl, poolMax: 3 });
+      const getPrisma = vi.spyOn(prismaModule, "getPrisma").mockReturnValue(recoveryClient);
+      const signal = vi.spyOn(runtimeSignal, "signalHostedDeviceSyncMailboxRuntime")
+        .mockImplementation(async ({ mailboxItemId }) => {
+          expect(await client.hostedMailboxItem.count({ where: { id: mailboxItemId } })).toBe(1);
+          return { signalAccepted: true, workflowId: "synthetic-workflow" };
+        });
+      try {
+        const request = {
+          connectionId: fixture.wake.connectionId!,
+          createdAt: new Date().toISOString(),
+          eventId: fixture.wake.eventId,
+          expectedConnectedAt: fixture.wake.expectedConnectedAt!,
+          nextReconcileAt: fixture.wake.hint!.nextReconcileAt!,
+          provider: "oura",
+          userId: fixture.memberId,
+        };
+        const results = await Promise.all([
+          appendHostedDeviceSyncScheduledReconcileWake(request),
+          appendHostedDeviceSyncScheduledReconcileWake(request),
+        ]);
+        expect(results.filter((result) => result.wakeInserted)).toHaveLength(1);
+        expect(results.every((result) => result.wakeAccepted)).toBe(true);
+        expect(signal).toHaveBeenCalledTimes(1);
+        const items = await client.hostedMailboxItem.findMany({
+          where: { userId: fixture.memberId, lane: "system" },
+          orderBy: { laneSeq: "asc" },
+          select: { dedupeKey: true, laneSeq: true },
+        });
+        expect(items).toEqual([
+          { dedupeKey: fixture.wake.eventId, laneSeq: 1n },
+          { dedupeKey: `${fixture.wake.eventId}:consumed-recovery:1`, laneSeq: 2n },
+        ]);
+      } finally {
+        signal.mockRestore();
+        getPrisma.mockRestore();
+        await recoveryClient.$disconnect();
+      }
+    });
+
+    it.each([
+      "pending", "continuation", "future_retry", "changed_epoch",
+      "advanced_cadence", "disconnected", "mismatched_frontier", "malformed_pending",
+    ] as const)("does not recover a consumed wake with %s", async (scenario) => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedConsumedScheduledWake({ client, memberIds });
+      const nextHour = new Date(Date.now() + 3_600_000);
+      if (scenario === "pending") {
+        await client.hostedMailboxLaneCounter.update({
+          where: { userId_lane: { userId: fixture.memberId, lane: "system" } },
+          data: { nextSeq: 3n },
+        });
+      } else if (scenario === "changed_epoch" || scenario === "advanced_cadence" || scenario === "disconnected") {
+        await client.deviceConnection.update({
+          where: { id: fixture.wake.connectionId! },
+          data: scenario === "changed_epoch" ? { connectedAt: nextHour }
+            : scenario === "advanced_cadence" ? { nextReconcileAt: nextHour }
+              : { status: "disconnected" },
+        });
+      } else {
+        await client.hostedWorkspace.update({
+          where: { userId: fixture.memberId },
+          data: {
+            ...(scenario === "future_retry" ? { nextWakeAt: nextHour } : {}),
+            redactedStatusJson: {
+              hostedMailboxSystemHandledThroughSeq: scenario === "mismatched_frontier" ? "0" : "1",
+              hostedMailboxSystemImportedSeq: "1",
+              ...(scenario === "continuation" ? { hostedMailboxSystemDeviceSyncContinuationSeqs: ["1"] } : {}),
+              ...(scenario === "malformed_pending" ? { hostedMailboxSystemFirstPendingSeq: false } : {}),
+            },
+          },
+        });
+      }
+      await expect(appendScheduledWake(client, fixture.wake)).resolves.toMatchObject({
+        duplicate: true, dedupeConflict: false, inserted: false,
+      });
+      expect(await client.hostedMailboxItem.count({ where: { userId: fixture.memberId } })).toBe(1);
     });
 
     it.each(["success", "kms_failure", "consent_revoked", "root_rotated"] as const)(
@@ -792,6 +879,41 @@ async function seedRetiredScheduledWake(input: {
       sidecar: input.sidecar,
     }),
   };
+}
+
+async function seedConsumedScheduledWake(input: {
+  client: PrismaClient;
+  memberIds: string[];
+}) {
+  const fixture = await seedRetiredScheduledWake({ ...input, importedSeq: "0" });
+  await input.client.hostedMailboxItem.delete({ where: { id: fixture.mailboxItemId } });
+  await input.client.hostedMailboxLaneCounter.update({
+    where: { userId_lane: { userId: fixture.memberId, lane: "system" } },
+    data: { nextSeq: 1n, consumedSeq: 0n },
+  });
+  await input.client.deviceConnection.create({ data: {
+    id: fixture.wake.connectionId!, userId: fixture.memberId,
+    provider: "oura", status: "active",
+    providerAccountBlindIndex: `synthetic-${fixture.wake.connectionId}`,
+    connectedAt: new Date(fixture.wake.expectedConnectedAt!),
+    nextReconcileAt: new Date(fixture.wake.hint!.nextReconcileAt!),
+  } });
+  const initial = await appendScheduledWake(input.client, fixture.wake);
+  expect(initial.inserted).toBe(true);
+  await input.client.hostedMailboxLaneCounter.update({
+    where: { userId_lane: { userId: fixture.memberId, lane: "system" } },
+    data: { consumedSeq: 1n },
+  });
+  // Older checkpoints omit the optional pending/continuation fields and the
+  // per-item consumed marker; the lane frontier remains canonical.
+  await input.client.hostedWorkspace.update({
+    where: { userId: fixture.memberId },
+    data: { nextWakeAt: null, redactedStatusJson: {
+      hostedMailboxSystemHandledThroughSeq: "1",
+      hostedMailboxSystemImportedSeq: "1",
+    } },
+  });
+  return { ...fixture, mailboxItemId: initial.item.id };
 }
 
 async function insertRetiredScheduledWake(input: {

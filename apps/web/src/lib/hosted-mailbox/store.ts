@@ -854,7 +854,7 @@ export async function appendHostedScheduledDeviceSyncWakeEnvelopeTx(input: {
   prepared: PreparedHostedMailboxItemAppendCrypto;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedScheduledDeviceSyncWakeResult> {
-  const result = await appendHostedMailboxEnvelopeInternalTx({
+  let result = await appendHostedMailboxEnvelopeInternalTx({
     acceptRuntimeOwnedRetiredDuplicate:
       isHostedScheduledDeviceSyncWakeV3(input.envelope),
     encryption: { mode: "prepared-root", prepared: input.prepared },
@@ -862,11 +862,60 @@ export async function appendHostedScheduledDeviceSyncWakeEnvelopeTx(input: {
     tx: input.tx,
   });
 
+  if (result.duplicate && !result.dedupeConflict && isHostedScheduledDeviceSyncWakeV3(input.envelope)) {
+    const recoveryFrontier = await readHostedScheduledDeviceSyncRecoveryFrontierTx({
+      envelope: input.envelope,
+      item: result.item,
+      tx: input.tx,
+    });
+    if (recoveryFrontier !== null) {
+      // The original dedupe lock stays held through this successor append.
+      // Consumed history is immutable; the frontier gives recovery one identity.
+      result = await appendHostedMailboxEnvelopeInternalTx({
+        encryption: { mode: "prepared-root", prepared: input.prepared },
+        envelope: {
+          ...input.envelope,
+          eventId: `${input.envelope.eventId}:consumed-recovery:${recoveryFrontier}`,
+        },
+        tx: input.tx,
+      });
+    }
+  }
+
   return {
     ...result,
     runtimeOwnedRetiredDuplicate:
       result.runtimeOwnedRetiredDuplicate === true,
   };
+}
+
+async function readHostedScheduledDeviceSyncRecoveryFrontierTx(input: {
+  envelope: HostedExecutionDeviceSyncWake;
+  item: HostedMailboxItem;
+  tx: HostedMailboxMutationTx;
+}): Promise<string | null> {
+  const rows = await input.tx.$queryRaw<Array<{ frontier: string }>>`
+    SELECT counters.consumed_seq::text AS frontier
+    FROM hosted_mailbox_lane_counter counters
+    JOIN hosted_workspace workspace ON workspace.user_id = counters.user_id
+    JOIN device_connection connection ON connection.user_id = counters.user_id
+    WHERE counters.user_id = ${input.envelope.userId}
+      AND counters.lane = 'system'
+      AND counters.consumed_seq = counters.next_seq - 1
+      AND counters.consumed_seq >= ${BigInt(input.item.laneSeq)}
+      AND workspace.redacted_status_json->>'hostedMailboxSystemHandledThroughSeq' = counters.consumed_seq::text
+      AND workspace.redacted_status_json->>'hostedMailboxSystemImportedSeq' = counters.consumed_seq::text
+      AND COALESCE(workspace.redacted_status_json->'hostedMailboxSystemFirstPendingSeq', 'null'::jsonb) = 'null'::jsonb
+      AND COALESCE(workspace.redacted_status_json->'hostedMailboxSystemDeviceSyncContinuationSeqs', '[]'::jsonb) = '[]'::jsonb
+      AND (workspace.next_wake_at IS NULL OR workspace.next_wake_at <= NOW() AT TIME ZONE 'UTC')
+      AND connection.id = ${input.envelope.connectionId}
+      AND connection.provider = ${input.envelope.provider}
+      AND connection.status = 'active'
+      AND connection.connected_at = ${new Date(input.envelope.expectedConnectedAt!)}
+      AND connection.next_reconcile_at = ${new Date(input.envelope.hint!.nextReconcileAt!)}
+      AND connection.next_reconcile_at <= NOW() AT TIME ZONE 'UTC'
+  `;
+  return rows[0]?.frontier ?? null;
 }
 
 /**
