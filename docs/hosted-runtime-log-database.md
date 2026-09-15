@@ -1060,6 +1060,36 @@ retained sample. Histograms merge by summing corresponding counts; never compute
 per-call percentiles from per-profile averages. Truncation/loss means even those
 bounds describe the retained samples, not the complete population.
 
+### Private device failure evidence
+
+Caught device-handler failures may add three optional scalars to the existing
+`ToolFailureDiagnostic` classification row: `deviceAction` is the parsed
+`list_accounts | connect | reconcile | configure_no_data_outreach` action;
+`deviceErrorCode` is exact membership in `DEVICE_FAILURE_CODES` in
+`packages/assistant-engine/src/assistant-codex/tool-failure-diagnostics.ts` (the
+11 codes already recognized by the device adapter); `deviceHttpStatus` is an
+integer from 100 through 599, read from own `status`, or own `statusCode` only
+when `status` is nullish. Unknown codes and absent/invalid statuses are omitted,
+not suppressed failures. A status does not establish an external cause, override
+a local unsupported-selection code, or authorize a retry.
+
+Only this caught-device boundary emits the fields. Capture rejects proxies
+before descriptor reads and never invokes accessors, follows prototypes, reads
+contexts/causes/bodies/payloads, or retains errors, names, prose, providers,
+identifiers, arguments or results. The existing issue-input, reporting and
+sanitizer path retains the scalars without schema or cap changes (at most eight
+classification detail keys here, within the existing 24-key cap). Old/missing
+fields remain valid. RPCs, prompts, tool schemas, completion counters and
+success/admission telemetry are unchanged; classification rows are not another
+completed-call denominator.
+
+For the next authorized review, query at most 200 device classification failures
+in one fixed 24-hour window, grouped only by these fields and the existing
+reason/category. Keep missing/unknown evidence unresolved and completion counts
+separate. Propose a behavior correction only after at least two matching
+action/code observations and a deterministic reproduction at the responsible
+owner; telemetry alone does not establish the original cause.
+
 ### Finite CLI failure counts (optional, same timing identity)
 
 Each non-successful invocation from a new producer contributes at most one
