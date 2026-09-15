@@ -17,9 +17,15 @@ import type { HostedMailboxItem, HostedWorkspaceCheckpointRequest } from "@murph
 import { createEmptyHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime-wake.ts";
 
-test.each(["quiet window", "snapshot", "provider change", "shutdown"] as const)(
-  "promoted foreground priority preserves %s behavior",
-  async (arrival) => {
+// The same foreground contract must hold regardless of how authority arrived.
+// Keep the invocation alive beyond its first admission to exercise owner history.
+const priorityJourneys = (["default", "device completion", "system checkpoint"] as const)
+  .flatMap((owner) => (["quiet window", "snapshot", "provider change", "shutdown"] as const)
+    .map((arrival) => ({ owner, arrival })));
+
+test.each(priorityJourneys)(
+  "$owner owner preserves foreground priority through $arrival",
+  async ({ owner, arrival }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-promoted-priority-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -66,15 +72,19 @@ test.each(["quiet window", "snapshot", "provider change", "shutdown"] as const)(
     vi.setSystemTime(new Date(TEST_NOW));
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      await enqueueDeviceSyncSystemMailboxItemForTest({ item: device, vaultRoot });
+      if (owner !== "default") {
+        await enqueueDeviceSyncSystemMailboxItemForTest({ item: device, vaultRoot });
+      }
       const state = createEmptyHostedMailboxImportState();
       state.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, state);
       const restored = await createVaultSnapshotBundle({ vaultRoot });
       const mailbox = createMailboxPort({ events, items });
+      if (owner === "default") sendInput();
       invocation = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
-          processingMode: "system_mailbox", workspaceVersion: "0",
+          processingMode: owner === "default" ? "default" : "system_mailbox",
+          workspaceVersion: "0",
           idleCheckpointDelayMs: quietMs,
         },
         resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -82,6 +92,10 @@ test.each(["quiet window", "snapshot", "provider change", "shutdown"] as const)(
         vaultRoot, runtimeWakeSignal: wake, signal: abort.signal,
         shutdownSignal: shutdown.signal,
         async createCheckpointSnapshot(_request, context) {
+          if (owner === "system checkpoint" && nextInput === 0) {
+            sendInput();
+            return { snapshotRef: createSnapshotFixtureRef({ hash: "d".repeat(64), size: 512 }) };
+          }
           snapshotTimes.push(Date.now());
           events.push("snapshot");
           if (!providerChanged && !shutdown.signal.aborted) {
@@ -144,7 +158,9 @@ test.each(["quiet window", "snapshot", "provider change", "shutdown"] as const)(
           deviceSyncPort: createSnapshotDeviceSyncPort({
             connectionId: "synthetic-priority-connection",
             nextReconcileAt: "2099-01-01T00:00:00.000Z",
-            onApplyUpdates() { if (nextInput === 0) sendInput(); },
+            onApplyUpdates() {
+              if (owner === "device completion" && nextInput === 0) sendInput();
+            },
           }),
           mailboxPort: {
             ...mailbox,
@@ -162,6 +178,10 @@ test.each(["quiet window", "snapshot", "provider change", "shutdown"] as const)(
       void invocation.catch(() => undefined);
       await awaitReply(1);
       assert.deepEqual(snapshotTimes, []);
+      const initialIdleCheckpoints = checkpointRequests
+        .filter((request) => request.reason === "idle_shutdown").length;
+      const foregroundIdleCheckpoints = () => checkpointRequests
+        .filter((request) => request.reason === "idle_shutdown").length - initialIdleCheckpoints;
 
       if (arrival === "provider change" || arrival === "shutdown") {
         if (arrival === "provider change") providerChanged = true;
@@ -184,7 +204,7 @@ test.each(["quiet window", "snapshot", "provider change", "shutdown"] as const)(
       }
       await awaitReply(2);
       assert.equal(effectCalls, 0, "Background effects must wait for foreground input.");
-      assert.equal(checkpointRequests.filter((request) => request.reason === "idle_shutdown").length, 0);
+      assert.equal(foregroundIdleCheckpoints(), 0);
       assert.equal(snapshotInterrupted, arrival === "snapshot");
 
       await vi.advanceTimersByTimeAsync(1_000);
@@ -192,7 +212,7 @@ test.each(["quiet window", "snapshot", "provider change", "shutdown"] as const)(
       await awaitReply(3);
       const finalReplyAt = Date.now();
       await vi.advanceTimersByTimeAsync(quietMs - 1);
-      assert.equal(checkpointRequests.filter((request) => request.reason === "idle_shutdown").length, 0);
+      assert.equal(foregroundIdleCheckpoints(), 0);
       await vi.advanceTimersByTimeAsync(1);
       const result = await withRealTimeout(invocation, 10_000, () => events.join(","));
       assert.equal(imported.size, 3);
@@ -200,7 +220,7 @@ test.each(["quiet window", "snapshot", "provider change", "shutdown"] as const)(
       assert.deepEqual(events.filter((event) => event.startsWith("reply:")),
         ["reply:1", "reply:2", "reply:3"]);
       assert.equal(effectCalls, 1);
-      assert.equal(checkpointRequests.filter((request) => request.reason === "idle_shutdown").length, 2,
+      assert.equal(foregroundIdleCheckpoints(), 2,
         "Deferred effects must still converge through their follow-up checkpoint.");
       assert.ok(snapshotTimes.at(-1)! >= finalReplyAt + quietMs);
       assert.ok(events.indexOf("durable-effect") > events.indexOf("reply:3"));
