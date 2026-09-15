@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:reduce-heart-disease-risk
 slug: reduce-heart-disease-risk
-title: Lower My Risk of Heart Disease
-summary: Reduce cardiovascular risk by working on the few factors that matter most for you and maintaining them over time.
+title: Understand Heart Disease Prevention
+summary: Learn about heart disease risk factors, everyday habits, and prevention options to discuss with your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: function
-  goalPhrase: lower my risk of heart disease
+  goalPhrase: understand heart disease prevention
   successSignals:
     - id: major_cardiovascular_risks
       kind: biomarker
@@ -32,7 +32,7 @@ goal:
     kind: general_plan
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me lower my risk of heart disease.
+  startPrompt: Hey Murph, help me understand heart disease prevention.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -89,4 +89,4 @@ This is a prevention plan, not a way to evaluate current symptoms. Call emergenc
 
 ## Related goals
 
-[Lower My Blood Pressure](/goals/lower-blood-pressure) · [Lower My LDL Cholesterol](/goals/lower-ldl-cholesterol) · [Lower My Risk of Stroke](/goals/reduce-stroke-risk)
+[Track My Blood Pressure](/goals/lower-blood-pressure) · [Understand My LDL Cholesterol](/goals/lower-ldl-cholesterol) · [Understand Stroke Prevention](/goals/reduce-stroke-risk)

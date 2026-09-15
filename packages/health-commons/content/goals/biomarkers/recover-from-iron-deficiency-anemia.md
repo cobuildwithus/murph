@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:recover-from-iron-deficiency-anemia
 slug: recover-from-iron-deficiency-anemia
-title: Recover From Iron-Deficiency Anemia
-summary: Rebuild hemoglobin and iron stores, address the blood loss or absorption problem, and return to normal energy safely.
+title: Understand My Iron-Deficiency Anemia
+summary: Understand iron-deficiency anemia, how clinicians investigate its cause, and what follow-up involves.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:correct-iron-deficiency
   outcomeKind: function
-  goalPhrase: recover from iron-deficiency anemia
+  goalPhrase: understand my iron-deficiency anemia
   successSignals:
     - id: hemoglobin_recovery
       kind: biomarker
@@ -35,7 +35,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - micronutrients-supplements
-  startPrompt: Hey Murph, help me recover from iron-deficiency anemia.
+  startPrompt: Hey Murph, help me understand my iron-deficiency anemia.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -91,4 +91,4 @@ Dark stool is common with oral iron; sticky black tarry stool with weakness or a
 
 ## Related goals
 
-[Correct My Iron Deficiency](/goals/correct-iron-deficiency) · [Build Stronger Bones](/goals/build-stronger-bones)
+[Understand My Iron Deficiency](/goals/correct-iron-deficiency) · [Build Stronger Bones](/goals/build-stronger-bones)

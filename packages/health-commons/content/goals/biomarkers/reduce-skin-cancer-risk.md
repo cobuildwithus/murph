@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:reduce-skin-cancer-risk
 slug: reduce-skin-cancer-risk
-title: Lower My Risk of Skin Cancer
-summary: Reduce harmful ultraviolet exposure with shade, clothing, sunscreen, and no indoor tanning while keeping the plan realistic.
+title: Understand Skin Cancer Prevention
+summary: Learn about skin cancer risk factors, sun-protection habits, and when to seek a skin review.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: function
-  goalPhrase: lower my risk of skin cancer
+  goalPhrase: understand skin cancer prevention
   successSignals:
     - id: uv_protection
       kind: behavior
@@ -36,7 +36,7 @@ goal:
     kind: habit_plan
     ownerSkillIds:
       - behavior-followthrough
-  startPrompt: Hey Murph, help me lower my risk of skin cancer.
+  startPrompt: Hey Murph, help me understand skin cancer prevention.
   indexable: true
 safety:
   cautionLevel: low
@@ -93,4 +93,4 @@ Sunscreen does not make heat exposure safe; hydration, breaks, and heat-illness 
 
 ## Related goals
 
-[Correct My Vitamin D Deficiency](/goals/correct-vitamin-d-deficiency) · [Lower My Risk of Lung Cancer](/goals/reduce-lung-cancer-risk)
+[Understand My Vitamin D Deficiency](/goals/correct-vitamin-d-deficiency) · [Understand Lung Cancer Prevention](/goals/reduce-lung-cancer-risk)
