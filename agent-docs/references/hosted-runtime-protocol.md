@@ -946,6 +946,19 @@ Device hints, restored timers, imports, activity scheduling, and exact
 acknowledgments all use the workspace-owned mailbox path. Common durable effects
 retain their existing delivery and shutdown behavior.
 
+Before the dedicated system-mailbox lane checkpoints completed workspace work,
+it offers one additional bounded system-prefix import after those attempts
+quiesce. This uses the invocation's remaining mailbox budget and yields to
+foreground wakes, abort, receipt capacity, and assistant deadlines. It does not
+execute another device pass or change the original completion preparation's
+admission authority. The existing post-checkpoint recording publishes current
+cadence and compacts only covered later hints; its follow-up checkpoint persists
+that removal. Equal-cadence, manual, different-epoch, and unrelated connection
+requests remain actionable. Final progress and import retry projection use the
+latest imported prefix, and each import's deferred effects run at most once
+after a covering checkpoint. Input arriving after this one read remains ordinary
+durable follow-up work. No polling loop, wire field, or persisted schema changes.
+
 Scheduling preserves per-connection ordering and the imported-watermark-bounded
 continuation projection used by handling. Invalid continuation authority cannot
 advance the handled prefix, but it does not block an unrelated connection or
