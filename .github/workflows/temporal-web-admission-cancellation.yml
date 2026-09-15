@@ -1,0 +1,65 @@
+name: Temporal Web Admission Cancellation
+
+on:
+  workflow_run:
+    workflows: ["Temporal Web Deployment Admission"]
+    types: [completed]
+
+permissions: {}
+
+# This must live outside the admission concurrency group: a superseded waiting
+# workflow never starts its own final-status job.
+jobs:
+  publish-cancellation:
+    name: Publish canceled Web admission status
+    if: ${{ github.event.workflow_run.conclusion == 'cancelled' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      statuses: write
+    steps:
+      - name: Settle canceled Web admission
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADMISSION_RUN_ID: ${{ github.event.workflow_run.id }}
+          ADMISSION_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          ADMISSION_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${ADMISSION_RUN_ID}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${ADMISSION_ATTEMPT}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${ADMISSION_SHA}" =~ ^[0-9a-f]{40}$ ]]
+
+          # Read current run metadata so a delayed event cannot settle a retry.
+          run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ADMISSION_RUN_ID}")"
+          jq -e --arg repository "${GITHUB_REPOSITORY}" --arg sha "${ADMISSION_SHA}" \
+            --argjson id "${ADMISSION_RUN_ID}" '
+            .id == $id and .head_sha == $sha and
+            .repository.full_name == $repository and
+            .head_repository.full_name == $repository and
+            .event == "push" and .head_branch == "main" and
+            .path == ".github/workflows/temporal-web-deployment-admission.yml"
+          ' <<<"${run}" > /dev/null
+          if ! jq -e --argjson attempt "${ADMISSION_ATTEMPT}" '
+            .run_attempt == $attempt and .status == "completed" and .conclusion == "cancelled"
+          ' <<<"${run}" > /dev/null; then
+            echo "Admission has moved beyond this canceled attempt; no status change."
+            exit 0
+          fi
+
+          # Preserve an already admitted candidate if cancellation arrived late.
+          statuses="$(gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/commits/${ADMISSION_SHA}/status?per_page=100")"
+          if jq -e '[.[].statuses[] | select(.context == "Temporal Web production admission" and .state == "success")] | length > 0' <<<"${statuses}" > /dev/null; then
+            echo "Candidate already has successful admission; no status change."
+            exit 0
+          fi
+
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${ADMISSION_SHA}" \
+            -f state=failure \
+            -f context='Temporal Web production admission' \
+            -f description='Admission workflow was canceled; this candidate was not approved.' \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${ADMISSION_RUN_ID}" \
+            --silent

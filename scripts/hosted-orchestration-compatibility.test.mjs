@@ -1738,6 +1738,81 @@ test("Web admission publishes the exact completed proof result to Vercel's statu
   }
 });
 
+test("canceled Web admission settles outside its queue without authorizing promotion", async () => {
+  const workflow = await readFile(path.join(REPO_ROOT, ".github/workflows/temporal-web-admission-cancellation.yml"), "utf8");
+  assert.match(workflow, /workflow_run:\n    workflows: \["Temporal Web Deployment Admission"\]\n    types: \[completed\]/u);
+  assert.doesNotMatch(workflow, /concurrency:|checkout|secrets\.|create-github-app-token|state=success/u);
+  assert.match(workflow, /actions: read\n      statuses: write/u);
+  const script = extractWorkflowStepScript(workflow, "Settle canceled Web admission");
+  const directory = await mkdtemp(path.join(tmpdir(), "web-admission-cancellation-"));
+  const run = {
+    id: 123, head_sha: PUBLIC_SHA, run_attempt: 1,
+    repository: { full_name: "example/repository" },
+    head_repository: { full_name: "example/repository" },
+    event: "push", head_branch: "main", status: "completed", conclusion: "cancelled",
+    path: ".github/workflows/temporal-web-deployment-admission.yml",
+  };
+  try {
+    await writeFile(path.join(directory, "gh"), `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *'--method POST'* ]]; then
+  printf '%s\\n' "$@" > "$GH_CAPTURE"
+  exit "\${GH_POST_EXIT:-0}"
+elif [[ "$*" == *'/actions/runs/'* ]]; then
+  printf '%s' "$GH_RUN"
+  exit "\${GH_READ_EXIT:-0}"
+else
+  printf '%s' "$GH_STATUSES"
+fi
+`, { mode: 0o755 });
+    const cases = [
+      { name: "canceled before jobs started", post: true },
+      { name: "newer retry queued", run: { run_attempt: 2, status: "queued", conclusion: null } },
+      { name: "newer retry passed", run: { run_attempt: 2, conclusion: "success" } },
+      { name: "current run still active", run: { status: "in_progress", conclusion: null } },
+      { name: "run succeeded", run: { conclusion: "success" } },
+      { name: "existing successful admission", statuses: [{ statuses: [{ context: "Temporal Web production admission", state: "success" }] }] },
+      { name: "successful admission on another page", statuses: [{ statuses: [] }, { statuses: [{ context: "Temporal Web production admission", state: "success" }] }] },
+      { name: "wrong workflow", run: { path: ".github/workflows/other.yml" }, failure: true },
+      { name: "wrong commit", run: { head_sha: "b".repeat(40) }, failure: true },
+      { name: "wrong run", run: { id: 124 }, failure: true },
+      { name: "foreign head repository", run: { head_repository: { full_name: "other/repository" } }, failure: true },
+      { name: "foreign repository", run: { repository: { full_name: "other/repository" } }, failure: true },
+      { name: "wrong trigger", run: { event: "pull_request" }, failure: true },
+      { name: "wrong branch", run: { head_branch: "feature" }, failure: true },
+      { name: "metadata read fails", env: { GH_READ_EXIT: "1" }, failure: true },
+      { name: "status delivery fails", env: { GH_POST_EXIT: "1" }, post: true, failure: true },
+      { name: "invalid event SHA", env: { ADMISSION_SHA: "invalid" }, failure: true },
+    ];
+    for (const scenario of cases) {
+      const capture = path.join(directory, "args");
+      await rm(capture, { force: true });
+      const result = spawnSync("bash", ["-c", script], {
+        encoding: "utf8",
+        env: {
+          ...process.env, PATH: `${directory}:${process.env.PATH ?? ""}`,
+          GITHUB_REPOSITORY: "example/repository", GITHUB_SERVER_URL: "https://github.example.test",
+          ADMISSION_RUN_ID: "123", ADMISSION_ATTEMPT: "1", ADMISSION_SHA: PUBLIC_SHA,
+          GH_RUN: JSON.stringify({ ...run, ...scenario.run }),
+          GH_STATUSES: JSON.stringify(scenario.statuses ?? [{ statuses: [] }]),
+          GH_CAPTURE: capture, ...scenario.env,
+        },
+      });
+      assert.equal(result.status === 0, !scenario.failure, `${scenario.name}: ${result.stderr}`);
+      const args = await readFile(capture, "utf8").catch(() => "");
+      assert.equal(Boolean(args), Boolean(scenario.post), scenario.name);
+      if (scenario.post) {
+        assert.ok(args.includes(`repos/example/repository/statuses/${PUBLIC_SHA}`));
+        assert.ok(args.includes("state=failure"));
+        assert.ok(args.includes("context=Temporal Web production admission"));
+        assert.ok(args.includes("target_url=https://github.example.test/example/repository/actions/runs/123"));
+      }
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("Repo Hygiene owns the focused controller contract test", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "repo-hygiene.yml"),
@@ -1843,6 +1918,10 @@ function extractWorkflowStepScript(workflow, stepName) {
   assert.ok(scriptStart >= 0, `${stepName} script must exist`);
   const scriptLines = [];
   for (const line of workflow.slice(scriptStart + runMarker.length).split("\n")) {
+    if (line === "") {
+      scriptLines.push("");
+      continue;
+    }
     if (!line.startsWith("          ")) break;
     scriptLines.push(line.slice(10));
   }
