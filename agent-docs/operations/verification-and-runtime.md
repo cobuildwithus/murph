@@ -979,6 +979,9 @@ focused, diff-aware, and package-coverage lanes need no package-specific heap
 or invocation branch. Release checks leave job-wide `NODE_OPTIONS` unset so an
 unrelated memory regression remains visible at its owner.
 
+Vercel also bounds checker concurrency in the initial Web typecheck.
+`apps/web/README.md` § Production build memory guard owns that boundary.
+
 Hosted-web production build memory: on Linux CI, `apps/web verify` defaults to
 wrapping its production `next build` step with
 `apps/web/scripts/build-memory-guard.sh`. The guard creates a root-level

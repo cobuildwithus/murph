@@ -2032,6 +2032,10 @@ machine: 4 vCPUs, 8 GB RAM, and 32 GB disk. The CI guard currently observes the
 production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
+The Vercel entrypoint runs the initial Web typecheck with one checker through
+`MURPH_TSC_WEB_CHECKERS=1`. Automatic checker parallelism exhausted the Standard
+build machine before the Next build began; the limit retains the full check.
+
 The production runner first performs route type generation and an explicit
 app-local generated-contract TypeScript check with a 6 GiB limit. It marks
 only that prepared check complete before starting Webpack. The Next CLI parent
