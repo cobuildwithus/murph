@@ -1,5 +1,5 @@
 import "server-only";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import * as z from "@murphai/contracts/zod-runtime";
 import { prepareHostedDomainRootForWeb, revalidatePreparedHostedDomainRootForWebTx } from "../hosted-crypto/domain-root-store";
@@ -179,7 +179,7 @@ export async function prepareHostedCredentialChange(input: {
       if (current.account) await adapter.delete({ model: "account", where: [{ field: "id", value: current.account.id }] });
       if (change.value) {
         await upsertHostedMemberTelegramRoutingBindingTx({ memberId, telegramUserId: change.value, prisma: tx });
-        await adapter.create({ model: "account", data: { id: randomUUID(), userId: memberId, providerId: "telegram", accountId: change.value, createdAt: now, updatedAt: now } });
+        await adapter.create({ model: "account", data: { userId: memberId, providerId: "telegram", accountId: change.value, createdAt: now, updatedAt: now } });
       }
     }
     const fields = change.method === "email" ? {
