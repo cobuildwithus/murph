@@ -438,6 +438,18 @@ due connection create one new canonical wake when its matching `v2` wake was
 already consumed under the older handling semantics, while retries within `v3`
 remain deterministic.
 
+An exact, non-conflicting `v3` duplicate can admit a successor when the original
+scheduled item is consumed but the same active connection epoch still has that
+overdue canonical reconcile date. The scheduled mailbox append checks matching
+imported, handled, and consumed system frontiers, an empty system lane, no pending
+item or retained continuation, and no future workspace wake. Older checkpoints
+may omit the optional pending/continuation fields only when the other settled
+frontier evidence agrees. The successor identity includes the consumed frontier;
+the original dedupe lock serializes competing recovery attempts, and the normal
+post-commit signal owns its handoff. Recovery neither rewrites consumed history
+nor changes preflight eligibility or a retained retry's ownership. Conflicting
+payloads and retired payloads without exact duplicate proof remain fail-closed.
+
 The Vercel device-sync dirty-sweeper cron is not registered, and there is no
 Temporal dirty-row sweep replacement. Temporal is the single production owner of
 the due-reconcile scheduled-wake cadence, while the signed web sweep command
