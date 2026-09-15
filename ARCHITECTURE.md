@@ -2713,6 +2713,11 @@ in its transaction. Later connection, authenticated completion, and companion
 admission reuse those keys; ordinary authenticated Web entry also repairs
 missing phone routing before projecting contact actions. The member lock
 revalidates access and identity and prevents duplicate capacity claims.
+Phone-welcome entry first uses one metadata-only member lookup to exclude
+suspended accounts, accounts without a verified phone, and accounts with a
+current or pending Linq conversation lookup key. These no-op visits do not load
+the recovery owner or decrypt a full member snapshot. Candidates retain the
+existing live identity, access, and deduplication checks under the member lock.
 Active ingress encryption roots, plus active control roots for phone routing
 writes, are prepared before the short database transaction. Line reservation
 and mailbox append commit together, then runtime is signaled.

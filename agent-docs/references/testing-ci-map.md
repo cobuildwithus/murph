@@ -21,6 +21,15 @@ tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 
 ## Current Repo Checks
 
+Phone-welcome preflight proof lives in `apps/web/test/hosted-phone-welcome.test.ts`.
+Its opt-in `MURPH_TEST_POSTGRES_CONCURRENCY=1` case uses a loopback `murph_test`
+database to verify the actual Prisma predicate and one-query budget for new,
+unverified, suspended, current-chat, pending-chat, and bare-line accounts.
+`hosted-crypto-domain-root-store.test.ts` compares the prior full-snapshot
+path with the preflight through real crypto owners: an established conversation
+requires no snapshot decryption or KMS call after the change. The ordinary Home,
+page-auth, authentication-completion, and companion suites preserve recovery.
+
 Automatic meal closeout admission is covered by
 `packages/assistant-engine/test/automatic-meal-closeout-eligibility.test.ts`
 and `assistant-cron-runtime.test.ts`: empty and manual-only queues suppress

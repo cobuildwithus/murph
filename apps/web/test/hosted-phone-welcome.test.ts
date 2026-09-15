@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedMemberChannelWelcomeDeliveryIdentity,
@@ -18,11 +19,76 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({ lockHostedMemberRow: mock
 
 import { ensureHostedMemberPhoneWelcome } from "@/src/lib/hosted-onboarding/phone-welcome";
 import { ensureHostedMemberChannelWelcome } from "@/src/lib/hosted-onboarding/channel-welcome";
+import * as channelWelcome from "@/src/lib/hosted-onboarding/channel-welcome";
 import { areHostedDomainRootProviderCallsDisabled } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "@/src/lib/hosted-onboarding/messaging-state";
+
+it.runIf(process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1")("phone welcome preflight uses one PostgreSQL query and preserves recovery candidates", async () => {
+  const databaseUrl = process.env.DATABASE_URL ?? "";
+  const url = new URL(databaseUrl);
+  if (url.hostname !== "127.0.0.1" || url.pathname !== "/murph_test" || url.search) {
+    throw new Error("Phone welcome database proof requires loopback murph_test.");
+  }
+  const { PrismaClient } = await import("@prisma/client");
+  const { PrismaPg } = await import("@prisma/adapter-pg");
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: databaseUrl, max: 1 }),
+    log: [{ emit: "event", level: "query" }],
+  });
+  let queryCount = 0;
+  prisma.$on("query", () => { queryCount += 1; });
+  const recovery = vi.spyOn(channelWelcome, "ensureHostedMemberChannelWelcome").mockResolvedValue();
+  const prefix = `test-phone-preflight-${randomUUID()}`;
+  const cases = [
+    { name: "new-phone", verified: true, routing: undefined, suspended: false, recover: true },
+    { name: "no-phone", verified: false, routing: undefined, suspended: false, recover: false },
+    { name: "unverified", verified: false, routing: undefined, suspended: false, recover: false },
+    { name: "suspended", verified: true, routing: undefined, suspended: true, recover: false },
+    { name: "established", verified: true, routing: { linqChatLookupKey: `${prefix}-home` }, suspended: false, recover: false },
+    { name: "pending", verified: true, routing: { pendingLinqChatLookupKey: `${prefix}-pending` }, suspended: false, recover: false },
+    { name: "bare-line", verified: true, routing: { linqRecipientPhoneLookupKey: `${prefix}-line` }, suspended: false, recover: true },
+  ];
+  try {
+    for (const scenario of cases) {
+      const memberId = `${prefix}-${scenario.name}`;
+      // Seed only the metadata this query reads; private recovery is stubbed.
+      await prisma.$executeRaw`
+        INSERT INTO hosted_member (id, suspended_at, updated_at)
+        VALUES (${memberId}, ${scenario.suspended ? new Date() : null}, now())
+      `;
+      if (scenario.name !== "no-phone") {
+        await prisma.$executeRaw`
+          INSERT INTO hosted_member_identity (member_id, phone_number_verified_at, updated_at)
+          VALUES (${memberId}, ${scenario.verified ? new Date() : null}, now())
+        `;
+      }
+      if (scenario.routing) {
+        await prisma.$executeRaw`
+          INSERT INTO hosted_member_routing
+            (member_id, linq_chat_lookup_key, pending_linq_chat_lookup_key, linq_recipient_phone_lookup_key, updated_at)
+          VALUES (${memberId}, ${scenario.routing.linqChatLookupKey ?? null},
+            ${scenario.routing.pendingLinqChatLookupKey ?? null},
+            ${scenario.routing.linqRecipientPhoneLookupKey ?? null}, now())
+        `;
+      }
+      recovery.mockClear();
+      queryCount = 0;
+      await ensureHostedMemberPhoneWelcome({ memberId, prisma });
+      expect(queryCount, scenario.name).toBe(1);
+      expect(recovery, scenario.name).toHaveBeenCalledTimes(scenario.recover ? 1 : 0);
+    }
+    recovery.mockClear();
+    await ensureHostedMemberPhoneWelcome({ memberId: `${prefix}-missing`, prisma });
+    expect(recovery).not.toHaveBeenCalled();
+  } finally {
+    recovery.mockRestore();
+    await prisma.hostedMember.deleteMany({ where: { id: { startsWith: prefix } } });
+    await prisma.$disconnect();
+  }
+});
 
 describe("welcome on a newly connected channel", () => {
   const memberId = "member_channel_welcome";
@@ -46,6 +112,7 @@ describe("welcome on a newly connected channel", () => {
   });
   const tx = { hostedMailboxItem: { findUnique } };
   const prisma = {
+    hostedMember: { findFirst: vi.fn(async (): Promise<{ id: string } | null> => ({ id: memberId })) },
     hostedMailboxItem: { findUnique },
     $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>) => {
       lockedMember = structuredClone(member);
@@ -89,6 +156,7 @@ describe("welcome on a newly connected channel", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prisma.hostedMember.findFirst.mockResolvedValue({ id: memberId });
     member = makeMember();
     queued = new Set();
     inTransaction = false;
@@ -129,6 +197,17 @@ describe("welcome on a newly connected channel", () => {
       expect(inTransaction).toBe(false);
       expect(queued.size).toBeGreaterThan(0);
     });
+  });
+
+  it("skips snapshot decryption and recovery when the database excludes the account", async () => {
+    prisma.hostedMember.findFirst.mockResolvedValueOnce(null);
+    await run();
+    expect(prisma.hostedMember.findFirst).toHaveBeenCalledTimes(1);
+    expect(mocks.read).not.toHaveBeenCalled();
+    expect(mocks.access).not.toHaveBeenCalled();
+    expect(mocks.unwrap).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.signal).not.toHaveBeenCalled();
   });
 
   it.each([

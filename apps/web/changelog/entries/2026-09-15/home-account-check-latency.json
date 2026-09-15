@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "home-account-check-latency",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting when opening Home",
+    "summary": "Home skips unnecessary account setup recovery when you already have a text conversation with Murph.",
+    "details": "Newly verified phone numbers still receive the usual setup and connection recovery.",
+    "relevanceTags": [
+      "home",
+      "performance"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Open Home",
+      "href": "/home"
+    }
+  }
+}

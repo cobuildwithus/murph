@@ -311,6 +311,9 @@ The deployment unblock retaining the dormant experiment namespace is tracked in
 | `packages/runtime-state/README.md` | `.runtime` taxonomy, portability, generated-delivery ref ownership, hosted state rules, and hosted Codex rollout snapshot scope without ChatGPT auth portability. | `packages/runtime-state/**` | Medium | 2026-07-16 |
 | `packages/vault-usecases/README.md` | CLI/headless vault usecase orchestration boundary over core, importers, and query. | `packages/vault-usecases/**` | Medium | 2026-05-02 |
 
+The completed Home account-check optimization and local proof are recorded in
+[`2026-09-15-home-first-paint.md`](exec-plans/completed/2026-09-15-home-first-paint.md).
+
 ## Conventions
 
 Local feedback diagnostics are documented in
