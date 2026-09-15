@@ -289,3 +289,31 @@ Updated: 2026-09-15
   provider-visible input builder, or group runtime was changed. Model-quality
   live proof is not selected for this orchestration change; the composed journey
   uses the real Codex app-server/runtime with synthetic provider responses.
+
+## Five-audit findings and remediation
+
+- All five independent GPT-6 Pro audits validated the same immutable first head.
+  Full A, full B, and upload/cleanup each found the same high-severity media
+  expiry bug. Ownership returned PASS. Migration found a high-severity freeze
+  ordering race. These are two distinct accepted findings.
+- Real Postgres reproduced deletion at minute 66 for successful 14-, 30-, and
+  90-day media. The existing media row now distinguishes provisional admission
+  from successful registration with one boolean; registration replaces orphan
+  grace with product retention. Legacy imports default to registered. Terminal
+  retirement, repeated finite expiry limits, and abandoned cleanup are preserved.
+- Freeze now always stops again after settlement, including work that settled
+  during the initial stop. Both the barrier test and real SQLite/controller
+  regression prove the late-reserved exact slot is stopped before export.
+  Uncertain final stops retain the retryable freezing state across eviction.
+- Added the documented predeploy compatibility entries for constant-default
+  inventory/registration columns and the widened upload-kind/nullable-pair
+  checks. The normal migration command passes against the isolated test DB.
+- Remediation proof: 28 real-Postgres owner tests, 70 migration/guard tests,
+  60 native identity/freeze tests, both app typechecks, and complexity pass
+  (85 source files, 15 inherited/moved hotspots).
+- A second composed timing run failed at activation startup with HTTP 500
+  before conversation turns; the earlier complete cold/warm journey passed.
+  No measured latency improvement is claimed. A diagnostic rerun remains due.
+- Current main was reconciled with an ordinary merge. The two conflict
+  resolutions retain main's newer handoff tests and this branch's purge mocks,
+  and retain both documentation index entries. Focused merge checks passed.

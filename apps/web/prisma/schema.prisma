@@ -1441,6 +1441,7 @@ model HostedRuntimeMedia {
   byteSize  BigInt    @map("byte_size")
   sha256    String
   objectKey String    @map("object_key")
+  registered Boolean @default(true)
   expiresAt DateTime? @map("expires_at")
   retiredAt DateTime? @map("retired_at")
   purgedAt  DateTime? @map("purged_at")

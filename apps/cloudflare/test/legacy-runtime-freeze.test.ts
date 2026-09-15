@@ -46,6 +46,50 @@ describe("finite legacy runtime freeze", () => {
     await expect(evicted.assertFrozen()).resolves.toBeUndefined();
   });
 
+  it.each([false, true])("stops a target admitted while the first stop was in flight (uncertain final stop: %s)", async uncertain => {
+    const h = harness();
+    const started = deferred();
+    const launch = deferred();
+    const firstStopStarted = deferred();
+    const firstStopDone = deferred();
+    let target: string | null = null;
+    const work = h.freeze.run(async () => {
+      started.resolve();
+      await launch.promise;
+      target = "synthetic-reserved-slot";
+    });
+    await started.promise;
+    const stop = vi.fn(async () => {
+      if (stop.mock.calls.length === 1) {
+        firstStopStarted.resolve();
+        await firstStopDone.promise;
+      } else if (uncertain) {
+        throw new Error("synthetic final stop uncertain");
+      } else {
+        target = null;
+      }
+    });
+    const freezing = h.freeze.freeze({ stop, drained: async () => true });
+    const result = Promise.allSettled([freezing]);
+    await firstStopStarted.promise;
+    launch.resolve();
+    await work;
+    firstStopDone.resolve();
+    await result;
+    expect(stop).toHaveBeenCalledTimes(2);
+    if (uncertain) {
+      await expect(freezing).rejects.toThrow("final stop uncertain");
+      await expect(h.freeze.assertFrozen()).rejects.toThrow("completed freeze");
+      expect(h.state.storage.deleteAlarm).not.toHaveBeenCalled();
+      const evicted = new LegacyRuntimeFreeze(h.state);
+      expect(await evicted.freeze({ stop: async () => { target = null; }, drained: async () => true })).toBe(true);
+    } else {
+      expect(await freezing).toBe(true);
+      await expect(h.freeze.assertFrozen()).resolves.toBeUndefined();
+    }
+    expect(target).toBeNull();
+  });
+
   it("retains the closed barrier across uncertain stop and capability drains", async () => {
     const h = harness();
     await expect(h.freeze.freeze({ stop: async () => { throw new Error("synthetic uncertain stop"); }, drained: async () => true })).rejects.toThrow("uncertain stop");

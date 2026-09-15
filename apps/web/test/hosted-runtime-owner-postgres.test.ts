@@ -442,6 +442,46 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect((await claimHostedRuntimeResourceCleanup({ prisma: second, now })).orphans.some(row => row.userId === userId)).toBe(false);
   });
 
+  it.each([14, 30, 90])("registers successful media with its %i-day retention instead of the orphan deadline", async days => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + days * 86_400_000).toISOString();
+    const descriptor = { mediaId: "a".repeat(64), mediaKind: days === 30 ? "video" as const : "image" as const,
+      byteSize: 12, sha256: "b".repeat(64), expiresAt };
+    const run = (command: Parameters<typeof executeHostedRuntimeMediaCommand>[0]["command"], at = now) =>
+      executeHostedRuntimeMediaCommand({ prisma: first, userId, command, now: at });
+    await run({ operation: "admit_put", ...runtime, descriptor, writeId: "retention-write", uploadId: "retention-upload" });
+    await run({ operation: "release_put", mediaId: descriptor.mediaId, writeId: "retention-write" });
+    await run({ operation: "register", ...runtime, descriptor });
+    const afterGrace = new Date(now.getTime() + 66 * 60_000);
+    expect((await claimHostedRuntimeResourceCleanup({ prisma: second, now: afterGrace })).media
+      .filter(row => row.userId === userId)).toHaveLength(0);
+    expect(await run({ operation: "read", descriptor }, afterGrace)).toMatchObject({ applied: true, reason: "active" });
+    // A subsequent registration still cannot extend an established finite expiry.
+    await run({ operation: "register", ...runtime, descriptor: { ...descriptor,
+      expiresAt: new Date(now.getTime() + (days + 1) * 86_400_000).toISOString() } });
+    expect(await observer.hostedRuntimeMedia.findUniqueOrThrow({ where: { userId_mediaId: { userId, mediaId: descriptor.mediaId } } }))
+      .toMatchObject({ expiresAt: new Date(expiresAt), retiredAt: null });
+    expect(await run({ operation: "read", descriptor }, new Date(expiresAt))).toMatchObject({ applied: false, reason: "expired" });
+  });
+
+  it("cleans up completed uploads that never register after the orphan grace", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const now = new Date();
+    const descriptor = { mediaId: "a".repeat(64), mediaKind: "image" as const, byteSize: 12,
+      sha256: "b".repeat(64), expiresAt: new Date(now.getTime() + 90 * 86_400_000).toISOString() };
+    await executeHostedRuntimeMediaCommand({ prisma: first, userId, now,
+      command: { operation: "admit_put", ...runtime, descriptor, writeId: "abandoned-write", uploadId: "abandoned-upload" } });
+    await executeHostedRuntimeMediaCommand({ prisma: first, userId, now,
+      command: { operation: "release_put", mediaId: descriptor.mediaId, writeId: "abandoned-write" } });
+    expect((await claimHostedRuntimeResourceCleanup({ prisma: second, now: new Date(now.getTime() + 66 * 60_000) })).media
+      .filter(row => row.userId === userId)).toHaveLength(1);
+    expect(await executeHostedRuntimeMediaCommand({ prisma: first, userId,
+      command: { operation: "register", ...runtime, descriptor } })).toMatchObject({ applied: false, reason: "expired" });
+  });
+
   it("keeps media retirement terminal and fences purge acknowledgements after a late upload", async () => {
     const userId = await member();
     const runtime = identity((await claim(userId)).owner);

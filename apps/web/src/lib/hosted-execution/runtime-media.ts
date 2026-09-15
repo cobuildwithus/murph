@@ -82,7 +82,7 @@ async function admitMediaPutTx(input: MediaTransaction, command: Extract<HostedR
     const descriptor = command.descriptor;
     // An interrupted first upload expires; its independent drain prevents
     // deletion while the write may still be in flight.
-    await tx.hostedRuntimeMedia.create({ data: { userId, mediaId, objectKey,
+    await tx.hostedRuntimeMedia.create({ data: { userId, mediaId, objectKey, registered: false,
       mediaKind: descriptor.mediaKind, sha256: descriptor.sha256, byteSize: BigInt(descriptor.byteSize),
       expiresAt: new Date(now.getTime() + HOSTED_RUNTIME_ORPHAN_GRACE_MS) } });
   }
@@ -98,8 +98,10 @@ async function registerMediaTx(input: MediaTransaction, command: Extract<HostedR
   }
   const descriptor = command.descriptor;
   const candidateExpiry = descriptor.expiresAt === null ? null : new Date(descriptor.expiresAt);
-  const expiresAt = candidateExpiry === null ? null : row?.expiresAt && row.expiresAt < candidateExpiry ? row.expiresAt : candidateExpiry;
-  const data = { mediaKind: descriptor.mediaKind, byteSize: BigInt(descriptor.byteSize), sha256: descriptor.sha256, objectKey, expiresAt };
+  // The first registration replaces provisional orphan grace with the product
+  // lifetime. Only an already registered descriptor can constrain that lifetime.
+  const expiresAt = candidateExpiry === null ? null : row?.registered && row.expiresAt && row.expiresAt < candidateExpiry ? row.expiresAt : candidateExpiry;
+  const data = { mediaKind: descriptor.mediaKind, byteSize: BigInt(descriptor.byteSize), sha256: descriptor.sha256, objectKey, expiresAt, registered: true };
   await tx.hostedRuntimeMedia.upsert({ where, create: { userId, mediaId, ...data }, update: { ...data, revision: { increment: 1 } } });
   return mediaResult(true);
 }

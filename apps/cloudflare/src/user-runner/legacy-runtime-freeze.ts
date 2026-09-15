@@ -56,12 +56,12 @@ export class LegacyRuntimeFreeze {
   private async finishFreeze(input: { stop: () => Promise<void>; drained: () => Promise<boolean> }): Promise<boolean> {
     await this.persist("freezing");
     await input.stop();
-    while (this.pending.size > 0) {
+    do {
       await Promise.allSettled([...this.pending]);
       // An admitted launch can have crossed the first stop while awaiting an
       // RPC. Reconcile again after those continuations have settled.
       await input.stop();
-    }
+    } while (this.pending.size > 0);
     if (!await input.drained()) return false;
     if (!this.state.storage.deleteAlarm) throw new Error("Legacy migration requires alarm deletion.");
     await this.state.storage.deleteAlarm();

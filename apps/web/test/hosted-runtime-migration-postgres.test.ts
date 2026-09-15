@@ -59,7 +59,7 @@ describe.skipIf(!enabled)("Postgres fleet migration", () => {
     await command({ operation: "import", ...identity, objectId, page: first });
     expect(await prisma.hostedRuntimeMedia.count({ where: { userId } })).toBe(1);
     expect(await prisma.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({ generation: 17n, phase: "idle", attemptId: null, platformAiUsageAllowed: false });
-    expect(await prisma.hostedRuntimeMedia.findFirstOrThrow({ where: { userId } })).toMatchObject({ retiredAt: new Date("2026-01-01T00:00:00.000Z"), revision: 1n });
+    expect(await prisma.hostedRuntimeMedia.findFirstOrThrow({ where: { userId } })).toMatchObject({ registered: true, retiredAt: new Date("2026-01-01T00:00:00.000Z"), revision: 1n });
     await expect(command({ operation: "import", ...identity, objectId, page: page(3) })).rejects.toThrow("cursor");
     for (let section = 1; section <= 3; section++) await command({ operation: "import", ...identity, objectId, page: page(section) });
     await expect(command(activation)).rejects.toThrow("incomplete");

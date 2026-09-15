@@ -92,7 +92,12 @@ then waits for all write obligations before physical namespace deletion.
 Replica cleanup owns the root and its derived shard family; individual upload
 receipts prevent a successful sibling from releasing a failed sibling's write.
 Media retirement is terminal and revision-acknowledged. Canonical snapshot and
-replica refs protect retained objects from orphan deletion. Existing private
+replica refs protect retained objects from orphan deletion. Provisional media
+rows carry a 65-minute orphan deadline and `registered=false`; first successful
+registration replaces that deadline with the descriptor's product expiry.
+Registered rows, including legacy imports, retain the existing minimum-expiry
+rule on repeated finite registrations. A retired row can never be revived.
+Existing private
 image capability expiry and the R2 lifecycle policy remain the expiry owner.
 
 R2 contracts: [multipart upload and abort](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/),
