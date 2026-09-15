@@ -1,8 +1,8 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-// Version 19 preserves terminal media retirement before asynchronous object deletion.
-// Older writers must not revive retired identities.
-export const RUNNER_STATE_SCHEMA_VERSION = 19;
+// Version 20 requires the durable migration freeze barrier. Older writers must
+// fail before running RPCs or alarms against an object participating in cutover.
+export const RUNNER_STATE_SCHEMA_VERSION = 20;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`

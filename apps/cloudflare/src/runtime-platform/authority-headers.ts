@@ -7,7 +7,7 @@ import {
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "../runner-outbound/headers.ts";
-import { writeRunnerRuntimeWriteFenceHeaders } from "../runner-outbound/write-fence.ts";
+import { writeRunnerRuntimeWriteFenceHeaders } from "../runner-outbound/headers.ts";
 
 const HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY_CODE =
   "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY";

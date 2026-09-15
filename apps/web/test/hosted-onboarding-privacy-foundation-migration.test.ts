@@ -1204,6 +1204,11 @@ describe("hosted Prisma baseline migration", () => {
       "20260910040000_approval_recovery_key",
       "20260910190000_message_typing_latency_alerts",
       "20260911143000_checkpoint_runtime_recheck_receipt",
+      "20260915151000_hosted_runtime_owner",
+      "20260915183000_hosted_runtime_resources",
+      "20260915223000_hosted_runtime_legacy_import",
+      "20260915224500_hosted_runtime_upload_recovery",
+      "20260915230000_hosted_runtime_media_registration",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

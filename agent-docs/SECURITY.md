@@ -4,6 +4,13 @@ Last verified: 2026-08-31
 
 ## Non-Negotiable Rules
 
+The activated runtime authority and migration boundary are owned by
+[Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md).
+UserRunner-specific coordination below applies only while the durable gate is
+legacy. Existing product admission, delivery, and runtime safety rules continue
+to apply after cutover.
+
+
 - Terminal Linq retry authority comes only from an existing runtime-owned
   failed delivery, current exact chat/sender routing, consent-aware runtime
   access, and current line/chat egress policy. The existing runtime access owner

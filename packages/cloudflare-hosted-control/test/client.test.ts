@@ -48,6 +48,7 @@ describe("createCloudflareHostedControlClient", () => {
       "enqueueDeviceWebhook",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
+      "purgeRuntimeResource",
       "reconcileRuntimeHealthDataConsent",
       "sendTelegramUsageLimitNotice",
       "stageEnvironmentVoice",

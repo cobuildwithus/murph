@@ -1,3 +1,5 @@
+import type { HostedWorkspaceInvocationResult } from "@murphai/hosted-execution/runtime-control";
+import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import { hostedRunnerImageMatches, readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
 import { Container, type StopParams } from "@cloudflare/containers";
 import {
@@ -71,6 +73,9 @@ import {
 import type {
   WorkerActiveRuntimeUserFenceResult,
 } from "./worker-contracts.ts";
+import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
+import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
+import { RunnerInvocationReceiptStore, type RunnerInvocationReceipt } from "./runner-invocation-receipt.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
@@ -309,6 +314,12 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
+  startSupervisedInvocation?(input: HostedExecutionContainerInvokeRequest): Promise<{ accepted: true }>;
+  recordSupervisedRuntimeCompletion?(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<{ completed: boolean }>;
+  readSupervisedInvocation?(input: { userId: string }): Promise<RunnerInvocationReceipt | null>;
+  beginRuntimeUsageSettlement?(input: { userId: string; attemptId: string; generation: string; reportId: string }): Promise<boolean>;
+  finishRuntimeUsageSettlement?(input: { userId: string; attemptId: string; generation: string; reportId: string; allowed: boolean }): Promise<void>;
+  runtimeUsageSettlementAllowsProviders?(input: { userId: string; attemptId: string; generation: string }): Promise<boolean>;
   onRuntimeCompletionRecorded?(
     input: RunnerContainerRuntimeCompletionRecordedInput,
   ): Promise<void>;
@@ -972,6 +983,99 @@ export class RunnerContainer extends Container {
       );
     }
     return { bundleFingerprint, sourceFingerprint };
+  }
+
+  private async recordRuntimeFailureBeforeStop(request: { userId: string; attemptId: string; leaseGeneration: string }, error: unknown): Promise<void> {
+    if (!usesPostgresRuntimeOwner(this.environment)) return;
+    const phaseCode = readRunnerContainerErrorDetails(error)?.[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY];
+    await commandHostedRuntimeOwner({ source: this.environment, userId: request.userId, timeoutMs: 1_000,
+      command: { operation: "record_failure", attemptId: request.attemptId, generation: request.leaseGeneration,
+        errorCode: isHostedRuntimeFailurePhaseCode(phaseCode) ? phaseCode : "runtime_error" },
+    }).catch(() => undefined);
+  }
+
+  async startSupervisedInvocation(
+    payload: HostedExecutionContainerInvokeRequest,
+  ): Promise<{ accepted: true }> {
+    this.authorizeBoundUser(payload.userId);
+    const parsed = parseHostedExecutionContainerInvokeInput(payload);
+    const request = parsed.job.request;
+    if (request.userId !== payload.userId) throw new Error("Hosted runtime member mismatch.");
+    const target = this.requireRunnerSlotStore().read();
+    if (target.state !== "bound") throw new Error("Hosted runtime slot is not bound.");
+    const identity = { attemptId: request.attemptId, generation: request.leaseGeneration };
+    const authority = await commandHostedRuntimeOwner({
+      source: this.environment, userId: payload.userId,
+      command: { operation: "authorize_effect", ...identity, runnerContainerName: target.slotName, managedAi: false },
+    });
+    if (authority.status !== "authorized"
+      || authority.owner?.workspaceVersion !== request.workspaceVersion) {
+      throw new Error("Hosted runtime launch authority is stale.");
+    }
+    const receipts = this.requireInvocationReceiptStore();
+    // Reserve durably before launch. Retrying after eviction never reexecutes
+    // an ambiguous invocation; reconciliation inspects this exact target.
+    if (receipts.register(identity) === "existing") return { accepted: true };
+    const result = this.invoke(payload);
+    this.ctx.waitUntil(result.then(async (completed) => {
+      if (!receipts.complete(identity, completed.immediateRecheckRequested === true)) return;
+      const recorded = await recordHostedRuntimeOwnerCompletion({
+        source: this.environment,
+        userId: payload.userId,
+        attemptId: payload.job.request.attemptId,
+        generation: payload.job.request.leaseGeneration,
+        result: completed,
+        settledRunnerContainerName: target.slotName,
+      });
+      if (recorded) await this.onRuntimeCompletionRecorded({
+        attemptId: payload.job.request.attemptId,
+        leaseGeneration: payload.job.request.leaseGeneration,
+        userId: payload.userId,
+      });
+    }).catch((error: unknown) => {
+      // Transport loss is not stoppedness. Keep the exact target and native
+      // liveness evidence for the existing ensure/reconciliation path.
+      emitHostedExecutionStructuredLog({
+        component: "container", level: "warn", phase: "checkpoint",
+        message: "Hosted runtime supervision needs reconciliation.",
+        userId: payload.userId,
+        details: { ...buildHostedExecutionSafeErrorDiagnostics(error), workspaceAttemptId: payload.job.request.attemptId },
+      });
+    }));
+    return { accepted: true };
+  }
+
+  async recordSupervisedRuntimeCompletion(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<{ completed: boolean }> {
+    this.authorizeBoundUser(input.userId);
+    if (!this.requireInvocationReceiptStore().complete(input, input.result.immediateRecheckRequested === true)) return { completed: false };
+    const completed = await recordHostedRuntimeOwnerCompletion({ ...input, source: this.environment });
+    if (completed) await this.onRuntimeCompletionRecorded({ userId: input.userId, attemptId: input.attemptId, leaseGeneration: input.generation });
+    return { completed };
+  }
+
+  async readSupervisedInvocation(input: { userId: string }): Promise<RunnerInvocationReceipt | null> {
+    this.authorizeBoundUser(input.userId);
+    return this.requireInvocationReceiptStore().read();
+  }
+
+  async beginRuntimeUsageSettlement(input: { userId: string; attemptId: string; generation: string; reportId: string }): Promise<boolean> {
+    this.authorizeBoundUser(input.userId);
+    return this.requireInvocationReceiptStore().beginUsageSettlement(input, input.reportId);
+  }
+
+  async finishRuntimeUsageSettlement(input: { userId: string; attemptId: string; generation: string; reportId: string; allowed: boolean }): Promise<void> {
+    this.authorizeBoundUser(input.userId);
+    this.requireInvocationReceiptStore().finishUsageSettlement(input, input.reportId, input.allowed);
+  }
+
+  async runtimeUsageSettlementAllowsProviders(input: { userId: string; attemptId: string; generation: string }): Promise<boolean> {
+    this.authorizeBoundUser(input.userId);
+    return this.requireInvocationReceiptStore().usageSettlementAllowsProviders(input);
+  }
+
+  private requireInvocationReceiptStore(): RunnerInvocationReceiptStore {
+    if (!this.ctx.storage.sql) throw new Error("Native invocation receipts require SQLite storage.");
+    return new RunnerInvocationReceiptStore(this.ctx.storage.sql);
   }
 
   async invoke(
@@ -2093,6 +2197,11 @@ export class RunnerContainer extends Container {
     binding: Extract<HostedStandbySlotBinding, { state: "bound" }>,
   ): Promise<void> {
     try {
+      if (usesPostgresRuntimeOwner(this.environment)) {
+        await commandHostedRuntimeOwner({ source: this.environment, userId: binding.userId, command: { operation: "target_retired", runnerContainerName: binding.slotName } });
+        return;
+      }
+
       const namespace = readRunnerContainerMetadataRecordProperty(this.environment.USER_RUNNER);
       if (typeof namespace.getByName !== "function") return;
       const runner = readRunnerContainerMetadataRecordProperty(namespace.getByName(binding.userId));
@@ -2424,6 +2533,7 @@ export class RunnerContainer extends Container {
         phase: "failed",
         userId: routeUserId,
       });
+      await this.recordRuntimeFailureBeforeStop(input.job.request, error);
       throw error;
     } finally {
       let cleanupSettled = false;

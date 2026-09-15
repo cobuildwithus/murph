@@ -828,10 +828,17 @@ describe("hosted execution coverage gaps", () => {
       "./return-contact",
       "./routes",
       "./runtime-control",
+      "./runtime-media",
+      "./runtime-migration",
+      "./runtime-owner",
+      "./runtime-resource-purge",
+      "./runtime-resources",
       "./side-effects",
+      "./storage-paths",
       "./subscription",
       "./temporal-env",
       "./vault-share",
+      "./workspace-snapshot-store",
       "./workspace-snapshot-v2",
     ]);
     expect(

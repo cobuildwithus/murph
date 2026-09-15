@@ -1,3 +1,4 @@
+import { parseHostedRuntimeResourcePurge, parseHostedRuntimeResourcePurgeResponse, type HostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
 import {
   parseHostedCipherEnvelope,
   parseHostedUserRecipientPublicKeyJwk,
@@ -72,6 +73,7 @@ import {
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
+  buildCloudflareHostedControlRuntimeResourcePurgePath,
 } from "./routes.ts";
 import { requireCloudflareHostedControlUserId } from "./user-id.ts";
 import {
@@ -182,6 +184,8 @@ export interface CloudflareHostedControlBrowserVaultReplicaAad {
 }
 
 export interface CloudflareHostedControlUserDataDeletionResult {
+  stateOwner?: "postgres";
+  runtimeStateCleared?: boolean;
   durableObject: {
     alarmCleared: boolean;
     deleteAllCompleted: boolean;
@@ -256,6 +260,7 @@ export interface CloudflareHostedControlClient {
     replicaRef: HostedBrowserVaultReplicaRef;
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultExportSession>;
+  purgeRuntimeResource(input: { userId: string; resource: HostedRuntimeResourcePurge }): Promise<{ deleted: true }>;
   deleteUserData(
     userId: string,
     options?: { signal?: AbortSignal },
@@ -546,6 +551,17 @@ export function createCloudflareHostedControlClient(
 
     createBrowserVaultExportSession(input) {
       return requestBrowserVaultExportSession(input);
+    },
+
+    purgeRuntimeResource(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "runtime resource purge", parse: parseHostedRuntimeResourcePurgeResponse,
+        path: buildCloudflareHostedControlRuntimeResourcePurgePath(userId),
+        request: { body: JSON.stringify(parseHostedRuntimeResourcePurge(input.resource)), headers: { "content-type": "application/json; charset=utf-8" }, method: "POST" },
+        timeoutMs: options.timeoutMs,
+      });
     },
 
     deleteUserData(userId, requestOptions) {
@@ -1761,6 +1777,8 @@ function parseCloudflareHostedControlUserDataDeletionResult(
   const userScopedSkipReason = r2.userScopedSkipReason;
 
   return {
+    ...(record.stateOwner === "postgres" ? { stateOwner: "postgres" as const,
+      runtimeStateCleared: requireBoolean(record.runtimeStateCleared, "Runtime state cleared") } : {}),
     deletedAt: requireString(record.deletedAt, "Cloudflare user-data deletion result deletedAt"),
     durableObject: {
       alarmCleared: requireBoolean(

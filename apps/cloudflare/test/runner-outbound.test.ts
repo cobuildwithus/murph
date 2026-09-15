@@ -855,7 +855,7 @@ describe("handleRunnerOutboundRequest", () => {
         throw new Error("Expected the allowlisted web-control fetch to run.");
       }
       const [url, init] = firstCall;
-      expect(String(url)).toBe(`https://web.example.test${path}`);
+      expect(String(url)).toBe(`https://web.example.test${path}?runtimeAuthority=1&runtimeAttempt=attempt_1&runtimeGeneration=9&runtimeWorkspaceVersion=4`);
       expect(init?.method).toBe("POST");
       const snapshotIncludeCredentialMaterial = (() => {
         if (
@@ -1070,7 +1070,7 @@ describe("handleRunnerOutboundRequest", () => {
     const [url, init] = firstCall;
     const headers = new Headers(init?.headers);
     expect(String(url)).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}${assistantInputSearch}`,
+      `https://web.example.test${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}${assistantInputSearch}&runtimeAuthority=1&runtimeAttempt=attempt_active&runtimeGeneration=9`,
     );
     expect(init?.body).toBe(payload);
     expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_active");
@@ -1100,7 +1100,7 @@ describe("handleRunnerOutboundRequest", () => {
       path: HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
       payload,
       request: forwardedRequest,
-      search: assistantInputSearch,
+      search: new URL(forwardedRequest.url).search,
     };
     await expect(verifyHostedWebCallbackSignatureHeaders({
       ...signatureInput,
@@ -3769,7 +3769,7 @@ describe("handleRunnerOutboundRequest", () => {
       throw new Error("Expected the workspace read web-control fetch to run.");
     }
     const [url, init] = firstCall;
-    expect(String(url)).toBe(`https://web.example.test${HOSTED_RUNTIME_WORKSPACE_PATH}`);
+    expect(String(url)).toBe(`https://web.example.test${HOSTED_RUNTIME_WORKSPACE_PATH}?runtimeAuthority=1&runtimeAttempt=attempt_1&runtimeGeneration=9&runtimeWorkspaceVersion=4`);
     expect(init?.method).toBe("GET");
     expect(init?.body).toBeUndefined();
     const headers = new Headers(init?.headers);
@@ -7001,7 +7001,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledTimes(4);
     expect(fetchMock).toHaveBeenCalledTimes(baseline === "omitted" ? 2 : 1);
     expect(fetchMock.mock.calls.filter(isHostedWorkspaceReadFetch)).toHaveLength(baseline === "omitted" ? 1 : 0);
-    expect(fetchMock.mock.lastCall?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace/checkpoint");
+    expect(fetchMock.mock.lastCall?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace/checkpoint?runtimeAuthority=1&runtimeAttempt=attempt_1&runtimeGeneration=9&runtimeWorkspaceVersion=5");
     const checkpointInit = fetchMock.mock.lastCall?.[1] as RequestInit | undefined;
     expect(JSON.parse(String(checkpointInit?.body))).toEqual(expect.objectContaining({
       attemptId: "attempt_1",
@@ -7991,11 +7991,11 @@ describe("handleRunnerOutboundRequest", () => {
           status: 200,
         });
       }
-      if (url.href === `https://web.example.test${HOSTED_RUNTIME_WORKSPACE_PATH}` && method === "GET") {
+      if (url.origin === "https://web.example.test" && url.pathname === HOSTED_RUNTIME_WORKSPACE_PATH && method === "GET") {
         return createHostedWorkspaceReadFetchResponse();
       }
       if (
-        url.href === "https://web.example.test/api/internal/hosted-workspace/checkpoint"
+        url.origin === "https://web.example.test" && url.pathname === "/api/internal/hosted-workspace/checkpoint"
         && method === "POST"
       ) {
         const checkpointRequest = readTestFetchBodyObject(

@@ -86,9 +86,10 @@ describe("hosted execution usage record route", () => {
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackJsonRequest).toHaveBeenCalledWith(
       expect.any(Request),
-      { maxBodyBytes: 16_384 },
+      { maxBodyBytes: 16_384, runtimeAuthority: "caller_transaction" },
     );
     expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).toHaveBeenCalledWith({
+      runtimeIdentity: null,
       accountAllowance: true,
       noticeDeliveryTarget,
       trustedUserId: "member_123",
@@ -176,6 +177,7 @@ describe("hosted execution usage record route", () => {
     expect((await hostedExecutionUsageRecordRoute.POST(request(atLimit))).status).toBe(200);
     expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).toHaveBeenCalledTimes(1);
     expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).toHaveBeenCalledWith({
+      runtimeIdentity: null,
       accountAllowance: true, trustedUserId: "member_123", noticeDeliveryTarget: body.noticeDeliveryTarget,
       usage: [expect.objectContaining({ inputTokens: 53, outputTokens: 29, usageId: body.usage.usageId })],
     });

@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   hostedRuntimeMailboxMemberFindUnique: vi.fn(),
   hostedThreadContainerParticipantFindFirst: vi.fn(),
   getPrisma: vi.fn(),
+  requireHostedRuntimeCallbackTx: vi.fn(),
   isHostedRuntimeLogDatabaseConfigured: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
   hasHostedPersonalPatternsRunAlert: vi.fn(),
@@ -75,6 +76,10 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
 }));
 
+vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({
+  requireHostedRuntimeCallbackTx: mocks.requireHostedRuntimeCallbackTx,
+}));
+
 vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-mailbox/store")>()),
   fetchHostedMailboxItemsAfterLaneCursors: mocks.fetchHostedMailboxItemsAfterLaneCursors,
@@ -119,6 +124,11 @@ vi.mock("@/src/lib/hosted-workspace/store", () => ({
   claimHostedAcceptedAttemptFailureRecheck:
     mocks.claimHostedAcceptedAttemptFailureRecheck,
   readHostedWorkspace: mocks.readHostedWorkspace,
+}));
+
+vi.mock("@/src/lib/hosted-workspace/runtime-publication", () => ({
+  checkpointHostedRuntimeWorkspace: mocks.checkpointHostedWorkspace,
+  publishHostedRuntimeBrowserVaultReplica: mocks.publishLatestBrowserVaultReplicaRef,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-log/write", () => ({
@@ -678,6 +688,7 @@ describe("hosted runtime internal web routes", () => {
     });
     expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledWith({
+      prisma: expect.objectContaining({ kind: "prisma" }),
       cursorMode: "imported_seq",
       lanes: [
         {
@@ -1820,10 +1831,12 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledExactlyOnceWith({
+      prisma: expect.objectContaining({ kind: "prisma" }),
       dedupeKey: "dedupe_item_2",
       userId: "member_routes_1",
     });
     expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
+      prisma: expect.objectContaining({ kind: "prisma" }),
       item,
       payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
     });
@@ -1883,6 +1896,7 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(403);
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "read_first",
+      prisma: expect.objectContaining({ kind: "prisma" }),
       userId: "member_routes_1",
     });
     expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
@@ -1967,6 +1981,7 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
+      prisma: expect.objectContaining({ kind: "prisma" }),
       item: expect.objectContaining({
         id: "mailbox_item_2",
         laneSeq: "14",
@@ -2006,6 +2021,7 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
+      prisma: expect.objectContaining({ kind: "prisma" }),
       item: null,
       payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
     });
@@ -2044,6 +2060,7 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
+      prisma: expect.objectContaining({ kind: "prisma" }),
       item: expect.objectContaining({
         id: "mailbox_browser_vault",
         lane: "system",
@@ -2355,6 +2372,7 @@ describe("hosted runtime internal web routes", () => {
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
+      runtimeAuthority: null,
       expectedVersion: "4",
       handledConversationMailboxItemIds: ["item_terminal_12"],
       inboxMediaRetentionWakeAt: "2026-04-26T00:10:00.000Z",
@@ -2435,6 +2453,7 @@ describe("hosted runtime internal web routes", () => {
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
+      runtimeAuthority: null,
       expectedVersion: "4",
       nextDefaultProcessingWakeAt: null,
       nextDefaultProcessingWakeReason: null,
@@ -2487,6 +2506,7 @@ describe("hosted runtime internal web routes", () => {
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
+      runtimeAuthority: null,
       expectedVersion: "4",
       nextDefaultProcessingWakeAt: null,
       nextDefaultProcessingWakeReason: null,
@@ -2875,6 +2895,7 @@ describe("hosted runtime internal web routes", () => {
       },
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
+      runtimeAuthority: null,
       expectedVersion: "4",
       nextDefaultProcessingWakeAt: null,
       nextDefaultProcessingWakeReason: null,
@@ -2917,6 +2938,7 @@ describe("hosted runtime internal web routes", () => {
       },
     });
     expect(mocks.publishLatestBrowserVaultReplicaRef).toHaveBeenCalledWith({
+      runtimeAuthority: null,
       expectedWorkspaceVersion: "4",
       replicaRef,
       userId: "member_routes_1",
@@ -2987,6 +3009,7 @@ describe("hosted runtime internal web routes", () => {
       workspace: null,
     });
     expect(mocks.publishLatestBrowserVaultReplicaRef).toHaveBeenCalledWith({
+      runtimeAuthority: null,
       expectedWorkspaceVersion: "4",
       replicaRef,
       userId: "member_routes_1",
@@ -4251,6 +4274,9 @@ function buildActiveHostedMemberRecord(overrides: Partial<{
 
 function createPrismaClientStub() {
   return {
+    async $transaction<T>(this: unknown, run: (tx: unknown) => Promise<T>): Promise<T> {
+      return run(this);
+    },
     hostedWorkspace: { findUnique: mocks.hostedWorkspaceFindUnique },
     hostedMember: {
       findUnique: mocks.hostedRuntimeMailboxMemberFindUnique,

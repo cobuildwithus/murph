@@ -105,6 +105,25 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20260915223000_hosted_runtime_legacy_import",
+    // The new cursor/count fields have constant defaults, so existing rows and
+    // old writers retain the empty-inventory shape before cutover begins.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
+    "20260915224500_hosted_runtime_upload_recovery",
+    // All three new fields are nullable. The kind check only widens admission;
+    // old writers produce the accepted all-null upload/key pair. The broad
+    // ADD COLUMN scanner also matches the later pair check's IS NOT NULL.
+    new Set(["ADD COLUMN NOT NULL", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260915230000_hosted_runtime_media_registration",
+    // A constant true default preserves existing registered/imported metadata;
+    // only the new admission writer explicitly creates provisional false rows.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
     "20260810010000_member_owned_device_provider_applications",
     // Both application-binding columns are introduced nullable in this same
     // migration, so every existing row has the accepted all-null shape. The

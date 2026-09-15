@@ -6,6 +6,19 @@ tunable numeric settings, incident history, and rollout case law belong in
 owner docs and executable tests. A fixed numeric floor appears here only when
 it has been explicitly elevated to a cross-cutting invariant.
 
+## Hosted runtime authority cutover
+
+- Exactly one durable owner admits a member's runtime effects. After Postgres
+  activation, runtime attempt/generation validation and canonical Web mutations
+  share one transaction; workspace CAS version is a separate freshness check.
+- An uncertain native launch or stop retains its exact allocation and target.
+  Elapsed time can request reconciliation, never prove stoppedness.
+- Upload and cleanup obligations survive member deletion. A pending multipart
+  write requires exact completion/abort proof before cleanup can pass it.
+- The migration gate is monotonic: legacy, draining, Postgres. Frozen legacy
+  state exports resources and generation high-water, never active authority.
+  See `agent-docs/references/hosted-postgres-runtime.md` for the finite cutover.
+
 ## Admission Test
 
 - A baseline invariant must protect a recurring cross-cutting failure class or

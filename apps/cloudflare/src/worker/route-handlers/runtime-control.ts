@@ -1,3 +1,5 @@
+import { usesPostgresRuntimeOwner } from "../../runtime-cutover.ts";
+import { readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -55,6 +57,7 @@ import {
 import {
   decodeRouteParam,
 } from "../route-utils/route-params.ts";
+import { ensurePostgresRuntimeProcessing } from "../../runtime-processing.ts";
 
 const runtimeEnsureProcessingRoute = {
   authorizeBeforeMethod: true,
@@ -129,6 +132,7 @@ export async function handleStatusRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
+  if (usesPostgresRuntimeOwner(context.env)) return json(await readPostgresRunnerStatus(context.env, userId, readHostedStatusRouteOptions(context.url)));
   const stub = await resolveUserRunnerStub(context.env, userId);
   const status = await stub.runnerStatus(readHostedStatusRouteOptions(context.url));
   return json(status);
@@ -300,6 +304,7 @@ export async function handleRuntimeHealthDataConsentRoute(
       "Hosted runtime health-data consent request must be empty.",
     );
   }
+  if (usesPostgresRuntimeOwner(context.env)) return json(await reconcilePostgresRuntimeConsent(context.env, userId));
   const stub = await resolveUserRunnerStub(context.env, userId);
   if (!stub.reconcileRuntimeHealthDataConsentForUser) {
     throw new Error(
@@ -309,7 +314,7 @@ export async function handleRuntimeHealthDataConsentRoute(
   return json(await stub.reconcileRuntimeHealthDataConsentForUser(userId));
 }
 
-function runRuntimeEnsureProcessingForUser(input: {
+async function runRuntimeEnsureProcessingForUser(input: {
   commandStartedAtEpochMs: number;
   commandTimeoutMs: number | null;
   context: WorkerRouteContext;
@@ -317,14 +322,17 @@ function runRuntimeEnsureProcessingForUser(input: {
   orchestration: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]>;
   userId: string;
 }): Promise<HostedRuntimeEnsureProcessingResponse> {
-  const stub = input.context.env.USER_RUNNER.getByName(input.userId);
-  return stub.ensureRuntimeProcessingForUser({
+  const command = {
     ...input.ensureRequest,
     commandStartedAtEpochMs: input.commandStartedAtEpochMs,
     ...(input.commandTimeoutMs === null ? {} : { commandTimeoutMs: input.commandTimeoutMs }),
     orchestration: input.orchestration,
     userId: input.userId,
-  });
+  };
+  const postgres = await ensurePostgresRuntimeProcessing(input.context.env, command);
+  if (postgres) return postgres;
+  const stub = input.context.env.USER_RUNNER.getByName(input.userId);
+  return stub.ensureRuntimeProcessingForUser(command);
 }
 
 export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {

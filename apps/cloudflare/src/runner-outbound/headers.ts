@@ -110,3 +110,30 @@ function isHostedRuntimeMediaReadPurpose(
 ): value is HostedRuntimeMediaReadPurpose {
   return HOSTED_RUNTIME_MEDIA_READ_PURPOSE_SET.has(value);
 }
+
+export interface RunnerRuntimeWriteFenceToken {
+  attemptId: string;
+  generation?: string;
+  leaseGeneration?: string;
+  workspaceVersion: string;
+}
+
+export class RunnerRuntimeWriteFenceError extends Error {
+  constructor(message = "Hosted runner runtime write fence is not valid.") {
+    super(message);
+    this.name = "RunnerRuntimeWriteFenceError";
+  }
+}
+
+export function writeRunnerRuntimeWriteFenceHeaders(
+  headers: Headers,
+  token: RunnerRuntimeWriteFenceToken,
+): void {
+  const generation = token.generation ?? token.leaseGeneration;
+  if (!generation) {
+    throw new RunnerRuntimeWriteFenceError("Hosted runner runtime write fence generation is missing.");
+  }
+  headers.set(HOSTED_RUNTIME_ATTEMPT_ID_HEADER, token.attemptId);
+  headers.set(HOSTED_RUNTIME_LEASE_GENERATION_HEADER, generation);
+  headers.set(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER, token.workspaceVersion);
+}

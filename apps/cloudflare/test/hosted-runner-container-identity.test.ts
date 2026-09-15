@@ -61,6 +61,8 @@ import {
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "../src/runner-job-transport.js";
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.js";
+import { LegacyRuntimeFreeze } from "../src/user-runner/legacy-runtime-freeze.ts";
+import { readLegacyRuntimeExportPage } from "../src/user-runner/legacy-runtime-export.ts";
 import {
   RunnerSecretsService,
 } from "../src/user-runner/runner-secrets.js";
@@ -115,6 +117,48 @@ vi.mock("@murphai/hosted-execution", async () => {
 const FIXED_NOW = "2026-06-03T00:00:00.000Z";
 const TEST_USER_ID = "member_123";
 describe("hosted runner container identity", () => {
+  it("freezes only after stopping the exact slot reserved during fallback destruction", async () => {
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const freeze = new LegacyRuntimeFreeze(durable.state);
+    const slotName = "runner--v-release_1--0123456789abcdef0123456789abcdef";
+    const launch = createVoidGate();
+    const admitted = createVoidGate();
+    const fallbackStarted = createVoidGate();
+    const fallbackDone = createVoidGate();
+    const stopped: string[] = [];
+    const controller = new RuntimeProcessingController({
+      env: createHostedExecutionEnvironment(), stateStore,
+      invocationService: new RecordingRuntimeInvocationService(),
+      readHealthDataAdmission: async userId => ({ userId, consentState: "granted", processingAllowed: true }),
+      runnerRuntimeEnvSource: { CF_VERSION_METADATA: { id: "release_1" } },
+      runnerContainerNamespace: { getByName: name => ({
+        ...createRunnerContainerStub({ name }),
+        destroyInstance: async () => { fallbackStarted.resolve(); await fallbackDone.promise; stopped.push(name); },
+        retireStandbySlot: async () => { stopped.push(name); return { retired: true }; },
+      }) },
+    });
+    const work = freeze.run(async () => {
+      admitted.resolve();
+      await launch.promise;
+      expect(await stateStore.reserveRunnerContainerStopTarget({ runnerContainerName: slotName, userId: TEST_USER_ID })).toBe(true);
+    });
+    await admitted.promise;
+    const freezing = freeze.freeze({
+      stop: async () => { await controller.stopForHealthDataConsentWithdrawal(TEST_USER_ID); },
+      drained: async () => true,
+    });
+    await fallbackStarted.promise;
+    launch.resolve();
+    await work;
+    await expect(readLegacyRuntimeExportPage(durable.state, { section: 0, after: "" })).rejects.toThrow("execution target");
+    fallbackDone.resolve();
+    expect(await freezing).toBe(true);
+    expect(stopped).toEqual(["member_123--v-release_1", slotName]);
+    await expect(freeze.assertFrozen()).resolves.toBeUndefined();
+    await expect(readLegacyRuntimeExportPage(durable.state, { section: 0, after: "" })).resolves.toMatchObject({ userId: TEST_USER_ID });
+  });
+
   it("keeps a ready runner when the distributed claim exceeds the former 250ms budget", async () => {
     const stateStore = new RunnerStateStore(createRunnerDurableState().state);
     const slotName = "runner--v-release_1--0123456789abcdef0123456789abcdef";

@@ -1,3 +1,6 @@
+import { usesPostgresRuntimeOwner } from "../runtime-cutover.ts";
+import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
+import { readRuntimeTargetAdapter } from "../runtime-target-adapter.ts";
 import {
   parseHostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/parsers";
@@ -49,6 +52,14 @@ export async function handleRunnerRuntimeCompletionRequest(input: {
       : jsonError("Invalid request.", 400);
   }
 
+  if (usesPostgresRuntimeOwner(input.env)) {
+    const state = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: { operation: "reconcile" } });
+    const owner = state.owner;
+    if (state.cutover !== "postgres" || owner?.attemptId !== authority.attemptId || owner.generation !== authority.generation || !owner.runnerContainerName) return json({ completed: false });
+    const container = readRuntimeTargetAdapter(input.env, owner.runnerContainerName);
+    if (!container?.recordSupervisedRuntimeCompletion) throw new Error("Native runtime completion receipt is unavailable.");
+    return json(await container.recordSupervisedRuntimeCompletion({ userId: input.userId, attemptId: authority.attemptId, generation: authority.generation, result }));
+  }
   const userRunner = await resolveRunnerOutboundUserRunnerStub(
     input.env,
     input.userId,

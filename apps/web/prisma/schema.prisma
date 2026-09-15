@@ -1320,6 +1320,139 @@ model HostedUserCryptoAudit {
   @@map("hosted_user_crypto_audit")
 }
 
+/// Runtime authority and exact cleanup target survive canonical member deletion.
+/// No expiry grants replacement authority; retirement requires adapter proof.
+model HostedRuntimeOwner {
+  userId                    String   @id @map("user_id")
+  generation                BigInt   @default(0)
+  attemptId                 String?  @map("attempt_id")
+  phase                     String   @default("idle")
+  processingMode            String?  @map("processing_mode")
+  allocationId              String?  @map("allocation_id")
+  runnerContainerName       String?  @map("runner_container_name")
+  workspaceVersion          BigInt?  @map("workspace_version")
+  providerEgressTokenHash    String?  @map("provider_egress_token_hash")
+  customInferenceEnvelope   String?  @map("custom_inference_envelope")
+  platformAiUsageAllowed    Boolean  @default(false) @map("platform_ai_usage_allowed")
+  startedAt                 DateTime? @map("started_at")
+  acceptedAt                DateTime? @map("accepted_at")
+  completedAt               DateTime? @map("completed_at")
+  failureCount              Int      @default(0) @map("failure_count")
+  lastErrorCode             String?  @map("last_error_code")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  @@map("hosted_runtime_owner")
+}
+
+/// Finite migration gate. A shared row lock fences legacy publication and
+/// admission against the exclusive legacy -> draining -> postgres transition.
+model HostedRuntimeCutover {
+  id              String    @id
+  phase           String    @default("legacy")
+  namespaceId     String?   @map("namespace_id")
+  workerVersion   String?   @map("worker_version")
+  inventoryAfter  String    @default("") @map("inventory_after")
+  inventoryHash   String?   @map("inventory_hash")
+  inventoryCount Int       @default(0) @map("inventory_count")
+  inventorySealedAt DateTime? @map("inventory_sealed_at")
+  activatedAt     DateTime? @map("activated_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("hosted_runtime_cutover")
+}
+
+/// Temporary inventory and exact-page receipt, retained through the rollback
+/// window. No member FK: dormant and deleted-member objects must be covered.
+model HostedRuntimeLegacyImport {
+  objectId     String    @id @map("object_id")
+  userId       String?   @unique @map("user_id")
+  generation   BigInt?
+  nextCursor   Json      @map("next_cursor")
+  lastCursor   Json?     @map("last_cursor")
+  lastHash     String?   @map("last_hash")
+  completedAt  DateTime? @map("completed_at")
+
+  @@index([completedAt, objectId])
+  @@map("hosted_runtime_legacy_import")
+}
+
+// Runtime resource obligations outlive member deletion until physical cleanup.
+model HostedRuntimeSnapshotUpload {
+  userId                   String    @id @map("user_id")
+  snapshotId               String    @map("snapshot_id")
+  attemptId                String    @map("attempt_id")
+  generation               BigInt
+  expectedWorkspaceVersion BigInt    @map("expected_workspace_version")
+  workspaceVersion         BigInt    @map("workspace_version")
+  objectKey                String    @map("object_key")
+  encryption               Json
+  replacedSnapshotRef      Json?     @map("replaced_snapshot_ref")
+  createdAt                DateTime  @map("created_at")
+  expiresAt                DateTime  @map("expires_at")
+  heartbeatAt              DateTime  @map("heartbeat_at")
+  completedAt              DateTime? @map("completed_at")
+  putExpiresAt             DateTime? @map("put_expires_at")
+  putDrainUntil            DateTime? @map("put_drain_until")
+
+  @@index([expiresAt, userId])
+  @@map("hosted_runtime_snapshot_upload")
+}
+
+model HostedRuntimePutDrain {
+  userId      String    @map("user_id")
+  writeId     String    @map("write_id")
+  kind        String
+  attemptId   String    @map("attempt_id")
+  generation  BigInt
+  admittedAt  DateTime  @map("admitted_at")
+  drainUntil  DateTime? @map("drain_until")
+  objectKey   String?   @map("object_key")
+  uploadId    String?   @map("upload_id")
+  reconcileAfter DateTime? @map("reconcile_after")
+  completedAt DateTime? @map("completed_at")
+
+  @@index([completedAt, reconcileAfter])
+  @@id([userId, writeId])
+  @@index([drainUntil, userId])
+  @@map("hosted_runtime_put_drain")
+}
+
+model HostedRuntimeOrphan {
+  userId      String    @map("user_id")
+  resourceId  String    @map("resource_id")
+  kind        String
+  objectKey   String?   @map("object_key")
+  snapshotRef Json?     @map("snapshot_ref")
+  createdAt   DateTime  @map("created_at")
+  cleanupAt   DateTime  @map("cleanup_at")
+  retiredAt   DateTime? @map("retired_at")
+  purgedAt    DateTime? @map("purged_at")
+  revision    BigInt    @default(1)
+
+  @@id([userId, kind, resourceId])
+  @@index([purgedAt, cleanupAt, userId])
+  @@map("hosted_runtime_orphan")
+}
+
+model HostedRuntimeMedia {
+  userId    String    @map("user_id")
+  mediaId   String    @map("media_id")
+  mediaKind String    @map("media_kind")
+  byteSize  BigInt    @map("byte_size")
+  sha256    String
+  objectKey String    @map("object_key")
+  registered Boolean @default(true)
+  expiresAt DateTime? @map("expires_at")
+  retiredAt DateTime? @map("retired_at")
+  purgedAt  DateTime? @map("purged_at")
+  revision  BigInt    @default(1)
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@id([userId, mediaId])
+  @@index([purgedAt, expiresAt, userId])
+  @@map("hosted_runtime_media")
+}
+
 model HostedWorkspace {
   userId                 String       @id @map("user_id")
   version                BigInt       @default(0)
