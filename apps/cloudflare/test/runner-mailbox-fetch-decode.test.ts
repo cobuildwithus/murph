@@ -4,7 +4,13 @@ import { buildHostedSecureBoxAad, sealHostedSecureBox, serializeHostedSecureBoxE
 import { buildHostedMailboxPayloadScope, buildHostedMailboxPayloadSecureBoxAad, HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA } from "@murphai/hosted-execution/runtime-control";
 import { parseHostedMailboxFetchResponse } from "@murphai/hosted-execution/parsers";
 
-const mocks = vi.hoisted(() => ({ forward: vi.fn(), fence: vi.fn(), crypto: vi.fn() }));
+const mocks = vi.hoisted(() => ({ forward: vi.fn(), fence: vi.fn(), crypto: vi.fn(),
+  suppliedCrypto: vi.fn(), cached: vi.fn() }));
+vi.mock("../src/hosted-crypto/runtime-user-crypto-context.ts", async (original) => ({
+  ...await original<typeof import("../src/hosted-crypto/runtime-user-crypto-context.ts")>(),
+  requireHostedUserCryptoContextFromResponse: mocks.suppliedCrypto,
+  hasCachedHostedUserCryptoContextEnvelope: mocks.cached,
+}));
 vi.mock("../src/web-control-plane.ts", async (original) => ({
   ...await original<typeof import("../src/web-control-plane.ts")>(),
   fetchHostedExecutionWebControlPlaneResponse: mocks.forward,
@@ -73,6 +79,8 @@ describe("Worker mailbox fetch/decode composition", () => {
     vi.resetAllMocks();
     mocks.fence.mockResolvedValue({ attemptId: "synthetic-attempt", generation: "1", workspaceVersion: "1" });
     mocks.crypto.mockResolvedValue({ resolveKeyById: async (id: string) => id === rootKeyId ? rootKey : null });
+    mocks.suppliedCrypto.mockResolvedValue({ resolveKeyById: async (id: string) => id === rootKeyId ? rootKey : null });
+    mocks.cached.mockReturnValue(false);
   });
   it("returns a parsed wake through one container request, one Web fetch and one fence check", async () => {
     const mailbox = await mailboxFixture();
@@ -104,11 +112,51 @@ describe("Worker mailbox fetch/decode composition", () => {
     })) });
     expect(mocks.crypto).toHaveBeenCalledTimes(1);
   });
+  it.each([2, 100])("decodes %i items with one supplied ingress context and no context RPC", async (count) => {
+    const mailbox = await mailboxFixture();
+    for (let index = 2; index <= count; index += 1) {
+      mailbox.items.push((await mailboxFixture(index)).items[0]!);
+    }
+    const ingressCryptoContext = { syntheticSignedContext: true };
+    mocks.forward.mockResolvedValue(Response.json({ ...mailbox, ingressCryptoContext }));
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => handle(new Request(url, init)));
+    const port = createHostedWebMailboxPort({ boundUserId: wake.userId, fetchImpl,
+      timeoutMs: 1000, transport: { mode: "proxy" } });
+    const fetched = await port.fetch(requestBody);
+    expect(fetched.items.every((item) => item.decodedWake?.kind === "conversation.message")).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(mocks.forward).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(mocks.forward.mock.calls[0]![0].body).includeIngressCryptoContext).toBe(true);
+    expect(mocks.suppliedCrypto).toHaveBeenCalledTimes(1);
+    expect(mocks.suppliedCrypto).toHaveBeenCalledWith(expect.objectContaining({ context: ingressCryptoContext,
+      domain: "ingress", userId: wake.userId }));
+    expect(mocks.crypto).not.toHaveBeenCalled();
+    expect(fetched).not.toHaveProperty("ingressCryptoContext");
+  });
+  it("omits the context request when the encrypted-envelope cache is warm", async () => {
+    mocks.cached.mockReturnValue(true);
+    mocks.forward.mockResolvedValue(Response.json(await mailboxFixture()));
+    await expect((await handle(request())).json()).resolves.toMatchObject({ items: [{ decodedWake: wake }] });
+    expect(JSON.parse(mocks.forward.mock.calls[0]![0].body).includeIngressCryptoContext).toBe(false);
+    expect(mocks.suppliedCrypto).not.toHaveBeenCalled();
+  });
+  it("attempts a rejected supplied context once and leaves items for lazy retry", async () => {
+    const mailbox = await mailboxFixture();
+    mailbox.items.push((await mailboxFixture(2)).items[0]!);
+    mocks.forward.mockResolvedValue(Response.json({ ...mailbox, ingressCryptoContext: {} }));
+    mocks.suppliedCrypto.mockRejectedValue(new Error("Invalid envelope signature"));
+    const response = await handle(request());
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(parseHostedMailboxFetchResponse(mailbox));
+    expect(mocks.suppliedCrypto).toHaveBeenCalledTimes(1);
+    expect(mocks.crypto).not.toHaveBeenCalled();
+  });
   it("leaves old containers on the original fetch contract", async () => {
     const mailbox = await mailboxFixture();
     mocks.forward.mockResolvedValue(Response.json(mailbox));
     expect(await (await handle(request(false))).json()).toEqual(mailbox);
     expect(mocks.crypto).not.toHaveBeenCalled();
+    expect(JSON.parse(mocks.forward.mock.calls[0]![0].body).includeIngressCryptoContext).toBe(false);
   });
   it.each(["consumed", "floor", "sidecar", "corrupt"])("preserves lazy import for %s items", async (kind) => {
     const mailbox = await mailboxFixture();

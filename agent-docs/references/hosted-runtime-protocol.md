@@ -92,6 +92,18 @@ The live ownership split is:
   for sidecars. Both directions of Worker/container skew are supported, with no
   Web deployment dependency or persisted schema change. After convergence,
   fresh inline messages omit the second request and its write-fence RPC.
+  On a Worker signed-envelope cache miss, the forwarded mailbox fetch also
+  requests `includeIngressCryptoContext`. After its existing member/consent and
+  allowance checks, Web attaches `ingressCryptoContext` only for fresh inline
+  conversation items and a provisioned workspace. It reads one already-signed
+  ingress envelope per batch, never runtime roots or plaintext keys. The Worker
+  verifies the supplied context through the existing user/domain/signature and
+  recipient checks, then reuses the bounded encrypted-envelope cache (60-second
+  ceiling). The extension is stripped before returning the mailbox to the
+  container. Cache hits request no envelope read. An old Web response omits the
+  extension and retains the existing context callback; old Workers never request
+  it. Either Worker/Web rollout order is safe. Unavailable optional context leaves
+  lazy decode/retry ownership intact, and historical-root lookup is unchanged.
   Retire the opt-in once the supported Worker/runner rollback floor and all warm
   callers consume decodedWake; the decoder remains for lazy sidecar/system work.
   The container must not receive ingress root keys, callback-signing private

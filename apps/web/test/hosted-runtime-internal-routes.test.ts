@@ -16,6 +16,8 @@ const MAILBOX_ITEM_2_PAYLOAD_REF = "hosted-mailbox-payload:mailbox_item_2";
 const UNSAFE_SENTINEL = "UNSAFE_CONTENT_SENTINEL";
 
 const mocks = vi.hoisted(() => ({
+  readHostedRuntimeIngressCryptoContextForWorker: vi.fn(),
+  hostedWorkspaceFindUnique: vi.fn(),
   reportHostedRuntimeTypingAlerts: vi.fn(),
   after: vi.fn<(task: () => Promise<void> | void) => void>(),
   checkpointHostedWorkspace: vi.fn(),
@@ -51,6 +53,11 @@ const mocks = vi.hoisted(() => ({
   resolveHostedRuntimeAiUsageGate: vi.fn(),
   signalHostedRuntimeOwnerReleasedRuntime: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (original) => ({
+  ...await original<typeof import("@/src/lib/hosted-crypto/domain-root-store")>(),
+  readHostedRuntimeIngressCryptoContextForWorker: mocks.readHostedRuntimeIngressCryptoContextForWorker,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-latency/typing-alert-monitor", () => ({
@@ -207,6 +214,11 @@ describe("hosted runtime internal web routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.hostedWorkspaceFindUnique.mockResolvedValue({ userId: "member_routes_1" });
+    mocks.readHostedRuntimeIngressCryptoContextForWorker.mockResolvedValue({
+      schema: "murph.hosted-runtime-crypto-context.v1", userId: "member_routes_1",
+      cacheMaxAgeMs: 300_000, cryptoContextVersion: "synthetic-version", envelopes: { ingress: {} },
+    });
     mocks.hasHostedPersonalPatternsRunAlert.mockReturnValue(false);
     delete process.env.HOSTED_CUSTOM_CHAT_COMPLETIONS_ENABLED;
     delete process.env.HOSTED_CUSTOM_INFERENCE_ENABLED;
@@ -530,6 +542,46 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledOnce();
     expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
   });
+
+  it.each(["fresh", "old-worker", "no-inline-decode", "empty", "consumed", "floor", "sidecar", "system", "denied", "inactive", "no-workspace", "crypto-failure"])(
+    "includes ingress context only for authorized fresh inline work: %s", async (scenario) => {
+      const item = { createdAt: FIXED_NOW, updatedAt: FIXED_NOW, occurredAt: FIXED_NOW,
+        dedupeKey: "synthetic-dedupe", id: "synthetic-item", userId: "member_routes_1",
+        kind: scenario === "system" ? "assistant.notification.requested" : "conversation.message",
+        lane: scenario === "system" ? "system" : "conversation", laneSeq: "1",
+        payloadSchema: "murph.hosted-mailbox-item.v1", payloadInlineCiphertext: "synthetic-ciphertext",
+        payloadRef: scenario === "sidecar" ? "synthetic-sidecar" : null,
+        consumedAt: scenario === "consumed" ? FIXED_NOW : null };
+      mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValue({
+        items: scenario === "empty" ? [] : [item, { ...item, id: "synthetic-item-2", dedupeKey: "synthetic-dedupe-2" }],
+        consumedSeqByLane: [{ lane: "conversation", consumedSeq: scenario === "floor" ? "1" : "0" }],
+        maxSeqByLane: [{ lane: item.lane, maxSeq: "1" }],
+      });
+      if (scenario === "denied") mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({ status: "denied" });
+      if (scenario === "inactive") mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(null);
+      if (scenario === "no-workspace") mocks.hostedWorkspaceFindUnique.mockResolvedValueOnce(null);
+      if (scenario === "crypto-failure") mocks.readHostedRuntimeIngressCryptoContextForWorker.mockRejectedValueOnce(new Error("Unavailable"));
+      const response = await mailboxFetchRoute.POST(jsonRequest("/api/internal/hosted-mailbox/fetch", {
+        requestId: "synthetic-request", limitPerLane: 10,
+        lanes: [{ importedSeq: "0", lane: item.lane }],
+        decodeInlinePayloads: scenario !== "no-inline-decode",
+        ...(scenario !== "old-worker" ? { includeIngressCryptoContext: true } : {}),
+      }));
+      const payload = await response.json();
+      expect(response.status).toBe(scenario === "inactive" ? 403 : 200);
+      const shouldReadWorkspace = ["fresh", "no-workspace", "crypto-failure"].includes(scenario);
+      expect(mocks.hostedWorkspaceFindUnique).toHaveBeenCalledTimes(shouldReadWorkspace ? 1 : 0);
+      expect(mocks.readHostedRuntimeIngressCryptoContextForWorker).toHaveBeenCalledTimes(
+        scenario === "fresh" || scenario === "crypto-failure" ? 1 : 0);
+      if (scenario === "fresh") {
+        expect(payload.ingressCryptoContext).toMatchObject({ userId: "member_routes_1", envelopes: { ingress: {} } });
+        expect(payload.ingressCryptoContext.fetchedAt).toEqual(expect.any(String));
+        expect(parseHostedMailboxFetchResponse(payload)).not.toHaveProperty("ingressCryptoContext");
+      } else {
+        expect(payload).not.toHaveProperty("ingressCryptoContext");
+      }
+    },
+  );
 
   it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
     process.env.HOSTED_VENICE_ENABLED = "1";
@@ -4199,6 +4251,7 @@ function buildActiveHostedMemberRecord(overrides: Partial<{
 
 function createPrismaClientStub() {
   return {
+    hostedWorkspace: { findUnique: mocks.hostedWorkspaceFindUnique },
     hostedMember: {
       findUnique: mocks.hostedRuntimeMailboxMemberFindUnique,
     },

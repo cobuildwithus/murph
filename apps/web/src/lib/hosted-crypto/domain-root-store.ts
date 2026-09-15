@@ -969,6 +969,24 @@ export async function readHostedRuntimeCryptoContextForWorker(input: {
   };
 }
 
+export async function readHostedRuntimeIngressCryptoContextForWorker(input: {
+  prisma?: HostedCryptoClient;
+  userId: string;
+}) {
+  const ingress = await readActiveHostedDomainRootEnvelopeRecordOrThrow({
+    domain: "ingress",
+    prisma: input.prisma ?? getPrisma(),
+    userId: input.userId,
+  });
+  return {
+    cacheMaxAgeMs: HOSTED_RUNTIME_CRYPTO_CONTEXT_CACHE_MAX_AGE_MS,
+    cryptoContextVersion: createHostedRuntimeCryptoContextVersion({ ingress, userId: input.userId }),
+    envelopes: { ingress: ingress.envelope },
+    schema: "murph.hosted-runtime-crypto-context.v1" as const,
+    userId: input.userId,
+  };
+}
+
 async function provisionActiveHostedDomainRootEnvelopeForUserOnlyTx(input: {
   candidate?: HostedDomainRootKeyEnvelopeV1 | undefined;
   domain: HostedCryptoDomain;
@@ -1548,7 +1566,7 @@ function kmsRecipientForDomain(domain: HostedCryptoDomain): HostedCryptoKmsRecip
 
 function createHostedRuntimeCryptoContextVersion(input: {
   ingress: VerifiedHostedDomainRootEnvelopeRecord;
-  runtime: VerifiedHostedDomainRootEnvelopeRecord;
+  runtime?: VerifiedHostedDomainRootEnvelopeRecord;
   userId: string;
 }): string {
   const hash = createHash("sha256");
@@ -1558,10 +1576,10 @@ function createHostedRuntimeCryptoContextVersion(input: {
     ingressSignedAt: input.ingress.envelope.authoritySignature.signedAt,
     ingressStatus: input.ingress.status,
     ingressUpdatedAt: input.ingress.updatedAt,
-    runtimeRootKeyId: input.runtime.envelope.rootKeyId,
-    runtimeSignedAt: input.runtime.envelope.authoritySignature.signedAt,
-    runtimeStatus: input.runtime.status,
-    runtimeUpdatedAt: input.runtime.updatedAt,
+    runtimeRootKeyId: input.runtime?.envelope.rootKeyId,
+    runtimeSignedAt: input.runtime?.envelope.authoritySignature.signedAt,
+    runtimeStatus: input.runtime?.status,
+    runtimeUpdatedAt: input.runtime?.updatedAt,
     schema: "murph.hosted-runtime-crypto-context.version.v1",
     userId: input.userId,
   }));

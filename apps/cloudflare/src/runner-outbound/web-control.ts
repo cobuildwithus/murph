@@ -45,6 +45,7 @@ import {
   writeRunnerRuntimeWriteFenceHeaders,
 } from "./write-fence.ts";
 import {
+  addRunnerMailboxCryptoContextRequest,
   handleRunnerMailboxPayloadDecodeRequest,
   decodeRunnerMailboxFetchResponse,
 } from "./mailbox-payload-decode.ts";
@@ -178,6 +179,12 @@ export async function handleRunnerWebControlRequest(input: {
       env: input.env,
       includeDeviceSyncCredentialMaterial: isDeviceSyncRuntimeSnapshotRequest,
       path: input.url.pathname,
+      userId: input.userId,
+    });
+    body = addRunnerMailboxCryptoContextRequest({
+      body,
+      environment: input.environment,
+      mailboxFetch: policy.operation === "mailbox_fetch",
       userId: input.userId,
     });
   } catch (error) {
