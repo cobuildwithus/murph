@@ -237,7 +237,7 @@ describe("@murphai/health-commons build determinism", () => {
       '"schemaVersion": "murph.commons.web.experiment-index.v1"',
     );
     await expect(readFile(path.join(generatedRoot, "web/browse/biomarkers.json"), "utf8")).resolves.toContain(
-      '"schemaVersion": "murph.commons.web.biomarker-index.v3"',
+      '"schemaVersion": "murph.commons.web.biomarker-index.v4"',
     );
     await expect(readFile(path.join(generatedRoot, "web/browse/goals.json"), "utf8")).resolves.toContain(
       '"schemaVersion": "murph.commons.web.goal-index.v2"',

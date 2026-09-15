@@ -145,6 +145,89 @@ afterEach(() => {
   mocks.unwrapHostedBrowserSessionKey.mockReset();
 });
 
+test.each(["/settings", "/settings/", "/connect", "/records", "/records/connect"])(
+  "account route %s does not fetch or decrypt an unused health replica",
+  async (pathname) => {
+    mocks.usePathname.mockReturnValue(pathname);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    installBrowserVaultCryptoMocks();
+    const rendered = await renderClientComponent(
+      createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+      { requireButton: false },
+    );
+    try {
+      assert.equal(rendered.container.textContent, "empty:none");
+      assert.equal(fetchMock.mock.calls.length, 0);
+      assert.equal(mocks.generateHostedUserRecipientKeyPair.mock.calls.length, 0);
+      assert.equal(mocks.decryptHostedStoragePayload.mock.calls.length, 0);
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
+test.each(["/home", "/journal", "/patterns", "/environment", "/biomarkers", "/experiments", "/training", "/ops"])(
+  "data route %s retains its session load",
+  async (pathname) => {
+    mocks.usePathname.mockReturnValue(pathname);
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      memberId: "member_123", state: "empty", replicaRef: null,
+      encryptedReplica: null, replicaAad: null, replicaKeyEnvelope: null,
+      freshness: "fresh", refreshPending: false, workspaceVersion: null,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    installBrowserVaultCryptoMocks();
+    const rendered = await renderClientComponent(
+      createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+      { requireButton: false },
+    );
+    try {
+      await waitForText(rendered.container, "empty:none");
+      assert.equal(fetchMock.mock.calls.length, 1);
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
+test("returning from account management waits for fresh health-data authority", async () => {
+  const ref = createReplicaRef();
+  const nextAuthority = createDeferred<Response>();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: ref,
+      state: "ready",
+    }))
+    .mockImplementationOnce(() => nextAuthority.promise);
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+  const element = () => createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe));
+  const rendered = await renderClientComponent(element(), { requireButton: false });
+  try {
+    await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+    mocks.usePathname.mockReturnValue("/settings");
+    await rendered.rerender(element());
+    assert.equal(rendered.container.textContent, "empty:none");
+    assert.equal(getBrowserVaultReadySnapshot(), null);
+    assert.equal(fetchMock.mock.calls.length, 1);
+
+    mocks.usePathname.mockReturnValue("/home");
+    await rendered.rerender(element());
+    await waitForCondition(() => fetchMock.mock.calls.length === 2, "fresh authority request");
+    assert.equal(rendered.container.textContent, "loading:none");
+    nextAuthority.resolve(new Response(JSON.stringify({ error: "Consent withdrawn" }), { status: 403 }));
+    await waitForCondition(() => rendered.container.textContent !== "loading:none", "authority denial");
+    assert.equal(getBrowserVaultReadySnapshot(), null);
+    assert.ok(!String(rendered.container.textContent).includes(`ready:${ref.dataVersion}`));
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("browser-vault provider rejects not_modified refs that do not match the known replica", async () => {
   const ref = createReplicaRef();
   const mismatchedRef = {

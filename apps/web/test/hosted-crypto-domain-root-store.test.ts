@@ -3505,6 +3505,52 @@ test.each([false, true])("phone channel welcome prepares real routing and mailbo
   });
 });
 
+test("established phone welcome skips the full snapshot and KMS work that previously blocked page auth", async () => {
+  const { tx, decryptMetrics } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithFreshHostedDomainRootUnwrapCache } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const { ensureHostedMemberChannelWelcome } = await import("../src/lib/hosted-onboarding/channel-welcome");
+  const { ensureHostedMemberPhoneWelcome } = await import("../src/lib/hosted-onboarding/phone-welcome");
+  const memberId = "member-established-phone-preflight";
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control", prisma: tx.prisma, userId: memberId, reason: "test.phone-preflight",
+  });
+  const identity = await buildHostedMemberIdentityPrivateColumns({
+    memberId, phoneNumber: "+15550001001", prisma: tx.prisma, privyUserId: null,
+    signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null, signupPhoneNumber: null,
+  });
+  const routing = await buildHostedMemberRoutingPrivateColumns({
+    memberId, linqChatId: "synthetic-established-chat", linqRecipientPhone: "+15550001002",
+    pendingLinqChatId: null, pendingLinqParticipantContact: null,
+    pendingLinqRecipientPhone: null, prisma: tx.prisma, telegramThreadId: null, telegramUserId: null,
+  });
+  const snapshotRead = vi.fn(async () => ({
+    id: memberId, billingStatus: HostedBillingStatus.active, suspendedAt: null,
+    createdAt: new Date(), updatedAt: new Date(), billingRef: null, emailAuthorization: null,
+    identity: { ...identity, memberId, phoneLookupKey: "synthetic-phone-lookup", phoneNumberVerifiedAt: new Date() },
+    routing: { ...routing, memberId, linqChatLookupKey: "synthetic-chat-lookup" },
+  }));
+  const candidateRead = vi.fn(async () => null);
+  const prisma = Object.assign(tx.prisma, {
+    hostedMember: { findUnique: snapshotRead, findFirst: candidateRead },
+  });
+
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+  await runWithFreshHostedDomainRootUnwrapCache(() =>
+    ensureHostedMemberChannelWelcome({ channel: "linq", memberId, prisma: prisma as never }));
+  expect(snapshotRead).toHaveBeenCalledOnce();
+  expect(decryptMetrics.calls.length).toBeGreaterThan(0);
+
+  snapshotRead.mockClear();
+  resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
+  await runWithFreshHostedDomainRootUnwrapCache(() =>
+    ensureHostedMemberPhoneWelcome({ memberId, prisma: prisma as never }));
+  expect(candidateRead).toHaveBeenCalledOnce();
+  expect(snapshotRead).not.toHaveBeenCalled();
+  expect(decryptMetrics.calls).toHaveLength(0);
+});
+
 async function createHostedWebCryptoTransactionFixture(
   createTransaction: () => HostedCryptoTestTransaction = createCapturingTransaction,
 ): Promise<{
