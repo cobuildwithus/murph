@@ -1,6 +1,6 @@
 # Yield provider cleanup to foreground messages
 
-Status: active
+Status: completed
 Created: 2026-09-14
 Updated: 2026-09-14
 
@@ -54,3 +54,11 @@ Updated: 2026-09-14
 
 - Commands: focused provider-cleanup and workspace-runner tests; assistant-runtime typecheck; complexity guard; focused changelog validation.
 - Expected outcomes: a held request yields, required commits remain protected, retained ids retry successfully, and no typing or provider-input surface changes.
+
+## Implementation result
+
+- Focused provider-cleanup and workspace-runner tests passed: 30 tests, including real runner-to-HTTP interruption and durable retry.
+- Assistant-runtime and Web typechecks passed; changelog render tests passed (10); complexity debt and maximum are unchanged; diff whitespace checks passed.
+- Parent candidate review completed. ReviewGPT round 1 passed on `a07ef0b4a07c1cc264de38260ab5617564582d8f` with no qualifying findings.
+- PR #3451 owns final CI and mergeability evidence. The implementation is complete; no deployment or merge was performed. This closure changes documentation only.
+Completed: 2026-09-14
