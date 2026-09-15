@@ -58,6 +58,7 @@ test.each([
   let refreshWakeSent = false;
   let refreshReadFault: "error" | "incomplete" | null = null;
   let completeRefreshWakeRead: (() => void) | null = null;
+  let writesAtFirstPublication: number | null = null;
   let effectStartedAt = 0;
   const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
   const checkpointExpectationCount = () => latencyTraceRequests.filter((request) =>
@@ -230,6 +231,7 @@ test.each([
           return createBrowserVaultReplicaRef(replica);
         },
         async publishRef({ replicaRef }) {
+          writesAtFirstPublication ??= events.filter((event) => event === "replica.write").length;
           events.push("replica.publish");
           currentWorkspace = { ...currentWorkspace, browserVaultReplicaRef: replicaRef };
           return { published: true, workspace: currentWorkspace };
@@ -384,9 +386,9 @@ test.each([
     }
     if (scenario === "scheduler-refresh" || scenario.startsWith("refresh-")) {
       assert.ok(refreshWakeSent, facts());
-      assert.equal(events.filter((event) => event === "replica.write").length, 1, facts());
     }
     if (scenario.startsWith("refresh-")) {
+      assert.equal(events.filter((event) => event === "replica.write").length, 1, facts());
       assert.equal(events.includes("replica.publish"), false, facts());
       assert.equal(result.status, "scheduled", facts());
       assert.ok(Date.parse(result.nextWakeAt ?? "") <= Date.now(), facts());
@@ -395,9 +397,11 @@ test.each([
       return;
     }
     if (scenario === "scheduler-refresh") {
+      // An unfinished wake classification can be replayed after publication.
+      // Prove the original write completes without restart across the hints.
+      assert.equal(writesAtFirstPublication, 1, facts());
       assert.equal(events.filter((event) => event === "refresh.wake_hint").length, 3, facts());
       assert.equal(events.filter((event) => event === "refresh.mailbox_read").length, 3, facts());
-      assert.equal(events.filter((event) => event === "replica.publish").length, 1, facts());
     }
     const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
     assert.equal(pending.length, 0, JSON.stringify({ retry: pending.map(({ status, lastErrorCode, nextAttemptAt }) => ({ status, lastErrorCode, nextAttemptAt })), ...JSON.parse(facts()) }));

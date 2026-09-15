@@ -8,6 +8,10 @@ import type {
 
 import { type readHostedExecutionEnvironment } from "../env.ts";
 import {
+  hasCachedHostedUserCryptoContextEnvelope,
+  requireHostedUserCryptoContextFromResponse,
+} from "../hosted-crypto/runtime-user-crypto-context.ts";
+import {
   createHostedMailboxEncryptionEnvironmentFromIngressRootResolver,
   decryptHostedMailboxPayloadCiphertext,
 } from "../hosted-mailbox-encryption.ts";
@@ -26,6 +30,20 @@ import {
 } from "./shared.ts";
 
 const MAILBOX_PAYLOAD_DECODE_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
+
+export function addRunnerMailboxCryptoContextRequest(input: {
+  body: string | undefined;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  mailboxFetch: boolean;
+  userId: string;
+}): string | undefined {
+  if (!input.mailboxFetch || !input.body) return input.body;
+  const request = JSON.parse(input.body);
+  // Recompute the opt-in at the Worker boundary; a warm envelope needs no read.
+  request.includeIngressCryptoContext = request.decodeInlinePayloads === true
+    && !hasCachedHostedUserCryptoContextEnvelope({ ...input, domain: "ingress" });
+  return JSON.stringify(request);
+}
 
 export async function handleRunnerMailboxPayloadDecodeRequest(input: {
   env: RunnerOutboundEnvironmentSource;
@@ -87,17 +105,25 @@ export async function handleRunnerMailboxPayloadDecodeRequest(input: {
 }
 
 async function createRunnerMailboxPayloadDecoder(input: {
+  ingressCryptoContext?: unknown;
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   userId: string;
 }): Promise<(payload: HostedMailboxPayloadDecodeRequest) => Promise<HostedExecutionWake>> {
-  const cryptoContext = await resolveRunnerOutboundUserCryptoContext({
-    bucket: input.env.BUNDLES,
-    domain: "ingress",
-    env: input.env,
-    environment: input.environment,
-    userId: input.userId,
-  });
+  const cryptoContext = input.ingressCryptoContext !== undefined
+    ? await requireHostedUserCryptoContextFromResponse({
+        context: input.ingressCryptoContext,
+        domain: "ingress",
+        environment: input.environment,
+        userId: input.userId,
+      })
+    : await resolveRunnerOutboundUserCryptoContext({
+        bucket: input.env.BUNDLES,
+        domain: "ingress",
+        env: input.env,
+        environment: input.environment,
+        userId: input.userId,
+      });
   const environment = createHostedMailboxEncryptionEnvironmentFromIngressRootResolver({
     async readIngressRoot(rootKeyId) {
       const rootKey = await cryptoContext.resolveKeyById(rootKeyId);
@@ -134,13 +160,16 @@ export async function decodeRunnerMailboxFetchResponse(input: {
   response: Response;
   userId: string;
 }): Promise<Response> {
-  const mailbox = parseHostedMailboxFetchResponse(await input.response.json());
+  const rawResponse = await input.response.json();
+  const mailbox = parseHostedMailboxFetchResponse(rawResponse);
+  const ingressCryptoContext = typeof rawResponse === "object" && rawResponse !== null
+    && "ingressCryptoContext" in rawResponse ? rawResponse.ingressCryptoContext : undefined;
   if (mailbox.userId !== input.userId
     || mailbox.items.some((item) => item.userId !== input.userId)) {
     return unauthorized();
   }
   const consumed = mailbox.consumedSeqByLane?.find((cursor) => cursor.lane === "conversation");
-  let decode: Awaited<ReturnType<typeof createRunnerMailboxPayloadDecoder>> | undefined;
+  let decode: ReturnType<typeof createRunnerMailboxPayloadDecoder> | undefined;
   for (const item of mailbox.items) {
     if (item.kind !== "conversation.message" || item.lane !== "conversation"
       || item.consumedAt || !item.payloadInlineCiphertext || item.payloadRef
@@ -148,8 +177,11 @@ export async function decodeRunnerMailboxFetchResponse(input: {
       continue;
     }
     try {
-      decode ??= await createRunnerMailboxPayloadDecoder(input);
-      const wake = await decode({
+      decode ??= createRunnerMailboxPayloadDecoder({
+        ...input,
+        ingressCryptoContext,
+      });
+      const wake = await (await decode)({
         itemRef: item,
         payloadCiphertext: item.payloadInlineCiphertext,
         payloadRequestId: null,

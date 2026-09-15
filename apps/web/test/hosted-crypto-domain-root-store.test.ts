@@ -133,6 +133,7 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
   const {
     provisionActiveHostedDomainRootEnvelopeForUserOnly,
     readHostedRuntimeCryptoContextForWorker,
+    readHostedRuntimeIngressCryptoContextForWorker,
   } = await import(
     "../src/lib/hosted-crypto/domain-root-store"
   );
@@ -151,6 +152,16 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
     userId: "member-test-1",
   });
   const persistedBeforeRead = tx.persistedEnvelopes.length;
+
+  const ingressOnlyQuery = vi.spyOn(tx.prisma, "$queryRaw");
+  const ingressOnly = await readHostedRuntimeIngressCryptoContextForWorker({
+    prisma: tx.prisma, userId: "member-test-1",
+  });
+  expect(ingressOnlyQuery).toHaveBeenCalledTimes(1);
+  expect(ingressOnly.envelopes).toEqual({ ingress: tx.persistedEnvelopes.find((entry) => entry.domain === "ingress") });
+  expect(ingressOnly.cacheMaxAgeMs).toBe(300_000);
+  expect(ingressOnly.cryptoContextVersion).toMatch(/^hccv_[0-9a-f]{32}$/u);
+  ingressOnlyQuery.mockRestore();
 
   const context = await readHostedRuntimeCryptoContextForWorker({
     prisma: tx.prisma,

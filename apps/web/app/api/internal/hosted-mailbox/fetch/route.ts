@@ -3,6 +3,7 @@ import {
   parseHostedMailboxFetchResponse,
 } from "@murphai/hosted-execution/parsers";
 import type { PrismaClient } from "@prisma/client";
+import { readHostedRuntimeIngressCryptoContextForWorker } from "@/src/lib/hosted-crypto/domain-root-store";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -62,7 +63,8 @@ export const POST = withJsonError(async (request: Request) => {
       && memberState?.inferenceConnection?.selected
     ? memberState.inferenceConnection.revision
     : null;
-  const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
+  const rawBody = await readOptionalJsonObject(request);
+  const body = parseHostedMailboxFetchRequest(rawBody);
   const fetchedAt = new Date();
   const projection = await fetchHostedRuntimeMailboxProjection({
     cursorMode: body.cursorMode ?? null,
@@ -122,7 +124,7 @@ export const POST = withJsonError(async (request: Request) => {
       }).catch(() => null)
     : null;
 
-  return jsonOk(parseHostedMailboxFetchResponse({
+  const mailbox = parseHostedMailboxFetchResponse({
     assistantProvider: access.assistantProvider,
     assistantCustomInferenceRevision,
     ...(usage.runningLow ? { conversationUsageStatus: "low" as const } : {}),
@@ -132,8 +134,29 @@ export const POST = withJsonError(async (request: Request) => {
     items: projection.items,
     maxSeqByLane: projection.maxSeqByLane,
     userId,
-  }));
+  });
+  const consumed = mailbox.consumedSeqByLane?.find((cursor) => cursor.lane === "conversation");
+  const inlineConversationPresent = mailbox.items.some((item) =>
+    item.kind === "conversation.message" && item.lane === "conversation"
+    && !item.consumedAt && item.payloadInlineCiphertext && !item.payloadRef
+    && (!consumed || BigInt(item.laneSeq) > BigInt(consumed.consumedSeq)));
+  const ingressCryptoContext = rawBody?.includeIngressCryptoContext === true
+    && rawBody.decodeInlinePayloads === true && inlineConversationPresent
+    ? await readMailboxIngressCryptoContext({ prisma, userId }).catch(() => null)
+    : null;
+  // This signed-envelope extension ends at the Worker; the canonical parser strips it.
+  return jsonOk({ ...mailbox, ...(ingressCryptoContext ? { ingressCryptoContext } : {}) });
 });
+
+async function readMailboxIngressCryptoContext(input: { prisma: PrismaClient; userId: string }) {
+  const workspace = await input.prisma.hostedWorkspace.findUnique({
+    select: { userId: true },
+    where: { userId: input.userId },
+  });
+  if (!workspace) return null;
+  const context = await readHostedRuntimeIngressCryptoContextForWorker(input);
+  return { ...context, fetchedAt: new Date().toISOString() };
+}
 
 async function readHostedRuntimeMailboxAiUsageAccess(input: {
   consumedSeqByLane: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["consumedSeqByLane"];
