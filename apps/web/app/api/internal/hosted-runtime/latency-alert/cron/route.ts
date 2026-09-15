@@ -4,12 +4,13 @@ import { runHostedAiUsageOvershootAlertMonitor } from "@/src/lib/hosted-executio
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { runHostedRuntimeLatencyAlertMonitor } from "@/src/lib/hosted-runtime-latency/alert-monitor";
 import { runHostedRuntimeTypingAlertMonitor } from "@/src/lib/hosted-runtime-latency/typing-alert-monitor";
+import { runHostedDeviceImportAlertMonitor } from "@/src/lib/hosted-runtime-progress/device-import-alert-monitor";
 import { runHostedRuntimeProgressAlertMonitor } from "@/src/lib/hosted-runtime-progress/alert-monitor";
 
 export const GET = withJsonError(async (request: Request) => {
   requireVercelCronRequest(request);
 
-  const [typingResult, latencyResult, progressResult, usageOvershootResult, starterAbuseResult] = await Promise.allSettled([
+  const [typingResult, latencyResult, progressResult, usageOvershootResult, starterAbuseResult, deviceImportResult] = await Promise.allSettled([
     runHostedRuntimeTypingAlertMonitor(),
     runHostedRuntimeLatencyAlertMonitor({
       signal: request.signal,
@@ -21,6 +22,7 @@ export const GET = withJsonError(async (request: Request) => {
       signal: request.signal,
     }),
     runHostedStarterAbuseAlertMonitor({ signal: request.signal }),
+    runHostedDeviceImportAlertMonitor({ signal: request.signal }),
   ]);
 
   if (typingResult.status === "rejected") {
@@ -38,7 +40,10 @@ export const GET = withJsonError(async (request: Request) => {
 
   if (starterAbuseResult.status === "rejected") throw starterAbuseResult.reason;
 
+  if (deviceImportResult.status === "rejected") throw deviceImportResult.reason;
+
   return jsonOk({
+    deviceImportAlert: deviceImportResult.value,
     starterAbuseAlert: starterAbuseResult.value,
     runtimeLatencyAlert: latencyResult.value,
     runtimeTypingAlert: typingResult.value,

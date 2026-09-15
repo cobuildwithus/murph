@@ -21,6 +21,7 @@ import {
   type HostedRuntimeLogSqlResult,
 } from "@/src/lib/hosted-runtime-log/store";
 
+import { readDeviceImportObservations } from "@/src/lib/hosted-runtime-progress/device-import-observation";
 import { findHostedUsageLimitedPersonalPatternsOccurrences } from "@/src/lib/hosted-runtime-log/usage-gate";
 
 const { Client: PgClient, Pool: PgPool } = pg;
@@ -190,6 +191,44 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     );
     database = poolDatabase(pool);
   }, 30_000);
+
+  it("projects bounded device import metadata without exposing payloads", async () => {
+    const db = requireDatabase(database);
+    const now = new Date("2026-08-10T16:00:00Z");
+    const subject = hostedRuntimeLogSubjectKey("synthetic-import-runtime");
+    const entries = [
+      { event: "device-sync.pass_finished", details: { processedJobs: 7,
+        incomingRetainedProgressFingerprint: "a".repeat(64), outgoingRetainedProgressFingerprint: "b".repeat(64),
+        outgoingRetainedJobCount: 10, pendingJobCountAfter: 10, queueSnapshotAfterPresent: true,
+        yieldReason: "outer_signal", privateCanary: "must-not-be-selected" } },
+      { event: "checkpoint.snapshot_finished", details: { webCheckpointAccepted: true } },
+      { event: "runner.processing_finished", details: { runtimeProcessingOutcome: "runtime_processing_accepted", runtimeProcessingAction: "woken" } },
+      { event: "runner.processing_finished", details: { runtimeProcessingOutcome: "runtime_processing_accepted", runtimeProcessingAction: "started" } },
+      { event: "device-sync.pass_finished", details: { processedJobs: "malformed", pendingJobCountAfter: "malformed", queueSnapshotAfterPresent: true } },
+      { event: "device-sync.pass_finished", details: { processedJobs: 0, pendingJobCountAfter: 0, outgoingRetainedJobCount: 0, queueSnapshotAfterPresent: true } },
+      { event: "device-sync.pass_finished", details: { processedJobs: 4, deviceSyncImportAppliedCount: 4,
+        incomingRetainedProgressFingerprint: "a".repeat(64), outgoingRetainedProgressFingerprint: "a".repeat(64) } },
+      { event: "device-sync.pass_finished", details: { processedJobs: 4, deviceSyncImportNoopCount: 4,
+        incomingRetainedProgressFingerprint: "a".repeat(64), outgoingRetainedProgressFingerprint: "a".repeat(64) } },
+    ];
+    for (const [index, entry] of entries.entries()) {
+      await db.query(`INSERT INTO hosted_runtime_log (id, subject_key, at, level, component, phase, event_code, attempt_id, redacted_json)
+        VALUES ($1, $2, $3, 'info', 'runtime', 'invoke', $4, 'synthetic-attempt', $5::jsonb)`,
+        [randomUUID(), subject, new Date(+now - (entries.length - index) * 1000), entry.event, JSON.stringify(entry.details)]);
+    }
+    const observations = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+    expect(observations).toHaveLength(8);
+    expect(observations[0]).toMatchObject({ pending: true, progressed: true, cancelled: true });
+    expect(observations[1]).toMatchObject({ checkpointAccepted: true });
+    expect(observations[2]).toMatchObject({ restarted: false });
+    expect(observations[3]).toMatchObject({ restarted: true });
+    expect(observations[4]).toMatchObject({ pending: null, progressed: false });
+    expect(observations[5]).toMatchObject({ pending: false });
+    expect(observations[6]).toMatchObject({ progressed: true });
+    expect(observations[7]).toMatchObject({ progressed: false });
+    expect(JSON.stringify(observations)).not.toContain("must-not-be-selected");
+    expect(await readDeviceImportObservations({ database: db, now, subjects: ["unrelated-subject"] })).toEqual([]);
+  });
 
   afterAll(async () => {
     if (pool && subjectKeys.size > 0) {
