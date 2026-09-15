@@ -67,6 +67,40 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
     });
   });
 
+  it("counts same-chat sends and active typing while preserving silent and unrelated alerts", async () => {
+    await withTables(async (tx) => {
+      for (const id of ["sent", "missing-sent", "other-chat", "failed-send", "late-send",
+        "active", "expired", "finished", "other-member", "unknown-route"]) {
+        await insertTrace(tx, id, { elapsed: id === "missing-sent" ? null : 9000 });
+        if (id !== "unknown-route") await bindConversation(tx, id, `chat-${id}`);
+      }
+      await insertDelivery(tx, "sent", "chat-sent", 5000);
+      await insertDelivery(tx, "missing-sent", "chat-missing-sent", 15_000);
+      await insertDelivery(tx, "unrelated", "chat-unrelated", 1000);
+      await insertDelivery(tx, "failed", "chat-failed-send", null);
+      await insertDelivery(tx, "late", "chat-late-send", 10_000);
+      for (const id of ["active", "expired", "finished", "other-member"]) {
+        const ageMs = id === "expired" ? 301_000 : 2000;
+        await insertTrace(tx, `prior-${id}`, {
+          elapsed: -ageMs,
+          receivedAt: new Date(received.getTime() - ageMs - 1000),
+        });
+        await bindConversation(tx, `prior-${id}`, `chat-${id}`);
+      }
+      await insertDelivery(tx, "finished", "chat-finished", -500);
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace
+        SET linq_delivery_id = 'finished' WHERE id = 'prior-finished'`;
+      await tx.$executeRaw`UPDATE hosted_mailbox_item SET user_id = 'other-member'
+        WHERE id = 'mailbox-prior-other-member'`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET user_id = 'other-member'
+        WHERE id = 'prior-other-member'`;
+      const rows = await tx.$queryRaw<Array<{ id: string }>>(buildHostedRuntimeTypingAlertQuery({ now }));
+      expect(rows.map((row) => row.id).sort()).toEqual([
+        "expired", "failed-send", "finished", "late-send", "other-chat", "other-member", "unknown-route",
+      ].map((id) => `runtime-typing/${id}`).sort());
+    });
+  });
+
   it.each(["linq", "telegram"] as const)("excludes usage-denied %s inputs while alerting on other slow inputs for the same member", async (source) => {
     await withTables(async (tx) => {
       const usageDeniedAt = new Date(received.getTime() + 1500);
@@ -147,12 +181,18 @@ async function withTables(run: (tx: Prisma.TransactionClient) => Promise<void>) 
   try {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`CREATE TEMP TABLE hosted_mailbox_item (
-        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, ai_usage_denied_at TIMESTAMP(3)
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source_message_lookup_key TEXT, ai_usage_denied_at TIMESTAMP(3)
       ) ON COMMIT DROP`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_ingress_latency_trace (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source TEXT NOT NULL, mailbox_item_id TEXT,
-        assistant_input_id TEXT, accepted_at TIMESTAMP(3), webhook_received_at TIMESTAMP(3),
+        assistant_input_id TEXT, linq_delivery_id TEXT, accepted_at TIMESTAMP(3), webhook_received_at TIMESTAMP(3),
         workspace_restore_done_at TIMESTAMP(3), ingress_typing_accepted_at TIMESTAMP(3), phase_breakdown_json JSONB
+      ) ON COMMIT DROP`;
+      await tx.$executeRaw`CREATE TEMP TABLE hosted_linq_provider_event (
+        message_lookup_key TEXT, linq_chat_lookup_key TEXT, provider_created_at TIMESTAMP(3)
+      ) ON COMMIT DROP`;
+      await tx.$executeRaw`CREATE TEMP TABLE hosted_linq_delivery (
+        id TEXT PRIMARY KEY, linq_chat_lookup_key TEXT, attempted_at TIMESTAMP(3), accepted_at TIMESTAMP(3)
       ) ON COMMIT DROP`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_linq_alert (
         id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
@@ -203,4 +243,20 @@ async function insertTrace(tx: Prisma.TransactionClient, id: string, input: {
       ${new Date(received.getTime() + 2000)}, ${receivedAt}, ${restoredAt},
       ${JSON.stringify(phase)}::jsonb)
   `);
+}
+
+async function bindConversation(tx: Prisma.TransactionClient, traceId: string, chat: string) {
+  await tx.$executeRaw`UPDATE hosted_mailbox_item
+    SET source_message_lookup_key = ${`message-${traceId}`} WHERE id = ${`mailbox-${traceId}`}`;
+  await tx.$executeRaw`INSERT INTO hosted_linq_provider_event
+    (message_lookup_key, linq_chat_lookup_key, provider_created_at)
+    SELECT ${`message-${traceId}`}, ${chat}, webhook_received_at
+    FROM hosted_ingress_latency_trace WHERE id = ${traceId}`;
+}
+
+async function insertDelivery(tx: Prisma.TransactionClient, id: string, chat: string, offsetMs: number | null) {
+  const acceptedAt = offsetMs === null ? null : new Date(received.getTime() + offsetMs);
+  await tx.$executeRaw`INSERT INTO hosted_linq_delivery
+    (id, linq_chat_lookup_key, attempted_at, accepted_at)
+    VALUES (${id}, ${chat}, ${acceptedAt ?? received}, ${acceptedAt})`;
 }

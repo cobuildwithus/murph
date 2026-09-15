@@ -2349,6 +2349,20 @@ Last verified: 2026-09-04
   through the earliest accepted typing indicator: strictly over 3 seconds for a
   warm workspace and over 10 seconds for a cold workspace. Mailbox acceptance
   remains its existing timestamp; it never substitutes for webhook receipt.
+  Linq alerts exclude an accepted message in the same chat between webhook
+  receipt and the observed typing acceptance (or the missing-observation check).
+  Existing blinded provider message/chat keys establish the exact conversation;
+  activity in another chat or member never supplies prior-typing evidence.
+  An earlier accepted typing session in that chat also covers arrival until its
+  linked delivery is accepted, within the existing five-minute session cap.
+  Missing correlation, failed sends, expired typing, and sends after the measured
+  typing endpoint do not suppress an alert. Telegram retains exact-input typing
+  observations and the existing thresholds.
+  Accepted-typing persistence waits for competing short trace-row writes in the
+  detached callback; other retry-backed milestones keep skipping locked rows.
+  Transport exceptions use the existing two retries (250 ms and 1 second), and
+  exhausted acceptance reporting emits only channel and input count. No provider
+  or delivery operation waits for this diagnostic persistence.
   A restore completed before the message arrived, or an explicit reused restore,
   identifies warmth. This includes later messages within an invocation that
   originally started cold. Missing warmth evidence uses the 10-second cutoff and
@@ -3334,9 +3348,10 @@ Last verified: 2026-09-04
   trace-id lock order. This common order prevents cross-writer row-lock cycles,
   while the fresh checkpoint snapshot prevents an older waiting lease from
   overwriting a newer one, without a broad transaction retry. Provider-start
-  and assistant-milestone writers additionally skip contended rows and report
-  them unmatched so their existing bounded 250 ms / 1 s caller retries own
-  recovery; writers without that retry contract keep ordinary ordered locking.
+  and ordinary assistant-milestone writers additionally skip contended rows and
+  report them unmatched so their existing bounded 250 ms / 1 s caller retries
+  own recovery. Accepted-typing milestones and writers without that retry
+  contract keep ordinary ordered locking.
   Persistence failures emit only event type, source, input cardinality, query
   tag, Prisma code, and SQLSTATE; trace and attempt identifiers and query text
   stay out of failure logs. The bounded transaction-local trace-id list passes

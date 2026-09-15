@@ -157,7 +157,11 @@ describe.skipIf(!runPostgresProof)(
       const availableTraceId = `hil_latency_skip_locked_available_${suffix}`;
       const runtimeAttemptId = `runtime_latency_skip_locked_${suffix}`;
       const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const applicationName = `typing_acceptance_lock_${suffix.slice(0, 8)}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({
+        databaseUrl: withPostgresLockOrderProbe(databaseUrl, applicationName), poolMax: 1,
+      });
       let releaseTraceLock!: () => void;
       const traceLockRelease = new Promise<void>((resolve) => {
         releaseTraceLock = resolve;
@@ -360,8 +364,17 @@ describe.skipIf(!runPostgresProof)(
           firstCodexOutputObservedAtEpochMs: assistantMilestoneAt.getTime(),
         });
 
+        // Accepted typing must survive even when this is the caller's final retry.
+        const acceptanceWhileLocked = recordHostedIngressAssistantMilestone({
+          ...assistantInput, milestone: "linq_typing_accepted",
+        });
+        inFlight.push(acceptanceWhileLocked);
+        await waitForPostgresLock({ applicationName, observer });
         releaseTraceLock();
         await blockerPromise;
+        await expect(acceptanceWhileLocked).resolves.toEqual({
+          matchedCount: 1, recorded: true, unmatchedCount: 0,
+        });
 
         await expect(
           recordHostedIngressProviderStarted(batchedProviderInput),
@@ -396,6 +409,7 @@ describe.skipIf(!runPostgresProof)(
           ),
         ).toMatchObject({
           firstCodexOutputObservedAtEpochMs: assistantMilestoneAt.getTime(),
+          linqTypingAcceptedAtEpochMs: assistantMilestoneAt.getTime(),
         });
       } finally {
         releaseTraceLock();
@@ -403,6 +417,7 @@ describe.skipIf(!runPostgresProof)(
         await writer.hostedMember.deleteMany({ where: { id: memberId } });
         await Promise.all([
           blocker.$disconnect(),
+          observer.$disconnect(),
           writer.$disconnect(),
         ]);
       }
