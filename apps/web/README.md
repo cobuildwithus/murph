@@ -2036,6 +2036,15 @@ The Vercel entrypoint runs the initial Web typecheck with one checker through
 `MURPH_TSC_WEB_CHECKERS=1`. Automatic checker parallelism exhausted the Standard
 build machine before the Next build began; the limit retains the full check.
 
+The final Next compilation also sets `GOMEMLIMIT=1GiB` for Workflow's Go-based
+esbuild services, which can remain resident in both the Next parent and its
+Webpack worker. Node's V8 heap limits do not cover these services. This is a
+[Go GC soft target](https://go.dev/doc/gc-guide#Memory_limit), not a process RSS
+or container limit. Keep it on the Next compilation command: applying the same
+target to the whole package build would also constrain the much larger native
+TypeScript source check. Route type generation and the separate TypeScript
+compatibility check retain their existing environment and heap budgets.
+
 The production runner first performs route type generation and an explicit
 app-local generated-contract TypeScript check with a 6 GiB limit. It marks
 only that prepared check complete before starting Webpack. The Next CLI parent
