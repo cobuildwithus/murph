@@ -1,6 +1,6 @@
 # Simplify active runtime wake transport
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-15
 
@@ -68,6 +68,13 @@ Cloudflare typecheck passed on the final source. Complexity guard passed;
 complexity dropped from 55 to 34. The changed wake method retains its required
 identity, abort/stop, and older Node response branches.
 
-Pending: changelog and documentation checks, final candidate review, exact-head CI,
-and final ReviewGPT. No production deployment or latency gain is claimed.
+Documentation drift and final candidate/privacy review passed. The isolated
+`active-conversation-wake` changelog fragment has 10 passing archive tests and
+a passing Web typecheck. The documented app-directory test command found no
+tests; the equivalent repository-root command with `apps/web/vitest.config.ts`
+passed. Existing Frog entries cover that discovery problem; no duplicate entry.
+
+Implementation and local verification are complete. PR #3474 owns exact-head CI
+and final ReviewGPT completion. No production deployment or latency gain is claimed.
 The inter-object stall still needs production attribution after this simplification.
+Completed: 2026-09-15
