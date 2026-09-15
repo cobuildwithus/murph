@@ -875,6 +875,8 @@ describe("handleRunnerOutboundRequest", () => {
             ...body,
             includeCredentialMaterial: snapshotIncludeCredentialMaterial,
           })
+        : path === "/api/internal/hosted-mailbox/fetch"
+        ? JSON.stringify({ ...body, includeIngressCryptoContext: false })
         : body === undefined ? undefined : JSON.stringify(body);
       expect(init?.body).toBe(expectedForwardedBody);
       const headers = new Headers(init?.headers);
