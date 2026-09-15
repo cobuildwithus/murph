@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "message-count-test-traffic",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "A more accurate message count",
+    "summary": "The homepage message total now excludes live messages from our automated messaging checks.",
+    "details": "Ordinary conversations continue to count across supported channels. Previously saved daily totals are unchanged.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}

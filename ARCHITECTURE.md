@@ -1457,8 +1457,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   activity results. Daily snapshots apply the same member exclusion and omit
   Linq deliveries attributed to the canary member's canonical current or
   pending Linq chat lookup key; previously aggregated snapshots remain
-  immutable. Snapshot capture performs one bounded routing-row read after the
-  canary identity lookup. Composed with sponsorship reads, the page can queue at
+  immutable. The public lifetime message total uses the same filtered message
+  counts for its live window, retaining ordinary chats on the same sending line
+  and unattributed Linq deliveries. Both readers perform one bounded routing-row
+  read after the canary identity lookup. The public read adds those two sequential
+  lookups to its existing snapshot aggregate and three parallel message counts;
+  it adds no content read, external call, transaction, or persisted correction.
+  Composed with sponsorship reads, the page can queue at
   most 27 database operations at its read peak (previously 26); the shared pool
   still caps live connections at 15. This projection adds no transaction,
   decrypt, external call, retry, or fallback.

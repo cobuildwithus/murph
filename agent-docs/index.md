@@ -110,6 +110,11 @@ owned by `operations/device-sync-ingestion-invariants.md` and `RELIABILITY.md`.
 The implementation and focused proof are recorded in
 [`2026-09-14-junction-preflight-fallbacks.md`](exec-plans/completed/2026-09-14-junction-preflight-fallbacks.md).
 
+Public message totals share the daily snapshot canary exclusion in
+`ARCHITECTURE.md`; API and PostgreSQL regression proof lives in
+`apps/web/test/hosted-ops-growth.test.ts` and
+`apps/web/test/hosted-ops-growth-canary-postgres.test.ts`.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
