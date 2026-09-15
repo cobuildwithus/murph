@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:reduce-liver-fat
 slug: reduce-liver-fat
-title: Reduce My Liver Fat
-summary: Reduce excess liver fat with sustainable energy balance, movement, food quality, and treatment of the metabolic drivers.
+title: Understand My Liver Fat
+summary: Understand liver-fat measurements, related lifestyle evidence, and questions for your care team.
 status: field-testing
 quality: usable
 aliases:
@@ -18,7 +18,7 @@ goal:
   category: biomarkers
   parentGoalKey: goal_template:improve-fatty-liver-disease
   outcomeKind: biomarker
-  goalPhrase: reduce my liver fat
+  goalPhrase: understand my liver fat
   successSignals:
     - id: hepatic_fat
       kind: biomarker
@@ -33,7 +33,7 @@ goal:
     kind: habit_plan
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me reduce my liver fat.
+  startPrompt: Hey Murph, help me understand my liver fat.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -89,4 +89,4 @@ Avoid detoxes and multi-ingredient liver supplements; some cause liver injury. S
 
 ## Related goals
 
-[Improve Fatty Liver Disease](/goals/improve-fatty-liver-disease) · [Improve My Insulin Sensitivity](/goals/improve-insulin-sensitivity) · [Lower My Triglycerides](/goals/lower-triglycerides)
+[Understand Fatty Liver Disease](/goals/improve-fatty-liver-disease) · [Understand Insulin Sensitivity](/goals/improve-insulin-sensitivity) · [Understand My Triglycerides](/goals/lower-triglycerides)

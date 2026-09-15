@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:lower-blood-pressure
 slug: lower-blood-pressure
-title: Lower My Blood Pressure
-summary: Build a practical plan around accurate home readings, everyday habits, and the care that fits your cardiovascular risk.
+title: Track My Blood Pressure
+summary: Organize home blood pressure readings and learn consistent measurement habits for conversations with your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: biomarker
-  goalPhrase: lower my blood pressure
+  goalPhrase: track my blood pressure
   successSignals:
     - id: home_blood_pressure_average
       kind: biomarker
@@ -32,7 +32,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me lower my blood pressure.
+  startPrompt: Hey Murph, help me track my blood pressure.
   indexable: true
 safety:
   cautionLevel: moderate

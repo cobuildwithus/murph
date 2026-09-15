@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:reduce-lung-cancer-risk
 slug: reduce-lung-cancer-risk
-title: Lower My Risk of Lung Cancer
-summary: Lower lung cancer risk by avoiding tobacco, testing for radon, reducing hazardous exposures, and using screening when eligible.
+title: Understand Lung Cancer Prevention
+summary: Learn about lung cancer risk factors, tobacco and radon exposure, and screening discussions.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: function
-  goalPhrase: lower my risk of lung cancer
+  goalPhrase: understand lung cancer prevention
   successSignals:
     - id: tobacco_exposure
       kind: behavior
@@ -34,7 +34,7 @@ goal:
     kind: general_plan
     ownerSkillIds:
       - substance-load
-  startPrompt: Hey Murph, help me lower my risk of lung cancer.
+  startPrompt: Hey Murph, help me understand lung cancer prevention.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -89,4 +89,4 @@ Vitamin or antioxidant supplements have not been shown to undo smoking risk, and
 
 ## Related goals
 
-[Lower My Risk of Heart Disease](/goals/reduce-heart-disease-risk) · [Lower My Risk of Stroke](/goals/reduce-stroke-risk)
+[Understand Heart Disease Prevention](/goals/reduce-heart-disease-risk) · [Understand Stroke Prevention](/goals/reduce-stroke-risk)

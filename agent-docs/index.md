@@ -160,7 +160,7 @@ preserving locked authority revalidation; its contract is owned by
 | `agent-docs/product-specs/hosted-support-escalation.md` | Hosted support product spec. | Hosted support product spec | High | 2026-08-05 |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted billing/product spec. | Hosted billing/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/health-commons.md` | Health Commons behavior. | Health Commons behavior | High | 2026-07-29 |
-| `agent-docs/product-specs/public-goal-guides.md` | Goal guide behavior. | Goal guide behavior | High | 2026-08-30 |
+| `agent-docs/product-specs/public-goal-guides.md` | Goal guide behavior. | Goal guide behavior | High | 2026-09-14 |
 | `agent-docs/product-specs/murph-safe-public-product-search.md` | Public product evidence behavior. | Public product evidence behavior | High | 2026-09-02 |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Health Commons protocol card copy | High | 2026-04-30 |
 | `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored new-member onboarding contract for a private broad-assistant relationship. | New-member onboarding behavior | High | 2026-09-05 |
