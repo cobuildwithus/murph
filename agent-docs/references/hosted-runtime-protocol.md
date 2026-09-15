@@ -3318,6 +3318,16 @@ Overlapping wakes that receive identity-verified acknowledgement from the same
 runtime do not invalidate one another. Wake acknowledgement checks actual
 invocation, abort, destroy, and stop changes; the activity generation used to
 protect warm-shell expiry is not runtime ownership.
+Active wakes use the native container port directly. They do not read SDK
+lifecycle state, start a container, or wait for SDK readiness before dispatch.
+The wake owner checks the member binding once, records activity, and preserves
+the existing timeout, identity proof, bounded metadata drain, and stop/abort
+fences. Its existing entry timestamp includes that binding check. Cold starts
+continue through the explicit readiness owner; a wake cannot create a new child.
+UserRunner calls the unified `ensureProcessing` RPC supported by all production
+container classes, including retained-image classes. There is no alternate
+legacy wake RPC; a missing method remains an unconfirmed wake. Node HTTP wake
+response compatibility is independent and retains its existing identity checks.
 A failed transport call to an accepted invocation does not prove the invocation
 died. Before clearing the write fence after an invoke transport failure, the
 UserRunner probes the RunnerContainer for the exact fence identity

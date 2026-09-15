@@ -13,6 +13,10 @@ service restart/retry proof lives in
 
 ## Purpose
 
+Native active-runtime wake transport and single-owner member-binding admission
+are specified in the hosted runtime protocol reference; cold-start readiness
+retains its existing owner.
+
 Immediate manual meal estimation and ordinary incomplete-meal recovery are
 owned by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/SECURITY.md`. Their focused proof covers canonical import replay,
