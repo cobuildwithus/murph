@@ -40,4 +40,9 @@ queue, retry owner, dependency, or live-authority bypass is introduced.
   no changed-source functions above 20. Diff whitespace and privacy checks passed.
 - Parent candidate review: Ready at the scheduled-wake admission boundary.
   Production backlog size, age, provider completion, and latency are unmeasured.
-- PR number, final changelog reference, ReviewGPT, and exact-head CI pending.
+- Implementation and local proof complete. PR #3471 owns final ReviewGPT,
+  exact-head CI, and merge evidence; these external gates remain pending at
+  archival. The release note references that PR.
+Status: completed
+Updated: 2026-09-15
+Completed: 2026-09-15

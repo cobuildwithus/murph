@@ -14,7 +14,7 @@ service restart/retry proof lives in
 Device-sync sweep capacity, backlog-presence telemetry, and the optional
 preflight admission budget are owned by `agent-docs/RELIABILITY.md`; the
 implementation record is
-[`2026-09-15-device-sweep-capacity.md`](exec-plans/active/2026-09-15-device-sweep-capacity.md).
+[`2026-09-15-device-sweep-capacity.md`](exec-plans/completed/2026-09-15-device-sweep-capacity.md).
 
 ## Purpose
 
