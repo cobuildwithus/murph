@@ -13,7 +13,9 @@
       "dashboard",
       "performance"
     ],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [
+      3489
+    ],
     "tryIt": {
       "label": "Open Home",
       "href": "/home"
