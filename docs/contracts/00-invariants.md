@@ -246,8 +246,15 @@ it has been explicitly elevated to a cross-cutting invariant.
   barrier; generic non-idempotent provider work remains excluded until routine
   checkpointing. Generic notifications and unrelated pending outbox work remain
   excluded. Inherited, committed, durability-gated, and shutdown-time wakes do
-  not otherwise use this exception. If the hot pass dirties state, the full
-  quiet window starts again. An actual host termination may use the separate
+  not otherwise use this exception. Newly accepted foreground-priority work
+  starts the full quiet window again; generic progress, cleanup-only work and
+  empty internal probes do not. After publication, dirty post-checkpoint effects
+  use the spent window while preserving all required save-before-effect and
+  follow-up-save barriers. Conversation warmth is independently bounded by ten
+  minutes from the latest accepted inbound user's original server receipt, not
+  by checkpoint or invocation completion. Expiry cannot interrupt accepted work
+  or bypass the exact owner, durable recovery, and stop fences. An actual host
+  termination may use the separate
   last-chance durability path, but durably staged foreground work still wins.
   Current-turn durability barriers may run only for facts the current reply or
   effect consumes. Before provider start, that is limited to accepted-input and

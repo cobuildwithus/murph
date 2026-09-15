@@ -155,7 +155,7 @@ describe("RunnerContainer internal runtime dispatch", () => {
         nextWakeAt: new Date(Date.now() + 30_000).toISOString(),
       },
     },
-  ])("keeps the warm shell for $name", async ({ resultOverrides }) => {
+  ])("does not earn warmth from $name", async ({ resultOverrides }) => {
     const { container, destroy } = createActivityExpiryContainerDouble({
       environment: {
         HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
@@ -174,13 +174,13 @@ describe("RunnerContainer internal runtime dispatch", () => {
       leaseGeneration: "11",
       userId: "member_123",
     });
-    expect(destroy).not.toHaveBeenCalled();
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(await container.listSchedules("onActivityExpired")).toEqual([]);
   });
 
   it.each([
     "active child",
     "recent conversation warmth",
-    "legacy child without a warmth watermark",
   ])("keeps the terminal shell for $name", async (name) => {
     const nowMs = Date.now();
     const healthResult = name === "active child"
@@ -188,16 +188,10 @@ describe("RunnerContainer internal runtime dispatch", () => {
           ...createRunnerHealthResult(),
           activeJobCount: 1,
         }
-      : name === "recent conversation warmth"
-        ? {
-            ...createRunnerHealthResult(),
-            conversationWarmActivityCompletedAtEpochMs: nowMs,
-          }
-        : {
-            activeJobCount: 0,
-            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
-            ok: true,
-          };
+      : {
+          ...createRunnerHealthResult(),
+          conversationActivityReceivedAtEpochMs: nowMs,
+        };
     const { container, destroy } = createActivityExpiryContainerDouble({
       healthResult,
     });
@@ -403,7 +397,7 @@ describe("RunnerContainer internal runtime dispatch", () => {
     expect(destroy).not.toHaveBeenCalled();
   });
 
-  it("early activity expiry renews the warm shell without dispatching a checkpoint job", async () => {
+  it("expiry does not retain a background shell or dispatch a checkpoint job", async () => {
     const renewActivityTimeout = vi.fn();
     const { container, containerFetch, destroy } = createActivityExpiryContainerDouble({
       renewActivityTimeout,
@@ -423,11 +417,11 @@ describe("RunnerContainer internal runtime dispatch", () => {
     await expect(container.onActivityExpired()).resolves.toBeUndefined();
 
     expect(countPostedRunnerRequests(containerFetch)).toBe(0);
-    expect(destroy).not.toHaveBeenCalled();
-    expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(renewActivityTimeout).not.toHaveBeenCalled();
   });
 
-  it("activity expiry cleans up when the platform timeout cannot be renewed", async () => {
+  it("activity expiry uses safe stop without dispatching another invocation", async () => {
     const { container, containerFetch, destroy } = createActivityExpiryContainerDouble();
 
     await container.invoke({
@@ -560,7 +554,7 @@ function createRunnerResult(overrides: Record<string, unknown> = {}) {
 function createRunnerHealthResult(): Record<string, unknown> {
   return {
     activeJobCount: 0,
-    conversationWarmActivityCompletedAtEpochMs: null,
+    conversationActivityReceivedAtEpochMs: null,
     hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     ok: true,
   };

@@ -648,6 +648,7 @@ describe("hosted mailbox conversation import adapter", () => {
         if (scenario === "failed-stage") throw new Error("synthetic staging failure");
         return {
           inputId: `input_attachment_${scenario}`,
+          receivedAt: "2026-04-26T00:00:00.000Z",
           attachmentDescriptorCount: 1,
           attachmentEvidenceRequired: true,
           enqueuePendingReply,
@@ -897,7 +898,8 @@ describe("hosted mailbox conversation import adapter", () => {
         importConversationWake,
         prepareWakeContext,
         item,
-        onConversationActivityObserved() {
+        onConversationActivityObserved(receivedAtEpochMs) {
+          assert.equal(receivedAtEpochMs, Date.parse(item.item.createdAt));
           order.push("activity-callback");
         },
         onConversationInputStaged(channel) {
@@ -920,6 +922,38 @@ describe("hosted mailbox conversation import adapter", () => {
     } finally {
       controller.close();
     }
+  });
+
+  test("mailbox replay preserves the persisted receipt instead of the replay admission time", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-receipt-replay-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem();
+    const wake = createConversationWake({ message: {
+      channel: "linq",
+      phoneLookupKey: "synthetic-contact",
+      linqMessage: {
+        chatId: "chat_receipt_replay", from: "synthetic-contact", isFromMe: false,
+        messageId: "msg_receipt_replay", threadIsDirect: true,
+        parts: [{ type: "text", value: "synthetic inbound message" }],
+      },
+    } });
+    const receipts: number[] = [];
+    const importItem = (candidate: typeof item) => importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(wake),
+      async importConversationWake() { return { captureId: null, metrics: { nextWakeAt: null, parserProcessed: 0 } }; },
+      async prepareWakeContext() {},
+      item: candidate,
+      onConversationActivityObserved: (receipt) => { receipts.push(receipt); },
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+    await importItem(item);
+    await importItem({ ...item, item: { ...item.item, createdAt: new Date(Date.parse(item.item.createdAt) + 300_000).toISOString() } });
+    assert.deepEqual(receipts, [Date.parse(item.item.createdAt), Date.parse(item.item.createdAt)]);
+    const events = (await listAssistantInputEvents({ vault: vaultRoot })).events;
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.receivedAt, item.item.createdAt);
   });
 
   test("admits an audio attachment exactly once after its parser retry settles", async () => {
@@ -1153,7 +1187,7 @@ describe("hosted mailbox conversation import adapter", () => {
     })();
 
     assert.equal(outcome.status, "imported");
-    assert.equal(activityCallbackCount, 1);
+    assert.equal(activityCallbackCount, 0);
     assert.equal(activeTurnNotificationCount, 0);
     assert.equal(preparationCallbackCount, 0);
     const events = (await listAssistantInputEvents({ vault: vaultRoot })).events;
@@ -1829,6 +1863,7 @@ describe("hosted mailbox conversation import adapter", () => {
       runtimeAttemptId: "attempt_admission_trace_1",
       stageAssistantInputEvent: async () => ({
         attachmentEvidenceRequired: false,
+        receivedAt: "2026-04-26T00:00:00.000Z",
         async enqueuePendingReply() {
           await Promise.resolve();
           enqueueCompleted = true;
@@ -1938,6 +1973,7 @@ describe("hosted mailbox conversation import adapter", () => {
         }),
         stageAssistantInputEvent: async () => ({
           attachmentEvidenceRequired: false,
+          receivedAt: "2026-04-26T00:00:00.000Z",
           async enqueuePendingReply() {},
           inputId: "input_import_timing",
           async recordProjection() {},
@@ -2198,6 +2234,7 @@ describe("hosted mailbox conversation import adapter", () => {
           );
           return {
             attachmentEvidenceRequired: false,
+            receivedAt: "2026-04-26T00:00:00.000Z",
             async enqueuePendingReply() {},
             inputId: "input_linq_admission",
             async recordProjection() {},
@@ -2703,6 +2740,7 @@ describe("hosted mailbox conversation import adapter", () => {
           );
           return {
             attachmentEvidenceRequired: false,
+            receivedAt: "2026-04-26T00:00:00.000Z",
             async enqueuePendingReply() {},
             inputId: "input_email_admission",
             async recordProjection() {},
@@ -4448,6 +4486,7 @@ describe("hosted mailbox conversation import adapter", () => {
           stageCalls += 1;
           return {
             attachmentEvidenceRequired: false,
+            receivedAt: "2026-04-26T00:00:00.000Z",
             async enqueuePendingReply() {},
             inputId: "ain_00000000000000000000000000000000",
             async recordProjection() {},
@@ -4603,6 +4642,7 @@ describe("hosted mailbox conversation import adapter", () => {
       stageAssistantInputEvent: async () => ({
         attachmentDescriptorCount: 1,
         attachmentEvidenceRequired: true,
+        receivedAt: "2026-04-26T00:00:00.000Z",
         async enqueuePendingReply() {},
         inputId: "ain_00000000000000000000000000000000",
         async recordAttachmentEvidence() {
@@ -4646,6 +4686,7 @@ describe("hosted mailbox conversation import adapter", () => {
       stageAssistantInputEvent: async () => ({
         attachmentDescriptorCount: 1,
         attachmentEvidenceRequired: true,
+        receivedAt: "2026-04-26T00:00:00.000Z",
         async enqueuePendingReply() {
           enqueueCount += 1;
         },
@@ -5817,6 +5858,7 @@ function createAssistantInputEventStager(input: {
         ? {}
         : { attachmentDescriptorCount: input.attachmentDescriptorCount }),
       attachmentEvidenceRequired: (input.attachmentDescriptorCount ?? 0) > 0,
+      receivedAt: "2026-04-26T00:00:00.000Z",
       async enqueuePendingReply() {},
       inputId: "ain_00000000000000000000000000000000",
       async recordProjection(projection: unknown) {

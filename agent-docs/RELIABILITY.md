@@ -571,7 +571,13 @@ Last verified: 2026-09-04
   genuinely due default work or claim system progress. A no-progress phase that
   requests only this correction preserves an active checkpoint quiet window and
   does not start another 180-second window after the preceding checkpoint has
-  completed. Progressing foreground work still restarts the ordinary floor.
+  completed. Newly accepted foreground-priority input still restarts the
+  ordinary floor. Generic progress is not evidence of a new user admission:
+  cleanup-only passes and empty internal probes preserve an active window and
+  do not create another full window after a checkpoint. Required provider
+  cleanup and its follow-up save retain their existing ordering and replay
+  barriers. Waiting for an active diagnostic/image job uses its work wait,
+  without resetting either the checkpoint window or conversation warmth.
   This reuses the workspace CAS and Temporal timer owners; it adds no queue,
   scheduler, per-member state table, or second wake authority.
 - A hosted-group projection grant that needs its first private projection and
@@ -719,9 +725,17 @@ Last verified: 2026-09-04
   slot-transition lock only through the exact-process decision and any
   pending-preinitialization teardown or ready-process reservation. The
   potentially long background-work wait then runs outside the lock under that
-  reservation. The hosted conversation warm lease remains 20 minutes, and
-  process-only initialization neither extends that lease nor adds keepalive
-  traffic.
+  reservation. Hosted conversation warmth ends ten minutes after the latest
+  genuinely accepted inbound user's original server receipt. Process-only
+  initialization, generic requests, housekeeping, and invocation completion do
+  not extend it. The native Containers SDK schedule is independent of generic
+  activity renewal. Expiry never authorizes interruption of active accepted
+  work: existing lifecycle/ownership fences and health checks protect it until
+  safe completion or durable recovery. A failed or uncertain stop retains a
+  pre-armed recovery check, not new warmth. Drained expired and background-only
+  children stop without another grace period; future durable wakes can start
+  cold. DO reactivation preserves the SDK task, while process replacement does
+  not inherit a completed process's watermark.
 - The production database-health operator alert is an independent Cloudflare
   singleton so the monitored Postgres database cannot take down its own page
   owner. A five-minute Cron Trigger records one normalized PlanetScale sample

@@ -403,7 +403,7 @@ export interface HostedWorkspaceRunnerMailboxImportContext {
   assistantBootstrap?: HostedAssistantBootstrapResult | null;
   assistantAskRequestTargetKind?: "joined_group";
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
-  onConversationActivityObserved?: (() => void) | null;
+  onConversationActivityObserved?: ((receivedAtEpochMs: number) => void) | null;
   onConversationInputStaged?: ((
     channel: HostedExecutionConversationMessageChannel,
   ) => void) | null;

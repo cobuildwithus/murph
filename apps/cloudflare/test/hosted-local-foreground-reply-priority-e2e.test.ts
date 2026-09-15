@@ -1654,7 +1654,7 @@ async function proveInterruptedSnapshotForegroundOrdering(input: {
           event.ordinal > snapshotStarted.ordinal
           && event.responseStatus === 200
           && event.conversationLaneRequested === true
-          && event.probeKind === "checkpoint_interrupt_rearm"
+          && event.probeKind === "checkpoint_interrupt"
           && event.conversationItemCount === 0
         ),
       scenario: targetScenario,
@@ -1667,7 +1667,7 @@ async function proveInterruptedSnapshotForegroundOrdering(input: {
       event.ordinal > snapshotStarted.ordinal
       && event.responseStatus === 200
       && event.conversationLaneRequested === true
-      && event.probeKind === "checkpoint_interrupt_rearm"
+      && event.probeKind === "checkpoint_interrupt"
       && event.conversationItemCount === 0
     );
     if (!emptyForegroundProbe) {

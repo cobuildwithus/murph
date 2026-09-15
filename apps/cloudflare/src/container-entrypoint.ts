@@ -364,7 +364,7 @@ export async function startHostedContainerEntrypoint(input: {
   };
   let activeHostedRunnerJobCount = 0;
   let workspaceInvocationAcceptedCount = 0;
-  let conversationWarmActivityCompletedAtEpochMs: number | null = null;
+  let conversationActivityReceivedAtEpochMs: number | null = null;
   let activeRuntimeWake: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
   let activeRuntimeWakeLeaseGeneration: string | null = null;
@@ -406,8 +406,6 @@ export async function startHostedContainerEntrypoint(input: {
     // endpoint below.
     const invocationAbort = new AbortController();
     let claimedRunnerSlot = false;
-    let conversationActivityObservedForInvocation = false;
-    let conversationActivitySettled = false;
     let workspaceRestorePreparation: Promise<HostedWorkspaceRestorePreparation> | null = null;
     let runtimeWakeForRequest: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
@@ -422,16 +420,6 @@ export async function startHostedContainerEntrypoint(input: {
       leaseGeneration: string | null;
       userId: string;
     } | null = null;
-    const settleConversationActivity = () => {
-      if (conversationActivitySettled) {
-        return;
-      }
-      conversationActivitySettled = true;
-      if (conversationActivityObservedForInvocation) {
-        conversationWarmActivityCompletedAtEpochMs = Date.now();
-      }
-    };
-
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
 
@@ -443,7 +431,10 @@ export async function startHostedContainerEntrypoint(input: {
           codexShellPreflightCompletedAtEpochMs,
           codexShellPreflightStatus,
           cloudflareRegion,
-          conversationWarmActivityCompletedAtEpochMs,
+          conversationActivityReceivedAtEpochMs,
+          // Rollout-only wire alias for the preceding Worker. Never a second
+          // clock: even old consumers see receipt time, not completion time.
+          conversationWarmActivityCompletedAtEpochMs: conversationActivityReceivedAtEpochMs,
           heavyRuntimeHydrationCompletedAtEpochMs,
           heavyRuntimeHydrationStatus,
           hostedRuntimeArchitectureVersion:
@@ -929,8 +920,14 @@ export async function startHostedContainerEntrypoint(input: {
       );
 
       const result = await heavyRuntime.runWorkspaceInvocation(job, {
-        onConversationActivityObserved() {
-          conversationActivityObservedForInvocation = true;
+        onConversationActivityObserved(receivedAtEpochMs) {
+          if (Number.isSafeInteger(receivedAtEpochMs)
+            && receivedAtEpochMs >= 0 && receivedAtEpochMs <= Date.now()) {
+            conversationActivityReceivedAtEpochMs = Math.max(
+              conversationActivityReceivedAtEpochMs ?? receivedAtEpochMs,
+              receivedAtEpochMs,
+            );
+          }
         },
         onRuntimeWakeReady(sendWake) {
           activeRuntimeWake = sendWake;
@@ -990,11 +987,8 @@ export async function startHostedContainerEntrypoint(input: {
       completedInvocation = { job, result };
 
       if (requestAbort.signal.aborted || response.destroyed) {
-        settleConversationActivity();
         return;
       }
-
-      settleConversationActivity();
 
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -1010,9 +1004,6 @@ export async function startHostedContainerEntrypoint(input: {
       response.end(JSON.stringify(result));
     } catch (caughtError) {
       let error = caughtError;
-      if (job) {
-        settleConversationActivity();
-      }
       const responseUnavailable = requestAbort.signal.aborted || response.destroyed;
 
       if (
@@ -1052,9 +1043,6 @@ export async function startHostedContainerEntrypoint(input: {
       const classified = classifyRunnerJobError(error);
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
-      if (job) {
-        settleConversationActivity();
-      }
       stopActiveJobDiagnostics?.();
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
         activeRuntimeWake = null;

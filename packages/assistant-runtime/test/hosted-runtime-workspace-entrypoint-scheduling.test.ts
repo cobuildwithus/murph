@@ -797,7 +797,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
 
   test("binds provider batches to stored input ids and conversation activity", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const conversationActivity: string[] = [];
+    const conversationActivity: number[] = [];
 
     try {
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
@@ -850,7 +850,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             ],
           });
           assert.equal(input.currentAssistantInputId?.(), null);
-          assert.deepEqual(conversationActivity, ["uncertain"]);
+          assert.deepEqual(conversationActivity, []);
           await invalidRelease?.();
           const release = await input.beforeProviderAcceptedInputs?.({
             turnId: "turn_hosted_runtime_test",
@@ -866,7 +866,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           assert.equal(typeof release, "function");
           await release?.();
           assert.equal(input.currentAssistantInputId?.(), null);
-          assert.deepEqual(conversationActivity, ["uncertain", "observed"]);
+          assert.deepEqual(conversationActivity, [Date.parse(TEST_NOW)]);
 
           const systemInputId = await stageAssistantInputEventForMailboxItem({
             causalSeq: "43",
@@ -893,7 +893,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             ],
           });
           await genericRelease?.();
-          assert.deepEqual(conversationActivity, ["uncertain", "observed"]);
+          assert.deepEqual(conversationActivity, [Date.parse(TEST_NOW)]);
           return { progressed: false };
         },
         vaultRoot,

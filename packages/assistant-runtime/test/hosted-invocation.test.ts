@@ -121,8 +121,10 @@ describe("runHostedWorkspaceInvocation", () => {
     const captured = capturedRuntimeCalls[0];
     expect(captured?.job).toBe(job);
     expect(captured?.options.platform).toBe(platform);
-    captured?.options.onConversationActivityObserved?.("observed");
-    expect(onConversationActivityObserved).toHaveBeenCalledOnce();
+    captured?.options.onConversationActivityObserved?.(Date.parse("2026-04-26T00:00:00.000Z"));
+    expect(onConversationActivityObserved).toHaveBeenCalledExactlyOnceWith(
+      Date.parse("2026-04-26T00:00:00.000Z"),
+    );
     expect(captured?.options.runtimeWakeSignal).toBe(runtimeWakeSignal);
     expect(captured?.options.runtimeIssueProvenance).toEqual({
       releaseSha: "0123456789abcdef0123456789abcdef01234567",

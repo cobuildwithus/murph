@@ -254,8 +254,10 @@ describe("runHostedWorkspaceInvocation", () => {
     if (typeof capturedConversationActivity !== "function") {
       throw new Error("Expected direct invocation to forward conversation activity.");
     }
-    capturedConversationActivity();
-    expect(onConversationActivityObserved).toHaveBeenCalledOnce();
+    capturedConversationActivity(Date.parse("2026-04-26T00:00:00.000Z"));
+    expect(onConversationActivityObserved).toHaveBeenCalledExactlyOnceWith(
+      Date.parse("2026-04-26T00:00:00.000Z"),
+    );
     expect(capturedInput.latencyMilestones).toEqual({
       runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
     });

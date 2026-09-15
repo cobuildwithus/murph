@@ -63,16 +63,11 @@ export interface HostedAssistantInputSource extends AssistantInputSource {
   readSelectedInputIds(): string[];
 }
 
-export type HostedConversationActivityObservation =
-  | "not_observed"
-  | "observed"
-  | "uncertain";
-
 export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   assistantInputIds: readonly string[];
   vaultRoot: string;
 }): Promise<{
-  conversationActivity: HostedConversationActivityObservation;
+  conversationActivityReceivedAtEpochMs: number | null;
   currentInputId: string | null;
   foregroundPriorityInputAccepted: boolean;
   latencyTraceInputGroups: Array<{
@@ -83,7 +78,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   const inputIds = uniqueStrings(input.assistantInputIds);
   if (inputIds.length === 0) {
     return {
-      conversationActivity: "not_observed",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: false,
       latencyTraceInputGroups: [],
@@ -91,7 +86,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   }
   if (inputIds.length !== input.assistantInputIds.length) {
     return {
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [],
@@ -105,7 +100,7 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     });
   } catch {
     return {
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [],
@@ -116,15 +111,24 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   );
   if (events.length !== inputIds.length) {
     return {
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups,
     };
   }
-  const conversationActivity = events.some(isHostedConversationActivityInputEvent)
-    ? "observed"
-    : "not_observed";
+  // The persisted receipt is admission evidence; execution/replay time and
+  // provider occurredAt are not. Unknown reads keep foreground priority above,
+  // but cannot manufacture a conversation deadline.
+  const nowMs = Date.now();
+  const conversationActivityReceivedAtEpochMs = events
+    .filter(isHostedConversationActivityInputEvent)
+    .reduce<number | null>((latest, event) => {
+      const receivedAt = event.receivedAt === null ? NaN : Date.parse(event.receivedAt);
+      return Number.isSafeInteger(receivedAt) && receivedAt >= 0 && receivedAt <= nowMs
+        ? Math.max(latest ?? receivedAt, receivedAt)
+        : latest;
+    }, null);
   const foregroundPriorityInputAccepted = events.some((event) =>
     isHostedConversationActivityInputEvent(event)
     || isAssistantHostedImageCompletionEvent(event)
@@ -143,14 +147,14 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
     });
   } catch {
     return {
-      conversationActivity,
+      conversationActivityReceivedAtEpochMs,
       currentInputId: null,
       foregroundPriorityInputAccepted,
       latencyTraceInputGroups,
     };
   }
   return {
-    conversationActivity,
+    conversationActivityReceivedAtEpochMs,
     currentInputId: batch.length === events.length
       ? batch.at(-1)?.inputId ?? null
       : null,
@@ -184,10 +188,13 @@ function groupHostedAssistantInputLatencyTraceEvents(
 function isHostedConversationActivityInputEvent(
   event: AssistantInputEventRecord,
 ): boolean {
-  return event.sourceRef.kind === "inbox-capture"
-    || (
-      event.sourceRef.kind === "hosted-mailbox"
-      && event.sourceRef.lane === "conversation"
+  return event.conversation?.actorIsSelf !== true
+    && (
+      event.sourceRef.kind === "inbox-capture"
+      || (
+        event.sourceRef.kind === "hosted-mailbox"
+        && event.sourceRef.lane === "conversation"
+      )
     );
 }
 

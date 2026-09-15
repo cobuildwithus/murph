@@ -158,7 +158,23 @@ assistant wake projected by the current foreground phase may run once when due
 before the idle floor without publishing a snapshot. Otherwise the invocation
 remains dirty until the runtime-owned idle-floor—or last-chance shutdown—
 `idle_shutdown` checkpoint succeeds; inherited or committed wakes and
-durability barriers remain checkpoint-first. A restored due wake in a clean
+durability barriers remain checkpoint-first. Only newly admitted foreground
+priority work restarts the quiet window. Empty probes and generic maintenance
+do not restart it; cleanup that dirties state after a checkpoint uses the spent
+window and proceeds directly to its required follow-up checkpoint. Provider
+cleanup still runs only after its saved intent, and required post-checkpoint
+effects are not removed or collapsed into an unsafe single snapshot. Active
+background-work waits use their existing work deadlines and remain wakeable,
+without moving the conversation or checkpoint clocks.
+
+The conversation-activity callback carries the original persisted
+`AssistantInputEvent.receivedAt` epoch milliseconds (mailbox `createdAt`), not
+provider `occurredAt`, replay time, response time, or invocation completion.
+Unknown reads retain foreground priority but emit no warmth; self-authored
+responses and system notifications also emit none. A replay returns the
+original persisted input receipt rather than the replay's mailbox timestamp.
+The child reduces valid observations to one process-local maximum; the host
+owns the separate ten-minute retention deadline. A restored due wake in a clean
 workspace runs ordinarily. If the container dies before that checkpoint, local
 runtime residue since the last accepted checkpoint can be lost. Inbox capture,
 audio/video transcript work,
