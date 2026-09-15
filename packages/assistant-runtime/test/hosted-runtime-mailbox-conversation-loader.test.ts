@@ -185,6 +185,7 @@ function createAssistantInputEventStager(): NonNullable<
 > {
   return async () => ({
     attachmentEvidenceRequired: false,
+    receivedAt: "2026-04-26T00:00:00.000Z",
     async enqueuePendingReply() {},
     inputId: "ain_00000000000000000000000000000000",
     async recordProjection() {},

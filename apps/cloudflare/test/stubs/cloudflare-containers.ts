@@ -4,7 +4,19 @@ interface TestContainerStorage {
   put<T>(key: string, value: T): Promise<void>;
 }
 
+interface TestContainerSchedule<T = unknown> {
+  callback: string;
+  payload: T;
+  taskId: string;
+  time: number;
+  type: "scheduled";
+}
+
+const schedulesByStorage = new WeakMap<TestContainerStorage, Map<string, TestContainerSchedule>>();
+let nextScheduleId = 0;
+
 interface TestContainerContext {
+  blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
   waitUntil(promise: Promise<unknown>): void;
   container?: {
     readonly running: boolean;
@@ -78,6 +90,7 @@ export class Container {
     storage?: TestContainerStorage;
   }) {
     this.ctx = {
+      blockConcurrencyWhile: async (callback) => await callback(),
       waitUntil: (promise) => { if (ctx?.waitUntil) ctx.waitUntil(promise); else void promise.catch(() => undefined); },
       ...(ctx?.container ? { container: ctx.container } : {}),
       storage: ctx?.storage ?? createMemoryStorage(),
@@ -90,6 +103,39 @@ export class Container {
     _portParam?: number,
   ): Promise<Response> {
     throw new Error("Test stub Container.containerFetch is not implemented.");
+  }
+
+  renewActivityTimeout(): void {}
+
+  private get schedules(): Map<string, TestContainerSchedule> {
+    let schedules = schedulesByStorage.get(this.ctx.storage);
+    if (!schedules) {
+      schedules = new Map();
+      schedulesByStorage.set(this.ctx.storage, schedules);
+    }
+    return schedules;
+  }
+
+  deleteSchedules(callback: string): void {
+    for (const [id, schedule] of this.schedules) {
+      if (schedule.callback === callback) this.schedules.delete(id);
+    }
+  }
+
+  async schedule<T>(when: Date | number, callback: string, payload: T): Promise<TestContainerSchedule<T>> {
+    const schedule: TestContainerSchedule<T> = {
+      callback,
+      payload,
+      taskId: `synthetic-schedule-${++nextScheduleId}`,
+      time: Math.floor(when instanceof Date ? when.getTime() / 1_000 : Date.now() / 1_000 + when),
+      type: "scheduled",
+    };
+    this.schedules.set(schedule.taskId, schedule);
+    return schedule;
+  }
+
+  async listSchedules(callback: string): Promise<TestContainerSchedule[]> {
+    return [...this.schedules.values()].filter((schedule) => schedule.callback === callback).slice(0, 1);
   }
 
   async destroy(): Promise<void> {}

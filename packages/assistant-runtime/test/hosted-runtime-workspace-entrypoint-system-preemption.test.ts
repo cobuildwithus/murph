@@ -3616,7 +3616,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     }
   });
 
-  test("runtime wakes reset the idle checkpoint window before checkpointing", async () => {
+  test("new conversation admission resets the idle checkpoint window before checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];

@@ -502,26 +502,36 @@ Defaulted worker vars:
 - `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=180000` for the runtime-owned idle
   window before a dirty invocation checkpoints and returns; production rejects
   lower values so routine checkpoints cannot bypass the three-minute quiet floor
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=600000` for the post-completion
-  conversation warm lease (code default is `300000` when unset)
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=600000` (also the code default) for
+  conversation warmth from the latest accepted inbound user message's original
+  server receipt, never from invocation completion
+- `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS=60000` (also the code
+  default) for recovery checks while work or uncertain health prevents cleanup
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=45000` (must exceed the web-control timeout by at least 5 seconds)
 - `HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS=30000`
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production`
 
-After the additive runner-retention deploy has completed its observation and
-container-drain window, set optional
-`HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS=60000` to reconsider
-maintenance-only idle shells every minute. When unset it falls back to the
-conversation lease for safe rollback.
+RunnerContainer uses one persisted Containers SDK `onActivityExpired` schedule
+for the absolute receipt deadline, rounded up to SDK whole-second precision.
+Generic RPCs and their settlement may renew the SDK activity timeout, but cannot
+move this schedule or the message watermark. Active invocations and uncertain
+health/stop outcomes retain the existing work fences and a pre-armed recovery
+check, not another conversation lease. Completion checks stop a drained expired
+or background-only child without an additional ten-minute grace period. A due
+or future published wake does not retain an idle shell; the existing durable
+orchestrator can start it cold. DO reactivation uses the persisted SDK task and
+live child health; a replacement process starts with no conversation watermark.
+See DEPLOY.md for the bounded Worker/container compatibility order.
 
 `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` bounds consecutive failed hosted runner
 invocations for a Durable Object. Temporal decides when durable work is due by
 reading web-owned reconciliation facts; Cloudflare does not reread web
-mailbox/workspace status as a scheduler. Cloudflare alarms are limited to
+mailbox/workspace status as a scheduler. UserRunner alarms remain limited to
 workspace snapshot orphan cleanup; runtime completion and replacement
-invocations clear their own stale execution-failure state without alarm
-resync.
+invocations clear their own stale execution-failure state without alarm resync.
+RunnerContainer reuses the Containers SDK's own scheduling/alarm owner solely
+for safe idle-container cleanup, not mailbox or checkpoint scheduling.
 
 Optional execution vars and secrets:
 
@@ -774,14 +784,15 @@ only. `RunnerContainer` matches that notification to its in-memory successful
 result in either arrival order and then runs the same lifecycle decision used by
 `sleepAfter` expiry. That decision remains fenced by the lifecycle lock and the
 single interaction generation captured when that invocation enters the
-container. Any later interaction changes the generation and retains the shell,
-as do an active or replacement invocation, active child work, recent
-conversation warmth, an undefined legacy warmth field, or uncertain status,
-health, or cleanup. A missing or mismatched notification, activation reset,
-retained shell, or failed immediate cleanup leaves the ordinary activity timer
-armed as the fallback. When Cloudflare later reports `sleepAfter` expiry, that
-shared decision either renews the shell or tears it down; a shell already
-stopped by invocation completion is not destroyed again.
+container. A later interaction, active invocation, active child work, or
+uncertain health/stop result defers cleanup to the pre-armed SDK safety check.
+A valid receipt within the ten-minute window schedules its absolute expiry.
+Missing receipt metadata grants no idle warmth; the active-work count still
+protects old children during rollout. A missing completion notification or DO
+reactivation converges through the persisted SDK check and live child health.
+The platform activity timer uses the same safe-stop decision as a fallback;
+generic renewal cannot move the receipt deadline. A shell already stopped by
+invocation completion is not destroyed again.
 Each invocation runs in-process through `packages/assistant-runtime` with
 per-user warm workspace roots and invocation-local cache/temp roots. Runtime
 effects use internal virtual hosts and write-fence headers instead of

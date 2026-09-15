@@ -1103,7 +1103,7 @@ describe("selectHostedAssistantInputIds", () => {
       candidate.event.conversation?.sessionId ?? null
     )).toEqual(["asst_image_completion_group", null]);
     expect(acceptedContext).toEqual({
-      conversationActivity: "observed",
+      conversationActivityReceivedAtEpochMs: Date.parse(fresh.receivedAt!),
       currentInputId: fresh.inputId,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [{
@@ -1280,7 +1280,7 @@ describe("selectHostedAssistantInputIds", () => {
     ]);
     expect(foregroundSelection.preserveInputOrder).toBe(true);
     expect(foregroundContext).toEqual({
-      conversationActivity: "observed",
+      conversationActivityReceivedAtEpochMs: Date.parse(newestFresh.receivedAt!),
       currentInputId: newestFresh.inputId,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [{
@@ -1765,7 +1765,7 @@ describe("selectHostedAssistantInputIds", () => {
       vaultRoot,
     });
     expect(acceptedContext).toMatchObject({
-      conversationActivity: "observed",
+      conversationActivityReceivedAtEpochMs: Date.parse("2026-04-23T00:00:02.000Z"),
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
     });
@@ -2116,7 +2116,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       assistantInputIds: [],
       vaultRoot,
     })).resolves.toEqual({
-      conversationActivity: "not_observed",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: false,
       latencyTraceInputGroups: [],
@@ -2150,7 +2150,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       assistantInputIds: [second.inputId, first.inputId],
       vaultRoot,
     })).resolves.toEqual({
-      conversationActivity: "observed",
+      conversationActivityReceivedAtEpochMs: Date.parse("2026-04-23T00:00:03.000Z"),
       currentInputId: second.inputId,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [{
@@ -2187,7 +2187,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       assistantInputIds: [first.inputId, afterGap.inputId],
       vaultRoot,
     })).resolves.toEqual({
-      conversationActivity: "observed",
+      conversationActivityReceivedAtEpochMs: Date.parse("2026-04-23T00:00:03.000Z"),
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [{
@@ -2204,7 +2204,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       assistantInputIds: ["ain_00000000000000000000000000000000"],
       vaultRoot,
     })).resolves.toEqual({
-      conversationActivity: "uncertain",
+      conversationActivityReceivedAtEpochMs: null,
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
       latencyTraceInputGroups: [],
@@ -2253,7 +2253,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       assistantInputIds: [staged.inputId],
       vaultRoot,
     })).resolves.toMatchObject({
-      conversationActivity: "not_observed",
+      conversationActivityReceivedAtEpochMs: null,
       foregroundPriorityInputAccepted: false,
     });
   });
@@ -2293,8 +2293,51 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       assistantInputIds: [completion.inputId],
       vaultRoot,
     })).resolves.toMatchObject({
-      conversationActivity: "not_observed",
+      conversationActivityReceivedAtEpochMs: null,
       foregroundPriorityInputAccepted: true,
+    });
+  });
+
+  it.each([
+    ["linq", true], ["linq", false], ["telegram", true],
+    ["telegram", false], ["email", true], ["email", false],
+  ] as const)("uses original server receipt for %s direct=%s, including delayed replay", async (source, threadIsDirect) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const vaultRoot = await createTempVault();
+      const receivedAt = "2026-08-01T12:00:00.000Z";
+      vi.setSystemTime(new Date("2026-08-01T13:00:00.000Z"));
+      const event = createAssistantInputEvent({
+        source, threadIsDirect, receivedAt,
+        occurredAt: "2030-01-01T00:00:00.000Z",
+      });
+      const original = await upsertAssistantInputEvent({ vault: vaultRoot, event });
+      const replay = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: { ...event, receivedAt: "2026-08-01T13:00:00.000Z" },
+      });
+      expect(replay.inputId).toBe(original.inputId);
+      expect(replay.receivedAt).toBe(receivedAt);
+      const accepted = await resolveHostedCurrentInputIdForAcceptedInputs({ assistantInputIds: [replay.inputId], vaultRoot });
+      expect(accepted.conversationActivityReceivedAtEpochMs).toBe(Date.parse(receivedAt));
+      const newer = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({ source, threadIsDirect, receivedAt: "2026-08-01T12:59:59.000Z", dedupeKey: "dedupe_newer", eventId: "evt_newer", itemId: "item_newer", laneSeq: "43" }),
+      });
+      const extended = await resolveHostedCurrentInputIdForAcceptedInputs({ assistantInputIds: [original.inputId, newer.inputId], vaultRoot });
+      expect(extended.conversationActivityReceivedAtEpochMs).toBe(Date.parse(newer.receivedAt!));
+      const duplicate = await resolveHostedCurrentInputIdForAcceptedInputs({ assistantInputIds: [original.inputId, original.inputId], vaultRoot });
+      expect(duplicate.conversationActivityReceivedAtEpochMs).toBeNull();
+      expect(duplicate.foregroundPriorityInputAccepted).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not award warmth to a self-authored response", async () => {
+    const vaultRoot = await createTempVault();
+    const event = await upsertAssistantInputEvent({ vault: vaultRoot, event: createAssistantInputEvent({ actorIsSelf: true }) });
+    await expect(resolveHostedCurrentInputIdForAcceptedInputs({ assistantInputIds: [event.inputId], vaultRoot })).resolves.toMatchObject({
+      conversationActivityReceivedAtEpochMs: null,
+      foregroundPriorityInputAccepted: false,
     });
   });
 
@@ -2309,7 +2352,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       assistantInputIds: [staged.inputId],
       vaultRoot,
     })).resolves.toMatchObject({
-      conversationActivity: "observed",
+      conversationActivityReceivedAtEpochMs: Date.parse("2026-04-23T00:00:03.000Z"),
       foregroundPriorityInputAccepted: true,
     });
   });
@@ -2347,6 +2390,7 @@ function createHostedImageCompletionText(originAssistantInputId: string): string
 
 function createAssistantInputEvent(input: {
   actorId?: string | null;
+  actorIsSelf?: boolean;
   causalSeq?: string | null;
   dedupeKey?: string;
   eventId?: string;
@@ -2387,7 +2431,7 @@ function createAssistantInputEvent(input: {
     conversation: {
       accountId: "acct_1",
       actorId: input.actorId ?? "actor_1",
-      actorIsSelf: false,
+      actorIsSelf: input.actorIsSelf ?? false,
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       source,
       threadId,

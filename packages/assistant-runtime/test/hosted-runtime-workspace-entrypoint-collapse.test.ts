@@ -1573,8 +1573,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           < requireEventIndex(events, "snapshot:idle_shutdown"),
       );
 
-      await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      // Follow-up work preserves the spent window; no second clock advance.
       const result = await resultPromise;
 
       assert.deepEqual(checkpointRequests.map((request) => [
@@ -1866,8 +1865,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         await vi.runOnlyPendingTimersAsync();
       }
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-      await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      // Follow-up work preserves the spent window; no second clock advance.
       const result = await resultWithTimeout;
 
       assert.ok(
@@ -2252,10 +2250,11 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     }
   });
 
-  test("same-key checkpoint-blocked conversation wakes hide due assistant state before checkpoint", async () => {
+  test("checkpoint-blocked conversation wakes preserve save-before-cleanup without another quiet window", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const snapshotTimes: number[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const idleCheckpointDelayMs = 180_000;
@@ -2282,6 +2281,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           {
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
+              snapshotTimes.push(Date.now());
               return {
                 snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
@@ -2319,11 +2319,14 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               if (assistantPhaseCalls === 1) {
                 assistantOneObserved.resolve();
                 return {
-                  afterCheckpoint: async () => ({
-                    checkpointReason: "provider_cleanup",
-                    nextWakeAt: TEST_NOW,
-                    nextWakeReason: "assistant",
-                  }),
+                  afterCheckpoint: async () => {
+                    events.push("provider.cleanup");
+                    return {
+                      checkpointReason: "provider_cleanup",
+                      nextWakeAt: TEST_NOW,
+                      nextWakeReason: "assistant",
+                    };
+                  },
                   checkpointReason: "canonical_runtime_commit",
                   nextWakeAt: TEST_NOW,
                   nextWakeReason: "assistant",
@@ -2389,9 +2392,15 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           < requireEventIndex(events, `assistant.phase:3:${TEST_NOW}:assistant`),
       );
 
-      await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      // Cleanup's local follow-up is dirty, but cannot mint another full
+      // quiet window. No additional clock advance is allowed here.
       const result = await resultPromise;
+      assert.deepEqual(snapshotTimes, [
+        Date.parse(TEST_NOW) + idleCheckpointDelayMs,
+        Date.parse(TEST_NOW) + idleCheckpointDelayMs,
+      ]);
+      assert.ok(requireEventIndex(events, "provider.cleanup")
+        < requireEventIndex(events, `assistant.phase:3:${TEST_NOW}:assistant`));
 
       assert.deepEqual(checkpointRequests.map((request) => [
         request.reason,

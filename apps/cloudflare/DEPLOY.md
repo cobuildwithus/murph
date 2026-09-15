@@ -1726,7 +1726,34 @@ Core execution tuning:
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` selects native `gradual` (default), explicit `immediate`, or `worker-only`. Follow the Production rollout policy above for compatibility evidence and first-writer transitions.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `600000`) and controls the post-completion warm lease minted only by observed conversation activity. Reducing production from 20 minutes to 10 minutes means a follow-up in the former 11–20 minute warm window can take the existing cold-start path instead. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An old child without the watermark remains protected and re-arms the lifecycle timer; its active-work count independently protects active work. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `600000` and bounds
+  conversation warmth from the latest accepted inbound user's original server
+  receipt. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to
+  `60000` independently. RunnerContainer uses the existing SDK schedule owner
+  (not a replacement `alarm`) to check that absolute deadline despite generic
+  request activity. An invocation's completion, cleanup, replay, responses,
+  device work, and published wakes never grant a new ten-minute grace period.
+  Active work and uncertain health/stop state remain protected by the existing
+  lifecycle lock, exact interaction generation, child active-work count, and
+  safe-stop/recovery paths. The SDK task is pre-armed before asynchronous checks
+  because the SDK consumes a callback even on failure. Dirty runtime work still
+  checkpoints under its own owner; no host-owned checkpoint intent is added.
+
+  Receipt-deadline rollout is consumer-first: deploy the Worker consumer before
+  promoting the new runner image, using the existing deployment/release gates.
+  An old image's missing `conversationActivityReceivedAtEpochMs` grants no idle
+  warmth, but its validated active count still protects all in-flight work.
+  This can cause an earlier safe cold start during the transition. The new
+  image temporarily emits `conversationWarmActivityCompletedAtEpochMs` as a
+  wire alias of the same receipt watermark for the preceding Worker; it never
+  stores or mints a completion timestamp. A rollback to the old Worker can
+  temporarily restore its old generic-activity scheduling policy, but not
+  interrupt active work. Keep this one alias only through the supported Worker
+  rollback window and old-Worker drain; remove it once that rollback floor is
+  advanced. No Temporal/Web rollout or checkpoint-signal change is required.
+  Process replacement clears warmth rather than restoring a completed lease;
+  DO replacement recovers the SDK task and checks the live process.
+
 - `HOSTED_EXECUTION_STANDBY_MODE` defaults to `off`; `shadow` maintains ready
   inventory without allocating it, and `allocate` lets authenticated foreground
   conversation work claim it. Modes control inventory only; all fresh cold

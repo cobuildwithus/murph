@@ -50,7 +50,7 @@ export interface HostedWorkspaceInvocationInput {
   job: HostedAssistantWorkspaceRuntimeJobInput;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder;
-  onConversationActivityObserved?: () => void;
+  onConversationActivityObserved?: (receivedAtEpochMs: number) => void;
   platform: HostedRuntimePlatform;
   preparedWorkspaceRestore?: HostedWorkspaceRestorePreparation | null;
   readCurrentLease: () =>
@@ -94,9 +94,7 @@ export async function runHostedWorkspaceInvocation(
     return await runHostedWorkspaceRuntimeJobInProcess(input.job, {
       ...options,
       latencyMilestones: input.latencyMilestones ?? null,
-      onConversationActivityObserved: input.onConversationActivityObserved
-        ? () => input.onConversationActivityObserved?.()
-        : undefined,
+      onConversationActivityObserved: input.onConversationActivityObserved,
       ...(input.preparedWorkspaceRestore
         ? { preparedWorkspaceRestore: input.preparedWorkspaceRestore }
         : {}),

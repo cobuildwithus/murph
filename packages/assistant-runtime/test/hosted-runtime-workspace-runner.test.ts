@@ -9257,6 +9257,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       stageAssistantInputEvent: async () => ({
         attachmentDescriptorCount: 1,
         attachmentEvidenceRequired: true,
+        receivedAt: "2026-04-26T00:00:00.000Z",
         async enqueuePendingReply() {},
         inputId: "ain_00000000000000000000000000000000",
         async recordAttachmentEvidence() {

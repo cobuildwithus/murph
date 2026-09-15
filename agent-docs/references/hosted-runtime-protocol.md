@@ -57,11 +57,27 @@ The live ownership split is:
   deliveries and future cron work remain projected; newly pending input and
   unavailable scheduling authority retain their normal execution or retry paths.
   At the idle floor, or on shutdown, the runtime checkpoints remaining dirty
-  state before returning success. When Cloudflare reports container activity
-  expiry, the shell yields to any active foreground operation; otherwise it runs
-  cleanup only. There is no pending idle-checkpoint Durable Object state, idle
-  checkpoint lease, idle checkpoint alarm, or host-owned shutdown checkpoint
-  invocation.
+  state before returning success. New foreground-priority admissions reset the
+  batching window; cleanup-only work and empty probes do not. Post-checkpoint
+  effects retain save-before-effect ordering and checkpoint their resulting
+  dirty state without another full quiet window.
+
+  Conversation retention is separate: the existing activity callback transports
+  original trusted receipt epoch milliseconds and child health publishes their
+  process-local maximum as `conversationActivityReceivedAtEpochMs`. No callback
+  on an uncertain read or a synthetic/self-authored input may mint warmth.
+  RunnerContainer uses the SDK's persisted `onActivityExpired` schedule for that
+  receipt plus ten minutes, independent of generic activity timeout renewals.
+  It yields to active operations or uncertain health and retries safely; once
+  drained, expired or background-only work gets no fresh grace. The existing
+  completion acknowledgement, interaction generation, and exact stop fences
+  remain authoritative. A new process starts with no watermark; DO reactivation
+  recovers the native SDK task and rereads live health. The preceding health key
+  is temporarily an alias of receipt time only; DEPLOY.md owns its bounded
+  consumer-first rollout and removal. There is no pending idle-checkpoint
+  Durable Object state, idle checkpoint lease, idle checkpoint alarm, or
+  host-owned shutdown checkpoint invocation. Pointer-only Temporal signals,
+  checkpoint rechecks, and durable published next-wake facts are unchanged.
   When hosted runtime crypto is configured, Cloudflare fetches signed
   ingress/runtime root envelopes from web through the signed
   `/api/internal/hosted-runtime/crypto-context` callback, verifies the authority

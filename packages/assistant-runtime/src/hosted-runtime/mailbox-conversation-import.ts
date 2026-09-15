@@ -201,6 +201,8 @@ export interface HostedConversationMailboxAssistantInputStageResult {
   attachmentEvidenceRequired: boolean;
   enqueuePendingReply(): Promise<void>;
   inputId: string;
+  /** Original persisted server receipt, including when staging returns a replay. */
+  receivedAt: string | null;
   recordAttachmentEvidence?(
     attachmentEvidence: AssistantInputAttachmentEvidence,
   ): Promise<boolean>;
@@ -304,7 +306,7 @@ interface HostedConversationMailboxImportInput {
   item: HostedMailboxResolvedImportItem;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
-  onConversationActivityObserved?: (() => void) | null;
+  onConversationActivityObserved?: ((receivedAtEpochMs: number) => void) | null;
   onConversationInputStaged?: ((
     channel: HostedExecutionConversationMessageChannel,
   ) => void) | null;
@@ -487,20 +489,20 @@ async function stageHostedConversationMailboxItem(
       pendingIndexEnsuredAtEpochMs,
       stagedAtEpochMs: Date.now(),
     });
-    notifyConversationInputStagedBestEffort(
-      input.onConversationActivityObserved ?? null,
-    );
     if (
-      foregroundAssistantInputId
-      && (
-        !isHostedLinqConversationMessageWake(decoded.wake)
-        || decoded.wake.message.linqMessage.isFromMe !== true
-      )
+      !isHostedLinqConversationMessageWake(decoded.wake)
+      || decoded.wake.message.linqMessage.isFromMe !== true
     ) {
-      notifyForegroundConversationInputStagedBestEffort(
-        input.onConversationInputStaged ?? null,
-        decoded.wake.message.channel,
+      notifyConversationInputStagedBestEffort(
+        input.onConversationActivityObserved ?? null,
+        stagedInput.receivedAt,
       );
+      if (foregroundAssistantInputId) {
+        notifyForegroundConversationInputStagedBestEffort(
+          input.onConversationInputStaged ?? null,
+          decoded.wake.message.channel,
+        );
+      }
     }
     recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
       inputId: stagedInput.inputId,
@@ -844,15 +846,18 @@ function withHostedConversationImportLatencyMilestones(input: {
 }
 
 function notifyConversationInputStagedBestEffort(
-  notify: (() => void) | null,
+  notify: ((receivedAtEpochMs: number) => void) | null,
+  receivedAt: string | null,
 ): void {
-  if (!notify) {
+  const receivedAtEpochMs = receivedAt === null ? NaN : Date.parse(receivedAt);
+  if (!notify || !Number.isSafeInteger(receivedAtEpochMs)
+    || receivedAtEpochMs < 0 || receivedAtEpochMs > Date.now()) {
     return;
   }
   try {
-    notify();
+    notify(receivedAtEpochMs);
   } catch {
-    // Staging observation is a foreground-yield hint only.
+    // An optional warmth observation must not undo durable input admission.
   }
 }
 
@@ -1431,6 +1436,7 @@ async function stageHostedConversationAssistantInputEvent(input: {
       });
     },
     inputId: event.inputId,
+    receivedAt: event.receivedAt,
     async recordAttachmentEvidence(attachmentEvidence) {
       if (attachmentEvidence.status === "failed") {
         const latestEvent = await readAssistantInputEvent({

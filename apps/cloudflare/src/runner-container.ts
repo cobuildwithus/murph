@@ -116,11 +116,9 @@ const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
   "Invalid request.",
   "Request body too large.",
 ]);
-const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
+const DEFAULT_RUNNER_IDLE_TTL_MS = 600_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const MIN_RUNNER_LIFECYCLE_REEVALUATION_MS = 1_000;
-const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
-const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
 const BASE_RUNNER_CONTAINER_ENV_VARS = {
   ...buildHostedRunnerContainerCaEnv(),
@@ -435,33 +433,21 @@ interface HostedExecutionContainerSmokeHealthInput {
   };
 }
 
-interface RunnerActivityTimeoutRenewable {
-  renewActivityTimeout(): void;
-}
-
 interface RunnerContainerHealth {
   activeJobCount: number;
-  conversationWarmActivityCompletedAtEpochMs: number | null | undefined;
+  conversationActivityReceivedAtEpochMs: number | null;
 }
 
 interface RunnerContainerPendingCompletionCleanup
   extends RunnerContainerRuntimeCompletionRecordedInput {
   expectedInteractionGeneration: number;
-  result: HostedExecutionRunnerJobResult;
 }
 
-type RunnerContainerLifecycleEvaluationInput =
-  | {
-      expectedInteractionGeneration: number;
-      trigger: "activity-expired";
-      userId?: string;
-    }
-  | {
-      expectedInteractionGeneration: number;
-      result: HostedExecutionRunnerJobResult;
-      trigger: "invoke-completed";
-      userId: string;
-    };
+interface RunnerContainerLifecycleEvaluationInput {
+  expectedInteractionGeneration: number;
+  trigger: "activity-expired" | "invoke-completed";
+  userId?: string;
+}
 
 function runnerCompletionCleanupMatches(
   pending: RunnerContainerPendingCompletionCleanup,
@@ -633,7 +619,6 @@ export class RunnerContainer extends Container {
   interceptHttps = true;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
-  sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs({}));
 
   protected readonly environment: RunnerContainerEnvironmentSource;
   // This discriminator is namespace identity, not a second lifecycle owner.
@@ -671,9 +656,19 @@ export class RunnerContainer extends Container {
     this.envVars = buildRunnerContainerEnvVars();
     const releaseId = readHostedStandbyReleaseId(env);
     if (releaseId) this.envVars.HOSTED_EXECUTION_WORKER_RELEASE_ID = releaseId;
+    // Keep fail-fast validation now that the two defaults are independent.
+    readRunnerContainerIdleTtlMs(env);
     this.sleepAfter = formatRunnerSleepAfter(
       readRunnerContainerLifecycleReevaluationMs(env),
     );
+    // Native schedules survive DO eviction. Recover an already-running process
+    // from the preceding Worker too, without trusting its completion-time clock.
+    this.ctx.blockConcurrencyWhile(async () => {
+      if (this.ctx.container?.running
+        && (await this.listSchedules("onActivityExpired")).length === 0) {
+        await this.scheduleLifecycleCheck(Date.now());
+      }
+    });
   }
 
   async prepareStandbySlot(input: {
@@ -1048,7 +1043,6 @@ export class RunnerContainer extends Container {
         attemptId: input.job.request.attemptId,
         expectedInteractionGeneration: invocationInteractionGeneration,
         leaseGeneration: input.job.request.leaseGeneration,
-        result: completedResult,
         userId: routeUserId,
       };
       await this.withLifecycleLock(async () => {
@@ -1061,7 +1055,6 @@ export class RunnerContainer extends Container {
           this.recordedCompletionCleanup = null;
           await this.evaluateWarmContainerLifecycle({
             expectedInteractionGeneration: pending.expectedInteractionGeneration,
-            result: pending.result,
             trigger: "invoke-completed",
             userId: pending.userId,
           });
@@ -1088,7 +1081,6 @@ export class RunnerContainer extends Container {
       this.recordedCompletionCleanup = null;
       await this.evaluateWarmContainerLifecycle({
         expectedInteractionGeneration: pending.expectedInteractionGeneration,
-        result: pending.result,
         trigger: "invoke-completed",
         userId: pending.userId,
       });
@@ -1992,25 +1984,14 @@ export class RunnerContainer extends Container {
   ): Promise<void> {
     const lifecycleObservedAtMs = Date.now();
     const lifecycleStagePrefix = input.trigger;
-    const renewActivityTimeout = (stage: string): boolean =>
-      this.renewPlatformActivityTimeout(`${lifecycleStagePrefix}-${stage}`);
-
-    if (
-      input.trigger === "invoke-completed"
-      // A completed previous release must reach the normal idle checks so
-      // an overdue wake cannot indefinitely retain an obsolete runner image.
-      && readHostedRunnerDeployment(this.environment)?.previous?.id
-        !== resolveHostedRunnerReleaseId(this.environment)
-      && this.retainCompletedInvocationForPendingWake(
-        input.result,
-        lifecycleObservedAtMs,
-      )
-    ) {
-      return;
-    }
+    // SDK 0.3.7 consumes a scheduled callback even if it throws. Persist the
+    // next safety check before health/stop awaits; uncertainty grants recovery,
+    // not a new conversation lease. A proved warm receipt replaces this date.
+    await this.scheduleLifecycleCheck(
+      lifecycleObservedAtMs + readRunnerContainerLifecycleReevaluationMs(this.environment),
+    );
 
     if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
-      renewActivityTimeout("interaction-race");
       return;
     }
     const activeOperation = this.readWorkspaceInvocationOperation();
@@ -2018,7 +1999,6 @@ export class RunnerContainer extends Container {
       if (input.trigger === "activity-expired") {
         this.lastActivityExpiryAtMs = lifecycleObservedAtMs;
       }
-      renewActivityTimeout("active-operation");
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -2037,17 +2017,12 @@ export class RunnerContainer extends Container {
     }
 
     if (input.trigger === "activity-expired") {
-      if (this.retainEarlyActivityExpiry(lifecycleObservedAtMs)) {
-        return;
-      }
       this.lastActivityExpiryAtMs = lifecycleObservedAtMs;
     }
 
     if (!await this.canStopWarmContainer({
       expectedInteractionGeneration: input.expectedInteractionGeneration,
-      lifecycleObservedAtMs,
       lifecycleStagePrefix,
-      renewActivityTimeout,
       userId: input.userId,
     })) {
       return;
@@ -2074,10 +2049,22 @@ export class RunnerContainer extends Container {
       !destroyed
       || this.containerInteractionGeneration !== input.expectedInteractionGeneration
     ) {
-      renewActivityTimeout("cleanup-retained");
       return;
     }
+    this.deleteSchedules("onActivityExpired");
     this.retireStoppedMemberSlot();
+  }
+
+  private async scheduleLifecycleCheck(atEpochMs: number): Promise<void> {
+    this.deleteSchedules("onActivityExpired");
+    // The SDK stores whole seconds. Round up so a receipt deadline cannot fire
+    // early; generic RPC settlement only moves the SDK activity timeout, not
+    // this persisted schedule. Never override alarm() or write its alarm here.
+    await this.schedule(
+      new Date(Math.ceil(atEpochMs / 1_000) * 1_000),
+      "onActivityExpired",
+      null,
+    );
   }
 
   private retireStoppedMemberSlot(): void {
@@ -2117,61 +2104,6 @@ export class RunnerContainer extends Container {
     }
   }
 
-  private retainCompletedInvocationForPendingWake(
-    result: HostedExecutionRunnerJobResult,
-    lifecycleObservedAtMs: number,
-  ): boolean {
-    if (result.immediateRecheckRequested === true) {
-      this.renewPlatformActivityTimeout("invoke-completed-immediate-recheck");
-      return true;
-    }
-    const nextWakeAt = result.nextWakeAt;
-    if (nextWakeAt === undefined || nextWakeAt === null) {
-      return false;
-    }
-    const nextWakeAtMs = Date.parse(nextWakeAt);
-    if (
-      Number.isFinite(nextWakeAtMs)
-      && nextWakeAtMs > lifecycleObservedAtMs
-        + readRunnerContainerLifecycleReevaluationMs(this.environment)
-    ) {
-      return false;
-    }
-    this.renewPlatformActivityTimeout(
-      Number.isFinite(nextWakeAtMs)
-        ? "invoke-completed-near-term-wake"
-        : "invoke-completed-next-wake-unavailable",
-    );
-    return true;
-  }
-
-  private retainEarlyActivityExpiry(lifecycleObservedAtMs: number): boolean {
-    const lastActivityObservedAtMs = this.lastActivityObservedAtMs;
-    if (
-      lastActivityObservedAtMs === null
-      || lifecycleObservedAtMs - lastActivityObservedAtMs
-        >= readRunnerContainerLifecycleReevaluationMs(this.environment)
-    ) {
-      return false;
-    }
-    this.lastActivityExpiryAtMs = lifecycleObservedAtMs;
-    if (!this.renewPlatformActivityTimeout("activity-expired-early-renew")) {
-      return false;
-    }
-    emitHostedExecutionStructuredLog({
-      component: "container",
-      details: {
-        ...this.buildLifecycleDiagnosticDetails(),
-        lifecycleStage: "activity-expired-early-renew",
-      },
-      message:
-        "Hosted execution container activity expiry arrived before the idle TTL elapsed; renewing.",
-      phase: "container.ready",
-      userId: this.currentLogContext?.userId,
-    });
-    return true;
-  }
-
   private lifecycleInteractionChanged(expectedInteractionGeneration: number): boolean {
     return this.lifecycleLockPendingCount > 1
       || this.containerInteractionGeneration !== expectedInteractionGeneration;
@@ -2179,9 +2111,7 @@ export class RunnerContainer extends Container {
 
   private async canStopWarmContainer(input: {
     expectedInteractionGeneration: number;
-    lifecycleObservedAtMs: number;
     lifecycleStagePrefix: RunnerContainerLifecycleEvaluationInput["trigger"];
-    renewActivityTimeout(stage: string): boolean;
     userId?: string;
   }): Promise<boolean> {
     let status: string | null;
@@ -2196,14 +2126,13 @@ export class RunnerContainer extends Container {
         error,
         input.userId,
       );
-      input.renewActivityTimeout("status-unavailable");
       return false;
     }
     if (isRunnerContainerStopped(status)) {
+      this.deleteSchedules("onActivityExpired");
       return false;
     }
     if (status !== "running" && status !== "healthy") {
-      input.renewActivityTimeout("status-unavailable");
       return false;
     }
 
@@ -2216,30 +2145,22 @@ export class RunnerContainer extends Container {
         error,
         input.userId,
       );
-      input.renewActivityTimeout("health-unavailable");
       return false;
     }
     if (health.activeJobCount > 0) {
-      input.renewActivityTimeout("active-child");
       return false;
     }
     if (this.lifecycleInteractionChanged(input.expectedInteractionGeneration)) {
-      input.renewActivityTimeout("interaction-race");
       return false;
     }
-    const conversationWarmActivityCompletedAtEpochMs =
-      health.conversationWarmActivityCompletedAtEpochMs;
-    if (conversationWarmActivityCompletedAtEpochMs === undefined) {
-      input.renewActivityTimeout("conversation-warm-unavailable");
-      return false;
-    }
-    if (
-      conversationWarmActivityCompletedAtEpochMs !== null
-      && conversationWarmActivityCompletedAtEpochMs
-        > input.lifecycleObservedAtMs - readRunnerContainerIdleTtlMs(this.environment)
-    ) {
-      input.renewActivityTimeout("conversation-warm");
-      return false;
+    const receivedAtEpochMs = health.conversationActivityReceivedAtEpochMs;
+    if (receivedAtEpochMs !== null) {
+      const deadlineAtEpochMs = receivedAtEpochMs
+        + readRunnerContainerIdleTtlMs(this.environment);
+      if (deadlineAtEpochMs > Date.now()) {
+        await this.scheduleLifecycleCheck(deadlineAtEpochMs);
+        return false;
+      }
     }
     return true;
   }
@@ -2342,7 +2263,6 @@ export class RunnerContainer extends Container {
     let cleanupWarmContainerOnFailure = false;
     let invokeFailure: unknown = null;
     let preserveActiveOperationAfterTransportFailure = false;
-    let stopRunnerActivityRenewal: (() => void) | null = null;
     const operationAbortController = operation.abortController;
     operation.abortEndpointReady = false;
     operation.requiresFailClosedStopReason = null;
@@ -2373,7 +2293,6 @@ export class RunnerContainer extends Container {
 
       activeOperationAcquired = true;
       operation.abortEndpointReady = true;
-      stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
       this.noteRunnerActivity("invoke-started");
       this.noteRunnerActivity("runner-request-starting");
       emitHostedExecutionStructuredLog({
@@ -2518,7 +2437,6 @@ export class RunnerContainer extends Container {
         }
         cleanupSettled = true;
       } finally {
-        stopRunnerActivityRenewal?.();
         this.noteRunnerActivity("invoke-finished");
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
@@ -2559,15 +2477,17 @@ export class RunnerContainer extends Container {
     ) {
       throw new Error("Hosted runner container health did not include a valid active job count.");
     }
-    const conversationWarmActivityCompletedAtEpochMs =
-      payload.conversationWarmActivityCompletedAtEpochMs;
+    // Consumer-first rollout: old children still expose activeJobCount, but no
+    // authoritative receipt. Drain active work; do not award unknown warmth.
+    const conversationActivityReceivedAtEpochMs =
+      payload.conversationActivityReceivedAtEpochMs ?? null;
     if (
-      conversationWarmActivityCompletedAtEpochMs !== undefined
-      && conversationWarmActivityCompletedAtEpochMs !== null
+      conversationActivityReceivedAtEpochMs !== null
       && (
-        typeof conversationWarmActivityCompletedAtEpochMs !== "number"
-        || !Number.isSafeInteger(conversationWarmActivityCompletedAtEpochMs)
-        || conversationWarmActivityCompletedAtEpochMs < 0
+        typeof conversationActivityReceivedAtEpochMs !== "number"
+        || !Number.isSafeInteger(conversationActivityReceivedAtEpochMs)
+        || conversationActivityReceivedAtEpochMs < 0
+        || conversationActivityReceivedAtEpochMs > Date.now()
       )
     ) {
       throw new Error(
@@ -2576,7 +2496,7 @@ export class RunnerContainer extends Container {
     }
     return {
       activeJobCount: payload.activeJobCount,
-      conversationWarmActivityCompletedAtEpochMs,
+      conversationActivityReceivedAtEpochMs,
     };
   }
 
@@ -2751,6 +2671,11 @@ export class RunnerContainer extends Container {
     } = {},
   ): Promise<RunnerContainerEnsureReadyResult> {
     const readinessStartedAt = Date.now();
+    if ((await this.listSchedules("onActivityExpired")).length === 0) {
+      await this.scheduleLifecycleCheck(
+        readinessStartedAt + readRunnerContainerLifecycleReevaluationMs(this.environment),
+      );
+    }
     const initialState = await this.getState();
     const stateReadFinishedAtEpochMs = Date.now();
     const status = readContainerStatus(initialState);
@@ -3412,21 +3337,6 @@ export class RunnerContainer extends Container {
     throw new RunnerContainerCleanupUnsettledError(input.cause);
   }
 
-  private startRunnerActivityRenewal(): () => void {
-    const lifecycleReevaluationMs =
-      readRunnerContainerLifecycleReevaluationMs(this.environment);
-    const intervalMs = computeRunnerActivityRenewIntervalMs(
-      lifecycleReevaluationMs,
-    );
-    const interval = setInterval(() => {
-      this.noteRunnerActivity("invoke-heartbeat");
-    }, intervalMs);
-
-    return () => {
-      clearInterval(interval);
-    };
-  }
-
   protected noteRunnerActivity(stage: string): boolean {
     if (!this.renewPlatformActivityTimeout(stage)) {
       return false;
@@ -3436,16 +3346,9 @@ export class RunnerContainer extends Container {
     return true;
   }
 
-  protected renewPlatformActivityTimeout(stage = "activity-expired-early-renew"): boolean {
-    const renewActivityTimeout =
-      (this as RunnerContainer & Partial<RunnerActivityTimeoutRenewable>).renewActivityTimeout;
-
-    if (typeof renewActivityTimeout !== "function") {
-      return false;
-    }
-
+  protected renewPlatformActivityTimeout(stage = "platform-activity"): boolean {
     try {
-      renewActivityTimeout.call(this);
+      this.renewActivityTimeout();
       return true;
     } catch (error) {
       emitHostedExecutionStructuredLog({
@@ -5150,7 +5053,7 @@ function readRunnerContainerLifecycleReevaluationMs(
 ): number {
   const raw = source.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS;
   if (raw === undefined || raw === null || raw === "") {
-    return readRunnerContainerIdleTtlMs(source);
+    return 60_000;
   }
   if (typeof raw !== "string") {
     throw new TypeError(
@@ -5168,13 +5071,6 @@ function readRunnerContainerLifecycleReevaluationMs(
     );
   }
   return parsed;
-}
-
-function computeRunnerActivityRenewIntervalMs(idleTtlMs: number): number {
-  return Math.max(
-    MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS,
-    Math.min(RUNNER_ACTIVITY_RENEW_INTERVAL_MS, Math.floor(idleTtlMs / 2)),
-  );
 }
 
 function buildRunnerContainerMetadataOnlyErrorDetails(error: unknown): HostedExecutionStructuredLogDetails {

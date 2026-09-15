@@ -630,130 +630,89 @@ describe("startHostedContainerEntrypoint", () => {
     expect(eagerHydrationOffset).toBeGreaterThan(listenOffset);
   });
 
-  it("publishes settled conversation warmth in health", async () => {
-    mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
-      options.onConversationActivityObserved?.();
-      return buildWorkspaceRunnerResult();
-    });
-    const server = await startHostedContainerEntrypoint({ port: 0 });
-    servers.push(server);
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-    }
-
-    await sendHostedContainerJsonRequest({
-      body: JSON.stringify(buildWorkspaceJobBody()),
-      path: "/internal/workspace-invocation",
-      port: address.port,
-    });
-
-    const health = await sendHostedContainerGetRequest({
-      path: "/health",
-      port: address.port,
-    });
-    const healthJson = requireRecord(health.json, "health response");
-    const completedAtEpochMs = healthJson
-      .conversationWarmActivityCompletedAtEpochMs;
-    expect(Number.isSafeInteger(completedAtEpochMs)).toBe(true);
-    expect(healthJson).toMatchObject({
-      conversationWarmActivityCompletedAtEpochMs: completedAtEpochMs,
-    });
-
-    await sendHostedContainerJsonRequest({
-      body: JSON.stringify(buildWorkspaceJobBody()),
-      path: "/internal/workspace-invocation",
-      port: address.port,
-    });
-    const healthAfterMaintenance = await sendHostedContainerGetRequest({
-      path: "/health",
-      port: address.port,
-    });
-    expect(healthAfterMaintenance.json).toMatchObject({
-      conversationWarmActivityCompletedAtEpochMs: completedAtEpochMs,
-    });
-  });
-
-  it("starts conversation warmth when the observed invocation settles", async () => {
+  it.each([false, true])("publishes receipt warmth before housekeeping settles (failure=%s)", async (fail) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
-      const observedAtEpochMs = Date.parse("2026-07-22T13:00:00.000Z");
-      const settledAtEpochMs = observedAtEpochMs + 300_000;
-      const activityObserved = createDeferred();
-      const releaseInvocation = createDeferred();
+      const receivedAtEpochMs = Date.parse("2026-07-22T13:00:00.000Z");
+      vi.setSystemTime(receivedAtEpochMs + 120_000);
+      const observed = createDeferred();
+      const release = createDeferred();
       mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
-        options.onConversationActivityObserved?.();
-        activityObserved.resolve();
-        await releaseInvocation.promise;
+        options.onConversationActivityObserved?.(receivedAtEpochMs);
+        // Replays, unknown evidence and provider-future timestamps cannot mint
+        // a later lease at observation or when the invocation settles.
+        for (const receipt of [receivedAtEpochMs, receivedAtEpochMs - 1, NaN, -1, Date.now() + 1]) {
+          options.onConversationActivityObserved?.(receipt);
+        }
+        observed.resolve();
+        await release.promise;
+        if (fail) throw new Error("synthetic checkpoint failure");
         return buildWorkspaceRunnerResult();
       });
-      vi.setSystemTime(observedAtEpochMs);
       const server = await startHostedContainerEntrypoint({ port: 0 });
       servers.push(server);
       const address = server.address();
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-      }
-
-      const invocationPromise = sendHostedContainerJsonRequest({
+      if (!address || typeof address === "string") throw new Error("Expected a TCP port.");
+      const invocation = sendHostedContainerJsonRequest({
         body: JSON.stringify(buildWorkspaceJobBody()),
         path: "/internal/workspace-invocation",
         port: address.port,
       });
-      await activityObserved.promise;
-
-      const healthWhileRunning = await sendHostedContainerGetRequest({
-        path: "/health",
-        port: address.port,
-      });
-      expect(healthWhileRunning.json).toMatchObject({
-        activeJobCount: 1,
-        conversationWarmActivityCompletedAtEpochMs: null,
-      });
-
-      vi.setSystemTime(settledAtEpochMs);
-      releaseInvocation.resolve();
-      await invocationPromise;
-
-      const healthAfterSettlement = await sendHostedContainerGetRequest({
-        path: "/health",
-        port: address.port,
-      });
-      expect(healthAfterSettlement.json).toMatchObject({
-        activeJobCount: 0,
-        conversationWarmActivityCompletedAtEpochMs: settledAtEpochMs,
-      });
+      await observed.promise;
+      expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+        .toMatchObject({
+          activeJobCount: 1,
+          conversationActivityReceivedAtEpochMs: receivedAtEpochMs,
+          conversationWarmActivityCompletedAtEpochMs: receivedAtEpochMs,
+        });
+      vi.setSystemTime(receivedAtEpochMs + 900_000);
+      release.resolve();
+      expect((await invocation).status).toBe(fail ? 500 : 200);
+      expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+        .toMatchObject({ activeJobCount: 0, conversationActivityReceivedAtEpochMs: receivedAtEpochMs });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("settles conversation warmth when the invocation fails after observation", async () => {
-    mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
-      options.onConversationActivityObserved?.();
-      throw new Error("synthetic invocation failure");
-    });
-    const server = await startHostedContainerEntrypoint({ port: 0 });
-    servers.push(server);
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+  it("only a newer admitted receipt extends warmth; maintenance and process replacement do not", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const firstReceipt = Date.parse("2026-07-22T13:00:00.000Z");
+      vi.setSystemTime(firstReceipt);
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP port.");
+      for (const [receipt, expected] of [
+        [firstReceipt, firstReceipt],
+        [null, firstReceipt],
+        [firstReceipt, firstReceipt],
+        [firstReceipt + 599_999, firstReceipt + 599_999],
+        [firstReceipt, firstReceipt + 599_999],
+      ] as const) {
+        vi.setSystemTime(firstReceipt + 599_999);
+        mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
+          if (receipt !== null) options.onConversationActivityObserved?.(receipt);
+          return buildWorkspaceRunnerResult();
+        });
+        await sendHostedContainerJsonRequest({
+          body: JSON.stringify(buildWorkspaceJobBody()),
+          path: "/internal/workspace-invocation",
+          port: address.port,
+        });
+        expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+          .toMatchObject({ conversationActivityReceivedAtEpochMs: expected });
+      }
+      const replacement = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(replacement);
+      const replacementAddress = replacement.address();
+      if (!replacementAddress || typeof replacementAddress === "string") throw new Error("Expected a TCP port.");
+      expect((await sendHostedContainerGetRequest({ path: "/health", port: replacementAddress.port })).json)
+        .toMatchObject({ activeJobCount: 0, conversationActivityReceivedAtEpochMs: null });
+    } finally {
+      vi.useRealTimers();
     }
-
-    const invocation = await sendHostedContainerJsonRequest({
-      body: JSON.stringify(buildWorkspaceJobBody()),
-      path: "/internal/workspace-invocation",
-      port: address.port,
-    });
-    expect(invocation.status).toBe(500);
-    const health = await sendHostedContainerGetRequest({
-      path: "/health",
-      port: address.port,
-    });
-    const healthJson = requireRecord(health.json, "health response");
-    expect(Number.isSafeInteger(
-      healthJson.conversationWarmActivityCompletedAtEpochMs,
-    )).toBe(true);
   });
 
   it("drains deferred usage completions before clean shutdown exit", async () => {
