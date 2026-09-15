@@ -66,16 +66,6 @@
       },
       "rollout_active_grace_period": 0,
       "ssh": { "enabled": false }
-    },
-    {
-      "class_name": "SmallRunnerContainer",
-      "image": "../../Dockerfile.cloudflare-hosted-runner",
-      "image_build_context": ".",
-      "instance_type": { "vcpu": 1, "memory_mib": 3072, "disk_mb": 6000 },
-      "max_instances": 10,
-      "rollout_active_grace_period": 0,
-      "rollout_step_percentage": [10, 25, 50, 100],
-      "ssh": { "enabled": false }
     }
   ],
   "durable_objects": {
@@ -115,10 +105,6 @@
       {
         "name": "STANDBY_RUNNER_CONTAINER",
         "class_name": "StandbyRunnerContainer"
-      },
-      {
-        "name": "SMALL_RUNNER_CONTAINER",
-        "class_name": "SmallRunnerContainer"
       }
     ]
   },
@@ -164,6 +150,10 @@
     {
       "tag": "v9",
       "new_sqlite_classes": ["SmallRunnerContainer"]
+    },
+    {
+      "tag": "v10",
+      "deleted_classes": ["SmallRunnerContainer"]
     }
   ],
   "triggers": {
@@ -241,7 +231,6 @@
   "vars": {
     "HOSTED_EXECUTION_STANDBY_MODE": "off",
     "HOSTED_EXECUTION_STANDBY_TARGET": "2",
-    "HOSTED_EXECUTION_SMALL_RUNNER_ENABLED": "false",
     "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION": "projects/.../cryptoKeyVersions/1",
     "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
     "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID": "cloudflare-automation:v1",

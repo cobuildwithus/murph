@@ -260,15 +260,15 @@ export function resolveHostedStandbyCoordinatorName(input: {
   return `standby-coordinator--v-${requireReleaseId(input.releaseId)}--r-${input.region.toLowerCase()}`;
 }
 
-export function createHostedRunnerSlotName(releaseId: string, profile: "default" | "small" = "default"): string {
-  return createHostedSlotName(profile === "small" ? "runner-small" : "runner", releaseId);
+export function createHostedRunnerSlotName(releaseId: string): string {
+  return createHostedSlotName("runner", releaseId);
 }
 
 export function createHostedStandbySlotName(releaseId: string): string {
   return createHostedSlotName("standby", releaseId);
 }
 
-function createHostedSlotName(prefix: "runner" | "runner-small" | "standby", releaseId: string): string {
+function createHostedSlotName(prefix: "runner" | "standby", releaseId: string): string {
   if (typeof crypto === "undefined" || typeof crypto.getRandomValues !== "function") {
     throw new Error("Hosted standby slot generation requires Web Crypto.");
   }
@@ -302,15 +302,11 @@ export function readHostedStandbySlotReleaseId(value: string): string | null {
 
 export function isHostedRunnerSlotName(value: unknown): boolean {
   return typeof value === "string"
-    && /^runner(?:-small)?--v-[A-Za-z0-9_-]{1,128}--[a-f0-9]{32}$/u.test(value);
-}
-
-export function isHostedSmallRunnerSlotName(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith("runner-small--v-") && isHostedRunnerSlotName(value);
+    && /^runner--v-[A-Za-z0-9_-]{1,128}--[a-f0-9]{32}$/u.test(value);
 }
 
 export function readHostedRunnerSlotReleaseId(value: string): string | null {
-  const match = /^runner(?:-small)?--v-([A-Za-z0-9_-]{1,128})--[a-f0-9]{32}$/u.exec(value);
+  const match = /^runner--v-([A-Za-z0-9_-]{1,128})--[a-f0-9]{32}$/u.exec(value);
   return match?.[1] ?? null;
 }
 
@@ -360,7 +356,6 @@ function isRunnerBindingRecord(value: unknown): value is Record<string, unknown>
 export function createHostedRunnerContainerNamespaceRouter(input: {
   exactUser: HostedExecutionContainerNamespaceLike | null;
   next?: HostedExecutionContainerNamespaceLike | null;
-  small?: HostedExecutionContainerNamespaceLike | null;
   standby: HostedStandbyRunnerContainerNamespaceLike | null;
 }): HostedExecutionContainerNamespaceLike | null {
   const runner = input.exactUser;
@@ -370,10 +365,6 @@ export function createHostedRunnerContainerNamespaceRouter(input: {
 
   return {
     getByName(name: string) {
-      if (isHostedSmallRunnerSlotName(name)) {
-        if (!input.small) throw new Error("Hosted small runner container binding is unavailable.");
-        return input.small.getByName(name);
-      }
       if (readHostedRunnerBankFromName(name) === "next") {
         if (!input.next) throw new Error("Hosted next runner container binding is unavailable.");
         return input.next.getByName(name);

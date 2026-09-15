@@ -6,13 +6,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { prepareSmallRunnerNamespaceBootstrap } from "../scripts/stage-runner-release.ts";
+import { parseJsoncObject } from "./helpers/jsonc.js";
 
 const execute = promisify(execFile);
 const require = createRequire(import.meta.url);
 const account = "0".repeat(32);
 const versionId = "11111111-1111-4111-8111-111111111111";
-const classes = ["RunnerContainer", "SmallRunnerContainer"];
+const classes = ["RunnerContainer"];
 const image = `registry.cloudflare.com/${account}/synthetic-runner:retained-release`;
 const native = {
   id: "synthetic-application", name: "synthetic-worker-runnercontainer",
@@ -25,31 +25,19 @@ const native = {
   max_instances: 10, constraints: { tiers: [1, 2] }, rollout_active_grace_period: 300,
 };
 
-async function bootstrapConfig(directory: string): Promise<string> {
-  const bindings = classes.map(class_name => ({ name: class_name.toUpperCase(), class_name }));
-  const vars = { HOSTED_EXECUTION_SMALL_RUNNER_ENABLED: "true",
-    HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "a".repeat(64),
-    HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "b".repeat(64) };
+async function retirementConfig(directory: string): Promise<string> {
+  const scaffold = parseJsoncObject(await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
   const configPath = path.join(directory, "wrangler.json");
   await writeFile(configPath, JSON.stringify({
     name: "synthetic-worker", main: "worker.js", compatibility_date: "2026-01-01", account_id: account,
-    workers_dev: false, preview_urls: false, observability: { logs: { enabled: true } }, vars,
-    durable_objects: { bindings },
-    migrations: [{ tag: "v8", new_sqlite_classes: ["RunnerContainer"] },
-      { tag: "v9", new_sqlite_classes: ["SmallRunnerContainer"] }],
-    containers: classes.map(class_name => ({ class_name, image,
+    workers_dev: false, preview_urls: false,
+    durable_objects: { bindings: [{ name: "RUNNER_CONTAINER", class_name: "RunnerContainer" }] },
+    migrations: scaffold.migrations,
+    containers: [{ class_name: "RunnerContainer", image,
       instance_type: { vcpu: 2, memory_mib: 6144, disk_mb: 6000 }, max_instances: 10,
-      rollout_active_grace_period: 300, rollout_step_percentage: [100], ssh: { enabled: false } })),
+      rollout_active_grace_period: 300, rollout_step_percentage: [100], ssh: { enabled: false } }],
   }));
-  const output = await prepareSmallRunnerNamespaceBootstrap({ allowed: true, configPath,
-    currentVersionId: versionId, listApplications: async () => [native],
-    currentVersion: { resources: { bindings: [
-      { type: "durable_object_namespace", ...bindings[0], namespace_id: "ns-RunnerContainer" },
-      ...Object.entries(vars).map(([name, text]) => ({ type: "plain_text", name, text })),
-    ] } },
-  });
-  if (!output) throw new Error("Synthetic bootstrap config was not produced");
-  return output;
+  return configPath;
 }
 
 async function readUploadMetadata(request: IncomingMessage): Promise<unknown> {
@@ -63,8 +51,8 @@ async function readUploadMetadata(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(typeof metadata === "string" ? metadata : await metadata.text());
 }
 
-async function runWranglerBootstrap(skipContainers: boolean) {
-  const directory = await mkdtemp(path.join(tmpdir(), "murph-bootstrap-cli-"));
+async function runWranglerRetirement(skipContainers: boolean) {
+  const directory = await mkdtemp(path.join(tmpdir(), "murph-retirement-cli-"));
   const requests: string[] = [];
   let metadata: unknown;
   const server = createServer(async (request, response) => {
@@ -78,13 +66,13 @@ async function runWranglerBootstrap(skipContainers: boolean) {
         result = { deployment_id: versionId, startup_time_ms: 0 };
       } else if (method === "GET" && route.endsWith("/workers/services/synthetic-worker")) {
         result = { default_environment: { environment: "production",
-          script: { tag: "synthetic-tag", tags: [], last_deployed_from: "wrangler", migration_tag: "v8" } } };
+          script: { tag: "synthetic-tag", tags: [], last_deployed_from: "wrangler", migration_tag: "v9" } } };
       } else if (method === "GET" && route.endsWith("/deployments")) {
         result = { deployments: [{ id: "synthetic-deployment", versions: [{ version_id: versionId, percentage: 100 }] }] };
       } else if (method === "GET" && route.endsWith("/workers/scripts")) {
-        result = [{ id: "synthetic-worker", migration_tag: "v8" }];
+        result = [{ id: "synthetic-worker", migration_tag: "v9" }];
       } else if (method === "GET" && route.endsWith("/settings")) {
-        result = { migration_tag: "v8", bindings: [] };
+        result = { migration_tag: "v9", bindings: [] };
       } else if (method === "GET" && route.endsWith(`/versions/${versionId}`)) {
         result = { id: versionId, resources: { bindings: classes.map(class_name => ({
           type: "durable_object_namespace", class_name, namespace_id: `ns-${class_name}`,
@@ -107,9 +95,9 @@ async function runWranglerBootstrap(skipContainers: boolean) {
     await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Synthetic API did not bind a TCP port");
-    const configPath = await bootstrapConfig(directory);
+    const configPath = await retirementConfig(directory);
     await writeFile(path.join(directory, "worker.js"),
-      "export class RunnerContainer {}\nexport class SmallRunnerContainer {}\nexport default { fetch() { return new Response('synthetic'); } };\n");
+      "export class RunnerContainer {}\nexport default { fetch() { return new Response('synthetic'); } };\n");
     const packagePath = require.resolve("wrangler/package.json");
     const { bin } = JSON.parse(await readFile(packagePath, "utf8"));
     const command = execute(process.execPath, [path.resolve(path.dirname(packagePath), bin.wrangler),
@@ -118,7 +106,7 @@ async function runWranglerBootstrap(skipContainers: boolean) {
       env: { PATH: process.env.PATH, CI: "true", XDG_CONFIG_HOME: path.join(directory, "config"),
         CLOUDFLARE_ACCOUNT_ID: account, CLOUDFLARE_API_TOKEN: "synthetic-api-token",
         CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${address.port}/client/v4`,
-        WRANGLER_SEND_METRICS: "false", WRANGLER_LOG_PATH: path.join(directory, "wrangler.log") },
+        WRANGLER_SEND_METRICS: "false", WRANGLER_WRITE_LOGS: "false" },
     });
     const succeeded = await command.then(() => true, () => false);
     return { succeeded, requests, metadata };
@@ -129,23 +117,20 @@ async function runWranglerBootstrap(skipContainers: boolean) {
   }
 }
 
-describe("installed Wrangler namespace bootstrap", () => {
-  it("uploads the new namespace with selection off and never enters the container API", async () => {
-    const result = await runWranglerBootstrap(true);
+describe("installed Wrangler namespace retirement", () => {
+  it("deletes only the retired namespace without reconciling regular containers", async () => {
+    const result = await runWranglerRetirement(true);
     expect(result.succeeded).toBe(true);
     expect(result.metadata).toMatchObject({
       containers: [{ class_name: "RunnerContainer" }],
-      migrations: { old_tag: "v8", new_tag: "v9", steps: [{ new_sqlite_classes: ["SmallRunnerContainer"] }] },
-      bindings: expect.arrayContaining([
-        { type: "durable_object_namespace", name: "SMALLRUNNERCONTAINER", class_name: "SmallRunnerContainer" },
-        { type: "plain_text", name: "HOSTED_EXECUTION_SMALL_RUNNER_ENABLED", text: "false" },
-      ]),
+      migrations: { old_tag: "v9", new_tag: "v10", steps: [{ deleted_classes: ["SmallRunnerContainer"] }] },
+      bindings: [{ type: "durable_object_namespace", name: "RUNNER_CONTAINER", class_name: "RunnerContainer" }],
     });
     expect(result.requests.some(request => request.includes("/containers/"))).toBe(false);
   });
 
-  it("shows why a normal deploy cannot promise to preserve every existing container setting", async () => {
-    const result = await runWranglerBootstrap(false);
+  it("shows why retirement must skip reconciliation of unrelated container settings", async () => {
+    const result = await runWranglerRetirement(false);
     expect(result.succeeded).toBe(false);
     expect(result.requests).toContain(`PATCH /client/v4/accounts/${account}/containers/applications/synthetic-application`);
   });

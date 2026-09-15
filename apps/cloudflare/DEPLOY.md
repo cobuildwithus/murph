@@ -101,57 +101,45 @@ floor. This GET neither reads member selection nor authorizes that feature's
 activation. New wire obligations need narrowly derived executable witnesses at
 their actual owners, not labels in a general capability registry.
 
-### Selected-account size experiment
+### Retiring the selected-account size experiment
 
-`SmallRunnerContainer` has a ten-instance ceiling outside the regular fleet
-budget; each instance has 1 vCPU, 3,072 MiB memory and 6,000 MB disk. The ceiling
-leaves room for immutable replacement targets while the provider releases
-previous capacity. It does not create or prewarm ten instances. The exact-member
-write fence remains the execution owner. A one-instance application ceiling
-must not be used as a substitute for that fence.
+All fresh member allocations use the regular runner fleet. The temporary
+member selector, separate resource profile, namespace router and deployment
+bootstrap have been removed. Migration `v9` remains historical; `v10` deletes
+`SmallRunnerContainer`. The regular member budget and isolated smoke capacity
+are unchanged.
 
-It uses the serving runner image, release identity, egress policy and member
-lifecycle. Include all ten slots in account quota accounting; the protected
-full deploy checks the desired budget before increasing existing small capacity.
-It never supplies shared standby inventory.
+Existing deployments must complete retirement before publishing this Worker:
 
-The protected Worker secret `HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256` holds
-the lowercase SHA-256 of the selected member ID. Keep both the ID and digest
-out of source, ordinary variables and deployment summaries. Selection defaults
-off through `HOSTED_EXECUTION_SMALL_RUNNER_ENABLED=false`; enabling requires
-the private secret and secret synchronization. Only fresh allocations consult
-selection. Existing targets remain exact-member owned through normal idle,
-checkpointing and retirement, including after disabling selection.
+1. On the previous compatible release, disable
+   `HOSTED_EXECUTION_SMALL_RUNNER_ENABLED` and verify the live variable is false.
+   Keep its binding and image while existing targets checkpoint and retire.
+2. Prove that no persisted active or pending UserRunner target references
+   `runner-small--v-...`, no small-container invocation or instance remains,
+   and the last workspace checkpoint is committed. A stopped instance alone
+   does not prove dormant routing references are gone. Use the existing
+   authenticated status and retirement owners; do not erase routing state or
+   force-stop a member invocation to make this gate pass.
+3. In the protected deployment environment, remove the drained native small
+   application. Publish the retirement Worker and `v10` once with pinned
+   Wrangler `deploy --containers-rollout=none`. Preserve the live regular
+   applications' image, resources, capacity and serving release variables in
+   that migration config, and compare native receipts before and after. This
+   step must pass ordinary Web protocol admission and verify the live Worker
+   version immediately before activation. The installed-CLI regression proves
+   the delete metadata and absence of Container API reconciliation; live drain
+   and protected activation remain operational prerequisites.
+4. Resume the normal version-based release flow with matching public and private
+   sources. Remove the retired selector secret and enable/bootstrap variables
+   from the Worker and protected environments. Verify only regular member
+   targets are allocated and ordinary checkpoint/recovery succeeds.
 
-Merge the public runtime and matching private environment mappings before the
-first protected full deployment. That deployment alone requires
-`CF_BOOTSTRAP_SMALL_RUNNER=true`: migration `v9` creates the SQLite namespace
-using a full Worker deploy with selection off and every existing application
-pinned to its live image, resources and capacity. Native before/after receipts
-must remain unchanged. Existing native image tags are preserved exactly in this
-namespace-only step; newly admitted release images still require immutable
-digests. The direct deploy CLI is pinned to Wrangler 4.93.0, the first release
-supporting `--containers-rollout=none`; bootstrap must retain this flag so
-Wrangler does not build images or reconcile native applications. The older
-Wrangler used internally by the Workers test pool is not the deploy executable.
-This is the bounded namespace-bootstrap exception to
-the ordinary version-only release flow; no application image rollout belongs
-in that bootstrap. Missing live authority, a pending candidate or an active
-native rollout stops provisioning. Clear the bootstrap control after success.
-
-Normal full releases keep selection off in the compatibility Worker, distribute
-both serving and small images, prove native convergence and smoke, then promote
-the requested selection. Worker-only releases retain an existing small image
-and cannot introduce its application. A failure leaves selection off; retry the
-same release under the existing pending-image rules. Once small targets exist,
-retain the `SmallRunnerContainer` binding and `runner-small--v-...` reader even
-when selection is disabled. An older Worker cannot recover those targets; this
-release is the rollback floor, and any rollback needs separate approval.
-
-After deployment, verify the protected native resource receipt and selected
-account's next cold allocation after normal idle. Compare existing warm ingress
-latency and matched vault CLI timing aggregates, keeping cold starts and missing
-timing coverage separate. Deployment success alone is not latency evidence.
+Namespace deletion permanently removes its Durable Object data. This is a
+forward-only retirement boundary: the old experiment release cannot be rolled
+back into service after deletion. Follow Cloudflare's
+[Durable Object migrations](https://developers.cloudflare.com/durable-objects/reference/durable-object-class-migrations-legacy/)
+contract; production retirement requires its own authorized protected execution.
+Source validation and a successful ordinary release are not proof of live drain.
 
 ### Migration and release order
 

@@ -192,7 +192,6 @@ describe("hosted deploy automation helpers", () => {
       "CF_CONTAINER_MAX_INSTANCES",
       "CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES",
       "HOSTED_EXECUTION_DEPLOY_TAG",
-      "CF_BOOTSTRAP_SMALL_RUNNER",
     ]);
   });
 
@@ -362,16 +361,6 @@ describe("hosted deploy automation helpers", () => {
         rollout_step_percentage: [10, 25, 50, 100],
         ssh: { enabled: false },
       },
-      {
-        class_name: "SmallRunnerContainer",
-        image: "../../../Dockerfile.cloudflare-hosted-runner",
-        image_build_context: "..",
-        instance_type: { vcpu: 1, memory_mib: 3072, disk_mb: 6000 },
-        max_instances: 10,
-        rollout_active_grace_period: 0,
-        rollout_step_percentage: [10, 25, 50, 100],
-        ssh: { enabled: false },
-      },
     ]);
     expect(config.durable_objects.bindings).toEqual([
       {
@@ -410,7 +399,6 @@ describe("hosted deploy automation helpers", () => {
         class_name: "StandbyRunnerContainer",
         name: "STANDBY_RUNNER_CONTAINER",
       },
-      { class_name: "SmallRunnerContainer", name: "SMALL_RUNNER_CONTAINER" },
     ]);
     expect(config.analytics_engine_datasets).toEqual([
       {
@@ -452,6 +440,7 @@ describe("hosted deploy automation helpers", () => {
       },
       { new_sqlite_classes: ["NextRunnerContainer"], tag: "v8" },
       { new_sqlite_classes: ["SmallRunnerContainer"], tag: "v9" },
+      { deleted_classes: ["SmallRunnerContainer"], tag: "v10" },
     ]);
     expect(config).toMatchObject({
       triggers: {
@@ -826,7 +815,6 @@ describe("hosted deploy automation helpers", () => {
       expectedDefaultInstanceType,
       expectedDefaultInstanceType,
       expectedDefaultInstanceType,
-      { vcpu: 1, memory_mib: 3072, disk_mb: 6000 },
     ]);
     expect(checkedInConfig.containers).toHaveLength(generatedConfig.containers.length);
     for (const [index, generatedContainer] of generatedConfig.containers.entries()) {
@@ -908,7 +896,6 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars).toEqual({
-      HOSTED_EXECUTION_SMALL_RUNNER_ENABLED: "false",
       ...expectedRequiredHostedCryptoWorkerVars(),
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "600000",
@@ -1014,7 +1001,7 @@ describe("hosted deploy automation helpers", () => {
       "containers_pid_namespace",
       "enable_request_signal",
     ]);
-    expect(config.containers).toHaveLength(5);
+    expect(config.containers).toHaveLength(4);
     for (const container of config.containers) {
       expect(container.ssh).toEqual({ enabled: false });
       expect(container).not.toHaveProperty("authorized_keys");

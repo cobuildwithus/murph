@@ -96,7 +96,6 @@ export interface WorkerEnvironmentSource
   extends WorkerEnvironmentContract<UserRunnerDurableObjectStubLike> {
   RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
   NEXT_RUNNER_CONTAINER?: HostedExecutionContainerNamespaceLike;
-  SMALL_RUNNER_CONTAINER?: HostedExecutionContainerNamespaceLike;
   RUNNER_CONTAINER_SMOKE: HostedExecutionContainerNamespaceLike;
   STANDBY_COORDINATOR?: HostedStandbyCoordinatorNamespaceLike;
   STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
