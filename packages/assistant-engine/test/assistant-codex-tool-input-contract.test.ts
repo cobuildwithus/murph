@@ -462,6 +462,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     }
     const personalizationDeclaration = personalization.description.replace(/^MURPH_INPUT_SCHEMA_JSON: .+$/mu, '')
     expect(personalizationDeclaration).toMatch(/action: "update"/u)
+    expect(personalizationDeclaration).toMatch(/message_ref\?: string/u)
     for (const field of ['mainPersona', 'supportingPersona', 'tone', 'voice']) {
       expect(personalizationDeclaration).toMatch(new RegExp(`${field}\\??:`, 'u'))
       expect(personalizationDeclaration).not.toMatch(new RegExp(`${field}\\??: unknown`, 'u'))

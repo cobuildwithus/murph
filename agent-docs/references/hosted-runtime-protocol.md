@@ -2450,8 +2450,9 @@ merge queue or second state owner.
 
 Conversation batching across system events does not reattribute preference
 intent: `assistant_style` and `personalization` updates select the requesting
-accepted `message_ref`. The runtime checks membership in the current accepted
-scope, including inputs admitted live, and passes that input through the
+accepted `message_ref`. Both prompt builders expose validated input IDs across
+transports, independently of native reply/reaction eligibility. The runtime
+checks membership in the current accepted scope, including inputs admitted live, and passes that input through the
 existing signed authority callback. An ambiguous batch without a selected ref
 fails closed. Web still reloads the selected message's canonical timestamp and
 causal sequence before comparing each preference against newer Settings state.

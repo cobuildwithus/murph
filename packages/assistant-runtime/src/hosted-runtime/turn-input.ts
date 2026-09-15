@@ -755,7 +755,7 @@ function isHostedAssistantInputEventBatchSuccessor(
   const previousCausalSeq = readPositiveHostedConversationInputSequence(previous, "causalSeq");
   const candidateCausalSeq = readPositiveHostedConversationInputSequence(candidate, "causalSeq");
   // System work shares causal order, but cannot create a missing conversation
-  // message. Effect owners still use the terminal accepted input's causal order.
+  // message. Effect owners retain their separate causal authority checks.
   return previousLaneSeq !== null
     && candidateLaneSeq === previousLaneSeq + 1n
     && previousCausalSeq !== null

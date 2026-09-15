@@ -6031,7 +6031,8 @@ describeRealCodex('real Codex assistant-style boundary e2e', () => {
 })
 
 describeRealCodex('real Codex preference source e2e', () => {
-  it.each([false, true])('preserves Settings while applying later batched intent (group=%s)', async (groupConversation) => {
+  it.each(['imessage-direct', 'imessage-group', 'sms', 'rcs', 'email'] as const)('preserves Settings while applying later batched intent (route=%s)', async (route) => {
+    const groupConversation = route === 'imessage-group'
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-preference-source-e2e-'))
     const first = `ain_${'1'.repeat(32)}`
@@ -6048,10 +6049,25 @@ describeRealCodex('real Codex preference source e2e', () => {
           senderHandle: 'synthetic-style-member',
           speakerLabel: { displayName: 'Avery', source: 'profile-name' },
         })
-        return { ...input, conversation: { ...input.conversation, threadIsDirect: !groupConversation } }
+        return {
+          ...input,
+          source: route === 'email' ? 'email' : 'linq',
+          conversation: {
+            ...input.conversation, source: route === 'email' ? 'email' : 'linq',
+            threadIsDirect: !groupConversation,
+          },
+          replyTarget: route.startsWith('imessage') ? input.replyTarget : null,
+          sourceMetadata: route.startsWith('imessage') ? input.sourceMetadata : route === 'email' ? null : {
+            kind: 'linq' as const, partCount: 1, reactionEligible: false,
+            replyToMessageId: null,
+            service: route.startsWith('imessage') ? 'imessage' : route,
+          },
+        }
       })
       const prompt = buildAssistantAutoReplyPrompt(inputs)
       if (prompt.kind !== 'ready') throw new Error('Expected a ready preference batch.')
+      expect(prompt.prompt).toContain(`Message ref: ${first}`)
+      expect(prompt.prompt).toContain(`Message ref: ${later}`)
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
@@ -6105,7 +6121,7 @@ describeRealCodex('real Codex preference source e2e', () => {
           vaultFileSendAvailable: false,
         },
       })
-      process.stdout.write(`[preference-source-e2e] ${JSON.stringify({ groupConversation, writeCount: writes.length, reply: result.finalMessage })}\n`)
+      process.stdout.write(`[preference-source-e2e] ${JSON.stringify({ route, writeCount: writes.length, reply: result.finalMessage })}\n`)
       expect(writes).toHaveLength(2)
       expect(writes).toEqual(expect.arrayContaining([
         {

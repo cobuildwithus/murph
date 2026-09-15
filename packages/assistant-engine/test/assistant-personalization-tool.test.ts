@@ -47,7 +47,8 @@ describe('assistant personalization tool', () => {
 
   it('advertises sparse updates with paired persona fields and preserves runtime admission', () => {
     expect(MURPH_PERSONALIZATION_TOOL.inputSchema.oneOf[1]).toMatchObject({
-      type: 'object', additionalProperties: false, required: ['action'], anyOf: expect.any(Array),
+      type: 'object', additionalProperties: false, required: ['action'], minProperties: 2,
+      not: { required: ['message_ref'], maxProperties: 2 },
       dependentRequired: {
         mainPersona: ['supportingPersona'], supportingPersona: ['mainPersona'],
       },
@@ -158,6 +159,9 @@ describe('assistant personalization tool', () => {
     )
     expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
       'lowercase means casual',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'Confirm casing as sentence case or lowercase in the reply.',
     )
     expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
       'rather than an unsupported setting',

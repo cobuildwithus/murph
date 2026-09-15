@@ -17,7 +17,8 @@ Conversation batching uses conversation-lane adjacency while retaining increasin
 causal order for effects; initial, recovered and live admission are owned by
 `agent-docs/references/hosted-runtime-protocol.md` and verified by the runtime
 turn-input suite. Preference mutations retain the requesting message's authority
-through accepted message refs, as described in the same protocol owner.
+through transport-independent accepted message refs, as described in the same
+protocol owner.
 
 Immediate manual meal estimation and ordinary incomplete-meal recovery are
 owned by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and

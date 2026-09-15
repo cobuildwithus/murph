@@ -1204,7 +1204,10 @@ model-selected target crosses this boundary. New `conversation.message` mailbox 
 server-keyed lookup of their existing deterministic assistant input id; the raw
 id is not persisted there, and this adds no mailbox wire, `sourceRef`, or
 event-id field. For a conversation update, the model selects the exact
-`message_ref` of the accepted message requesting those changes. The runtime
+`message_ref` of the accepted message requesting those changes. Both prompt
+paths expose validated opaque input IDs on every transport, including SMS, RCS,
+and authorized email; source identity does not grant native reply or reaction
+capability, which retains its separate route validation. The runtime
 validates that ref against the current accepted-input scope and forwards it as
 the existing `assistantInputId` authority, without adding a wire field.
 An omitted ref is unambiguous only with one accepted input; multi-input turns

@@ -27,7 +27,7 @@ import {
   type AssistantDerivedEvidenceReadBudget,
 } from '../attachment-evidence-model.js'
 import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artifact-paths.js'
-import { readAssistantInputMessageRef } from '../message-target-selection.js'
+import { isAssistantInputEventId } from '../input-store.js'
 import {
   formatAssistantPromptInstant,
   formatAssistantPromptUtcInstant,
@@ -149,7 +149,8 @@ export function buildAssistantAutoReplyPrompt(
         inputText: normalizeNullableString(entry.text),
         index,
         groupContext: renderAssistantInputGroupContextPrompt(entry),
-        messageRef: readAssistantInputMessageRef(entry),
+        // Source identity is independent of native reply/reaction eligibility.
+        messageRef: isAssistantInputEventId(entry.inputId) ? entry.inputId : null,
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
@@ -242,7 +243,8 @@ export async function prepareAssistantAutoReplyInput(
         inputText: normalizeNullableString(entry.text),
         index,
         groupContext: renderAssistantInputGroupContextPrompt(entry),
-        messageRef: readAssistantInputMessageRef(entry),
+        // Source identity is independent of native reply/reaction eligibility.
+        messageRef: isAssistantInputEventId(entry.inputId) ? entry.inputId : null,
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,

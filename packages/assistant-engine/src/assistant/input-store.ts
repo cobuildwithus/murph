@@ -1340,7 +1340,7 @@ function normalizeAssistantInputEventId(value: string): string {
   )
 }
 
-function isAssistantInputEventId(value: string): boolean {
+export function isAssistantInputEventId(value: string): boolean {
   return ASSISTANT_INPUT_RUNTIME_EVENT_ID_PATTERN.test(value)
 }
 
