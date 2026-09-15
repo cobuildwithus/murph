@@ -42,6 +42,7 @@ import {
 } from "../route-utils/test-routes.ts";
 
 interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubLike {
+  readRunnerContainerNameForTest(input: { userId: string }): Promise<string | null>;
   ageActiveRuntimeFenceForTest(input: {
     startedAgoMs: number;
     userId: string;
@@ -561,13 +562,17 @@ export async function handleTestContainerActivityExpiredRoute(
     return boundUserResponse;
   }
 
-  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
-    source: context.env,
-    userId,
+  const userRunner = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
+  const runnerContainerName = await userRunner.readRunnerContainerNameForTest({ userId })
+    ?? resolveHostedExecutionRunnerContainerName({ source: context.env, userId });
+  const namespace = createHostedRunnerContainerNamespaceRouter({
+    exactUser: context.env.RUNNER_CONTAINER,
+    next: context.env.NEXT_RUNNER_CONTAINER,
+    small: context.env.SMALL_RUNNER_CONTAINER,
+    standby: context.env.STANDBY_RUNNER_CONTAINER ?? null,
   });
-  const stub = context.env.RUNNER_CONTAINER.getByName(
-    runnerContainerName,
-  );
+  if (!namespace) throw new Error("Hosted runner container binding is unavailable.");
+  const stub = namespace.getByName(runnerContainerName);
   if (!hasHostedLocalTestRunnerContainerActivityControl(stub)) {
     throw new Error("Hosted runner container test activity-expiry RPC is unavailable.");
   }

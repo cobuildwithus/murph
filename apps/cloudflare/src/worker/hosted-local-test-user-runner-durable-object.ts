@@ -76,6 +76,10 @@ export class HostedLocalTestUserRunnerDurableObject extends UserRunnerDurableObj
     return await this.testRunner.ageActiveRuntimeFenceForTest(input);
   }
 
+  async readRunnerContainerNameForTest(input: { userId: string }): Promise<string | null> {
+    return await this.testRunner.readRunnerContainerNameForTest(input);
+  }
+
   async readActiveRuntimeFenceForTest(input: {
     userId: string;
   }): Promise<HostedRunnerActiveFenceTestResult | null> {

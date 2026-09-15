@@ -37,6 +37,18 @@ describe("hosted device-sync scheduled wake sweeper", () => {
     expect(preferenceHandoffSweeper).toHaveBeenCalledTimes(1);
   });
 
+  it("does not retry benign skipped wakes when the due sweep reports no failures", async () => {
+    const logger = { warn: vi.fn() };
+    await expect(runHostedDeviceSyncRecoverySweep({
+      logger,
+      runDueReconcileSweeper: async () => buildDueReconcileSweepResult({
+        wakeAccepted: 0, wakeNotAccepted: 1, wakeFailed: 0,
+      }),
+      runPreferenceHandoffSweeper: async () => buildPreferenceHandoffSweepResult(),
+    })).resolves.toMatchObject({ dueReconcileSweeper: { wakeNotAccepted: 1, wakeFailed: 0 } });
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
   it("fails the command when due-reconcile wake handoff is not accepted", async () => {
     const logger = {
       warn: vi.fn(),

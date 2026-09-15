@@ -955,18 +955,28 @@ Device hints, restored timers, imports, activity scheduling, and exact
 acknowledgments all use the workspace-owned mailbox path. Common durable effects
 retain their existing delivery and shutdown behavior.
 
-Before the dedicated system-mailbox lane checkpoints completed workspace work,
-it offers one additional bounded system-prefix import after those attempts
-quiesce. This uses the invocation's remaining mailbox budget and yields to
-foreground wakes, abort, receipt capacity, and assistant deadlines. It does not
-execute another device pass or change the original completion preparation's
-admission authority. The existing post-checkpoint recording publishes current
-cadence and compacts only covered later hints; its follow-up checkpoint persists
-that removal. Equal-cadence, manual, different-epoch, and unrelated connection
-requests remain actionable. Final progress and import retry projection use the
-latest imported prefix, and each import's deferred effects run at most once
-after a covering checkpoint. Input arriving after this one read remains ordinary
-durable follow-up work. No polling loop, wire field, or persisted schema changes.
+After the dedicated system-mailbox lane checkpoints completed workspace work,
+finishes projection, and records completion, it offers one additional bounded
+system-prefix import before the final completion checkpoint. This placement
+includes requests arriving during snapshot creation or cadence publication.
+It uses the invocation's remaining mailbox budget and yields to foreground
+wakes, abort, receipt capacity, and assistant deadlines. It does not execute
+another device pass or change the original completion preparation's admission
+authority. Existing retained-owner coverage retires only superseded schedules;
+dirty, equal-cadence, manual, different-epoch, and unrelated connection requests
+remain actionable. The final checkpoint persists both the imported prefix and
+covered-hint removal before deferred import effects run, at most once. Final
+progress and retry projection use the latest import. Input arriving after this
+one read remains ordinary durable follow-up work. No polling loop, wire field,
+or persisted schema changes.
+
+Web revalidates the selected connection, provider, active epoch, and exact due
+cadence inside the existing connection-locked scheduled append transaction,
+after crypto preparation. A changed tuple is a benign `schedule_superseded`
+skip with no mailbox insertion, signal record, or runtime handoff. Cadence
+publication uses the same connection lock: an old candidate either commits
+before publication and is eligible for the completion drain, or is rejected
+after publication. Recovery remains eligible while its exact due tuple is current.
 
 Scheduling preserves per-connection ordering and the imported-watermark-bounded
 continuation projection used by handling. Invalid continuation authority cannot
@@ -1058,6 +1068,11 @@ promotion rule. An already-default-owned assistant queue head may reuse the
 runtime's existing foreground phase inside a `system_mailbox` invocation,
 preserving the generic assistant anti-starvation behavior without changing the
 controller fence or persisting a mode switch.
+After a qualified conversation promotion, foreground wake and idle-handoff
+checks use the effective default mode rather than the immutable system-mode
+invocation request. Repeated default wakes preserve the conversation quiet
+window and checkpoint interruption. Provider-authority changes and actual
+shutdown still require their existing checkpoint handoff.
 `assistantExecutionBlocked` remains a hard boundary: that invocation retains
 the assistant wake for a later allowed foreground owner instead of promoting
 it.
@@ -2990,9 +3005,12 @@ payloads or become the device-sync queue. Active foreground wake handling stays
 conversation-focused; system-lane work runs through normal invocation and
 reconciliation when no fresh conversation input is pending, and reschedules a
 short `device-sync.reconcile` wake if foreground work preempts that background
-pass. A device-sync pass has its own 120-second budget, independent of the shared
-Web/checkpoint request timeout; the foreground-yield and invocation-abort paths
-may still end it sooner at cooperative boundaries. Dense-raw cleanup retains a
+pass. A device-sync pass has its own five-minute budget, independent of the shared
+Web/checkpoint request timeout, to amortize restore and checkpoint work across
+large backlogs. The 100-job cap, foreground-yield, and invocation-abort paths
+may still end it sooner at cooperative boundaries. This increases the maximum
+work replayed after an unexpected container loss; exact retained-job continuation
+and idempotent imports remain the recovery owners. Dense-raw cleanup retains a
 45-second admission cap. A bounded raw cleanup pass attempts the canonical lock
 without waiting; contention returns `hasMore: true` without mutation so the existing
 maintenance continuation remains due. The live foreground-yield predicate reaches

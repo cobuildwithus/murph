@@ -14,6 +14,9 @@ const DEFAULT_WAKE_LIMIT = 100;
 const DUE_RECONCILE_WAKE_BUCKET_MS = 5 * 60_000;
 const MAX_WAKE_LIMIT = 250;
 const PREFLIGHT_START_BUDGET_MS = 60_000;
+const BENIGN_WAKE_SKIP_REASONS = new Set<string | undefined>([
+  "health_data_consent_withdrawn", "schedule_superseded",
+]);
 
 export interface HostedDeviceSyncDueReconcileSweeperResult {
   dueConnections: number;
@@ -155,8 +158,8 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
       }
 
       wakeNotAccepted += 1;
-      if (wake.reason === "health_data_consent_withdrawn") {
-        logger.info("Hosted device-sync due reconcile wake skipped after consent withdrawal.", {
+      if (BENIGN_WAKE_SKIP_REASONS.has(wake.reason)) {
+        logger.info("Hosted device-sync due reconcile wake skipped before mailbox append.", {
           reason: wake.reason,
         });
         return;
