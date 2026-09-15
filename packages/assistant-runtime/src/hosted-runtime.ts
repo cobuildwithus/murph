@@ -4772,7 +4772,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         && options.shutdownSignal?.aborted !== true
       ) {
         detachedAssistantAskController?.resume();
-        clinicalEnrichmentController?.resume();
+        // A reread dirties the vault. Drain checkpoint-ready effects before
+        // reclaiming clinical work, or a spent window can repeatedly cancel it.
+        if (readyDurableCheckpointEffects.length === 0) {
+          clinicalEnrichmentController?.resume();
+        }
       }
     };
     closeDetachedAssistantAskBeforeWorkspaceRelease = async () => {
