@@ -46,3 +46,7 @@ Updated: 2026-09-15
 
 - Local PostgreSQL scheduled-wake retention tests plus focused scheduled-wake unit tests; Web typecheck and complexity diff.
 - The new regression must fail before the fix and pass afterward, including concurrent duplicate recovery and stale/retained ownership exclusions.
+- Reproduced before the source change: the composed scheduled-wake call accepted duplicates but inserted zero successors.
+- Passed after the source change: all 35 scheduled-wake PostgreSQL tests using an isolated migrated local database, including two concurrent admissions on a three-connection pool and eight exclusion cases.
+- Passed: 210 hosted-wake/sweeper tests, Web typecheck, and complexity diff. The unchanged workspace-target validator remains the only listed hotspot (24).
+- Candidate PR: #3465. Changelog proof, final ReviewGPT, and exact-head CI remain pending.
