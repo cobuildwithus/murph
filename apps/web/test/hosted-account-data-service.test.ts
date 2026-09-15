@@ -193,7 +193,7 @@ vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-privacy/account-deletion-cleanup", () => ({
-  HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS: 5_000,
+  HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS: 8_000,
   pendingHostedAccountDeletionCleanupResult:
     serviceMocks.pendingHostedAccountDeletionCleanupResult,
   persistHostedAccountDeletionCleanupTx:
@@ -1622,7 +1622,7 @@ describe("deleteHostedAccountData", () => {
       },
     );
     expect(serviceMocks.runHostedAccountDeletionCleanup).toHaveBeenCalledWith({
-      attemptTimeoutMs: 5_000,
+      attemptTimeoutMs: 8_000,
       cleanupId: "cleanup_123",
       prisma,
     });
@@ -4018,7 +4018,7 @@ describe("deleteHostedAccountData", () => {
     expect(result.cloudflare.deleted).toBe(false);
     expect(result.cloudflare.r2SkippedUserScopedPrefixes).toBe(true);
     expect(serviceMocks.runHostedAccountDeletionCleanup).toHaveBeenCalledWith({
-      attemptTimeoutMs: 5_000,
+      attemptTimeoutMs: 8_000,
       cleanupId: "cleanup_123",
       prisma,
     });
