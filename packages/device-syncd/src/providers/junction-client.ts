@@ -1962,7 +1962,10 @@ function extractStructurallyCompleteSummaryRecords(payload: unknown, resource: s
 }
 
 function resolveCollectionEnvelopeKeys(resource: string): readonly string[] {
-  return resource === "meal" ? ["meal", "meals"] : [resource];
+  if (resource === "meal") return ["meal", "meals"];
+  if (resource === "sleep_cycle") return ["sleep_cycle", "sleepCycle"];
+  if (resource === "menstrual_cycle") return ["menstrual_cycle", "menstrualCycle"];
+  return [resource];
 }
 
 function extractTimeseriesRecords(payload: unknown, resource: string): unknown[] {

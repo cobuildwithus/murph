@@ -104,6 +104,12 @@ Active crypto-root preparation reuses one bounded metadata snapshot while
 preserving locked authority revalidation; its contract is owned by
 `agent-docs/RELIABILITY.md` and proof by the hosted crypto domain-root tests.
 
+Junction SDK collection keys, uncapped preflight admission within the existing
+sweep cohort, and checkpointed cadence publication with retained future jobs are
+owned by `operations/device-sync-ingestion-invariants.md` and `RELIABILITY.md`.
+The implementation and focused proof are recorded in
+[`2026-09-14-junction-preflight-fallbacks.md`](exec-plans/completed/2026-09-14-junction-preflight-fallbacks.md).
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

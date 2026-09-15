@@ -13,7 +13,6 @@ import {
 const DEFAULT_WAKE_LIMIT = 25;
 const DUE_RECONCILE_WAKE_BUCKET_MS = 5 * 60_000;
 const MAX_WAKE_LIMIT = 250;
-const MAX_PREFLIGHTS_PER_SWEEP = 5;
 
 export interface HostedDeviceSyncDueReconcileSweeperResult {
   dueConnections: number;
@@ -83,9 +82,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     async (dueConnection) => {
       const canProbe = dueConnection.provider === "junction"
         && dueConnection.orphanedDirtyRecoveryKey === undefined;
-      if (canProbe && preflightTotals.attempted >= MAX_PREFLIGHTS_PER_SWEEP) {
-        preflightTotals.reasons.budget_exhausted = (preflightTotals.reasons.budget_exhausted ?? 0) + 1;
-      } else if (canProbe) {
+      if (canProbe) {
         preflightTotals.attempted += 1;
         try {
           const probe = await (input.preflight ?? preflightHostedScheduledReconcile)({ connection: dueConnection, now });

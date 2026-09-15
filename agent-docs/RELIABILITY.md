@@ -1660,7 +1660,12 @@ Last verified: 2026-09-04
   page; a full queue blocks new jobs, never acknowledgement of existing jobs. The same wake
   carries the provider's advanced cadence, but Web does not receive that
   cadence until the post-record checkpoint has made the exact completion state
-  durable. Before exposing that completion record, the pass requires Web to
+  durable. On a later admission, the same-epoch retained wake may publish its
+  already checkpointed provider cadence even while future history jobs remain.
+  Publication is capped by both that wake hint and the current local provider
+  cadence; this pass's newer cadence remains behind its next checkpoint. Missing
+  or stale-epoch hints cannot advance the baseline. Exact pending jobs and their
+  retry times keep their existing owner. Before exposing that completion record, the pass requires Web to
   accept the full local control-plane update. A version mismatch fetches the
   current canonical snapshot, rehydrates without re-admitting wake hints or
   dirty work, carries the same-epoch pass's provider cadence and dirty terminal
@@ -1668,9 +1673,11 @@ Last verified: 2026-09-04
   second mismatch fails and retains the mailbox owner. A yielded pass retains
   its exact wake without completion eligibility. The post-checkpoint recorder
   then treats a fresh same-admission record as complete only when its normalized
-  retained-job set is empty. It publishes cadence only for a non-null wake epoch
-  matching a current active connection, clears the source, and checkpoints that
-  removal within the same runtime admission. The same-admission proof is
+  retained-job set is empty. A successfully reconciled, non-yielded current
+  admission may publish checkpointed cadence and proof while future jobs remain,
+  retaining their mailbox owner and exact retry time. Only an empty-job completion
+  clears that owner. Publication requires a non-null wake epoch matching a current
+  active connection; recording failures preserve the recovery record. The same-admission proof is
   intentionally transient: a restored record returns to the ordinary full
   reconciliation path. An epoch-less legacy record or a replaced, missing,
   disconnected, or reauthorization-required connection has no cadence authority

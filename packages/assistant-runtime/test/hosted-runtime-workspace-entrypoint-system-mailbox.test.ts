@@ -1702,7 +1702,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         );
       };
       const result = await runPass();
-      assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, retainedRetry ? 2 : 1);
       assert.equal(fetchDirtyStatesCalls, 1);
       assert.equal(providerFetch.mock.calls.length, schedule === "connected" ? 4 : retainedRetry ? 3 : 0);
       assert.equal(result.status, retainedRetry ? "scheduled" : "idle");
@@ -1717,7 +1717,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       }
       assert.equal(result.nextWakeReason ?? null, retainedRetry ? "device-sync.reconcile" : null);
       const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
+      const checkpointedReconcileAt = pending[0]?.wake.kind === "device-sync.wake"
+        ? pending[0].wake.hint?.nextReconcileAt : null;
       if (retainedRetry) {
+        assert.equal(canonicalNextReconcileAt, checkpointedReconcileAt);
+        assert.ok(Date.parse(canonicalNextReconcileAt) > Date.parse(TEST_NOW));
+        assert.ok(Date.parse(canonicalNextReconcileAt) < Date.parse(retryAt));
         assert.equal(pending.length, schedule === "equal" ? 2 : 1);
         assert.equal(pending[0]?.itemId, deviceItem.id);
         assert.equal(pending[0]?.deviceSyncContinuationOwner, true);
@@ -1771,7 +1776,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       }
       if (schedule === "equal") {
         assert.equal(pending[1]?.wake.kind === "device-sync.wake" ? pending[1].wake.reason : null, "webhook_hint");
-        assert.equal(canonicalNextReconcileAt, TEST_NOW);
+        assert.equal(canonicalNextReconcileAt, checkpointedReconcileAt);
         assert.ok(result.nextWakeAt);
         vi.setSystemTime(new Date(result.nextWakeAt));
         const drained = await runPass();
@@ -1783,7 +1788,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.deepEqual(continued[0]?.wake.kind === "device-sync.wake" ? continued[0].wake.hint?.jobs : null, futureJobs);
         assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 0);
         assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
-        assert.equal(canonicalNextReconcileAt, TEST_NOW);
+        assert.equal(canonicalNextReconcileAt, checkpointedReconcileAt);
         assert.ok(Date.parse(drained.nextWakeAt ?? "") > Date.parse(TEST_NOW));
         const drainedFetchCount = fetchDirtyStatesCalls;
         await runPass();

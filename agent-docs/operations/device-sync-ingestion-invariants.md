@@ -665,6 +665,13 @@ of all ordinary summary/calendar work can write the final local metadata. Web
 publication is withheld until the existing checkpointed wake/completion fence
 proves durable recovery. Warm hydration retains unpublished progress without
 turning it into a hosted baseline; old continuations lacking proof still import.
+After the post-record checkpoint, a successfully reconciled current admission
+publishes its provider cadence and completed proof even while future jobs remain;
+the mailbox keeps their exact retry hints and time. Yielded passes and restored
+recording state have no transient publication authority. An exact same-epoch
+retained wake can also recover already checkpointed cadence on the next admission,
+capped by its hint and any earlier local due time. Newly produced progress stays
+withheld until its own checkpoint.
 
 Web refetches the same summary start through current time, retaining older rows
 rather than shrinking the comparison window. It uses complete collection
@@ -672,20 +679,26 @@ responses and existing calendar filtering. Proof expires at the earliest next
 UTC midnight, global provider-day closure, vault-local midnight, or the next
 fixed-lag temporal-authority boundary across an offset transition. The digest
 also binds the original start, expiry, and timezone, so edited scope cannot
-reuse matching record evidence. Expiry and
+reuse matching record evidence. Binding version `junction-reconcile-v2` recognizes
+SDK-decoded sleep-cycle and menstrual-cycle collections as records; a v1/v2 mismatch requires
+ordinary reconciliation. Both runtime imports and Web comparisons accept the
+wire `sleep_cycle`/`menstrual_cycle` and SDK `sleepCycle`/`menstrualCycle` keys, including valid empty arrays,
+while strict preflight still rejects missing or malformed collections. Expiry and
 pending scheduler-owned history/recovery cause ordinary execution. New config,
 source lifecycle, or provider inventory changes also require the runtime. A
 future change to comparison/normalization semantics must advance the binding
 version; daily repair remains the independent recovery floor.
 
-The sweeper admits at most five preflights, each with a 20-second provider budget,
-two simultaneous summary units, and existing collection page limits. Web checks
+The sweeper checks every ordinary Junction candidate in its selected cohort;
+there is no separate preflight-count cap. The existing five-worker recovery
+executor and selected-cohort limit bound fanout. Each probe retains a 20-second
+provider budget, two simultaneous summary units, and collection page limits. Web checks
 current member access, consent, connection/source state, dirty payloads, mailbox
 counters, and checkpoint continuation frontier before provider egress and again
 before a cadence-only compare-and-set. Existing member/connection, mailbox
 append, and workspace locks serialize the final decision; provider and securebox
 work stay outside transactions. Missing proof/authority, accepted work, failed or
-incomplete reads, exhausted probe budget, and failed CAS keep the ordinary wake.
+incomplete reads, provider timeouts, and failed CAS keep the ordinary wake.
 The recovery route intentionally reaches the existing provider registry only
 through this preflight; other control-plane routes and recovery paths retain
 their provider-free package graph. Continuation proof is declared in both the
@@ -699,7 +712,7 @@ provider elapsed time, and outcomes by last-webhook-age bucket. `avoidedWakes`
 counts only successful cadence CAS, not observed equality, cold starts, or
 billing savings. Compare complete unchanged/changed results within each age
 bucket before changing cadence; track timeout, history, missing/expired proof,
-and budget exclusions separately. Pull frequency is unchanged by this feature.
+and authority exclusions separately. Pull frequency is unchanged by this feature.
 
 ## Consequences for changes
 
