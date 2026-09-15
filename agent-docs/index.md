@@ -13,13 +13,6 @@ service restart/retry proof lives in
 
 ## Purpose
 
-Conversation batching uses conversation-lane adjacency while retaining increasing
-causal order for effects; initial, recovered and live admission are owned by
-`agent-docs/references/hosted-runtime-protocol.md` and verified by the runtime
-turn-input suite. Preference mutations retain the requesting message's authority
-through transport-independent accepted message refs, as described in the same
-protocol owner.
-
 Immediate manual meal estimation and ordinary incomplete-meal recovery are
 owned by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/SECURITY.md`. Their focused proof covers canonical import replay,
@@ -28,6 +21,13 @@ private notification tools, model admission, and real assistant replies.
 Empty automatic meal closeout admission is owned by `ARCHITECTURE.md`;
 canonical queue, scheduler, and focused real-Codex proof are indexed in
 `agent-docs/references/testing-ci-map.md`.
+
+Conversation batching uses conversation-lane adjacency while retaining increasing
+causal order for effects; initial, recovered and live admission are owned by
+`agent-docs/references/hosted-runtime-protocol.md` and verified by the runtime
+turn-input suite. Preference mutations retain the requesting message's authority
+through transport-independent accepted message refs, as described in the same
+protocol owner.
 
 Manual device refresh admission during retained history retries, one-shot
 provider job creation and recovery compatibility are owned by
