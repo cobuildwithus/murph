@@ -1,9 +1,13 @@
+import registrationEvidence from "@/src/lib/clinical-records/epic-registration.v1.json";
 import { describe, expect, it } from "vitest";
 import { clinicalFhirRetrievalSliceSchema } from "@murphai/clinical-records";
 import baseline from "./fixtures/clinical-records-query-baseline.json";
 
 import {
   EPIC_ACQUISITION_POLICY,
+  EPIC_AUTOMATIC_REGISTRATION_APIS,
+  EPIC_AUTOMATIC_QUERIES,
+  EPIC_AUTOMATIC_RESOURCE_TYPES,
   EPIC_BETA_RESOURCE_TYPES,
   buildEpicBetaInitialFhirPageUrl,
   buildEpicBetaRetrievalPlan,
@@ -89,6 +93,44 @@ const EXACT_EPIC_REGISTRATION_API_NAMES = [
 ] as const;
 
 describe("Epic Clinical Records acquisition policy", () => {
+  it("defaults to reviewed automatically distributed queries while keeping labs and supported history", () => {
+    const plan = buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-09-15T12:00:00Z"),
+      pageCount: "100", resourceTypes: EPIC_BETA_RESOURCE_TYPES });
+    const ids = plan.slices.map((slice) => slice.queryScopeId);
+    expect(ids).toContain("laboratory-observations");
+    expect(ids).toContain("diagnostic-reports");
+    expect(ids).toContain("document-references-notes");
+    expect(ids).toContain("document-references-summaries");
+    expect(ids).toContain("medication-requests");
+    expect(ids).toContain("condition-problem-list");
+    expect(ids).toContain("procedure-surgeries");
+    expect(ids).not.toContain("procedure-surgical-history");
+    expect(ids).not.toContain("family-member-history");
+    expect(ids).not.toContain("document-references-imaging");
+    expect(ids).not.toContain("document-references-outside-notes");
+    expect(ids).not.toContain("document-references-advance-directive");
+    expect(EPIC_AUTOMATIC_RESOURCE_TYPES).not.toContain("FamilyMemberHistory");
+    expect(plan.slices.every((slice) => slice.coverage === "whole-family")).toBe(true);
+  });
+
+  it("accounts for the full registration catalog and requires both Epic eligibility sources", () => {
+    expect(registrationEvidence.apis.map(({ key, name }) => ({ key, name })))
+      .toEqual(EPIC_ACQUISITION_POLICY.registrationApis.map(({ key, epicCatalogName }) => ({ key, name: epicCatalogName })));
+    expect(new Set(registrationEvidence.apis.map((api) => api.apiId)).size).toBe(registrationEvidence.apis.length);
+    for (const api of registrationEvidence.apis) {
+      expect(api.automaticDistribution).toBe(api.isUscdi && api.appendixName !== null);
+    }
+    expect(EPIC_AUTOMATIC_REGISTRATION_APIS).toHaveLength(42);
+    const eligibleKeys = new Set(EPIC_AUTOMATIC_REGISTRATION_APIS.map((api) => api.key));
+    expect(EPIC_AUTOMATIC_QUERIES.every((query) => query.registrationApiKeys.every((key) => eligibleKeys.has(key)))).toBe(true);
+    for (const key of ["binary-read-labs", "binary-read-clinical-notes", "binary-read-generated-cdas", "binary-read-study", "media-read-study"]) {
+      expect(eligibleKeys.has(key)).toBe(true);
+    }
+    for (const key of ["binary-read-radiology-results", "binary-read-outside-clinical-notes", "binary-read-advance-directive"]) {
+      expect(eligibleKeys.has(key)).toBe(false);
+    }
+  });
+
   it.each([
     ["document-references-imaging", "DocumentReference", "imaging-result"],
     ["document-references-external-ccda", "DocumentReference", "external-ccda"],
@@ -108,7 +150,7 @@ describe("Epic Clinical Records acquisition policy", () => {
     ["document-references-irf-pai-hyphenated", "DocumentReference", "IRF-PAI"],
 
   ])("requests the patient-bound lifetime %s variant", (queryScopeId, resourceType, category) => {
-    const plan = buildEpicBetaRetrievalPlan({
+    const plan = buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true,
       frozenAt: new Date("2026-09-10T12:00:00Z"), pageCount: "100", resourceTypes: [resourceType],
     });
     const slice = requireSlice(plan, queryScopeId);
@@ -125,7 +167,7 @@ describe("Epic Clinical Records acquisition policy", () => {
   it("includes lab documents sharing the clinical-note query and MDS assessments", () => {
     expect(EPIC_ACQUISITION_POLICY.queries.find((query) => query.queryScopeId === "document-references-notes")?.registrationApiKeys)
       .toContain("document-reference-search-labs");
-    const plan = buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-09-10T12:00:00Z"), pageCount: "100", resourceTypes: ["DocumentReference"] });
+    const plan = buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true, frozenAt: new Date("2026-09-10T12:00:00Z"), pageCount: "100", resourceTypes: ["DocumentReference"] });
     expect(buildEpicBetaInitialFhirPageUrl({
       fhirBaseUrl: "https://fhir.example.test/FHIR/R4", pageCount: "100", patientId: "patient-1",
       retrievalSlice: requireSlice(plan, "document-references-assessments"),
@@ -257,7 +299,7 @@ describe("Epic Clinical Records acquisition policy", () => {
       "patient/Goal.s",
       "patient/ServiceRequest.s",
     ]);
-    const plan = buildEpicBetaRetrievalPlan({
+    const plan = buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true,
       frozenAt: new Date("2026-07-21T12:00:00.000Z"),
       pageCount: "100",
       resourceTypes: EPIC_BETA_RESOURCE_TYPES,
@@ -347,7 +389,7 @@ describe("Epic Clinical Records acquisition policy", () => {
 
   it("requests available lifetime history without a lower or upper date cutoff", () => {
     for (const frozenAt of [new Date("2026-07-21T12:00:00Z"), new Date("2030-01-01T00:00:00Z")]) {
-      const plan = buildEpicBetaRetrievalPlan({ frozenAt, pageCount: "100", resourceTypes: EPIC_BETA_RESOURCE_TYPES });
+      const plan = buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true, frozenAt, pageCount: "100", resourceTypes: EPIC_BETA_RESOURCE_TYPES });
       for (const retrievalSlice of plan.slices) {
         expect(retrievalSlice.coverage).toBe("whole-family");
         const url = buildEpicBetaInitialFhirPageUrl({
@@ -377,7 +419,7 @@ describe("Epic Clinical Records acquisition policy", () => {
 
   it("preserves query fingerprints and scopes while expanding date coverage across grants", () => {
     for (const resourceTypes of [EPIC_BETA_RESOURCE_TYPES, ["Patient", "Observation", "Condition"]]) {
-      const plan = buildEpicBetaRetrievalPlan({
+      const plan = buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true,
         frozenAt: new Date("2026-07-21T12:00:00.000Z"), pageCount: "100", resourceTypes,
       });
       expect(plan.slices.filter((slice) => baseline.some((row) => row.slice.queryScopeId === slice.queryScopeId)).map((slice) => ({

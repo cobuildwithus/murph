@@ -225,6 +225,7 @@ The deployment unblock retaining the dormant experiment namespace is tracked in
 | `agent-docs/product-specs/consented-group-disclosure.md` | Hosted group disclosure. | Hosted group disclosure | High | 2026-08-26 |
 | `agent-docs/product-specs/hosted-group-join-confirmation.md` | Hosted group membership behavior. | Hosted group membership behavior | High | 2026-07-23 |
 | `agent-docs/product-specs/clinical-records-intake.md` | Bounded clinical import, document enrichment, source revisions, saved results and recovery. | Clinical Records intake behavior | High | 2026-09-11 |
+| `agent-docs/references/epic-automatic-distribution.md` | Reviewed Epic automatic-distribution API matrix, hospital-approved import flag and separate client registration. | Epic import registration and rollout | High | 2026-09-15 |
 | `agent-docs/phone-calls/retell-phone-agent.md` | Retell hosted phone agent prompt, authority, transfer, and call-brief handling rules. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/phone-calls/retell-analysis-fields.md` | Retell post-call analysis field contract and transcript-retention boundary. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/feature-user-story-audit/README.md` | Feature user-story audit overview and artifact inventory. | Point-in-time feature audit | Low | 2026-06-21 |

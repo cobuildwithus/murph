@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import registrationEvidence from "./epic-registration.v1.json";
+
 import {
   clinicalFhirRetrievalPlanSchema,
   clinicalFhirScopeAllowsOperation,
@@ -472,6 +474,22 @@ export const EPIC_ACQUISITION_POLICY: EpicAcquisitionPolicy = {
   sourceSystem: "epic-fhir",
 };
 
+// Fail closed for new or unverified APIs; the full catalog remains the frozen-plan reader.
+const AUTOMATIC_REGISTRATION_KEYS: ReadonlySet<string> = new Set(
+  registrationEvidence.apis.filter((api) => api.automaticDistribution).map((api) => api.key),
+);
+export const EPIC_AUTOMATIC_REGISTRATION_APIS = REGISTRATION_APIS.filter((api) =>
+  AUTOMATIC_REGISTRATION_KEYS.has(api.key));
+export const EPIC_AUTOMATIC_QUERIES = QUERIES.filter((query) =>
+  query.registrationApiKeys.every((key) => AUTOMATIC_REGISTRATION_KEYS.has(key)));
+export const EPIC_AUTOMATIC_RESOURCE_TYPES: readonly string[] = [...new Set(
+  EPIC_AUTOMATIC_QUERIES.map((query) => query.resourceType),
+)];
+
+export function isEpicAutomaticQuery(queryScopeId: string): boolean {
+  return EPIC_AUTOMATIC_QUERIES.some((query) => query.queryScopeId === queryScopeId);
+}
+
 export const EPIC_BETA_RESOURCE_TYPES = Object.freeze([
   ...new Set(QUERIES.map((query) => query.resourceType)),
 ]);
@@ -480,6 +498,7 @@ const EPIC_BETA_RESOURCE_TYPE_SET: ReadonlySet<string> = new Set(EPIC_BETA_RESOU
 type SmartPermissionVersion = "v1" | "v2";
 
 export function buildEpicBetaRetrievalPlan(input: {
+  hospitalApprovedImports?: boolean;
   frozenAt: Date;
   pageCount: string;
   resourceTypes: readonly string[];
@@ -491,7 +510,8 @@ export function buildEpicBetaRetrievalPlan(input: {
   }
   return clinicalFhirRetrievalPlanSchema.parse({
     schemaVersion: "murph.clinical-retrieval-plan.v1",
-    slices: QUERIES.filter((query) => requestedResourceTypes.has(query.resourceType)).map((query) =>
+    slices: (input.hospitalApprovedImports ? QUERIES : EPIC_AUTOMATIC_QUERIES)
+      .filter((query) => requestedResourceTypes.has(query.resourceType)).map((query) =>
       buildActiveRetrievalSlice({
         frozenAt: input.frozenAt,
         pageCount: input.pageCount,
