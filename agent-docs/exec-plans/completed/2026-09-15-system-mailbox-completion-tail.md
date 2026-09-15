@@ -1,6 +1,6 @@
 # Absorb covered late device requests before background completion
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-15
 
@@ -36,7 +36,17 @@ Foreground, abort, receipt capacity, and shared budget can stop the tail. Rows a
 - The covered late-arrival regression failed on the base: the late request was not imported and its effect never ran.
 - Eleven focused cases pass: covered/equal/manual/epoch/connection boundaries, after-bound input, shared budget, foreground and abort during fetch, initial checkpoint failure, follow-up failure, and cold restore preserving exact future jobs.
 - Runtime typecheck passes. Existing composed container tests pass for both completion/response arrival orders.
-- Focused owner suites pass: 242 tests across system-mailbox notification and composed workspace entrypoint. Final ReviewGPT/CI are pending.
+- Focused owner suites pass: 242 tests across system-mailbox notification and composed workspace entrypoint. Final ReviewGPT passed on the source candidate; final-head CI is tracked by PR #3476.
 - Complexity guard passes: file debt 493 -> 493; maximum 233 unchanged. The new helper stays below 20; existing large owner functions retain their boundaries.
 
 Local proof uses synthetic data only. Production physical-start improvement requires deployment and a later observation window; do not equate avoided logical executions with measured physical starts.
+
+## Completion review
+
+- PR: https://github.com/cobuildwithus/murph/pull/3476
+- Reviewed source head: `5457852b037417eaf44fd47b33163066844ead94`.
+- ReviewGPT: PASS, verified `gpt-6-pro`, response SHA-256 `948830677ad0105cfff1d15b22678c01169cba5a481c5a470cc952ead193b998`. No qualifying findings; exact review target closed.
+- Parent review confirmed original completion authority, bounded import and retry state, once-only effects, unchanged device/provider work, and no private evidence in the patch.
+- Only this plan's explanatory closeout follows the reviewed source candidate. Final exact-head CI remains the PR completion gate; no deployment is claimed.
+- Larger retained-history scheduling changes remain separate.
+Completed: 2026-09-15
