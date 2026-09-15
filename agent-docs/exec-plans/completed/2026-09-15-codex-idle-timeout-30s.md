@@ -1,6 +1,6 @@
 # Reduce OpenAI stream silence recovery to 30 seconds
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-15
 
@@ -60,7 +60,7 @@ old and new containers may coexist without schema or protocol changes.
   Assistant Engine and Assistant Runtime typechecks passed. Complexity and
   docs drift passed; no new source complexity debt.
 - Web release-note rendering: 10 passed; Web typecheck passed. PR #3468 is
-  open. ReviewGPT and exact-head CI pending. Prior live-model measurements remain the live-provider evidence;
+  open. ReviewGPT passed; final-head CI remains the PR completion gate. Prior live-model measurements remain the live-provider evidence;
   no prompt, tool schema, model choice, or reply policy changes.
 - Reused Frog entries for the documented changelog command's root-relative test
   discovery/generation issue; use repository-root Vitest and prepare the catalog.
@@ -77,3 +77,33 @@ path, and existing authority, abort, lease, delivery, and persistence owners are
 untouched. Mixed deployment changes timing only; fleet adoption is not locally
 proven. Parent Product UX verdict: Ready for this provisional transport policy,
 with genuine silence over 30 seconds and live HTTPS tails an explicit risk.
+
+
+## Final review and handoff
+
+ReviewGPT round 1 passed on bffccbc095477e99ed26b5dbc537c919c0248d4d:
+https://chatgpt.com/c/6aa95ebd-5eb0-83ea-a939-c97353eb2738
+
+The managed Eragon lane selected and verified gpt-6-pro. Exact preceding-turn
+identity, response hash, completion marker, full sensitive snapshot metadata,
+and all 12 patch files were checked. Observed response-wait updates spanned at
+least 225 seconds before capture, exceeding the 180-second minimum. Response
+SHA-256: b0ff1d663f023b2d5160d76aad04af25acc83f65c9d4db068e6eeec534d6ae08.
+No Critical, High, or material Complexity Collapse findings; zero accepted or
+unresolved findings. The review inspected source and test validity but did not
+independently execute dependencies/native fixtures in its archive environment.
+
+Parent final review agrees: provider scope and retry counts are preserved;
+partial output and completed-tool fallback remain native-owned. Explicit known
+risk of useful silence exceeding 30 seconds remains part of the authorized
+provisional policy. No production test, deployment, or merge was performed.
+
+At review completion, 32 CI checks passed, four package coverage checks remained
+pending, and none failed. The verified base was
+de4edbaecf37cdc91ab01c7933a0fc012e8fb9f2 with merge-tree result
+50e0a76156bec1eb89c07143b3ff61b1722246f2. This final commit only closes the
+historical plan; the reviewed production/test/JSON tree is unchanged. Final
+exact-head CI and refreshed mergeability are tracked on PR #3468. Keep its
+worktree while the PR is open. No additional substantive review is needed for
+this explanatory closeout under the review-loop exemption.
+Completed: 2026-09-15
