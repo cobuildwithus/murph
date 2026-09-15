@@ -231,6 +231,9 @@
       "@murphai/runtime-state/node/cli-timing": [
         "../../packages/runtime-state/src/node/cli-timing.ts"
       ],
+      "@murphai/runtime-state/node/hosted-bundle-codec": [
+        "../../packages/runtime-state/src/node/hosted-bundle-codec.ts"
+      ],
       "@murphai/runtime-state/node/loopback-control-plane-auth": [
         "../../packages/runtime-state/src/node/loopback-control-plane-auth.ts"
       ],
