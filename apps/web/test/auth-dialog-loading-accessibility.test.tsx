@@ -33,10 +33,10 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", async () => {
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", async () => {
   await mocks.moduleGate;
   return {
-    HostedAuthPanelIsland(props: { phoneInputAutoFocus?: boolean }) {
+    HostedFirstPartyAuthPanel(props: { phoneInputAutoFocus?: boolean }) {
       const [panelState, setPanelState] = useState(mocks.initialPanelState);
       mocks.panelRender();
       mocks.panelAutoFocusHistory.push(props.phoneInputAutoFocus);
@@ -347,7 +347,7 @@ test("uses a panel preloaded after a closed dialog mounts without suppressing ph
   expect(rendered.container.querySelector('[aria-busy="true"]')).toBeNull();
 });
 
-test("reopens a closed dialog and preserves the intent until Privy finishes Telegram OAuth", async () => {
+test("a stale provider intent cannot reopen first-party authentication", async () => {
   const { AuthDialog } = await import(
     "@/src/components/hosted-onboarding/auth-dialog"
   );
@@ -375,14 +375,12 @@ test("reopens a closed dialog and preserves the intent until Privy finishes Tele
     }),
   );
 
-  await vi.waitFor(() => {
-    expect(returnedOpenChange).toHaveBeenCalledWith(true);
-  });
+  expect(returnedOpenChange).not.toHaveBeenCalled();
   expect(
     rendered.window.sessionStorage.getItem(
       "murph:telegram-oauth-dialog-intent:v1",
     ),
-  ).toBe("claimed");
+  ).toBe("1");
 });
 
 async function renderPendingAuthDialog() {

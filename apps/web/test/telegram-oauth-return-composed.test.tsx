@@ -46,8 +46,8 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-runtime", () => ({
     return children({ kind: "configured", attempt: 1, restart: () => {} });
   },
 }));
-vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => ({
-  HostedAuthPanelIsland({ onCompleted }: { onCompleted: (payload: HostedPrivyCompletionPayload) => Promise<void> | void }) {
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () => ({
+  HostedFirstPartyAuthPanel({ onCompleted }: { onCompleted: (payload: HostedPrivyCompletionPayload) => Promise<void> | void }) {
     mocks.islandCompletions.push(onCompleted);
     return createElement("button", { type: "button" }, "Complete authentication");
   },
@@ -66,7 +66,7 @@ afterEach(async () => {
   cleanup = null;
 });
 
-test("a Telegram return opens one composed dialog and preserves the route completion destination", async () => {
+test("a stale Privy Telegram return waits for sign-in intent and preserves the route completion destination", async () => {
   const storage = memoryStorage("1");
   const rendered = await renderClientComponent(createElement("div"), {
     requireButton: false,
@@ -83,17 +83,29 @@ test("a Telegram return opens one composed dialog and preserves the route comple
     }
     return element.style;
   };
-  const { AuthProvider } = await import("@/src/components/hosted-onboarding/auth-dialog-provider");
+  const { AuthProvider, useAuth } = await import("@/src/components/hosted-onboarding/auth-dialog-provider");
   const { HomepageAuthRuntimeProvider } = await import("@/src/components/hosted-onboarding/homepage-auth-runtime-provider");
+  function SignInAction() {
+    const { openAuthDialog } = useAuth();
+    return createElement("button", { onClick: openAuthDialog }, "Sign in");
+  }
   await rendered.rerender(
     createElement(AuthProvider, { authenticated: false },
-      createElement(HomepageAuthRuntimeProvider, { authenticated: false, authenticatedDestination: "/refer" })),
+      createElement(HomepageAuthRuntimeProvider, { authenticated: false, authenticatedDestination: "/refer" },
+        createElement(SignInAction))),
   );
   await act(async () => { await Promise.resolve(); });
 
+  expect(rendered.window.document.querySelectorAll('[role="dialog"]')).toHaveLength(0);
+  expect(mocks.islandCompletions).toHaveLength(0);
+  expect(mocks.complete).not.toHaveBeenCalled();
+  await act(async () => {
+    rendered.container.querySelector("button")?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
   expect(rendered.window.document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
   expect(mocks.islandCompletions.length).toBeGreaterThan(0);
-  expect(storage.getItem(intentKey)).toBe("claimed");
+  expect(storage.getItem(intentKey)).toBe("1");
   await act(async () => {
     await mocks.islandCompletions.at(-1)?.(completionPayload());
   });

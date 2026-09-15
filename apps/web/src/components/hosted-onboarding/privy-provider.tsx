@@ -2,6 +2,7 @@
 
 import { PrivyProvider } from "@privy-io/react-auth";
 import type { ReactNode } from "react";
+import { LegacyWalletApprovalProvider } from "../sensitive-actions/legacy-wallet-approval-provider";
 
 import {
   HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
@@ -27,7 +28,7 @@ export function HostedPrivyProvider(input: { appId: string; children: ReactNode;
         },
       }}
     >
-      {input.children}
+      <LegacyWalletApprovalProvider>{input.children}</LegacyWalletApprovalProvider>
     </PrivyProvider>
   );
 }

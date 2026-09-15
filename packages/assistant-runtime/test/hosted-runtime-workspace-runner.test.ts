@@ -66,6 +66,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
+  buildHostedExecutionRuntimeTimerWake,
   sanitizeHostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
@@ -115,6 +116,10 @@ import {
   writeHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
+import {
+  drainHostedProviderCleanupAfterCommit,
+  recordHostedProviderCleanupBeforeCommit,
+} from "../src/hosted-runtime/provider-cleanup.ts";
 import {
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
@@ -6713,7 +6718,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("runtime wake interrupts post-checkpoint background maintenance after late assistant input import", async () => {
+  test("runtime wake interrupts an in-flight provider cleanup request after late assistant input import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -6782,6 +6787,37 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           return {
             afterCheckpointKeepsForegroundImportLoop: true,
             afterCheckpoint: async () => {
+              await recordHostedProviderCleanupBeforeCommit({
+                checkpoint: { nextWakeAt: null },
+                linqMessageIds: ["linq_cleanup_held"],
+                vaultRoot,
+              });
+              const deleteStarted = createDeferred<void>();
+              const providerFetch = vi.fn<typeof fetch>(async (resource, init) => {
+                const request = new Request(resource, init);
+                assert.equal(request.method, "DELETE");
+                return await new Promise<Response>((_resolve, reject) => {
+                  const abort = () => reject(request.signal.reason);
+                  if (request.signal.aborted) abort();
+                  else request.signal.addEventListener("abort", abort, { once: true });
+                  deleteStarted.resolve();
+                });
+              });
+              const cleanup = drainHostedProviderCleanupAfterCommit({
+                checkpoint: { nextWakeAt: null },
+                env: { LINQ_API_TOKEN: "test-token" },
+                fetchImplementation: providerFetch,
+                shouldYield: input.shouldYieldBackgroundMaintenance,
+                signal: input.backgroundMaintenanceSignal,
+                vaultRoot,
+                wake: buildHostedExecutionRuntimeTimerWake({
+                  eventId: "evt_synthetic_cleanup_handoff",
+                  occurredAt: TEST_NOW,
+                  triggerKind: "runtime_timer",
+                  userId: TEST_USER_ID,
+                }),
+              });
+              await deleteStarted.promise;
               items.push(createMailboxItem({
                 id: "mailbox_item_runner_after_checkpoint_yield_late",
                 laneSeq: "2",
@@ -6793,6 +6829,17 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 input.shouldYieldBackgroundMaintenance?.() === true
               );
               assert.equal(input.backgroundMaintenanceSignal?.aborted, false);
+              const cleanupResult = await cleanup;
+              assert.equal(cleanupResult.deletedLinqMessageCount, 0);
+              assert.equal(cleanupResult.failedLinqMessageCount, 0);
+              assert.ok(cleanupResult.nextWakeAt);
+              assert.equal(providerFetch.mock.calls.length, 1);
+              const retainedCleanup = JSON.parse(await readFile(path.join(
+                resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+                "hosted-provider-cleanup.json",
+              ), "utf8"));
+              assert.deepEqual(retainedCleanup.linqMessageIds, ["linq_cleanup_held"]);
+              assert.equal(retainedCleanup.checkpoint.nextWakeAt, cleanupResult.nextWakeAt);
               yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
               return {
                 checkpointReason: "assistant_runtime_commit",
