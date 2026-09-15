@@ -2448,6 +2448,14 @@ preference items during enqueue or checkpoint preparation. This ordering is
 what preserves two adjacent changes to different personality dials without a
 merge queue or second state owner.
 
+Conversation batching across system events does not reattribute preference
+intent: `assistant_style` and `personalization` updates select the requesting
+accepted `message_ref`. The runtime checks membership in the current accepted
+scope, including inputs admitted live, and passes that input through the
+existing signed authority callback. An ambiguous batch without a selected ref
+fails closed. Web still reloads the selected message's canonical timestamp and
+causal sequence before comparing each preference against newer Settings state.
+
 Mailbox append also allocates one immutable per-member causal sequence under a
 user-scoped transaction lock, shared by the conversation and system lanes.
 That acceptance sequence, not lane import order or wall-clock time, orders

@@ -6030,6 +6030,114 @@ describeRealCodex('real Codex assistant-style boundary e2e', () => {
   )
 })
 
+describeRealCodex('real Codex preference source e2e', () => {
+  it.each([false, true])('preserves Settings while applying later batched intent (group=%s)', async (groupConversation) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-preference-source-e2e-'))
+    const first = `ain_${'1'.repeat(32)}`
+    const later = `ain_${'2'.repeat(32)}`
+    const writes: { request: unknown; authority: unknown }[] = []
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const inputs = [
+        { inputId: first, text: 'Murph, set Humor to 10 going forward.' },
+        { inputId: later, text: 'Use sentence case from now on. Briefly tell me the current Humor score and casing.' },
+      ].map(({ inputId, text }, index) => {
+        const input = buildSyntheticLinqGroupPromptInput({
+          inputId, text, occurredAt: `2026-05-01T12:00:0${index * 2}.000Z`,
+          senderHandle: 'synthetic-style-member',
+          speakerLabel: { displayName: 'Avery', source: 'profile-name' },
+        })
+        return { ...input, conversation: { ...input.conversation, threadIsDirect: !groupConversation } }
+      })
+      const prompt = buildAssistantAutoReplyPrompt(inputs)
+      if (prompt.kind !== 'ready') throw new Error('Expected a ready preference batch.')
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env,
+        developerInstructions: groupConversation
+          ? buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true })
+          : buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_ASSISTANT_STYLE_TOOL, MURPH_PERSONALIZATION_TOOL],
+        groupConversation, model: config.model, modelProvider: config.modelProvider,
+        prompt: prompt.prompt, reasoningEffort: 'low', sandbox: 'workspace-write',
+        vaultRoot: workingDirectory, workingDirectory,
+        hostedToolContext: {
+          computerToolsAvailable: false, currentAssistantInputId: () => later,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          currentUserActionScope: () => ({
+            acceptedInputIds: [first, later], conversationId: 'conversation_style',
+            conversationScope: groupConversation ? 'group' : 'direct',
+            inboundMailboxItemIds: [], originSessionId: 'session_style', recipientKey: null,
+          }),
+          personalizationTool: {
+            async request(request, authority) {
+              if (request.action === 'read') return { action: 'read', result: {
+                mainPersona: 'classic', model: 'gpt-5.6-terra', solAvailable: true,
+                supportingPersona: null, tone: 'casual', voice: 'warm',
+              } }
+              writes.push({ request, authority })
+              if (request.action === 'update_personality') {
+                expect(authority).toMatchObject({ assistantInputId: first })
+                expect(request.personality).toEqual({ humor: 10 })
+                // Canonical Settings at the intermediate time already saved 0.
+                return { action: 'update_personality', result: {
+                  outcomes: { humor: 'superseded' },
+                  settings: {
+                    humor: { source: 'custom', value: 0 },
+                    detail: { source: 'default', value: 5 },
+                    push: { source: 'default', value: 5 },
+                    unhinged: { source: 'default', value: 0 },
+                  },
+                } }
+              }
+              expect(authority).toMatchObject({ assistantInputId: later })
+              expect(request).toEqual({ action: 'update', tone: 'formal' })
+              return { action: 'update', result: {
+                mainPersona: 'classic', model: 'gpt-5.6-terra',
+                modelChangeAppliesNextRun: false, modelUpdated: false, solAvailable: true,
+                status: 'saved', supportingPersona: null, tone: 'formal', voice: 'warm',
+              } }
+            },
+          },
+          sendVaultFile: async () => { throw new Error('Unexpected file send') },
+          vaultFileSendAvailable: false,
+        },
+      })
+      process.stdout.write(`[preference-source-e2e] ${JSON.stringify({ groupConversation, writeCount: writes.length, reply: result.finalMessage })}\n`)
+      expect(writes).toHaveLength(2)
+      expect(writes).toEqual(expect.arrayContaining([
+        {
+          request: { action: 'update_personality', personality: { humor: 10 } },
+          authority: expect.objectContaining({ assistantInputId: first }),
+        },
+        {
+          request: { action: 'update', tone: 'formal' },
+          authority: expect.objectContaining({ assistantInputId: later }),
+        },
+      ]))
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(actions.filter(action => action.kind === 'command')).toEqual([])
+      const dynamicActions = actions.filter(action => action.kind === 'dynamic')
+      const scoreReads = dynamicActions.filter(action => action.argumentsValue.action === 'show')
+      // The user also asks for the current score; one read-only verification is
+      // valid. Exactly two source-bound writes remain mandatory.
+      expect(scoreReads.length).toBeLessThanOrEqual(1)
+      expect(scoreReads.every(action => action.tool === MURPH_ASSISTANT_STYLE_TOOL.name)).toBe(true)
+      expect(dynamicActions).toHaveLength(2 + scoreReads.length)
+      expect(dynamicActions.every(action => action.success)).toBe(true)
+      expect(result.finalMessage).toMatch(/humor[\s\S]*\b0\b/iu)
+      expect(result.finalMessage).toMatch(/sentence case|standard capitalization/iu)
+      expect(result.finalMessage).not.toMatch(/(?:set|saved|updated)[\s\S]*humor[\s\S]*\b10\b|message.ref|causal|tool call/iu)
+      expect(result.responseMedia).toEqual([])
+      expect(result.responseCard).toBeNull()
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex conversation batch e2e', () => {
   it.each([false, true])('answers both resumed bottle messages in one turn (group=%s)', async (groupConversation) => {
     const config = await resolveRealCodexE2eConfig()
