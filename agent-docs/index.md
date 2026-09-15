@@ -67,12 +67,15 @@ by `agent-docs/RELIABILITY.md`, including the service-owned finite ECG binding
 reason in hosted failure events; Junction's progress keys remain provider-owned.
 
 Runtime progress diagnostics (aggregate alerts, per-message warm/cold typing
-alerts with exact-chat activity exclusions, contention-safe acceptance evidence,
+alerts with exact-chat silence resets, answered-input completion,
+contention-safe acceptance evidence,
 turn-admission and provider-lifetime evidence, and code-only
 first-pending evidence) are specified in
 [`agent-docs/RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
 That owner also specifies cold-restore download transport milestones,
 process-activity timing, and bounded Cloudflare/R2 request correlation.
+The silence-reset follow-up is recorded in
+[`2026-09-15-typing-silence-reset.md`](exec-plans/completed/2026-09-15-typing-silence-reset.md).
 
 Automation edit schema discovery and attended progress guidance are owned by
 `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`. Real Codex native-schema and

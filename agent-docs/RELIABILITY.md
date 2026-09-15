@@ -2349,15 +2349,20 @@ Last verified: 2026-09-04
   through the earliest accepted typing indicator: strictly over 3 seconds for a
   warm workspace and over 10 seconds for a cold workspace. Mailbox acceptance
   remains its existing timestamp; it never substitutes for webhook receipt.
-  Linq alerts exclude an accepted message in the same chat between webhook
-  receipt and the observed typing acceptance (or the missing-observation check).
-  Existing blinded provider message/chat keys establish the exact conversation;
-  activity in another chat or member never supplies prior-typing evidence.
-  An earlier accepted typing session in that chat also covers arrival until its
-  linked delivery is accepted, within the existing five-minute session cap.
-  Missing correlation, failed sends, expired typing, and sends after the measured
-  typing endpoint do not suppress an alert. Telegram retains exact-input typing
-  observations and the existing thresholds.
+  For unanswered Linq inputs, the latest accepted message in the same chat
+  resets the silence start between receipt and the first typing acceptance
+  (or the missing-observation check). A reply does not exempt subsequent silence.
+  An accepted reply linked to this exact input ends its wait; no later typing
+  is required for an already-answered input. Existing blinded provider message/chat
+  keys establish the exact conversation; another chat cannot reset the clock,
+  and another member cannot supply prior-typing evidence.
+  An earlier accepted typing session covers arrival until its linked reply or
+  five-minute expiry, then silence resumes from that endpoint. Missing correlation,
+  failed sends, and sends after the measured typing endpoint cannot reset the clock.
+  Missing typing retains a 30-second telemetry grace from the silence start;
+  observed typing uses the strict warm/cold threshold. Frozen emails retain both
+  receipt and silence-start timestamps; older records retain their original text.
+  Telegram retains exact-input typing observations and the existing thresholds.
   Accepted-typing persistence waits for competing short trace-row writes in the
   detached callback; other retry-backed milestones keep skipping locked rows.
   Transport exceptions use the existing two retries (250 ms and 1 second), and

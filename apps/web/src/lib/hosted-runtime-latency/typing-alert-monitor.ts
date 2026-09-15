@@ -17,6 +17,7 @@ interface TypingAlertRow {
   id: string;
   source: string;
   webhookReceivedAt: Date;
+  silenceStartedAtEpochMs: bigint;
   typingAcceptedAtEpochMs: bigint | null;
   workspaceState: "warm" | "cold" | "unconfirmed";
   elapsedMs: bigint;
@@ -59,6 +60,7 @@ export async function runHostedRuntimeTypingAlertMonitor(input: TypingAlertInput
         schemaVersion: 1,
         source: row.source,
         webhookReceivedAt: row.webhookReceivedAt.toISOString(),
+        silenceStartedAt: new Date(Number(row.silenceStartedAtEpochMs)).toISOString(),
         typingAcceptedAt: row.typingAcceptedAtEpochMs === null
           ? null : new Date(Number(row.typingAcceptedAtEpochMs)).toISOString(),
         workspaceState: row.workspaceState,
@@ -105,6 +107,7 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         trace.source,
         trace.user_id,
         trace.mailbox_item_id,
+        trace.linq_delivery_id,
         trace.webhook_received_at,
         EXTRACT(EPOCH FROM trace.webhook_received_at AT TIME ZONE 'UTC') * 1000 AS received_ms,
         CASE
@@ -151,22 +154,78 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
       WHERE typing_ms <= ${input.now.getTime()}::bigint
         OR (typing_ms IS NULL
           AND received_ms < ${input.now.getTime() - MISSING_TYPING_OBSERVATION_GRACE_MS}::bigint)
+    ), measured AS MATERIALIZED (
+      SELECT observation.*, GREATEST(received_ms,
+        EXTRACT(EPOCH FROM ${buildLinqConversationActivitySql(input.now)} AT TIME ZONE 'UTC') * 1000
+      ) AS silence_started_ms
+      FROM classified AS observation
+      WHERE elapsed_ms > threshold_ms
+        AND NOT EXISTS (
+          SELECT 1 FROM hosted_linq_delivery AS answer
+          WHERE observation.source = 'linq'
+            AND answer.id = observation.linq_delivery_id
+            AND answer.accepted_at >= observation.webhook_received_at
+            AND answer.accepted_at <= LEAST(${input.now}::timestamp,
+              TIMESTAMP 'epoch' + observation.typing_ms * INTERVAL '1 millisecond')
+        )
     )
     SELECT id, source, webhook_received_at AS "webhookReceivedAt",
+      silence_started_ms::bigint AS "silenceStartedAtEpochMs",
       typing_ms AS "typingAcceptedAtEpochMs", workspace_state AS "workspaceState",
-      elapsed_ms::bigint AS "elapsedMs", threshold_ms AS "thresholdMs"
-    FROM classified AS observation
-    WHERE elapsed_ms > threshold_ms
-      AND NOT ${buildLinqConversationActivitySql(input.now)}
+      (COALESCE(typing_ms, ${input.now.getTime()}::bigint) - silence_started_ms)::bigint AS "elapsedMs",
+      threshold_ms AS "thresholdMs"
+    FROM measured
+    WHERE COALESCE(typing_ms, ${input.now.getTime()}::bigint) - silence_started_ms > threshold_ms
+      AND (typing_ms IS NOT NULL
+        OR silence_started_ms < ${input.now.getTime() - MISSING_TYPING_OBSERVATION_GRACE_MS}::bigint)
     ORDER BY webhook_received_at, id
     LIMIT ${ALERT_READ_LIMIT + 1}
   `;
 }
 
-/** Existing blinded provider correlation keeps activity scoped to the exact chat. */
+/** Latest activity resets pending silence; an earlier typing session ends at its reply or expiry. */
 function buildLinqConversationActivitySql(now: Date): Prisma.Sql {
-  return Prisma.sql`(observation.source = 'linq' AND EXISTS (
-    SELECT 1
+  return Prisma.sql`(
+    SELECT GREATEST(
+      (
+        SELECT MAX(delivery.accepted_at) FROM hosted_linq_delivery AS delivery
+        WHERE delivery.linq_chat_lookup_key = conversation.linq_chat_lookup_key
+          AND delivery.attempted_at >= observation.webhook_received_at - INTERVAL '5 minutes'
+          AND delivery.attempted_at <= ${now}
+          AND delivery.accepted_at >= observation.webhook_received_at
+          AND delivery.accepted_at <= LEAST(${now}::timestamp,
+            TIMESTAMP 'epoch' + observation.typing_ms * INTERVAL '1 millisecond')
+      ),
+      (
+        SELECT MAX(LEAST(
+          earlier_delivery.accepted_at,
+          TIMESTAMP 'epoch' + (prior_typing.ms + 300000) * INTERVAL '1 millisecond',
+          ${now}::timestamp,
+          TIMESTAMP 'epoch' + observation.typing_ms * INTERVAL '1 millisecond'
+        ))
+        FROM hosted_linq_provider_event AS earlier_event
+        JOIN hosted_mailbox_item AS earlier_mailbox
+          ON earlier_mailbox.source_message_lookup_key = earlier_event.message_lookup_key
+         AND earlier_mailbox.user_id = current_mailbox.user_id
+        JOIN hosted_ingress_latency_trace AS earlier_trace
+          ON earlier_trace.mailbox_item_id = earlier_mailbox.id
+         AND earlier_trace.user_id = current_mailbox.user_id
+         AND earlier_trace.source = 'linq'
+        LEFT JOIN hosted_linq_delivery AS earlier_delivery
+          ON earlier_delivery.id = earlier_trace.linq_delivery_id
+        CROSS JOIN LATERAL (SELECT CASE
+          WHEN earlier_trace.phase_breakdown_json #>> '{assistant,linqTypingAcceptedAtEpochMs}' ~ '^[0-9]{1,15}$'
+          THEN (earlier_trace.phase_breakdown_json #>> '{assistant,linqTypingAcceptedAtEpochMs}')::bigint
+        END AS ms) AS prior_typing
+        WHERE earlier_event.linq_chat_lookup_key = conversation.linq_chat_lookup_key
+          AND earlier_event.provider_created_at >= observation.webhook_received_at - INTERVAL '5 minutes'
+          AND earlier_event.provider_created_at <= observation.webhook_received_at
+          AND earlier_mailbox.id <> current_mailbox.id
+          AND earlier_trace.webhook_received_at <= observation.webhook_received_at
+          AND (earlier_delivery.accepted_at IS NULL OR earlier_delivery.accepted_at > observation.webhook_received_at)
+          AND prior_typing.ms BETWEEN observation.received_ms - 300000 AND observation.received_ms
+      )
+    )
     FROM hosted_mailbox_item AS current_mailbox
     JOIN LATERAL (
       SELECT event.linq_chat_lookup_key
@@ -176,45 +235,8 @@ function buildLinqConversationActivitySql(now: Date): Prisma.Sql {
       ORDER BY event.provider_created_at DESC
       LIMIT 1
     ) AS conversation ON TRUE
-    WHERE current_mailbox.id = observation.mailbox_item_id
+    WHERE observation.source = 'linq'
+      AND current_mailbox.id = observation.mailbox_item_id
       AND current_mailbox.user_id = observation.user_id
-      AND (
-        EXISTS (
-          SELECT 1 FROM hosted_linq_delivery AS delivery
-          WHERE delivery.linq_chat_lookup_key = conversation.linq_chat_lookup_key
-            AND delivery.attempted_at >= observation.webhook_received_at - INTERVAL '5 minutes'
-            AND delivery.attempted_at <= ${now}
-            AND delivery.accepted_at >= observation.webhook_received_at
-            AND delivery.accepted_at <= LEAST(
-              ${now}::timestamp,
-              TIMESTAMP 'epoch' + observation.typing_ms * INTERVAL '1 millisecond'
-            )
-        )
-        OR EXISTS (
-          SELECT 1
-          FROM hosted_linq_provider_event AS earlier_event
-          JOIN hosted_mailbox_item AS earlier_mailbox
-            ON earlier_mailbox.source_message_lookup_key = earlier_event.message_lookup_key
-           AND earlier_mailbox.user_id = current_mailbox.user_id
-          JOIN hosted_ingress_latency_trace AS earlier_trace
-            ON earlier_trace.mailbox_item_id = earlier_mailbox.id
-           AND earlier_trace.user_id = current_mailbox.user_id
-           AND earlier_trace.source = 'linq'
-          LEFT JOIN hosted_linq_delivery AS earlier_delivery
-            ON earlier_delivery.id = earlier_trace.linq_delivery_id
-          WHERE earlier_event.linq_chat_lookup_key = conversation.linq_chat_lookup_key
-            AND earlier_event.provider_created_at >= observation.webhook_received_at - INTERVAL '5 minutes'
-            AND earlier_event.provider_created_at <= observation.webhook_received_at
-            AND earlier_mailbox.id <> current_mailbox.id
-            AND earlier_trace.webhook_received_at <= observation.webhook_received_at
-            AND (earlier_delivery.accepted_at IS NULL OR earlier_delivery.accepted_at > observation.webhook_received_at)
-            AND CASE
-              WHEN earlier_trace.phase_breakdown_json #>> '{assistant,linqTypingAcceptedAtEpochMs}' ~ '^[0-9]{1,15}$'
-              THEN (earlier_trace.phase_breakdown_json #>> '{assistant,linqTypingAcceptedAtEpochMs}')::bigint
-                BETWEEN observation.received_ms - 300000 AND observation.received_ms
-              ELSE FALSE
-            END
-        )
-      )
-  ))`;
+  )`;
 }

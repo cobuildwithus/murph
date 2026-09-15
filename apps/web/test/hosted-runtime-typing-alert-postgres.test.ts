@@ -67,7 +67,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
     });
   });
 
-  it("counts same-chat sends and active typing while preserving silent and unrelated alerts", async () => {
+  it("measures post-send silence and preserves active typing and conversation isolation", async () => {
     await withTables(async (tx) => {
       for (const id of ["sent", "missing-sent", "other-chat", "failed-send", "late-send",
         "active", "expired", "finished", "other-member", "unknown-route"]) {
@@ -96,8 +96,65 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
         WHERE id = 'prior-other-member'`;
       const rows = await tx.$queryRaw<Array<{ id: string }>>(buildHostedRuntimeTypingAlertQuery({ now }));
       expect(rows.map((row) => row.id).sort()).toEqual([
-        "expired", "failed-send", "finished", "late-send", "other-chat", "other-member", "unknown-route",
+        "expired", "failed-send", "finished", "late-send", "missing-sent", "other-chat", "other-member", "sent", "unknown-route",
       ].map((id) => `runtime-typing/${id}`).sort());
+    });
+  });
+
+  it("restarts pending silence after replies and after earlier typing ends", async () => {
+    await withTables(async (tx) => {
+      for (const id of ["gap", "boundary", "repeated", "missing", "recent", "answered", "answered-typed",
+        "prior-ended", "prior-expired", "cold-gap", "cold-boundary"]) {
+        await insertTrace(tx, id, {
+          elapsed: ["missing", "recent", "answered"].includes(id) ? null
+            : id.startsWith("cold-") ? 13_000 : 9000,
+          cold: id.startsWith("cold-"),
+        });
+        await bindConversation(tx, id, `chat-${id}`);
+      }
+      await insertDelivery(tx, "gap-reply", "chat-gap", 2000);
+      await insertDelivery(tx, "boundary-reply", "chat-boundary", 6000);
+      await insertDelivery(tx, "repeated-first", "chat-repeated", 2000);
+      await insertDelivery(tx, "repeated-last", "chat-repeated", 6500);
+      await insertDelivery(tx, "missing-reply", "chat-missing", 2000);
+      await insertDelivery(tx, "recent-reply", "chat-recent", 58_000);
+      await insertDelivery(tx, "answer", "chat-answered", 2000);
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace
+        SET linq_delivery_id = 'answer' WHERE id = 'answered'`;
+      await insertDelivery(tx, "typed-answer", "chat-answered-typed", 2000);
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace
+        SET linq_delivery_id = 'typed-answer' WHERE id = 'answered-typed'`;
+      await insertDelivery(tx, "cold-gap-reply", "chat-cold-gap", 2000);
+      await insertDelivery(tx, "cold-boundary-reply", "chat-cold-boundary", 3000);
+      for (const [id, age] of [["prior-ended", 2000], ["prior-expired", 298_000]] as const) {
+        await insertTrace(tx, `${id}-earlier`, {
+          elapsed: -age, receivedAt: new Date(received.getTime() - age - 1000),
+        });
+        await bindConversation(tx, `${id}-earlier`, `chat-${id}`);
+      }
+      await insertDelivery(tx, "prior-answer", "chat-prior-ended", 2000);
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace
+        SET linq_delivery_id = 'prior-answer' WHERE id = 'prior-ended-earlier'`;
+      const rows = await tx.$queryRaw<Array<{ id: string; elapsedMs: bigint }>>(
+        buildHostedRuntimeTypingAlertQuery({ now }),
+      );
+      expect(rows.map(({ id, elapsedMs }) => [id, elapsedMs]).sort()).toEqual([
+        ["runtime-typing/cold-gap", 11_000n],
+        ["runtime-typing/gap", 7000n],
+        ["runtime-typing/missing", 58_000n],
+        ["runtime-typing/prior-ended", 7000n],
+        ["runtime-typing/prior-expired", 7000n],
+      ]);
+      const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () =>
+        new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }));
+      await runHostedRuntimeTypingAlertMonitor({
+        env, fetchImpl, now, prisma: tx, userId: "synthetic-member", assistantInputIds: ["input-gap"],
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      const body = String(fetchImpl.mock.calls[0]?.[1]?.body);
+      expect(body).toContain("Silence measured from: 2026-09-10T03:59:02.000Z");
+      expect(body).toContain("Wait without typing or a reply: 7000 ms");
+      expect(body).not.toContain("Webhook-to-typing wait");
     });
   });
 
