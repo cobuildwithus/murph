@@ -151,6 +151,15 @@ Source-tagged Deep and REM records also carry that provider's bounded
 `recordedAt` timestamp, or `null` when unavailable; their `occurredAt` remains
 the synthetic UTC midnight used only for civil-date identity.
 
+Shared nightly duration, Deep/REM, and sleep timing exclude sessions explicitly
+classified as naps. Nap records remain in the personal vault and do not fill a
+missing-night reporting gap; other metrics from naps remain eligible under
+their own scopes. Unknown sleep types remain eligible without guessing from
+duration or clock time. Per-source metric reads derive this classification
+from retained sleep summaries, including when cached MetricPoints predate the
+metadata. A later main sleep fills the gap on the ordinary projection refresh;
+already-delivered snapshots converge through that same complete replacement.
+
 The same source-preserving rule applies across steps, sleep duration and times,
 sleep stages, activity metrics and selectors, workout-day summaries, heart-rate
 zones, workouts, and nutrition totals. `workouts.v0` tags each workout item

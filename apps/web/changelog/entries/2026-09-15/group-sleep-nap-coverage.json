@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "group-sleep-nap-coverage",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer nightly sleep in groups",
+    "summary": "Sleep sessions marked as naps no longer count as a reported night in shared sleep totals, stages, or timing.",
+    "details": "Naps remain in your personal records. When your main sleep arrives, the next shared-data refresh can fill the missing night.",
+    "relevanceTags": ["groups", "sleep", "devices"],
+    "sourcePullRequests": []
+  }
+}
