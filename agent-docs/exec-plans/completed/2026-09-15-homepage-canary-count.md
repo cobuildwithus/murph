@@ -1,6 +1,6 @@
 # Exclude canary traffic from public message totals
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-15
 
@@ -45,7 +45,11 @@ cache headers may briefly retain a pre-deploy total. No Worker rollout dependenc
 - Initial proof setup failures: missing generated changelog input and an empty
   local test database. Generated the existing input and applied existing migrations
   to a dedicated task database; both checks then passed.
-- Web typecheck and exact-head CI remain pending.
+- Passed: `pnpm --dir apps/web typecheck`; the final source and test state was
+  checked. Final Growth and ESLint reruns also passed after formatting.
+- PR: https://github.com/cobuildwithus/murph/pull/3473. Implementation and local
+  verification are complete; ReviewGPT and exact-head CI gate the merge.
 - Parent review: shared queries retain ordinary same-line traffic, anonymous
   receipts, successful-send status filters, snapshot windows, and base fallback.
   No personal identifiers or production data were added.
+Completed: 2026-09-15
