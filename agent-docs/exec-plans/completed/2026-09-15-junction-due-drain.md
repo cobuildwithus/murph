@@ -1,6 +1,6 @@
 # Recover overdue device connections after consumed scheduled wakes
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-15
 
@@ -49,4 +49,9 @@ Updated: 2026-09-15
 - Reproduced before the source change: the composed scheduled-wake call accepted duplicates but inserted zero successors.
 - Passed after the source change: all 35 scheduled-wake PostgreSQL tests using an isolated migrated local database, including two concurrent admissions on a three-connection pool and eight exclusion cases.
 - Passed: 210 hosted-wake/sweeper tests, Web typecheck, and complexity diff. The unchanged workspace-target validator remains the only listed hotspot (24).
-- Candidate PR: #3465. Changelog proof, final ReviewGPT, and exact-head CI remain pending.
+- Passed: all 10 changelog rendering tests.
+- Parent final review passed: bounded existing-owner recovery, canonical ownership exclusions, synthetic fixtures, and privacy-safe diff.
+- ReviewGPT passed on `2b95b45d73cec03665899e487a1f179dba5a212f`; response model and hash verified. Review: https://chatgpt.com/c/6aa8cef6-0b08-83e9-91a8-be03ca3ba530.
+- Required CI passed on that candidate. The final plan-closure head must pass required CI before handoff.
+- PR: https://github.com/cobuildwithus/murph/pull/3465. Deployment remains a separate post-merge step; the source behavior is unchanged by plan closure.
+Completed: 2026-09-15
