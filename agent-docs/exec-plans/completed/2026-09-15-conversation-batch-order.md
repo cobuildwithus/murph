@@ -51,7 +51,17 @@ new runtimes use conversation adjacency. No wire or schema migration is needed.
 - Release-note tests: 10 passed. Documentation drift and diff whitespace checks
   passed. The optional full Web typecheck was stopped under local resource
   contention; no Web code or configuration changed.
-- Synthetic direct/group live replies remain pending after subscription failures
-  before provider action. Parent review finds no new state, I/O, dependency,
-  schema, or product boundary owner. Scope is a local fix and scoped commit;
-  no PR or production rollout is part of this task.
+- Focused real-Codex direct and group journeys both passed on gpt-5.6-terra via
+  the local subscription lane. Each used one provider request, answered both
+  synthetic messages correctly, and made no capability action, media, or card.
+  Reply review: Ready. Earlier profiles failed before provider action; retries
+  stopped on the first working profile, which ran both scenarios.
+- Commands: `pnpm test:assistant:live -- --test 'answers both resumed bottle messages in one turn \\(group=false\\)'`
+  and the corresponding `group=true` pattern, using the supported alternate-home
+  option. Authentication material and profile paths are omitted.
+- Parent review finds no new state, I/O, dependency, schema, or product boundary
+  owner. Scope is a local fix and scoped commit; no PR or production rollout is
+  part of this task. Existing older runtimes retain their prior batching behavior.
+Status: completed
+Updated: 2026-09-15
+Completed: 2026-09-15
