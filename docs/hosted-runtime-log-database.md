@@ -43,6 +43,23 @@ The isolated database does not store the raw hosted member id and has no
 cross-database foreign key. Attempt ids and other existing redacted operational
 correlation fields retain their current contract and limits.
 
+### Device import connection ownership
+
+`device-sync.pass_finished.deviceSyncConnectionKey` is a SHA-256 hex digest of
+`["device-sync-connection-v1", memberId, hostedConnectionId]`. It is stable across
+attempts for one connection and distinct across members and connections. The
+pass logs null when its wake has no hosted connection identity; raw connection
+and member identifiers never enter this field. Existing bounded log transport,
+parsing and retention apply, with no schema migration.
+
+Queue observations describe only the pass's connection. The import alert reader
+validates this optional digest and evaluates each connection separately, then
+aggregates distinct runtimes. Missing or malformed ownership does not authorize
+recovery of any identified connection. An accepted checkpoint credits only passes
+from its matching attempt; another connection's empty queue or progress cannot
+reset a stalled connection. The Web reader may deploy first and ignores legacy
+unkeyed passes until the additive runner producer is deployed.
+
 ### Device import no-op counts
 
 `device-sync.pass_finished` includes whole-pass persistence outcome counts:

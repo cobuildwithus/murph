@@ -4,12 +4,12 @@ import { summarizeDeviceImportHealth, type DeviceImportObservation } from "@/src
 const now = new Date("2026-08-10T16:00:00Z");
 const minute = 60_000;
 function row(minutesAgo: number, patch: Partial<DeviceImportObservation> = {}): DeviceImportObservation {
-  return { subjectKey: "synthetic-subject", attemptId: "attempt-a", at: new Date(+now - minutesAgo * minute),
+  return { subjectKey: "synthetic-subject", connectionKey: "a".repeat(64), attemptId: "attempt-a", at: new Date(+now - minutesAgo * minute),
     eventCode: "device-sync.pass_finished", pending: true, progressed: false,
     checkpointAccepted: false, restarted: false, cancelled: false, ...patch };
 }
 function checkpoint(minutesAgo: number, patch: Partial<DeviceImportObservation> = {}) {
-  return row(minutesAgo, { eventCode: "checkpoint.snapshot_finished", pending: null, checkpointAccepted: true, ...patch });
+  return row(minutesAgo, { eventCode: "checkpoint.snapshot_finished", connectionKey: null, pending: null, checkpointAccepted: true, ...patch });
 }
 function health(observations: DeviceImportObservation[], due = true) {
   return summarizeDeviceImportHealth({ now, observations,
@@ -35,6 +35,46 @@ describe("device import progress and efficiency alerts", () => {
   it("does not let repeated unchanged checkpoints reset a stall", () => {
     expect(health([row(20), checkpoint(19), row(10), checkpoint(9), row(1), checkpoint(0.5)])
       .stalled.anomalous).toBe(true);
+  });
+
+  it("keeps a stalled connection pending while another connection drains and checkpoints", () => {
+    const stalled = Array.from({ length: 15 }, (_, index) => row(70 - index * 5));
+    const draining = Array.from({ length: 14 }, (_, index) => {
+      const age = 68 - index * 5;
+      return [row(age, { connectionKey: "b".repeat(64), attemptId: "attempt-b", pending: false, progressed: true }),
+        checkpoint(age - 1, { attemptId: "attempt-b" })];
+    }).flat();
+    for (const age of [55, 30, 0]) {
+      const cutoff = new Date(+now - age * minute);
+      const result = summarizeDeviceImportHealth({ now: cutoff,
+        observations: [...stalled, ...draining].filter(observation => observation.at <= cutoff),
+        dueSubjects: new Set(["synthetic-subject"]) });
+      expect(result.stalled.affectedRuntimeCount).toBe(1);
+    }
+    const result = health([...stalled, ...draining]);
+    expect(result.stalled.oldestBacklogMs).toBe(70 * minute);
+    expect(result.backlog.affectedRuntimeCount).toBe(1);
+    expect(health([...stalled, ...draining, row(0, { pending: false }), checkpoint(0)]).stalled.anomalous).toBe(false);
+  });
+
+  it("counts a runtime and its starts once when multiple connections are stalled", () => {
+    const first = [19, 14, 9, 4].map(age => row(age, { restarted: true }));
+    const second = [19, 14, 9, 4].map(age => row(age, { connectionKey: "b".repeat(64), attemptId: "attempt-b" }));
+    const result = health([...first, ...second]);
+    expect(result.stalled.affectedRuntimeCount).toBe(1);
+    expect(result.cycling).toMatchObject({ affectedRuntimeCount: 1, restartCount: 4 });
+  });
+
+  it("shares a checkpoint only with the connections observed in that attempt", () => {
+    const rows = [row(20), row(10), row(2, { connectionKey: "b".repeat(64), pending: false, progressed: true })];
+    expect(health([...rows, checkpoint(1)]).stalled.affectedRuntimeCount).toBe(1);
+    expect(health([...rows, row(0.5, { pending: false }), checkpoint(0)]).stalled.anomalous).toBe(false);
+  });
+
+  it("does not use legacy or unowned passes to credit progress or recover a connection", () => {
+    const legacy = row(1, { connectionKey: null, pending: false, progressed: true });
+    expect(health([row(20), row(10), legacy, checkpoint(0)]).stalled.anomalous).toBe(true);
+    expect(health([row(20, { connectionKey: null }), checkpoint(0)]).stalled.anomalous).toBe(false);
   });
 
   it("clears alerts when the queue is explicitly empty, preserving unknown observations", () => {

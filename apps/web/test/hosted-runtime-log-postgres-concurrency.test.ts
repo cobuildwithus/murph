@@ -197,14 +197,14 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     const now = new Date("2026-08-10T16:00:00Z");
     const subject = hostedRuntimeLogSubjectKey("synthetic-import-runtime");
     const entries = [
-      { event: "device-sync.pass_finished", details: { processedJobs: 7,
+      { event: "device-sync.pass_finished", details: { processedJobs: 7, deviceSyncConnectionKey: "c".repeat(64),
         incomingRetainedProgressFingerprint: "a".repeat(64), outgoingRetainedProgressFingerprint: "b".repeat(64),
         outgoingRetainedJobCount: 10, pendingJobCountAfter: 10, queueSnapshotAfterPresent: true,
         yieldReason: "outer_signal", privateCanary: "must-not-be-selected" } },
       { event: "checkpoint.snapshot_finished", details: { webCheckpointAccepted: true } },
       { event: "runner.processing_finished", details: { runtimeProcessingOutcome: "runtime_processing_accepted", runtimeProcessingAction: "woken" } },
       { event: "runner.processing_finished", details: { runtimeProcessingOutcome: "runtime_processing_accepted", runtimeProcessingAction: "started" } },
-      { event: "device-sync.pass_finished", details: { processedJobs: "malformed", pendingJobCountAfter: "malformed", queueSnapshotAfterPresent: true } },
+      { event: "device-sync.pass_finished", details: { processedJobs: "malformed", deviceSyncConnectionKey: "not-a-connection-key", pendingJobCountAfter: "malformed", queueSnapshotAfterPresent: true } },
       { event: "device-sync.pass_finished", details: { processedJobs: 0, pendingJobCountAfter: 0, outgoingRetainedJobCount: 0, queueSnapshotAfterPresent: true } },
       { event: "device-sync.pass_finished", details: { processedJobs: 4, deviceSyncImportAppliedCount: 4,
         incomingRetainedProgressFingerprint: "a".repeat(64), outgoingRetainedProgressFingerprint: "a".repeat(64) } },
@@ -218,12 +218,12 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     }
     const observations = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
     expect(observations).toHaveLength(8);
-    expect(observations[0]).toMatchObject({ pending: true, progressed: true, cancelled: true });
-    expect(observations[1]).toMatchObject({ checkpointAccepted: true });
+    expect(observations[0]).toMatchObject({ pending: true, progressed: true, cancelled: true, connectionKey: "c".repeat(64) });
+    expect(observations[1]).toMatchObject({ checkpointAccepted: true, connectionKey: null });
     expect(observations[2]).toMatchObject({ restarted: false });
     expect(observations[3]).toMatchObject({ restarted: true });
-    expect(observations[4]).toMatchObject({ pending: null, progressed: false });
-    expect(observations[5]).toMatchObject({ pending: false });
+    expect(observations[4]).toMatchObject({ pending: null, progressed: false, connectionKey: null });
+    expect(observations[5]).toMatchObject({ pending: false, connectionKey: null });
     expect(observations[6]).toMatchObject({ progressed: true });
     expect(observations[7]).toMatchObject({ progressed: false });
     expect(JSON.stringify(observations)).not.toContain("must-not-be-selected");

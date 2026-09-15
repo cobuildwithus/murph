@@ -2487,10 +2487,21 @@ Last verified: 2026-09-04
   same cron: no saved continuation progress for 15 minutes; four starts or outer
   cancellations within 20 minutes with fewer than two saved progress passes;
   and a lower-priority notice after an hour of continuously observed backlog.
-  Routine wake RPCs are not starts. Applied imports or a changed valid continuation fingerprint
-  with processed work are credited only after Web accepts a checkpoint from the
-  same attempt; an empty local queue likewise requires that acceptance before
-  recovery. Unknown queue metadata does not clear pending evidence. A gap over
+  Routine wake RPCs are not starts. Each pass carries a versioned SHA-256
+  `deviceSyncConnectionKey` binding its member and hosted connection. Pending
+  queues, progress and recovery are evaluated per connection, then affected
+  runtimes and starts are counted once. A healthy connection cannot clear or
+  reset another connection's pending work. Applied imports or a changed valid
+  continuation fingerprint with processed work are credited only after Web
+  accepts a checkpoint from the same attempt; an empty local queue likewise
+  requires that acceptance before recovery. A checkpoint reaches only the
+  connections observed in that attempt since its preceding checkpoint; each
+  pass adds at most one checkpoint reference. Runtime restart counts use the
+  shared ordered timeline without copying it for each connection.
+  Unknown queue metadata does not clear pending evidence. Legacy or malformed
+  connection keys are excluded: they cannot prove connection-owned progress or
+  recovery. The additive reader can deploy before the runner, but complete
+  coverage starts only after keyed pass observations arrive. A gap over
   15 minutes resets continuous-backlog evidence; a silent queue remains eligible
   when its canonical device wake is due, otherwise its last pending observation
   must be within ten minutes. Current runtime-access eligibility is reread before

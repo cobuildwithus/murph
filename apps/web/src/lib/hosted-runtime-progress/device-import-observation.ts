@@ -51,6 +51,9 @@ export async function readDeviceImportObservations(input: {
   const database = input.database ?? getHostedRuntimeLogPool();
   const result = await database.query<DeviceImportObservation>(`
     SELECT subject_key AS "subjectKey", attempt_id AS "attemptId", at, event_code AS "eventCode",
+      CASE WHEN event_code = 'device-sync.pass_finished'
+        AND redacted_json->>'deviceSyncConnectionKey' ~ '^[a-f0-9]{64}$'
+        THEN redacted_json->>'deviceSyncConnectionKey' ELSE NULL END AS "connectionKey",
       CASE WHEN event_code <> 'device-sync.pass_finished' THEN NULL
         WHEN redacted_json->>'outgoingRetainedJobCount' ~ '^[1-9][0-9]{0,8}$' THEN true
         WHEN redacted_json->>'queueSnapshotAfterPresent' = 'true'

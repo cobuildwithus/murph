@@ -6667,7 +6667,7 @@ describe("runHostedAssistantAutomationLane", () => {
       resource: "steps", windowStart: "2026-04-01T00:00:00Z", windowEnd: at,
       webhookDataJson: "PRIVATE_FIXTURE_MUST_NOT_BE_LOGGED",
     } }];
-    const wake = { eventId: "evt_progress", kind: "device-sync.wake" as const,
+    const wake = { eventId: "evt_progress", kind: "device-sync.wake" as const, connectionId: "dsc_synthetic_progress",
       occurredAt: at, reason: "webhook_hint" as const, userId: "member_123",
       hint: { jobs: incomingJobs } };
     const outgoingWake = { ...wake, hint: { jobs: [{ ...incomingJobs[0]!,
@@ -6692,6 +6692,7 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(first).toMatchObject({ incomingRetainedJobCount: 1, outgoingRetainedJobCount: 1,
       stagedDirtyPayloadAckCount: 0, retainedMailboxOwnerPresent: true });
     expect(first?.incomingRetainedProgressFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(first?.deviceSyncConnectionKey).toMatch(/^[a-f0-9]{64}$/);
     expect(first?.outgoingRetainedProgressFingerprint).not.toBe(first?.incomingRetainedProgressFingerprint);
     logRequests.length = 0;
     await runHostedDeviceSyncWakeLane({ wake: outgoingWake, deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
@@ -6700,6 +6701,24 @@ describe("runHostedAssistantAutomationLane", () => {
     await drainHostedRuntimeLogWritesBestEffort();
     const second = logRequests.flatMap((r) => r.entries).find((e) => e.eventCode === "device-sync.pass_finished")?.redactedJson;
     expect(second?.incomingRetainedProgressFingerprint).toBe(first?.outgoingRetainedProgressFingerprint);
+    expect(second?.deviceSyncConnectionKey).toBe(first?.deviceSyncConnectionKey);
+    for (const changedWake of [
+      { ...wake, connectionId: "dsc_other_connection" },
+      { ...wake, userId: "member_other" },
+      { ...wake, connectionId: undefined },
+    ]) {
+      logRequests.length = 0;
+      await runHostedDeviceSyncWakeLane({ wake: changedWake, deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
+        resolvedConfig: { deviceSync: DEVICE_SYNC_CONFIG }, retainFollowUpWakeUntilCheckpoint: true,
+        runtimeLogPlatform: platform, timeoutMs: null, vaultRoot: "/tmp/vault-root" });
+      await drainHostedRuntimeLogWritesBestEffort();
+      const pass = logRequests.flatMap(r => r.entries).find(e => e.eventCode === "device-sync.pass_finished")?.redactedJson;
+      expect(pass?.deviceSyncConnectionKey).not.toBe(first?.deviceSyncConnectionKey);
+      if (!changedWake.connectionId) expect(pass?.deviceSyncConnectionKey).toBeNull();
+      expect(JSON.stringify(pass)).not.toContain("dsc_");
+      expect(JSON.stringify(pass)).not.toContain("member_");
+    }
+    expect(JSON.stringify([first, second])).not.toContain("dsc_synthetic_progress");
     expect(JSON.stringify([first, second])).not.toContain("PRIVATE_FIXTURE");
     expect(JSON.stringify([first, second])).not.toContain("synthetic-job");
     expect(JSON.stringify([first, second])).not.toContain("2026-04-03");

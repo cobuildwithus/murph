@@ -29,8 +29,7 @@ No scheduler, schema, provider credentials or member-facing behavior changes.
   gaps over 15 minutes do not prove continuous processing.
 - Applied imports count even when a pass has no retained continuation; no-op
   imports alone do not. Only an accepted checkpoint from the matching attempt
-  credits progress or
-  confirms an empty queue. Unknown queue metadata does not establish recovery.
+  credits progress or confirms an empty queue for that connection. Unknown queue metadata does not establish recovery.
 - One shared initial observation; each possible email rereads health before
   admission. Three incidents run serially and reuse existing send leases,
   idempotency, six-hour reminders and silent recovery. Only stalls bypass
@@ -40,9 +39,13 @@ No scheduler, schema, provider credentials or member-facing behavior changes.
   At most four primary reads and one log read execute serially per observation;
   the initial read plus three admission rereads totals at most 16 primary and
   four log reads, excluding the existing bounded singleton incident writes.
-- Mixed runner versions with missing progress metadata cannot prove saved
-  progress. Deploy against the existing pass-fingerprint producer; no new
-  producer or database migration is part of this change.
+- Evaluate queue/progress evidence per hashed connection identity. Aggregate
+  distinct affected runtimes and runtime starts only after classification.
+  Match checkpoints to connections that emitted passes in the same attempt;
+  do not broadcast every checkpoint to every connection.
+- The additive Web reader excludes legacy/malformed connection keys. Deploy
+  Web before the runner when needed; coverage begins with keyed observations.
+  The runner adds one digest to existing diagnostics. No schema migration.
 
 ## Tasks
 
@@ -64,3 +67,22 @@ No scheduler, schema, provider credentials or member-facing behavior changes.
   confirmed scope, privacy, chronology, bounded reads and unchanged admission.
 - PR CI and final ReviewGPT remain pending.
 - Changelog: not applicable; internal operator monitoring only.
+
+## Review round 1 disposition
+
+- Reviewed head: `6628ed6c5fa58ae6771fe18ab6bde1364b34526b`.
+- Result: one High ORIGINAL_PR finding, accepted; no rejected findings.
+- Cause: the producer reads a connection-local queue, while the classifier
+  grouped only by runtime. Another connection's checkpointed empty queue could
+  silently recover the stalled connection. Parent reproduced this with synthetic
+  observations and verified the supported interleaving scheduler path.
+- User resumed remediation. The correction adds connection ownership to the
+  existing diagnostic, groups evidence by that key and preserves distinct
+  runtime counts. No new durable state or runtime scheduling behavior.
+- Round 1 exact-head CI finished green. Round 2 is required after correction.
+- Corrected focused Web tests: 31 passed; local PostgreSQL projection: passed;
+  parsed runtime producer test: passed. Web and assistant-runtime typechecks
+  passed. Complexity guard passed; existing maintenance hotspots are unchanged.
+- An initial package test invocation included an extra argument separator and
+  started broader proof than intended. Its proven session-owned process tree
+  was stopped; the explicit focused Vitest command then passed.

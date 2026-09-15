@@ -18,6 +18,7 @@ export type DeviceImportHealth = {
 // Values are selected by the diagnostic reader; identifiers remain in memory.
 export type DeviceImportObservation = {
   subjectKey: string;
+  connectionKey: string | null;
   attemptId: string | null;
   at: Date;
   eventCode: string;
@@ -46,7 +47,27 @@ export function summarizeDeviceImportHealth(input: {
     bySubject.set(row.subjectKey, rows);
   }
   for (const [subject, rows] of bySubject) {
-    const evidence = summarizeRuntime(rows, now, input.dueSubjects.has(subject));
+    const health = summarizeRuntime(rows, now, input.dueSubjects.has(subject));
+    for (const condition of ["stalled", "cycling", "backlog"] as const) {
+      const runtime = health[condition];
+      const total = result[condition];
+      total.anomalous ||= runtime.anomalous;
+      total.affectedRuntimeCount += runtime.affectedRuntimeCount;
+      total.oldestBacklogMs = Math.max(total.oldestBacklogMs, runtime.oldestBacklogMs);
+      total.restartCount += runtime.restartCount;
+      total.cancellationCount += runtime.cancellationCount;
+      total.savedProgressPassCount += runtime.savedProgressPassCount;
+    }
+  }
+  return result;
+}
+
+function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boolean) {
+  rows.sort((a, b) => a.at.getTime() - b.at.getTime());
+  const result = { stalled: emptyHealth(), cycling: emptyHealth(), backlog: emptyHealth() };
+  const restartTimes = rows.filter(row => row.restarted).map(row => row.at.getTime());
+  for (const connectionRows of groupConnectionObservations(rows).values()) {
+    const evidence = summarizeConnection(connectionRows, now, due, restartTimes);
     if (!evidence) continue;
     const { backlogAge, lastProgress, restarts, cancellations, savedPasses, recentPasses } = evidence;
     const conditions: DeviceImportCondition[] = [];
@@ -58,9 +79,9 @@ export function summarizeDeviceImportHealth(input: {
     for (const condition of conditions) {
       const health = result[condition];
       health.anomalous = true;
-      health.affectedRuntimeCount++;
+      health.affectedRuntimeCount = 1;
       health.oldestBacklogMs = Math.max(health.oldestBacklogMs, backlogAge);
-      health.restartCount += restarts;
+      health.restartCount = Math.max(health.restartCount, restarts);
       health.cancellationCount += cancellations;
       health.savedProgressPassCount += savedPasses;
     }
@@ -68,13 +89,38 @@ export function summarizeDeviceImportHealth(input: {
   return result;
 }
 
+function groupConnectionObservations(rows: readonly DeviceImportObservation[]) {
+  const connections = new Map<string, DeviceImportObservation[]>();
+  const attempts = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (row.eventCode === "device-sync.pass_finished" && row.connectionKey) {
+      const connectionRows = connections.get(row.connectionKey) ?? [];
+      connectionRows.push(row);
+      connections.set(row.connectionKey, connectionRows);
+      if (row.attemptId) {
+        const keys = attempts.get(row.attemptId) ?? new Set<string>();
+        keys.add(row.connectionKey);
+        attempts.set(row.attemptId, keys);
+      }
+    }
+    if (row.checkpointAccepted && row.attemptId) {
+      // Each pass links to at most one following checkpoint. Do not broadcast
+      // every runtime checkpoint to every connection in the lookback window.
+      for (const key of attempts.get(row.attemptId) ?? []) connections.get(key)?.push(row);
+      attempts.delete(row.attemptId);
+    }
+  }
+  return connections;
+}
+
 function emptyHealth(): DeviceImportHealth {
   return { anomalous: false, affectedRuntimeCount: 0, oldestBacklogMs: 0,
     restartCount: 0, cancellationCount: 0, savedProgressPassCount: 0 };
 }
 
-function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boolean) {
-  rows.sort((a, b) => a.at.getTime() - b.at.getTime());
+function summarizeConnection(
+  rows: DeviceImportObservation[], now: number, due: boolean, restartTimes: readonly number[],
+) {
   let pendingSince: number | null = null;
   let lastPendingAt = 0;
   let lastProgress = 0;
@@ -82,7 +128,6 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
   const pendingSnapshots = new Map<string | null, boolean | null>();
   const savedAt: number[] = [];
   const passesAt: number[] = [];
-  const restartsAt: number[] = [];
   const cancellationsAt: number[] = [];
   for (const row of rows) {
     const at = row.at.getTime();
@@ -117,7 +162,6 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
       }
       pendingSnapshots.delete(row.attemptId);
     }
-    if (row.restarted) restartsAt.push(at);
     if (row.cancelled) cancellationsAt.push(at);
   }
   if (pendingSince === null || (!due && now - lastPendingAt > 10 * MINUTE)) return null;
@@ -126,7 +170,18 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
   return {
     backlogAge: now - pendingSince,
     lastProgress: Math.max(pendingSince, lastProgress),
-    restarts: countRecent(restartsAt), cancellations: countRecent(cancellationsAt),
+    restarts: countAtOrAfter(restartTimes, recentAfter), cancellations: countRecent(cancellationsAt),
     savedPasses: countRecent(savedAt), recentPasses: countRecent(passesAt),
   };
+}
+
+function countAtOrAfter(times: readonly number[], cutoff: number) {
+  let low = 0;
+  let high = times.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (times[middle]! < cutoff) low = middle + 1;
+    else high = middle;
+  }
+  return times.length - low;
 }
