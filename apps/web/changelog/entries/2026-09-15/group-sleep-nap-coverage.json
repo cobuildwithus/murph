@@ -9,6 +9,6 @@
     "summary": "Sleep sessions marked as naps no longer count as a reported night in shared sleep totals, stages, or timing.",
     "details": "Naps remain in your personal records. When your main sleep arrives, the next shared-data refresh can fill the missing night.",
     "relevanceTags": ["groups", "sleep", "devices"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3486]
   }
 }
