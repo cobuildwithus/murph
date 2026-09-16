@@ -16,7 +16,9 @@ closing new starts and destructive deletion. Readiness counts a browser-vault
 replica direct write as pending only inside its bounded admission window; an
 older admission cannot still be writing, and only the stop-side recovery clock
 or deletion erases its record. Freezing/importing admit no new
-execution. Activation requires the complete exact-source import and commits a
+execution. A recorded attempt whose exact container reports no such invocation
+(or is not running) cannot complete itself; the freeze's stop reconciles it
+instead of holding the quiesced member indefinitely. Activation requires the complete exact-source import and commits a
 durable wake through the existing mailbox/Temporal scheduler.
 
 Canonical `hosted_member` insertion enrolls new personal and group runtime

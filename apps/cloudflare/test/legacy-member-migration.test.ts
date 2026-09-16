@@ -74,6 +74,20 @@ describe("conditional member checkpoint handoff", () => {
     expect(await h.object.exportPostgresMigrationPage({ section: 0, after: "" })).toMatchObject({ userId: identity.userId, generation: "7" });
   });
 
+  it("reconciles a recorded attempt whose exact target reports no invocation instead of waiting forever", async () => {
+    const h = harness();
+    expect(await h.object.preparePostgresMemberMigration(identity)).toEqual({ quiesced: true, checkpointStatus: "accepted" });
+    canonical.command.mockResolvedValue({ member: { ...identity, migrationPhase: "freezing" } });
+    h.checkpoint.mockResolvedValue("unconfirmed" as never);
+    expect(await h.object.freezeForPostgresMigration(identity)).toEqual({ frozen: false });
+    expect(h.stop).not.toHaveBeenCalled();
+    h.checkpoint.mockResolvedValue("absent" as never);
+    expect(await h.object.freezeForPostgresMigration(identity)).toEqual({ frozen: true });
+    expect(h.stop).toHaveBeenCalledTimes(2);
+    expect(h.drained).toHaveBeenCalledOnce();
+    expect(h.values.get("runtime-migration-freeze:v1")).toMatchObject({ phase: "frozen", migrationId: identity.migrationId });
+  });
+
   it("preserves a frozen source and token after eviction into a compatible later release", async () => {
     const h = harness(); await h.object.preparePostgresMemberMigration(identity);
     h.sql.exec("UPDATE runner_meta SET active_attempt_id = NULL");
@@ -141,6 +155,34 @@ describe("resumable member handoff continuation", () => {
   });
 });
 
+
+describe("handoff continuation after a lost attempt completion", () => {
+  it("freezes, imports and activates a member whose recorded attempt has no live process", async () => {
+    const h = harness();
+    let phase = "legacy";
+    let section = 0;
+    let imported = false;
+    const operations: string[] = [];
+    canonical.command.mockImplementation(async ({ command }) => {
+      operations.push(command.operation);
+      if (command.operation === "read_object") return { object: { completedAt: imported ? "synthetic-complete" : null, nextCursor: { section, after: "" } } };
+      if (command.operation === "quiesce_member") phase = "quiescing";
+      if (command.operation === "freeze_member") phase = "freezing";
+      if (command.operation === "import_member") { phase = "importing"; imported = command.page.next === null; section++; return { object: { completedAt: imported ? "synthetic-complete" : null } }; }
+      if (command.operation === "activate_member") { expect(imported).toBe(true); phase = "postgres"; }
+      return { member: { ...identity, migrationId: phase === "legacy" ? null : identity.migrationId, migrationPhase: phase } };
+    });
+    const advance = () => advanceRuntimeMemberMigration({ source: h.source, stub: h.object, identity });
+    h.checkpoint.mockResolvedValue("absent" as never);
+    const first = await advance();
+    expect(first).not.toMatchObject({ pending: "checkpoint" });
+    expect(operations).toContain("freeze_member");
+    expect(h.stop).toHaveBeenCalled();
+    for (let i = 0; i < 8 && phase !== "postgres"; i++) await advance();
+    expect(phase).toBe("postgres");
+    expect((await advance())).toMatchObject({ member: { migrationPhase: "postgres" } });
+  });
+});
 
 describe("member deletion and migration ordering", () => {
   it("waits for a pre-admitted deletion before reserving source identity", async () => {

@@ -321,8 +321,11 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     if (identity) {
       await requireLegacyMemberMigrationPhase({ source: this.source, state: this.migrationState, identity, phases: ["freezing", "importing"] });
       // Never turn a checkpoint request acknowledgment into permission to kill
-      // active execution. Its canonical completion must clear the exact attempt.
-      if ((await observeMember(this.migrationState, identity.userId)).activeAttemptId) return { frozen: false };
+      // active execution. Its canonical completion must clear the exact attempt,
+      // unless the exact target reports that no such invocation exists.
+      const input = { source: this.source, state: this.migrationState, userId: identity.userId };
+      if ((await observeMember(this.migrationState, identity.userId)).activeAttemptId
+        && await requestLegacyMemberCheckpoint(input) !== "absent") return { frozen: false };
     } else await this.requireFleetDrainingGate();
     return this.freezeLegacyObject(identity?.migrationId);
   }
