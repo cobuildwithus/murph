@@ -261,7 +261,14 @@ A committed or ambiguous freeze requires same-token roll-forward recovery.
 
 Deletion admitted before local closure must settle before source reservation.
 Deletion after closure retains its canonical cleanup receipt and retries; it
-cannot clear the frozen source. Empty-object migration closes callbacks, waits
+cannot clear the frozen source. A pending deletion retry also advances one existing
+per-member handoff continuation within its original five-second budget. This
+keeps a member deleted before first use recoverable after its processing wake
+is gone. The response stays retryable; a later request re-reads authority before
+deleting. Ordinary cleanup retries reuse the already-decrypted payload to retain
+up to 100 runtime identities and their cursor in one short transaction. They can
+finish after the operator stops; vendor completion alone cannot erase unretained
+identities. Existing Postgres owners are never reset by identity retention. Empty-object migration closes callbacks, waits
 for admitted work and rechecks emptiness before persisting a freeze. It exports
 four hashed empty pages without constructing a runner or initializing SQL.
 Account for empty and deleted/resource-only objects as well as active members.
@@ -321,7 +328,8 @@ member inventories and resource rows remain private.
 actual source bridge and Web command handlers against isolated loopback Postgres.
 It proves busy-source readiness/quiescence, lost import acknowledgement, compatible
 release reload, generation/token and encrypted mailbox continuity, one activation
-wake, unrelated-member admission and automatic new-member empty activation without
+wake, unrelated-member admission, cleanup-driven deleted-member continuation
+and automatic new-member empty activation without
 advancing the baseline canary. Transport and external checkpoint completion are
 simulated. This proof does not measure container replies, production handoff time
 or real R2 interoperability; those remain rollout gates.

@@ -1,7 +1,7 @@
 import { listUnenrolledRuntimeMembersTx } from "./runtime-migration-enrollment";
 import type { HostedRuntimeCutover, Prisma, PrismaClient } from "@prisma/client";
 import { matchesHostedRuntimeMigrationRelease, type HostedRuntimeMigrationIdentity } from "@murphai/hosted-execution/runtime-migration";
-import { readHostedAccountCleanupRuntimePage } from "../hosted-privacy/account-deletion-cleanup";
+import { readHostedAccountCleanupRuntimePage, retainHostedAccountCleanupRuntimePageTx } from "../hosted-privacy/account-deletion-cleanup";
 
 /** One ciphertext and at most 100 retained identities per request. Decrypt
  * before taking the campaign/receipt locks; repeat its identity check inside
@@ -20,19 +20,7 @@ export async function prepareRuntimeCleanupEnrollment(prisma: PrismaClient, iden
   return { cleanup, ...page };
 }
 
-export async function retainRuntimeCleanupEnrollmentTx(tx: Prisma.TransactionClient,
-  prepared: Awaited<ReturnType<typeof prepareRuntimeCleanupEnrollment>>) {
-  if (!prepared) return;
-  const { cleanup } = prepared;
-  // CAS fences changed ciphertext, a concurrent continuation or receipt removal.
-  // Cursor and independent owners commit together; retries may safely lose CAS.
-  const advanced = await tx.hostedAccountDeletionCleanup.updateMany({
-    where: { id: cleanup.id, environment: cleanup.environment, kmsKeyName: cleanup.kmsKeyName,
-      payloadCiphertext: cleanup.payloadCiphertext, runtimeMigrationNextIndex: cleanup.runtimeMigrationNextIndex },
-    data: { runtimeMigrationNextIndex: prepared.nextIndex },
-  });
-  if (advanced.count) await tx.hostedRuntimeOwner.createMany({ data: prepared.userIds.map(userId => ({ userId })), skipDuplicates: true });
-}
+export const retainRuntimeCleanupEnrollmentTx = retainHostedAccountCleanupRuntimePageTx;
 
 export async function hasPendingRuntimeCleanupEnrollment(tx: Prisma.TransactionClient) {
   return await tx.hostedAccountDeletionCleanup.findFirst({ where: { runtimeMigrationNextIndex: { not: null } }, select: { id: true } }) !== null;

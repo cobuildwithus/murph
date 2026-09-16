@@ -600,14 +600,24 @@ macOS Bash 3.2. Private full verification and a new final review are pending.
 No production migration has started.
 
 
-### Next lifecycle correction identified during candidate review
+### Cleanup lifecycle corrections verified
 
-The campaign intentionally remains rolling after member migration. New cleanup
-receipts currently default to an unfinished enrollment cursor, but only operator
-census advances it; ordinary cleanup could therefore retain later receipts
-indefinitely after the operator finishes. Also, user-data deletion observes a
-pending member as retryable without driving the existing first-use continuation;
-a member deleted before first use may have no processing retry left to finish
-its source retirement. Prove and correct both through the existing cleanup retry
-and per-member continuation owners before declaring the candidate complete. Do
-not relax source proof or activate a deleted identity by absence.
+Two failing-before cases reproduced later cleanup being retained indefinitely
+and a member deleted before first use having no processing retry to advance its
+handoff. Ordinary cleanup now reuses its decrypted payload and the existing
+receipt/owner transaction to retain at most 100 identities per retry. Its cursor
+and existing retry schedule own continuation after the operator stops. The
+actual deletion HTTP handler advances one existing per-member continuation under
+its original five-second budget, returns retryable, and re-reads routing on the
+next request. It never treats member deletion as proof of an empty source.
+
+Validation passes: 30 Web cases (10 real Postgres cleanup cases and 20 existing
+account-cleanup owner cases), seven Worker cases including the composed protocol
+scenario, and Web/Worker typechecks, changed-source complexity and documentation drift.
+The account-cleanup hotspot decreases from 32 to 30. The composed scenario now deletes a pending
+member before first use and completes its exact source activation through actual
+deletion requests while another baseline member remains legacy; no wake is
+created for the deleted member. The cleanup proof covers one and 201 retained
+identities, final receipt deletion and preservation of an existing Postgres
+owner. External checkpoint completion remains simulated; real container replies,
+R2 interoperability, handoff timing, final review/CI and deployment remain gates.

@@ -1,3 +1,4 @@
+import type { HostedRuntimeOwnerCommand, HostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
 import type { HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
@@ -5,6 +6,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 // cross-app seam. Worker compilation must not adopt Web's private path aliases.
 const prismaModule = new URL("../../src/lib/prisma.ts", import.meta.url).href;
 const migrationModule = new URL("../../src/lib/hosted-execution/runtime-migration.ts", import.meta.url).href;
+const ownerModule = new URL("../../src/lib/hosted-execution/runtime-owner-control.ts", import.meta.url).href;
 const cutoverModule = new URL("../../src/lib/hosted-execution/runtime-cutover.ts", import.meta.url).href;
 const cryptoModule = new URL("../../src/lib/hosted-crypto/domain-root-store.ts", import.meta.url).href;
 type Backend = "legacy" | "draining" | "postgres";
@@ -25,6 +27,9 @@ export async function createHostedRuntimeMigrationRehearsalForTest(input: {
   const { executeHostedRuntimeMigrationCommand } = await import(migrationModule) as {
     executeHostedRuntimeMigrationCommand(input: { prisma: PrismaClient; command: HostedRuntimeMigrationCommand }): Promise<Record<string, unknown>>;
   };
+  const { executeHostedRuntimeOwnerCommand } = await import(ownerModule) as {
+    executeHostedRuntimeOwnerCommand(input: { prisma: PrismaClient; userId: string; command: HostedRuntimeOwnerCommand }): Promise<HostedRuntimeOwnerResponse>;
+  };
   const { lockHostedRuntimeMemberCutoverTx, readHostedRuntimeMemberBackend } = await import(cutoverModule) as {
     lockHostedRuntimeMemberCutoverTx(tx: Prisma.TransactionClient, userId: string): Promise<Backend>;
     readHostedRuntimeMemberBackend(prisma: PrismaClient, userId: string): Promise<Backend>;
@@ -39,6 +44,7 @@ export async function createHostedRuntimeMigrationRehearsalForTest(input: {
   }
   return {
     prisma,
+    ownerCommand: (userId: string, command: HostedRuntimeOwnerCommand) => executeHostedRuntimeOwnerCommand({ prisma, userId, command }),
     command: (command: HostedRuntimeMigrationCommand) => executeHostedRuntimeMigrationCommand({ prisma, command }),
     backend: (userId: string) => readHostedRuntimeMemberBackend(prisma, userId),
     callback: (userId: string) => prisma.$transaction(tx => lockHostedRuntimeMemberCutoverTx(tx, userId)),

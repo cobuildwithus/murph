@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { appendHostedExecutionWakeForTest, createHostedRuntimeMigrationRehearsalForTest } from "#hosted-web-testing";
 import { buildHostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
 import { HOSTED_RUNTIME_NAMESPACE_PROBE_NAME, type HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
+import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
+import { handleUserDataDeleteRoute } from "../src/worker/route-handlers/user-data-delete.ts";
 import { UserRunnerDurableObject } from "../src/worker/user-runner-durable-object.ts";
 import { advanceRuntimeMemberMigration } from "../src/worker/route-handlers/runtime-member-migration.ts";
 import { progressRuntimeMigrationForMember } from "../src/runtime-migration-progress.ts";
@@ -13,11 +15,12 @@ import type { WorkerEnvironmentSource } from "../src/worker-routes/shared.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
-const transport = vi.hoisted(() => ({ command: vi.fn() }));
+const transport = vi.hoisted(() => ({ command: vi.fn(), owner: vi.fn() }));
 vi.mock("../src/runtime-migration-client.ts", () => ({ commandHostedRuntimeMigration: transport.command }));
+vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: transport.owner }));
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
-const ids = ["selected", "unrelated", "new"].map(role => `synthetic_composed_${role}_${randomUUID()}`);
-const objects = ["a", "b", "c"].map(c => c.repeat(64));
+const ids = ["selected", "unrelated", "new", "deleted"].map(role => `synthetic_composed_${role}_${randomUUID()}`);
+const objects = ["a", "b", "c", "d"].map(c => c.repeat(64));
 const campaign = { namespaceId: "synthetic_composed_namespace", workerVersion: "synthetic_release_1" };
 let web: Awaited<ReturnType<typeof createHostedRuntimeMigrationRehearsalForTest>>;
 const sources = new Map<string, UserRunnerDurableObject>();
@@ -82,6 +85,7 @@ describe.skipIf(!enabled)("composed SQLite source to Postgres member handoff", (
     configureLocalCrypto();
     web = await createHostedRuntimeMigrationRehearsalForTest({ databaseUrl: process.env.DATABASE_URL ?? "", userIds: ids, objectIds: objects });
     await web.seed(ids[0]!); await web.seed(ids[1]!);
+    transport.owner.mockImplementation(({ userId, command }: { userId: string; command: HostedRuntimeOwnerCommand }) => web.ownerCommand(userId, command));
     transport.command.mockImplementation(({ command: input }: { command: HostedRuntimeMigrationCommand }) => command(input));
   });
   afterAll(async () => { await web?.close(); vi.unstubAllEnvs(); });
@@ -148,6 +152,20 @@ describe.skipIf(!enabled)("composed SQLite source to Postgres member handoff", (
     expect(await web.backend(ids[2]!)).toBe("postgres");
     expect(await web.prisma.hostedMailboxItem.count({ where: { userId: ids[2]! } })).toBe(1);
     expect(await web.prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).toMatchObject({ inventoryHash: sealed.inventoryHash, inventoryCount: sealed.inventoryCount });
+    // Deletion removes the processing wake owner, so its existing cleanup HTTP
+    // retries must finish pending first use without an operator or new scheduler.
+    await web.seed(ids[3]!); await web.prisma.hostedMember.delete({ where: { id: ids[3]! } });
+    const deleted = legacySource(3, false); deleted.sql.exec("DELETE FROM runner_meta");
+    for (let page = 0; page < 5; page++) {
+      const response = await handleUserDataDeleteRoute({ env: source,
+        request: new Request("https://worker.example.test/internal/users/synthetic/data", { method: "DELETE", body: "{}" }),
+      } as never, ids[3]!);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ code: "runtime_migration_pending" });
+      expect(await web.backend(ids[1]!)).toBe("legacy");
+    }
+    expect(await web.backend(ids[3]!)).toBe("postgres");
+    expect(await web.prisma.hostedMailboxItem.count({ where: { userId: ids[3]! } })).toBe(0);
     expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: objects[1] });
   }, 30_000);
 });

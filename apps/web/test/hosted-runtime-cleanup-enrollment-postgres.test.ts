@@ -7,6 +7,8 @@ import { executeHostedRuntimeMigrationCommand } from "@/src/lib/hosted-execution
 
 import { prepareRuntimeCleanupEnrollment, retainRuntimeCleanupEnrollmentTx } from "@/src/lib/hosted-execution/runtime-migration-cleanup";
 
+import { runHostedAccountDeletionCleanup } from "@/src/lib/hosted-privacy/account-deletion-cleanup";
+
 const crypto = vi.hoisted(() => ({ decrypt: vi.fn() }));
 vi.mock("@/src/lib/hosted-crypto/env", () => ({ getHostedWebCryptoConfig: () => ({ env: "test", gcpKms: { decrypt: crypto.decrypt } }) }));
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -167,4 +169,17 @@ describe.skipIf(!enabled)("historical encrypted runtime enrollment", () => {
     await expect(prisma.hostedAccountDeletionCleanup.delete({ where: { id: receipt.id } })).resolves.toMatchObject({ id: receipt.id });
     expect(crypto.decrypt).not.toHaveBeenCalled();
   });
+  it.each([1, 201])("finishes later cleanup for %i identities through ordinary retries after the operator stops", async count => {
+    await command({ operation: "begin_rolling", ...campaign });
+    const ids = identities(count); const receipt = await cleanup(ids);
+    await prisma.hostedRuntimeOwner.create({ data: { userId: ids[0]!, migrationPhase: "postgres", generation: 11n } });
+    for (let retained = 0; retained < count; retained += 100) {
+      expect(await runHostedAccountDeletionCleanup({ prisma, cleanupId: receipt.id })).toMatchObject({ cleanupPending: retained + 100 < count });
+      expect(await prisma.hostedRuntimeOwner.count({ where: { userId: { in: ids } } })).toBe(Math.min(count, retained + 100));
+    }
+    expect(await prisma.hostedAccountDeletionCleanup.findUnique({ where: { id: receipt.id } })).toBeNull();
+    expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId: ids[0]! } })).toMatchObject({ migrationPhase: "postgres", generation: 11n });
+    expect(await prisma.hostedRuntimeLegacyImport.count()).toBe(0);
+  });
+
 });
