@@ -150,6 +150,10 @@ by `agent-docs/RELIABILITY.md`; connection ownership in diagnostic events is
 specified in `docs/hosted-runtime-log-database.md`. Classifier, bounded-reader and PostgreSQL proof
 are indexed in `agent-docs/references/testing-ci-map.md`.
 
+SpO2/ECG validation telemetry, retained retry ownership, and review evidence
+for preserving collection scope are recorded in
+[`2026-09-16-junction-validation-pr.md`](exec-plans/completed/2026-09-16-junction-validation-pr.md).
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

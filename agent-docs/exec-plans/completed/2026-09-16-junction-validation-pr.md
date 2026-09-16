@@ -1,6 +1,6 @@
 # Complete Junction validation recovery and PR review
 
-Status: active
+Status: completed
 Created: 2026-09-16
 Updated: 2026-09-16
 
@@ -38,7 +38,8 @@ Publish and review the SpO2/ECG diagnostics and recovery change while preserving
 
 - Existing implementation: 103 distinct focused tests and importers, device-syncd, assistant-runtime, and Web typechecks passed before this follow-up.
 - Follow-up passed: all 63 SQLite store tests, nine targeted service retention/disconnect tests, two hosted cold-continuation tests, and device-syncd typecheck. The new two-case regression failed before the fix at retained dedupe ownership. Complexity guard passed; final privacy/diff review found no private evidence in artifacts.
-- PR CI owns broad proof; production recovery remains unverified until deployment and normal replay of already terminal jobs.
+- Required CI passed on the reviewed head, including both host matrices and the hosted billing boundary. Temporal compatibility passed after rerunning an attestation whose protected private base advanced during execution. Broad release coverage was still running at plan closure; the PR owns final-head CI status.
+- Production recovery remains unverified until deployment and normal replay of already terminal jobs.
 
 ## Sources
 
@@ -48,5 +49,8 @@ Publish and review the SpO2/ECG diagnostics and recovery change while preserving
 
 ## PR tracking
 
-- Draft PR: https://github.com/cobuildwithus/murph/pull/3501
-- Parent review and focused proof passed. ReviewGPT and required CI start on the stable pushed head after readiness.
+- PR: https://github.com/cobuildwithus/murph/pull/3501
+- Parent candidate and final review passed with no unresolved findings. Collection scope, validation bounds, complete-day authority, ECG identity, disconnect fences, and original retry payloads are preserved.
+- ReviewGPT round 1: validated PASS on `2e542e489b773d9114889cad3279e86c4bb82e0d`; full snapshot, sensitive context, all 20 changed files. Hercules selected `gpt-6-pro`, and response metadata confirmed that model. The completed response was captured 608.8 seconds after response waiting began; its hash and preceding accepted-turn identity match the capture metadata. The review inspected the composed owners and ran independent in-memory store checks and retry-policy combinations. No findings were received, accepted, or rejected; no remediation or retrospective was required.
+- Review response and capture artifacts remain ignored local evidence. This plan closure and its index link change explanatory documentation only, so another substantive review is not required. Required CI must pass on the final pushed head before handoff; its live result remains on the PR.
+Completed: 2026-09-16
