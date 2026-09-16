@@ -323,7 +323,10 @@ OperationOutcome warnings/errors mark coverage incomplete; empty uncertain
 searches never establish allergy absence. SMART `.s` grants authorize search.
 SUBSETTED resources and unorderable same-identity siblings remain raw evidence
 with an explicit incomplete disposition, leaving validated canonical facts
-unchanged. Comparable clinical holds retain the existing revision protection.
+unchanged. A resource that omits `meta.lastUpdated` takes its batch manifest
+`fetchedAt` as the source revision, so later retrievals supersede earlier ones
+and replays stay idempotent. Comparable clinical holds retain the existing
+revision protection.
 Web accepts partial received-page counts below served counts, rejects
 excess counts, and records same-generation saved counts after authorization
 ends without restoring access. Permanent outcome conflicts leave the mailbox

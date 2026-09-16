@@ -4879,37 +4879,152 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     }
   });
 
-  it("routes resources without provider freshness to review", async () => {
+  it("imports resources without meta.lastUpdated at the retrieval revision", async () => {
     const vaultRoot = await writeClinicalFixture({
+      addDefaultRevision: false,
+      manifest: { fetchedAt: "2026-07-03T08:00:00.000Z" },
       resourceFiles: [{
         resourceType: "Observation",
         relativePath: "Observation/page-1.json",
         count: 1,
       }],
+      pages: { "Observation/page-1.json": heartRateResource("missing-provider-freshness") },
+    });
+
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toEqual([
+      expect.objectContaining({
+        kind: "measurement",
+        externalRef: expect.objectContaining({
+          resourceType: "observation",
+          resourceId: "missing-provider-freshness",
+          version: "2026-07-03T08:00:00.000Z",
+        }),
+      }),
+    ]);
+    expect(executableDecisions(plan)).toHaveLength(1);
+  });
+
+  it("accepts FHIR ids longer than 64 characters for every resource type", async () => {
+    const longId = (prefix: string) => `${prefix}${"a1".repeat(44)}`.slice(0, 88);
+    const observationId = longId("e");
+    const conditionId = longId("f");
+    const allergyId = longId("g");
+    expect([observationId, conditionId, allergyId].map((id) => id.length)).toEqual([88, 88, 88]);
+    const vaultRoot = await writeClinicalFixture({
+      addDefaultRevision: false,
+      resourceFiles: [
+        { resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 },
+        { resourceType: "Condition", relativePath: "Condition/page-1.json", count: 1 },
+        { resourceType: "AllergyIntolerance", relativePath: "AllergyIntolerance/page-1.json", count: 1 },
+      ],
       pages: {
-        "Observation/page-1.json": {
-          resourceType: "Observation",
-          id: "missing-provider-freshness",
-          meta: null,
-          status: "final",
-          effectiveDateTime: "2026-07-01T12:00:00.000Z",
-          code: {
-            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
-          },
-          valueQuantity: { value: 70, unit: "bpm" },
+        "Observation/page-1.json": heartRateResource(observationId),
+        "Condition/page-1.json": { resourceType: "Condition", id: conditionId, code: { text: "Hypertension" }, recordedDate: "2026-06-30" },
+        "AllergyIntolerance/page-1.json": {
+          resourceType: "AllergyIntolerance",
+          id: allergyId,
+          code: { text: "Penicillin allergy" },
+          recordedDate: "2026-06-30",
         },
       },
     });
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan).map((payload) => payload.externalRef.resourceId)).toEqual([observationId, conditionId, allergyId]);
+    expect(upserts(plan).map((payload) => payload.evidence[0]?.sourceLabel)).toEqual([
+      `Observation/${observationId}`,
+      `Condition/${conditionId}`,
+      `AllergyIntolerance/${allergyId}`,
+    ]);
+  });
+
+  it("holds same-batch siblings that mix a resource revision with the retrieval fallback", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      addDefaultRevision: false,
+      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 2 }],
+      pages: {
+        "Observation/page-1.json": [
+          heartRateResource("mixed-revision-sibling"),
+          {
+            ...heartRateResource("mixed-revision-sibling"),
+            meta: { lastUpdated: "2026-07-02T12:00:00.000Z" },
+            valueQuantity: { value: 80, unit: "bpm" },
+          },
+        ],
+      },
+    });
+
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(upserts(plan)).toEqual([]);
-    expect(reviews(plan)).toEqual([
-      expect.objectContaining({
-        resourceId: "missing-provider-freshness",
-        reason: "FHIR resource lastUpdated is missing",
-      }),
+    expect(reviews(plan).map(({ disposition, reason }) => ({ disposition, reason }))).toEqual([
+      { disposition: "incomplete", reason: "FHIR resource revision cannot be ordered against a same-identity sibling" },
+      { disposition: "incomplete", reason: "FHIR resource revision cannot be ordered against a same-identity sibling" },
     ]);
     expect(executableDecisions(plan)).toEqual([]);
+  });
+
+  it("orders retrieval-revision fallbacks through core without duplicates or resurrection", async () => {
+    const resourceId = "retrieval-revision-heart-rate";
+    const lookup = {
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+      resourceType: "observation",
+      resourceId,
+    };
+    const resourceFiles = [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }];
+    const heartRate = (value: number, status = "final") => ({
+      ...heartRateResource(resourceId),
+      status,
+      valueQuantity: { value, unit: "bpm" },
+    });
+    const retrieval = async (retrievalJobId: string, fetchedAt: string, resource: Record<string, unknown>) => {
+      const manifestPath = `raw/clinical/fhir/clinical-connection-1/${retrievalJobId}/manifest.json`;
+      const vaultRoot = await writeClinicalFixture({
+        addDefaultRevision: false,
+        manifest: { fetchedAt, retrievalJobId },
+        manifestPath,
+        resourceFiles,
+        pages: { "Observation/page-1.json": resource },
+      });
+      return executableDecisions(await planFromFixture({ manifestPath, vaultRoot }));
+    };
+    const canonicalVaultRoot = await initializeCanonicalFixtureVault();
+    const apply = (decisions: ReturnType<typeof executableDecisions>) =>
+      importEventBatch({ vaultRoot: canonicalVaultRoot, decisions, apply: true });
+    const liveVersion = async () =>
+      (await findEventByExternalRef({ vaultRoot: canonicalVaultRoot, ...lookup }))?.externalRef?.version ?? null;
+
+    const first = await apply(await retrieval("retrieval-job-1", "2026-07-01T12:00:00.000Z", heartRate(70)));
+    expect(first.createdCount).toBe(1);
+    expect(await liveVersion()).toBe("2026-07-01T12:00:00.000Z");
+
+    // The same retrieval re-imported (different raw path, same content) is a replay.
+    const replay = await apply(await retrieval("retrieval-job-1-replay", "2026-07-01T12:00:00.000Z", heartRate(70)));
+    expect(replay).toMatchObject({ applied: false, createdCount: 0, skippedExistingCount: 1, supersededCount: 0 });
+
+    // A later retrieval supersedes the earlier one in place.
+    const later = await apply(await retrieval("retrieval-job-2", "2026-07-02T12:00:00.000Z", heartRate(72)));
+    expect(later).toMatchObject({ createdCount: 0, supersededCount: 1 });
+    expect(await liveVersion()).toBe("2026-07-02T12:00:00.000Z");
+
+    // An earlier retrieval replayed afterwards is stale and cannot roll the fact back.
+    const stale = await apply(await retrieval("retrieval-job-3", "2026-07-01T12:00:00.000Z", heartRate(70)));
+    expect(stale).toMatchObject({ applied: false, skippedExistingCount: 1, supersededCount: 0 });
+    expect(await liveVersion()).toBe("2026-07-02T12:00:00.000Z");
+
+    // A later non-importable representation withdraws the fact; an older delayed
+    // revision cannot resurrect it; a newer retrieval can.
+    const hold = await apply(await retrieval("retrieval-job-4", "2026-07-03T12:00:00.000Z", heartRate(72, "preliminary")));
+    expect(hold.retractedCount).toBe(1);
+    expect(await liveVersion()).toBeNull();
+    const delayed = await apply(await retrieval("retrieval-job-5", "2026-07-02T12:00:00.000Z", heartRate(72)));
+    expect(delayed).toMatchObject({ applied: false, createdCount: 0, supersededCount: 0 });
+    expect(await liveVersion()).toBeNull();
+    const recovery = await apply(await retrieval("retrieval-job-6", "2026-07-04T12:00:00.000Z", heartRate(74)));
+    expect(recovery.createdCount).toBe(1);
+    expect(await liveVersion()).toBe("2026-07-04T12:00:00.000Z");
   });
 
   it("routes oversized FHIR ids and source revisions to review without aborting the plan", async () => {
@@ -4952,12 +5067,13 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
     expect(upserts(plan)).toEqual([]);
     expect(retractions(plan)).toEqual([]);
-    expect(reviews(plan).map((decision) => decision.reason)).toEqual([
-      "FHIR resource id is missing",
-      "FHIR resource id is missing",
-      "FHIR resource lastUpdated is missing",
-      "FHIR resource id is missing",
+    expect(reviews(plan).map((decision) => [decision.disposition, decision.reason])).toEqual([
+      ["raw-only", "FHIR resource id is missing"],
+      ["raw-only", "FHIR resource id is missing"],
+      ["incomplete", "FHIR resource lastUpdated is not a comparable revision"],
+      ["raw-only", "FHIR resource id is missing"],
     ]);
+    expect(executableDecisions(plan)).toEqual([]);
   });
 
   it("namespaces FHIR external refs by source base and patient", async () => {
@@ -5090,6 +5206,8 @@ async function initializeCanonicalFixtureVault(): Promise<string> {
 
 async function writeClinicalFixture(input: {
   addDefaultPatientReference?: boolean;
+  /** Mirror servers that omit `meta.lastUpdated` entirely when false. */
+  addDefaultRevision?: boolean;
   manifest?: {
     completedResourceTypes?: string[];
     connectionId?: string;
@@ -5136,6 +5254,7 @@ async function writeClinicalFixture(input: {
         value,
         patientId,
         input.addDefaultPatientReference ?? true,
+        input.addDefaultRevision ?? true,
       )),
     ]),
   );
@@ -5182,10 +5301,11 @@ function withClinicalFixtureDefaults(
   value: unknown,
   patientId: string,
   addDefaultPatientReference: boolean,
+  addDefaultRevision = true,
 ): unknown {
   if (Array.isArray(value)) {
     return value.map((entry) =>
-      withClinicalFixtureDefaults(entry, patientId, addDefaultPatientReference)
+      withClinicalFixtureDefaults(entry, patientId, addDefaultPatientReference, addDefaultRevision)
     );
   }
   if (!isFixtureRecord(value) || typeof value.resourceType !== "string") {
@@ -5204,6 +5324,7 @@ function withClinicalFixtureDefaults(
                       entry.resource,
                       patientId,
                       addDefaultPatientReference,
+                      addDefaultRevision,
                     ),
                   }
                 : entry
@@ -5214,7 +5335,9 @@ function withClinicalFixtureDefaults(
   }
 
   const resource = { ...value };
-  if (resource.meta === undefined) {
+  if (!addDefaultRevision) {
+    // Leave `meta` untouched (absent stays absent).
+  } else if (resource.meta === undefined) {
     resource.meta = { lastUpdated: "2026-07-01T12:00:00.000Z" };
   } else if (isFixtureRecord(resource.meta) && resource.meta.lastUpdated === undefined) {
     resource.meta = { ...resource.meta, lastUpdated: "2026-07-01T12:00:00.000Z" };

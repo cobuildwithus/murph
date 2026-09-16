@@ -757,7 +757,7 @@ describe("importClinicalFhirSnapshot", () => {
     }));
   });
 
-  it("retains evidence without a comparable revision and leaves canonical facts unchanged", async () => {
+  it("imports a resource without meta.lastUpdated at the retrieval revision", async () => {
     const observation: Record<string, unknown> = heartRateObservation("missing-source-revision");
     delete observation.meta;
     const input = await createSnapshotInput({
@@ -769,10 +769,18 @@ describe("importClinicalFhirSnapshot", () => {
     });
 
     await expect(importClinicalFhirSnapshot(input)).resolves.toMatchObject({
-      canonical: { createdCount: 0, retractedCount: 0, supersededCount: 0 },
-      incompleteRevisionCount: 1,
+      canonical: { createdCount: 1, retractedCount: 0, supersededCount: 0 },
+      incompleteRevisionCount: 0,
       rawFileCount: 2,
     });
+    expect(await findEventByExternalRef({
+      vaultRoot: input.vaultRoot,
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+      resourceType: "observation",
+      resourceId: "missing-source-revision",
+    })).toEqual(expect.objectContaining({
+      externalRef: expect.objectContaining({ version: "2026-07-10T12:00:00.000Z" }),
+    }));
   });
 
   it.each(["2026-07-10T12:00:00.000Z", "2026-07-12T12:00:00.000Z"])("keeps validated facts when a SUBSETTED revision arrives at %s", async (revision) => {
@@ -882,11 +890,12 @@ describe("importClinicalFhirSnapshot", () => {
   });
 
   it("preserves review-only evidence without attempting an empty canonical batch", async () => {
+    // Without an id the resource has no source identity, so its review stays
+    // raw-only evidence instead of a comparable hold.
     const input = await createSnapshotInput({
       pages: [{queryScopeId: "condition", sliceId: "whole",
         content: fhirBundle([{
           resourceType: "Condition",
-          id: "condition-1",
           subject: { reference: `Patient/${PATIENT_ID}` },
           code: { text: "Example condition" },
         }]),
