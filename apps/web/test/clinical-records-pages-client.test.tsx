@@ -118,6 +118,48 @@ afterEach(async () => {
 });
 
 describe("Clinical Records connect page", () => {
+  it("debounces typing, aborts superseded searches, and never restores an older result", async () => {
+    vi.useFakeTimers();
+    const { ProviderSearch } = await import("../app/(dashboard)/records/connect/records-connect-client");
+    const pending: Array<(value: unknown) => void> = [];
+    mocks.requestHostedOnboardingJson.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    const rendered = await renderClientComponent(createElement(ProviderSearch, {
+      intentClaim: `cr_${"a".repeat(32)}`, onConsentRequired: () => {},
+    }));
+    cleanup = rendered.cleanup;
+    const input = rendered.container.querySelector<HTMLInputElement>('input[name="provider-search"]')!;
+    await act(async () => {
+      setInputValue(rendered.window, input, "Pi");
+      await vi.advanceTimersByTimeAsync(150);
+      setInputValue(rendered.window, input, "Piedmont");
+      await vi.advanceTimersByTimeAsync(299);
+    });
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    const focusSpy = vi.spyOn(rendered.window.HTMLElement.prototype, "focus");
+    const firstSignal = mocks.requestHostedOnboardingJson.mock.calls[0]?.[0].signal as AbortSignal;
+    expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0].payload).toEqual({ query: "Piedmont" });
+    await act(async () => {
+      setInputValue(rendered.window, input, "Mayo");
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(firstSignal.aborted).toBe(true);
+    const provider = { brandName: "Mayo Clinic", id: "epic-test-mayo", facilities: [], sourceSystem: "epic-fhir" };
+    await act(async () => { pending[1]?.({ ok: true, directoryVersion: "test", providers: [provider] }); });
+    await act(async () => { pending[0]?.({ ok: true, directoryVersion: "test", providers: [{ ...provider, brandName: "Piedmont Healthcare" }] }); });
+    expect(rendered.container.textContent).toContain("Mayo Clinic");
+    expect(rendered.container.textContent).not.toContain("Piedmont Healthcare");
+    expect(focusSpy).not.toHaveBeenCalled();
+    await act(async () => {
+      setInputValue(rendered.window, input, "Cle");
+      setInputValue(rendered.window, input, "");
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    expect(rendered.container.textContent).not.toContain("Mayo Clinic");
+    expect(rendered.container.textContent).toContain("Start typing");
+  });
+
   it("announces preparation while the private connection claim is loading", async () => {
     const queueMicrotask = vi.fn();
     vi.stubGlobal("queueMicrotask", queueMicrotask);
@@ -285,9 +327,9 @@ describe("Clinical Records connect page", () => {
     expect(rendered.replaceState).toHaveBeenCalled();
     expect(String(rendered.replaceState.mock.lastCall?.[2])).not.toContain(claim);
     await clickButton(rendered, "Accept health-data consent");
-    expect(rendered.container.textContent).toContain("Where do you get care?");
+    expect(rendered.container.textContent).toContain("Find your hospital or clinic");
     expect(rendered.container.querySelector('[aria-current="step"]')).toBeNull();
-    const searchInput = rendered.container.querySelector("#clinical-provider-search");
+    const searchInput = rendered.container.querySelector('input[name="provider-search"]');
     assert.ok(searchInput instanceof rendered.window.HTMLInputElement);
     await act(async () => {
       setInputValue(rendered.window, searchInput, " Piedmont ");
@@ -298,13 +340,14 @@ describe("Clinical Records connect page", () => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
         method: "POST",
         payload: { query: "Piedmont" },
+        signal: expect.any(AbortSignal),
         url: "/api/clinical-records/providers/search",
       });
     });
     expect(JSON.stringify(mocks.requestHostedOnboardingJson.mock.calls[0])).not.toContain(claim);
     expect(rendered.container.textContent).toContain("Piedmont Healthcare");
 
-    await clickButton(rendered, "Continue to portal");
+    await clickButton(rendered, "Continue to Piedmont Healthcare patient portal");
 
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
@@ -355,7 +398,7 @@ describe("Clinical Records connect page", () => {
     cleanup = rendered.cleanup;
 
     await clickButton(rendered, "Accept health-data consent");
-    const input = rendered.container.querySelector("#clinical-provider-search");
+    const input = rendered.container.querySelector('input[name="provider-search"]');
     assert.ok(input instanceof rendered.window.HTMLInputElement);
     await act(async () => {
       setInputValue(rendered.window, input, "Atlanta");
@@ -375,7 +418,7 @@ describe("Clinical Records connect page", () => {
     });
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {
-      expect(input.hasAttribute("readOnly")).toBe(true);
+      expect(input.hasAttribute("readOnly")).toBe(false);
     });
 
     await restoreFromBackForwardCache(rendered);
@@ -388,7 +431,7 @@ describe("Clinical Records connect page", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(rendered.container.textContent).not.toContain("No matches");
+    expect(rendered.container.textContent).not.toContain("No matching providers");
     expect(rendered.container.textContent).not.toContain("This portal may not be supported");
     await vi.waitFor(() => {
       expect(input.hasAttribute("readOnly")).toBe(false);
@@ -431,7 +474,7 @@ describe("Clinical Records connect page", () => {
     cleanup = rendered.cleanup;
 
     await clickButton(rendered, "Accept health-data consent");
-    const input = rendered.container.querySelector("#clinical-provider-search");
+    const input = rendered.container.querySelector('input[name="provider-search"]');
     assert.ok(input instanceof rendered.window.HTMLInputElement);
     await act(async () => {
       setInputValue(rendered.window, input, "Piedmont");
@@ -441,7 +484,7 @@ describe("Clinical Records connect page", () => {
       expect(rendered.container.textContent).toContain("Piedmont Healthcare");
     });
 
-    await clickButton(rendered, "Continue to portal");
+    await clickButton(rendered, "Continue to Piedmont Healthcare patient portal");
     await vi.waitFor(() => {
       expect(rendered.container.textContent).toContain("Opening portal");
     });
@@ -497,7 +540,7 @@ describe("Clinical Records connect page", () => {
     cleanup = rendered.cleanup;
 
     await clickButton(rendered, "Accept health-data consent");
-    const input = rendered.container.querySelector("#clinical-provider-search");
+    const input = rendered.container.querySelector('input[name="provider-search"]');
     assert.ok(input instanceof rendered.window.HTMLInputElement);
     await act(async () => {
       setInputValue(rendered.window, input, "Piedmont");
@@ -507,15 +550,15 @@ describe("Clinical Records connect page", () => {
       expect(rendered.container.textContent).toContain("Piedmont Healthcare");
     });
 
-    const results = rendered.container.querySelector("div[aria-busy]");
+    const results = rendered.container.querySelector('ul[aria-label="Matching hospitals and clinics"]');
     assert.ok(results instanceof rendered.window.HTMLElement);
     expect(results.getAttribute("aria-busy")).toBe("false");
-    expect(results.className).not.toContain("opacity-60");
+    expect(findButton(rendered, "Continue to Piedmont Healthcare patient portal").disabled).toBe(false);
 
     await submitProviderSearch(rendered);
 
     expect(results.getAttribute("aria-busy")).toBe("true");
-    expect(results.className).toContain("opacity-60");
+    expect(findButton(rendered, "Continue to Piedmont Healthcare patient portal").disabled).toBe(true);
 
     await act(async () => {
       resolveSecondSearch({ directoryVersion: "test-v1", ok: true, providers: [] });
@@ -523,9 +566,8 @@ describe("Clinical Records connect page", () => {
       await Promise.resolve();
     });
 
-    expect(rendered.container.textContent).toContain("No matches");
+    expect(rendered.container.textContent).toContain("No matching providers");
     expect(results.getAttribute("aria-busy")).toBe("false");
-    expect(results.className).not.toContain("opacity-60");
   });
 
   it("moves keyboard focus into the provider search field when it appears", async () => {
@@ -550,7 +592,7 @@ describe("Clinical Records connect page", () => {
     const focusSpy = vi.spyOn(rendered.window.HTMLInputElement.prototype, "focus");
     await clickButton(rendered, "Accept health-data consent");
 
-    const input = rendered.container.querySelector("#clinical-provider-search");
+    const input = rendered.container.querySelector('input[name="provider-search"]');
     assert.ok(input instanceof rendered.window.HTMLInputElement);
     expect(focusSpy.mock.instances).toContain(input);
   });
@@ -584,7 +626,7 @@ describe("Clinical Records connect page", () => {
     const focusSpy = vi.spyOn(rendered.window.HTMLInputElement.prototype, "focus");
     await clickButton(rendered, "Accept health-data consent");
 
-    const input = rendered.container.querySelector("#clinical-provider-search");
+    const input = rendered.container.querySelector('input[name="provider-search"]');
     assert.ok(input instanceof rendered.window.HTMLInputElement);
     expect(focusSpy.mock.instances).not.toContain(input);
   });
@@ -609,7 +651,7 @@ describe("Clinical Records connect page", () => {
     cleanup = rendered.cleanup;
 
     await clickButton(rendered, "Accept health-data consent");
-    const input = rendered.container.querySelector("#clinical-provider-search");
+    const input = rendered.container.querySelector('input[name="provider-search"]');
     assert.ok(input instanceof rendered.window.HTMLInputElement);
     expect(input.hasAttribute("required")).toBe(true);
     expect(mocks.inputProps).toHaveBeenCalledWith(expect.objectContaining({ maxLength: 120 }));
@@ -653,7 +695,7 @@ describe("Clinical Records connect page", () => {
     cleanup = rendered.cleanup;
 
     await clickButton(rendered, "Accept health-data consent");
-    const input = rendered.container.querySelector("#clinical-provider-search");
+    const input = rendered.container.querySelector('input[name="provider-search"]');
     const form = input?.closest("form");
     assert.ok(input instanceof rendered.window.HTMLInputElement);
     assert.ok(form);
@@ -698,12 +740,12 @@ describe("Clinical Records connect page", () => {
       intentClaim: claim, onConsentRequired: vi.fn(),
     }));
     cleanup = rendered.cleanup;
-    const input = rendered.container.querySelector("#clinical-provider-search");
+    const input = rendered.container.querySelector('input[name="provider-search"]');
     assert.ok(input instanceof rendered.window.HTMLInputElement);
     await act(async () => { setInputValue(rendered.window, input, "Example"); });
     await submitProviderSearch(rendered);
     const portalButtons = () => Array.from(rendered.container.querySelectorAll("button"))
-      .filter((button) => button.textContent?.includes("Continue to portal"));
+      .filter((button) => button.getAttribute("aria-label")?.startsWith("Continue to "));
     await vi.waitFor(() => { expect(portalButtons()).toHaveLength(2); });
     await act(async () => { portalButtons()[0]!.click(); });
     await vi.waitFor(() => {
@@ -757,7 +799,7 @@ describe("Clinical Records connect page", () => {
     cleanup = rendered.cleanup;
 
     await clickButton(rendered, "Accept health-data consent");
-    const input = rendered.container.querySelector("#clinical-provider-search");
+    const input = rendered.container.querySelector('input[name="provider-search"]');
     assert.ok(input instanceof rendered.window.HTMLInputElement);
     await act(async () => {
       setInputValue(rendered.window, input, "Piedmont");
@@ -767,7 +809,7 @@ describe("Clinical Records connect page", () => {
       expect(rendered.container.textContent).toContain("Piedmont Healthcare");
     });
 
-    await clickButton(rendered, "Continue to portal");
+    await clickButton(rendered, "Continue to Piedmont Healthcare patient portal");
 
     await vi.waitFor(() => {
       expect(rendered.container.textContent).toContain("Connection link unavailable");
@@ -811,7 +853,7 @@ describe("Clinical Records connect page", () => {
     cleanup = rendered.cleanup;
 
     await clickButton(rendered, "Accept health-data consent");
-    const input = rendered.container.querySelector("#clinical-provider-search");
+    const input = rendered.container.querySelector('input[name="provider-search"]');
     assert.ok(input instanceof rendered.window.HTMLInputElement);
     await act(async () => {
       setInputValue(rendered.window, input, "Piedmont");
@@ -820,7 +862,7 @@ describe("Clinical Records connect page", () => {
     await vi.waitFor(() => {
       expect(rendered.container.textContent).toContain("Piedmont Healthcare");
     });
-    await clickButton(rendered, "Continue to portal");
+    await clickButton(rendered, "Continue to Piedmont Healthcare patient portal");
     await vi.waitFor(() => {
       expect(rendered.container.textContent).toContain("Connection link unavailable");
     });
@@ -1412,7 +1454,7 @@ function findButton(
   label: string,
 ): HTMLButtonElement {
   const button = Array.from(rendered.container.querySelectorAll("button")).find(
-    (candidate) => candidate.textContent?.trim() === label,
+    (candidate) => candidate.textContent?.trim() === label || candidate.getAttribute("aria-label") === label,
   );
   assert.ok(button instanceof rendered.window.HTMLButtonElement, `Missing ${label} button`);
   return button;

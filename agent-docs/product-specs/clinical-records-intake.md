@@ -144,6 +144,19 @@ stable brand identifier, not an endpoint URL. All published facility tuples
 are retained so city/facility matches beyond the first visible results remain
 discoverable.
 
+The connect page searches after two typed characters and a 300 ms pause. A
+query change cancels the previous request and clears obsolete results; manual
+search, keyboard navigation, clear, and retry remain available. Selecting a
+provider still uses the existing single-use connection intent and portal flow.
+
+Provider logos are locally served static assets, matched by directory ID.
+The offline `node apps/web/scripts/import-epic-provider-logos.ts` refresh uses
+MyChart's public organization directory and documented official-site overrides.
+`public/clinical-provider-logos/sources.json` records provenance; the generated
+`provider-logos.json` maps IDs to content-hashed assets. No hospital search is
+sent to a branding service. Unknown or failed images show initials. SVG input
+is restricted to the exact reviewed official asset hash.
+
 Refresh the artifact from the repository root with:
 
 ```bash
@@ -171,8 +184,8 @@ Epic's official R4 sandbox. It uses only
 `epic-policy.ts` authors one ordered literal query catalog: stable ids,
 resource family, operation, fingerprint template, fixed search parameters,
 optional executed window, and registration API keys. Scopes, family order and
-frozen plans derive from that catalog. The default new plan uses only the 24
-queries backed by the 42 verified USCDI-v3 automatic-distribution registrations.
+frozen plans derive from that catalog. The default new plan uses only the 25
+queries backed by the 44 verified USCDI-v3 automatic-distribution registrations.
 The full 40-query/70-registration catalog is available only to explicitly
 flagged hospital-approved providers using a separately configured client.
 The flag controls OAuth families, plan variants and page/document egress;
@@ -187,8 +200,8 @@ The full catalog includes radiology DocumentReferences (category `imaging-result
 external C-CDA documents (`external-ccda`), outside clinical notes
 (`external-clinical-note`) and outside vital signs (`external-vital-signs`).
 Each uses the authorized patient, normal pagination and its own stable query
-identity, with no client date cutoff. Outside vital signs remain enabled by
-default; the three additional document variants require hospital-approved mode.
+identity, with no client date cutoff. Outside vital signs and outside clinical notes remain enabled by
+default; radiology documents and external CCDAs require hospital-approved mode.
 Register each exact selected API in the matching Epic app before rollout.
 Existing frozen plans retain their original query set.
 
