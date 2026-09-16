@@ -248,8 +248,13 @@ entrypoint. It accepts only private Murph Cloud main execution and uses that
 environment's existing Cloudflare API credential and callback-signing key.
 Inventory mode is read-only and outputs only count, hash and serving version.
 Migration mode defaults to one source object, up to 1000 continuations and a
-ten-minute work window. The object budget is checked before starting a different
-source, so a canary can finish all pages and activate in one run. A pending or
+ten-minute work window. The object budget is checked before durably selecting a
+different source; automatic first-use retries therefore cannot advance the next
+baseline member beyond the canary. The invocation retains its exact source
+through every import page and activation. Optional
+`MURPH_RUNTIME_MIGRATION_MEMBER_ID` selects one enrolled member with a one-object
+budget, refuses to replace another unfinished selection, and returns without
+expanding the cohort if that member already activated. A pending or
 failed result after quiescence requires same-source roll-forward recovery; the
 work window is not a guarantee of member-pause duration. The hosted entrypoint
 and canonical rolling campaign reject namespace finalization. Successful member

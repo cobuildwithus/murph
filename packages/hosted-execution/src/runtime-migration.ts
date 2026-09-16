@@ -97,6 +97,7 @@ export type HostedRuntimeMigrationCommand =
   | ({ operation: "close_legacy_creation" } & HostedRuntimeMigrationIdentity)
   | ({ operation: "settle_unmaterialized" } & HostedRuntimeMigrationIdentity)
   | ({ operation: "next_object" } & HostedRuntimeMigrationIdentity)
+  | ({ operation: "select_member"; userId: string } & HostedRuntimeMigrationIdentity)
   | ({ operation: "discover"; objectIds: string[]; complete: boolean } & HostedRuntimeMigrationIdentity)
   | ({ operation: "list_inventory"; after: string } & HostedRuntimeMigrationIdentity)
   | ({ operation: "inventory"; after: string; objectIds: string[]; complete: boolean } & HostedRuntimeMigrationIdentity)
@@ -136,6 +137,7 @@ export function parseHostedRuntimeMigrationCommand(value: unknown): HostedRuntim
   const campaign = parseCampaignMigrationCommand(record, identity);
   if (campaign) return campaign;
   switch (record.operation) {
+    case "select_member": return { operation: "select_member", ...identity, userId: migrationIdentifier(record.userId) };
     case "select_first_use": return { operation: "select_first_use", ...identity, objectId: migrationDigest(record.objectId), userId: requireString(record.userId, "Migration member") };
     case "advance_member": return { operation: "advance_member", ...identity, ...memberMigrationIdentity(record) };
     case "advance_empty":

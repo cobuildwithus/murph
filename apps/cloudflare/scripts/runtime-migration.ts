@@ -39,6 +39,7 @@ async function readServingIdentity(input: RuntimeMigrationOperator) {
  */
 type RollingOperator = RuntimeMigrationOperator & {
   activate: boolean; maxSteps?: number; maxObjects?: number; waitForPending?: boolean; maxDurationMs?: number;
+  memberId?: string;
 };
 export async function migrateHostedLegacyRuntime(input: RollingOperator) {
   const { maxSteps, maxObjects, deadline } = readRollingLimits(input);
@@ -55,21 +56,29 @@ export async function migrateHostedLegacyRuntime(input: RollingOperator) {
     if (inventory.namespaceId !== identity.namespaceId) throw new Error("Migration namespace changed before discovery.");
     gate = await prepareRollingInventory(input, send, inventory, gate);
   }
-  const selected = new Set<string>();
+  let objectId: string | null = null;
+  let selectedCount = 0;
   for (let steps = 1; steps <= maxSteps; steps++) {
     if (Date.now() >= deadline) return { phase: "rolling", steps: steps - 1, pending: "time_budget" };
-    const next = await send({ operation: "next_object", ...identity });
-    if (next.objectId === null) {
-      if (await enrollCanonicalSources(send, identity) > 0) continue;
-      const settled = await send({ operation: "settle_unmaterialized", ...identity });
-      if (settled.done === true) return finishRollingMigration(input, send, identity, gate, steps);
-      if (settled.done !== false) throw new Error("Unmaterialized settlement receipt is invalid.");
-      continue;
+    if (objectId === null) {
+      // Selection is durable authority for automatic continuations too. Check
+      // the budget before selecting, and retain this source until activation.
+      if (selectedCount >= maxObjects) return { phase: "rolling", steps: steps - 1, pending: "object_budget" };
+      const next = await send(input.memberId === undefined ? { operation: "next_object", ...identity }
+        : { operation: "select_member", ...identity, userId: input.memberId });
+      if (next.objectId === null) {
+        if (input.memberId !== undefined) return { phase: "member_migrated", steps: steps - 1 };
+        if (await enrollCanonicalSources(send, identity) > 0) continue;
+        const settled = await send({ operation: "settle_unmaterialized", ...identity });
+        if (settled.done === true) return finishRollingMigration(input, send, identity, gate, steps);
+        if (settled.done !== false) throw new Error("Unmaterialized settlement receipt is invalid.");
+        continue;
+      }
+      objectId = requireObjectId(next.objectId);
+      selectedCount++;
     }
-    const objectId = requireObjectId(next.objectId);
-    if (!selected.has(objectId) && selected.size >= maxObjects) return { phase: "rolling", steps: steps - 1, pending: "object_budget" };
-    selected.add(objectId);
     const result = await advanceSelectedObject(send, identity, objectId);
+    if (migrationActivated(result)) objectId = null;
     if (typeof result.pending !== "string") continue;
     if (!input.waitForPending || !["checkpoint", "freeze", "source_changed"].includes(result.pending)) {
       return { phase: "rolling", steps, pending: result.pending };
@@ -81,11 +90,20 @@ export async function migrateHostedLegacyRuntime(input: RollingOperator) {
   return { phase: "rolling", steps: maxSteps, pending: "step_budget" };
 }
 
+function migrationActivated(result: Record<string, unknown>) {
+  // A completed import page is not activation. Empty-source and member
+  // activation have different canonical receipts.
+  return result.done === true || (result.member != null && record(result.member).migrationPhase === "postgres");
+}
+
 function readRollingLimits(input: RollingOperator) {
   if (input.activate) throw new Error("Rolling migration cannot finalize the namespace.");
   const maxSteps = input.maxSteps ?? 25;
   const maxObjects = input.maxObjects ?? 1_000;
   const maxDurationMs = input.maxDurationMs ?? 600_000;
+  if (input.memberId !== undefined && (!/^[A-Za-z0-9_-]{1,128}$/u.test(input.memberId) || maxObjects !== 1)) {
+    throw new TypeError("Targeted migration requires a valid member identity and a one-object budget.");
+  }
   for (const bound of [maxSteps, maxObjects]) {
     if (!Number.isSafeInteger(bound) || bound < 1 || bound > 1_000) throw new TypeError("Migration step and object bounds must be between 1 and 1000.");
   }

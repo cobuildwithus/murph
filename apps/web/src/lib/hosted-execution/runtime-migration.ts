@@ -1,6 +1,6 @@
 import { listRuntimeMigrationCandidates } from "./runtime-migration-cleanup";
 import { enrollRuntimeSourcesTx, runtimeSourcesAlreadyEnrolled } from "./runtime-migration-enrollment";
-import { closeLegacyCreationTx, discoverRuntimeObjectsTx, listRuntimeInventoryTx, nextRuntimeObjectTx, selectFirstUseRuntimeObjectTx, readSelectedRuntimeObject, requireSelectedRuntimeObject, requireRollingInventoryPageTx } from "./runtime-migration-inventory";
+import { closeLegacyCreationTx, discoverRuntimeObjectsTx, listRuntimeInventoryTx, nextRuntimeObjectTx, selectMemberRuntimeObjectTx, selectFirstUseRuntimeObjectTx, readSelectedRuntimeObject, requireSelectedRuntimeObject, requireRollingInventoryPageTx } from "./runtime-migration-inventory";
 import { activateEmptyRuntime, settleUnmaterializedRuntime } from "./runtime-migration-unmaterialized";
 import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient, type HostedRuntimeCutover } from "@prisma/client";
@@ -43,6 +43,7 @@ export async function executeHostedRuntimeMigrationCommand(input: { prisma: Pris
       case "close_legacy_creation": return { gate: await closeLegacyCreationTx(tx, gate) };
       case "list_inventory": return listRuntimeInventoryTx(tx, gate, command.after);
       case "next_object": return nextRuntimeObjectTx(tx, gate);
+      case "select_member": return selectMemberRuntimeObjectTx(tx, gate, command.userId);
       case "select_first_use": return selectFirstUseRuntimeObjectTx(tx, gate, command);
       case "inventory": return { gate: await inventoryTx(tx, gate, command) };
       case "read_object":

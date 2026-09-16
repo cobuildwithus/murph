@@ -82,7 +82,7 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
           }
         }
         activated.add(command.objectId);
-        return Response.json({ member: { migrationPhase: "postgres" } });
+        return Response.json(command.operation === "advance_empty" ? { done: true, member: null } : { member: { migrationPhase: "postgres" } });
       } else if (command.operation === "settle_unmaterialized") {
         expect(activated.size).toBe(known.size);
         return Response.json({ done: true });
@@ -90,7 +90,7 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
       return Response.json({ gate });
     },
   };
-  return { input, sent, options, known, late, imported, activated, tokens, authorizations: () => authorizations };
+  return { input, sent, options, known, late, imported, activated, tokens, authorizations: () => authorizations, selected: () => selected };
 }
 
 describe("rolling runtime migration operator", () => {
@@ -163,6 +163,7 @@ describe("rolling runtime migration operator", () => {
     await vi.advanceTimersByTimeAsync(3_000);
     expect(await result).toEqual({ phase: "rolling", steps: 4, pending: "object_budget" });
     expect([...h.activated]).toEqual([first]);
+    expect(h.selected()).toBe(first);
     expect(h.sent.filter(c => String(c.operation).startsWith("advance_")).map(c => c.objectId)).toEqual([first, first, first, first]);
     expect(h.sent.some(c => c.operation === "activate")).toBe(false);
   });

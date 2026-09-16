@@ -1,5 +1,8 @@
+import { migrateHostedLegacyRuntime, type RuntimeMigrationOperator } from "../scripts/runtime-migration.ts";
+import { runtimeMigrationRoutes } from "../src/worker/route-handlers/runtime-migration.ts";
+import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { generateKeyPairSync, randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { appendHostedExecutionWakeForTest, createHostedRuntimeMigrationRehearsalForTest } from "#hosted-web-testing";
 import { buildHostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
 import { HOSTED_RUNTIME_NAMESPACE_PROBE_NAME, type HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
@@ -21,7 +24,7 @@ vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: tr
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const ids = ["selected", "unrelated", "new", "deleted"].map(role => `synthetic_composed_${role}_${randomUUID()}`);
 const objects = ["a", "b", "c", "d"].map(c => c.repeat(64));
-const campaign = { namespaceId: "synthetic_composed_namespace", workerVersion: "synthetic_release_1" };
+const campaign = { namespaceId: "e".repeat(32), workerVersion: "synthetic_release_1" };
 let web: Awaited<ReturnType<typeof createHostedRuntimeMigrationRehearsalForTest>>;
 const sources = new Map<string, UserRunnerDurableObject>();
 const unused = async (): Promise<never> => { throw new Error("Unexpected external runtime effect in the protocol rehearsal."); };
@@ -169,3 +172,131 @@ describe.skipIf(!enabled)("composed SQLite source to Postgres member handoff", (
     expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: objects[1] });
   }, 30_000);
 });
+
+
+function canaryOperator(): RuntimeMigrationOperator {
+  return {
+    accountId: "f".repeat(32), scriptName: "synthetic-worker", workerVersion: campaign.workerVersion,
+    cloudflareToken: "synthetic-token", workerBaseUrl: "https://worker.example.test",
+    workerAuthorization: async () => new Headers(),
+    fetchImpl: async (input, init) => {
+      const url = new URL(String(input));
+      if (url.hostname === "api.cloudflare.com") {
+        if (url.pathname.endsWith("/deployments")) return Response.json({ success: true, result: { deployments: [{ versions: [{ percentage: 100, version_id: campaign.workerVersion }] }] } });
+        if (url.pathname.endsWith("/namespaces")) return Response.json({ success: true, result: [{ id: campaign.namespaceId, script: "synthetic-worker", class: "UserRunnerDurableObject", use_sqlite: true }], result_info: { total_pages: 1 } });
+        throw new Error("Sealed canary must not need a new provider census.");
+      }
+      return runtimeMigrationRoutes[0]!.handle({ env: source, environment: readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+        url, request: new Request(url, init) }, {});
+    },
+  };
+}
+
+describe.skipIf(!enabled)("bounded operator with canonical selection and first-use recovery", () => {
+  beforeEach(async () => {
+    configureLocalCrypto();
+    sources.clear(); source.CF_VERSION_METADATA = { id: campaign.workerVersion };
+    web = await createHostedRuntimeMigrationRehearsalForTest({ databaseUrl: process.env.DATABASE_URL ?? "", userIds: ids, objectIds: objects });
+    transport.owner.mockImplementation(({ userId, command }: { userId: string; command: HostedRuntimeOwnerCommand }) => web.ownerCommand(userId, command));
+    transport.command.mockImplementation(({ command: input }: { command: HostedRuntimeMigrationCommand }) => command(input));
+  });
+  afterEach(async () => { await web?.close(); vi.unstubAllEnvs(); });
+
+  it.each(["member", "bound-empty", "physical-empty"] as const)("keeps the next baseline member live after a one-object %s canary", async kind => {
+    await proveCanaryBoundary(kind, null);
+  });
+  it.each(["member", "bound-empty", "physical-empty"] as const)("recovers lost import replies within the same %s canary", async kind => {
+    await proveCanaryBoundary(kind, "import");
+  });
+  it.each(["member", "bound-empty", "physical-empty"] as const)("keeps baseline selection closed after a lost %s activation reply", async kind => {
+    await proveCanaryBoundary(kind, "activation");
+  });
+
+  it.each([null, "select_member", "import_member", "activate_member"] as const)("targets a later member and retries safely after %s", async fault => {
+    const first = await prepareTargetedCanary();
+    const prepare = vi.spyOn(first.object, "preparePostgresMemberMigration");
+    let loseReply = fault !== null;
+    transport.command.mockImplementation(async ({ command: input }: { command: HostedRuntimeMigrationCommand }) => {
+      const result = await command(input);
+      if (loseReply && input.operation === fault) { loseReply = false; throw new Error("synthetic lost targeted reply"); }
+      return result;
+    });
+    const run = () => migrateHostedLegacyRuntime({ ...canaryOperator(), activate: false, memberId: ids[1]!, maxObjects: 1 });
+    if (fault) await expect(run()).rejects.toThrow("lost targeted reply");
+    expect(await run()).toMatchObject({ phase: fault === "activate_member" ? "member_migrated" : "rolling" });
+    expect(await run()).toEqual({ phase: "member_migrated", steps: 0 });
+    expect(await web.backend(ids[1]!)).toBe("postgres");
+    expect(await web.backend(ids[0]!)).toBe("legacy");
+    expect(prepare).not.toHaveBeenCalled();
+    expect(first.values.has("runtime-migration-freeze:v1")).toBe(false);
+    expect(await web.prisma.hostedMailboxItem.count({ where: { userId: ids[1]! } })).toBe(1);
+  });
+
+  it("refuses to replace another unfinished handoff for a requested member", async () => {
+    await prepareTargetedCanary();
+    expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: objects[0] });
+    await expect(command({ operation: "select_member", ...campaign, userId: ids[1]! })).rejects.toThrow("unfinished handoff");
+    expect(await command({ operation: "select_member", ...campaign, userId: ids[0]! })).toEqual({ objectId: objects[0] });
+    expect(await web.backend(ids[1]!)).toBe("legacy");
+  });
+
+  it.each(["missing", "ambiguous", "contradictory"] as const)("rejects a %s requested-member binding before selection", async kind => {
+    await prepareTargetedCanary();
+    if (kind === "ambiguous") await web.prisma.hostedRuntimeLegacyImport.create({ data: { objectId: objects[2]!, userId: ids[1]!, nextCursor: { section: 0, after: "" } } });
+    if (kind === "contradictory") await web.prisma.hostedRuntimeLegacyImport.update({ where: { objectId: objects[1]! }, data: { userId: ids[0]! } });
+    await expect(command({ operation: "select_member", ...campaign, userId: ids[kind === "missing" ? 2 : 1]! })).rejects.toThrow("one consistent enrolled source");
+    expect((await web.prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).selectedObjectId).toBeNull();
+    expect(await web.backend(ids[0]!)).toBe("legacy");
+    expect(await web.backend(ids[1]!)).toBe("legacy");
+  });
+});
+
+async function prepareTargetedCanary() {
+  await web.seed(ids[0]!); await web.seed(ids[1]!);
+  const first = legacySource(0, false); legacySource(1, false);
+  await command({ operation: "begin_rolling", ...campaign });
+  await command({ operation: "enroll_sources", ...campaign, bindings: ids.slice(0, 2).map((userId, index) => ({ userId, objectId: objects[index]! })) });
+  await command({ operation: "discover", ...campaign, objectIds: objects.slice(0, 2), complete: true });
+  await command({ operation: "close_legacy_creation", ...campaign });
+  await command({ operation: "inventory", ...campaign, objectIds: objects.slice(0, 2), after: "", complete: true });
+  return first;
+}
+
+async function proveCanaryBoundary(kind: "member" | "bound-empty" | "physical-empty", fault: "import" | "activation" | null) {
+  if (kind !== "physical-empty") await web.seed(ids[0]!);
+  await web.seed(ids[1]!);
+  const first = legacySource(0, false);
+  if (kind !== "member") first.sql.exec("DELETE FROM runner_meta");
+  const unrelated = legacySource(1, false);
+  const preparation = vi.spyOn(unrelated.object, "preparePostgresMemberMigration");
+  await command({ operation: "begin_rolling", ...campaign });
+  await command({ operation: "enroll_sources", ...campaign, bindings: ids.slice(kind === "physical-empty" ? 1 : 0, 2)
+    .map(userId => ({ userId, objectId: objects[ids.indexOf(userId)]! })) });
+  await command({ operation: "discover", ...campaign, objectIds: objects.slice(0, 2), complete: true });
+  await command({ operation: "close_legacy_creation", ...campaign });
+  await command({ operation: "inventory", ...campaign, objectIds: objects.slice(0, 2), after: "", complete: true });
+  let loseReply = fault !== null;
+  transport.command.mockImplementation(async ({ command: input }: { command: HostedRuntimeMigrationCommand }) => {
+    const result = await command(input);
+    const operation = `${fault === "import" ? "import" : "activate"}_${kind === "member" ? "member" : "empty"}`;
+    if (loseReply && input.operation === operation) { loseReply = false; throw new Error("synthetic lost committed canary reply"); }
+    return result;
+  });
+  const run = () => migrateHostedLegacyRuntime({ ...canaryOperator(), activate: false, maxObjects: 1 });
+  if (fault) await expect(run()).rejects.toThrow("lost committed canary reply");
+  if (fault !== "activation") expect(await run()).toMatchObject({ phase: "rolling", pending: "object_budget" });
+  if (kind !== "physical-empty") expect(await web.backend(ids[0]!)).toBe("postgres");
+  const afterCanary = await web.prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
+  await web.seed(ids[2]!);
+  const empty = legacySource(2, false); empty.sql.exec("DELETE FROM runner_meta");
+  for (let page = 0; page < 5; page++) {
+    await progressRuntimeMigrationForMember({ source, userId: ids[2]!, budget: { deadlineAtMs: Date.now() + 10_000 } });
+  }
+  expect({ selectedAfterCanary: afterCanary.selectedObjectId, unrelatedBackend: await web.backend(ids[1]!),
+    firstUseBackend: await web.backend(ids[2]!) }).toEqual({
+    selectedAfterCanary: objects[0], unrelatedBackend: "legacy", firstUseBackend: "postgres",
+  });
+  expect(preparation).not.toHaveBeenCalled();
+  expect(unrelated.values.has("runtime-migration-freeze:v1")).toBe(false);
+  if (kind !== "physical-empty") expect(await web.prisma.hostedMailboxItem.count({ where: { userId: ids[0]! } })).toBe(1);
+}

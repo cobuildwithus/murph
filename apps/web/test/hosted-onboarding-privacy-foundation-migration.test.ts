@@ -1209,6 +1209,15 @@ describe("hosted Prisma baseline migration", () => {
       "20260915223000_hosted_runtime_legacy_import",
       "20260915224500_hosted_runtime_upload_recovery",
       "20260915230000_hosted_runtime_media_registration",
+      "20260915234500_hosted_runtime_member_cutover",
+      "20260915234600_hosted_runtime_rolling_campaign",
+      "20260915234700_hosted_runtime_managed_snapshots",
+      "20260915234800_hosted_runtime_creation_barrier",
+      "20260916044500_hosted_runtime_member_enrollment",
+      "20260916050000_hosted_runtime_deleted_member_enrollment",
+      "20260916053000_hosted_runtime_late_sources",
+      "20260916060000_hosted_runtime_release_compatibility",
+      "20260916063000_hosted_runtime_cleanup_enrollment",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

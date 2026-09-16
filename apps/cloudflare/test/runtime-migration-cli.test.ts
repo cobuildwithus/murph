@@ -34,6 +34,15 @@ describe("protected hosted migration entrypoint", () => {
     expect(await verifyHostedWebCallbackSignatureHeaders({ environment, ...request, request: new Request(`https://worker.example.test${request.path}`, { method: "POST", headers: first }) })).toBe(false);
   });
 
+  it("accepts an explicit member only for a one-object migration", () => {
+    const target = { ...source, MURPH_RUNTIME_MIGRATION_MODE: "migrate", MURPH_RUNTIME_MIGRATION_MEMBER_ID: "synthetic-member" };
+    expect(readRuntimeMigrationOperator(target)).toMatchObject({ memberId: "synthetic-member", maxObjects: 1 });
+    for (const overrides of [{ MURPH_RUNTIME_MIGRATION_MAX_OBJECTS: "2" }, { MURPH_RUNTIME_MIGRATION_MODE: "inventory" },
+      { MURPH_RUNTIME_MIGRATION_MEMBER_ID: "invalid\nmember" }]) {
+      expect(() => readRuntimeMigrationOperator({ ...target, ...overrides })).toThrow("Targeted migration requires");
+    }
+  });
+
   it("prints aggregate inventory only and does not need a signing key for read-only discovery", async () => {
     const result = await runRuntimeMigrationOperator({ ...source, HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: undefined }, async request => {
       const url = new URL(String(request));

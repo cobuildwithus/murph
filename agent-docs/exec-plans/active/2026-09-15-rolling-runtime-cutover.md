@@ -750,3 +750,35 @@ The source-inspection/native-proof correction is committed as `2db2c0f4e53e`.
 The public candidate is ready for final external review and exact-head CI.
 Production deployment, provider proof, measured live canary and full migration
 remain separate unfinished steps; no production state has changed.
+
+
+### Canary isolation remediation and requested-member selection
+
+Final ReviewGPT round 1 on `a726db524f20a4053d9faec500333d5b973e6836`
+returned one accepted high-severity finding: the operator selected the next
+source before checking its object budget. Automatic first-use recovery could
+then hand off that source outside a one-object canary. The composed regression
+failed before the correction: the unrelated baseline member migrated while the
+new member remained draining.
+
+The operator now checks its budget before durable selection and retains the
+same invocation-local object through import and canonical activation. Completed
+import alone is not activation. The existing selection owner and receipts remain
+authoritative; no durable lease or scheduler was added. Explicit `select_member`
+uses one consistent canonical source binding, refuses to replace another
+unfinished handoff, and returns without expanding after prior activation.
+The hosted CLI restricts targeted runs to one object. A separate command makes
+an older consumer reject the target request instead of ignoring a new field.
+
+Thirty-eight focused operator, CLI and real-Postgres composed cases pass,
+including bound/physical empty sources, lost selection/import/activation replies,
+first-use progress, exact requested-member targeting and conflicting bindings.
+Web, Worker and shared-contract typechecks pass. Previously failed CI fixtures
+now reflect the intentional callback, schema, campaign-read and active-job
+contracts; their focused suites pass 298 Web and 88 Worker tests.
+
+The user has authorized deployment and migration after safety gates, with an
+explicit member canary before expansion. Keep that private operational input out
+of repository artifacts. The private workflow follow-up validates and masks its
+optional target input. Review and exact-head CI remain pending; no production
+mutation has occurred. Local handoff timing is not a production downtime promise.

@@ -433,17 +433,17 @@ describe("RunnerStateStore schema guard", () => {
     expect(readRunnerStateSchemaVersion(db)).toBe(RUNNER_STATE_SCHEMA_VERSION);
   });
 
-  it("blocks a pre-freeze runner before it can read a version-20 workspace", () => {
+  it.each([19, 20])("blocks a schema-%i runner before it can read managed-upload state", supportedVersion => {
     const readWorkspace = vi.fn();
-    expect(RUNNER_STATE_SCHEMA_VERSION).toBe(20);
+    expect(RUNNER_STATE_SCHEMA_VERSION).toBe(21);
     expect(() => {
       assertRunnerStateSchemaVersionSupported({
         observedVersion: RUNNER_STATE_SCHEMA_VERSION,
-        supportedVersion: 19,
+        supportedVersion,
       });
       readWorkspace();
     }).toThrow(
-      "Hosted runner Durable Object schema version 20 is newer than supported version 19.",
+      `Hosted runner Durable Object schema version 21 is newer than supported version ${supportedVersion}.`,
     );
     expect(readWorkspace).not.toHaveBeenCalled();
   });

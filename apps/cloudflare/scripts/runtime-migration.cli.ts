@@ -10,7 +10,7 @@ type Source = Readonly<Record<string, string | undefined>>;
 export function readRuntimeMigrationOperator(source: Source) {
   if (source.GITHUB_ACTIONS !== "true" || source.GITHUB_REPOSITORY !== "cobuildwithus/murph-cloud"
     || source.GITHUB_REF !== "refs/heads/main") throw new Error("Runtime migration CLI requires the protected Murph Cloud main workflow.");
-  const { mode, maxSteps, maxObjects, activate } = readMigrationOptions(source);
+  const { mode, maxSteps, maxObjects, activate, memberId } = readMigrationOptions(source);
   const workerVersion = required(source, "MURPH_RUNTIME_MIGRATION_WORKER_VERSION");
   const scriptName = required(source, "CF_WORKER_NAME");
   if (![workerVersion, scriptName].every(value => /^[A-Za-z0-9_-]{1,128}$/u.test(value))) throw new Error("Runtime migration version or script identity is invalid.");
@@ -25,7 +25,7 @@ export function readRuntimeMigrationOperator(source: Source) {
       ...request, environment: readHostedWebCallbackSigningEnvironment(source), userId: null,
     })),
   };
-  return { input, mode, maxSteps, maxObjects, activate };
+  return { input, mode, maxSteps, maxObjects, activate, memberId };
 }
 
 function readMigrationOptions(source: Source) {
@@ -37,16 +37,20 @@ function readMigrationOptions(source: Source) {
   if (!Number.isSafeInteger(maxObjects) || maxObjects < 1 || maxObjects > 1_000) throw new Error("Runtime migration requires an object bound from 1 to 1000.");
   const finalize = source.MURPH_RUNTIME_MIGRATION_FINALIZE ?? "false";
   if (finalize !== "false") throw new Error("Rolling migration cannot finalize the namespace.");
-  return { mode, maxSteps, maxObjects, activate: false };
+  const memberId = source.MURPH_RUNTIME_MIGRATION_MEMBER_ID?.trim() || undefined;
+  if (memberId !== undefined && (!/^[A-Za-z0-9_-]{1,128}$/u.test(memberId) || maxObjects !== 1 || mode !== "migrate")) {
+    throw new Error("Targeted migration requires a valid member identity, migrate mode and a one-object budget.");
+  }
+  return { mode, maxSteps, maxObjects, activate: false, memberId };
 }
 
 export async function runRuntimeMigrationOperator(source: Source, fetchImpl?: typeof fetch) {
-  const { input, mode, maxSteps, maxObjects, activate } = readRuntimeMigrationOperator(source);
+  const { input, mode, maxSteps, maxObjects, activate, memberId } = readRuntimeMigrationOperator(source);
   if (mode === "inventory") {
     const inventory = await inventoryHostedLegacyRuntime({ ...input, fetchImpl });
     return { phase: "inventory", objectCount: inventory.count, inventoryHash: inventory.hash, workerVersion: inventory.workerVersion };
   }
-  return migrateHostedLegacyRuntime({ ...input, fetchImpl, maxSteps, maxObjects, activate, waitForPending: true });
+  return migrateHostedLegacyRuntime({ ...input, fetchImpl, maxSteps, maxObjects, activate, memberId, waitForPending: true });
 }
 
 function required(source: Source, name: string): string {

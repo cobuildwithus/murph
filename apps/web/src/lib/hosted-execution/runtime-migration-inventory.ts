@@ -79,6 +79,27 @@ export function requireSelectedRuntimeObject(gate: HostedRuntimeCutover, objectI
   if (gate.phase === "rolling" && gate.selectedObjectId !== objectId) throw new Error("Migration source is not the selected object.");
 }
 
+/** Explicit canaries use the canonical binding, never a provider-list position.
+ * The exclusive campaign lock preserves an already selected unfinished source.
+ */
+export async function selectMemberRuntimeObjectTx(tx: Tx, gate: HostedRuntimeCutover, userId: string) {
+  if (gate.phase !== "rolling" || !gate.inventorySealedAt || !gate.creationClosedAt) {
+    throw new Error("Member selection requires a closed, sealed rolling campaign.");
+  }
+  const sources = await tx.hostedRuntimeLegacyImport.findMany({ where: { OR: [{ userId }, { admittedUserId: userId }] }, take: 2 });
+  if (sources.length !== 1 || (sources[0]!.userId !== null && sources[0]!.userId !== userId)
+    || (sources[0]!.admittedUserId !== null && sources[0]!.admittedUserId !== userId)) {
+    throw new Error("Requested member must have one consistent enrolled source.");
+  }
+  const source = sources[0]!;
+  const selected = await unfinishedRuntimeSelectionTx(tx, gate);
+  if (selected && selected !== source.objectId) throw new Error("Another source has an unfinished handoff; resume it first.");
+  const owner = await tx.hostedRuntimeOwner.findUnique({ where: { userId } });
+  if (source.completedAt && owner?.migrationPhase === "postgres") return { objectId: null };
+  if (gate.selectedObjectId !== source.objectId) await tx.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { selectedObjectId: source.objectId } });
+  return { objectId: source.objectId };
+}
+
 
 export async function requireRollingInventoryPageTx(tx: Tx, gate: HostedRuntimeCutover, command: Extract<HostedRuntimeMigrationCommand, { operation: "inventory" }>) {
   if (!gate.creationClosedAt || !gate.discoveryCompletedAt) throw new Error("Rolling inventory cannot seal while legacy creation is open.");
