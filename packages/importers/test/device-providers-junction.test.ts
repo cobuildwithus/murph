@@ -1379,6 +1379,89 @@ test("Junction complete source days reject lossy rows before the canonical write
   }
 });
 
+test("Junction Withings blood oxygen preserves valid facts across invalid days and recovers", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-oxygen-recovery");
+  const importDay = (values: readonly number[], revisionAt: string) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        completeSourceDay: {
+          connectionId: "junction-test-connection",
+          dayKey: "2026-04-22",
+          resources: ["blood_oxygen"],
+          revisionAt,
+          timeZone: "UTC",
+        },
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-test-account",
+          importedAt: revisionAt,
+          timeseries: {
+            blood_oxygen: {
+              groups: {
+                withings: [{
+                  source: { provider: "withings", type: "watch" },
+                  data: values.map((value, index) => ({
+                    timestamp: new Date(Date.UTC(2026, 3, 22, 7, index)).toISOString(),
+                    unit: "%",
+                    value,
+                  })),
+                }],
+              },
+            },
+          },
+        },
+      },
+      { corePort: coreRuntime },
+    );
+  const liveFacets = async (paths: readonly string[]) => latestLiveRecords(
+    (await Promise.all(paths.map((relativePath) =>
+      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+    ))).flat(),
+  ).filter((record) => record.kind === "observation"
+    && typeof record.metric === "string" && record.metric.startsWith("spo2-"));
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const seeded = await importDay([97, 98, 98, 99], "2026-04-24T12:00:00.000Z");
+    const before = await liveFacets(seeded.eventShardPaths);
+    assert.ok(before.length > 0);
+    for (const invalid of [0, -1, 101]) {
+      await assert.rejects(
+        importDay([invalid, 98, 99], "2026-04-24T13:00:00.000Z"),
+        (error: unknown) => {
+          assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+          assert.equal(error.code, "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION");
+          assert.equal(error.retryable, true);
+          assert.equal(error.diagnostic.reason, "daily.value_out_of_range");
+          assert.equal(error.diagnostic.sourceProvider, "withings");
+          return true;
+        },
+      );
+      assert.deepEqual(await liveFacets(seeded.eventShardPaths), before);
+    }
+
+    // Both supported scalar representations recover through the same day owner.
+    const corrected = await importDay([88, 88, 98, 98], "2026-04-24T14:00:00.000Z");
+    const after = await liveFacets(corrected.eventShardPaths);
+    const below = after.find((record) => record.metric === "spo2-samples-below-90-percent");
+    assert.equal(storedObservationValue(below), 50);
+    assert.ok(eventRevisionFromLifecycle(below?.lifecycle) > 1);
+    const fraction = await importDay([0.88, 0.88, 0.98, 0.98], "2026-04-24T15:00:00.000Z");
+    const fractionFacets = await liveFacets(fraction.eventShardPaths);
+    assert.deepEqual(
+      fractionFacets.map((record) => [record.id, record.metric, storedObservationValue(record)]).sort(),
+      after.map((record) => [record.id, record.metric, storedObservationValue(record)]).sort(),
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.each([
   {
     dayKey: "2026-04-22",

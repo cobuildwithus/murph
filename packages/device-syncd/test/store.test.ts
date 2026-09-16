@@ -4115,7 +4115,7 @@ test("device sync store reuses queued jobs with the same dedupe key", async () =
   }
 });
 
-test("device sync store requeues completed Junction temporal days after restart and drains newer backlog first", async () => {
+test.each(["succeeded", "dead"] as const)("device sync store requeues %s Junction temporal days after restart and drains newer backlog first", async (terminalStatus) => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-requeue");
   const databasePath = path.join(tempDir, "state.sqlite");
   let store = new SqliteDeviceSyncStore(databasePath);
@@ -4138,6 +4138,7 @@ test("device sync store requeues completed Junction temporal days after restart 
       availableAt: "2026-04-06T00:00:00.000Z",
       dedupeKey: "junction-temporal-authority:completed",
       kind: "resource",
+      maxAttempts: 1,
       payload: {
         resource: "blood_oxygen",
         resourceCategory: "timeseries",
@@ -4153,10 +4154,25 @@ test("device sync store requeues completed Junction temporal days after restart 
       store.claimDueJob("worker-before-restart", "2026-04-06T00:00:00.000Z", 60_000)?.id,
       completed.id,
     );
-    store.completeJob(completed.id, "2026-04-06T00:00:01.000Z");
+    if (terminalStatus === "succeeded") {
+      store.completeJob(completed.id, "2026-04-06T00:00:01.000Z");
+    } else {
+      const failure = store.failJobIfOwned(
+        completed.id,
+        "worker-before-restart",
+        "2026-04-06T00:00:01.000Z",
+        "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+        "Synthetic invalid complete day.",
+        null,
+        true,
+      );
+      assert.equal(failure?.disposition, "dead");
+      assert.equal(failure.remainingAttempts, 0);
+    }
     store.close();
 
     store = new SqliteDeviceSyncStore(databasePath);
+    assert.equal(store.claimDueJob("worker-after-restart", "2026-04-06T01:00:00.000Z", 60_000), null);
     const enqueueRepeatedDay = () => store.enqueueJob({
       accountId: account.id,
       availableAt: "2026-04-06T01:00:00.000Z",
@@ -4176,6 +4192,8 @@ test("device sync store requeues completed Junction temporal days after restart 
     const repeated = enqueueRepeatedDay();
     assert.notEqual(repeated.id, completed.id);
     assert.equal(repeated.status, "queued");
+    assert.equal(repeated.attempts, 0);
+    assert.ok(repeated.maxAttempts > 0);
     assert.equal(enqueueRepeatedDay().id, repeated.id);
     assert.equal(
       store.claimDueJob("worker-repeated", "2026-04-06T01:00:00.000Z", 60_000)?.id,
