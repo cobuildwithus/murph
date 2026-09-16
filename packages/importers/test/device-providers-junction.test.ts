@@ -16576,9 +16576,9 @@ test("Junction daily row reduction preserves revision admission, duplicate count
 test("Junction daily row validation reports the first invalid delivered row before publication", () => {
   const missing = { timestamp: "2026-04-22T09:00:00.000Z" };
   const outOfRange = { timestamp: "2026-04-22T10:00:00.000Z", value: 150 };
-  for (const [first, second, reason] of [
-    [missing, outOfRange, "daily.value_missing"],
-    [outOfRange, missing, "daily.value_out_of_range"],
+  for (const [first, second, reason, valueKind, valueRange] of [
+    [missing, outOfRange, "daily.value_missing", "missing", undefined],
+    [outOfRange, missing, "daily.value_out_of_range", "number", "above_percentage"],
   ] as const) {
     assert.throws(() => normalizeCompleteTemporalSourceDay({
       importedAt: "2026-04-24T12:00:00.000Z",
@@ -16594,6 +16594,7 @@ test("Junction daily row validation reports the first invalid delivered row befo
       assert.deepEqual(error.diagnostic, {
         reason, rowOrdinal: 2, sourceProvider: "garmin",
         timestampKind: "absolute", timestampSemantics: "utc",
+        valueKind, valueRange, unitKind: "missing",
       });
       return true;
     });
