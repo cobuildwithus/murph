@@ -6,7 +6,7 @@ import {
 import { readdir, readFile, readlink } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER, parseHostedRuntimeMigrationCheckpointRequest } from "@murphai/hosted-execution/runtime-migration";
+import { HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER, parseHostedRuntimeMigrationCheckpointRequest } from "@murphai/hosted-execution/runtime-migration";
 import { requestContainerMigrationCheckpoint } from "./container-migration-checkpoint.ts";
 
 import {
@@ -621,6 +621,14 @@ export async function startHostedContainerEntrypoint(input: {
           pending,
           identityPresent: wakeRequest !== null,
         });
+        return;
+      }
+
+      if (request.method === "GET" && requestUrl.pathname === HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH) {
+        discardUnreadRequestBody(request);
+        response.statusCode = 204;
+        response.setHeader(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL);
+        response.end();
         return;
       }
 

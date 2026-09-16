@@ -151,6 +151,7 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
     const inventoryHash = digest(`${digest(`${digest("")}\n${objectId}`)}\n${otherObjectId}`);
     await command({ operation: "activate", ...campaign, inventoryCount: 2, inventoryHash });
     expect((await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).phase).toBe("postgres");
+    expect(await command({ operation: "begin_rolling", ...campaign })).toMatchObject({ gate: { phase: "postgres" } });
   });
 });
 

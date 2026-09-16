@@ -75,7 +75,7 @@ import type {
 } from "./worker-contracts.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
-import { HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER, parseHostedRuntimeMigrationCheckpointRequest, type HostedRuntimeMigrationCheckpointRequest, type HostedRuntimeMigrationCheckpointStatus } from "@murphai/hosted-execution/runtime-migration";
+import { HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER, parseHostedRuntimeMigrationCheckpointRequest, type HostedRuntimeMigrationCheckpointRequest, type HostedRuntimeMigrationCheckpointStatus } from "@murphai/hosted-execution/runtime-migration";
 import { RunnerInvocationReceiptStore, type RunnerInvocationReceipt } from "./runner-invocation-receipt.ts";
 
 const RUNNER_PORT = 8080;
@@ -304,6 +304,7 @@ interface HostedExecutionContainerRunnerInput {
 }
 
 export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSlotLifecycle> {
+  supportsMigrationCheckpoint?(input: { userId: string }): Promise<boolean>;
   requestMigrationCheckpoint?(input: HostedRuntimeMigrationCheckpointRequest): Promise<HostedRuntimeMigrationCheckpointStatus>;
   abortWorkspaceInvocation?(input: {
     attemptId: string;
@@ -1400,6 +1401,18 @@ export class RunnerContainer extends Container {
       }
       throw error;
     }
+  }
+
+  async supportsMigrationCheckpoint(input: { userId: string }): Promise<boolean> {
+    this.authorizeBoundUser(input.userId);
+    const platform = this.ctx.container;
+    if (!platform || platform.running !== true) return false;
+    const signal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
+    try {
+      const response = await platform.getTcpPort(RUNNER_PORT).fetch(`http://container${HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH}`, { method: "GET", signal });
+      await drainRunnerContainerMetadataResponseBody(response, { signal });
+      return response.ok && response.headers.get(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER) === HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL;
+    } catch { return false; }
   }
 
   async requestMigrationCheckpoint(input: HostedRuntimeMigrationCheckpointRequest): Promise<HostedRuntimeMigrationCheckpointStatus> {

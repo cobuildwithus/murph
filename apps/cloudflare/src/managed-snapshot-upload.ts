@@ -71,8 +71,11 @@ export async function completeManagedSnapshotUpload(input: {
   }
 }
 
-export async function verifyManagedSnapshotBytes(input: { bucket: Pick<R2BucketLike, "get">; receipt: UploadReceipt }): Promise<void> {
-  const object = await input.bucket.get(input.receipt.objectKey);
+export async function verifyManagedSnapshotBytes(input: { bucket: Pick<R2BucketLike, "get">; receipt: UploadReceipt; timeoutMs?: number }): Promise<void> {
+  const signal = AbortSignal.timeout(input.timeoutMs ?? 60_000);
+  const getting = input.bucket.get(input.receipt.objectKey);
+  void getting.then(object => { if (signal.aborted) void object?.body?.cancel().catch(() => {}); }, () => {});
+  const object = await awaitSnapshotRead(getting, signal);
   if (!object?.body) throw new Error("Managed snapshot byte verification requires an object stream.");
   const reader = object.body.getReader();
   let ended = false;
@@ -81,7 +84,7 @@ export async function verifyManagedSnapshotBytes(input: { bucket: Pick<R2BucketL
     const hash = createHash("sha256");
     let count = 0;
     for (;;) {
-      const part = await reader.read();
+      const part = await awaitSnapshotRead(reader.read(), signal);
       if (part.done) { ended = true; break; }
       count += part.value.byteLength;
       if (count > input.receipt.encryptedByteSize) throw new Error("Managed snapshot exceeds its committed byte length.");
@@ -91,7 +94,7 @@ export async function verifyManagedSnapshotBytes(input: { bucket: Pick<R2BucketL
       throw new Error("Managed snapshot encrypted SHA-256 verification failed.");
     }
   } finally {
-    if (!ended) { try { await reader.cancel(); } catch { /* preserve verification failure */ } }
+    if (!ended) void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }
@@ -101,4 +104,15 @@ function requireSameSnapshotBytes(expected: UploadReceipt, actual: UploadReceipt
     || actual.attemptId !== expected.attemptId || actual.generation !== expected.generation
     || actual.objectKey !== expected.objectKey || actual.encryptedByteSize !== expected.encryptedByteSize
     || actual.encryptedSha256 !== expected.encryptedSha256) throw new Error("Managed snapshot admission changed its byte or owner identity.");
+}
+
+/** R2 reads cannot prolong a member handoff indefinitely. Cancellation is
+ * best-effort and never grants upload settlement or verified-byte authority. */
+function awaitSnapshotRead<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) { void operation.catch(() => {}); return Promise.reject(signal.reason); }
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }

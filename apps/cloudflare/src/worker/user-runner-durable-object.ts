@@ -1,3 +1,5 @@
+import type { HostedRuntimeMemberMigrationIdentity } from "@murphai/hosted-execution/runtime-migration";
+import { isLegacyMemberReady, observeMember, requestLegacyMemberCheckpoint, requireLegacyMemberMigrationPhase } from "../user-runner/legacy-member-migration.ts";
 import { commandHostedRuntimeMigration } from "../runtime-migration-client.ts";
 import { observeLegacyRuntime } from "../user-runner/legacy-runtime-observation.ts";
 import { requireLegacyRuntimeStorageCoverage, readLegacyRuntimeMigrationIdentity, readLegacyRuntimeExportPage, type LegacyRuntimeExportCursor } from "../user-runner/legacy-runtime-export.ts";
@@ -258,17 +260,38 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.migrationFreeze.run(() => this.runner.recordHostedBrowserVaultReplicaOrphanCandidate(input));
   }
 
-  async freezeForPostgresMigration(): Promise<{ frozen: boolean }> {
+  async preparePostgresMemberMigration(identity: HostedRuntimeMemberMigrationIdentity) {
+    const input = { source: this.source, state: this.migrationState, identity, userId: identity.userId };
+    await requireLegacyMemberMigrationPhase({ ...input, phases: ["quiescing"] });
+    const quiesced = await this.migrationFreeze.quiesce(identity.migrationId, () => isLegacyMemberReady(input));
+    return { quiesced, checkpointStatus: quiesced ? await requestLegacyMemberCheckpoint(input) : null };
+  }
+
+  async freezeForPostgresMigration(identity?: HostedRuntimeMemberMigrationIdentity): Promise<{ frozen: boolean }> {
+    if (identity) {
+      await requireLegacyMemberMigrationPhase({ source: this.source, state: this.migrationState, identity, phases: ["freezing", "importing"] });
+      // Never turn a checkpoint request acknowledgment into permission to kill
+      // active execution. Its canonical completion must clear the exact attempt.
+      if ((await observeMember(this.migrationState, identity.userId)).activeAttemptId) return { frozen: false };
+    } else await this.requireFleetDrainingGate();
+    return this.freezeLegacyObject(identity?.migrationId);
+  }
+
+  private async requireFleetDrainingGate(): Promise<void> {
     const result = await commandHostedRuntimeMigration({ source: this.source, command: { operation: "status" } });
     const gate = result.gate;
     if (!gate || typeof gate !== "object" || !("phase" in gate) || gate.phase !== "draining") {
       throw new Error("Legacy freeze requires the durable draining gate.");
     }
+  }
+
+  private async freezeLegacyObject(migrationId?: string): Promise<{ frozen: boolean }> {
     // The legacy fleet protocol initialized the schema on construction. Keep
     // that mutation at its authorized freeze entry, never at live inspection.
     const runner = this.runner;
     // Derive identity from this exact object, including resource-only records.
     return { frozen: await this.migrationFreeze.freeze({
+      ...(migrationId ? { migrationId } : {}),
       stop: async () => {
         const { userId } = await readLegacyRuntimeMigrationIdentity(this.migrationState);
         if (userId) await runner.stopLegacyRuntimeForMigration(userId);

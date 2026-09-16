@@ -148,6 +148,19 @@ describe("RunnerContainer", () => {
     vi.clearAllMocks();
   });
 
+  it.each(["managed-snapshot-v1", "old-protocol", "missing"])("probes checkpoint support without starting or checkpointing a process: %s", async protocol => {
+    const nativeFetch = vi.fn(async () => new Response(null, { status: 204,
+      headers: protocol === "missing" ? {} : { "x-runtime-migration-checkpoint-capability": protocol } }));
+    const h = createContainerDouble({ state: { container: { running: true, getTcpPort: () => ({ fetch: nativeFetch }) } } });
+    expect(await h.container.supportsMigrationCheckpoint({ userId: "synthetic_member" })).toBe(protocol === "managed-snapshot-v1");
+    expect(nativeFetch).toHaveBeenCalledExactlyOnceWith("http://container/internal/workspace-invocation/migration-checkpoint", expect.objectContaining({ method: "GET" }));
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(h.destroy).not.toHaveBeenCalled();
+    const stopped = createContainerDouble({ platformRunning: false });
+    expect(await stopped.container.supportsMigrationCheckpoint({ userId: "synthetic_member" })).toBe(false);
+    expect(stopped.containerFetch).not.toHaveBeenCalled();
+  });
+
   it.each(["accepted", "stale", "absent", "missing"])("requests migration checkpoints without starting or stopping a container: %s", async status => {
     const nativeFetch = vi.fn(async (_url: string, _init: RequestInit) => new Response(null, { status: 204,
       headers: status === "missing" ? {} : { "x-runtime-migration-checkpoint-status": status },

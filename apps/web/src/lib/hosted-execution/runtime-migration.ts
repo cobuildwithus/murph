@@ -8,19 +8,20 @@ import { recordRuntimeOrphansTx } from "./runtime-orphans";
 
 const INITIAL_CURSOR = { section: 0, after: "" };
 const INITIAL_INVENTORY_HASH = digest("");
-type MigrationCommand = Exclude<HostedRuntimeMigrationCommand, { operation: "status" | "inspect_object" }>;
+type MigrationCommand = Exclude<HostedRuntimeMigrationCommand, { operation: "status" | "inspect_object" | "advance_member" }>;
 
 /** Trusted finite campaign. Campaign transitions take the exclusive gate;
  * member transitions/pages share it and serialize only the affected owner. */
 export async function executeHostedRuntimeMigrationCommand(input: { prisma: PrismaClient; command: HostedRuntimeMigrationCommand }) {
   const command = parseHostedRuntimeMigrationCommand(input.command);
   if (command.operation === "status") return { gate: await input.prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } }) };
-  if (command.operation === "inspect_object") throw new Error("Live inspection belongs to the source Worker.");
+  if (command.operation === "inspect_object" || command.operation === "advance_member") throw new Error("Live member migration belongs to the source Worker.");
   const resources = command.operation === "import" || command.operation === "import_member" ? await validatePage(command.page) : null;
   if (isMemberMigrationCommand(command)) return withMemberMigrationWake({ prisma: input.prisma, command,
     run: prepared => input.prisma.$transaction(tx => executeMemberTx(tx, command, resources, prepared), { maxWait: 5_000, timeout: 5_000 }) });
   return input.prisma.$transaction(async tx => {
-    await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR UPDATE`;
+    if (command.operation === "read_object") await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
+    else await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR UPDATE`;
     const gate = await tx.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
     if (command.operation === "begin" || command.operation === "begin_rolling") return { gate: await beginTx(tx, gate, command) };
     requireIdentity(gate, command);
@@ -53,7 +54,7 @@ async function executeMemberTx(tx: Prisma.TransactionClient,
 async function beginTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover, command: Extract<MigrationCommand, { operation: "begin" | "begin_rolling" }>) {
   if (gate.phase !== "legacy") {
     requireIdentity(gate, command);
-    if (gate.phase !== (command.operation === "begin_rolling" ? "rolling" : "draining")) throw new Error("Migration campaign mode changed.");
+    if (gate.phase !== "postgres" && gate.phase !== (command.operation === "begin_rolling" ? "rolling" : "draining")) throw new Error("Migration campaign mode changed.");
     return gate;
   }
   return tx.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: {

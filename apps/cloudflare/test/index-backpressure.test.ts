@@ -204,6 +204,19 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(control).not.toHaveBeenCalled();
   });
 
+  it.each(["quiesce_member", "freeze_member", "activate_member"])("rejects raw operator transition %s without an exact-object handoff", async operation => {
+    const harness = createUserRunnerDurableObject({ CF_VERSION_METADATA: { id: "synthetic-version" }, HOSTED_RUNTIME_POSTGRES_ENABLED: "true" });
+    const control = vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration");
+    const request = new Request("https://runner.example.test/internal/runtime-migration", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation,
+        objectId: "a".repeat(64), namespaceId: "synthetic-namespace", workerVersion: "synthetic-version",
+        userId: "synthetic-member", migrationId: "synthetic-handoff" }),
+    });
+    const response = await worker.fetch(await signControlRequest(request), harness.env as never);
+    expect(response.ok).toBe(false);
+    expect(control).not.toHaveBeenCalled();
+  });
+
   it("forwards managed AI revocation through the UserRunner Durable Object", async () => {
     const revoke = vi.spyOn(
       HostedUserRunner.prototype,

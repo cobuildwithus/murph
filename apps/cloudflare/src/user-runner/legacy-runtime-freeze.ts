@@ -20,7 +20,7 @@ export class LegacyRuntimeFreeze {
   private readonly pending = new Set<Promise<unknown>>();
   private freezing: Promise<boolean> | null = null;
   private migrationId: string | null = null;
-  private quiescing: Promise<void> | null = null;
+  private quiescing: Promise<boolean> | null = null;
   private readonly admissions = new Set<Promise<unknown>>();
 
   constructor(private readonly state: DurableObjectStateLike) {
@@ -53,19 +53,34 @@ export class LegacyRuntimeFreeze {
   /** The caller verifies the canonical member transition before closing this
    * local gate. Wait for pre-barrier launches before selecting a checkpoint
    * target; background invocations remain tracked until the final freeze. */
-  async quiesce(migrationId: string): Promise<void> {
+  async quiesce(migrationId: string, ready?: () => Promise<boolean>): Promise<boolean> {
     if (!/^[A-Za-z0-9_-]{1,128}$/u.test(migrationId)) throw new TypeError("Legacy migration identity is invalid.");
     await this.loaded;
     if (this.phase && this.migrationId !== migrationId) throw new Error("Legacy migration identity changed.");
     if (this.phase === "freezing" || this.phase === "frozen") throw new LegacyRuntimeFrozenError();
     if (this.quiescing) return this.quiescing;
+    const alreadyClosed = this.phase === "quiescing";
     this.phase = "quiescing";
     this.migrationId = migrationId;
-    this.quiescing = this.persist("quiescing").then(async () => {
-      await Promise.allSettled([...this.admissions]);
-    });
-    try { await this.quiescing; }
+    this.quiescing = this.finishQuiescence(alreadyClosed ? undefined : ready);
+    try { return await this.quiescing; }
     finally { this.quiescing = null; }
+  }
+
+  private async finishQuiescence(ready?: () => Promise<boolean>): Promise<boolean> {
+    await Promise.allSettled([...this.admissions]);
+    if (ready) {
+      let eligible = false;
+      try { eligible = await ready(); }
+      finally {
+        // Nothing durable closed yet. A failed observational preflight leaves
+        // this member live; it is never a rollback from a stored barrier.
+        if (!eligible) { this.phase = null; this.migrationId = null; }
+      }
+      if (!eligible) return false;
+    }
+    await this.persist("quiescing");
+    return true;
   }
 
   track<T>(operation: Promise<T>): Promise<T> {
@@ -83,7 +98,7 @@ export class LegacyRuntimeFreeze {
     await this.loaded;
     if (input.migrationId && !this.phase) throw new Error("Member freeze requires completed quiescence.");
     if ((input.migrationId ?? null) !== this.migrationId) throw new Error("Legacy migration identity changed.");
-    if (this.quiescing) await this.quiescing;
+    if (this.quiescing && !await this.quiescing) throw new Error("Member freeze requires completed quiescence.");
     if (this.phase === "frozen") return true;
     if (this.freezing) return this.freezing;
     this.phase = "freezing";

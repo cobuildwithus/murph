@@ -52,7 +52,11 @@ export async function transitionMemberMigrationTx(input: {
   if (command.operation === "freeze_member" && owner.migrationPhase === "quiescing") {
     return projectMember(await tx.hostedRuntimeOwner.update({ where: { userId: command.userId }, data: { migrationPhase: "freezing" } }));
   }
-  if (command.operation !== "activate_member" || owner.migrationPhase === "postgres") return projectMember(owner);
+  if (command.operation !== "activate_member") return projectMember(owner);
+  if (owner.migrationPhase === "postgres") {
+    const wake = await tx.hostedMailboxItem.findUnique({ where: { userId_dedupeKey: { userId: command.userId, dedupeKey: migrationWakeEventId(command) } }, select: { id: true } });
+    return { ...projectMember(owner), mailboxItemId: wake?.id ?? null };
+  }
   const source = await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: command.objectId } });
   if (owner.migrationPhase !== "importing" || !source.completedAt || source.generation === null
     || source.generation > owner.generation || owner.phase !== "idle" || owner.attemptId || owner.runnerContainerName) {

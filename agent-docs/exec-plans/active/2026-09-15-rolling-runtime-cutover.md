@@ -161,11 +161,32 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
   fleet migration test. It covers same-member callback serialization with an
   independently progressing member, complete import before activation, one wake
   across retries, deleted members and fleet closure during migrated execution.
-  Web, Worker and shared typechecks and the complexity guard pass. Source-side
-  readiness, graceful checkpoint, local freeze and hosted operator wiring are
-  still required before these commands form a usable handoff.
-- Remaining before a final candidate: conditional local
-  admission closure and controlled final checkpoint; complete effect and
+  Web, Worker and shared typechecks and the complexity guard pass.
+- Wired the authenticated exact-object member continuation: reserve canonical
+  identity, conditionally close local starts, request the exact active checkpoint,
+  wait for completion, freeze, import one page per request and activate. Raw
+  operator freeze/activation/import commands are rejected; only the source Worker
+  supplies pages and transitions. Replaying activation also retries its existing
+  wake signal after commit; durable mailbox recovery covers lost signal replies.
+- Conditional readiness runs after admitted launches settle. Busy old containers
+  must answer a non-mutating native GET capability probe before closure persists;
+  old direct URLs and pending replica writes leave the member live. Rejected
+  preflight can reopen only an unpersisted local barrier. Persisted closure never
+  reopens. Final stop independently refuses an active attempt even after a
+  checkpoint request was accepted. Native probes never auto-start containers.
+- Controlled-byte verification now has a 60-second read deadline and cancels a
+  stalled stream without granting verification or upload-settlement authority.
+- Source proof: 349 tests across seven affected Worker files pass (including
+  three operator transition-boundary cases); five real Postgres migration tests
+  pass. Readiness/checkpoint/container, conditional closure and a resumable
+  source-to-import continuation are covered. This remains local component and
+  composed-source proof, not real R2 interop or a measured live member pause.
+- Next implementation: empty-object migration, explicit new personal/group member
+  ownership and legacy creation closure, then the authenticated hosted fleet
+  operator. Busy pre-protocol processes remain live during readiness; release
+  convergence and eventual completion of every held member must be proved in
+  rehearsal and deployment. Do not mistake a skipped member for completion.
+- Remaining before a final candidate: complete effect and
   control routing; creation/inventory closure; hosted
   operator; composed rehearsal; owner documentation and final review/CI. Keep
   the PR draft and the production campaign inactive until those are complete.

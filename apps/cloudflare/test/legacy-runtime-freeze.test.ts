@@ -42,7 +42,7 @@ describe("finite legacy runtime freeze", () => {
     await expect(evicted.runAdmission(async () => {})).rejects.toThrow("frozen");
     await expect(evicted.run(async () => "completion callback")).resolves.toBe("completion callback");
     await expect(evicted.quiesce("another-migration")).rejects.toThrow("identity changed");
-    await expect(evicted.quiesce("migration-synthetic")).resolves.toBeUndefined();
+    await expect(evicted.quiesce("migration-synthetic")).resolves.toBe(true);
     await expect(h.freeze.freeze({ stop: async () => {}, drained: async () => true })).rejects.toThrow("identity changed");
     finishInvocation.resolve();
     expect(await h.freeze.freeze({ migrationId: "migration-synthetic", stop: async () => {}, drained: async () => true })).toBe(true);
@@ -77,6 +77,30 @@ describe("finite legacy runtime freeze", () => {
     await failed.freeze.quiesce("migration-synthetic");
     const evicted = new LegacyRuntimeFreeze(failed.state);
     await expect(evicted.runAdmission(async () => {})).rejects.toThrow("frozen");
+  });
+
+  it("checks readiness after admitted launches settle and reopens only an unpersisted rejected barrier", async () => {
+    const h = harness();
+    const launched = deferred();
+    const release = deferred();
+    const launch = h.freeze.runAdmission(async () => { launched.resolve(); await release.promise; });
+    await launched.promise;
+    const ready = vi.fn(async () => false);
+    const first = h.freeze.quiesce("migration-synthetic", ready);
+    const duplicate = h.freeze.quiesce("migration-synthetic", ready);
+    await expect(h.freeze.runAdmission(async () => {})).rejects.toThrow("frozen");
+    expect(ready).not.toHaveBeenCalled();
+    release.resolve(); await launch;
+    expect(await first).toBe(false);
+    expect(await duplicate).toBe(false);
+    expect(ready).toHaveBeenCalledTimes(1);
+    await expect(h.freeze.runAdmission(async () => "live")).resolves.toBe("live");
+    expect(await h.state.storage.get("runtime-migration-freeze:v1")).toBeUndefined();
+    expect(await h.freeze.quiesce("migration-synthetic", async () => true)).toBe(true);
+    const mustNotReopen = vi.fn(async () => false);
+    expect(await h.freeze.quiesce("migration-synthetic", mustNotReopen)).toBe(true);
+    expect(mustNotReopen).not.toHaveBeenCalled();
+    await expect(h.freeze.runAdmission(async () => {})).rejects.toThrow("frozen");
   });
 
   it("preserves old completed freeze records and rejects member freeze before quiescence", async () => {

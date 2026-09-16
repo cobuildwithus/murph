@@ -74,6 +74,16 @@ describe("managed snapshot uploads", () => {
     expect(h.bucket.get).toHaveBeenCalledWith(objectKey);
   });
 
+  it("bounds a stalled verification stream without recording success", async () => {
+    const h = harness();
+    const cancel = vi.fn();
+    h.bucket.get = vi.fn(async () => ({ size: bytes.length, arrayBuffer: async () => new ArrayBuffer(0),
+      body: new ReadableStream<Uint8Array>({ cancel }) }));
+    await expect(verifyManagedSnapshotBytes({ bucket: h.bucket, receipt, timeoutMs: 10 })).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(h.settle).not.toHaveBeenCalled();
+  });
+
   it("records admission before granting access to the upload and aborts only unused retry allocations", async () => {
     const h = harness();
     const admit = vi.fn(async (proposed: HostedRuntimeManagedSnapshotUpload) => ({ ...proposed, uploadId: "existing-upload" }));

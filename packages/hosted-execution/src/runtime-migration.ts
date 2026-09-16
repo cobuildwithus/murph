@@ -2,6 +2,8 @@ import { parseAllowedString, requireObject, requireString } from "./parsers/asse
 import { parseHostedRuntimeOwnerIdentity } from "./runtime-owner.ts";
 
 export const HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH = "/internal/workspace-invocation/migration-checkpoint";
+export const HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER = "x-runtime-migration-checkpoint-capability";
+export const HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL = "managed-snapshot-v1";
 export const HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER = "x-runtime-migration-checkpoint-status";
 export interface HostedRuntimeMigrationCheckpointRequest { userId: string; attemptId: string; generation: string }
 /** Acceptance requests a graceful checkpoint; it is never a stop or durability receipt. */
@@ -82,6 +84,7 @@ export type HostedRuntimeMemberMigrationCommand =
   | ({ operation: "import_member"; page: LegacyRuntimeExportPage } & HostedRuntimeMemberMigrationIdentity);
 export type HostedRuntimeMigrationCommand =
   | HostedRuntimeMemberMigrationCommand
+  | ({ operation: "advance_member" } & HostedRuntimeMemberMigrationIdentity)
   | { operation: "status" }
   | ({ operation: "begin" } & HostedRuntimeMigrationIdentity)
   | ({ operation: "begin_rolling" } & HostedRuntimeMigrationIdentity)
@@ -120,6 +123,7 @@ export function parseHostedRuntimeMigrationCommand(value: unknown): HostedRuntim
   const member = parseMemberMigrationCommand(record, identity);
   if (member) return member;
   switch (record.operation) {
+    case "advance_member": return { operation: "advance_member", ...identity, ...memberMigrationIdentity(record) };
     case "begin":
     case "begin_rolling": return { operation: record.operation, ...identity };
     case "inventory": {

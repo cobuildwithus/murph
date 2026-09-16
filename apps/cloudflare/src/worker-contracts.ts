@@ -1,4 +1,4 @@
-import type { LegacyRuntimeExportCursor, LegacyRuntimeExportPage, LegacyRuntimeInspection } from "@murphai/hosted-execution/runtime-migration";
+import type { HostedRuntimeMemberMigrationIdentity, HostedRuntimeMigrationCheckpointStatus, LegacyRuntimeExportCursor, LegacyRuntimeExportPage, LegacyRuntimeInspection } from "@murphai/hosted-execution/runtime-migration";
 import type { HostedExecutionContainerStubLike } from "./runner-container.ts";
 import type {
   HostedWorkspaceInvocationResult,
@@ -149,7 +149,8 @@ export interface WorkerRunnerContainerNamespaceLike<
 export interface WorkerUserRunnerStubLike {
   manageHostedWorkspaceSnapshotUpload?(input: { userId: string; command: import("@murphai/hosted-execution/runtime-resources").HostedRuntimeManagedSnapshotCommand }): Promise<import("@murphai/hosted-execution/runtime-resources").HostedRuntimeSnapshotResponse>;
   inspectPostgresMigration?(): Promise<LegacyRuntimeInspection>;
-  freezeForPostgresMigration?(): Promise<{ frozen: boolean }>;
+  preparePostgresMemberMigration?(identity: HostedRuntimeMemberMigrationIdentity): Promise<{ quiesced: boolean; checkpointStatus: HostedRuntimeMigrationCheckpointStatus | null }>;
+  freezeForPostgresMigration?(identity?: HostedRuntimeMemberMigrationIdentity): Promise<{ frozen: boolean }>;
   exportPostgresMigrationPage?(cursor: LegacyRuntimeExportCursor): Promise<LegacyRuntimeExportPage>;
   recordRunnerContainerRetired?(input: {
     runnerContainerName: string;

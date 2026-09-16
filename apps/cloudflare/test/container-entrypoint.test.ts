@@ -852,6 +852,9 @@ describe("startHostedContainerEntrypoint", () => {
     const identity = { userId: "u_container_workspace", attemptId: "attempt_container_workspace", generation: "8" };
     try {
       await ready.promise;
+      expect((await sendHostedContainerGetRequest({ port: address.port, path: "/internal/workspace-invocation/migration-checkpoint" })).status).toBe(204);
+      expect(observed.shutdown?.aborted).toBe(false);
+      expect(observed.invocation?.aborted).toBe(false);
       for (const stale of [{ ...identity, userId: "synthetic_other" }, { ...identity, generation: "9" }, { ...identity, attemptId: "synthetic_other" }]) {
         expect((await checkpoint(stale)).headers["x-runtime-migration-checkpoint-status"]).toBe("stale");
         expect(observed.shutdown?.aborted).toBe(false);
