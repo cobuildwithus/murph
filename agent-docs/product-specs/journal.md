@@ -167,7 +167,10 @@ The current Journal page still navigates today and historical days. Upcoming
 context does not add a future-date browser to that page; a saved plan appears
 on its occurrence date once that date is selectable and the view is refreshed.
 
-The context improves wording, relevance, and interpretation only when useful. It
+Before advice or reminder wording, Murph considers upcoming plans that affect
+what is practical, even when the member does not mention them. Relevant plans
+shape the answer and one useful preparation or adjustment; unrelated questions
+do not acquire plan mentions or extra check-ins. The context
 never grants permission to reschedule a fixed reminder, change the member timezone,
 pause an experiment, or treat a future plan as an observed confounder. Permanent
 experiment evidence continues through the existing canonical experiment owner.

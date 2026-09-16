@@ -19,7 +19,9 @@ Updated: 2026-09-16
 ## Scope
 
 - In scope: existing event, connected-context ledger, and snapshot owners.
-- Out of scope: new databases, schedulers, factual stores, production mutations.
+- Out of scope: new databases, schedulers, factual stores, and future-date UI.
+- The latest user instruction authorizes final review, fixes, merge, and normal
+  protected deployment; rollback remains outside that authorization.
 - Journal navigation currently excludes future dates; await the user's preference
   before extending that behavior.
 
@@ -71,13 +73,14 @@ Updated: 2026-09-16
   functions are unchanged. Parent diff/privacy review found no remaining
   accepted issue in this correction scope.
 - Complete loopback provider-input fixtures passed: direct 143666 to 145028
-  bytes, group 131269 unchanged. These fixtures omit the optional CLI contract;
+  bytes before the proactive prompt edit, group 131269 unchanged. These fixtures omit the optional CLI contract;
   token counts remain unavailable without the exact model tokenizer.
 - The new all-day correction live journey and updated calendar/retry journey
   are not yet proven on this candidate: local subscription authentication
-  failed before any model action. The default home and all eight available
-  alternate authenticated homes were tried once; subscription sign-in must be
-  restored before this proof can run. No auth material was copied or persisted.
+  initially failed before any model action. The earlier environment-based
+  alternate-home attempts were invalid because the runner discards that override.
+  Retrying with --codex-home reached a working subscription. No auth material
+  was copied or persisted.
 - Remaining gates: focused live proof, exact-head CI, and a resolved final
   review for the new runtime delta. Prior ReviewGPT rounds remain recorded
   against their actual heads; none covers these subsequent corrections.
@@ -97,3 +100,45 @@ Updated: 2026-09-16
   owners, without new stores, queues, or synchronization mechanisms.
 - The three-round count and first-reviewed head remain immutable. Do not start
   a fourth substantive review without the documented continuation decision.
+
+## Proactive reply guidance and completion authorization
+
+- The user approved proactive preparation advice from relevant upcoming plans,
+  then explicitly authorized a fourth and final review, fixing its findings,
+  merge, deployment, and additional checks of existing Journal behavior.
+- Outcome: relevant upcoming constraints shape advice without the member having
+  to mention them. Reaches: private replies and existing reminders; unrelated
+  questions, group privacy, quiet capture, and schedule authority stay intact.
+- Proof: composed prompt assertions, three real-model relevance/irrelevance
+  journeys, canonical Journal/query/UI regressions, and exact-head CI.
+- Earlier alternate-home live attempts used an environment override that the
+  test runner discards. They did not actually test the alternate homes. Retry
+  with the documented --codex-home argument before declaring authentication
+  exhausted, and correct the PR evidence accordingly.
+- Round four is now authorized. Preserve the original first-reviewed head and
+  prior review ledger; include the final prompt change in the review candidate.
+
+## Final candidate regression evidence
+
+- Existing Journal behavior: 155 passing checks across canonical storage (10),
+  query views (28), typed/legacy CLI and experiment flows (57), capture,
+  follow-up and automation lifecycle (56), and page navigation (4).
+- Proactive prompt/projection checks: 17 passing; changelog rendering: 10 passing.
+  Engine and Web typechecks, complexity guard, and complete provider-input
+  fixtures pass. Final direct input is 145274 bytes, +1608 bytes (1.1193%);
+  assembled instructions are 85530 bytes. Group input and tool bytes are unchanged.
+- The first successful live provider call gave useful travel preparation while
+  preserving uncertainty. Its test rejected the equivalent wording "may";
+  the assertion now accepts that ordinary uncertainty marker. No production
+  instruction was changed to satisfy this test-only correction.
+- A later live reply made tentative travel sound settled. The existing context
+  guidance now requires conditional advice for tentative plans. Composed prompt
+  and provider-input proof were rerun; direct reply, reminder, and unrelated
+  factual-answer journeys pass with no tool actions or extra messages.
+- The all-day correction journey passes on Terra high: one existing record
+  changes, date-only timing remains, and no duplicate or reminder is created.
+- The Luna capture journey exposed ambiguous follow-up reference guidance: it
+  used the note subtype instead of the canonical event family. The existing
+  capture skill now gives the exact event reference shape. A materialized-skill
+  contract assertion and the existing live exact-reference assertion cover it;
+  no new reference resolver, persistence owner, or schema rule is introduced.

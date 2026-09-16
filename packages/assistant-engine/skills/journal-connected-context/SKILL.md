@@ -100,7 +100,8 @@ an overnight check-in from its midnight date boundary; an end-based check-in
 requires a real end time. Preserve already-authorized follow-ups.
 Save that one-shot check-in with `murph.automation` in
 the same pass that creates the plan. Bind it to the current private
-conversation and include the new Journal event id as a context reference. Its
+conversation using `contextReferences: [{"entityKind":"event","entityId":"<saved event id>"}]`.
+A Journal note is an event; do not use its `note` subtype as the entity kind. Its
 instructions must check passive evidence first and stay quiet when that
 evidence already resolves the event. Do not defer this write to a later
 connected-context pass. Use `schedule.kind=at` with `schedule.localAt.date`,

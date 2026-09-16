@@ -2604,6 +2604,10 @@ describe('real Codex live fixture contracts', () => {
     expect(prompt).not.toContain('Scheduled automation changes are unavailable')
     const root = await mkdtemp(path.join(tmpdir(), 'murph-journal-cli-contract-'))
     try {
+      const skillsRoot = path.join(root, 'skills')
+      await materializeAssistantSkill({ skillsRoot, slug: 'journal-connected-context' })
+      const skill = await readFile(path.join(skillsRoot, 'journal-connected-context', 'SKILL.md'), 'utf8')
+      expect(skill).toContain('contextReferences: [{"entityKind":"event","entityId":"<saved event id>"}]')
       const binDirectory = path.join(root, 'bin')
       await materializeJournalConnectedContextVaultCli({ binDirectory, vaultRoot: root })
       const cli = (args: string[]) => execFileAsync(path.join(binDirectory, 'vault-cli'), args, { timeout: 60_000 })
@@ -18847,7 +18851,11 @@ describeRealCodex('real Codex upcoming context use e2e', () => {
     }
   }, 360_000)
 
-  it.each([false, true])('uses relevant travel context without changing plans (scheduled=%s)', async (scheduled) => {
+  it.each([
+    { scenario: 'unmentioned travel in a reply', scheduled: false, relevant: true },
+    { scenario: 'unmentioned travel in a reminder', scheduled: true, relevant: true },
+    { scenario: 'unrelated factual question', scheduled: false, relevant: false },
+  ])('uses upcoming context selectively without changing plans ($scenario)', async ({ scenario, scheduled, relevant }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-upcoming-use-e2e-'))
     try {
@@ -18872,9 +18880,10 @@ describeRealCodex('real Codex upcoming context use e2e', () => {
         dynamicTools,
         progressDelivery: { async send(text) { updates.push(text); return { kind: 'sent', source: 'model' } } },
         prompt: resolveAssistantProviderPrompt({ dynamicTools,
-          prompt: scheduled
-            ? 'Scheduled reminder: prepare for tomorrow, usually by setting things out at home. Send one short useful reminder for tomorrow that respects what is known and uncertain about my plans. Do not change any schedule or plan. No research or tool calls are needed.'
-            : 'My usual evening reminder is to set things out at home for tomorrow. How would you phrase it for tomorrow given my plans? One short sentence; do not take actions or research.',
+          prompt: !relevant ? 'How many centimeters are in a meter? Just the answer, please.'
+            : scheduled
+              ? 'Scheduled reminder: prepare for tomorrow, usually by setting things out at home for the gym. Send one short useful reminder. Do not change any schedule or plan. No research or tool calls are needed.'
+              : 'Help me prepare for tomorrow. My usual routine is to lay out clothes at home for a gym workout. One short sentence; do not take actions or research.',
           providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
           turnContextPrompt: context, workingDirectory,
         }),
@@ -18883,11 +18892,17 @@ describeRealCodex('real Codex upcoming context use e2e', () => {
       const actions = readCapabilityRoutingActions(result.jsonEvents)
       expect(actions.filter(action => action.kind === 'dynamic' || action.kind === 'command')).toEqual([])
       expect(updates).toEqual([])
-      expect(result.finalMessage).toMatch(/tomorrow|prepare|set|ready|pack|lay/iu)
-      expect(result.finalMessage).toMatch(/hotel|away|travel|trip|conference|room/iu)
-      expect(result.finalMessage).toMatch(/if|tentative|possible|might|in case|go(?:es)? ahead/iu)
+      if (relevant) {
+        expect(result.finalMessage).toMatch(/tomorrow|prepare|set|ready|pack|lay/iu)
+        expect(result.finalMessage).toMatch(/hotel|away|travel|trip|conference|room/iu)
+        expect(result.finalMessage).toMatch(/if|tentative|possible|might|\bmay\b|in case|go(?:es)? ahead/iu)
+        expect(result.finalMessage).toMatch(/pack|bring|bag|portable|bodyweight|room|hotel|walk/iu)
+      } else {
+        expect(result.finalMessage).toMatch(/100|one hundred/iu)
+        expect(result.finalMessage).not.toMatch(/hotel|travel|trip|conference|gym|workout|pack/iu)
+      }
       expect(result.finalMessage).not.toMatch(/reminders? (?:are |have been )?cancel|changed your|rescheduled|scratchpad|provider text|upcoming.context/iu)
-      process.stdout.write(`[upcoming-context-use] ${JSON.stringify({ scheduled, reply: result.finalMessage, actions: actions.length })}\n`)
+      process.stdout.write(`[upcoming-context-use] ${JSON.stringify({ scenario, scheduled, reply: result.finalMessage, actions: actions.length })}\n`)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }

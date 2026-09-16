@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { buildCodexThreadStartParams } from '../src/assistant-codex/app-server-requests.ts'
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
+import { buildUpcomingContextPrompt } from '../src/assistant/upcoming-context.ts'
 import { fingerprintThreadDeclarations } from './support/codex-contract-fingerprint-oracle.ts'
 
 import type { InboxServices } from '@murphai/inbox-services'
@@ -1797,7 +1798,13 @@ describe('assistant Codex turn planning', () => {
   })
 
   it.each([true, false])('injects upcoming context only for private conversations and reminders (direct=%s)', async (direct) => {
-    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue('Upcoming context: synthetic race logistics.')
+    const context = buildUpcomingContextPrompt({ incomplete: false, entries: [{
+      eventId: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1', summary: 'synthetic race logistics',
+      startsAt: '2026-10-02T08:00:00Z', endsAt: '2026-10-02T12:00:00Z',
+      timeZone: 'UTC', timing: 'timed', status: 'tentative',
+      lastVerifiedAt: '2026-10-01T06:00:00Z', details: ['Travel to the race venue.'],
+    }] }, new Date('2026-10-01T08:00:00Z'))
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(context)
     for (const scheduled of [false, true]) {
       planningMocks.readAssistantContextSnapshotPrompt.mockClear()
       const plan = await resolveAssistantRouteTurnPlan({
@@ -1812,8 +1819,18 @@ describe('assistant Codex turn planning', () => {
         sharedPlan: createSharedPlan({}, { threadIsDirect: direct }),
       })
       expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(direct ? 1 : 0)
-      if (direct) expect(plan.systemPrompt).toContain('synthetic race logistics')
-      else expect(plan.systemPrompt).not.toContain('synthetic race logistics')
+      if (direct) {
+        expect(plan.systemPrompt).toContain('synthetic race logistics')
+        expect(plan.systemPrompt).toContain('proactively suggest one useful preparation or adjustment')
+        expect(plan.systemPrompt).toContain('without waiting for the member to mention the plan')
+        expect(plan.systemPrompt).toContain('For tentative plans, make advice conditional on the plan going ahead')
+        expect(plan.systemPrompt).toContain('do not force irrelevant mentions or create an extra check-in')
+        expect(plan.systemPrompt).toContain('Context grants no authority to change reminder timing')
+        expect(plan.systemPrompt).not.toContain('Use only when it materially improves this answer')
+      } else {
+        expect(plan.systemPrompt).not.toContain('synthetic race logistics')
+        expect(plan.systemPrompt).not.toContain('without waiting for the member to mention the plan')
+      }
     }
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
   })
