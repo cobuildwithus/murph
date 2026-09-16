@@ -1,3 +1,4 @@
+import { resolveAdmittedLegacyUserRunner } from "./legacy-runtime-admission.ts";
 import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
 import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import { authorizePostgresRuntimeProvider } from "./runtime-provider-authorization.ts";
@@ -1131,7 +1132,7 @@ async function recordHostedDirectRuntimeUsage(input: {
   record: AssistantUsageRecord;
   writeFence: HostedProviderEgressWriteFenceMetadata;
 }): Promise<HostedRuntimeUsageRecordResponse> {
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, input.writeFence.userId))) {
     const headers = new Headers({ "content-type": "application/json" });
     if (!input.writeFence.workspaceVersion) throw new Error("Runtime usage workspace identity is missing.");
     writeRunnerRuntimeWriteFenceHeaders(headers, { attemptId: input.writeFence.attemptId, leaseGeneration: input.writeFence.leaseGeneration, workspaceVersion: input.writeFence.workspaceVersion });
@@ -3409,7 +3410,7 @@ async function authorizeHostedProviderEgress(input: {
       headers: input.request.headers,
       userId: input.userId,
     });
-    if (usesPostgresRuntimeOwner(input.env) && writeFence) {
+    if ((await usesPostgresRuntimeOwner(input.env, input.userId)) && writeFence) {
       const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.userId,
         command: { operation: "authorize_effect", attemptId: writeFence.attemptId, generation: writeFence.leaseGeneration, runnerContainerName: null, managedAi: false },
         managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
@@ -3692,14 +3693,14 @@ async function authorizeHostedProviderEgressCredential(input: {
     };
   }
 
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, verification.claims.userId))) {
     const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: verification.claims.userId,
       command: { operation: "authorize_provider", runnerContainerName: verification.claims.runnerContainerName, providerEgressTokenHash: null, providerKind: input.providerKind },
       managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
     });
     return postgresProviderAuthorization(validation, { startedAt, userId: verification.claims.userId, mode: "provider_egress_credential", runtimeAuthorityHeadersPresent, providerEgressTokenPresent });
   }
-  const runner = input.env.USER_RUNNER.getByName(verification.claims.userId);
+  const runner = await resolveAdmittedLegacyUserRunner(input.env, verification.claims.userId);
   if (typeof runner.validateRuntimeProviderEgressCredential !== "function") {
     return {
       authorized: false,
@@ -3762,7 +3763,7 @@ async function authorizeHostedProviderEgressToken(input: {
   runtimeAuthorityHeadersPresent: boolean;
   startedAt: number;
 }): Promise<HostedProviderEgressAuthorization> {
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, input.activeUserId))) {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input.providerEgressToken)));
     const providerEgressTokenHash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
     const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.activeUserId,
@@ -3771,7 +3772,7 @@ async function authorizeHostedProviderEgressToken(input: {
     });
     return postgresProviderAuthorization(validation, { ...input, userId: input.activeUserId, mode: "provider_egress_token" });
   }
-  const runner = input.env.USER_RUNNER.getByName(input.activeUserId);
+  const runner = await resolveAdmittedLegacyUserRunner(input.env, input.activeUserId);
   if (typeof runner.validateRuntimeProviderEgressToken !== "function") {
     return {
       authorized: false,

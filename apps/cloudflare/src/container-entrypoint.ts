@@ -6,6 +6,8 @@ import {
 import { readdir, readFile, readlink } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER, parseHostedRuntimeMigrationCheckpointRequest } from "@murphai/hosted-execution/runtime-migration";
+import { requestContainerMigrationCheckpoint } from "./container-migration-checkpoint.ts";
 
 import {
   buildHostedExecutionSafeErrorDetails,
@@ -82,6 +84,13 @@ const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS = 5_000;
+const HOSTED_CONTAINER_REQUEST_KINDS = new Map([
+  [HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH, "codex-shell-smoke"],
+  [HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH, "live-model-smoke"],
+  [HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH, "direct-r2-smoke"],
+  ["/internal/workspace-invocation", "workspace-invocation"],
+  [HOSTED_CONTAINER_WORKSPACE_INVOCATION_ABORT_PATH, "workspace-invocation-abort"],
+]);
 
 function writeHostedRuntimeWakeResponse(
   response: ServerResponse,
@@ -615,27 +624,34 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
-      const isCodexShellSmokeRequest =
-        request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH;
-      const isLiveModelTurnSmokeRequest =
-        request.method === "POST"
-        && requestUrl.pathname === HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH;
-      const isDirectR2PresignedPutSmokeRequest =
-        request.method === "POST"
-        && requestUrl.pathname === HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH;
-      const isWorkspaceInvocationRequest =
-        request.method === "POST" && requestUrl.pathname === "/internal/workspace-invocation";
-      const isWorkspaceInvocationAbortRequest =
-        request.method === "POST"
-        && requestUrl.pathname === HOSTED_CONTAINER_WORKSPACE_INVOCATION_ABORT_PATH;
+      if (request.method === "GET" && requestUrl.pathname === HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH) {
+        discardUnreadRequestBody(request);
+        response.statusCode = 204;
+        response.setHeader(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL);
+        response.end();
+        return;
+      }
 
-      if (
-        !isWorkspaceInvocationRequest
-        && !isWorkspaceInvocationAbortRequest
-        && !isCodexShellSmokeRequest
-        && !isLiveModelTurnSmokeRequest
-        && !isDirectR2PresignedPutSmokeRequest
-      ) {
+      if (request.method === "POST" && requestUrl.pathname === HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH) {
+        const checkpointRequest = parseHostedRuntimeMigrationCheckpointRequest(JSON.parse(
+          await readHostedContainerInvocationRequestBody(request, HOSTED_CONTAINER_RUNTIME_WAKE_REQUEST_BODY_LIMIT_BYTES),
+        ));
+        const status = requestContainerMigrationCheckpoint({
+          request: checkpointRequest, active: activeWorkspaceInvocationAbort, shutdown: containerShutdownController,
+        });
+        response.statusCode = 204;
+        response.setHeader(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER, status);
+        response.end();
+        return;
+      }
+
+      const requestKind = request.method === "POST" ? HOSTED_CONTAINER_REQUEST_KINDS.get(requestUrl.pathname) : undefined;
+      const isCodexShellSmokeRequest = requestKind === "codex-shell-smoke";
+      const isLiveModelTurnSmokeRequest = requestKind === "live-model-smoke";
+      const isDirectR2PresignedPutSmokeRequest = requestKind === "direct-r2-smoke";
+      const isWorkspaceInvocationAbortRequest = requestKind === "workspace-invocation-abort";
+
+      if (requestKind === undefined) {
         discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
@@ -1068,13 +1084,15 @@ export async function startHostedContainerEntrypoint(input: {
       ) {
         activeWorkspaceInvocationAbort = null;
       }
-      if (claimedRunnerSlot) {
-        activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
-      }
       requestAbort.cleanup();
       await recordHostedContainerRuntimeCompletionIfPresent(
         completedInvocation,
       );
+      // A checkpoint control response must not let shutdown exit while the
+      // completed invocation's durable completion callback is still settling.
+      if (claimedRunnerSlot) {
+        activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
+      }
       maybeExitAfterContainerShutdownDrain();
     }
   });

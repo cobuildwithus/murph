@@ -209,6 +209,8 @@ describe("hosted-onboarding member-identity-service", () => {
     const memberCreate = vi.fn().mockResolvedValue(createdMember);
     const prisma = asRootPrisma({
       $executeRaw: participantContactLock,
+      $queryRaw: vi.fn().mockResolvedValue([{ phase: "legacy" }]),
+      hostedRuntimeOwner: { create: vi.fn().mockResolvedValue({}) },
       hostedMember: {
         create: memberCreate,
         delete: vi.fn(),

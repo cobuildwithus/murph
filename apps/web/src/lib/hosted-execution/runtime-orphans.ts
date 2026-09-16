@@ -1,8 +1,9 @@
+import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 import { createHash } from "node:crypto";
 import { hostedBrowserVaultReplicaUserPrefix, hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
 import { parseHostedRuntimeResourcePurge, type HostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
-import { lockHostedRuntimeCutoverTx, lockHostedRuntimeOwnerRowTx } from "./runtime-owner";
+import { lockHostedRuntimeOwnerRowTx } from "./runtime-owner";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type { HostedExecutionSnapshotRef, HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/contracts";
 import { isHostedWorkspaceSnapshotV2Ref, readHostedExecutionSnapshotBaseRef, readHostedExecutionSnapshotHotRef, readHostedExecutionSnapshotDeltaRef } from "@murphai/hosted-execution/parsers";
@@ -67,7 +68,7 @@ export async function recordHostedRuntimeOrphan(input: { prisma: PrismaClient; u
     candidates = [{ kind: "replica", resourceId: resource.objectKey, objectKey: resource.objectKey, snapshotRef: Prisma.DbNull }];
   } else throw new TypeError("Media retirement has its own metadata owner.");
   await input.prisma.$transaction(async tx => {
-    if (await lockHostedRuntimeCutoverTx(tx) !== "postgres") throw hostedOnboardingError({ code: "HOSTED_RUNTIME_OWNER_STALE", httpStatus: 409, message: "Postgres resource ownership is not active." });
+    if (await lockHostedRuntimeMemberCutoverTx(tx, input.userId) !== "postgres") throw hostedOnboardingError({ code: "HOSTED_RUNTIME_OWNER_STALE", httpStatus: 409, message: "Postgres resource ownership is not active." });
     await lockHostedMemberRow(tx, input.userId);
     await lockHostedRuntimeOwnerRowTx(tx, input.userId);
     await recordRuntimeOrphansTx(tx, input.userId, candidates, new Date());

@@ -9,6 +9,25 @@ function source() {
 }
 
 describe("Postgres-owned physical resource cleanup", () => {
+  it("aborts the exact managed snapshot upload while rejecting foreign and nested snapshot keys", async () => {
+    const base = source();
+    const abort = vi.fn(async () => {});
+    const resumeMultipartUpload = vi.fn(() => ({ uploadId: "synthetic-upload", abort,
+      complete: async () => undefined, uploadPart: async () => ({ partNumber: 1, etag: "synthetic-etag" }) }));
+    const env = { ...base, BUNDLES: { ...base.BUNDLES, resumeMultipartUpload } };
+    const userId = "synthetic_owner";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({ userId, snapshotId: "snapshot-proof" });
+    await purgeHostedRuntimeResource({ source: env, userId, resource: { kind: "multipart", objectKey, uploadId: "synthetic-upload" } });
+    expect(resumeMultipartUpload).toHaveBeenCalledExactlyOnceWith(objectKey, "synthetic-upload");
+    expect(abort).toHaveBeenCalledOnce();
+    const foreign = await hostedWorkspaceSnapshotObjectKey({ userId: "synthetic_other", snapshotId: "snapshot-proof" });
+    for (const badKey of [foreign, objectKey + "/nested"]) {
+      await expect(purgeHostedRuntimeResource({ source: env, userId, resource: { kind: "multipart", objectKey: badKey, uploadId: "synthetic-upload" } })).rejects.toThrow("outside the member namespace");
+    }
+    expect(abort).toHaveBeenCalledOnce();
+    expect(base.BUNDLES.delete).not.toHaveBeenCalled();
+  });
+
   it("rejects another member's object and nested paths before touching R2", async () => {
     const env = source();
     const objectKey = await hostedMediaObjectKey({ userId: "synthetic_other", mediaId: "a".repeat(64) });

@@ -18,6 +18,7 @@ export async function commandHostedRuntimeSnapshot(input: {
     response, description: "Hosted runtime snapshot", maxBytes: 64 * 1024, signal: null, timeoutMs: env.webControlTimeoutMs,
   })));
   if (result.session && result.session.userId !== input.userId) throw new Error("Hosted runtime snapshot member mismatch.");
+  if (result.managedUpload && result.managedUpload.userId !== input.userId) throw new Error("Hosted runtime upload member mismatch.");
   return result;
 }
 

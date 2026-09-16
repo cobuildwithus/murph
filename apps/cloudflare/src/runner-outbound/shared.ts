@@ -1,3 +1,4 @@
+import { resolveAdmittedLegacyUserRunner } from "../legacy-runtime-admission.ts";
 import type {
   HostedCryptoDomain,
 } from "@murphai/runtime-state";
@@ -85,7 +86,7 @@ export async function resolveRunnerOutboundUserRunnerStub(
   env: RunnerOutboundEnvironmentSource,
   userId: string,
 ): Promise<WorkerUserRunnerStubLike> {
-  return env.USER_RUNNER.getByName(userId);
+  return resolveAdmittedLegacyUserRunner(env, userId);
 }
 
 type WorkerUserRunnerStubWithMethod<

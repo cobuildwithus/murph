@@ -3766,6 +3766,7 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
       const query = args[0] as TemplateStringsArray | Prisma.Sql;
       const isPrismaSql = !Array.isArray(query) && "sql" in query;
       const sql = isPrismaSql ? query.sql : query.join("?");
+      if (sql.includes("hosted_runtime_cutover")) return [{ phase: "legacy" }] as T;
       const values = isPrismaSql ? query.values : args.slice(1);
       const userIds = values.filter((value): value is string =>
         typeof value === "string" && (value.startsWith("member-") || value.startsWith("hbm_")));
@@ -3985,6 +3986,7 @@ function createHostedMemberIdentityTransaction(): HostedCryptoTestTransaction {
 
 function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransaction {
   const tx = createHostedMemberIdentityTransaction();
+  Object.assign(tx.prisma, { hostedRuntimeOwner: { create: vi.fn().mockResolvedValue({}) } });
   const hostedMember = {
     async create(input: {
       data: Prisma.HostedMemberUncheckedCreateInput;

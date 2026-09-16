@@ -3537,7 +3537,8 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   if (!("$queryRaw" in prismaWithQueryRaw)) {
     Object.defineProperty(prismaWithQueryRaw, "$queryRaw", {
       configurable: true,
-      value: vi.fn(async () => []),
+      value: vi.fn(async (query: TemplateStringsArray) =>
+        query.join("").includes("hosted_runtime_cutover") ? [{ phase: "legacy" }] : []),
     });
   }
   if (!("hostedAccountGroupMembership" in prismaWithQueryRaw)) {

@@ -1,4 +1,7 @@
-import { usesPostgresRuntimeOwner } from "../../runtime-cutover.ts";
+import { progressRuntimeMigrationForMember } from "../../runtime-migration-progress.ts";
+import { createRuntimeProcessingCommandBudget } from "../../user-runner/runtime-command-budget.ts";
+import { resolveAdmittedLegacyUserRunner } from "../../legacy-runtime-admission.ts";
+import { HostedRuntimeMemberMigratingError, usesPostgresRuntimeOwner } from "../../runtime-cutover.ts";
 import { readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
 import {
   emitHostedExecutionStructuredLog,
@@ -132,7 +135,7 @@ export async function handleStatusRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  if (usesPostgresRuntimeOwner(context.env)) return json(await readPostgresRunnerStatus(context.env, userId, readHostedStatusRouteOptions(context.url)));
+  if ((await usesPostgresRuntimeOwner(context.env, userId))) return json(await readPostgresRunnerStatus(context.env, userId, readHostedStatusRouteOptions(context.url)));
   const stub = await resolveUserRunnerStub(context.env, userId);
   const status = await stub.runnerStatus(readHostedStatusRouteOptions(context.url));
   return json(status);
@@ -304,7 +307,7 @@ export async function handleRuntimeHealthDataConsentRoute(
       "Hosted runtime health-data consent request must be empty.",
     );
   }
-  if (usesPostgresRuntimeOwner(context.env)) return json(await reconcilePostgresRuntimeConsent(context.env, userId));
+  if ((await usesPostgresRuntimeOwner(context.env, userId))) return json(await reconcilePostgresRuntimeConsent(context.env, userId));
   const stub = await resolveUserRunnerStub(context.env, userId);
   if (!stub.reconcileRuntimeHealthDataConsentForUser) {
     throw new Error(
@@ -329,10 +332,21 @@ async function runRuntimeEnsureProcessingForUser(input: {
     orchestration: input.orchestration,
     userId: input.userId,
   };
+  const progressMigration = () => progressRuntimeMigrationForMember({ source: input.context.env, userId: input.userId,
+    budget: createRuntimeProcessingCommandBudget({ commandTimeoutMs: input.commandTimeoutMs,
+      startedAtMs: input.commandStartedAtEpochMs, webControlTimeoutMs: input.context.environment.webControlTimeoutMs }) });
   const postgres = await ensurePostgresRuntimeProcessing(input.context.env, command);
   if (postgres) return postgres;
-  const stub = input.context.env.USER_RUNNER.getByName(input.userId);
-  return stub.ensureRuntimeProcessingForUser(command);
+  try {
+    const stub = await resolveAdmittedLegacyUserRunner(input.context.env, input.userId);
+    const result = await stub.ensureRuntimeProcessingForUser(command);
+    if (result.kind === "retry_later") await progressMigration();
+    return result;
+  } catch (error) {
+    if (!(error instanceof HostedRuntimeMemberMigratingError)) throw error;
+    await progressMigration();
+    return { kind: "retry_later", retryAt: new Date(Date.now() + 3_000).toISOString() };
+  }
 }
 
 export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {

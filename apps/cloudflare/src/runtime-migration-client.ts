@@ -1,3 +1,4 @@
+import { readRuntimeMigrationCompatibility } from "./runtime-migration-compatibility.ts";
 import { HOSTED_RUNTIME_MIGRATION_PATH, parseHostedRuntimeMigrationCommand, type HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
@@ -8,10 +9,12 @@ import { readHostedWebControlPlaneResponseText } from "./runtime-platform/web-co
 export async function commandHostedRuntimeMigration(input: { source: Readonly<Record<string, unknown>>; command: HostedRuntimeMigrationCommand }): Promise<Record<string, unknown>> {
   const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.source));
   if (!environment.hostedWebBaseUrl) throw new Error("Hosted runtime migration URL is not configured.");
+  const command = input.command.operation === "status" ? input.command
+    : { ...input.command, compatibility: readRuntimeMigrationCompatibility(input.source) };
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl: environment.hostedWebBaseUrl, allowHttpHosts: environment.hostedWebAllowHttpHosts,
     boundUserId: null, callbackSigning: environment.webCallbackSigning, method: "POST", path: HOSTED_RUNTIME_MIGRATION_PATH,
-    body: JSON.stringify(parseHostedRuntimeMigrationCommand(input.command)), timeoutMs: environment.webControlTimeoutMs,
+    body: JSON.stringify(parseHostedRuntimeMigrationCommand(command)), timeoutMs: environment.webControlTimeoutMs,
   });
   if (!response.ok) throw new Error(`Hosted runtime migration returned HTTP ${response.status}.`);
   const result: unknown = JSON.parse(await readHostedWebControlPlaneResponseText({ response,

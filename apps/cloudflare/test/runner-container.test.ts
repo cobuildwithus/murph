@@ -148,6 +148,50 @@ describe("RunnerContainer", () => {
     vi.clearAllMocks();
   });
 
+  it.each(["managed-snapshot-v1", "old-protocol", "missing"])("probes checkpoint support without starting or checkpointing a process: %s", async protocol => {
+    const nativeFetch = vi.fn(async () => new Response(null, { status: 204,
+      headers: protocol === "missing" ? {} : { "x-runtime-migration-checkpoint-capability": protocol } }));
+    const h = createContainerDouble({ state: { container: { running: true, getTcpPort: () => ({ fetch: nativeFetch }) } } });
+    expect(await h.container.supportsMigrationCheckpoint({ userId: "synthetic_member" })).toBe(protocol === "managed-snapshot-v1");
+    expect(nativeFetch).toHaveBeenCalledExactlyOnceWith("http://container/internal/workspace-invocation/migration-checkpoint", expect.objectContaining({ method: "GET" }));
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(h.destroy).not.toHaveBeenCalled();
+    const stopped = createContainerDouble({ platformRunning: false });
+    expect(await stopped.container.supportsMigrationCheckpoint({ userId: "synthetic_member" })).toBe(false);
+    expect(stopped.containerFetch).not.toHaveBeenCalled();
+  });
+
+  it.each(["accepted", "stale", "absent", "missing"])("requests migration checkpoints without starting or stopping a container: %s", async status => {
+    const nativeFetch = vi.fn(async (_url: string, _init: RequestInit) => new Response(null, { status: 204,
+      headers: status === "missing" ? {} : { "x-runtime-migration-checkpoint-status": status },
+    }));
+    const sdkFetch = vi.fn();
+    const h = createContainerDouble({ containerFetch: sdkFetch,
+      state: { container: { running: true, getTcpPort: () => ({ fetch: nativeFetch }) } },
+    });
+    const request = { userId: "synthetic_member", attemptId: "synthetic_attempt", generation: "7" };
+    expect(await h.container.requestMigrationCheckpoint(request)).toBe(status === "missing" ? "unconfirmed" : status);
+    expect(nativeFetch).toHaveBeenCalledExactlyOnceWith("http://container/internal/workspace-invocation/migration-checkpoint",
+      expect.objectContaining({ method: "POST", body: expect.any(String) }));
+    expect(JSON.parse(String(nativeFetch.mock.calls[0]?.[1].body))).toEqual(request);
+    expect(sdkFetch).not.toHaveBeenCalled();
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(h.destroy).not.toHaveBeenCalled();
+  });
+
+  it("keeps checkpoint outcome unconfirmed when the process is absent or the reply is lost", async () => {
+    const request = { userId: "synthetic_member", attemptId: "synthetic_attempt", generation: "7" };
+    const stopped = createContainerDouble({ platformRunning: false });
+    expect(await stopped.container.requestMigrationCheckpoint(request)).toBe("unconfirmed");
+    expect(stopped.containerFetch).not.toHaveBeenCalled();
+    expect(stopped.startAndWaitForPorts).not.toHaveBeenCalled();
+    const lost = createContainerDouble({ platformRunning: true,
+      containerFetch: vi.fn(async () => { throw new Error("synthetic lost checkpoint reply"); }),
+    });
+    expect(await lost.container.requestMigrationCheckpoint(request)).toBe("unconfirmed");
+    expect(lost.destroy).not.toHaveBeenCalled();
+  });
+
   it("registers host-specific outbound interception through Cloudflare Containers accessors", () => {
     expect(RunnerContainer.outbound).toBeUndefined();
     expect(RunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);

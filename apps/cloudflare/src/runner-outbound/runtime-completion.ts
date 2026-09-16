@@ -52,7 +52,7 @@ export async function handleRunnerRuntimeCompletionRequest(input: {
       : jsonError("Invalid request.", 400);
   }
 
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
     const state = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: { operation: "reconcile" } });
     const owner = state.owner;
     if (state.cutover !== "postgres" || owner?.attemptId !== authority.attemptId || owner.generation !== authority.generation || !owner.runnerContainerName) return json({ completed: false });

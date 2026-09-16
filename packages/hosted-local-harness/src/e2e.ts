@@ -393,6 +393,7 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-postgres-runtime-e2e.test.ts",
     manualOnly: true,
     name: "postgres-runtime-warm-reuse",
+    vitestProcessTestNamePatterns: ["empty Postgres: cold reply and warm typing", "rolling migration: cold reply and warm typing"],
   },
   {
     file: "apps/cloudflare/test/hosted-local-runner-warm-auth-recovery-e2e.test.ts",

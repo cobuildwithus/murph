@@ -71,6 +71,8 @@ describe("Postgres usage settlement with native receipts", () => {
     expect((await handleRunnerOutboundRequest(h.request(), h.env, h.userId)).status).toBe(200);
     expect(h.receipt().usageSettlementAllowsProviders(h.identity)).toBe(true);
     expect(fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
-    expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(1);
+    const commands = vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation);
+    expect(commands.filter(operation => operation === "reconcile")).toHaveLength(2);
+    expect(commands).toHaveLength(3);
   });
 });

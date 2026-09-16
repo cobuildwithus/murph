@@ -213,6 +213,64 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect((await observer.hostedRuntimePutDrain.findFirstOrThrow({ where: { userId } })).drainUntil?.toISOString()).toBe(drainUntil);
   });
 
+  it("serializes managed snapshot admission, binds immutable bytes and excludes direct PUT capabilities", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const created = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: { operation: "snapshot_create", session: await snapshotSession(runtime) } });
+    const command = { operation: "snapshot_managed_admit" as const, expectedSession: created.session!, uploadId: "synthetic-upload-a", encryptedByteSize: 4, encryptedSha256: "a".repeat(64) };
+    const [a, b] = await Promise.all([
+      executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command }),
+      executeHostedRuntimeSnapshotCommand({ prisma: second, userId, command: { ...command, uploadId: "synthetic-upload-b" } }),
+    ]);
+    expect(a.applied && b.applied).toBe(true);
+    expect(a.managedUpload).toEqual(b.managedUpload);
+    expect(await observer.hostedRuntimePutDrain.count({ where: { userId } })).toBe(1);
+    expect(a.managedUpload).toMatchObject({ encryptedByteSize: 4, encryptedSha256: "a".repeat(64), completedAt: null, verifiedAt: null });
+    expect((await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: { ...command, encryptedSha256: "b".repeat(64) } })).applied).toBe(false);
+    expect((await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: {
+      operation: "snapshot_admit_put", expectedSession: created.session!, expiresAt: new Date(Date.now() + 60_000).toISOString(), drainUntil: new Date(Date.now() + 120_000).toISOString(),
+    } })).applied).toBe(false);
+    const wrong = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: {
+      operation: "snapshot_managed_settled", ...runtime, snapshotId: created.session!.snapshotId, uploadId: "wrong-upload", verified: true,
+    } });
+    expect(wrong.applied).toBe(false);
+    expect((await observer.hostedRuntimePutDrain.findFirstOrThrow({ where: { userId } })).completedAt).toBeNull();
+  });
+
+  it("retains managed snapshot obligations after session deletion until exact abort or verified completion", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const created = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: { operation: "snapshot_create", session: await snapshotSession(runtime) } });
+    const admission = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: {
+      operation: "snapshot_managed_admit", expectedSession: created.session!, uploadId: "synthetic-managed-upload", encryptedByteSize: 4, encryptedSha256: "a".repeat(64),
+    } });
+    expect(admission.applied).toBe(true);
+    await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: { operation: "snapshot_delete", ...runtime, snapshotId: created.session!.snapshotId } });
+    await retireHostedRuntime({ prisma: first, identity: runtime });
+    await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: runtime, runnerContainerName: null });
+    await observer.hostedMember.delete({ where: { id: userId } });
+    expect(await isHostedRuntimeDeletionReady({ prisma: first, userId })).toBe(false);
+    const settled = { operation: "snapshot_managed_settled" as const, ...runtime, snapshotId: created.session!.snapshotId, uploadId: "synthetic-managed-upload", verified: true };
+    const completed = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: settled });
+    expect(completed.managedUpload?.verifiedAt).not.toBeNull();
+    expect(await isHostedRuntimeDeletionReady({ prisma: first, userId })).toBe(true);
+    const lateAbort = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: { ...settled, verified: false } });
+    expect(lateAbort.managedUpload).toEqual(completed.managedUpload);
+  });
+
+  it("cannot turn an issued direct snapshot capability into a revocable managed upload", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const created = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: { operation: "snapshot_create", session: await snapshotSession(runtime) } });
+    const direct = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: {
+      operation: "snapshot_admit_put", expectedSession: created.session!, expiresAt: new Date(Date.now() + 60_000).toISOString(), drainUntil: new Date(Date.now() + 120_000).toISOString(),
+    } });
+    expect((await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: {
+      operation: "snapshot_managed_admit", expectedSession: direct.session!, uploadId: "synthetic-managed-upload", encryptedByteSize: 4, encryptedSha256: "a".repeat(64),
+    } })).applied).toBe(false);
+    expect((await observer.hostedRuntimePutDrain.findFirstOrThrow({ where: { userId } })).uploadId).toBeNull();
+  });
+
   it("serializes revocation ahead of final PUT admission on independent connections", async () => {
     const userId = await member();
     const runtime = identity((await claim(userId)).owner);

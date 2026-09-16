@@ -1,3 +1,4 @@
+import { resolveAdmittedLegacyUserRunner } from "../legacy-runtime-admission.ts";
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
   HostedRunnerStatusResponse,
@@ -123,7 +124,7 @@ export async function resolveUserRunnerStub(
   env: WorkerEnvironmentSource,
   userId: string,
 ): Promise<UserRunnerDurableObjectStubLike> {
-  const stub = env.USER_RUNNER.getByName(userId);
+  const stub = await resolveAdmittedLegacyUserRunner(env, userId);
   await stub.bindUser(userId);
   return stub;
 }

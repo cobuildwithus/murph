@@ -49,7 +49,7 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedMailboxPayloadFetchRequest(await readOptionalJsonObject(request));
   const authority = readHostedRuntimeCallbackAuthority(request);
   const response = await getPrisma().$transaction(async (tx) => {
-    await requireHostedRuntimeCallbackTx(tx, authority ? { ...authority, userId } : null);
+    await requireHostedRuntimeCallbackTx(tx, userId, authority ? { ...authority, userId } : null);
     await requireHostedRuntimeMailboxActiveAccess(userId, {
       prisma: tx,
       code: "HOSTED_RUNTIME_MAILBOX_PAYLOAD_USER_INACTIVE",
