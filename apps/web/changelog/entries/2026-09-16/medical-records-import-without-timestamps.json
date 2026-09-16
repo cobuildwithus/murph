@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 2,
     "title": "Medical record imports save results from more patient portals",
-    "summary": "Lab results, notes, and vitals now import from portals whose records use long identifiers or leave out a last-updated time.",
-    "details": "Records without a last-updated time are ordered by when Murph retrieved them, so a newer import replaces an older one and repeating the same import changes nothing. If an earlier import saved only source evidence, reconnect the portal to save its results.",
+    "summary": "Lab results, notes, vitals, and documents now import from portals whose records use long identifiers or leave out a last-updated time.",
+    "details": "Records without a last-updated time are ordered by when Murph retrieved them, so a newer import replaces an older one and repeating the same import changes nothing. Document downloads and the facts Murph extracts from them follow the same rule. If an earlier import saved only source evidence, reconnect the portal to save its results.",
     "relevanceTags": [
       "medical-records",
       "labs",

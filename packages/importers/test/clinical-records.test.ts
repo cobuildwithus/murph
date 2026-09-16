@@ -4906,6 +4906,24 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     expect(executableDecisions(plan)).toHaveLength(1);
   });
 
+  it("dates an undated history record by the retrieval revision when it has no clinical date", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      addDefaultRevision: false,
+      manifest: { fetchedAt: "2026-07-03T08:00:00.000Z" },
+      resourceFiles: [{ resourceType: "Condition", relativePath: "Condition/page-1.json", count: 1 }],
+      pages: { "Condition/page-1.json": { resourceType: "Condition", id: "undated-history", code: { text: "Hypertension" } } },
+    });
+
+    const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
+    expect(reviews(plan)).toEqual([]);
+    expect(upserts(plan)).toEqual([expect.objectContaining({
+      kind: "note",
+      occurredAt: "2026-07-03T08:00:00.000Z",
+      note: expect.stringContaining("Record revision: 2026-07-03T08:00:00.000Z. Clinical event date is not available."),
+      externalRef: expect.objectContaining({ resourceId: "undated-history", version: "2026-07-03T08:00:00.000Z" }),
+    })]);
+  });
+
   it("accepts FHIR ids longer than 64 characters for every resource type", async () => {
     const longId = (prefix: string) => `${prefix}${"a1".repeat(44)}`.slice(0, 88);
     const observationId = longId("e");

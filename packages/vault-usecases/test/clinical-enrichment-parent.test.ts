@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { clinicalRawManifestSchema, hashClinicalFhirBaseUrl, hashClinicalFhirPatientId } from "@murphai/clinical-records";
-import { initializeVault } from "@murphai/core";
+import { findEventByExternalRef, importEventBatch, initializeVault } from "@murphai/core";
+import { buildClinicalImportPlanFromSnapshot, clinicalPlanToEventImportDecisions } from "@murphai/importers/clinical-records";
 import { listCanonicalEntities } from "@murphai/query";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -15,10 +16,17 @@ const roots: string[] = [];
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
-async function fixture(options: { resourceType?: "DocumentReference" | "DiagnosticReport"; status?: string; docStatus?: string; duplicate?: boolean; subject?: string; revision?: unknown } = {}) {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "clinical-enrichment-parent-"));
-  roots.push(vaultRoot);
-  await initializeVault({ vaultRoot, timezone: "UTC", createdAt: "2026-07-10T12:00:00Z" });
+async function fixture(options: {
+  resourceType?: "DocumentReference" | "DiagnosticReport"; status?: string; docStatus?: string; duplicate?: boolean; subject?: string; revision?: unknown;
+  /** Reuse an initialized vault so a later batch can supersede an earlier one. */
+  vaultRoot?: string; batch?: string; fetchedAt?: string;
+} = {}) {
+  const vaultRoot = options.vaultRoot ?? await mkdtemp(path.join(tmpdir(), "clinical-enrichment-parent-"));
+  if (!options.vaultRoot) {
+    roots.push(vaultRoot);
+    await initializeVault({ vaultRoot, timezone: "UTC", createdAt: "2026-07-10T12:00:00Z" });
+  }
+  const batch = options.batch ?? "synthetic-batch";
   const resourceType = options.resourceType ?? "DocumentReference";
   const attachment = { contentType: "application/pdf", url: "Binary/synthetic-document" };
   const parent = { resourceType, id: "synthetic-document", status: options.status ?? "current",
@@ -27,13 +35,13 @@ async function fixture(options: { resourceType?: "DocumentReference" | "Diagnost
     ...(resourceType === "DocumentReference" ? { content: [{ attachment }] } : { presentedForm: [attachment] }),
   };
   const content = JSON.stringify({ resourceType: "Bundle", entry: (options.duplicate ? [parent, parent] : [parent]).map((resource) => ({ resource })) });
-  const manifestPath = "raw/clinical/fhir/synthetic-connection/synthetic-batch/manifest.json";
+  const manifestPath = `raw/clinical/fhir/synthetic-connection/${batch}/manifest.json`;
   const relativePath = `documents/whole/${resourceType}/page-0001.json`;
   const document = "%PDF-1.7 synthetic scanned evidence";
   const sha256 = digest(document);
   const manifest = clinicalRawManifestSchema.parse({
     schemaVersion: "murph.clinical-raw-manifest.v3", kind: "clinical_fhir_retrieval", sourceSystem: "epic-fhir",
-    connectionId: "synthetic-connection", retrievalJobId: "synthetic-batch", fetchedAt: "2026-07-10T12:00:00Z",
+    connectionId: "synthetic-connection", retrievalJobId: batch, fetchedAt: options.fetchedAt ?? "2026-07-10T12:00:00Z",
     fhirBaseUrlHash: hashClinicalFhirBaseUrl("https://ehr.example.test/fhir"), patientIdHash: hashClinicalFhirPatientId("synthetic-patient"),
     requestedScopes: [`patient/${resourceType}.read`], grantedScopes: [`patient/${resourceType}.read`],
     retrievalSlices: [{ queryScopeId: "documents", sliceId: "whole", resourceType, coverage: "whole-family", queryFingerprint: "a".repeat(64) }],
@@ -83,8 +91,13 @@ describe("clinical enrichment attested parent eligibility", () => {
     expect(parent).toMatchObject({ eligible: true, parentRevision: options.revision, parentExternalRef: { version: options.revision } });
   });
 
-  it.each([undefined, "not-a-timestamp", "2026-07-10", "2026-02-30T12:00:00.123456789Z"])("rejects invalid parent revisions: %s", async (revision) => {
+  it.each(["not-a-timestamp", "2026-07-10", "2026-02-30T12:00:00.123456789Z"])("rejects non-comparable parent revisions: %s", async (revision) => {
     await expect(readClinicalEnrichmentParentEligibility(await fixture({ revision }))).rejects.toThrow("source attestation");
+  });
+
+  it("binds a parent without meta.lastUpdated to the retrieval fetchedAt, matching the importer", async () => {
+    const parent = await readClinicalEnrichmentParentEligibility(await fixture({ revision: undefined, fetchedAt: "2026-07-11T09:30:00Z" }));
+    expect(parent).toMatchObject({ eligible: true, parentRevision: "2026-07-11T09:30:00Z", parentExternalRef: { version: "2026-07-11T09:30:00Z" } });
   });
 
   it("holds already prepared proposals for a withdrawn origin without altering raw evidence or publishing facts", async () => {
@@ -109,6 +122,51 @@ describe("clinical enrichment attested parent eligibility", () => {
     expect(await readFile(path.join(input.vaultRoot, input.rawRef))).toEqual(rawBefore);
     expect(await readNextClinicalEnrichment({ vaultRoot: input.vaultRoot, jobId })).toMatchObject({ status: "advance" });
     expect(await readNextClinicalEnrichment({ vaultRoot: input.vaultRoot, jobId })).toBeNull();
+  });
+
+  it("rebuilds document extraction at the retrieval revision after an undated reconnect supersedes a dated parent", async () => {
+    type Fixture = Awaited<ReturnType<typeof fixture>>;
+    const importParent = async (input: Fixture) => {
+      const file = input.manifest.resourceFiles[0]!;
+      const plan = buildClinicalImportPlanFromSnapshot({ manifestPath: input.manifestPath, manifest: input.manifest,
+        pages: [{ relativePath: file.relativePath, content: await readFile(input.parentPagePath, "utf8") }],
+        attachments: [{ relativePath: input.attachment.relativePath, contentBase64: (await readFile(path.join(input.vaultRoot, input.rawRef))).toString("base64") }] });
+      return importEventBatch({ vaultRoot: input.vaultRoot, decisions: clinicalPlanToEventImportDecisions(plan), apply: true });
+    };
+    const extracted = { payload: { kind: "measurement", occurredAt: "2026-07-10T12:00:00Z", title: "Synthetic heart rate", note: null,
+      measurements: [{ metric: "heart-rate", value: 70, unit: "bpm" }] } };
+    const enrich = async (input: Fixture) => {
+      const { jobId } = await enqueueClinicalEnrichment(input);
+      // The attested parent is accepted for extraction instead of being held.
+      expect(await readNextClinicalEnrichment({ vaultRoot: input.vaultRoot, jobId })).toMatchObject({ status: "extract" });
+      const statePath = path.join(input.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${jobId}.json`);
+      const state = JSON.parse(await readFile(statePath, "utf8"));
+      const empty = { status: "complete", records: [] };
+      await writeFile(statePath, JSON.stringify({ ...state, status: "prepared",
+        source: { rawRef: input.rawRef, sha256: input.attachment.sha256, byteLength: input.attachment.byteLength, mediaType: input.attachment.mediaType },
+        prepared: { page: 1, totalPages: 1, outputs: { labs: empty, history: empty, measurements: { status: "complete", records: [extracted] } } } }));
+      return applyClinicalEnrichmentProposals({ vaultRoot: input.vaultRoot, jobId });
+    };
+    const liveMeasurements = (vaultRoot: string) => listCanonicalEntities(vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 });
+    const parentLookup = (input: Fixture) => ({ vaultRoot: input.vaultRoot, resourceType: "document-reference", resourceId: "synthetic-document",
+      system: `epic-fhir-${input.manifest.fhirBaseUrlHash}-${input.manifest.patientIdHash}` });
+
+    const dated = await fixture({ fetchedAt: "2026-07-10T12:00:00Z" });
+    expect(await importParent(dated)).toMatchObject({ createdCount: 1 });
+    expect(await enrich(dated)).toMatchObject({ counts: { created: 1, held: 0 } });
+    expect(await liveMeasurements(dated.vaultRoot)).toHaveLength(1);
+
+    // The same document returns on a later retrieval that omits meta.lastUpdated.
+    const reconnect = await fixture({ vaultRoot: dated.vaultRoot, batch: "synthetic-batch-2", fetchedAt: "2026-07-12T08:00:00Z", revision: undefined });
+    const superseded = await importParent(reconnect);
+    expect(superseded.createdCount).toBe(0);
+    expect(superseded.supersededCount).toBeGreaterThanOrEqual(1);
+    expect(await findEventByExternalRef(parentLookup(reconnect)))
+      .toEqual(expect.objectContaining({ externalRef: expect.objectContaining({ version: "2026-07-12T08:00:00Z" }) }));
+    expect(await liveMeasurements(dated.vaultRoot)).toEqual([]);
+    // Enrichment binds to the same retrieval revision the importer assigned, so the withdrawn fact is rebuilt.
+    expect(await enrich(reconnect)).toMatchObject({ counts: { created: 1, held: 0 } });
+    expect(await liveMeasurements(dated.vaultRoot)).toHaveLength(1);
   });
 
   it("rejects mutated parent bytes, ambiguous resource identity and contradictory patient binding", async () => {

@@ -109,7 +109,10 @@ evidence, while retrieval metadata stays on the plan. A comparable
 resource; when it is absent, the batch manifest `fetchedAt` is the revision, so
 a later retrieval supersedes an earlier one, the same retrieval replays
 idempotently, and an earlier retrieval replayed later stays stale. The
-aggregate allergy identity always uses manifest `fetchedAt`.
+aggregate allergy identity always uses manifest `fetchedAt`. The same rule
+(`resolveClinicalFhirSourceRevision`) governs enrichment parent attestation, so
+document-extraction facets bind to the revision the importer assigned to their
+parent, and Web issues document tickets for parents that omit the revision.
 
 Core bulk event import skips older revisions and source-semantically equal
 same-version replays even when retrieval paths differ. It rejects true

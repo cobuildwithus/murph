@@ -353,7 +353,7 @@ export async function fetchClinicalRetrievalDocument(input: {
   // Ciphertext is randomized; the attested parent and URL own logical identity.
   const requestFingerprint = sha256Hex(["document", run.connection.id, String(run.generation), run.id,
     ticket.queryScopeId, ticket.sliceId, ticket.parentPageSha256, ticket.resourceType,
-    ticket.resourceId, ticket.resourceVersion, String(ticket.attachmentIndex), url.href].join("\n"));
+    ticket.resourceId, ticket.resourceVersion ?? "", String(ticket.attachmentIndex), url.href].join("\n"));
   const claimed = await claimRetrievalPageRequest({ connectionId: run.connection.id,
     generation: run.generation, memberId: input.memberId, queryScopeId: ticket.queryScopeId,
     sliceId: ticket.sliceId, requestFingerprint, runId: run.id,
