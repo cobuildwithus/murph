@@ -6,7 +6,7 @@ const first = "a".repeat(64);
 const second = "b".repeat(64);
 const intentOnly = "c".repeat(64);
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
-function harness(options: { drift?: boolean; split?: boolean; held?: boolean; intent?: boolean; loseAdvance?: boolean; loseSeal?: boolean; pending?: string[]; canonical?: boolean; loseEnrollment?: boolean; cleanupPages?: number } = {}) {
+function harness(options: { drift?: boolean; split?: boolean; held?: boolean; intent?: boolean; loseAdvance?: boolean; loseSeal?: boolean; pending?: string[]; canonical?: boolean; loseEnrollment?: boolean; cleanupPages?: number; observation?: Record<string, unknown> } = {}) {
   const sent: Array<Record<string, unknown>> = [];
   const known = new Set<string>(options.intent ? [intentOnly] : []);
   const late = new Set<string>();
@@ -66,7 +66,7 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
         }
         return Response.json({ objectId: selected });
       } else if (command.operation === "inspect_object") {
-        return Response.json({ objectId: command.objectId, observation: { kind: "observed", userId: command.objectId === first ? "synthetic-member" : null } });
+        return Response.json({ objectId: command.objectId, observation: { kind: "observed", userId: command.objectId === first ? "synthetic-member" : null, ...options.observation } });
       } else if (command.operation === "advance_member" || command.operation === "advance_empty") {
         expect(command.objectId).toBe(selected);
         if (command.operation === "advance_member") {
@@ -182,8 +182,21 @@ describe("rolling runtime migration operator", () => {
 
   it("leaves a readiness-held member live instead of polling or moving to another source", async () => {
     const h = harness({ held: true });
-    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false, waitForPending: true })).toEqual({ phase: "rolling", steps: 1, pending: "readiness" });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false, waitForPending: true })).toEqual({ phase: "rolling", steps: 1, pending: "readiness",
+      readiness: { activeAttempt: false, containerBound: false, snapshotPutDrainMs: 0, replicaPendingWrites: null, managedSnapshotPendingUploads: null } });
     expect(h.sent.filter(c => c.operation === "advance_member")).toHaveLength(1);
+  });
+
+  it("reports readiness inputs as flags and bounded counts without source identifiers", async () => {
+    const h = harness({ held: true, observation: { activeAttemptId: "e".repeat(32), activeRunnerContainerName: "synthetic-container",
+      snapshotPutDrainUntil: new Date(Date.now() + 90_000).toISOString(), replicaPendingWrites: 2, managedSnapshotPendingUploads: 1 } });
+    const result = await migrateHostedLegacyRuntime({ ...h.input, activate: false });
+    expect(result).toMatchObject({ phase: "rolling", pending: "readiness",
+      readiness: { activeAttempt: true, containerBound: true, replicaPendingWrites: 2, managedSnapshotPendingUploads: 1 } });
+    const drainMs = (result as { readiness?: { snapshotPutDrainMs?: number } }).readiness?.snapshotPutDrainMs ?? 0;
+    expect(drainMs).toBeGreaterThan(0);
+    expect(drainMs).toBeLessThanOrEqual(90_000);
+    for (const secret of ["e".repeat(32), "synthetic-container", first]) expect(JSON.stringify(result)).not.toContain(secret);
   });
 
   it("recovers an interrupted handoff before enrolling unrelated late provider objects", async () => {

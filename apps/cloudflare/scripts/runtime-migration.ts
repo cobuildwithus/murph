@@ -81,7 +81,7 @@ export async function migrateHostedLegacyRuntime(input: RollingOperator) {
     if (migrationActivated(result)) objectId = null;
     if (typeof result.pending !== "string") continue;
     if (!input.waitForPending || !["checkpoint", "freeze", "source_changed"].includes(result.pending)) {
-      return { phase: "rolling", steps, pending: result.pending };
+      return { phase: "rolling", steps, pending: result.pending, ...(result.pending === "readiness" ? { readiness: result.readiness } : {}) };
     }
     // Keep the same durable selection while a closed source drains. Returning
     // here would add workflow queue/install latency to the member's pause.
@@ -122,7 +122,18 @@ async function advanceSelectedObject(send: Commander, identity: CampaignIdentity
   if (typeof observed.userId !== "string" || !observed.userId) throw new Error("Legacy source member identity is invalid.");
   const userId = observed.userId;
   const migrationId = digest(JSON.stringify([identity.namespaceId, objectId, userId]));
-  return send({ operation: "advance_member", ...identity, objectId, userId, migrationId });
+  const result = await send({ operation: "advance_member", ...identity, objectId, userId, migrationId });
+  // The Worker decides readiness; report its inspected inputs as flags and bounded counts only.
+  return result.pending === "readiness" ? { ...result, readiness: readinessSummary(observed) } : result;
+}
+function readinessSummary(observed: Record<string, unknown>) {
+  const drainUntil = typeof observed.snapshotPutDrainUntil === "string" ? Date.parse(observed.snapshotPutDrainUntil) : Number.NaN;
+  return {
+    activeAttempt: observed.activeAttemptId != null, containerBound: observed.activeRunnerContainerName != null,
+    snapshotPutDrainMs: Number.isFinite(drainUntil) ? Math.max(0, drainUntil - Date.now()) : 0,
+    replicaPendingWrites: typeof observed.replicaPendingWrites === "number" ? observed.replicaPendingWrites : null,
+    managedSnapshotPendingUploads: typeof observed.managedSnapshotPendingUploads === "number" ? observed.managedSnapshotPendingUploads : null,
+  };
 }
 
 async function prepareRollingInventory(input: RuntimeMigrationOperator, send: Commander,
