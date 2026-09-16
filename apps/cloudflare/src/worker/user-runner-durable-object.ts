@@ -115,7 +115,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
     const gate = await commandHostedRuntimeOwner({ source: this.source, userId: input.userId, command: { operation: "reconcile" } });
     if (gate.cutover !== "legacy") return { kind: "retry_later", retryAt: new Date(Date.now() + 3_000).toISOString() };
-    return this.migrationFreeze.run(() => this.runner.ensureRuntimeProcessingForUser({
+    return this.migrationFreeze.runAdmission(() => this.runner.ensureRuntimeProcessingForUser({
       ...input,
       orchestration: {
         ...(input.orchestration ?? {}),
@@ -123,7 +123,10 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
         userRunnerFirstEnsureRuntimeProcessingAtEpochMs: firstEnsureAt,
         userRunnerRpcStartedAtEpochMs,
       },
-    }));
+    })).catch((error: unknown) => {
+      if (!(error instanceof LegacyRuntimeFrozenError)) throw error;
+      return { kind: "retry_later", retryAt: new Date(Date.now() + 3_000).toISOString() };
+    });
   }
 
   async validateRuntimeWriteFence(input: {

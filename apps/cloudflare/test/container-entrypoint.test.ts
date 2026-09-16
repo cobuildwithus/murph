@@ -821,6 +821,59 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
+  it("checkpoints only the matching migration attempt and waits for completion publication before exit", async () => {
+    const ready = createDeferred();
+    const releaseInvocation = createDeferred();
+    const completionStarted = createDeferred();
+    const releaseCompletion = createDeferred();
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const observed: { shutdown: AbortSignal | null; invocation: AbortSignal | null } = { shutdown: null, invocation: null };
+    mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
+      observed.shutdown = options.shutdownSignal;
+      observed.invocation = options.signal;
+      ready.resolve();
+      await releaseInvocation.promise;
+      return buildWorkspaceRunnerResult();
+    });
+    mocks.recordHostedContainerRuntimeCompletionBestEffort.mockImplementationOnce(async () => {
+      completionStarted.resolve();
+      await releaseCompletion.promise;
+    });
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Expected a TCP port.");
+    const invocation = sendHostedContainerJsonRequest({ port: address.port,
+      path: "/internal/workspace-invocation", body: JSON.stringify(buildWorkspaceJobBody()),
+    });
+    const checkpoint = (request: { userId: string; attemptId: string; generation: string }) => sendHostedContainerJsonRequest({
+      port: address.port, path: "/internal/workspace-invocation/migration-checkpoint", body: JSON.stringify(request),
+    });
+    const identity = { userId: "u_container_workspace", attemptId: "attempt_container_workspace", generation: "8" };
+    try {
+      await ready.promise;
+      for (const stale of [{ ...identity, userId: "synthetic_other" }, { ...identity, generation: "9" }, { ...identity, attemptId: "synthetic_other" }]) {
+        expect((await checkpoint(stale)).headers["x-runtime-migration-checkpoint-status"]).toBe("stale");
+        expect(observed.shutdown?.aborted).toBe(false);
+      }
+      expect((await checkpoint(identity)).headers["x-runtime-migration-checkpoint-status"]).toBe("accepted");
+      expect(observed.shutdown?.aborted).toBe(true);
+      expect(observed.invocation?.aborted).toBe(false);
+      expect(exit).not.toHaveBeenCalled();
+      releaseInvocation.resolve();
+      await completionStarted.promise;
+      expect((await checkpoint(identity)).headers["x-runtime-migration-checkpoint-status"]).toBe("absent");
+      expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json).toMatchObject({ activeJobCount: 1 });
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      releaseInvocation.resolve();
+      releaseCompletion.resolve();
+      await invocation;
+    }
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0));
+    servers.splice(servers.indexOf(server), 1);
+  });
+
   it("rejects active runtime wakes after shutdown starts without advertising absence", async () => {
     const invocationReady = createDeferred();
     const releaseInvocation = createDeferred();

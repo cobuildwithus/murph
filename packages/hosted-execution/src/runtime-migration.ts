@@ -1,4 +1,15 @@
 import { parseAllowedString, requireObject, requireString } from "./parsers/assertions.ts";
+import { parseHostedRuntimeOwnerIdentity } from "./runtime-owner.ts";
+
+export const HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH = "/internal/workspace-invocation/migration-checkpoint";
+export const HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER = "x-runtime-migration-checkpoint-status";
+export interface HostedRuntimeMigrationCheckpointRequest { userId: string; attemptId: string; generation: string }
+/** Acceptance requests a graceful checkpoint; it is never a stop or durability receipt. */
+export type HostedRuntimeMigrationCheckpointStatus = "accepted" | "stale" | "absent" | "unconfirmed";
+export function parseHostedRuntimeMigrationCheckpointRequest(value: unknown): HostedRuntimeMigrationCheckpointRequest {
+  const record = requireObject(value, "Runtime migration checkpoint");
+  return { ...parseHostedRuntimeOwnerIdentity(record), userId: requireString(record.userId, "Runtime migration member") };
+}
 
 export const HOSTED_RUNTIME_MEMBER_MIGRATION_PHASES = [
   "legacy", "quiescing", "freezing", "importing", "postgres",
@@ -60,7 +71,7 @@ export type LegacyRuntimeObservation =
     observedAt: string;
   };
 export type LegacyRuntimeInspection = LegacyRuntimeObservation & {
-  freeze: { phase: "freezing" | "frozen" | null; pendingOperations: number };
+  freeze: { phase: "quiescing" | "freezing" | "frozen" | null; pendingOperations: number };
 };
 export type HostedRuntimeMigrationCommand =
   | { operation: "status" }

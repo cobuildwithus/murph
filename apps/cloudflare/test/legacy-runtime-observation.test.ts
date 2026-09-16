@@ -5,6 +5,10 @@ import { ensureRunnerStateSchema } from "../src/user-runner/runner-state-schema.
 import type { DurableObjectStateLike } from "../src/user-runner/types.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
 
+vi.mock("../src/runtime-owner-client.ts", () => ({
+  commandHostedRuntimeOwner: vi.fn(async () => ({ cutover: "legacy" })),
+}));
+
 function harness(initialized = true) {
   const queries: string[] = [];
   const sql = createTestSqlStorage({ beforeExec: query => { queries.push(query); } });
@@ -32,6 +36,22 @@ function harness(initialized = true) {
 }
 
 describe("live legacy migration inspection", () => {
+  it("defers new work at a durable member quiescence barrier without initializing the runner", async () => {
+    const h = harness(false);
+    h.kv.set("runtime-migration-freeze:v1", {
+      schema: "murph.legacy-runtime-freeze.v2", phase: "quiescing", migrationId: "migration-synthetic",
+    });
+    const object = new UserRunnerDurableObject(h.state, {} as never);
+    expect(await object.ensureRuntimeProcessingForUser({
+      userId: "synthetic_member", orchestrationAttemptId: "synthetic_orchestration",
+    })).toMatchObject({ kind: "retry_later" });
+    expect(await object.inspectPostgresMigration()).toMatchObject({
+      kind: "observed", schemaVersion: null, freeze: { phase: "quiescing", pendingOperations: 0 },
+    });
+    expect(h.mutation).not.toHaveBeenCalled();
+    expect(h.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table'").toArray()).toEqual([]);
+  });
+
   it("constructs and inspects an empty object without schema, alarm, or KV writes", async () => {
     const h = harness(false);
     const object = new UserRunnerDurableObject(h.state, {} as never);

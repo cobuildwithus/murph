@@ -98,6 +98,34 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
 - Worker routing tests and Web, Worker and shared-contract typechecks pass.
   SQLite/RPC tests cover read-only inspection, exact-object authentication,
   contradictory resource identities, existing export and freeze behavior.
+- Added an exact-member/attempt/generation graceful-checkpoint request to the
+  container's existing shutdown path. Native port access does not start a
+  stopped container; a missing or lost response remains unconfirmed. Acceptance
+  is not checkpoint durability or native-stop evidence. The process now keeps
+  its active-job count until its completion callback has settled, preventing a
+  concurrent control response from exiting the process early.
+- Added token-bound durable local quiescence. New starts return retry-later;
+  current-attempt callbacks remain admitted. Closure waits for admitted launch
+  RPCs before the operator can select a checkpoint target and survives object
+  eviction. A failed storage write never acknowledges closure or reopens the
+  in-memory gate. Final freeze still blocks all RPCs, settles tracked work and
+  repeats the exact-target stop. Canonical member transitions and operator
+  wiring for these primitives remain pending.
+- Checkpoint/container and local barrier/inspection suites pass together: 319
+  tests across four files. Worker and shared-contract typechecks and the
+  complexity guard pass. These are local primitive proofs, not a completed
+  handoff rehearsal or measured member-pause result.
+- Controlled-upload implementation remains pending. Investigated a single-part
+  R2 multipart upload: retain the existing direct encrypted stream, but durably
+  record the exact upload ID before returning a part URL and let trusted code
+  complete or abort that ID. This avoids proxying large snapshots and permits
+  an acknowledged terminal capability instead of an expiration wait. Before
+  adopting it, prove R2 checksum behavior across Workers/S3 APIs and preserve
+  SHA-256 verification; a multipart composite checksum is not the existing
+  whole-object SHA-256. Keep pending obligations with each backend's resource
+  owner, including cleanup/deletion fencing, retries and lost completion replies.
+  Old clients need explicit capability negotiation and old direct-PUT deadlines
+  must drain while the member remains live. No shorter deadline is being assumed.
 - Remaining before a final candidate: member state transitions and conditional
   admission closure; controlled final checkpoint/upload; complete effect and
   control routing; durable activation wake; creation/inventory closure; hosted
