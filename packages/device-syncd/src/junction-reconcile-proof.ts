@@ -7,11 +7,14 @@ export interface JunctionReconcileProof {
   binding: string;
   digest: string;
   timeZone: string;
+  /** Checkpoint-owned future work, bounded by this content proof's expiry. */
+  historyDeferredUntil?: number;
 }
 
 export function encodeJunctionReconcileProof(proof: JunctionReconcileProof): string {
   return JSON.stringify([
     proof.windowStart, proof.validUntil, proof.binding, proof.digest, proof.timeZone,
+    ...(proof.historyDeferredUntil === undefined ? [] : [proof.historyDeferredUntil]),
   ]);
 }
 
@@ -19,7 +22,7 @@ export function readJunctionReconcileProof(value: unknown): JunctionReconcilePro
   if (typeof value !== "string" || value.length > 256) return null;
   try {
     const parts: unknown = JSON.parse(value);
-    if (!Array.isArray(parts) || parts.length !== 5) return null;
+    if (!Array.isArray(parts) || (parts.length !== 5 && parts.length !== 6)) return null;
     const [windowStart, validUntil, binding, digest, timeZone] = parts;
     if (typeof windowStart !== "string" || typeof validUntil !== "string"
       || typeof binding !== "string" || typeof digest !== "string"
@@ -29,10 +32,24 @@ export function readJunctionReconcileProof(value: unknown): JunctionReconcilePro
       || new Date(validUntil).toISOString() !== validUntil
       || windowStart >= validUntil) return null;
     new Intl.DateTimeFormat("en", { timeZone }).format(0);
-    return { windowStart, validUntil, binding, digest, timeZone };
+    const deferral = readHistoryDeferral(parts, windowStart, validUntil);
+    return deferral ? { windowStart, validUntil, binding, digest, timeZone, ...deferral } : null;
   } catch {
     return null;
   }
+}
+
+function readHistoryDeferral(
+  parts: unknown[], windowStart: string, validUntil: string,
+): Pick<JunctionReconcileProof, "historyDeferredUntil"> | null {
+  if (parts.length === 5) return {};
+  const historyDeferredUntil = parts[5];
+  return typeof historyDeferredUntil === "number"
+    && Number.isSafeInteger(historyDeferredUntil)
+    && historyDeferredUntil > Date.parse(windowStart)
+    && historyDeferredUntil <= Date.parse(validUntil)
+    ? { historyDeferredUntil }
+    : null;
 }
 
 // Canonicalize object key ordering, preserving nested array semantics. Sort only

@@ -1,5 +1,7 @@
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 
+export { encodeJunctionReconcileProof, readJunctionReconcileProof } from "./junction-reconcile-proof.ts";
+
 import { JUNCTION_RECONCILE_PROOF_METADATA_KEY, JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
@@ -790,6 +792,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   historicalProofFirstSeenAt: "isoTimestamp",
   historicalProofSourceProviderSlug: "string",
   historicalProviderRecordsSeen: "boolean",
+  historicalPullPending: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",
   historicalUnresolvedProviderRecordCount: "number",

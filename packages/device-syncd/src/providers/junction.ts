@@ -1131,12 +1131,17 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
-  function reconcileProbeEligibility(account: StoredDeviceSyncAccount, now: string): string | null {
+  function reconcileProbeEligibility(account: StoredDeviceSyncAccount, now: string, proof: JunctionReconcileProof): string | null {
     if (account.status !== "active" || account.credential.kind !== "provider_config") return "connection_ineligible";
     if (!account.sources) return "sources_missing";
     if (summaryResources.includes("profile") && !hasCheckedJunctionProfileSummary(account.metadata)) return "profile_due";
     if (shouldImportClosedTimeseriesForReconcile(account.lastSyncCompletedAt, floorUtcDayTimestamp(now))) return "daily_repair_due";
-    if (createScheduledJobs(account, now).jobs.length !== 1) return "history_or_recovery_due";
+    // Only the restored runtime can prove that every history root has a future
+    // queue owner. Summary backfill and source recovery retain their own gates.
+    if (buildScheduledHistoricalBackfillJobs(account, now).length > 0
+      || buildPushSourceRecoveryJobs(account, now).length > 0
+      || (!(proof.historyDeferredUntil && proof.historyDeferredUntil > Date.parse(now))
+        && buildScheduledExtendedTimeseriesBackfillJobs(account, now).length > 0)) return "history_or_recovery_due";
     return null;
   }
 
@@ -1252,7 +1257,7 @@ export function createJunctionDeviceSyncProvider(
     const baseline = readJunctionReconcileProof(account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY]);
     if (!baseline) return finish("ineligible", "baseline_missing");
     if (baseline.validUntil <= now) return finish("ineligible", "baseline_expired");
-    const ineligible = reconcileProbeEligibility(account, now);
+    const ineligible = reconcileProbeEligibility(account, now, baseline);
     if (ineligible) return finish("ineligible", ineligible);
     if (account.credential.kind !== "provider_config") return finish("ineligible", "connection_ineligible");
     const observe = (records: readonly unknown[]) => {
@@ -3369,36 +3374,14 @@ export function createJunctionDeviceSyncProvider(
       requiresJunctionHistoricalPullReadiness(extendedHistoricalPolicy)
       && window.windowStart === historicalWindowStart
     ) {
-      const historicalPullReadiness = await readHistoricalPullReadiness(
-        context,
-        effectiveResource,
-        sourceProviderSlug,
+      const deferred = await deferHistoricalTimeseriesImport(
+        context, job, effectiveResource, sourceProviderSlug, window, extendedHistoricalPolicy,
       );
-      if (historicalPullReadiness === "no_obligation") {
-        return withJunctionExtendedTimeseriesBackfillFollowUp({
-          context,
-          historicalPullReadiness,
-          importResult: buildUncollectedTimeseriesImportResult(true),
-          job,
-          resource: effectiveResource,
-          result: { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
-          window,
-        });
-      }
-      if (historicalPullReadiness === "pending") {
-        const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.at(-1) ?? 0;
-        return {
-          nextReconcileAt: clampWebhookJobNextReconcileAt(context),
-          scheduledJobs: [buildExtendedTimeseriesBackfillFollowUp(job, {
-            availableAt: addMilliseconds(context.now, retryDelayMs),
-            windowEnd: window.windowEnd,
-            windowStart: window.windowStart,
-          })],
-        };
-      }
-      if (historicalPullReadiness === "terminal_failure") {
-        return { nextReconcileAt: clampWebhookJobNextReconcileAt(context) };
-      }
+      if (deferred.result) return deferred.result;
+      // The first window is the only readiness observation a scan makes. Carry
+      // a pending start through every continuation so the final segment cannot
+      // certify windows that were read before upstream finished populating them.
+      job = withHistoricalPullPending(job, deferred.historicalPullReadiness === "pending");
     }
     const timeseriesPolicy = resolveJunctionTimeseriesResourcePolicy(effectiveResource);
     const historicalResourceJobWorkBudget =
@@ -3564,6 +3547,72 @@ export function createJunctionDeviceSyncProvider(
       extendedHistoricalPolicy,
       sourceLifecycleEpoch,
     });
+  }
+
+  async function deferHistoricalTimeseriesImport(
+    context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
+    resource: string,
+    sourceProviderSlug: string | null,
+    window: { windowStart: string; windowEnd: string },
+    policy: JunctionExtendedTimeseriesBackfillPolicy | null,
+  ): Promise<{
+    historicalPullReadiness: JunctionHistoricalPullReadiness;
+    result: ProviderJobResult | null;
+  }> {
+    const historicalPullReadiness = await readHistoricalPullReadiness(
+      context,
+      resource,
+      sourceProviderSlug,
+    );
+    if (historicalPullReadiness === "no_obligation") {
+      return {
+        historicalPullReadiness,
+        result: withJunctionExtendedTimeseriesBackfillFollowUp({
+          context,
+          historicalPullReadiness,
+          importResult: buildUncollectedTimeseriesImportResult(true),
+          job,
+          resource,
+          result: { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+          window,
+        }),
+      };
+    }
+    if (historicalPullReadiness === "pending" && policy?.completion !== "exact_records") {
+      const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.at(-1) ?? 0;
+      return {
+        historicalPullReadiness,
+        result: {
+          nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+          scheduledJobs: [buildExtendedTimeseriesBackfillFollowUp(job, {
+            availableAt: addMilliseconds(context.now, retryDelayMs),
+            windowEnd: window.windowEnd,
+            windowStart: window.windowStart,
+          })],
+        },
+      };
+    }
+    if (historicalPullReadiness === "terminal_failure") {
+      return {
+        historicalPullReadiness,
+        result: { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+      };
+    }
+    return { historicalPullReadiness, result: null };
+  }
+
+  function withHistoricalPullPending(
+    job: DeviceSyncJobRecord,
+    pending: boolean,
+  ): DeviceSyncJobRecord {
+    return {
+      ...job,
+      payload: stripUndefined({
+        ...job.payload,
+        historicalPullPending: pending ? true : undefined,
+      }),
+    };
   }
 
   function buildUncollectedTimeseriesImportResult(
@@ -3750,11 +3799,15 @@ export function createJunctionDeviceSyncProvider(
     const historicalPullReadiness =
       requiresJunctionHistoricalPullReadiness(extendedHistoricalPolicy)
       && timeseriesImport.fetchComplete
-        ? await readHistoricalPullReadiness(
-            context,
-            effectiveResource,
-            sourceProviderSlug,
-          )
+        ? job.payload.historicalPullPending === true
+          // A scan that began before upstream finished cannot certify its
+          // earlier windows; keep the daily continuation without another read.
+          ? "pending"
+          : await readHistoricalPullReadiness(
+              context,
+              effectiveResource,
+              sourceProviderSlug,
+            )
         : undefined;
     if (
       extendedHistoricalBackfill
@@ -11811,7 +11864,7 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
   }
 
   const coverageVersion = readJunctionHistoricalBackfillVersion(payload);
-  if (policy.completion !== "exact_records") {
+  if (policy.anchor === "current_day" || policy.completion !== "exact_records") {
     return sha256Text(JSON.stringify([
       "junction",
       "extended-timeseries-backfill",

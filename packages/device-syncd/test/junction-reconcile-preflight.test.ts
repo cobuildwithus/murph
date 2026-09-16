@@ -12,8 +12,8 @@ import { createJsonResponse, readUrl } from "./helpers.ts";
 const NOW = "2026-04-03T14:00:00.000Z";
 const LATER = "2026-04-03T15:00:00.000Z";
 
-function harness(options: { bounded?: boolean; timeseries?: boolean; resources?: string[]; sdkEnvelope?: boolean } = {}) {
-  let providers = [{ id: "provider-garmin-1", slug: "garmin", status: "connected", resource_availability: { activity: true } }];
+function harness(options: { bounded?: boolean; timeseries?: boolean; resources?: string[]; sdkEnvelope?: boolean; weightHistory?: boolean } = {}) {
+  let providers = [{ id: "provider-garmin-1", slug: "garmin", status: "connected", resource_availability: { activity: true, ...(options.weightHistory ? { weight: true } : {}) } }];
   let rows: unknown[] = [{ id: "activity-1", date: "2026-04-02", steps: 1234, source: { provider: "garmin" } }];
   let timeseriesValue = 99;
   let malformed = false;
@@ -32,10 +32,10 @@ function harness(options: { bounded?: boolean; timeseries?: boolean; resources?:
     throw new Error("Unexpected provider endpoint");
   }, {
     summaryResources: options.resources ?? ["activity"],
-    timeseriesResources: options.timeseries ? ["glucose"] : [],
+    timeseriesResources: options.weightHistory ? ["weight"] : options.timeseries ? ["glucose"] : [],
     pushSourceRecoveryEnabled: false,
   });
-  const source = { ...createConnectionSource(), resourceCount: 1, lifecycleEpoch: 0 };
+  const source = { ...createConnectionSource(), resourceCount: 1, lifecycleEpoch: options.weightHistory ? 1 : 0, resourceAvailabilitySummary: { activity: true, ...(options.weightHistory ? { weight: true } : {}) } };
   const account = createAccount({
     sources: [source], lastSyncCompletedAt: NOW,
     metadata: {
@@ -298,4 +298,34 @@ test("missing admitted source authority still requires runtime reconciliation", 
   await h.importBaseline();
   h.account.sources = undefined;
   assert.equal((await h.probe()).reason, "sources_missing");
+});
+
+test("checkpoint-owned future history permits content preflight only until its deadline", async () => {
+  const h = harness({ weightHistory: true });
+  await h.importBaseline();
+  assert.equal((await h.probe()).reason, "history_or_recovery_due");
+  const baseline = readJunctionReconcileProof(h.account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY]);
+  assert.ok(baseline);
+  const deferred = { ...baseline, historyDeferredUntil: Date.parse("2026-04-03T16:00:00.000Z") };
+  h.account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY] = encodeJunctionReconcileProof(deferred);
+  assert.equal((await h.probe()).outcome, "unchanged");
+  h.account.sources![0]!.lifecycleEpoch = 2;
+  assert.equal((await h.probe()).reason, "authority_or_inventory_changed", "deferral cannot hide a reconnect");
+  h.account.sources![0]!.lifecycleEpoch = 1;
+  h.setRows([{ id: "activity-1", date: "2026-04-02", steps: 4321, source: { provider: "garmin" } }]);
+  assert.equal((await h.probe()).outcome, "changed", "retained history cannot hide fresh data");
+  h.account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY] = encodeJunctionReconcileProof({ ...deferred, historyDeferredUntil: Date.parse(LATER) });
+  assert.equal((await h.probe()).reason, "history_or_recovery_due");
+});
+
+test("future history proof stays inside the legacy metadata bound and rejects unsafe deadlines", () => {
+  const baseline = { windowStart: "2026-04-01T00:00:00.000Z", validUntil: "2026-04-04T00:00:00.000Z",
+    binding: "a".repeat(64), digest: "b".repeat(64), timeZone: "America/Argentina/Buenos_Aires" };
+  assert.deepEqual(readJunctionReconcileProof(encodeJunctionReconcileProof(baseline)), baseline);
+  const proof = { ...baseline, historyDeferredUntil: Date.parse(baseline.validUntil) };
+  assert.ok(encodeJunctionReconcileProof(proof).length <= 256);
+  assert.deepEqual(readJunctionReconcileProof(encodeJunctionReconcileProof(proof)), proof);
+  for (const deadline of [0, Date.parse(baseline.validUntil) + 1, 1.5, NaN]) {
+    assert.equal(readJunctionReconcileProof(encodeJunctionReconcileProof({ ...baseline, historyDeferredUntil: deadline })), null);
+  }
 });
