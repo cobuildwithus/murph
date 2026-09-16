@@ -7,7 +7,7 @@ import { parseHostedClinicalRecordsFetchPageResponse, parseHostedClinicalRecords
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   hashClinicalFhirPageUrl,
@@ -64,7 +64,55 @@ describe("Clinical Records retrieval control plane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "");
     mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([false, true])("gates a frozen restricted query before provider egress (approved=%s)", async (approved) => {
+    const harness = createHarness(["Patient"]);
+    const plan = buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true,
+      frozenAt: new Date("2026-09-15T12:00:00Z"), pageCount: "100", resourceTypes: ["FamilyMemberHistory"] });
+    harness.state.run.retrievalPlanJson = plan;
+    harness.state.run.grantedScopesJson = ["patient/FamilyMemberHistory.s"];
+    const slice = plan.slices[0]!;
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", approved ? "epic-test" : "epic-other");
+    const fetchImpl = vi.fn(async () => fhirResponse({ resourceType: "Bundle", entry: [] }));
+    const result = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: {
+      cursor: null, generation: 1, requestId: "approved-family", resourceType: slice.resourceType, runId: RUN_ID,
+      retrievalProtocol: "query-slices-v2", queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint, sliceId: slice.sliceId,
+    } });
+    expect(result.status).toBe(approved ? "page" : "unavailable");
+    expect(fetchImpl).toHaveBeenCalledTimes(approved ? 1 : 0);
+    if (!approved) expect(result).toEqual({ status: "unavailable", errorCode: "hospital-approval-required", retryable: false });
+  });
+
+  it("revokes an issued restricted document ticket when the provider flag is removed", async () => {
+    const harness = createHarness(["DocumentReference"]);
+    const plan = buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true,
+      frozenAt: new Date("2026-09-15T12:00:00Z"), pageCount: "100", resourceTypes: ["DocumentReference"] });
+    harness.state.run.retrievalPlanJson = plan;
+    harness.state.run.grantedScopesJson = ["patient/DocumentReference.s", "patient/Binary.r"];
+    const slice = plan.slices.find((entry) => entry.queryScopeId === "document-references-imaging")!;
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "epic-test");
+    const fetchImpl = vi.fn(async () => fhirResponse({ resourceType: "Bundle", entry: [{ resource: {
+      resourceType: "DocumentReference", id: "report-1", status: "current",
+      meta: { lastUpdated: "2026-09-15T12:00:00Z" },
+      subject: { reference: "Patient/patient-1" }, content: [{ attachment: {
+        url: "Binary/document-1", contentType: "text/plain", size: 13,
+      } }],
+    } }] }));
+    const page = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: {
+      cursor: null, generation: 1, requestId: "restricted-document", resourceType: "DocumentReference", runId: RUN_ID,
+      retrievalProtocol: "query-slices-v2", queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint, sliceId: slice.sliceId,
+    } });
+    if (page.status !== "page" || !page.documents?.[0]?.ticket) throw new Error("Expected document ticket.");
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "");
+    const result = await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: page.documents[0].ticket } });
+    expect(result).toEqual({ status: "unavailable", errorCode: "hospital-approval-required", retryable: false });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("downloads linked Binary bytes with a run-bound ticket without altering raw pages or FHIR page counts", async () => {

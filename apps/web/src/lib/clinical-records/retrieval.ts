@@ -1,5 +1,7 @@
 import "server-only";
 
+import { epicImportQueryEnabled } from "./epic-import-config";
+
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { readHostedRuntimeAiAccessDecision } from "../hosted-onboarding/member-access";
 
@@ -197,6 +199,9 @@ export async function fetchClinicalRetrievalPage(input: {
   if (!retrievalSlice) {
     return unavailable("retrieval-identity-mismatch", false);
   }
+  if (!epicImportQueryEnabled(run.connection.providerDirectoryEntryId, retrievalSlice.queryScopeId)) {
+    return unavailable("hospital-approval-required", false);
+  }
   if (!run.resourceTypes.includes(input.request.resourceType)) {
     return unavailable("resource-family-not-requested", false);
   }
@@ -299,23 +304,20 @@ export async function fetchClinicalRetrievalPage(input: {
       requestRowId: claimed.requestRowId,
       run,
     });
-    if (
-      isClinicalRecordsControlPlaneError(error)
-      && error.code === "CLINICAL_RECORD_SMART_REAUTH_REQUIRED"
-    ) {
-      const marked = await markClinicalConnectionNeedsReauth({
-        connectionId: run.connection.id,
-        generation: run.generation,
-        memberId: input.memberId,
-        observedTokenVersion: run.connection.tokenVersion,
-        runId: run.id,
-      });
-      return marked
-        ? unavailable(HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE, false)
-        : unavailable("credentials-updated-retry", true);
-    }
     if (error instanceof TypeError) return unavailable("provider-response-invalid", false);
     if (isClinicalRecordsControlPlaneError(error)) {
+      if (error.code === "CLINICAL_RECORD_SMART_REAUTH_REQUIRED") {
+        const marked = await markClinicalConnectionNeedsReauth({
+          connectionId: run.connection.id,
+          generation: run.generation,
+          memberId: input.memberId,
+          observedTokenVersion: run.connection.tokenVersion,
+          runId: run.id,
+        });
+        return marked
+          ? unavailable(HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE, false)
+          : unavailable("credentials-updated-retry", true);
+      }
       return unavailable(
         error.code === "CLINICAL_RECORD_FHIR_FAMILY_UNAVAILABLE"
           ? "family-unavailable"
@@ -425,6 +427,9 @@ async function loadClinicalDocumentRequest(input: {
       && entry.sliceId === ticket.sliceId && entry.queryFingerprint === ticket.queryFingerprint
       && entry.resourceType === ticket.resourceType);
     if (!slice) return { unavailable: "document-ticket-invalid", retryable: false };
+    if (!epicImportQueryEnabled(input.run.connection.providerDirectoryEntryId, slice.queryScopeId)) {
+      return { unavailable: "hospital-approval-required", retryable: false };
+    }
     const sourceKind = ticket.sourceKind ?? "binary";
     if (sourceKind === "media" && !epicMediaReadIsGranted(input.grantedScopes)) return { unavailable: "media-scope-unavailable", retryable: false };
     return { ticket, url: resolveClinicalDocumentUrl(ticket.url, fhirBaseUrl, sourceKind), fhirBaseUrl, patientIdHash };

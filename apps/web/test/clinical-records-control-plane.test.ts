@@ -1,3 +1,4 @@
+import { clinicalFhirRetrievalPlanSchema } from "@murphai/clinical-records";
 import { createHash } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,6 +63,7 @@ vi.mock("@/src/lib/clinical-records/retrieval", () => ({
   signalClinicalRetrievalWake: mocks.signalClinicalRetrievalWake,
 }));
 
+import { EPIC_BETA_RESOURCE_TYPES } from "@/src/lib/clinical-records/epic-policy";
 import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import {
   finishClinicalRecordAuthorization,
@@ -143,10 +145,88 @@ describe("Clinical Records authorization persistence", () => {
       rootKey: new Uint8Array([1, 2, 3, 4]),
     }));
     vi.stubEnv("EPIC_SMART_CLIENT_ID", "epic-client-id");
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "");
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it.each([false, true])("selects scoped OAuth families and freezes the matching query subset (approved=%s)", async (approved) => {
+    provider = { ...productionProvider, resourceTypes: [...EPIC_BETA_RESOURCE_TYPES] };
+    const smart = await vi.importActual<typeof import("@/src/lib/clinical-records/smart")>("@/src/lib/clinical-records/smart");
+    mocks.discoverSmartConfiguration.mockImplementation(async (input) => ({
+      authorizationEndpoint: "https://fhir.example.test/oauth2/authorize",
+      tokenEndpoint: "https://fhir.example.test/oauth2/token",
+      requestedScopes: smart.selectSmartRequestedScopes({ ...input,
+        capabilities: ["permission-v2", "context-standalone-patient"],
+      }).scopes,
+    }));
+
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", approved ? PROVIDER_ID : "epic-other");
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_CLIENT_ID", "hospital-client-id");
+    const harness = createHarness(null, { clientId: approved ? "hospital-client-id" : "epic-client-id" });
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    await startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request("https://app.example.test/api/clinical-records/connect-intents/start", { method: "POST" }) });
+    const discoveryTypes = mocks.discoverSmartConfiguration.mock.calls[0]?.[0].resourceTypes;
+    const oauthScopes = mocks.buildSmartAuthorizationUrl.mock.calls[0]?.[0].requestedScopes;
+    expect(oauthScopes.includes("patient/FamilyMemberHistory.s")).toBe(approved);
+    expect(oauthScopes).toContain("patient/Observation.s");
+
+    expect(discoveryTypes.includes("FamilyMemberHistory")).toBe(approved);
+    expect(discoveryTypes).toContain("Observation");
+    expect(mocks.buildSmartAuthorizationUrl).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: approved ? "hospital-client-id" : "epic-client-id",
+    }));
+    mocks.readGrantedSmartResourceTypes.mockReturnValue(discoveryTypes);
+    await finishAuthorization();
+    const plan = clinicalFhirRetrievalPlanSchema.parse(harness.retrievalRunCreate.mock.calls[0]?.[0].data.retrievalPlanJson);
+    const ids = plan.slices.map((slice: { queryScopeId: string }) => slice.queryScopeId);
+    expect(ids.includes("family-member-history")).toBe(approved);
+    expect(ids.includes("procedure-surgical-history")).toBe(approved);
+    expect(ids.includes("document-references-imaging")).toBe(approved);
+    expect(ids).toContain("laboratory-observations");
+    expect(ids).toContain("procedure-surgeries");
+  });
+
+  it.each(["", "epic-client-id"])("rejects missing or reused hospital client configuration (%s)", async (clientId) => {
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", PROVIDER_ID);
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_CLIENT_ID", clientId);
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    await expect(startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request("https://app.example.test/api/clinical-records/connect-intents/start", { method: "POST" }) }))
+      .rejects.toMatchObject({ code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED" });
+    expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
+    expect(harness.oauthSessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("requires the separate sandbox approved client without falling back to either production client", async () => {
+    provider = { ...productionProvider, clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID" };
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", ` epic-other, ${PROVIDER_ID} `);
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "automatic-sandbox");
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_CLIENT_ID", "approved-production");
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_NON_PRODUCTION_CLIENT_ID", "");
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    const start = () => startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request("https://app.example.test/api/clinical-records/connect-intents/start", { method: "POST" }) });
+    await expect(start()).rejects.toMatchObject({ code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED" });
+    expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_NON_PRODUCTION_CLIENT_ID", "approved-sandbox");
+    await start();
+    expect(mocks.buildSmartAuthorizationUrl).toHaveBeenCalledWith(expect.objectContaining({ clientId: "approved-sandbox" }));
+  });
+
+  it.each([true, false])("rejects a changed feature flag during OAuth before token exchange (now approved=%s)", async (approved) => {
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", approved ? PROVIDER_ID : "");
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_CLIENT_ID", "hospital-client-id");
+    const harness = createHarness(null, { clientId: approved ? "epic-client-id" : "hospital-client-id" });
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED" });
+    expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
+    expect(harness.retrievalRunCreate).not.toHaveBeenCalled();
   });
 
   it.each(["active", "disconnected", "needs_reauth"] as const)(

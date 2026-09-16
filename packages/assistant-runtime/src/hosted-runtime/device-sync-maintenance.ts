@@ -1617,6 +1617,11 @@ function buildHostedDeviceSyncPassProgressDiagnostics(
     ])).sort()))
     .digest("hex");
   return {
+    deviceSyncConnectionKey: wake.kind === "device-sync.wake" && wake.connectionId
+      ? createHash("sha256")
+        .update(JSON.stringify(["device-sync-connection-v1", wake.userId, wake.connectionId]))
+        .digest("hex")
+      : null,
     incomingRetainedJobCount: incoming.length,
     outgoingRetainedJobCount: outgoing.length,
     incomingRetainedProgressFingerprint: fingerprint(incoming),

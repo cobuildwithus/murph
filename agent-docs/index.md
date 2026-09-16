@@ -143,6 +143,11 @@ Silent morning Journal capture, canonical plan context, retirement of the
 afternoon pass, and bounded private upcoming-context injection are owned by
 `product-specs/journal.md` and `ARCHITECTURE.md`.
 
+Retained device-import stall, cycling and long-backlog operator alerts are owned
+by `agent-docs/RELIABILITY.md`; connection ownership in diagnostic events is
+specified in `docs/hosted-runtime-log-database.md`. Classifier, bounded-reader and PostgreSQL proof
+are indexed in `agent-docs/references/testing-ci-map.md`.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
@@ -232,7 +237,8 @@ afternoon pass, and bounded private upcoming-context injection are owned by
 | `agent-docs/product-specs/private-group-consultation.md` | Hosted group consultation. | Hosted group consultation | High | 2026-08-28 |
 | `agent-docs/product-specs/consented-group-disclosure.md` | Hosted group disclosure. | Hosted group disclosure | High | 2026-08-26 |
 | `agent-docs/product-specs/hosted-group-join-confirmation.md` | Hosted group membership behavior. | Hosted group membership behavior | High | 2026-07-23 |
-| `agent-docs/product-specs/clinical-records-intake.md` | Bounded clinical import, document enrichment, source revisions, saved results and recovery. | Clinical Records intake behavior | High | 2026-09-11 |
+| `agent-docs/product-specs/clinical-records-intake.md` | Bounded clinical import, provider autocomplete and local branding, document enrichment, saved results and recovery. | Clinical Records intake behavior | High | 2026-09-15 |
+| `agent-docs/references/epic-automatic-distribution.md` | Reviewed Epic automatic-distribution API matrix, hospital-approved import flag and separate client registration. | Epic import registration and rollout | High | 2026-09-15 |
 | `agent-docs/phone-calls/retell-phone-agent.md` | Retell hosted phone agent prompt, authority, transfer, and call-brief handling rules. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/phone-calls/retell-analysis-fields.md` | Retell post-call analysis field contract and transcript-retention boundary. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/feature-user-story-audit/README.md` | Feature user-story audit overview and artifact inventory. | Point-in-time feature audit | Low | 2026-06-21 |
@@ -273,7 +279,7 @@ afternoon pass, and bounded private upcoming-context injection are owned by
 | `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle, guarded retirement, and dependency hook setup. | Local rebuildable-storage lifecycle | High | 2026-09-11 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Local hosted runtime workflow, call-scoped cancellation, and exact-child startup/exit cleanup ownership. | Local hosted runtime workflow | Medium | 2026-09-05 |
 | `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, exact tracked archive inputs, no base-update limit, response timing and evidence requirements, same-session waiting or paced polling by default, exact-metadata recovery after capture failure, and invalid-first-attempt baseline recovery. | Final PR ReviewGPT loop | Medium | 2026-09-11 |
-| `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion, daily recovery, and checkpoint-fenced content preflight and sweep suppression. | Device-sync ingestion contract | High | 2026-09-12 |
+| `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion, daily recovery, checkpoint-owned continuation preflight, and bounded completion-marker retention. | Device-sync ingestion contract | High | 2026-09-15 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/2026-09-13-cli-validation-diagnostics.md` | Bounded optional schema diagnostics, three existing knowledge source classifications and consumer-first rollout contract. | CLI diagnostics execution plan | High | 2026-09-13 |
 | `agent-docs/exec-plans/completed/2026-09-13-browser-vault-source-read-telemetry.md` | Fixed source-operation timing through existing Browser Vault timeout telemetry, with behavior-preserving proof and rollout gates. | Completed diagnostic implementation | High | 2026-09-13 |
@@ -295,6 +301,7 @@ afternoon pass, and bounded private upcoming-context injection are owned by
 | `agent-docs/exec-plans/completed/2026-09-14-remove-small-runner.md` | Removal of the temporary member-specific container experiment and protected retirement prerequisites. | Historical implementation evidence | Low | 2026-09-14 |
 | `agent-docs/exec-plans/completed/2026-09-14-postgres-runtime-owner.md` | UserRunner removal, Postgres runtime authority, resource cutover, and focused integration proof. | Completed runtime ownership implementation and proof | Medium | 2026-09-15 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
+| `agent-docs/exec-plans/completed/2026-09-15-vercel-memory-headroom.md` | Vercel typecheck OOM recovery verification, native compiler memory comparisons, and compilation-only esbuild memory target. | Build memory investigation and local proof | Medium | 2026-09-15 |
 | `agent-docs/exec-plans/completed/2026-09-15-foreground-priority-transition-gate.md` | Foreground priority escape analysis, three-history transition matrix, required CI gate, and PR review evidence. | Historical implementation evidence | Low | 2026-09-15 |
 | `agent-docs/exec-plans/completed/2026-09-15-foreground-mode-priority.md` | Effective foreground mode after system promotion, checkpoint interruption and deferred-effect regressions, and local validation. | Historical implementation evidence | Low | 2026-09-15 |
 | `agent-docs/exec-plans/completed/2026-09-15-prisma-pool-pressure.md` | Actual-checkout pool-pressure sampling, healthy transaction regression, and PostgreSQL fault-injection proof. | Completed diagnostic fix | Low | 2026-09-15 |
@@ -345,3 +352,8 @@ agent-facing command and dedicated browser session.
 The hosted-local activity-expiry target correction is recorded in
 [`2026-09-15-recovery-test-targets.md`](exec-plans/completed/2026-09-15-recovery-test-targets.md);
 its active/retained target and namespace-routing proof is owned by the testing CI map.
+
+Provider-search delivery is recorded in
+[`2026-09-15-records-connect-polish.md`](exec-plans/completed/2026-09-15-records-connect-polish.md).
+The separate registration activation and composed import proof remain active in
+[`2026-09-16-epic-import-live-verification.md`](exec-plans/active/2026-09-16-epic-import-live-verification.md).

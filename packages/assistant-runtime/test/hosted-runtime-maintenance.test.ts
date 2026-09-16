@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -6667,7 +6667,7 @@ describe("runHostedAssistantAutomationLane", () => {
       resource: "steps", windowStart: "2026-04-01T00:00:00Z", windowEnd: at,
       webhookDataJson: "PRIVATE_FIXTURE_MUST_NOT_BE_LOGGED",
     } }];
-    const wake = { eventId: "evt_progress", kind: "device-sync.wake" as const,
+    const wake = { eventId: "evt_progress", kind: "device-sync.wake" as const, connectionId: "dsc_synthetic_progress",
       occurredAt: at, reason: "webhook_hint" as const, userId: "member_123",
       hint: { jobs: incomingJobs } };
     const outgoingWake = { ...wake, hint: { jobs: [{ ...incomingJobs[0]!,
@@ -6692,6 +6692,7 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(first).toMatchObject({ incomingRetainedJobCount: 1, outgoingRetainedJobCount: 1,
       stagedDirtyPayloadAckCount: 0, retainedMailboxOwnerPresent: true });
     expect(first?.incomingRetainedProgressFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(first?.deviceSyncConnectionKey).toMatch(/^[a-f0-9]{64}$/);
     expect(first?.outgoingRetainedProgressFingerprint).not.toBe(first?.incomingRetainedProgressFingerprint);
     logRequests.length = 0;
     await runHostedDeviceSyncWakeLane({ wake: outgoingWake, deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
@@ -6700,6 +6701,24 @@ describe("runHostedAssistantAutomationLane", () => {
     await drainHostedRuntimeLogWritesBestEffort();
     const second = logRequests.flatMap((r) => r.entries).find((e) => e.eventCode === "device-sync.pass_finished")?.redactedJson;
     expect(second?.incomingRetainedProgressFingerprint).toBe(first?.outgoingRetainedProgressFingerprint);
+    expect(second?.deviceSyncConnectionKey).toBe(first?.deviceSyncConnectionKey);
+    for (const changedWake of [
+      { ...wake, connectionId: "dsc_other_connection" },
+      { ...wake, userId: "member_other" },
+      { ...wake, connectionId: undefined },
+    ]) {
+      logRequests.length = 0;
+      await runHostedDeviceSyncWakeLane({ wake: changedWake, deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
+        resolvedConfig: { deviceSync: DEVICE_SYNC_CONFIG }, retainFollowUpWakeUntilCheckpoint: true,
+        runtimeLogPlatform: platform, timeoutMs: null, vaultRoot: "/tmp/vault-root" });
+      await drainHostedRuntimeLogWritesBestEffort();
+      const pass = logRequests.flatMap(r => r.entries).find(e => e.eventCode === "device-sync.pass_finished")?.redactedJson;
+      expect(pass?.deviceSyncConnectionKey).not.toBe(first?.deviceSyncConnectionKey);
+      if (!changedWake.connectionId) expect(pass?.deviceSyncConnectionKey).toBeNull();
+      expect(JSON.stringify(pass)).not.toContain("dsc_");
+      expect(JSON.stringify(pass)).not.toContain("member_");
+    }
+    expect(JSON.stringify([first, second])).not.toContain("dsc_synthetic_progress");
     expect(JSON.stringify([first, second])).not.toContain("PRIVATE_FIXTURE");
     expect(JSON.stringify([first, second])).not.toContain("synthetic-job");
     expect(JSON.stringify([first, second])).not.toContain("2026-04-03");
@@ -7608,7 +7627,13 @@ describe("runHostedDeviceSyncWakeLane", () => {
     }));
   });
 
-  it("retains processed-job progress when a later reconciliation stage fails", async () => {
+  it.each([0, 1])("retains failed-pass retry evidence with %i local jobs after late reconciliation failure", async (pendingJobCount) => {
+    const failedPass = JSON.parse(await readFile(new URL("./fixtures/device-import-failed-pass.json", import.meta.url), "utf8"));
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      listPendingJobsForAccount: () => Array.from({ length: pendingJobCount }, () => ({
+        attempts: 1, createdAt: "2026-04-08T00:00:00Z", kind: "resource", status: "queued",
+      })),
+    });
     const logRequests: HostedRuntimeLogRequest[] = [];
     const drainWorker = vi.fn()
       .mockResolvedValueOnce(1)
@@ -7644,9 +7669,11 @@ describe("runHostedDeviceSyncWakeLane", () => {
       wake: {
         eventId: "evt_device_sync_late_failure",
         kind: "device-sync.wake",
+        connectionId: "dsc_synthetic_retained",
+        hint: { jobs: [{ kind: "resource", dedupeKey: "synthetic-retained-job" }] },
         occurredAt: "2026-04-08T00:00:00.000Z",
         reason: "reconcile_due",
-        userId: "member_123",
+        userId: "synthetic-import-runtime",
       },
     })).rejects.toThrow("synthetic late reconciliation failure");
     await drainHostedRuntimeLogWritesBestEffort();
@@ -7655,9 +7682,8 @@ describe("runHostedDeviceSyncWakeLane", () => {
       .flatMap((request) => request.entries)
       .find((entry) => entry.eventCode === "device-sync.pass_finished");
     expect(finishedEntry?.redactedJson).toEqual(expect.objectContaining({
-      outcome: "failed",
-      passStage: "control_plane_reconcile",
-      processedJobs: 1,
+      ...failedPass,
+      pendingJobCountAfter: pendingJobCount,
     }));
   });
 });

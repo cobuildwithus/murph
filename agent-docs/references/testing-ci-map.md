@@ -1306,6 +1306,20 @@ limits, and local proof distinctions are owned by
   authenticated read-only verification, one tracked signaled batch across a
   six-id mounted journey, recovered-only automatic unlock, explicit proof
   discard, failed-only continuation, and manual retryable UI states.
+- `apps/web/test/hosted-device-import-health.test.ts` proves saved continuation
+  progress, checkpoint-confirmed recovery, sparse wake exclusion and independent
+  stall/cycling/backlog classification. Interleaved connections cannot clear each
+  other's pending work or inflate runtime/start counts, including shared-attempt
+  checkpoints and missing legacy ownership. The maintenance test's bounded
+  continuation log scenario proves parsed, private-free connection digests remain
+  stable across attempts and differ across members and connections. `hosted-device-import-alert-monitor.test.ts`
+  covers current eligibility, bounded query count at 1,000 owners, privacy,
+  truncation, independent incident admission and diagnostic failures. The
+  `projects bounded device import` case in
+  `hosted-runtime-log-postgres-concurrency.test.ts` executes the real projection
+  against local PostgreSQL; set `MURPH_TEST_RUNTIME_LOG_POSTGRES=1` with a local
+  `DATABASE_URL`. Existing progress and latency suites cover the reused incident
+  owner's send races, reminders, retry identity, quiet hours and recovery.
 - `apps/web/test/hosted-ai-usage-overshoot-alert-monitor.test.ts` proves the
   five-minute runtime-alert cron reuses the operational Resend incident owner
   under a distinct allowance-overshoot identity and locks the privacy-safe

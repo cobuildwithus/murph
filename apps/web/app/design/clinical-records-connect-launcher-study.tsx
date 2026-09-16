@@ -4,8 +4,9 @@ import { useState, type ReactNode } from "react";
 
 import {
   RecordsConnectLauncherState,
-  ProviderSearch,
 } from "@/app/(dashboard)/records/connect/records-connect-client";
+
+import { ProviderSearchView, type ProviderSearchViewProps } from "@/app/(dashboard)/records/connect/provider-search-view";
 
 import { ConnectionRow, DisconnectDialog } from "@/app/(dashboard)/records/records-page-client";
 import type { ClinicalRecordConnectionContract } from "@/src/lib/clinical-records/client-contracts";
@@ -32,6 +33,17 @@ const savedSource: ClinicalRecordConnectionContract = {
   },
 };
 
+const searchPreview: ProviderSearchViewProps = {
+  query: "Clinic", providers: [
+    { id: "epic-320", brandName: "Cleveland Clinic", facilities: [{ city: "Cleveland", state: "OH", name: null, postalCode: null }], sourceSystem: "epic-fhir" },
+    { id: "epic-958", brandName: "Mayo Clinic", facilities: [{ city: "Rochester", state: "MN", name: null, postalCode: null }], sourceSystem: "epic-fhir" },
+    { id: "epic-example", brandName: "Example Community Clinic", facilities: [], sourceSystem: "epic-fhir" },
+  ],
+  hasSearched: true, searchPending: false, searchError: null, startError: null,
+  startingProviderId: null, selectedProviderId: null,
+  onQueryChange: () => {}, onSearch: () => {}, onSelect: () => {}, onRestart: () => {},
+};
+
 export function ClinicalRecordsConnectLauncherStudy() {
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   return (
@@ -43,7 +55,16 @@ export function ClinicalRecordsConnectLauncherStudy() {
       inert
     >
       <StudyState label="Find your provider">
-        <ProviderSearch intentClaim={`cr_${"d".repeat(32)}`} onConsentRequired={() => {}} />
+        <ProviderSearchView {...searchPreview} />
+      </StudyState>
+      <StudyState label="Finding a provider">
+        <ProviderSearchView {...searchPreview} providers={[]} hasSearched={false} searchPending />
+      </StudyState>
+      <StudyState label="No matching provider">
+        <ProviderSearchView {...searchPreview} providers={[]} />
+      </StudyState>
+      <StudyState label="Search retry">
+        <ProviderSearchView {...searchPreview} providers={[]} searchError="Hospitals and clinics could not be searched right now. Try again." />
       </StudyState>
       <StudyState label="Saved lab results">
         <ul>

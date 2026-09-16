@@ -2509,11 +2509,48 @@ to apply after cutover.
   delivery advances the send boundary that schedules the next generation. The
   latency incident retains one email per continuous anomaly, and both monitors
   recover silently.
+  Retained device imports have three independent aggregate incidents on the
+  same cron: no saved continuation progress for 15 minutes; four starts or outer
+  cancellations within 20 minutes with fewer than two saved progress passes;
+  and a lower-priority notice after an hour of continuously observed backlog.
+  Routine wake RPCs are not starts. Each pass carries a versioned SHA-256
+  `deviceSyncConnectionKey` binding its member and hosted connection. Pending
+  queues, progress and recovery are evaluated per connection, then affected
+  runtimes and starts are counted once. A healthy connection cannot clear or
+  reset another connection's pending work. Applied imports or a changed valid
+  continuation fingerprint with processed work are credited only after Web
+  accepts a checkpoint from the same attempt; an empty local queue likewise
+  requires that acceptance before recovery. Continuation changes and empty-queue
+  recovery require a completed or yielded pass: a failed pass has no returned
+  continuation, and its checkpoint preserves the incoming retry obligation.
+  Positive pending evidence and separately applied imports remain valid.
+  A checkpoint reaches only the connections observed in that attempt since its
+  preceding checkpoint; each
+  pass adds at most one checkpoint reference. Runtime restart counts use the
+  shared ordered timeline without copying it for each connection.
+  Unknown queue metadata does not clear pending evidence. Legacy or malformed
+  connection keys are excluded: they cannot prove connection-owned progress or
+  recovery. The additive reader can deploy before the runner, but complete
+  coverage starts only after keyed pass observations arrive. A gap over
+  15 minutes resets continuous-backlog evidence; a silent queue remains eligible
+  when its canonical device wake is due, otherwise its last pending observation
+  must be within ten minutes. Current runtime-access eligibility is reread before
+  send admission. The diagnostic reader projects booleans and typed identifiers
+  in memory from at most 50,000 relevant log events over two hours for at most
+  1,000 active connection owners. It never selects full log payloads. Truncation
+  and read errors fail the cron without resetting an incident to healthy.
+  Each observation uses at most four serial primary reads and one isolated-log
+  read, with no transaction or crypto/provider work. One initial observation
+  plus at most three serial pre-send rereads bounds a scan at 16 primary and four
+  log reads, plus the existing bounded singleton incident writes and at most
+  three serial email sends. Each condition uses independent six-hour reminders,
+  send admission, provider idempotency and silent recovery. Only the import
+  stall bypasses quiet hours; cycling and healthy backlog notices defer.
   Outbound paging requires the shared Resend operational-email sender and
   recipients plus a valid IANA operator timezone; it never falls back to
   Linq/iMessage. The shared policy suppresses sends from 11 PM through 7 AM
   local time unless a monitor explicitly opts into immediate quiet-hour
-  delivery. Durable runtime-progress stalls are the sole opt-in because waiting
+  delivery. Durable runtime-progress and retained-import stalls opt in because waiting
   can widen a stuck execution loop; runtime-latency and allowance alerts retain
   quiet hours. The owner applies stable bounded jitter after quiet hours and
   after every provider attempt. No retry, reminder, or post-healthy recurrence

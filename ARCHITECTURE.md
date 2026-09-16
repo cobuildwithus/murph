@@ -2217,8 +2217,12 @@ cursors, duplicate completion lists and outgoing next-link metadata are gone.
 Query-aware page
 requests, opaque cursors, durable request claims, and terminal outcomes bind
 the frozen query-scope and slice identities so they cannot be swapped across
-the same resource type. Epic's active policy expands 40 primary query scopes
-from 17 unique granted FHIR resource permissions. New plans use whole-family
+the same resource type. Epic's default policy expands 24 reviewed automatic-distribution queries
+from 16 granted FHIR resource permissions. The full 40-query/17-family catalog
+requires a default-empty provider-ID flag and a separate hospital-approved
+client. Web checks that selection at OAuth start/callback and gates restricted
+page/document egress against the current provider flag. The registration matrix
+is owned by `agent-docs/references/epic-automatic-distribution.md`. New plans use whole-family
 slices without client date cutoffs; already-frozen bounded plans retain their
 original windows. Supporting document reads use run-bound Binary tickets and
 the bounded patient-bound Media bridge, without general dependency traversal;

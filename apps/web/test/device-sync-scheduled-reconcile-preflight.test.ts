@@ -39,7 +39,8 @@ function fixture() {
     lastErrorCode: null, lastErrorMessage: null, resourceAvailabilitySummaryJson: { sleep: true },
   };
   let pending = false;
-  let retained = false;
+  let continuations: unknown = [];
+  let emptySources = false;
   let payload = false;
   let workspaceVersion = 1n;
   let dirty = false;
@@ -47,13 +48,13 @@ function fixture() {
   const tx = {
     $queryRaw: vi.fn(async () => []),
     deviceConnection: { updateMany: update },
-    deviceConnectionSource: { findMany: vi.fn(async () => [source]) },
+    deviceConnectionSource: { findMany: vi.fn(async () => emptySources ? [] : [source]) },
     deviceSyncDirtyConnection: { findUnique: vi.fn(async () => ({ dirtyRevision: dirty ? 2n : 1n, processedRevision: 1n })) },
     deviceSyncDirtyPayload: { findFirst: vi.fn(async () => payload ? { id: "synthetic-payload" } : null) },
     hostedMailboxLaneCounter: { findMany: vi.fn(async () => [{ lane: "system", nextSeq: pending ? 3n : 2n, consumedSeq: 1n }]) },
     hostedWorkspace: { findUnique: vi.fn(async () => ({ version: workspaceVersion, redactedStatusJson: {
       hostedMailboxSystemHandledThroughSeq: "1", hostedMailboxSystemFirstPendingSeq: null,
-      hostedMailboxSystemDeviceSyncContinuationSeqs: retained ? ["1"] : [],
+      hostedMailboxSystemDeviceSyncContinuationSeqs: continuations,
     } })) },
   };
   const store = {
@@ -78,11 +79,14 @@ function fixture() {
   });
   return {
     tx, store, update,
+    setContinuations: (value: unknown) => { continuations = value; },
+    emptySources: () => { emptySources = true; },
+    addSource: () => { emptySources = false; },
     changeConnection: () => { record = { ...record, updatedAt: new Date(now.getTime() + 1) }; },
     reconnect: () => { record = { ...record, connectedAt: new Date(now.getTime() + 1) }; },
     changeSource: () => { source = { ...source, updatedAt: new Date(now.getTime() + 1), lifecycleEpoch: 2 }; },
     changeSourceSameTimestamp: () => { source = { ...source, status: "disconnected" }; },
-    pending: () => { pending = true; }, retained: () => { retained = true; }, payload: () => { payload = true; },
+    pending: () => { pending = true; }, retained: () => { continuations = ["1"]; }, payload: () => { payload = true; },
     checkpoint: () => { workspaceVersion += 1n; }, dirty: () => { dirty = true; },
   };
 }
@@ -109,7 +113,7 @@ it("advances only cadence after unchanged contents and exact authority revalidat
   expect(options.signal).toBeInstanceOf(AbortSignal);
 });
 
-it.each(["dirty", "payload", "pending", "retained"] as const)("does not fetch over existing %s work", async (kind) => {
+it.each(["dirty", "payload", "pending"] as const)("does not fetch over existing %s work", async (kind) => {
   const f = fixture(); f[kind]();
   expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(false);
   expect(mocks.probe).not.toHaveBeenCalled();
@@ -170,4 +174,34 @@ it("retains provider timeout metrics and the webhook age bucket", async () => {
     expect(await run).toMatchObject({ wakeAvoided: false, reason: "probe_timeout", requestCount: 2, webhookAgeBucket: "1to6h" });
     expect(f.update).not.toHaveBeenCalled();
   } finally { vi.useRealTimers(); }
+});
+
+it("compares ordinary cadence with checkpoint-owned continuation work", async () => {
+  const f = fixture(); f.retained();
+  expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(true);
+  expect(f.update.mock.calls[0]).toEqual([expect.objectContaining({
+    data: { nextReconcileAt: new Date(unchanged.nextReconcileAt) },
+  })]);
+});
+
+it.each([null, ["0"], ["2"], ["1", "1"], [1], ["01"], ["bad"]])(
+  "rejects malformed or uncovered continuation ownership: %j", async (value) => {
+    const f = fixture(); f.setContinuations(value);
+    expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(false);
+    expect(mocks.probe).not.toHaveBeenCalled();
+  },
+);
+
+it("compares a checkpoint-proven empty source inventory", async () => {
+  const f = fixture(); f.emptySources();
+  expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(true);
+  expect(mocks.probe.mock.calls[0][0].sources).toEqual([]);
+});
+
+it("retains the wake when a source appears during empty-inventory comparison", async () => {
+  const f = fixture(); f.emptySources();
+  mocks.probe.mockImplementation(async () => { f.addSource(); return unchanged; });
+  expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(false);
+  expect(mocks.probe).toHaveBeenCalledOnce();
+  expect(f.update).not.toHaveBeenCalled();
 });

@@ -1,5 +1,8 @@
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 
+import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
+import { preflightHostedScheduledReconcile } from "@/src/lib/device-sync/scheduled-reconcile-preflight";
+import * as deviceProviders from "@/src/lib/device-sync/providers";
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -64,6 +67,71 @@ describe.skipIf(!runPostgresProof)(
       await prisma?.$disconnect();
       restoreCrypto();
     });
+
+    it.each(["unchanged", "source_added", "checkpoint_changed", "mailbox_append"] as const)(
+      "preflights ordinary cadence without changing a retained retry: %s", async (scenario) => {
+        const client = requirePrisma(prisma);
+        const fixture = await seedRetiredScheduledWake({
+          client, memberIds, importedSeq: "1", consumedSeq: 1n,
+          firstPendingSeq: null, deviceSyncContinuationSeqs: ["1"], sidecar: true,
+        });
+        const now = new Date("2026-09-04T12:00:00Z");
+        const retryAt = new Date("2026-09-04T12:30:00Z");
+        const nextReconcileAt = new Date("2026-09-04T13:00:00Z");
+        const connectionId = fixture.wake.connectionId!;
+        await client.hostedWorkspace.update({ where: { userId: fixture.memberId }, data: {
+          nextWakeAt: retryAt, nextWakeReason: "device-sync.reconcile",
+        } });
+        await client.deviceConnection.create({ data: {
+          id: connectionId, userId: fixture.memberId, provider: "junction", status: "active",
+          providerAccountBlindIndex: `synthetic-${connectionId}`,
+          credentialKind: "provider_config", providerConfigKey: "junction", setupPhase: "source_confirmed",
+          connectedAt: new Date(fixture.wake.expectedConnectedAt!), nextReconcileAt: now,
+          metadataJson: { junctionReconcileProofV1: "synthetic-proof" },
+        } });
+        const store = new PrismaDeviceSyncControlPlaneStore({ prisma: client });
+        const before = await client.hostedWorkspace.findUniqueOrThrow({ where: { userId: fixture.memberId } });
+        const probe = vi.fn(async () => {
+          // These real writes use the same one-connection pool. Finishing them
+          // proves provider work runs outside the admission transaction.
+          if (scenario === "source_added") await client.deviceConnectionSource.create({ data: {
+            id: `source-${connectionId}`, connectionId, sourceInstanceKey: "synthetic-source",
+            sourceProviderSlug: "garmin", firstSeenAt: now, lastSeenAt: now,
+          } });
+          if (scenario === "checkpoint_changed") await client.hostedWorkspace.update({
+            where: { userId: fixture.memberId }, data: { version: { increment: 1 } },
+          });
+          if (scenario === "mailbox_append") await client.hostedMailboxLaneCounter.update({
+            where: { userId_lane: { userId: fixture.memberId, lane: "system" } }, data: { nextSeq: 3n },
+          });
+          return { outcome: "unchanged" as const, reason: "content_unchanged",
+            nextReconcileAt: nextReconcileAt.toISOString(), requestCount: 2, recordCount: 0, responseBytes: 2, elapsedMs: 1 };
+        });
+        const registry = vi.spyOn(deviceProviders, "createHostedDeviceSyncRegistry").mockReturnValue({
+          list: () => [], register: () => undefined,
+          get: () => ({
+            provider: "junction", descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+            jobExecutor: { probeScheduledReconcile: probe, executeJob: async () => { throw new Error("Unexpected runtime execution"); } },
+          }),
+        });
+        try {
+          const result = await preflightHostedScheduledReconcile({ store, now, connection: {
+            connectionId, userId: fixture.memberId, provider: "junction",
+            connectedAt: fixture.wake.expectedConnectedAt!, nextReconcileAt: now.toISOString(),
+          } });
+          expect(probe).toHaveBeenCalledOnce();
+          expect(result.wakeAvoided).toBe(scenario === "unchanged");
+          expect((await client.deviceConnection.findUniqueOrThrow({ where: { id: connectionId } })).nextReconcileAt)
+            .toEqual(scenario === "unchanged" ? nextReconcileAt : now);
+          const after = await client.hostedWorkspace.findUniqueOrThrow({ where: { userId: fixture.memberId } });
+          expect(after.nextWakeAt).toEqual(retryAt);
+          expect(after.nextWakeReason).toBe(before.nextWakeReason);
+          expect(after.redactedStatusJson).toEqual(before.redactedStatusJson);
+          expect(await client.hostedMailboxPayload.count({ where: { userId: fixture.memberId } })).toBe(1);
+          expect(await client.hostedMailboxItem.count({ where: { userId: fixture.memberId } })).toBe(1);
+        } finally { registry.mockRestore(); }
+      },
+    );
 
     it("recovers a consumed scheduled wake whose canonical cadence never advanced", async () => {
       const client = requirePrisma(prisma);
