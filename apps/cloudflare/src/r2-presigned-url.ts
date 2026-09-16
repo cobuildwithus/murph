@@ -146,6 +146,26 @@ function normalizeHostedR2Sha256ChecksumBase64(value: string): string {
   return normalized;
 }
 
+/** A part URL cannot publish an object. Trusted completion verifies the actual
+ * encrypted SHA-256 before recording publication eligibility. The signature
+ * binds its exact upload, sole part and byte length; abort revokes that upload. */
+export async function createHostedR2PresignedSnapshotPartUrl(input: {
+  environment: HostedR2PresignEnvironment; key: string; uploadId: string;
+  contentType: string; encryptedByteSize: number; expiresSeconds?: number; now?: Date;
+}): Promise<{ expiresAt: string; url: string }> {
+  if (!input.uploadId || input.uploadId.length > 1024 || !Number.isSafeInteger(input.encryptedByteSize) || input.encryptedByteSize <= 0) {
+    throw new TypeError("Managed snapshot part identity is invalid.");
+  }
+  const endpoint = new URL(input.environment.endpoint);
+  return createHostedR2PresignedObjectUrl({
+    canonicalHeaders: `content-length:${input.encryptedByteSize}\ncontent-type:${input.contentType}\nhost:${endpoint.host}\n`,
+    canonicalUri: `/${encodeR2PathSegment(input.environment.bucketName)}/${encodeR2ObjectKey(input.key)}`,
+    endpoint, environment: input.environment,
+    expiresSeconds: normalizeHostedR2PresignExpiresSeconds(input.expiresSeconds), method: "PUT", now: input.now ?? new Date(),
+    signedHeaders: "content-length;content-type;host", multipart: { uploadId: input.uploadId, partNumber: 1 },
+  });
+}
+
 export async function createHostedR2PresignedGetUrl(input: {
   environment: HostedR2PresignEnvironment;
   expiresSeconds?: number;
@@ -472,6 +492,7 @@ async function createHostedR2PresignedObjectUrl(input: {
   method: "DELETE" | "GET" | "HEAD" | "PUT";
   now: Date;
   signedHeaders: string;
+  multipart?: { uploadId: string; partNumber: 1 };
 }): Promise<{
   expiresAt: string;
   url: string;
@@ -487,6 +508,10 @@ async function createHostedR2PresignedObjectUrl(input: {
     "X-Amz-Expires": String(input.expiresSeconds),
     "X-Amz-SignedHeaders": input.signedHeaders,
   });
+  if (input.multipart) {
+    query.set("uploadId", input.multipart.uploadId);
+    query.set("partNumber", String(input.multipart.partNumber));
+  }
   const canonicalQuery = canonicalizeSearchParams(query);
   const canonicalRequest = [
     input.method,

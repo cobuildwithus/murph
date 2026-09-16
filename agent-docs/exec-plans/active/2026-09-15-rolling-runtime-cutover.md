@@ -57,7 +57,7 @@ passing a timer never substitutes for safe handoff evidence.
 
 1. [in progress] Revalidate state; add explicit member migration contracts,
    schema, locks and readiness evidence.
-2. [pending] Implement all member routing, graceful/conditional handoff,
+2. [in progress] Implement all member routing, graceful/conditional handoff,
    controlled upload/drain behavior and durable activation wake.
 3. [pending] Implement hosted resumable operator, source discovery and creation
    barrier, new-member routing and full campaign closure.
@@ -115,17 +115,31 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
   tests across four files. Worker and shared-contract typechecks and the
   complexity guard pass. These are local primitive proofs, not a completed
   handoff rehearsal or measured member-pause result.
-- Controlled-upload implementation remains pending. Investigated a single-part
-  R2 multipart upload: retain the existing direct encrypted stream, but durably
-  record the exact upload ID before returning a part URL and let trusted code
-  complete or abort that ID. This avoids proxying large snapshots and permits
-  an acknowledged terminal capability instead of an expiration wait. Before
-  adopting it, prove R2 checksum behavior across Workers/S3 APIs and preserve
-  SHA-256 verification; a multipart composite checksum is not the existing
-  whole-object SHA-256. Keep pending obligations with each backend's resource
-  owner, including cleanup/deletion fencing, retries and lost completion replies.
-  Old clients need explicit capability negotiation and old direct-PUT deadlines
-  must drain while the member remains live. No shorter deadline is being assumed.
+- Implemented the managed-upload path for Postgres members. Containers negotiate
+  support, stream one encrypted part directly to R2, and include the exact upload
+  ID and ETag in the existing snapshot-completion request. The existing upload
+  ledger records immutable byte identity before a part URL is returned, survives
+  session replacement/deletion, and excludes direct-PUT capabilities for that
+  same snapshot. Recovery can abort snapshot upload IDs through the existing
+  resource purge endpoint. Old clients retain the direct path.
+- Trusted completion seals the exact upload and streams the actual object through
+  SHA-256 before acknowledging verification or canonical publication. It does
+  not trust client metadata, ETags or multipart checksum formats. Lost completion
+  replies require acknowledged abort/NoSuchUpload before readback; unknown aborts
+  retain the durable obligation. This adds one storage read per new checkpoint;
+  real R2 interoperability and latency still require composed rehearsal.
+- Managed upload validation: 574 Worker tests and 31 real Postgres owner/resource
+  tests pass. Web, Worker and shared-contract typechecks pass; complexity guard
+  passes. The additive upload ledger migration is applied only to the isolated
+  synthetic test database. Production remains unchanged.
+- Next upload work: add equivalent durable receipts to the legacy snapshot owner
+  and serialize managed/direct admission using its existing consent mutation
+  lock. Legacy cleanup, deletion, observational inspection and frozen export must
+  account for pending receipts; abort exact IDs before deletion or final freeze.
+  Switch new legacy uploads while each member remains live, then drain old direct
+  capabilities in the background before quiescence. No shorter deadline is being
+  assumed. The current Postgres-only implementation does not yet remove that
+  legacy handoff wait.
 - Remaining before a final candidate: member state transitions and conditional
   admission closure; controlled final checkpoint/upload; complete effect and
   control routing; durable activation wake; creation/inventory closure; hosted

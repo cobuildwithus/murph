@@ -118,6 +118,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
 }): NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> {
   const sessionRuntimeState = new Map<string, {
     headers: Headers;
+    managedPart?: { uploadId: string; etag: string };
   }>();
   const sessionHeartbeatStops = new Map<string, () => void>();
   const readSessionWriteFenceHeaders = async (
@@ -132,6 +133,13 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       input.workspaceCheckpointBridge,
       description,
     );
+  };
+  const rememberManagedSnapshotPart = async (snapshotId: string, uploadId: string | undefined, response: Response): Promise<void> => {
+    if (uploadId === undefined) return;
+    const etag = response.headers.get("etag");
+    if (!etag) throw new Error("Managed snapshot upload did not return a part ETag.");
+    const headers = await readSessionWriteFenceHeaders(snapshotId, "Managed snapshot completion");
+    sessionRuntimeState.set(snapshotId, { headers, managedPart: { uploadId, etag } });
   };
   const stopSessionHeartbeat = (snapshotId: string): void => {
     sessionHeartbeatStops.get(snapshotId)?.();
@@ -264,6 +272,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         checkpointRequest: request.checkpointRequest,
         objectKey: request.ref.objectKey,
         snapshotId,
+        managedPart: sessionRuntimeState.get(snapshotId)?.managedPart,
       });
       const url = new URL(
         `/workspace-snapshots/${encodeURIComponent(snapshotId)}/complete`,
@@ -366,7 +375,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         throw new Error("Hosted workspace snapshot source file size does not match encryptedByteSize.");
       }
       const presignStartedAt = Date.now();
-      let presignedPut: { expiresAt: string; putUrl: string };
+      let presignedPut: SnapshotPresignedPut;
       try {
         presignedPut = await presignWorkspaceSnapshotPut({
           encryptedByteSize: request.encryptedByteSize,
@@ -403,11 +412,13 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       const putHeaders = {
         "content-length": String(request.encryptedByteSize),
         "content-type": HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+        ...(presignedPut.managedUploadId ? {} : {
         "if-none-match": "*",
         "x-amz-checksum-sha256": checksumSha256Base64,
         "x-amz-meta-encryptedsha256": request.encryptedObjectSha256,
         "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
         "x-amz-meta-snapshotid": request.snapshotId,
+        }),
       };
       let precedingAttemptWasAmbiguous = false;
       for (
@@ -477,15 +488,12 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
 
         if (response.ok) {
           assertHostedWorkspaceSnapshotOperationLive(request.signal);
+          await rememberManagedSnapshotPart(request.snapshotId, presignedPut.managedUploadId, response);
           timings.snapshotDirectR2PutElapsedMs =
             readHostedRuntimeStepElapsedMs(putStartedAt);
           return timings;
         }
-        if (
-          response.status === 412
-          && attempt > 1
-          && precedingAttemptWasAmbiguous
-        ) {
+        if (isCompletedAmbiguousDirectPut(response, presignedPut, attempt, precedingAttemptWasAmbiguous)) {
           await cancelHostedWorkspaceSnapshotResponseBody(response.body);
           assertHostedWorkspaceSnapshotOperationLive(request.signal);
           timings.snapshotDirectR2PutElapsedMs =
@@ -1197,9 +1205,15 @@ function parseHostedWorkspaceSnapshotStartPayload(
   };
 }
 
+interface SnapshotPresignedPut { expiresAt: string; putUrl: string; managedUploadId?: string }
+
+function isCompletedAmbiguousDirectPut(response: Response, presigned: SnapshotPresignedPut, attempt: number, ambiguous: boolean): boolean {
+  return response.status === 412 && presigned.managedUploadId === undefined && attempt > 1 && ambiguous;
+}
+
 function parseHostedWorkspaceSnapshotPresignedPutPayload(
   value: unknown,
-): { expiresAt: string; putUrl: string } {
+): SnapshotPresignedPut {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Hosted workspace snapshot presign response must be an object.");
   }
@@ -1207,6 +1221,7 @@ function parseHostedWorkspaceSnapshotPresignedPutPayload(
   return {
     expiresAt: readRequiredHostedRuntimeString(record.expiresAt, "Hosted workspace snapshot presign expiresAt"),
     putUrl: readRequiredHostedRuntimeString(record.putUrl, "Hosted workspace snapshot presign putUrl"),
+    ...(record.managedUploadId === undefined ? {} : { managedUploadId: readRequiredHostedRuntimeString(record.managedUploadId, "Managed snapshot upload ID") }),
   };
 }
 
@@ -1220,13 +1235,14 @@ async function presignWorkspaceSnapshotPut(input: {
   snapshotId: string;
   timeoutMs: number;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
-}): Promise<{ expiresAt: string; putUrl: string }> {
+}): Promise<SnapshotPresignedPut> {
   const headers = input.headers
     ?? await requireHostedRuntimeWriteFenceHeaders(
       input.workspaceCheckpointBridge,
       "Hosted workspace snapshot presign PUT",
     );
   const body = {
+    supportsManagedUpload: true,
     encryptedByteSize: input.encryptedByteSize,
     encryptedObjectSha256: input.encryptedObjectSha256,
     objectKey: input.objectKey,

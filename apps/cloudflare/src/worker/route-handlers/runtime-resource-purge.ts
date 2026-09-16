@@ -35,7 +35,7 @@ export async function purgeHostedRuntimeResource(input: {
   const resource = parseHostedRuntimeResourcePurge(input.resource);
   if (resource.kind === "multipart") {
     if (!bucket.resumeMultipartUpload) throw new Error("Runtime multipart recovery is unavailable.");
-    const prefixes = await Promise.all([hostedMediaUserPrefix({ userId: input.userId }), hostedPrivateMediaUserPrefix({ userId: input.userId }), hostedBrowserVaultReplicaUserPrefix({ userId: input.userId })]);
+    const prefixes = await Promise.all([hostedMediaUserPrefix({ userId: input.userId }), hostedPrivateMediaUserPrefix({ userId: input.userId }), hostedBrowserVaultReplicaUserPrefix({ userId: input.userId }), hostedWorkspaceSnapshotUserPrefix({ userId: input.userId })]);
     if (!prefixes.some(prefix => resource.objectKey.startsWith(prefix) && !resource.objectKey.slice(prefix.length).includes("/"))) throw new TypeError("Multipart upload is outside the member namespace.");
     await abortRuntimeMultipartUpload(bucket.resumeMultipartUpload(resource.objectKey, resource.uploadId));
     return;

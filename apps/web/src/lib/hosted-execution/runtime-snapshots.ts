@@ -7,6 +7,7 @@ import { isHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parser
 import { parseHostedRuntimeOwnerIdentity } from "@murphai/hosted-execution/runtime-owner";
 import { recordRuntimeOrphansTx, snapshotOrphanCandidates } from "./runtime-orphans";
 import { requireHostedRuntimeOwnerTx } from "./runtime-owner";
+import { manageSnapshotUploadTx, settleManagedSnapshotUploadTx } from "./runtime-snapshot-managed";
 
 /** All session state, ownership, and capability drains commit together. R2 and
  * encryption stay in the Worker before/after these database-only commands.
@@ -32,17 +33,18 @@ export async function executeHostedRuntimeSnapshotCommand(input: {
   return input.prisma.$transaction(async (tx) => {
     const cutover = await lockHostedRuntimeMemberCutoverTx(tx, input.userId);
     if (cutover !== "postgres") return { cutover, applied: false, session: null };
+    if (command.operation === "snapshot_managed_settled") return settleManagedSnapshotUploadTx({ tx, userId: input.userId, command, now });
     await requireHostedRuntimeOwnerTx(tx, runtimeIdentity);
     const current = await tx.hostedRuntimeSnapshotUpload.findUnique({ where: { userId: input.userId } });
     const unchanged = (): HostedRuntimeSnapshotResponse => ({ cutover, applied: false, session: current ? projectSession(current) : null });
     if (command.operation === "snapshot_create") {
       return createSnapshotSessionTx(tx, input.userId, command.session, current, now);
     }
-    const snapshotId = supplied?.snapshotId ?? ("snapshotId" in command ? command.snapshotId : null);
-    if (!current || current.snapshotId !== snapshotId || current.attemptId !== runtimeIdentity.attemptId
-      || current.generation.toString() !== runtimeIdentity.generation) return unchanged();
-    if (supplied && !sameSession(projectSession(current), supplied)) return unchanged();
+    if (!current || !commandOwnsCurrentSession(current, command, runtimeIdentity)) return unchanged();
     switch (command.operation) {
+      case "snapshot_managed_admit":
+      case "snapshot_managed_read":
+        return manageSnapshotUploadTx({ tx, session: projectSession(current), command, now });
       case "snapshot_read":
         // Expired sessions still identify ambiguous checkpoint recovery. Only
         // final PUT admission grants a fresh capability and checks expiry.
@@ -68,6 +70,14 @@ export async function executeHostedRuntimeSnapshotCommand(input: {
       }
     }
   });
+}
+
+function commandOwnsCurrentSession(current: HostedRuntimeSnapshotUpload, command: Exclude<HostedRuntimeSnapshotCommand, { operation: "snapshot_create" }>, identity: { attemptId: string; generation: string }): boolean {
+  const supplied = "expectedSession" in command ? command.expectedSession : null;
+  const snapshotId = supplied?.snapshotId ?? ("snapshotId" in command ? command.snapshotId : null);
+  return current.snapshotId === snapshotId && current.attemptId === identity.attemptId
+    && current.generation.toString() === identity.generation
+    && (supplied === null || sameSession(projectSession(current), supplied));
 }
 
 async function createSnapshotSessionTx(tx: Prisma.TransactionClient, userId: string, session: HostedWorkspaceSnapshotUploadSession, current: HostedRuntimeSnapshotUpload | null, now: Date): Promise<HostedRuntimeSnapshotResponse> {
@@ -106,6 +116,7 @@ async function admitSnapshotPutTx(tx: Prisma.TransactionClient, current: HostedR
     || drainUntil.getTime() > now.getTime() + HOSTED_RUNTIME_ORPHAN_GRACE_MS) throw new TypeError("Snapshot capability lifetime is invalid.");
   const writeId = `snapshot:${current.snapshotId}`;
   const previous = await tx.hostedRuntimePutDrain.findUnique({ where: { userId_writeId: { userId: current.userId, writeId } } });
+  if (previous?.uploadId) return { cutover: "postgres", applied: false, session: projectSession(current) };
   const retainedDrainUntil = previous?.drainUntil && previous.drainUntil > drainUntil ? previous.drainUntil : drainUntil;
   await tx.hostedRuntimePutDrain.upsert({
     where: { userId_writeId: { userId: current.userId, writeId } },

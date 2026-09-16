@@ -9,10 +9,26 @@ import {
   createHostedR2PresignedGetUrl,
   createHostedR2PresignedHeadUrl,
   createHostedR2PresignedPutUrl,
+  createHostedR2PresignedSnapshotPartUrl,
   readHostedR2PresignEnvironment,
 } from "../src/r2-presigned-url.js";
 
 describe("R2 presigned URL helpers", () => {
+  it("signs the exact multipart upload, sole part and byte length without granting object publication", async () => {
+    const environment = { accessKeyId: "AKIDEXAMPLE", bucketName: "snapshot-bucket", endpoint: "https://example-account.r2.cloudflarestorage.com", secretAccessKey: "synthetic-test-secret" };
+    const key = "users/synthetic/workspace-snapshots/snapshot.snapshot.enc";
+    const uploadId = "synthetic/upload+with=query&characters";
+    const result = await createHostedR2PresignedSnapshotPartUrl({ environment, key, uploadId, contentType: "application/octet-stream", encryptedByteSize: 123, expiresSeconds: 60, now: new Date("2026-09-15T00:00:00.000Z") });
+    verifyLocalS3SigV4QueryUrl({ ...environment, key, amzDate: "20260915T000000Z", expiresSeconds: 60,
+      method: "PUT", url: result.url, snapshotPart: { uploadId, encryptedByteSize: 123 } });
+    const url = new URL(result.url);
+    expect(url.searchParams.get("partNumber")).toBe("1");
+    expect(url.searchParams.get("uploadId")).toBe(uploadId);
+    expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe("content-length;content-type;host");
+    const changed = await createHostedR2PresignedSnapshotPartUrl({ environment, key, uploadId, contentType: "application/octet-stream", encryptedByteSize: 124, expiresSeconds: 60, now: new Date("2026-09-15T00:00:00.000Z") });
+    expect(new URL(changed.url).searchParams.get("X-Amz-Signature")).not.toBe(url.searchParams.get("X-Amz-Signature"));
+  });
+
   it("creates a deterministic signed PUT URL for a workspace snapshot object", async () => {
     const result = await createHostedR2PresignedPutUrl({
       contentType: "application/octet-stream",
@@ -445,7 +461,8 @@ function verifyLocalS3SigV4QueryUrl(input: {
   endpoint: string;
   expiresSeconds: number;
   key: string;
-  method: "DELETE" | "HEAD";
+  method: "DELETE" | "HEAD" | "PUT";
+  snapshotPart?: { uploadId: string; encryptedByteSize: number };
   secretAccessKey: string;
   url: string;
 }): void {
@@ -455,6 +472,7 @@ function verifyLocalS3SigV4QueryUrl(input: {
   const credentialScope = `${input.amzDate.slice(0, 8)}/auto/s3/aws4_request`;
   const credential = `${input.accessKeyId}/${credentialScope}`;
   const signedHeaders = [
+    ...(input.snapshotPart ? ["content-length", "content-type"] : []),
     "host",
     ...(input.checksumMode === undefined ? [] : [HOSTED_R2_CHECKSUM_MODE_HEADER]),
   ].join(";");
@@ -466,8 +484,13 @@ function verifyLocalS3SigV4QueryUrl(input: {
     "X-Amz-Expires": String(input.expiresSeconds),
     "X-Amz-SignedHeaders": signedHeaders,
   });
+  if (input.snapshotPart) {
+    expectedQuery.set("partNumber", "1");
+    expectedQuery.set("uploadId", input.snapshotPart.uploadId);
+  }
   const canonicalQuery = canonicalizeSigV4SearchParams(expectedQuery);
   const canonicalHeaders = [
+    ...(input.snapshotPart ? [`content-length:${input.snapshotPart.encryptedByteSize}`, "content-type:application/octet-stream"] : []),
     `host:${url.host}`,
     ...(input.checksumMode === undefined
       ? []

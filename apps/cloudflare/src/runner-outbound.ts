@@ -1,4 +1,5 @@
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
+import { presignManagedSnapshot, completeManagedSnapshotForSession } from "./managed-snapshot-control.ts";
 import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, commandHostedRuntimeReplicaPut } from "./runtime-resource-client.ts";
 import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
@@ -1679,6 +1680,12 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     return jsonError("Hosted workspace snapshot presign target is outside the bound user namespace.", 403);
   }
 
+  if (body.supportsManagedUpload === true && await usesPostgresRuntimeOwner(input.env, input.userId)) {
+    return json(await presignManagedSnapshot({
+      source: input.env, session, encryptedByteSize, encryptedSha256: encryptedObjectSha256,
+      expiresSeconds: Math.min(HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS, remainingSessionSeconds),
+    }));
+  }
   const presigned = await createHostedR2PresignedPutUrl({
     checksumSha256Base64: encodeHostedWorkspaceSnapshotSha256Base64(encryptedObjectSha256),
     contentType: HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
@@ -2381,6 +2388,10 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     });
     return jsonError("Hosted workspace snapshot exceeds the total plain size limit.", 413);
   }
+  const managedSha256 = body.managedPart === undefined ? null : await completeManagedSnapshotForSession({
+    source: input.env, session, part: body.managedPart,
+    encryptedByteSize: snapshotRef.archive.encryptedByteSize, encryptedSha256: snapshotRef.archive.encryptedObjectSha256,
+  });
   const snapshotObjectStore = createWorkspaceSnapshotObjectStore({
     bucket: input.bucket,
     env: input.env,
@@ -2439,19 +2450,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     });
     return jsonError("Hosted workspace snapshot object size does not match its ref.", 409);
   }
-  const objectEncryptedSha256 = readWorkspaceSnapshotObjectMetadata(
-    object.customMetadata,
-    "encryptedsha256",
-  );
-  const headChecksumSha256 = readHostedWorkspaceSnapshotSha256ChecksumHex(object.checksums?.sha256);
-  if (
-    headChecksumSha256 !== snapshotRef.archive.encryptedObjectSha256
-    || objectEncryptedSha256 !== snapshotRef.archive.encryptedObjectSha256
-    || readWorkspaceSnapshotObjectMetadata(object.customMetadata, "schema")
-      !== HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA
-    || readWorkspaceSnapshotObjectMetadata(object.customMetadata, "snapshotid")
-      !== snapshotRef.snapshotId
-  ) {
+  if (!workspaceSnapshotMetadataMatchesRef(object, snapshotRef, managedSha256)) {
     await retireWorkspaceSnapshotUploadSession({
     session: session,
       bucket: input.bucket,
@@ -3109,6 +3108,14 @@ async function isHostedWorkspaceSnapshotV2RefOwnedByUser(input: {
     userId: input.userId,
   });
   return input.snapshotRef.objectKey === expectedObjectKey;
+}
+
+function workspaceSnapshotMetadataMatchesRef(object: WorkspaceSnapshotR2ObjectLike, ref: HostedWorkspaceSnapshotV2Ref, verifiedManagedSha256: string | null): boolean {
+  const checksum = verifiedManagedSha256 ?? readHostedWorkspaceSnapshotSha256ChecksumHex(object.checksums?.sha256);
+  return checksum === ref.archive.encryptedObjectSha256
+    && readWorkspaceSnapshotObjectMetadata(object.customMetadata, "encryptedsha256") === ref.archive.encryptedObjectSha256
+    && readWorkspaceSnapshotObjectMetadata(object.customMetadata, "schema") === HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA
+    && readWorkspaceSnapshotObjectMetadata(object.customMetadata, "snapshotid") === ref.snapshotId;
 }
 
 function hostedWorkspaceSnapshotV2RefsMatch(
