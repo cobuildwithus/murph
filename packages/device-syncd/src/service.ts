@@ -150,7 +150,7 @@ const DEFAULT_PROVIDER_JOB_BATCH_MAX_ESTIMATED_BYTES = 2 * 1024 * 1024;
 const DEFAULT_PROVIDER_JOB_BATCH_CANDIDATE_SCAN_LIMIT = 200;
 const JUNCTION_WORKOUT_STREAM_CANDIDATE_DIAGNOSTIC_LIMIT =
   resolveJunctionTimeseriesResourcePolicy("workout_stream")?.maxRecordsPerWindow ?? 0;
-const JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT =
+export const JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT =
   (resolveJunctionTimeseriesResourcePolicy("electrocardiogram_voltage")?.maxSamplesPerWindow ?? 0) + 1;
 export const JUNCTION_ECG_BINDING_REASONS: ReadonlySet<string> = new Set([
   "collection_source_ambiguous",
@@ -172,6 +172,9 @@ export const JUNCTION_ECG_BINDING_REASONS: ReadonlySet<string> = new Set([
   "summary_source_inconsistent",
   "summary_window_invalid",
   "summary_windows_ambiguous",
+  "voltage_collection_empty",
+  "voltage_source_mismatch",
+  "voltage_samples_empty",
 ]);
 const DEVICE_SYNC_VALIDATION_SENSITIVE_FIELD_PATTERN =
   /(?:authorization|bearer|cookie|password|secret|token|api[-_]?key|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|email|phone|address|user(?:name)?|owner|account(?:id)?|external(?:id)?)/iu;
@@ -1614,14 +1617,8 @@ class DeviceSyncServiceController {
             "retry progress",
           ).payload
         : undefined;
-      const retainsAcceptedWorkUntilSuccess = (
-        preservesAcceptedCompanionHrv
-        && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE
-      ) || (
-        retainsAcceptedCalendarRefresh
-        && !isJunctionSparseCalendarRefreshTerminalFailureCode(failure.code)
-      );
-      const retainedFailureRetryable = failure.retryable || retainsAcceptedWorkUntilSuccess;
+      const { retainsAcceptedWorkUntilSuccess, retainedFailureRetryable, validationRetryDelayMs } =
+        resolveDeviceSyncFailureRetryPolicy({ job, failure, preservesAcceptedCompanionHrv, retainsAcceptedCalendarRefresh });
       const failureNow = currentNow();
       if (!isAccountExecutionCurrent()) {
         const released = releaseActiveJobsIfCurrentAccountActive(failureNow);
@@ -1637,7 +1634,7 @@ class DeviceSyncServiceController {
 
       const failureTransitions = activeJobs.flatMap((activeJob) => {
         const retryAt = retainedFailureRetryable
-          ? addMilliseconds(failureNow, computeRetryDelayMs(activeJob.attempts))
+          ? addMilliseconds(failureNow, validationRetryDelayMs ?? computeRetryDelayMs(activeJob.attempts))
           : null;
         const transition = this.store.failJobIfOwned(
           activeJob.id,
@@ -2395,6 +2392,52 @@ function connectionChangedDuringDisconnectError(): DeviceSyncError {
   });
 }
 
+function isRetainedJunctionValidationFailure(job: DeviceSyncJobRecord, code: string): boolean {
+  if (job.provider !== "junction" || job.kind !== "resource") return false;
+  return (job.payload.resource === "blood_oxygen"
+      && code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION")
+    || (job.payload.resource === "electrocardiogram_voltage"
+      && code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE");
+}
+
+function resolveDeviceSyncFailureRetryPolicy(input: {
+  job: DeviceSyncJobRecord;
+  failure: ReturnType<typeof normalizeExecutionError>;
+  preservesAcceptedCompanionHrv: boolean;
+  retainsAcceptedCalendarRefresh: boolean;
+}) {
+  const { job, failure, preservesAcceptedCompanionHrv, retainsAcceptedCalendarRefresh } = input;
+  const retainValidation = failure.retryable && isRetainedJunctionValidationFailure(job, failure.code);
+  const retainsAcceptedWorkUntilSuccess = (
+    preservesAcceptedCompanionHrv && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE
+  ) || (
+    retainsAcceptedCalendarRefresh && !isJunctionSparseCalendarRefreshTerminalFailureCode(failure.code)
+  ) || retainValidation;
+  const validationRetryDelayMs = retainValidation ? 30 * 60_000 : null;
+  if (validationRetryDelayMs !== null) failure.details.validationRetryDelayMs = validationRetryDelayMs;
+  return {
+    retainsAcceptedWorkUntilSuccess,
+    retainedFailureRetryable: failure.retryable || retainsAcceptedWorkUntilSuccess,
+    validationRetryDelayMs,
+  };
+}
+
+export function readSafeJunctionNormalizationDiagnostics(
+  input: Record<string, unknown>,
+): Pick<DeviceSyncJobFailureDiagnostic["details"],
+  "normalizationValueKind" | "normalizationValueRange" | "normalizationUnitKind"> {
+  const allowed = (value: unknown, values: readonly string[]): string | null =>
+    typeof value === "string" && values.includes(value) ? value : null;
+  return compactFailureDiagnostics({
+    normalizationValueKind: allowed(input.normalizationValueKind,
+      ["missing", "non_numeric", "non_finite", "numeric_string", "number"]),
+    normalizationValueRange: allowed(input.normalizationValueRange,
+      ["negative", "zero", "fraction", "percentage", "above_percentage"]),
+    normalizationUnitKind: allowed(input.normalizationUnitKind,
+      ["missing", "percent", "ratio", "other"]),
+  });
+}
+
 function normalizeExecutionError(error: unknown): {
   code: string;
   details: DeviceSyncJobFailureDiagnostic["details"];
@@ -2431,6 +2474,11 @@ function normalizeExecutionError(error: unknown): {
         normalizationTimestampSemantics: readSafeDiagnosticToken(
           error.diagnostic.timestampSemantics,
         ),
+        ...readSafeJunctionNormalizationDiagnostics({
+          normalizationValueKind: error.diagnostic.valueKind,
+          normalizationValueRange: error.diagnostic.valueRange,
+          normalizationUnitKind: error.diagnostic.unitKind,
+        }),
       }),
       message: error.message,
       retryable: true,
@@ -2656,6 +2704,12 @@ function readSafeJunctionEcgFailureContext(
   | "junctionEcgActualRecordingCount"
   | "junctionEcgActualSampleCount"
   | "junctionEcgBindingReason"
+  | "providerHttpStatusSource"
+  | "junctionEcgPageCount"
+  | "junctionEcgGroupCount"
+  | "junctionEcgProviderMatchGroupCount"
+  | "junctionEcgInstanceMatchGroupCount"
+  | "junctionEcgMatchedGroupCount"
   | "junctionEcgExpectedRecordingCount"
   | "junctionEcgExpectedSampleCount"
   | "junctionEcgMaxRecordingCount"
@@ -2676,6 +2730,12 @@ function readSafeJunctionEcgFailureContext(
       error.details?.actualSampleCount,
     ),
     junctionEcgBindingReason: reason,
+    providerHttpStatusSource: "local_validation",
+    junctionEcgPageCount: readSafeJunctionEcgDiagnosticCount(error.details?.pageCount),
+    junctionEcgGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.groupCount),
+    junctionEcgProviderMatchGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.providerMatchGroupCount),
+    junctionEcgInstanceMatchGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.instanceMatchGroupCount),
+    junctionEcgMatchedGroupCount: readSafeJunctionEcgDiagnosticCount(error.details?.matchedGroupCount),
     junctionEcgExpectedRecordingCount: readSafeJunctionEcgDiagnosticCount(
       error.details?.expectedRecordingCount,
     ),

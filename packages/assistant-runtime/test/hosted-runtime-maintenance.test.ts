@@ -4090,11 +4090,30 @@ describe("runHostedDeviceSyncPass", () => {
     exhausted?: boolean;
     label: string;
     reason?: unknown;
+    extraDetails?: Record<string, unknown>;
+    expectedExtra?: Record<string, unknown>;
   }>([
     { label: "ordinary failure", code: "SYNC_JOB_FAILED" },
+    {
+      label: "oxygen classification", code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      extraDetails: { normalizationValueKind: "number", normalizationValueRange: "zero", normalizationUnitKind: "percent", validationRetryDelayMs: 1_800_000 },
+      expectedExtra: { normalizationValueKind: "number", normalizationValueRange: "zero", normalizationUnitKind: "percent", validationRetryDelayMs: 1_800_000 },
+    },
+    {
+      label: "unsafe oxygen classification", code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      extraDetails: { normalizationValueKind: "synthetic-private-value", normalizationValueRange: 150, normalizationUnitKind: { raw: "synthetic-private-unit" }, validationRetryDelayMs: -1 },
+    },
     ...[
       { label: "valid queued reason", reason: "sample_count_mismatch", expectedReason: "sample_count_mismatch" },
       { label: "valid exhausted reason", reason: "summary_identity_incomplete", expectedReason: "summary_identity_incomplete", exhausted: true },
+      { label: "ECG matching counts", reason: "voltage_source_mismatch", expectedReason: "voltage_source_mismatch",
+        extraDetails: { junctionEcgPageCount: 2, junctionEcgGroupCount: 3, junctionEcgProviderMatchGroupCount: 3,
+          junctionEcgInstanceMatchGroupCount: 0, junctionEcgMatchedGroupCount: 0, validationRetryDelayMs: 1_800_000 },
+        expectedExtra: { junctionEcgPageCount: 2, junctionEcgGroupCount: 3, junctionEcgProviderMatchGroupCount: 3,
+          junctionEcgInstanceMatchGroupCount: 0, junctionEcgMatchedGroupCount: 0, validationRetryDelayMs: 1_800_000 } },
+      { label: "invalid ECG counts", reason: "voltage_source_mismatch", expectedReason: "voltage_source_mismatch",
+        extraDetails: { junctionEcgPageCount: -1, junctionEcgGroupCount: 100_002,
+          junctionEcgProviderMatchGroupCount: "3", junctionEcgInstanceMatchGroupCount: 0.5, junctionEcgMatchedGroupCount: null } },
       { label: "missing reason" },
       { label: "unknown token", reason: "unknown_binding_reason" },
       { label: "freeform reason", reason: "synthetic-private-ecg detail" },
@@ -4105,9 +4124,9 @@ describe("runHostedDeviceSyncPass", () => {
       { label: "object reason", reason: { reason: "sample_count_mismatch" } },
     ].map((entry) => ({ ...entry, code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE" })),
     { label: "reason on another failure", code: "SYNC_JOB_FAILED", reason: "sample_count_mismatch" },
-  ])("emits exactly one sanitized job-failed event: $label", async ({ code, expectedReason, exhausted = false, reason }) => {
+  ])("emits exactly one sanitized job-failed event: $label", async ({ code, expectedReason, exhausted = false, reason, extraDetails = {}, expectedExtra = {} }) => {
     const ecgFailure = code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE";
-    const provider = ecgFailure ? "junction" : "whoop";
+    const provider = ecgFailure || code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION" ? "junction" : "whoop";
     const sensitiveEcgDetails = {
       junctionEcgActualRecordingCount: 987_001,
       junctionEcgActualSampleCount: 987_002,
@@ -4138,9 +4157,11 @@ describe("runHostedDeviceSyncPass", () => {
           accountStatus: null,
           attempts: exhausted ? 5 : 1,
           code,
+          provider,
           details: {
             ...sensitiveEcgDetails,
             ...(reason === undefined ? {} : { junctionEcgBindingReason: reason }),
+            ...extraDetails,
             failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
             failureErrorCause: "Connect Timeout Error",
             failureErrorName: "TypeError",
@@ -4293,7 +4314,8 @@ describe("runHostedDeviceSyncPass", () => {
       normalizationTimestampKind: "invalid",
       normalizationTimestampSemantics: "unknown",
       failureRetryable: true,
-      ...(expectedReason ? { junctionEcgBindingReason: expectedReason } : {}),
+      ...(expectedReason ? { junctionEcgBindingReason: expectedReason, providerHttpStatusSource: "local_validation" } : {}),
+      ...expectedExtra,
       hadPriorFailure: false,
       hadPriorSuccess: false,
       hostedConnectionKnown: true,
@@ -4335,6 +4357,9 @@ describe("runHostedDeviceSyncPass", () => {
     expect(Object.keys(entry.redactedJson).length).toBeGreaterThan(32);
     const sharedDetails = sanitizeHostedExecutionStructuredLogDetails(entry.redactedJson);
     expect(sharedDetails?.junctionEcgBindingReason).toBe(expectedReason);
+    for (const [field, value] of Object.entries(expectedExtra)) {
+      expect(sharedDetails?.[field]).toEqual(value);
+    }
     for (const field of Object.keys(sensitiveEcgDetails)) {
       expect(entry.redactedJson).not.toHaveProperty(field);
       expect(sharedDetails).not.toHaveProperty(field);
@@ -7056,7 +7081,8 @@ describe("runHostedDeviceSyncWakeLane", () => {
         providerResourceRequestCount: 0,
         providerResourceRequestElapsedMs: 0,
         providerUnattributedElapsedMs: elapsedMs,
-        resource: "sleep",
+        resource: elapsedMs === 1_000 ? "blood_oxygen"
+          : elapsedMs === 2_000 ? "electrocardiogram_voltage" : "sleep",
         snapshotImportCount: 4,
         snapshotImportOutcomes: { applied: 1, noop: 1, failed: 1, unknown: 1 },
         completeSourceDayImportOutcomes: { applied: 0, noop: 1, failed: 1, unknown: 0 },
@@ -7119,9 +7145,28 @@ describe("runHostedDeviceSyncWakeLane", () => {
       deviceSyncCompleteSourceDayImportFailedCount: 18,
       deviceSyncCompleteSourceDayImportUnknownCount: 0,
       deviceSyncJobTimingCount: 18,
+      deviceSyncBloodOxygenCompletedJobCount: 1,
+      deviceSyncBloodOxygenFailedJobCount: 0,
+      deviceSyncBloodOxygenImportAppliedCount: 1,
+      deviceSyncBloodOxygenImportNoopCount: 1,
+      deviceSyncBloodOxygenImportFailedCount: 1,
+      deviceSyncBloodOxygenImportUnknownCount: 1,
+      deviceSyncEcgCompletedJobCount: 1,
+      deviceSyncEcgFailedJobCount: 0,
+      deviceSyncEcgImportAppliedCount: 1,
+      deviceSyncEcgImportNoopCount: 1,
+      deviceSyncEcgImportFailedCount: 1,
+      deviceSyncEcgImportUnknownCount: 1,
       deviceSyncJobTimingSampleLimit: 16,
       deviceSyncJobTimingTruncated: true,
     }));
+    const sharedDetails = sanitizeHostedExecutionStructuredLogDetails(finishedEntry.redactedJson);
+    expect(sharedDetails).toMatchObject({
+      deviceSyncBloodOxygenCompletedJobCount: 1,
+      deviceSyncBloodOxygenImportAppliedCount: 1,
+      deviceSyncEcgCompletedJobCount: 1,
+      deviceSyncEcgImportAppliedCount: 1,
+    });
     expect(timingSummaryObjects).toHaveLength(16);
     expect(timingSummaryObjects[0]).toMatchObject({
       historicalPullReadiness: "pending",

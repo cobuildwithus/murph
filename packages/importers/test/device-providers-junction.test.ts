@@ -1380,6 +1380,115 @@ test("Junction complete source days reject lossy rows before the canonical write
 });
 
 test.each([
+  { value: 0, unit: "%", valueKind: "number", valueRange: "zero", unitKind: "percent" },
+  { value: -1, unit: "percent", valueKind: "number", valueRange: "negative", unitKind: "percent" },
+  { value: "101", unit: "fraction", valueKind: "numeric_string", valueRange: "above_percentage", unitKind: "ratio" },
+  { value: 101, unit: undefined, valueKind: "number", valueRange: "above_percentage", unitKind: "missing" },
+  { value: "synthetic-private-value", spo2: 101, unit: "%", valueKind: "number", valueRange: "above_percentage", unitKind: "percent" },
+  { value: undefined, unit: undefined, valueKind: "missing", valueRange: undefined, unitKind: "missing" },
+  { value: Number.POSITIVE_INFINITY, unit: "%", valueKind: "non_finite", valueRange: undefined, unitKind: "percent" },
+  { value: "synthetic-private-value", unit: "synthetic-private-unit", valueKind: "non_numeric", valueRange: undefined, unitKind: "other" },
+])("Junction blood oxygen diagnostics classify $valueKind/$valueRange/$unitKind without raw values", ({ value, spo2, unit, valueKind, valueRange, unitKind }) => {
+  assert.throws(() => normalizeCompleteTemporalSourceDay({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    timeseries: { blood_oxygen: { groups: { withings: [{
+      source: { provider: "withings", type: "watch" },
+      data: [{ timestamp: "2026-04-22T07:00:00.000Z", unit, value, spo2 }],
+    }] } } },
+  }, "2026-04-22"), (error: unknown) => {
+    assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+    assert.equal(error.diagnostic.valueKind, valueKind);
+    assert.equal(error.diagnostic.valueRange, valueRange);
+    assert.equal(error.diagnostic.unitKind, unitKind);
+    assert.doesNotMatch(JSON.stringify(error.diagnostic), /synthetic-private|2026-|"value":|"unit":/u);
+    return true;
+  });
+});
+
+test("Junction Withings blood oxygen preserves valid facts across invalid days and recovers", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-oxygen-recovery");
+  const importDay = (values: readonly number[], revisionAt: string) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        completeSourceDay: {
+          connectionId: "junction-test-connection",
+          dayKey: "2026-04-22",
+          resources: ["blood_oxygen"],
+          revisionAt,
+          timeZone: "UTC",
+        },
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-test-account",
+          importedAt: revisionAt,
+          timeseries: {
+            blood_oxygen: {
+              groups: {
+                withings: [{
+                  source: { provider: "withings", type: "watch" },
+                  data: values.map((value, index) => ({
+                    timestamp: new Date(Date.UTC(2026, 3, 22, 7, index)).toISOString(),
+                    unit: "%",
+                    value,
+                  })),
+                }],
+              },
+            },
+          },
+        },
+      },
+      { corePort: coreRuntime },
+    );
+  const liveFacets = async (paths: readonly string[]) => latestLiveRecords(
+    (await Promise.all(paths.map((relativePath) =>
+      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+    ))).flat(),
+  ).filter((record) => record.kind === "observation"
+    && typeof record.metric === "string" && record.metric.startsWith("spo2-"));
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const seeded = await importDay([97, 98, 98, 99], "2026-04-24T12:00:00.000Z");
+    const before = await liveFacets(seeded.eventShardPaths);
+    assert.ok(before.length > 0);
+    for (const invalid of [0, -1, 101]) {
+      await assert.rejects(
+        importDay([invalid, 98, 99], "2026-04-24T13:00:00.000Z"),
+        (error: unknown) => {
+          assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+          assert.equal(error.code, "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION");
+          assert.equal(error.retryable, true);
+          assert.equal(error.diagnostic.reason, "daily.value_out_of_range");
+          assert.equal(error.diagnostic.sourceProvider, "withings");
+          return true;
+        },
+      );
+      assert.deepEqual(await liveFacets(seeded.eventShardPaths), before);
+    }
+
+    // Both supported scalar representations recover through the same day owner.
+    const corrected = await importDay([88, 88, 98, 98], "2026-04-24T14:00:00.000Z");
+    const after = await liveFacets(corrected.eventShardPaths);
+    const below = after.find((record) => record.metric === "spo2-samples-below-90-percent");
+    assert.equal(storedObservationValue(below), 50);
+    assert.ok(eventRevisionFromLifecycle(below?.lifecycle) > 1);
+    const fraction = await importDay([0.88, 0.88, 0.98, 0.98], "2026-04-24T15:00:00.000Z");
+    const fractionFacets = await liveFacets(fraction.eventShardPaths);
+    assert.deepEqual(
+      fractionFacets.map((record) => [record.id, record.metric, storedObservationValue(record)]).sort(),
+      after.map((record) => [record.id, record.metric, storedObservationValue(record)]).sort(),
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.each([
   {
     dayKey: "2026-04-22",
     expectedReason: "daily.value_missing",
@@ -16467,9 +16576,9 @@ test("Junction daily row reduction preserves revision admission, duplicate count
 test("Junction daily row validation reports the first invalid delivered row before publication", () => {
   const missing = { timestamp: "2026-04-22T09:00:00.000Z" };
   const outOfRange = { timestamp: "2026-04-22T10:00:00.000Z", value: 150 };
-  for (const [first, second, reason] of [
-    [missing, outOfRange, "daily.value_missing"],
-    [outOfRange, missing, "daily.value_out_of_range"],
+  for (const [first, second, reason, valueKind, valueRange] of [
+    [missing, outOfRange, "daily.value_missing", "missing", undefined],
+    [outOfRange, missing, "daily.value_out_of_range", "number", "above_percentage"],
   ] as const) {
     assert.throws(() => normalizeCompleteTemporalSourceDay({
       importedAt: "2026-04-24T12:00:00.000Z",
@@ -16485,6 +16594,7 @@ test("Junction daily row validation reports the first invalid delivered row befo
       assert.deepEqual(error.diagnostic, {
         reason, rowOrdinal: 2, sourceProvider: "garmin",
         timestampKind: "absolute", timestampSemantics: "utc",
+        valueKind, valueRange, unitKind: "missing",
       });
       return true;
     });

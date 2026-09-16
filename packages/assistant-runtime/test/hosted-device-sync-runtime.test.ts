@@ -16,6 +16,7 @@ import { parseHostedExecutionWake, parseHostedRuntimeLogRequest } from "@murphai
 import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
 import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
+import { JunctionSparseCalendarRepairNormalizationError } from "@murphai/importers/device-providers/junction";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 import {
   buildJunctionWearableHostedReplayPlan,
@@ -12991,6 +12992,95 @@ describe("hosted device-sync runtime", () => {
       await workspace.cleanup();
     }
   });
+
+  test.each(["blood_oxygen", "electrocardiogram_voltage"])(
+    "retained Junction %s validation restores from a hosted continuation without losing its delay or payload",
+    async (resource) => {
+      const occurredAt = "2026-04-04T09:00:00.000Z";
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(occurredAt));
+      const first = await createHostedRuntimeWorkspace("hosted-validation-first-");
+      const cold = await createHostedRuntimeWorkspace("hosted-validation-cold-");
+      let corrected = false;
+      const baseProvider = createFakeProvider();
+      const provider = createFakeProvider({
+        provider: "junction",
+        descriptor: { ...baseProvider.descriptor, provider: "junction" },
+        jobExecutor: { async executeJob() {
+          if (corrected) return {};
+          if (resource === "blood_oxygen") {
+            throw new JunctionSparseCalendarRepairNormalizationError({ reason: "daily.value_out_of_range" });
+          }
+          throw deviceSyncError({ code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+            message: "Synthetic incomplete collection.", retryable: true,
+            details: { reason: "voltage_collection_empty" } });
+        } },
+      });
+      const firstService = createDeviceSyncServiceForVault(first.vaultRoot, [provider]);
+      const coldService = createDeviceSyncServiceForVault(cold.vaultRoot, [provider]);
+      const connectionId = "hosted_validation_recovery";
+      const snapshot = buildRuntimeSnapshot({
+        connectionId, provider: "junction", connectedAt: occurredAt,
+        externalAccountId: "synthetic-validation-recovery", hostedUpdatedAt: occurredAt,
+        credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      });
+      const port: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async fetchSnapshot() { return snapshot; },
+        async applyUpdates() { throw new Error("No control mutation expected during hydration."); },
+        async createConnectLink() { throw new Error("No connection request expected."); },
+      };
+      const wake = buildDeviceSyncWake({ connectionId, provider: "junction", occurredAt,
+        expectedConnectedAt: occurredAt, reason: "reconcile_due" });
+      try {
+        const firstState = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: firstService, wake,
+        });
+        const accountId = firstState.hostedToLocalAccountIds.get(connectionId);
+        assert.ok(accountId);
+        const job = getStore(firstService).enqueueJob({
+          accountId, provider: "junction", kind: "resource", maxAttempts: 1,
+          availableAt: occurredAt, dedupeKey: "synthetic-validation-day",
+          payload: { resource, resourceCategory: "timeseries", sourceProviderSlug: "withings",
+            windowStart: "2026-04-03T00:00:00.000Z", windowEnd: "2026-04-04T00:00:00.000Z" },
+        });
+        assert.equal((await firstService.runWorkerOnce(accountId))?.id, job.id);
+        const recovery = resolveHostedDeviceSyncWakeRecovery({ service: firstService, state: firstState, wake });
+        assert.ok(recovery);
+        const retry = recovery.wake.hint?.jobs?.[0];
+        assert.ok(retry);
+        assert.equal(retry.maxAttempts, 1);
+        assert.equal(retry.availableAt, "2026-04-04T09:30:00.000Z");
+        assert.deepEqual(retry.payload, job.payload);
+        assert.deepEqual(parseHostedExecutionWake(recovery.wake), recovery.wake);
+        const coldState = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: coldService, wake: recovery.wake,
+        });
+        const coldAccountId = coldState.hostedToLocalAccountIds.get(connectionId);
+        assert.ok(coldAccountId);
+        const [restored] = getStore(coldService).listPendingJobsForAccount(coldAccountId, 10);
+        assert.ok(restored);
+        assert.deepEqual(restored.payload, job.payload);
+        assert.equal(restored.availableAt, retry.availableAt);
+        assert.equal(await coldService.runWorkerOnce(coldAccountId), null);
+        vi.setSystemTime(new Date(retry.availableAt));
+        assert.equal((await coldService.runWorkerOnce(coldAccountId))?.id, restored.id);
+        const pending = getStore(coldService).getJobById(restored.id);
+        assert.equal(pending?.status, "queued");
+        assert.equal(pending.availableAt, "2026-04-04T10:00:00.000Z");
+        corrected = true;
+        vi.setSystemTime(new Date(pending.availableAt));
+        await coldService.runWorkerOnce(coldAccountId);
+        assert.equal(getStore(coldService).getJobById(restored.id)?.status, "succeeded");
+      } finally {
+        closeHostedRuntimeDeviceSyncService(firstService);
+        closeHostedRuntimeDeviceSyncService(coldService);
+        await first.cleanup();
+        await cold.cleanup();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   test("rebuilds a real Strava scheduler retry from manifest-shaped durable fields", async () => {
     const occurredAt = "2026-04-04T09:10:00.000Z";

@@ -1831,9 +1831,40 @@ to apply after cutover.
   For `JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE`, the existing failed-attempt
   event may also carry `junctionEcgBindingReason`, checked against the same
   finite service-owned reason set before generic log sanitization. Missing,
-  malformed, and unknown reasons are omitted. ECG recording/sample counts,
-  identifiers, raw errors, URLs, paths, and payloads remain excluded. This reason
-  describes local binding validation, not proof of an upstream HTTP response.
+  malformed, and unknown reasons are omitted. Finite nonnegative integer counts
+  bounded by the ECG sample limit plus one describe expected/actual recordings
+  and samples, pages, total groups, provider-matching groups, instance-matching
+  groups, and fully matching groups. Empty collections, unmatched sources, and
+  matched groups without samples have distinct reasons, evaluated after all
+  bounded pages. `providerHttpStatusSource=local_validation` distinguishes the
+  validator's status from a provider HTTP response. Identifiers, raw errors,
+  URLs, paths, waveform values, and payloads remain excluded.
+  Blood-oxygen normalization failures additionally report finite value-kind,
+  numeric-range, and unit categories, never the reading or raw unit string.
+  `number`/`numeric_string`, `negative`/`zero`/`fraction`/`percentage`/
+  `above_percentage`, and `percent`/`ratio`/`missing`/`other` distinguish likely
+  scale or sentinel problems without interpreting them as valid measurements.
+  Missing, nonnumeric, and nonfinite values remain distinguishable. Service and
+  hosted boundaries independently allowlist these categories.
+  For Junction resource jobs, blood-oxygen incomplete-normalization failures
+  and ECG binding failures retain the existing queued job beyond its initial
+  attempt allowance, rechecking after 30 minutes. `validationRetryDelayMs`
+  records that policy. Complete-day and ECG binding validation still fail before
+  canonical replacement; no sample is silently dropped, rescaled, or certified
+  as a complete collection. Other jobs can run during the delay. Existing
+  disconnect, account-generation, and lease fences remain authoritative; this
+  policy does not resurrect terminal history or change other failure codes.
+  A persisted matching validation failure also preserves lease-reclaim and
+  dedupe ownership after an interrupted retry; it never grants import authority
+  after disconnect. Jobs without that failure retain ordinary lease exhaustion.
+  Additive fields tolerate older readers. Updated runners are needed for the
+  retained retry policy; rolling back can restore ordinary exhaustion.
+  `device-sync.pass_finished` reports `deviceSyncBloodOxygen*Count` and
+  `deviceSyncEcg*Count` across all retained job timings, independently of the
+  slowest-job sample. Completed/failed job counts and applied/no-op/failed/unknown
+  import counts distinguish useful progress from empty successful checks. These
+  are pre-checkpoint observations; durable recovery still requires checkpoint
+  evidence, and aggregate resource progress does not prove a specific day recovered.
   Inside a reconcile job's timeseries continuation, that binding failure is
   isolated to its resource: the unit records a `validation_incomplete` skip
   (same warn shape as an unavailable optional resource, with the real error

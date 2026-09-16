@@ -67,8 +67,9 @@ are specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
 Device-sync metadata priority within the existing bounded envelope is specified
-by `agent-docs/RELIABILITY.md`, including the service-owned finite ECG binding
-reason in hosted failure events; Junction's progress keys remain provider-owned.
+by `agent-docs/RELIABILITY.md`, including finite SpO2 categories, bounded ECG
+matching counts, retained validation retries, and resource completion counts;
+Junction's progress keys remain provider-owned.
 
 Runtime progress diagnostics (aggregate alerts, per-message warm/cold typing
 alerts with exact-chat silence resets, answered-input completion,
@@ -165,6 +166,10 @@ Retained device-import stall, cycling and long-backlog operator alerts are owned
 by `agent-docs/RELIABILITY.md`; connection ownership in diagnostic events is
 specified in `docs/hosted-runtime-log-database.md`. Classifier, bounded-reader and PostgreSQL proof
 are indexed in `agent-docs/references/testing-ci-map.md`.
+
+SpO2/ECG validation telemetry, retained retry ownership, and review evidence
+for preserving collection scope are recorded in
+[`2026-09-16-junction-validation-pr.md`](exec-plans/completed/2026-09-16-junction-validation-pr.md).
 
 ## Canonical Docs
 
