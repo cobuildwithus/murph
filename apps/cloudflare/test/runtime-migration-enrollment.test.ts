@@ -46,4 +46,12 @@ describe("canonical migration source enrollment", () => {
     expect(canonical.command.mock.calls[1]![0].command).toEqual(canonical.command.mock.calls[3]![0].command);
     expect(h.getByName).not.toHaveBeenCalled();
   });
+  it("keeps enrollment pending when a duplicate-only cleanup page has more encrypted identities", async () => {
+    const h = harness(); canonical.command.mockResolvedValueOnce({ userIds: [], cleanupPending: true });
+    expect(await enrollRuntimeMembers(h.source, identity)).toEqual({ enrolled: 0, cleanupPending: true });
+    expect(h.idFromName).not.toHaveBeenCalled(); expect(h.getByName).not.toHaveBeenCalled();
+    canonical.command.mockResolvedValueOnce({ userIds: ["synthetic-later-page"], cleanupPending: true }).mockResolvedValueOnce({ enrolled: 1 });
+    expect(await enrollRuntimeMembers(h.source, identity)).toEqual({ enrolled: 1, cleanupPending: true });
+  });
+
 });

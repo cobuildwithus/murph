@@ -1,3 +1,4 @@
+import { hasPendingRuntimeCleanupEnrollment } from "./runtime-migration-cleanup";
 import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient, HostedRuntimeOwner } from "@prisma/client";
 import { matchesHostedRuntimeMigrationRelease, type HostedRuntimeMigrationIdentity, type HostedRuntimeObjectMigrationIdentity } from "@murphai/hosted-execution/runtime-migration";
@@ -52,7 +53,7 @@ export async function settleUnmaterializedRuntime(input: { prisma: PrismaClient;
       throw new Error("Migration completion requires every source disposition.");
     }
     const candidate = await tx.hostedRuntimeOwner.findFirst({ where: { migrationPhase: { not: "postgres" } }, select: { userId: true } });
-    return { done: !candidate };
+    return { done: !candidate && !await hasPendingRuntimeCleanupEnrollment(tx) };
   }, { maxWait: 5_000, timeout: 5_000 });
 }
 

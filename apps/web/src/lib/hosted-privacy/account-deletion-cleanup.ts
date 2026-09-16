@@ -464,8 +464,26 @@ export function pendingHostedAccountDeletionCleanupResult(
   };
 }
 
+/** Narrow internal projection for the rolling runtime census. The provider
+ * call must run outside any transaction; unrelated vendor identifiers never
+ * leave this owner. Payload bytes are zeroed by the existing decrypt helper.
+ */
+export async function readHostedAccountCleanupRuntimePage(input: {
+  cleanup: Pick<HostedAccountDeletionCleanup, "id" | "environment" | "kmsKeyName" | "payloadCiphertext">;
+  after: number;
+  signal: AbortSignal;
+}) {
+  const payload = await decryptCleanupPayload(input.cleanup, input.signal);
+  if (!Number.isSafeInteger(input.after) || input.after < 0 || input.after >= payload.runtimeMemberIds.length) {
+    throw new TypeError("Runtime cleanup enrollment cursor is invalid.");
+  }
+  const userIds = payload.runtimeMemberIds.slice(input.after, input.after + 100);
+  const nextIndex = input.after + userIds.length;
+  return { userIds, nextIndex: nextIndex < payload.runtimeMemberIds.length ? nextIndex : null };
+}
+
 async function decryptCleanupPayload(
-  cleanup: HostedAccountDeletionCleanup,
+  cleanup: Pick<HostedAccountDeletionCleanup, "id" | "environment" | "kmsKeyName" | "payloadCiphertext">,
   signal: AbortSignal,
 ): Promise<CleanupPayload> {
   const cryptoConfig = getHostedWebCryptoConfig();

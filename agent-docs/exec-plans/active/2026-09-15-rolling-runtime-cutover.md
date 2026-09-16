@@ -536,3 +536,34 @@ transport test proves caller assertions cannot substitute a different namespace.
 Final changed-source complexity and documentation drift checks pass.
 Historical encrypted cleanup coverage and composed rehearsal remain
 release requirements; production is unchanged.
+
+
+## Historical encrypted cleanup enrollment
+
+A failing-before real Postgres case proved that deleted personal/group runtime
+identities represented only in encrypted account-cleanup receipts were absent
+from canonical enrollment. The existing enrollment command now prepares one
+cleanup payload outside transactions and retains up to 100 identities through
+existing FK-free runtime owners. A nullable cursor on the original receipt is
+the continuation checkpoint; the owners and cursor commit together, with live
+ciphertext/key/environment/cursor revalidation. No new source authority or
+scheduler is introduced. The bound Worker still derives exact source IDs.
+
+A rolling-only database deletion guard retains unfinished cleanup receipts even
+for old deletion writers. Provider cleanup completion is not source retirement.
+Creation closure and final completion check this obligation; duplicate-only
+pages keep the operator running. Late receipts preserve the baseline seal.
+The nullable cursor and index were applied only to the synthetic database
+(236 migrations); Prisma generation passes after shortening the index name to
+Postgres's identifier limit. No production changes have occurred.
+
+Focused tests pass: 35 real Postgres cases across cleanup/materialization/member
+migration, 23 Worker enrollment/operator/CLI cases, 20 account-deletion owner
+cases and 69 migration-guard cases. New proof includes 201-identity pagination,
+concurrent preparation, rollback, ciphertext changes, decryption failure,
+plaintext zeroing, no database lock during provider work, old-writer deletion,
+and late completion accounting. Web and Worker typechecks, changed-source
+complexity and documentation drift pass. The operator test uses the required
+non-finalizing mode; rolling namespace activation remains forbidden.
+Composed rehearsal, measured handoff pause, final public review/CI and rollout
+remain outstanding.

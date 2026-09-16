@@ -1772,6 +1772,7 @@ model HostedAccountDeletionCleanup {
   runtimeLogsCompletedAt DateTime? @map("runtime_logs_completed_at")
   temporalCompletedAt   DateTime? @map("temporal_completed_at")
   temporalNextRuntimeIndex Int     @default(0) @map("temporal_next_runtime_index")
+  runtimeMigrationNextIndex Int?   @default(0) @map("runtime_migration_next_index")
   attemptCount          Int       @default(0) @map("attempt_count")
   nextAttemptAt         DateTime  @map("next_attempt_at")
   lastAttemptedAt       DateTime? @map("last_attempted_at")
@@ -1783,6 +1784,7 @@ model HostedAccountDeletionCleanup {
 
   @@index([nextAttemptAt, leaseExpiresAt])
   @@index([privyUserLookupKey, privyCompletedAt])
+  @@index([runtimeMigrationNextIndex, id], map: "hosted_cleanup_runtime_enrollment_idx")
   @@map("hosted_account_deletion_cleanup")
 }
 

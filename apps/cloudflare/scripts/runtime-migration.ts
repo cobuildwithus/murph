@@ -132,8 +132,8 @@ async function enrollCanonicalSources(send: Commander, identity: CampaignIdentit
   let enrolled = 0;
   for (let page = 0; page <= MAX_OBJECTS / 100; page++) {
     const result = await send({ operation: "enroll_members", ...identity });
-    if (result.enrolled === 0) return enrolled;
-    if (typeof result.enrolled !== "number" || !Number.isInteger(result.enrolled) || result.enrolled < 1 || result.enrolled > 100) {
+    if (result.enrolled === 0 && result.cleanupPending !== true) return enrolled;
+    if (typeof result.enrolled !== "number" || !Number.isInteger(result.enrolled) || result.enrolled < 0 || result.enrolled > 100) {
       throw new Error("Canonical source enrollment receipt is invalid.");
     }
     enrolled += result.enrolled;

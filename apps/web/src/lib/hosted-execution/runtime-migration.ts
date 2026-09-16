@@ -1,9 +1,10 @@
-import { enrollRuntimeSourcesTx, listUnenrolledRuntimeMembersTx, runtimeSourcesAlreadyEnrolled } from "./runtime-migration-enrollment";
+import { listRuntimeMigrationCandidates } from "./runtime-migration-cleanup";
+import { enrollRuntimeSourcesTx, runtimeSourcesAlreadyEnrolled } from "./runtime-migration-enrollment";
 import { closeLegacyCreationTx, discoverRuntimeObjectsTx, listRuntimeInventoryTx, nextRuntimeObjectTx, selectFirstUseRuntimeObjectTx, readSelectedRuntimeObject, requireSelectedRuntimeObject, requireRollingInventoryPageTx } from "./runtime-migration-inventory";
 import { activateEmptyRuntime, settleUnmaterializedRuntime } from "./runtime-migration-unmaterialized";
 import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient, type HostedRuntimeCutover } from "@prisma/client";
-import { HOSTED_RUNTIME_ROLLING_PROTOCOL, matchesHostedRuntimeMigrationRelease, parseHostedRuntimeMigrationCommand, type HostedRuntimeMigrationCommand, type LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
+import { HOSTED_RUNTIME_ROLLING_PROTOCOL, matchesHostedRuntimeMigrationRelease, parseHostedRuntimeMigrationCommand, type HostedRuntimeMigrationCommand, type HostedRuntimeMigrationIdentity, type LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
 import { prepareLegacyMigrationResources, type LegacyMigrationResources } from "./runtime-migration-resources";
 import { isMemberMigrationCommand, lockMemberMigrationTx, readMemberMigrationTx, transitionMemberMigrationTx, withMemberMigrationWake } from "./runtime-member-migration";
 import type { PreparedHostedMailboxItemAppendCrypto } from "../hosted-mailbox/store";
@@ -11,7 +12,7 @@ import { recordRuntimeOrphansTx } from "./runtime-orphans";
 
 const INITIAL_CURSOR = { section: 0, after: "" };
 const INITIAL_INVENTORY_HASH = digest("");
-type MigrationCommand = Exclude<HostedRuntimeMigrationCommand, { operation: "status" | "inspect_object" | "advance_member" | "advance_empty" | "enroll_members" }>;
+type MigrationCommand = Exclude<HostedRuntimeMigrationCommand, { operation: "status" | "inspect_object" | "advance_member" | "advance_empty" | "enroll_members" | "list_unenrolled" }>;
 
 /** Trusted finite campaign. Campaign transitions take the exclusive gate;
  * member transitions/pages share it and serialize only the affected owner. */
@@ -26,17 +27,17 @@ export async function executeHostedRuntimeMigrationCommand(input: { prisma: Pris
     const objectId = await readSelectedRuntimeObject(input.prisma, command);
     if (objectId) return { objectId };
   }
+  if (command.operation === "list_unenrolled") return listRuntimeMigrationCandidates(input.prisma, command);
   const resources = command.operation === "import" || command.operation === "import_member" || command.operation === "import_empty" ? await validatePage(command.page) : null;
   if (isMemberMigrationCommand(command)) return withMemberMigrationWake({ prisma: input.prisma, command,
     run: prepared => input.prisma.$transaction(tx => executeMemberTx(tx, command, resources, prepared), { maxWait: 5_000, timeout: 5_000 }) });
   return input.prisma.$transaction(async tx => {
-    if (["read_object", "import_empty", "list_inventory", "list_unenrolled"].includes(command.operation)) await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
+    if (["read_object", "import_empty", "list_inventory"].includes(command.operation)) await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
     else await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR UPDATE`;
     const gate = await tx.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
     if (command.operation === "begin" || command.operation === "begin_rolling") return { gate: await beginTx(tx, gate, command) };
     requireIdentity(gate, command);
     switch (command.operation) {
-      case "list_unenrolled": return listUnenrolledRuntimeMembersTx(tx, gate);
       case "enroll_sources": return enrollRuntimeSourcesTx(tx, gate, command);
       case "discover": return { gate: await discoverRuntimeObjectsTx(tx, gate, command) };
       case "close_legacy_creation": return { gate: await closeLegacyCreationTx(tx, gate) };
@@ -91,7 +92,7 @@ async function beginTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover,
     phase: command.operation === "begin_rolling" ? "rolling" : "draining", namespaceId: command.namespaceId, workerVersion: command.workerVersion, inventoryHash: INITIAL_INVENTORY_HASH,
   } });
 }
-function requireIdentity(gate: HostedRuntimeCutover, command: MigrationCommand) {
+function requireIdentity(gate: HostedRuntimeCutover, command: HostedRuntimeMigrationIdentity) {
   if (gate.namespaceId !== command.namespaceId || !(gate.phase === "rolling" ? matchesHostedRuntimeMigrationRelease(gate, command) : gate.workerVersion === command.workerVersion)) throw new Error("Migration namespace or serving Worker version changed.");
 }
 async function inventoryTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover, command: Extract<MigrationCommand, { operation: "inventory" }>) {

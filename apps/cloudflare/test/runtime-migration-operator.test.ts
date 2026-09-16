@@ -6,7 +6,7 @@ const first = "a".repeat(64);
 const second = "b".repeat(64);
 const intentOnly = "c".repeat(64);
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
-function harness(options: { drift?: boolean; split?: boolean; held?: boolean; intent?: boolean; loseAdvance?: boolean; loseSeal?: boolean; pending?: string[]; canonical?: boolean; loseEnrollment?: boolean } = {}) {
+function harness(options: { drift?: boolean; split?: boolean; held?: boolean; intent?: boolean; loseAdvance?: boolean; loseSeal?: boolean; pending?: string[]; canonical?: boolean; loseEnrollment?: boolean; cleanupPages?: number } = {}) {
   const sent: Array<Record<string, unknown>> = [];
   const known = new Set<string>(options.intent ? [intentOnly] : []);
   const late = new Set<string>();
@@ -36,6 +36,7 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
       if (command.operation === "begin_rolling") {
         if (gate.phase === "legacy") gate = { phase: "rolling", inventoryAfter: "", inventoryCount: 0, inventoryHash: digest("") };
       } else if (command.operation === "enroll_members") {
+        if (options.cleanupPages) { options.cleanupPages--; return Response.json({ enrolled: 0, cleanupPending: true }); }
         if (options.canonical && !known.has(intentOnly)) {
           known.add(intentOnly);
           if (gate.creationClosedAt || gate.inventorySealedAt || Number(gate.inventoryCount) > 0) late.add(intentOnly);
@@ -206,4 +207,11 @@ describe("rolling runtime migration operator", () => {
     expect(h.sent.filter(c => c.operation === "inventory")).toHaveLength(1);
     expect(h.sent.some(c => c.operation === "activate")).toBe(false);
   });
+  it("continues duplicate-only cleanup pages before closing the canonical census", async () => {
+    const h = harness({ cleanupPages: 2, canonical: true });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "members_migrated" });
+    const closedAt = h.sent.findIndex(command => command.operation === "close_legacy_creation");
+    expect(h.sent.slice(0, closedAt).filter(command => command.operation === "enroll_members")).toHaveLength(4);
+  });
+
 });

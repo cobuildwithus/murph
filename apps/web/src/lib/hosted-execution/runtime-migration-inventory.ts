@@ -1,3 +1,4 @@
+import { hasPendingRuntimeCleanupEnrollment } from "./runtime-migration-cleanup";
 import { runtimeMigrationReleaseSql } from "./runtime-migration-compatibility";
 import { listUnenrolledRuntimeMembersTx, runtimeInventoryClass } from "./runtime-migration-enrollment";
 import type { HostedRuntimeCutover, Prisma, PrismaClient } from "@prisma/client";
@@ -18,6 +19,7 @@ export async function discoverRuntimeObjectsTx(tx: Tx, gate: HostedRuntimeCutove
 export async function closeLegacyCreationTx(tx: Tx, gate: HostedRuntimeCutover) {
   if (gate.phase !== "rolling" || !gate.discoveryCompletedAt) throw new Error("Legacy creation closure requires a complete provider discovery.");
   if (gate.creationClosedAt) return gate;
+  if (await hasPendingRuntimeCleanupEnrollment(tx)) throw new Error("Legacy creation closure has unenrolled cleanup identities.");
   if ((await listUnenrolledRuntimeMembersTx(tx, gate)).userIds.length) throw new Error("Legacy creation closure has unenrolled canonical identities.");
   return tx.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { creationClosedAt: new Date() } });
 }

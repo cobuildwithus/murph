@@ -39,6 +39,26 @@ The native `RunnerContainer` and memberless standby inventory remain in use.
 Temporal remains the pointer-only scheduler and retry owner. No Workflow names,
 signals, task queues, or replay command ordering change.
 
+Historical account-deletion receipts also contribute runtime identities. The
+existing canonical enrollment request decrypts one receipt outside transactions,
+with a five-second provider deadline, and retains at most 100 runtime identities
+in the existing FK-free owner table. A nullable cursor on that cleanup receipt
+advances atomically with those owners; null means all its identities are retained.
+Ciphertext, environment, key and cursor are revalidated before committing.
+Concurrent or lost-reply retries cannot skip identities, and existing owner
+phase/generation remains unchanged. Only runtime IDs leave the cleanup owner;
+provider account identifiers and plaintext payloads are never returned or logged.
+
+During rolling mode, a database deletion guard prevents any cleanup writer from
+erasing a receipt with an unfinished enrollment cursor, even if every vendor
+cleanup has completed. The existing Worker subsequently derives exact source
+bindings. Owner retention grants no runtime authority and proves neither source
+emptiness nor deletion. Creation closure and final completion reject outstanding
+cleanup enrollment. Duplicate-only pages carry a pending signal so the operator
+continues to later encrypted pages. Late receipts join late source accounting
+without changing the baseline seal. This work is operator census work, not part
+of ordinary foreground processing.
+
 ## Claim, launch, completion, and recovery
 
 The owner row has a monotonically increasing generation and one attempt. Its
@@ -130,8 +150,8 @@ Strong delete consistency alone does not cancel a concurrent write.
 ## Rolling migration readiness
 
 Production migration remains a separate authorized operation. The rolling
-implementation is not yet a complete operational release: historical encrypted
-cleanup identity coverage, composed first-use/release-overlap rehearsal, measured
+implementation is not yet a complete operational release: composed
+first-use/release-overlap rehearsal, measured
 handoff timing and final public review are still required. `migrateHostedLegacyRuntime` now starts a rolling campaign, reconciles
 provider discovery with creation intents, closes legacy creation and seals the
 ordered inventory. It never invokes the old fleet-draining path.

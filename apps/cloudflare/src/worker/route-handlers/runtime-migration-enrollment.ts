@@ -11,7 +11,8 @@ export async function enrollRuntimeMembers(source: WorkerEnvironmentSource, iden
   if (!Array.isArray(result.userIds) || result.userIds.length > 100
     || result.userIds.some(id => typeof id !== "string" || !id)) throw new Error("Canonical enrollment page is invalid.");
   const userIds = result.userIds as string[];
-  if (!userIds.length) return { enrolled: 0 };
+  const pending = result.cleanupPending === true ? { cleanupPending: true } : {};
+  if (!userIds.length) return { enrolled: 0, ...pending };
   const bindings = userIds.map(userId => ({ userId, objectId: source.USER_RUNNER.idFromName!(userId).toString() }));
-  return commandHostedRuntimeMigration({ source, command: { operation: "enroll_sources", ...identity, bindings } });
+  return { ...await commandHostedRuntimeMigration({ source, command: { operation: "enroll_sources", ...identity, bindings } }), ...pending };
 }
