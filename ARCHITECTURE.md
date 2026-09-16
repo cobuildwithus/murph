@@ -263,22 +263,33 @@ unavailable evidence or pages keep the ordinary maintenance path. The rolling
 evidence window remains intact so corrections and late committed events are
 not hidden behind a last-run timestamp.
 
-The morning Journal connected-context automation maintains canonical Journal plans
-and a bounded `upcoming-context` derived Knowledge page. The existing private
-current-state reader loads the page on each private conversation or scheduled
-model turn, filters expired/canceled entries, labels stale verification, and
-renders normalized logistics as data rather than instructions or effect authority.
-It adds one bounded local file read in parallel with memory and snapshot reads,
-no database/network work, and no graph traversal. Journal events remain the fact
-owner; corrections/cancellations update the derivative after canonical writes.
+The morning Journal connected-context automation writes canonical Journal plans.
+Their note record owns end time, planned/tentative/canceled state, verification
+time, category, and optional connected account; existing event fields own start,
+timezone, title, source identity, revision, and detailed logistics. Typed note
+creation accepts the event timezone. A repeated source identity recovers the
+existing plan without overwriting it or recreating a tombstone.
+
+The existing context snapshot builds a deterministic bounded projection; the
+model does not maintain a second factual page. Event and connected-source ledger
+write receipts mark `journal_plans` dirty, including after restore/replay. Dirty
+or unavailable plan context contributes retrieval guidance until rebuilt, while
+other current-state sections remain usable. The existing ledger's normalized
+negative controls and active accounts filter automatic plans during projection.
+Unrecognized policy suppresses automatic context until the ledger is normalized.
+
+Private conversations and ordinary scheduled turns read this snapshot, expire
+plans at read time, label stale verification, and prioritize navigation before
+optional details within 8 KiB. Exact Journal reads retain full logistics. Snapshot
+source scans happen in background, with preemption and fixed work/output bounds;
+no new foreground file, provider, database, or graph read is added. Group,
+maintenance, and detached-system scopes retain their private-context isolation.
 The fourteen-day discovery window does not delete known plans outside it. Failed
-reads preserve old verification. Missing/malformed pages fail open; oversized
-prompt content uses an explicit retrieval notice rather than silent truncation.
-Group, maintenance, and detached-system scopes do not receive this private page.
-Managed reconciliation archives the former afternoon id while preserving one-shot
-follow-ups. Active accounts are eligible without an announcement or notice gate, regardless
-of connection age or legacy baseline markers; explicit opt-outs still apply. The detailed
-capture and expiry contract is owned by `agent-docs/product-specs/journal.md`.
+provider reads preserve old verification. Plans never prove occurrence or arrival
+and grant no effect authority. Managed reconciliation archives the afternoon id,
+preserving independent follow-ups. Active connections are eligible silently,
+without connection-age or notice gates; explicit opt-outs remain controlling.
+The detailed contract is owned by `agent-docs/product-specs/journal.md`.
 
 The canonical cron lifecycle skips a managed Journal connected-context pass
 only when its ledger is genuinely missing and its complete connected-account

@@ -313,12 +313,12 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
         codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
       })
-      const context = buildUpcomingContextPrompt(JSON.stringify({ version: 1, entries: [{
-        eventId: 'event_synthetic_trip', summary: 'Conference trip',
+      const context = buildUpcomingContextPrompt({ incomplete: false, entries: [{
+        eventId: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1', summary: 'Conference trip',
         startsAt: '2026-10-01T00:00:00+02:00', endsAt: '2026-10-04T00:00:00+02:00',
         timeZone: 'Europe/Paris', status: 'planned', lastVerifiedAt: '2026-10-01T06:00:00Z',
-        details: ['Away from the usual gym; hotel equipment unknown', 'Return Saturday evening'],
-      }] }), new Date('2026-10-01T08:00:00Z'))
+        details: ['Away from the usual gym; hotel equipment unknown. Return Saturday evening.'],
+      }] }, new Date('2026-10-01T08:00:00Z'))
       assert.ok(context)
       // The base has the same prompt layers/tools; its only authored routing
       // difference is this line, and it has no upcoming-context injection.
@@ -348,8 +348,8 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         const body = readRecord(JSON.parse(captured.json))
         assert.ok(body)
         delete body.prompt_cache_key
-        if (scope === 'group' || phase === 'base') assert.ok(!captured.json.includes('event_synthetic_trip'))
-        else assert.ok(captured.json.includes('event_synthetic_trip'))
+        if (scope === 'group' || phase === 'base') assert.ok(!captured.json.includes('evt_01JNV422Y2M5ZBV64ZP4N1DRB1'))
+        else assert.ok(captured.json.includes('evt_01JNV422Y2M5ZBV64ZP4N1DRB1'))
         measurements.push({ phase, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
           registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
           instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, prompt].join('\n\n')),

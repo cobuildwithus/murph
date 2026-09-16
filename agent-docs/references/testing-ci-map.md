@@ -24,12 +24,14 @@ tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 Morning Journal and upcoming-context proof lives in
 `packages/assistant-engine/test/assistant-upcoming-context.test.ts`,
 `managed-automations.test.ts`, and `assistant-codex-turn-planning.test.ts`.
-These cover real Knowledge persistence, expiry, stale verification, bounded
-injection, replacement, private/group isolation, and retirement of only the
+These cover canonical persistence and write-receipt invalidation, expiry, stale
+verification, bounded navigation/detail injection, opt-outs without cleanup, source
+retry/tombstone handling, private/group isolation, and retirement of only the
 managed afternoon pass while preserving independent follow-ups. Focused live
 journeys in `assistant-codex-real-e2e.test.ts` cover silent first-pass eligibility for new connections and undated baseline accounts, calendar capture with Journal/context readback and retry
 dedupe, email itinerary capture, and tasteful private/scheduled context use
-without granting provider text action authority.
+without granting provider text action authority. Typed note metadata and destination
+timezone are covered by `packages/cli/test/cli-expansion-event-typed.test.ts`.
 
 Phone-welcome preflight proof lives in `apps/web/test/hosted-phone-welcome.test.ts`.
 Its opt-in `MURPH_TEST_POSTGRES_CONCURRENCY=1` case uses a loopback `murph_test`

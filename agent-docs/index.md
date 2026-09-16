@@ -139,7 +139,7 @@ the warning regression and delivery evidence are tracked in
 The deployment unblock retaining the dormant experiment namespace is tracked in
 [`2026-09-15-defer-small-namespace-retirement.md`](exec-plans/completed/2026-09-15-defer-small-namespace-retirement.md).
 
-Morning Journal capture, active-connection notice migration, retirement of the
+Silent morning Journal capture, canonical plan context, retirement of the
 afternoon pass, and bounded private upcoming-context injection are owned by
 `product-specs/journal.md` and `ARCHITECTURE.md`.
 

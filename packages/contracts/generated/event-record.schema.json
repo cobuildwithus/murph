@@ -3704,6 +3704,43 @@
           "minLength": 1,
           "maxLength": 120
         },
+        "plan": {
+          "type": "object",
+          "properties": {
+            "endsAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "planned",
+                "tentative",
+                "canceled"
+              ]
+            },
+            "lastVerifiedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "accountId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "category": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "endsAt",
+            "status",
+            "lastVerifiedAt",
+            "category"
+          ],
+          "additionalProperties": false
+        },
         "authoredAt": {
           "type": "string",
           "format": "date-time"

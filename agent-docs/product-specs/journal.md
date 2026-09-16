@@ -123,19 +123,34 @@ reconciliation archives the fixed afternoon automation without removing its
 Journal records or standalone follow-ups. Existing paused/archived morning records
 retain their status; active records converge to the current recipe.
 
-A derived Knowledge page, `upcoming-context`, projects these canonical Journal
-plans into a version-1 JSON body. Entries retain event id, summary, start/end with
-explicit offsets, IANA timezone, planned/tentative/canceled status, verification
-time, and normalized practical details. Canonical events remain authoritative.
-The shared private current-state reader loads only this fixed file (at most
-64 KiB) alongside existing memory/context reads, without provider or database
-calls or a Knowledge graph scan. It injects at most 8 KiB of complete entries,
-with an explicit retrieval notice when more remain. Every private conversation,
-resumed turn, and ordinary scheduled model turn reads fresh state; group and
-maintenance scopes retain their existing isolation. Expiry and cancellation are
-filtered at read time, and verification older than 48 hours is labeled stale.
-Partial source failures preserve old verification; direct corrections update the
-canonical plan and derived view together. Missing/invalid data does not block replies.
+Canonical `journal-plan` notes own a structured `plan` field containing end,
+status, verification time, category, and optional connected account. Existing
+fields retain start, timezone, source identity, title, and full normalized note.
+The typed note command accepts the event timezone and plan fields. Creation with
+a repeated external source identity returns the existing plan; deletion prevents
+a retry from resurrecting it. Reconciliation reads the exact event and uses
+revision-checked edits, preserving direct member corrections and secondary
+calendar/email aliases in the existing connected-source ledger.
+
+The existing context snapshot derives upcoming entries from current canonical
+revisions. There is no separately authored factual Knowledge page. Canonical
+and ledger-policy write receipts invalidate the Journal section, including on
+restore/replay; stale facts stay unavailable until rebuilt. The same ledger
+normalizes global/account/provider/category opt-outs and supported active accounts.
+Unrecognized legacy policy suppresses automatic context until the morning pass
+preserves and normalizes its controls. Opt-outs require no separate cleanup write.
+Historical Journal records remain intact.
+
+The snapshot reader performs a bounded local read (128 KiB) and injects at most
+8 KiB of upcoming navigation and details. Projection work runs in the existing
+background lane, bounded to 128 shards and 100,000 records with preemption; its
+serialized plan section is at most 24 KiB. Incomplete source reads produce an
+unavailable indication, not false absence. Navigation takes priority over verbose
+logistics, with exact canonical retrieval when details or additional plans matter.
+Every private conversation, resumed turn, and ordinary scheduled turn reads fresh
+state; groups and maintenance retain their existing isolation. Expiry is evaluated
+at read time, and verification older than 48 hours is stale. A planned departure
+does not prove arrival, current location, or realized experiment context.
 
 The context improves wording, relevance, and interpretation only when useful. It
 never grants permission to reschedule a fixed reminder, change the member timezone,

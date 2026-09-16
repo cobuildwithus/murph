@@ -26,7 +26,6 @@ import {
 const planningMocks = vi.hoisted(() => ({
   readAssistantCliSurfaceBootstrapContext:
     vi.fn(async (): Promise<string | null> => 'bootstrap contract'),
-  readUpcomingContextPrompt: vi.fn(async (): Promise<string | null> => null),
   readAssistantContextSnapshotPrompt:
     vi.fn(async (): Promise<string | null> => null),
   refreshAssistantContextSnapshotBestEffort: vi.fn(async (_input?: {
@@ -80,7 +79,6 @@ vi.mock('../src/assistant/service.js', () => ({
   sendAssistantMessage: planningMocks.sendAssistantMessage,
 }))
 
-vi.mock('../src/assistant/upcoming-context.js', () => ({ readUpcomingContextPrompt: planningMocks.readUpcomingContextPrompt }))
 
 vi.mock('../src/assistant/context-snapshot.js', () => ({
   readAssistantContextSnapshotPrompt:
@@ -215,8 +213,6 @@ const priorFactoredAutomationSchema = {
 }
 
 afterEach(() => {
-  planningMocks.readUpcomingContextPrompt.mockReset()
-  planningMocks.readUpcomingContextPrompt.mockResolvedValue(null)
   planningMocks.readAssistantCliSurfaceBootstrapContext.mockReset()
   planningMocks.readAssistantContextSnapshotPrompt.mockReset()
   planningMocks.refreshAssistantContextSnapshotBestEffort.mockReset()
@@ -1801,9 +1797,9 @@ describe('assistant Codex turn planning', () => {
   })
 
   it.each([true, false])('injects upcoming context only for private conversations and reminders (direct=%s)', async (direct) => {
-    planningMocks.readUpcomingContextPrompt.mockResolvedValue('Upcoming context: synthetic race logistics.')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue('Upcoming context: synthetic race logistics.')
     for (const scheduled of [false, true]) {
-      planningMocks.readUpcomingContextPrompt.mockClear()
+      planningMocks.readAssistantContextSnapshotPrompt.mockClear()
       const plan = await resolveAssistantRouteTurnPlan({
         executionContext: null,
         input: { ...createMessageInput(), threadIsDirect: direct,
@@ -1815,11 +1811,11 @@ describe('assistant Codex turn planning', () => {
         route: createRoute(), session: createSession(),
         sharedPlan: createSharedPlan({}, { threadIsDirect: direct }),
       })
-      expect(planningMocks.readUpcomingContextPrompt).toHaveBeenCalledTimes(direct ? 1 : 0)
+      expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(direct ? 1 : 0)
       if (direct) expect(plan.systemPrompt).toContain('synthetic race logistics')
       else expect(plan.systemPrompt).not.toContain('synthetic race logistics')
     }
-    planningMocks.readUpcomingContextPrompt.mockResolvedValue(null)
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
   })
 
   it('uses the narrow group room-model maintenance prompt without ordinary group context', async () => {

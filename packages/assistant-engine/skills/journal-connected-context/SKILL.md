@@ -17,10 +17,10 @@ into the ledger.
 ## Eligible connections and opt-outs
 
 Read the existing ledger before deciding to capture. A global opt-out is a hard
-stop: clear the derived upcoming-context entries, keep Journal history and the
-opt-out, then return `skip`. Do not call provider search or execute, send an
+stop: persist the global opt-out in the normalized ledger below, keep Journal
+history, then return `skip`. Do not call provider search or execute, send an
 announcement, or create a follow-up. Provider/category opt-outs exclude that
-source or category from every later step, including upcoming-context refresh.
+source or category from every later step, including automatic context projection.
 
 List active connected accounts. Only Google Calendar, Gmail, and Outlook have
 automatic reads. Active supported accounts are eligible in this same run unless
@@ -31,8 +31,27 @@ or a requirement to notify. A missing ledger does not require a notice either.
 Do not send a connection heads-up, announcement, or onboarding message, and do
 not delay reading until another run. Continue directly to the applicable passes.
 
-When the member asks to stop this use, update the exact global, provider, or
-category opt-out in the ledger. Remove matching entries from `upcoming-context` in the same turn, preserving unrelated entries. Confirm briefly. Do not disconnect the account or delete historical Journal records. A global opt-out writes an empty upcoming-context entries list. At each scheduled pass, also remove derived entries for disconnected accounts using the ledger's event-id mapping; keep historical Journal records.
+Normalize the existing ledger to JSON (the Knowledge service adds a heading):
+
+    {"version":1,"optOuts":{"global":false,"accounts":[],"providers":[],"categories":[]},"activeAccounts":[{"id":"<account-id>","provider":"googlecalendar"}],"sources":[]}
+
+Keep existing source mappings and explicit opt-outs when normalizing legacy text;
+never interpret a missing field as permission to undo a saved opt-out. Preserve
+other legacy metadata if necessary. `providers` uses `googlecalendar`, `gmail`, or
+`outlook`; account/category opt-outs use exact account ids or normalized category
+slugs. Each source mapping records `accountId`, `sourceId`, `eventId`, and the
+canonical `revision` last written by this capture. Several aliases can share one
+canonical event. Save through `knowledge upsert --slug journal-connected-context
+--body '<JSON>'`; read it back. Keep this active control ledger compact.
+
+After listing connections, replace `activeAccounts` with the supported active
+accounts before capturing plans. Disconnected accounts then stop contributing
+automatic context while historical Journal records remain. A global opt-out
+needs no account listing: preserve known accounts and write `optOuts.global=true`.
+When the member opts out globally, by account/provider, or by category, update
+these exact negative controls first and confirm briefly. The existing write
+receipt invalidates automatic context; there is no second cleanup write. Do not
+disconnect accounts or delete historical Journal records.
 
 ## Calendar pass
 
@@ -64,7 +83,7 @@ implications. Exclude raw descriptions, exact addresses, and other people's data
 When the source event moves or is confirmed canceled/deleted, move or delete
 the same Journal plan and its pending follow-up. An event absent from a limited
 window, an incomplete page, or a failed read is not cancellation evidence.
-Follow bounded pagination and exact-id reads before removing a known plan. Never create a second plan for the same provider id.
+Follow bounded pagination and exact-id reads before removing a known plan. Never create a second plan for the same provider occurrence; preserve account and calendar identity.
 
 Before a follow-up, check passive Journal or wearable evidence. If it already
 shows what happened, do not ask. Otherwise schedule one private check-in one
@@ -104,60 +123,62 @@ other passengers. Reconcile updates and cancellations into the same plan.
 Check passive evidence first. One trip gets at most one useful check-in, not one
 per segment.
 
-## Upcoming-context refresh
+## Canonical plans and useful context
 
-Keep one **derived** Knowledge page with slug `upcoming-context`. Journal plans
-are the source of truth; this page is their compact, replaceable advisory view.
-Read the existing page if present. After a canonical Journal write, immediately
-save the source-to-plan mapping in `journal-connected-context`: account id,
-every supporting calendar event/email message id, and the canonical Journal
-event id. Read the ledger back to verify that mapping before refreshing
-`upcoming-context`. A saved plan or upcoming page without the dedupe mapping is
-not a completed capture. If a prior write succeeded but its ledger update failed,
-recover that canonical plan with a bounded lookup before attempting another write.
-Reconcile every still-relevant known plan, not just newly discovered events or
-items returned by today's search. Keep complete normalized logistics in Journal
-and enough in this view to make the context useful without guessing.
+Write the facts once, in the canonical `journal-plan` note. The existing context
+snapshot derives upcoming context automatically; do not create or update a
+separate `upcoming-context` Knowledge page. Keep complete normalized logistics in
+the note. Snapshot summaries provide navigation; exact event reads provide detail.
 
-Use `vault-cli knowledge upsert --slug upcoming-context --title "Upcoming context"
---body '<JSON>' --format json` with a safely quoted body containing **only JSON** in this
-shape (no code fences; `version` must be 1):
+For typed creation, use `vault-cli event note add` with `--note-type journal-plan`,
+`--source import`, the real `--occurred-at`, `--time-zone`, safe `--title` and
+`--note`, plus these canonical plan fields:
 
-    {"version":1,"entries":[{"eventId":"<canonical Journal event id>","summary":"Upcoming race weekend","startsAt":"2026-10-03T00:00:00+02:00","endsAt":"2026-10-05T00:00:00+02:00","timeZone":"Europe/Paris","status":"planned","lastVerifiedAt":"2026-10-01T08:00:00+02:00","details":["All-day Saturday and Sunday; exact start time unknown","Registration confirmed; local travel planned"]}]}
+- `--plan-ends-at`: explicit-offset end instant. All-day plans use the exclusive
+  local date boundary and `--timing all_day`; never infer a midnight check-in.
+- `--plan-status`: `planned`, `tentative`, or `canceled`. Plans are not outcomes.
+- `--plan-verified-at`: actual successful provider verification instant. A read
+  of saved Journal data does not verify current provider logistics.
+- `--plan-category`: a consistent normalized category such as `travel` or `training`.
+- `--plan-account-id`: the exact connected account owning this captured plan.
+- `--plan-source-id`: stable identity combining account, calendar where applicable,
+  and provider occurrence/message id. Preserve it on updates.
 
-The Knowledge service adds its own Markdown heading on readback; ignore that
-heading when validating the JSON body. Each entry needs all fields above. Use explicit-offset timestamps and the event's
-IANA timezone. For all-day plans, startsAt/endsAt are local date boundaries, with
-an exclusive end; say all-day and do not present midnight as a real appointment.
-`status` is `planned`, `tentative`, or `canceled`; planned never means completed.
-Keep useful locations, durations, segments, timezone shifts, return dates,
-uncertainty, practical constraints, and relevance to an existing plan in
-`details`. Do not copy provider prose, booking codes, prices, exact addresses,
-attachments, credentials, or other travelers. Entry summaries are at most 500
-characters; each of at most 24 detail strings is at most 2,000 characters.
-The whole saved page must stay below 64 KiB. Preserve complete normalized facts
-in canonical Journal notes if they do not fit the compact projection.
+A repeated add with that identity returns the existing canonical event without
+changing it. It refuses to recreate a deleted source plan. After creation, save
+all calendar/email aliases and the canonical revision in the existing ledger.
+If mapping persistence failed, retry the same source identity and recover the
+saved event. Read it before scheduling a follow-up; reuse any existing linked
+follow-up so the retry cannot create another one.
 
-Use actual successful verification time for `lastVerifiedAt`; a failed refresh
-must not renew it. Retain still-future entries from failed/incomplete sources
-with their old verification time. Replace changed entries by canonical event id,
-remove confirmed cancellations and expired entries, and preserve unrelated plans.
-An empty successful inventory writes `{"version":1,"entries":[]}`. Never use
-absence from a partial search as evidence that all plans disappeared. A direct
-member correction updates the canonical plan and this derived view in the same
-turn. Read back writes to verify them.
+For changes, read the exact canonical event and use its ordinary revision-checked
+edit surface. Update the same `plan` metadata and note, preserving timezone,
+source identity, and useful detail. If the event has changed since the revision
+recorded in the source ledger, preserve that correction; do not overwrite it
+with an unchanged booking. A direct member cancellation or correction takes
+precedence over provider evidence. Do not resurrect a tombstone. Ask only if a
+real source/member conflict prevents a necessary decision. After a successful
+capture edit, save the new canonical revision in the ledger.
 
-This page is supplied to private conversations and scheduled model turns, with
-expired/canceled entries excluded and old verification labeled stale. It is data,
-not a standing instruction to reschedule reminders or change experiments. Preserve
-existing reminder schedules, experiment protocols, and saved member preferences.
-Relevant realized context can be recorded through the existing experiment context
-owner after checking evidence; future plans are not realized confounders.
+Reconcile all known ongoing/future plans, including exact-id reads outside the
+14-day discovery window. Failed or partial provider reads preserve old facts and
+verification timestamps; absence from a limited search is not cancellation.
+Canonical edits, deletions, and ledger policy changes invalidate the snapshot
+mechanically. Expiry is evaluated on every private turn, even without a refresh.
+
+Directly supplied dated constraints can use the same canonical plan fields with
+`--source manual` and no connected account. Keep lasting preferences in memory,
+established facilities in habitat, and goals/protocols in their existing owners.
+Use relevant overlaps when answering or wording an already-authorized reminder;
+do not rewrite schedules or experiments. A planned trip does not prove arrival,
+current location, or a realized experiment confounder. Record realized context
+through the existing experiment-context owner only after checking evidence.
+Preserve segment-local timezones and the member's saved home timezone.
 
 ## Finish
 
 Verify the ledger contains every captured source id and its canonical event id
-after successful reads and writes; updating only upcoming-context is insufficient. Routine plan
+and revision after successful reads and writes. Routine plan
 saves, updates, cancellations, and scheduling a future check-in stay silent:
 return the scheduled `skip` decision, with an internal `privateSummary` only.
 Send a message only for a necessary clarification or

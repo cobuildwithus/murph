@@ -265,6 +265,29 @@ function normalizeEventTags(value: readonly string[] | undefined): string[] {
   return normalizeRepeatableFlagOption(value, 'tag') ?? []
 }
 
+function buildJournalPlanPayloadFields(options: {
+  noteType?: string
+  planEndsAt?: string
+  planStatus?: 'planned' | 'tentative' | 'canceled'
+  planVerifiedAt?: string
+  planCategory?: string
+  planAccountId?: string
+  planSourceId?: string
+}): JsonObject {
+  if (![options.planEndsAt, options.planStatus, options.planVerifiedAt, options.planCategory, options.planAccountId, options.planSourceId].some(Boolean)) return {}
+  if (options.noteType !== 'journal-plan' || !options.planEndsAt || !options.planStatus || !options.planVerifiedAt || !options.planCategory) {
+    throw new Error('Journal plan metadata requires note-type journal-plan, plan-ends-at, plan-status, plan-verified-at, and plan-category.')
+  }
+  return {
+    plan: {
+      endsAt: options.planEndsAt, status: options.planStatus,
+      lastVerifiedAt: options.planVerifiedAt, category: options.planCategory,
+      ...(options.planAccountId ? { accountId: options.planAccountId } : {}),
+    },
+    ...(options.planSourceId ? { externalRef: { system: 'connected-context', resourceType: 'plan', resourceId: options.planSourceId } } : {}),
+  }
+}
+
 async function buildCommonTypedEventPayload(input: {
   kind: GenericTypedEventKind
   vault: string
@@ -494,6 +517,13 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
       noteType: slugSchema
         .optional()
         .describe('Optional structured note type, such as journal-factor or journal-outcome.'),
+      timeZone: z.string().optional().describe('Event IANA timezone; defaults to the saved vault timezone for Journal notes.'),
+      planEndsAt: z.string().datetime({ offset: true }).optional().describe('Journal plan end instant, with explicit offset. All-day plans use the exclusive local date boundary.'),
+      planStatus: z.enum(['planned', 'tentative', 'canceled']).optional(),
+      planVerifiedAt: z.string().datetime({ offset: true }).optional().describe('Actual successful source verification instant; never advance after a failed read.'),
+      planCategory: slugSchema.optional(),
+      planAccountId: z.string().min(1).max(200).optional().describe('Connected account owning an automatically captured plan; omit for a directly supplied member plan.'),
+      planSourceId: z.string().min(1).max(500).optional().describe('Stable account/calendar/provider-occurrence identity. A repeated add returns the saved plan; update that exact event id for changes.'),
       relatedId: eventRelatedIdOptionSchema,
       occurredAt: occurredAtOptionSchema
         .optional()
@@ -506,10 +536,11 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
     }),
     output: eventNoteAddResultSchema,
     async run({ options }) {
+      const planFields = buildJournalPlanPayloadFields(options)
       const title = deriveEventTitle(options.title, options.note)
-      const timeZone = options.noteType?.startsWith('journal-') || options.timing || options.icon
+      const timeZone = options.timeZone ?? (options.noteType?.startsWith('journal-') || options.timing || options.icon
         ? (await loadVault({ vaultRoot: options.vault })).metadata.timezone
-        : undefined
+        : undefined)
       const payload = await buildCommonTypedEventPayload({
         kind: 'note',
         vault: options.vault,
@@ -530,7 +561,10 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
       })
       const result = await upsertEventRecord({
         vault: options.vault,
-        payload,
+        payload: {
+          ...payload,
+          ...planFields,
+        },
       })
 
       return {

@@ -448,3 +448,30 @@ test('Journal notes preserve time precision and selected icons through canonical
     await rm(vault, { recursive: true, force: true })
   }
 })
+
+test('Journal plan creation preserves destination timezone, canonical metadata and retry identity', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-cli-plan-'))
+  try {
+    requireData(await runSliceCli(['init', '--vault', vault, '--timezone', 'America/New_York']))
+    const args = [
+      'event', 'note', 'add', '--vault', vault, '--note-type', 'journal-plan',
+      '--source', 'import', '--title', 'Conference trip', '--note', 'Return Sunday; equipment unknown',
+      '--occurred-at', '2026-10-02T00:30:00+02:00', '--time-zone', 'Europe/Paris',
+      '--plan-ends-at', '2026-10-04T18:00:00+02:00', '--plan-status', 'tentative',
+      '--plan-verified-at', '2026-10-01T08:00:00Z', '--plan-category', 'travel',
+      '--plan-account-id', 'synthetic-calendar', '--plan-source-id', 'synthetic-calendar/calendar-a/occurrence-1',
+    ]
+    const saved = requireData(await runSliceCli<EventAddEnvelope>(args))
+    const repeated = requireData(await runSliceCli<EventAddEnvelope>(args))
+    assert.equal(repeated.eventId, saved.eventId)
+    const shown = requireData(await runSliceCli<EventShowEnvelope>(['event', 'show', saved.eventId, '--vault', vault]))
+    assert.equal(shown.entity.data.timeZone, 'Europe/Paris')
+    assert.equal(shown.entity.data.dayKey, '2026-10-02')
+    assert.deepEqual(shown.entity.data.plan, {
+      endsAt: '2026-10-04T18:00:00+02:00', status: 'tentative',
+      lastVerifiedAt: '2026-10-01T08:00:00Z', category: 'travel', accountId: 'synthetic-calendar',
+    })
+    const incomplete = await runSliceCli(['event', 'note', 'add', '--vault', vault, '--note', 'Trip', '--note-type', 'journal-plan', '--plan-status', 'planned'])
+    assert.equal(incomplete.ok, false)
+  } finally { await rm(vault, { recursive: true, force: true }) }
+})
