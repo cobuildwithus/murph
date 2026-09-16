@@ -186,6 +186,15 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
   operator. Busy pre-protocol processes remain live during readiness; release
   convergence and eventual completion of every held member must be proved in
   rehearsal and deployment. Do not mistake a skipped member for completion.
+- Control audit finding to resolve before candidate: deletion routes still select
+  legacy while the member is quiescing, and UserRunner deletion uses the callback
+  gate that remains open in that phase. Its final storage.deleteAll can remove
+  both source identity and the local migration barrier after canonical inventory
+  reservation. Merely blocking deletion after local quiescence is insufficient:
+  already-admitted deletion can finish before the barrier. Coordinate deletion
+  admission/closure with canonical migration or provide a proved terminal empty
+  source receipt without losing generation high-water. Add the race test before
+  changing behavior; do not treat the reserved member's missing source as success.
 - Remaining before a final candidate: complete effect and
   control routing; creation/inventory closure; hosted
   operator; composed rehearsal; owner documentation and final review/CI. Keep
