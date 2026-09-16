@@ -6,7 +6,7 @@ Last verified: 2026-09-15
 
 The default app is patient-facing, read-only, R4, non-confidential with S256
 PKCE and no refresh/offline access. Select USCDI v3 automatic distribution in
-Epic and register only the 42 default APIs below. Provision that app's production
+Epic and register only the 44 default APIs below. Provision that app's production
 and non-production IDs in `EPIC_SMART_CLIENT_ID` and
 `EPIC_SMART_NON_PRODUCTION_CLIENT_ID`. A code feature flag does not change an
 Epic registration. An existing broad, manually distributed app cannot become
@@ -18,7 +18,7 @@ rolling cycle that can take up to 12 hours. Hospital licensing, Epic version,
 auto-download settings and patient authorization still apply. This is not a
 guarantee of every hospital, every historical record or every document body.
 
-## Sources and three-way check
+## Sources and eligibility checks
 
 1. [Patient-app distribution rules and appendix](https://fhir.epic.com/Documentation?docId=patientfacingfhirapps&section=AutomaticClientDistribution):
    USCDI-v3 distribution requires only eligible APIs, patient-facing read access,
@@ -26,34 +26,36 @@ guarantee of every hospital, every historical record or every document body.
 2. [Current public API catalog](https://fhir.epic.com/Specifications/Selections):
    the same public metadata that populates Epic's Specifications page gives
    stable API IDs, current names and `IsUSCDI`. All 70 current Murph registrations
-   were checked; default admission requires both `IsUSCDI: true` and an appendix
-   entry, with explicit naming aliases below.
-3. Each default API's linked specification was checked for patient-facing read/search
+   were checked; the catalog classification is informational and does not determine the
+   automatic-distribution version. Explicit registration metadata takes precedence.
+3. [Epic app registration](https://fhir.epic.com/Developer/Create) publishes
+   `autodownload-types` for each selectable API. All 70 APIs were checked against
+   the explicit `USCDIv3` value. This resolves the two catalog discrepancies below.
+4. Each default API's linked specification was checked for patient-facing read/search
    access. Two read APIs omit the HTTP-method metadata field; their descriptions
    and resource-by-ID templates describe reads. The lab-document search advertises
    GET and POST search, and Murph uses GET. [Client registration](https://fhir.epic.com/Documentation?docId=epiconfhirrequestprocess&section=custreq)
    explains manual client-record provisioning and production-ready app changes.
 
 The checked-in `apps/web/src/lib/clinical-records/epic-registration.v1.json`
-contains only these public catalog facts. Runtime performs no catalog request.
+contains catalog facts and generic registration eligibility metadata, without
+app identifiers or account data. Runtime performs no catalog request.
 The full existing policy remains the query/fingerprint reader; new plans filter
 its registration keys through this reviewed evidence. Unknown APIs default to
 gated until reviewed. Tests require evidence for every full-catalog API and
 preserve eligible lab and report dependencies.
 
-## Conflicting or incomplete evidence
+## Registration eligibility and catalog discrepancies
 
-- Outside-record clinical notes appear in the appendix, but the current exact
-  search and Binary APIs (10999 and 10996) report `IsUSCDI: false`. Keep both gated
-  pending clarification; an older similar name is not sufficient evidence.
-- Advance Directive APIs (40299 and 40293) report `IsUSCDI: true`, but are absent
-  from the published USCDI-v3 appendix. Keep both gated pending confirmation of
-  automatic-distribution eligibility. USCDI classification alone does not prove
-  the selected automatic-distribution version.
+- Outside-record clinical notes (10999 and 10996) explicitly allow `USCDIv3`
+  in registration metadata and appear in the published appendix. Both are
+  enabled. Their public catalog `IsUSCDI: false` flag is not an eligibility veto.
+- Advance Directive APIs (40299 and 40293) allow only `None` in registration
+  metadata. Both remain gated despite their catalog `IsUSCDI: true` flag.
 - FamilyMemberHistory, patient-reported surgical history, radiology documents,
   external CCDAs, questionnaires, correspondence, handoff, stored document
   information, clinical references and MDS/HIS/OASIS/IRF-PAI document APIs lack
-  the required matching evidence and remain gated.
+  the required matching registration eligibility and remain gated.
 - DiagnosticReport results remain enabled even though the separate radiology
   DocumentReference query is gated. Ordinary procedure/surgery searches remain
   enabled even though patient-reported surgical history is gated.
@@ -69,7 +71,7 @@ An opted-in organization uses `EPIC_SMART_HOSPITAL_APPROVED_CLIENT_ID` or, for
 sandbox, `EPIC_SMART_HOSPITAL_APPROVED_NON_PRODUCTION_CLIENT_ID`. These must be
 separate from the corresponding automatic app ID. Missing/identical IDs fail
 before OAuth discovery; production and sandbox never fall back to each other.
-Unlisted providers retain the automatic client and 24-query/16-family default.
+Unlisted providers retain the automatic client and 25-query/16-family default.
 Listed providers can use the full 40-query/17-family catalog and 70 registrations.
 
 The callback rechecks the selected client against the client frozen at OAuth
@@ -127,10 +129,10 @@ older names against Epic's current exact catalog names and identifiers.
 | [Specimen.Read (Patient Chart) (R4)](https://fhir.epic.com/Specifications?api=10014) | Default | Specimen.Read (R4) |
 | [DocumentReference.Search (Radiology Results) (R4)](https://fhir.epic.com/Specifications?api=10235) | Gated | Not verified |
 | [DocumentReference.Search (External CCDA) (R4)](https://fhir.epic.com/Specifications?api=10135) | Gated | Not verified |
-| [DocumentReference.Search (Outside Record - Clinical Notes) (R4)](https://fhir.epic.com/Specifications?api=10999) | Gated | Not verified |
+| [DocumentReference.Search (Outside Record - Clinical Notes) (R4)](https://fhir.epic.com/Specifications?api=10999) | Default | DocumentReference.Search (Outside Record Clinical Notes) (R4) |
 | [Observation.Search (Outside Record Vital Signs) (R4)](https://fhir.epic.com/Specifications?api=11422) | Default | Observation.Search (Outside Record Vital Sign) (R4) |
 | [Binary.Read (External CCDA) (R4)](https://fhir.epic.com/Specifications?api=10183) | Gated | Not verified |
-| [Binary.Read (Outside Record - Clinical Notes) (R4)](https://fhir.epic.com/Specifications?api=10996) | Gated | Not verified |
+| [Binary.Read (Outside Record - Clinical Notes) (R4)](https://fhir.epic.com/Specifications?api=10996) | Default | Binary.Read (Outside Record Clinical Notes) (R4) |
 | [Binary.Read (Radiology Results) (R4)](https://fhir.epic.com/Specifications?api=10230) | Gated | Not verified |
 | [Binary.Read (Labs) (R4)](https://fhir.epic.com/Specifications?api=10139) | Default | Binary.Read (Labs) (R4) |
 | [Binary.Read (Generated CDAs) (R4)](https://fhir.epic.com/Specifications?api=10501) | Default | Binary.Read (Generated CCDA) (R4) |
