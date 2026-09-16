@@ -55,14 +55,14 @@ passing a timer never substitutes for safe handoff evidence.
 
 ## Tasks
 
-1. [in progress] Revalidate state; add explicit member migration contracts,
+1. [complete] Revalidate state; add explicit member migration contracts,
    schema, locks and readiness evidence.
-2. [in progress] Implement all member routing, graceful/conditional handoff,
+2. [complete] Implement all member routing, graceful/conditional handoff,
    controlled upload/drain behavior and durable activation wake.
-3. [in progress] Implement hosted resumable operator, source discovery and creation
+3. [complete] Implement hosted resumable operator, source discovery and creation
    barrier, new-member routing and full campaign closure.
-4. [pending] Focused race/crash tests, typechecks and composed rehearsal.
-5. [pending] Candidate/privacy/complexity review, owner docs, changelog decision,
+4. [complete] Focused race/crash tests, typechecks and composed rehearsal.
+5. [in progress] Candidate/privacy/complexity review, owner docs, changelog decision,
    PR, green exact-head CI and final ReviewGPT.
 6. [pending] Merge and compatible Web/schema/Worker deployment; verify serving
    versions and inactive campaign before canary.
@@ -717,3 +717,36 @@ both Workers metadata cases, Worker/harness typechecks and changed-source
 complexity (no functions above 20). Final public review/CI, release convergence,
 actual R2, unrelated-member latency and live rollout remain outstanding. No
 production changes were performed.
+
+
+### Matched native rehearsal and candidate review
+
+The paired native command now passes with the merged private operator companion
+head `b826c4eea4477b3f6358063d505fb449456a4ace`:
+`pnpm hosted-local e2e postgres-runtime-warm-reuse --profile e2e:stub --no-bundle`.
+Both scenarios run in separate processes, with one selected test in each. The
+empty-Postgres case measured cold reply 8,475 ms, warm typing 547 ms and warm
+reply 2,388 ms. The rolling case measured its five-continuation handoff at
+1,191 ms, followed by cold reply 7,064 ms, warm typing 535 ms and warm reply
+2,103 ms. Both reused the same native target for their warm turn.
+
+This supersedes the earlier single-scenario environment: that run used an older
+Temporal checkout and emitted an unrelated scheduled-wake response warning. The
+matched run passed against the companion that owns the current response shape.
+These remain local samples using stub model/messaging providers and MinIO; they
+do not establish production latency, real R2 interoperability or a base/head
+performance comparison.
+
+Parent candidate review covered source readiness/freeze, signed HTTP identity
+projection, upload settlement, canonical import/activation, member routing,
+creation/enrollment, bounded cleanup, operator recovery, release compatibility
+and privacy. No additional implementation defect was identified. The complete
+76-source-file complexity comparison passes against the refreshed main merge
+base: 15 existing hotspots are unchanged or reduced, and no new function exceeds
+20. Further unrelated hotspot extraction would expand this migration. Authored
+additions contain no local username/home path or temporary diagnostics.
+
+The source-inspection/native-proof correction is committed as `2db2c0f4e53e`.
+The public candidate is ready for final external review and exact-head CI.
+Production deployment, provider proof, measured live canary and full migration
+remain separate unfinished steps; no production state has changed.
