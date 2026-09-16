@@ -124,7 +124,7 @@ Strong delete consistency alone does not cancel a concurrent write.
 
 Production migration remains a separate authorized operation. The rolling
 implementation is not yet a complete operational release: private workflow
-wiring, composed creation-closure proof, rehearsal and final review are still
+review, composed creation-closure proof, rehearsal and final review are still
 required. `migrateHostedLegacyRuntime` now starts a rolling campaign, reconciles
 provider discovery with creation intents, closes legacy creation and seals the
 ordered inventory. It never invokes the old fleet-draining path.
@@ -133,17 +133,22 @@ ordered inventory. It never invokes the old fleet-draining path.
 complete member activation. A completed import stays selected until its owner
 is Postgres. Immutable inventory order and monotonic receipts keep concurrent
 retries on the same source; the operator derives a stable member token from
-namespace, object and member identity. It stops a bounded invocation on pending
-readiness/checkpoint/freeze and resumes that source on retry. Other members keep
-running, but a held selected source delays later handoffs. Final provider scans
+namespace, object and member identity. The hosted driver polls checkpoint/freeze
+progress on the selected source within the same bounded run, avoiding workflow
+queue and install time during the pause. A readiness hold leaves that source live
+and returns; it delays later handoffs. Other members keep running. Final provider scans
 must be covered by the registered census; an unknown late object holds closure.
 
 `apps/cloudflare/scripts/runtime-migration.cli.ts` is the protected hosted
 entrypoint. It accepts only private Murph Cloud main execution and uses that
 environment's existing Cloudflare API credential and callback-signing key.
 Inventory mode is read-only and outputs only count, hash and serving version.
-Migration mode defaults to one bounded continuation; `maxSteps` is capped at
-1000. `finalize` controls the final campaign default switch, while successful
+Migration mode defaults to one source object, up to 1000 continuations and a
+ten-minute work window. The object budget is checked before starting a different
+source, so a canary can finish all pages and activate in one run. A pending or
+failed result after quiescence requires same-source roll-forward recovery; the
+work window is not a guarantee of member-pause duration. `finalize` controls the
+final campaign default switch, while successful
 member handoffs activate independently. Each control request has a fresh
 signature over its method, path and exact body; the existing OIDC path remains
 supported. No production credentials or raw inventories belong in local output.

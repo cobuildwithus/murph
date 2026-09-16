@@ -276,3 +276,16 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
 - Final operator route regression: 175 Worker tests across four files pass;
   Worker typecheck and documentation drift pass. The private workflow and
   late-old-request closure proof remain the next concrete work.
+
+- Committed and pushed the rolling operator at d0af2d04d362. A fresh design
+  consultation is reviewing exact-source creation closure, including late old
+  requests and unknown sources; this is separate from final PR approval.
+- Corrected hosted operator scheduling: a canary budgets one source rather than
+  one page, and checkpoint/freeze waits poll that same source within a bounded
+  run. Fourteen CLI/operator tests, Worker typecheck and complexity guard pass.
+  The real tsx entrypoint loads and rejects local invocation before credentials.
+- The private workflow is drafted in an isolated Murph Cloud checkout. It
+  validates protected-main public ancestry, pins the source before dependency
+  installation, serializes with Worker deployment, uses existing hosted-only
+  credentials and defaults to aggregate inventory. Private verification/review
+  and the public closure/rehearsal gates remain required before dispatch.

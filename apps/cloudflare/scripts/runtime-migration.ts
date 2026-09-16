@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import type { HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
 
 export interface RuntimeMigrationOperator {
@@ -34,9 +35,11 @@ export async function inventoryHostedLegacyRuntime(input: RuntimeMigrationOperat
  * all other members keep their existing backend. `activate` closes the campaign
  * default only; each successfully imported member activates independently.
  */
-export async function migrateHostedLegacyRuntime(input: RuntimeMigrationOperator & { activate: boolean; maxSteps?: number }) {
-  const maxSteps = input.maxSteps ?? 25;
-  if (!Number.isSafeInteger(maxSteps) || maxSteps < 1 || maxSteps > 1_000) throw new TypeError("Migration step bound must be between 1 and 1000.");
+type RollingOperator = RuntimeMigrationOperator & {
+  activate: boolean; maxSteps?: number; maxObjects?: number; waitForPending?: boolean; maxDurationMs?: number;
+};
+export async function migrateHostedLegacyRuntime(input: RollingOperator) {
+  const { maxSteps, maxObjects, deadline } = readRollingLimits(input);
   const inventory = await inventoryHostedLegacyRuntime(input);
   const identity = { namespaceId: inventory.namespaceId, workerVersion: inventory.workerVersion };
   const send = workerCommander(input);
@@ -44,7 +47,9 @@ export async function migrateHostedLegacyRuntime(input: RuntimeMigrationOperator
   if (gate.phase === "postgres") return { phase: "postgres", steps: 0 };
   if (gate.phase !== "rolling") throw new Error("Rolling operator cannot continue a fleet-draining campaign.");
   gate = await prepareRollingInventory(input, send, inventory, gate);
+  const selected = new Set<string>();
   for (let steps = 1; steps <= maxSteps; steps++) {
+    if (Date.now() >= deadline) return { phase: "rolling", steps: steps - 1, pending: "time_budget" };
     const next = await send({ operation: "next_object", ...identity });
     if (next.objectId === null) {
       const settled = await send({ operation: "settle_unmaterialized", ...identity });
@@ -53,10 +58,29 @@ export async function migrateHostedLegacyRuntime(input: RuntimeMigrationOperator
       continue;
     }
     const objectId = requireObjectId(next.objectId);
+    if (!selected.has(objectId) && selected.size >= maxObjects) return { phase: "rolling", steps: steps - 1, pending: "object_budget" };
+    selected.add(objectId);
     const result = await advanceSelectedObject(send, identity, objectId);
-    if (typeof result.pending === "string") return { phase: "rolling", steps, pending: result.pending };
+    if (typeof result.pending !== "string") continue;
+    if (!input.waitForPending || !["checkpoint", "freeze", "source_changed"].includes(result.pending)) {
+      return { phase: "rolling", steps, pending: result.pending };
+    }
+    // Keep the same durable selection while a closed source drains. Returning
+    // here would add workflow queue/install latency to the member's pause.
+    await delay(Math.min(1_000, Math.max(0, deadline - Date.now())));
   }
   return { phase: "rolling", steps: maxSteps, pending: "step_budget" };
+}
+
+function readRollingLimits(input: RollingOperator) {
+  const maxSteps = input.maxSteps ?? 25;
+  const maxObjects = input.maxObjects ?? 1_000;
+  const maxDurationMs = input.maxDurationMs ?? 600_000;
+  for (const bound of [maxSteps, maxObjects]) {
+    if (!Number.isSafeInteger(bound) || bound < 1 || bound > 1_000) throw new TypeError("Migration step and object bounds must be between 1 and 1000.");
+  }
+  if (!Number.isSafeInteger(maxDurationMs) || maxDurationMs < 1_000 || maxDurationMs > 3_600_000) throw new TypeError("Migration duration bound must be between one second and one hour.");
+  return { maxSteps, maxObjects, deadline: Date.now() + maxDurationMs };
 }
 
 type CampaignIdentity = { namespaceId: string; workerVersion: string };

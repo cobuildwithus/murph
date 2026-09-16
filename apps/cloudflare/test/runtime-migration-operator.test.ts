@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { inventoryHostedLegacyRuntime, migrateHostedLegacyRuntime, type RuntimeMigrationOperator } from "../scripts/runtime-migration.ts";
 
 const first = "a".repeat(64);
 const second = "b".repeat(64);
 const intentOnly = "c".repeat(64);
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
-function harness(options: { drift?: boolean; split?: boolean; held?: boolean; intent?: boolean; loseAdvance?: boolean; loseSeal?: boolean } = {}) {
+function harness(options: { drift?: boolean; split?: boolean; held?: boolean; intent?: boolean; loseAdvance?: boolean; loseSeal?: boolean; pending?: string[] } = {}) {
   const sent: Array<Record<string, unknown>> = [];
   const known = new Set<string>(options.intent ? [intentOnly] : []);
   const imported = new Set<string>();
@@ -57,6 +57,8 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
           if (tokens.has(command.objectId)) expect(command.migrationId).toBe(tokens.get(command.objectId));
           tokens.set(command.objectId, command.migrationId);
           if (options.held) return Response.json({ pending: "readiness" });
+          const pending = options.pending?.shift();
+          if (pending) return Response.json({ pending });
           if (!imported.has(command.objectId)) {
             imported.add(command.objectId);
             if (options.loseAdvance) { options.loseAdvance = false; throw new Error("synthetic lost import response"); }
@@ -80,6 +82,7 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
 }
 
 describe("rolling runtime migration operator", () => {
+  afterEach(() => vi.useRealTimers());
   it("requires a converged release and lists objects without stored data", async () => {
     const h = harness();
     expect((await inventoryHostedLegacyRuntime(h.input)).objectIds).toEqual([first, second]);
@@ -122,6 +125,35 @@ describe("rolling runtime migration operator", () => {
     expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "members_migrated" });
     expect(h.sent.some(c => c.operation === "activate")).toBe(false);
     expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true })).toMatchObject({ phase: "postgres" });
+  });
+
+  it("finishes one canary through checkpoint, drain, import and activation in the same run", async () => {
+    vi.useFakeTimers();
+    const h = harness({ pending: ["checkpoint", "freeze"] });
+    const result = migrateHostedLegacyRuntime({ ...h.input, activate: false, maxObjects: 1, waitForPending: true });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await result).toEqual({ phase: "rolling", steps: 4, pending: "object_budget" });
+    expect([...h.activated]).toEqual([first]);
+    expect(h.sent.filter(c => String(c.operation).startsWith("advance_")).map(c => c.objectId)).toEqual([first, first, first, first]);
+    expect(h.sent.some(c => c.operation === "activate")).toBe(false);
+  });
+
+  it("bounds polling without activating or moving past an unresolved handoff", async () => {
+    vi.useFakeTimers();
+    const h = harness({ pending: ["freeze", "freeze"] });
+    const result = migrateHostedLegacyRuntime({ ...h.input, activate: true, waitForPending: true, maxDurationMs: 1_000 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await result).toEqual({ phase: "rolling", steps: 1, pending: "time_budget" });
+    expect(h.activated.size).toBe(0);
+    expect(h.sent.some(c => c.operation === "advance_empty")).toBe(false);
+    h.options.pending = [];
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true })).toMatchObject({ phase: "postgres" });
+  });
+
+  it("leaves a readiness-held member live instead of polling or moving to another source", async () => {
+    const h = harness({ held: true });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true, waitForPending: true })).toEqual({ phase: "rolling", steps: 1, pending: "readiness" });
+    expect(h.sent.filter(c => c.operation === "advance_member")).toHaveLength(1);
   });
 
   it("refuses final closure when a new provider object is outside the sealed census", async () => {
