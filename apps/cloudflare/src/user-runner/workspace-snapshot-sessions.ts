@@ -20,6 +20,7 @@ import {
   readHostedExecutionSnapshotHotRef,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_WORKSPACE_SNAPSHOT_DIRECT_UPLOAD_WINDOW_MS,
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
@@ -75,6 +76,10 @@ const WORKSPACE_SNAPSHOT_R2_PUT_DRAIN_STATE_SCHEMA =
 const BROWSER_VAULT_REPLICA_ACTIVE_PUT_STATE_SCHEMA =
   "murph.hosted-browser-vault-replica-active-put-state.v1";
 export const BROWSER_VAULT_REPLICA_POST_STOP_DRAIN_MS = 60_000;
+/** A replica direct write is admitted and released inside one Worker request.
+ * An admission older than this window cannot still be writing; only the
+ * stop-side recovery clock or deletion erases its record. */
+export const BROWSER_VAULT_REPLICA_DIRECT_PUT_WINDOW_MS = 2 * HOSTED_WORKSPACE_SNAPSHOT_DIRECT_UPLOAD_WINDOW_MS;
 
 type WorkspaceSnapshotSessionStateStore = Pick<
   RunnerStateStore,
@@ -1047,7 +1052,11 @@ export async function observeHostedBrowserVaultReplicaDirectPuts(input: {
   userId: string;
 }): Promise<{ pendingWrites: number; recoveryDrainUntil: string | null }> {
   const active = await readBrowserVaultReplicaActivePutState(input);
-  return { pendingWrites: active?.writes.length ?? 0, recoveryDrainUntil: active?.recoveryDrainUntil ?? null };
+  const admittedAfter = Date.now() - BROWSER_VAULT_REPLICA_DIRECT_PUT_WINDOW_MS;
+  return {
+    pendingWrites: active?.writes.filter((write) => Date.parse(write.admittedAt) > admittedAfter).length ?? 0,
+    recoveryDrainUntil: active?.recoveryDrainUntil ?? null,
+  };
 }
 
 async function readBrowserVaultReplicaActivePutState(input: {

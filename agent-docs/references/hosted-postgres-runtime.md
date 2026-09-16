@@ -12,7 +12,10 @@ members remain legacy. Disabled deployments cannot start migrated members.
 Migration phase is separate from execution phase: `legacy -> quiescing ->
 freezing -> importing -> postgres`. Importing an owner row alone never activates
 execution. Quiescing keeps admitted callbacks available for checkpointing while
-closing new starts and destructive deletion. Freezing/importing admit no new
+closing new starts and destructive deletion. Readiness counts a browser-vault
+replica direct write as pending only inside its bounded admission window; an
+older admission cannot still be writing, and only the stop-side recovery clock
+or deletion erases its record. Freezing/importing admit no new
 execution. Activation requires the complete exact-source import and commits a
 durable wake through the existing mailbox/Temporal scheduler.
 
