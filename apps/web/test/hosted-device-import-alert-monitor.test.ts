@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedOperationalAlertMonitorSpec } from "@/src/lib/hosted-operational-alert/incident-email-monitor";
 import type { DeviceImportPrisma } from "@/src/lib/hosted-runtime-progress/device-import-observation";
-import { summarizeDeviceImportHealth, type DeviceImportHealth } from "@/src/lib/hosted-runtime-progress/device-import-health";
+import { summarizeDeviceImportHealth, type DeviceImportHealth, type DeviceImportObservation } from "@/src/lib/hosted-runtime-progress/device-import-health";
 
 const mocks = vi.hoisted(() => ({
   read: vi.fn(), incident: vi.fn(), query: vi.fn(), allowed: vi.fn(),
@@ -82,6 +82,44 @@ describe("device import incident integration", () => {
 });
 
 describe("bounded import diagnostic observation", () => {
+  it.each([
+    { overdueMinutes: -30, stalled: false },
+    { overdueMinutes: 0, stalled: false },
+    { overdueMinutes: 0.2, stalled: false },
+    { overdueMinutes: 14.99, stalled: false },
+    { overdueMinutes: 15, stalled: true },
+    { overdueMinutes: 30, stalled: true },
+  ])("gives a silent queue its scheduled wake grace ($overdueMinutes minutes overdue)", async ({ overdueMinutes, stalled }) => {
+    mocks.workspaces.mockResolvedValueOnce([{ userId: "synthetic-active",
+      nextWakeAt: new Date(+now - overdueMinutes * 60_000), nextWakeReason: "device-sync.reconcile" }]);
+    const pending: DeviceImportObservation = {
+      subjectKey: hostedRuntimeLogSubjectKey("synthetic-active"), connectionKey: "a".repeat(64),
+      attemptId: "synthetic-attempt", at: new Date(+now - 45 * 60_000),
+      eventCode: "device-sync.pass_finished", pending: true, progressed: false,
+      checkpointAccepted: false, restarted: false, cancelled: false,
+    };
+    mocks.logQuery.mockResolvedValueOnce({ rows: [pending, { ...pending,
+      at: new Date(+pending.at + 1_000), eventCode: "checkpoint.snapshot_finished",
+      connectionKey: null, pending: null, checkpointAccepted: true,
+    }] });
+
+    expect((await readDeviceImportHealth({ now })).stalled.anomalous).toBe(stalled);
+  });
+
+  it("still detects repeated no-progress passes before a future wake", async () => {
+    mocks.workspaces.mockResolvedValueOnce([{ userId: "synthetic-active",
+      nextWakeAt: new Date(+now + 30 * 60_000), nextWakeReason: "device-sync.reconcile" }]);
+    const rows: DeviceImportObservation[] = [20, 10, 1].map(minutesAgo => ({
+      subjectKey: hostedRuntimeLogSubjectKey("synthetic-active"), connectionKey: "a".repeat(64),
+      attemptId: "synthetic-attempt", at: new Date(+now - minutesAgo * 60_000),
+      eventCode: "device-sync.pass_finished", pending: true, progressed: false,
+      checkpointAccepted: false, restarted: false, cancelled: false,
+    }));
+    mocks.logQuery.mockResolvedValueOnce({ rows });
+
+    expect((await readDeviceImportHealth({ now })).stalled.anomalous).toBe(true);
+  });
+
   it("uses current admission authority and hashed subjects for the separate log database", async () => {
     await readDeviceImportHealth({ now });
     expect(mocks.allowed).toHaveBeenCalledWith(expect.objectContaining({ memberIds: ["synthetic-active", "synthetic-inactive"] }));
