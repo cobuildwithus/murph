@@ -88,12 +88,19 @@ Updated: 2026-09-15
 
 ## Candidate evidence
 
+- Draft PR: https://github.com/cobuildwithus/murph/pull/3496.
+
 - Architecture consultation: https://chatgpt.com/c/6aa9e0ad-f038-83ea-945f-6218535173bc.
 - Runtime restore suite: 32 tests passed; startup/checkpoint-race suites passed.
 - Existing mailbox importer and lightweight restore-preparation tests passed.
 - Cloudflare composed restore, mailbox port and inline-decode suites: 31 passed.
 - Assistant-runtime and Cloudflare typechecks passed; complexity ratchet passed
-  with no added debt in existing hotspots. Final candidate checks are pending.
+  with no added debt in existing hotspots. Final focused runtime run: 145 tests
+  passed across six suites. Web typecheck passed.
 - Actual production latency remains unmeasured for the new code; no deployment
   is included. The match test proves one fetch starts while restore is blocked
   and no second fetch is required before ordinary conversation staging.
+- Changelog archive: 10 tests passed after generating fragments. Reused existing
+  Frog reports `20260911184822-documented-changelog-test` and
+  `20260912202546-changelog-focused-test` for the documented command's working
+  directory/generated-input mismatch; no duplicate report was created.
