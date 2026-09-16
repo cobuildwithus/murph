@@ -45,3 +45,8 @@ Publish and review the SpO2/ECG diagnostics and recovery change while preserving
 - https://docs.junction.com/api-reference/data/timeseries/blood-oxygen
 - https://docs.junction.com/api-reference/data/timeseries/electrocardiogram-voltage
 - https://docs.junction.com/wearables/providers/data-attributions
+
+## PR tracking
+
+- Draft PR: https://github.com/cobuildwithus/murph/pull/3501
+- Parent review and focused proof passed. ReviewGPT and required CI start on the stable pushed head after readiness.
