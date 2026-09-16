@@ -18,6 +18,7 @@ import {
   type HostedRuntimeLatencyTraceStagedMilestones,
   type HostedRuntimeOrchestrationLatencyDiagnostics,
   type HostedRuntimeRedactedJson,
+  type HostedMailboxFetchResponse,
   type HostedMailboxLane,
   type HostedWorkspaceCheckpointResponse,
   type HostedWorkspaceInvocationProcessingMode,
@@ -131,6 +132,11 @@ import type {
   HostedAssistantWorkspaceRuntimeJobInput,
   HostedWorkspaceArtifactMaterializer,
 } from "./hosted-runtime/models.ts";
+import {
+  canUseHostedMailboxPrefixPrefetch,
+  HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
+  resolveHostedWorkspaceRunMailboxFetchLimit,
+} from "./hosted-runtime/mailbox-prefetch.ts";
 import {
   HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE,
   prefetchHostedMailboxPrefix,
@@ -449,7 +455,6 @@ export {
 
 const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
-const HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES = ["conversation", "system"] as const;
 const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
   "apply-member-channels-update",
   "apply-runtime-control-request",
@@ -563,6 +568,9 @@ async function readHostedVaultStoredFormatVersion(vaultRoot: string): Promise<nu
 }
 
 async function importHostedInitialMailboxForWorkspaceRunner(input: {
+  hasPendingWake?: boolean;
+  prefetch?: HostedMailboxPrefixPrefetch | null;
+  observePrefetchResponse?: (response: HostedMailboxFetchResponse) => HostedMailboxFetchResponse;
   plan: HostedInitialMailboxImportPlan;
   importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   lanes: readonly HostedMailboxLane[];
@@ -575,6 +583,8 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
   const prefetch = plan.bootstrapRequired
     ? null
     : await createHostedForegroundMailboxPrefetch({
+        prefetch: input.hasPendingWake ? null : input.prefetch,
+        observePrefetchResponse: input.observePrefetchResponse,
         lanes: input.prefetchLanes,
         limitPerLane: input.runnerInput.limitPerLane,
         requestId: input.requestId,
@@ -611,6 +621,8 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
 }
 
 async function createHostedForegroundMailboxPrefetch(input: {
+  prefetch?: HostedMailboxPrefixPrefetch | null;
+  observePrefetchResponse?: (response: HostedMailboxFetchResponse) => HostedMailboxFetchResponse;
   lanes: readonly HostedMailboxLane[];
   limitPerLane: number;
   requestId: string;
@@ -620,6 +632,18 @@ async function createHostedForegroundMailboxPrefetch(input: {
   const state = await readHostedMailboxImportState({
     vaultRoot: input.runnerInput.vaultRoot,
   });
+  if (input.prefetch && canUseHostedMailboxPrefixPrefetch({
+    lanes: input.lanes,
+    limitPerLane: input.limitPerLane,
+    prefetch: input.prefetch,
+    state,
+  })) {
+    const response = input.observePrefetchResponse
+      ? input.prefetch.response.then(input.observePrefetchResponse)
+      : input.prefetch.response;
+    void response.catch(() => undefined);
+    return { ...input.prefetch, response };
+  }
   return prefetchHostedMailboxPrefix({
     lanes: input.lanes,
     limitPerLane: input.limitPerLane,
@@ -1980,6 +2004,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       importForegroundMailboxItem, importMailboxItem,
     });
     const {
+      initialMailboxPrefetch,
       restored,
       workspaceRead,
       workspaceRestoreDoneAt,
@@ -2084,18 +2109,20 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         runtimeOwnerHandoffRequested = true;
       }
     };
+    const observeMailboxResponse = (response: HostedMailboxFetchResponse): HostedMailboxFetchResponse => {
+      const customRevision = response.assistantCustomInferenceRevision;
+      observeInvocationAssistantProvider(customRevision == null
+        ? response.assistantProvider
+        : HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID);
+      if (customRevision != null && invocationRuntimeEnv.HOSTED_ASSISTANT_MODEL
+          !== buildHostedCustomInferenceModelAlias(customRevision)) {
+        runtimeOwnerHandoffRequested = true;
+      }
+      return response;
+    };
     const runnerMailboxPort: NonNullable<HostedRuntimePlatform["mailboxPort"]> = {
       async fetch(request, context) {
-        const response = await guardedMailboxPort.fetch(request, context);
-        const customRevision = response.assistantCustomInferenceRevision;
-        observeInvocationAssistantProvider(customRevision == null
-          ? response.assistantProvider
-          : HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID);
-        if (customRevision != null && invocationRuntimeEnv.HOSTED_ASSISTANT_MODEL
-            !== buildHostedCustomInferenceModelAlias(customRevision)) {
-          runtimeOwnerHandoffRequested = true;
-        }
-        return response;
+        return observeMailboxResponse(await guardedMailboxPort.fetch(request, context));
       },
       fetchPayload: guardedMailboxPort.fetchPayload.bind(guardedMailboxPort),
       ...(guardedMailboxPort.recordMemberActionOutcome
@@ -2609,6 +2636,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     let initialMailboxImportResult: HostedInitialMailboxImportResult;
     if (returnSystemMailboxBeforeInitialImport === null) {
       initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
+        hasPendingWake: initialPendingRuntimeWake !== null,
+        prefetch: initialMailboxPrefetch,
+        observePrefetchResponse: observeMailboxResponse,
         plan: initialMailboxImportPlan,
         importItemContext: initialMailboxImportContext,
         lanes: initialMailboxImportLanes,
@@ -9236,7 +9266,7 @@ function createHostedWorkspaceMailboxImportBudget(
     context: HostedWorkspaceRuntimeJobImportContext,
   ): Promise<HostedMailboxItemImportOutcome>;
 } {
-  const importLimit = resolveHostedWorkspaceRunMailboxLimit(maxMailboxItems);
+  const importLimit = maxMailboxItems ?? 50;
   let importAttempts = 0;
   let exhausted = false;
 
@@ -9309,14 +9339,6 @@ function parseHostedMailboxSeqOrNull(value: unknown): bigint | null {
     && /^(?:0|[1-9][0-9]*)$/u.test(value)
     ? BigInt(value)
     : null;
-}
-
-function resolveHostedWorkspaceRunMailboxLimit(value: number | null | undefined): number {
-  return value ?? 50;
-}
-
-function resolveHostedWorkspaceRunMailboxFetchLimit(importLimit: number): number {
-  return importLimit >= Number.MAX_SAFE_INTEGER ? importLimit : importLimit + 1;
 }
 
 function resolveHostedWorkspaceInvocationStatus(input: {
