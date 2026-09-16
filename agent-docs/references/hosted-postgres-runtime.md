@@ -123,8 +123,8 @@ Strong delete consistency alone does not cancel a concurrent write.
 ## Rolling migration readiness
 
 Production migration remains a separate authorized operation. The rolling
-implementation is not yet a complete operational release: legacy creation
-closure, the hosted fleet driver, composed rehearsal and final review are still
+implementation is not yet a complete operational release: the hosted fleet
+driver, composed creation-closure proof, rehearsal and final review are still
 required. Do not use the older `migrateHostedLegacyRuntime` helper for a rolling
 rollout; it still begins fleet draining and stops at its first held object.
 
@@ -142,6 +142,23 @@ cannot clear the frozen source. Empty-object migration closes callbacks, waits
 for admitted work and rechecks emptiness before persisting a freeze. It exports
 four hashed empty pages without constructing a runner or initializing SQL.
 Account for empty and deleted/resource-only objects as well as active members.
+
+Legacy source access records durable materialization intent before obtaining a
+stub. The source rechecks registration on activation before ordinary RPCs can
+initialize storage. Provider discovery and these intents form one inventory;
+closing creation preserves registered legacy execution while preventing new
+unregistered sources. A stale route returns retry rather than trying another
+backend in the same operation. Seal only after reconciling discovery with the
+closed creation boundary and proving compatible serving-version convergence.
+
+After every sealed source has a terminal disposition, `settle_unmaterialized`
+handles one remaining default owner per call. It accepts only idle, generation
+zero identities without a migration or target and with no nonempty bound
+source. Ownership and an encrypted maintenance wake commit together; deleted
+members receive no wake. This accounts for lost first-use requests and admitted
+but empty sources without inventing execution history. Existing mailbox recovery
+owns a lost wake signal. Final campaign activation still independently rejects
+any remaining legacy owner or incomplete source.
 
 Managed checkpoint uploads use an exact, durably admitted multipart upload ID.
 Trusted completion seals the upload and streams the stored encrypted bytes to

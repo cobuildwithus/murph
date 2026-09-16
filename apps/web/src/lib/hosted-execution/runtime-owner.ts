@@ -62,7 +62,7 @@ export async function claimHostedRuntime(input: {
     };
     const owner = existing
       ? await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data })
-      : await tx.hostedRuntimeOwner.create({ data: { ...data, userId: input.userId } });
+      : await tx.hostedRuntimeOwner.create({ data: { ...data, userId: input.userId, migrationPhase: "postgres" } });
     return { status: "claimed", owner };
   }, OWNER_TRANSACTION_OPTIONS);
 }

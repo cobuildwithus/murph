@@ -1,4 +1,5 @@
-import { usesPostgresRuntimeOwner } from "../../runtime-cutover.ts";
+import { resolveAdmittedLegacyUserRunner } from "../../legacy-runtime-admission.ts";
+import { HostedRuntimeMemberMigratingError, usesPostgresRuntimeOwner } from "../../runtime-cutover.ts";
 import { readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
 import {
   emitHostedExecutionStructuredLog,
@@ -331,8 +332,13 @@ async function runRuntimeEnsureProcessingForUser(input: {
   };
   const postgres = await ensurePostgresRuntimeProcessing(input.context.env, command);
   if (postgres) return postgres;
-  const stub = input.context.env.USER_RUNNER.getByName(input.userId);
-  return stub.ensureRuntimeProcessingForUser(command);
+  try {
+    const stub = await resolveAdmittedLegacyUserRunner(input.context.env, input.userId);
+    return await stub.ensureRuntimeProcessingForUser(command);
+  } catch (error) {
+    if (!(error instanceof HostedRuntimeMemberMigratingError)) throw error;
+    return { kind: "retry_later", retryAt: new Date(Date.now() + 3_000).toISOString() };
+  }
 }
 
 export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {

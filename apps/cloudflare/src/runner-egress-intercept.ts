@@ -1,3 +1,4 @@
+import { resolveAdmittedLegacyUserRunner } from "./legacy-runtime-admission.ts";
 import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
 import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import { authorizePostgresRuntimeProvider } from "./runtime-provider-authorization.ts";
@@ -3699,7 +3700,7 @@ async function authorizeHostedProviderEgressCredential(input: {
     });
     return postgresProviderAuthorization(validation, { startedAt, userId: verification.claims.userId, mode: "provider_egress_credential", runtimeAuthorityHeadersPresent, providerEgressTokenPresent });
   }
-  const runner = input.env.USER_RUNNER.getByName(verification.claims.userId);
+  const runner = await resolveAdmittedLegacyUserRunner(input.env, verification.claims.userId);
   if (typeof runner.validateRuntimeProviderEgressCredential !== "function") {
     return {
       authorized: false,
@@ -3771,7 +3772,7 @@ async function authorizeHostedProviderEgressToken(input: {
     });
     return postgresProviderAuthorization(validation, { ...input, userId: input.activeUserId, mode: "provider_egress_token" });
   }
-  const runner = input.env.USER_RUNNER.getByName(input.activeUserId);
+  const runner = await resolveAdmittedLegacyUserRunner(input.env, input.activeUserId);
   if (typeof runner.validateRuntimeProviderEgressToken !== "function") {
     return {
       authorized: false,

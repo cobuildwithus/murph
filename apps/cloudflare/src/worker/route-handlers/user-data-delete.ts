@@ -1,3 +1,4 @@
+import { resolveAdmittedLegacyUserRunner } from "../../legacy-runtime-admission.ts";
 import { usesPostgresRuntimeOwner } from "../../runtime-cutover.ts";
 import { deletePostgresRunnerUserData } from "../../runtime-user-control.ts";
 import {
@@ -75,7 +76,7 @@ export async function handleUserDataDeleteRoute(
 
   const result = (await usesPostgresRuntimeOwner(context.env, userId))
     ? await deletePostgresRunnerUserData(context.env, userId)
-    : await context.env.USER_RUNNER.getByName(userId).deleteHostedUserData(userId);
+    : await (await resolveAdmittedLegacyUserRunner(context.env, userId)).deleteHostedUserData(userId);
   if (typeof result === "object" && result !== null && "ok" in result && result.ok === false) {
     const retryAfterSeconds = "retryAfterSeconds" in result
       && typeof result.retryAfterSeconds === "number"

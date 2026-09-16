@@ -1,3 +1,4 @@
+import { resolveAdmittedLegacyUserRunner } from "./legacy-runtime-admission.ts";
 import type { HostedWorkspaceSnapshotUploadSession } from "@murphai/hosted-execution/workspace-snapshot-store";
 import { HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE } from "@murphai/hosted-execution/workspace-snapshot-store";
 import type { HostedRuntimeManagedSnapshotUpload } from "@murphai/hosted-execution/runtime-resources";
@@ -12,7 +13,7 @@ type SnapshotSource = Readonly<Record<string, unknown>> & Pick<WorkerEnvironment
 
 async function commandSnapshotUpload(input: { source: SnapshotSource; userId: string; command: HostedRuntimeManagedSnapshotCommand }) {
   if (await usesPostgresRuntimeOwner(input.source, input.userId)) return commandHostedRuntimeSnapshot(input);
-  const stub = input.source.USER_RUNNER.getByName(input.userId);
+  const stub = await resolveAdmittedLegacyUserRunner(input.source, input.userId);
   if (!stub.manageHostedWorkspaceSnapshotUpload) throw new Error("Legacy runtime does not support managed snapshots.");
   const result = parseHostedRuntimeSnapshotResponse(await stub.manageHostedWorkspaceSnapshotUpload({ userId: input.userId, command: input.command }));
   if (result.managedUpload && result.managedUpload.userId !== input.userId) throw new Error("Managed snapshot member mismatch.");

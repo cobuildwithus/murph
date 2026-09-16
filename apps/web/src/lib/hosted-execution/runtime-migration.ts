@@ -1,3 +1,5 @@
+import { closeLegacyCreationTx, discoverRuntimeObjectsTx, listRuntimeInventoryTx, requireRollingInventoryPageTx } from "./runtime-migration-inventory";
+import { settleUnmaterializedRuntime } from "./runtime-migration-unmaterialized";
 import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient, type HostedRuntimeCutover } from "@prisma/client";
 import { parseHostedRuntimeMigrationCommand, type HostedRuntimeMigrationCommand, type LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
@@ -15,17 +17,21 @@ type MigrationCommand = Exclude<HostedRuntimeMigrationCommand, { operation: "sta
 export async function executeHostedRuntimeMigrationCommand(input: { prisma: PrismaClient; command: HostedRuntimeMigrationCommand }) {
   const command = parseHostedRuntimeMigrationCommand(input.command);
   if (command.operation === "status") return { gate: await input.prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } }) };
+  if (command.operation === "settle_unmaterialized") return settleUnmaterializedRuntime({ prisma: input.prisma, command });
   if (command.operation === "inspect_object" || command.operation === "advance_member" || command.operation === "advance_empty") throw new Error("Live member migration belongs to the source Worker.");
   const resources = command.operation === "import" || command.operation === "import_member" || command.operation === "import_empty" ? await validatePage(command.page) : null;
   if (isMemberMigrationCommand(command)) return withMemberMigrationWake({ prisma: input.prisma, command,
     run: prepared => input.prisma.$transaction(tx => executeMemberTx(tx, command, resources, prepared), { maxWait: 5_000, timeout: 5_000 }) });
   return input.prisma.$transaction(async tx => {
-    if (command.operation === "read_object" || command.operation === "import_empty") await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
+    if (command.operation === "read_object" || command.operation === "import_empty" || command.operation === "list_inventory") await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
     else await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR UPDATE`;
     const gate = await tx.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
     if (command.operation === "begin" || command.operation === "begin_rolling") return { gate: await beginTx(tx, gate, command) };
     requireIdentity(gate, command);
     switch (command.operation) {
+      case "discover": return { gate: await discoverRuntimeObjectsTx(tx, gate, command) };
+      case "close_legacy_creation": return { gate: await closeLegacyCreationTx(tx, gate) };
+      case "list_inventory": return listRuntimeInventoryTx(tx, gate, command.after);
       case "inventory": return { gate: await inventoryTx(tx, gate, command) };
       case "read_object": return { object: projectImport(await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: command.objectId } })) };
       case "import_empty": {
@@ -44,7 +50,7 @@ async function executeMemberTx(tx: Prisma.TransactionClient,
   await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
   const gate = await tx.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
   requireIdentity(gate, command);
-  if (gate.phase !== "rolling" || !gate.inventorySealedAt) throw new Error("Member migration requires a sealed rolling campaign.");
+  if (gate.phase !== "rolling" || !gate.inventorySealedAt || !gate.creationClosedAt) throw new Error("Member migration requires a sealed rolling campaign.");
   if (command.operation === "read_member") return { member: await readMemberMigrationTx(tx, command) };
   const owner = await lockMemberMigrationTx(tx, command);
   if (command.operation !== "import_member") return { member: await transitionMemberMigrationTx({ tx, command, owner, preparedWake }) };
@@ -72,6 +78,7 @@ function requireIdentity(gate: HostedRuntimeCutover, command: MigrationCommand) 
 async function inventoryTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover, command: Extract<MigrationCommand, { operation: "inventory" }>) {
   if ((gate.phase !== "draining" && gate.phase !== "rolling") || gate.inventorySealedAt || command.after !== gate.inventoryAfter
     || (!command.complete && command.objectIds.length === 0)) throw new Error("Migration inventory cursor is stale or sealed.");
+  if (gate.phase === "rolling") await requireRollingInventoryPageTx(tx, gate, command);
   let previous = gate.inventoryAfter;
   let hash = gate.inventoryHash!;
   for (const id of command.objectIds) {
@@ -79,7 +86,7 @@ async function inventoryTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCuto
     hash = digest(`${hash}\n${id}`);
     previous = id;
   }
-  if (command.objectIds.length) await tx.hostedRuntimeLegacyImport.createMany({ data: command.objectIds.map(objectId => ({ objectId, nextCursor: INITIAL_CURSOR })) });
+  if (gate.phase === "draining" && command.objectIds.length) await tx.hostedRuntimeLegacyImport.createMany({ data: command.objectIds.map(objectId => ({ objectId, nextCursor: INITIAL_CURSOR })) });
   return tx.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: {
     inventoryAfter: previous, inventoryHash: hash, inventoryCount: { increment: command.objectIds.length },
     ...(command.complete ? { inventorySealedAt: new Date() } : {}),
@@ -120,6 +127,7 @@ async function importHighWaterTx(tx: Prisma.TransactionClient, userId: string, g
 async function activateTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover, command: Extract<MigrationCommand, { operation: "activate" }>) {
   if (!gate.inventorySealedAt || command.inventoryHash !== gate.inventoryHash || command.inventoryCount !== gate.inventoryCount) throw new Error("Final namespace inventory does not match the sealed inventory.");
   if (gate.phase === "postgres") return gate;
+  if (gate.phase === "rolling" && !gate.creationClosedAt) throw new Error("Legacy creation remains open.");
   if (gate.phase !== "draining" && gate.phase !== "rolling") throw new Error("Postgres activation requires a migration campaign.");
   if (await tx.hostedRuntimeLegacyImport.findFirst({ where: { completedAt: null }, select: { objectId: true } })) throw new Error("Legacy resource import is incomplete.");
   if (gate.phase === "rolling" && await tx.hostedRuntimeOwner.findFirst({ where: { migrationPhase: { not: "postgres" } }, select: { userId: true } })) throw new Error("Legacy member ownership remains during migration.");

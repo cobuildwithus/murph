@@ -30,6 +30,7 @@ export interface HostedRuntimeOwnerSnapshot {
 
 export type HostedRuntimeOwnerCommand =
   | { operation: "reconcile" }
+  | { operation: "resolve_legacy"; objectId: string; workerVersion: string }
   | { operation: "deletion_ready" }
   | { operation: "target_retired"; runnerContainerName: string }
   | { operation: "authorize_provider"; runnerContainerName: string | null; providerEgressTokenHash: string | null; providerKind: string }
@@ -55,6 +56,12 @@ export function parseHostedRuntimeOwnerCommand(value: unknown): HostedRuntimeOwn
   const r = requireObject(value, "Runtime ownership command");
   const operation = requireString(r.operation, "Runtime ownership operation");
   if (operation === "reconcile" || operation === "deletion_ready") return { operation };
+  if (operation === "resolve_legacy") {
+    const objectId = requireString(r.objectId, "Legacy object identity");
+    const workerVersion = requireString(r.workerVersion, "Legacy serving version");
+    if (!/^[a-f0-9]{64}$/u.test(objectId) || !/^[A-Za-z0-9_-]{1,128}$/u.test(workerVersion)) throw new TypeError("Legacy materialization identity is invalid.");
+    return { operation, objectId, workerVersion };
+  }
   if (operation === "target_retired") return { operation, runnerContainerName: requireString(r.runnerContainerName, "Retired target") };
   if (operation === "claim") return { operation, processingMode: parseAllowedString(r.processingMode, "Runtime processing mode", HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES) };
   if (operation === "authorize_provider") return parseProviderAuthorization(r);

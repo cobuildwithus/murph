@@ -9,7 +9,7 @@ import { completeManagedSnapshotForSession, presignManagedSnapshot } from "../sr
 
 const resource = vi.hoisted(() => ({ command: vi.fn(), postgres: true }));
 vi.mock("../src/runtime-resource-client.ts", () => ({ commandHostedRuntimeSnapshot: resource.command }));
-vi.mock("../src/runtime-cutover.ts", () => ({ usesPostgresRuntimeOwner: async () => resource.postgres }));
+vi.mock("../src/runtime-cutover.ts", async original => ({ ...await original<typeof import("../src/runtime-cutover.ts")>(), usesPostgresRuntimeOwner: async () => resource.postgres }));
 
 const bytes = new TextEncoder().encode("synthetic encrypted snapshot bytes");
 const encryptedSha256 = createHash("sha256").update(bytes).digest("hex");

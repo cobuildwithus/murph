@@ -91,6 +91,10 @@ export type HostedRuntimeMigrationCommand =
   | { operation: "status" }
   | ({ operation: "begin" } & HostedRuntimeMigrationIdentity)
   | ({ operation: "begin_rolling" } & HostedRuntimeMigrationIdentity)
+  | ({ operation: "close_legacy_creation" } & HostedRuntimeMigrationIdentity)
+  | ({ operation: "settle_unmaterialized" } & HostedRuntimeMigrationIdentity)
+  | ({ operation: "discover"; objectIds: string[]; complete: boolean } & HostedRuntimeMigrationIdentity)
+  | ({ operation: "list_inventory"; after: string } & HostedRuntimeMigrationIdentity)
   | ({ operation: "inventory"; after: string; objectIds: string[]; complete: boolean } & HostedRuntimeMigrationIdentity)
   | ({ operation: "read_object"; objectId: string } & HostedRuntimeMigrationIdentity)
   | ({ operation: "inspect_object"; objectId: string } & HostedRuntimeMigrationIdentity)
@@ -125,21 +129,35 @@ export function parseHostedRuntimeMigrationCommand(value: unknown): HostedRuntim
   const identity = { namespaceId: migrationIdentifier(record.namespaceId), workerVersion: migrationIdentifier(record.workerVersion) };
   const member = parseMemberMigrationCommand(record, identity);
   if (member) return member;
+  const campaign = parseCampaignMigrationCommand(record, identity);
+  if (campaign) return campaign;
   switch (record.operation) {
     case "advance_member": return { operation: "advance_member", ...identity, ...memberMigrationIdentity(record) };
-    case "begin":
-    case "begin_rolling": return { operation: record.operation, ...identity };
-    case "inventory": return parseInventoryCommand(record, identity);
     case "advance_empty":
     case "read_object":
     case "inspect_object": return { operation: record.operation, ...identity, objectId: migrationDigest(record.objectId) };
     case "import_empty":
     case "import": return { operation: record.operation, ...identity, objectId: migrationDigest(record.objectId), page: parseLegacyRuntimeExportPage(record.page) };
+    default: throw new TypeError("Runtime migration operation is invalid.");
+  }
+}
+function parseCampaignMigrationCommand(record: Record<string, unknown>, identity: HostedRuntimeMigrationIdentity): HostedRuntimeMigrationCommand | null {
+  switch (record.operation) {
+    case "begin":
+    case "close_legacy_creation":
+    case "settle_unmaterialized":
+    case "begin_rolling": return { operation: record.operation, ...identity };
+    case "inventory": return parseInventoryCommand(record, identity);
+    case "discover": {
+      const page = parseInventoryCommand({ ...record, after: "" }, identity);
+      return { operation: "discover", ...identity, objectIds: page.objectIds, complete: page.complete };
+    }
+    case "list_inventory": return { operation: "list_inventory", ...identity, after: record.after === "" ? "" : migrationDigest(record.after) };
     case "activate": {
       if (typeof record.inventoryCount !== "number" || !Number.isSafeInteger(record.inventoryCount) || record.inventoryCount < 0) throw new TypeError("Migration inventory count is invalid.");
       return { operation: "activate", ...identity, inventoryHash: migrationDigest(record.inventoryHash), inventoryCount: record.inventoryCount };
     }
-    default: throw new TypeError("Runtime migration operation is invalid.");
+    default: return null;
   }
 }
 function migrationIdentifier(value: unknown): string {

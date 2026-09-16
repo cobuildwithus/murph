@@ -220,3 +220,29 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
   control routing; creation/inventory closure; hosted
   operator; composed rehearsal; owner documentation and final review/CI. Keep
   the PR draft and the production campaign inactive until those are complete.
+- Added durable legacy materialization intent before Worker source lookup and
+  a source-side activation check before ordinary RPCs initialize storage. The
+  provider census and admission intents share one ordered inventory. Creation
+  closure preserves known legacy execution, rejects stale release admission,
+  and routes an older member's previously unmaterialized first use to Postgres.
+  Final inventory sealing rejects omissions and remains closed to new sources.
+- Source admission races now return ordinary processing retry or HTTP 503 for
+  user controls without calling a second backend. Worker typecheck and 21
+  focused source-admission/processing/control tests pass.
+- Added bounded settlement for default legacy owners left by lost first-use
+  requests or completed empty imports. It requires a closed sealed census and
+  all source dispositions, rejects prior generation/attempt/target authority,
+  and commits one ordinary encrypted wake with activation. Existing mailbox
+  recovery handles lost signals; deleted identities receive no wake. Concurrent
+  settlement/retry proof and ordinary member import proof pass against isolated
+  PostgreSQL: twelve tests across three files, including refusal to activate an
+  empty receipt while creation remains open. Web and shared typechecks pass.
+- Broader affected Worker verification passes: 507 tests across six files,
+  including the HTTP route suite. The legacy operator's two regression tests
+  pass; that operator still requires replacement for rolling migration. The
+  campaign parser now separates campaign commands from object commands; shared
+  typecheck, complexity guard and documentation drift checks pass.
+- The hosted operator still needs durable one-at-a-time selection, resumable
+  advancement and final accounting. Late empty objects from old Worker requests
+  require composed serving-version/creation-closure proof before deployment;
+  no production mutation or handoff timing claim has been made.

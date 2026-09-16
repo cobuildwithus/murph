@@ -253,6 +253,7 @@ export interface WorkerUserRunnerNamespaceLike<
   TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
 > {
   getByName(name: string): TStub;
+  idFromName?(name: string): { toString(): string };
   idFromString?(id: string): unknown;
   get?(id: unknown): TStub;
 }

@@ -39,6 +39,7 @@ export interface DurableObjectStorageLike {
 }
 
 export interface DurableObjectStateLike {
+  id?: { toString(): string };
   storage: DurableObjectStorageLike;
   waitUntil(promise: Promise<unknown>): void;
 }
