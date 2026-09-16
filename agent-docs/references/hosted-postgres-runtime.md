@@ -28,8 +28,8 @@ by creation. The trigger takes a nonblocking shared campaign lock because some
 creators already hold identity/family locks. The current helper acquires that lock
 before insertion to return the existing retryable setup error; an old writer's
 contended insert fails atomically for retry. Neither path waits in an inverted
-lock order. Initial canonical enrollment is implemented below; late-source enrollment and
-automatic first-use progress for pending members remain release prerequisites.
+lock order. Canonical and late-source enrollment and automatic first-use progress are
+implemented below; composed onboarding/rollout proof remains a release prerequisite.
 
 The `UserRunnerDurableObject` implementation remains a finite migration bridge.
 Descriptions of its runtime ownership in the mailbox protocol apply only before
@@ -131,7 +131,7 @@ Strong delete consistency alone does not cancel a concurrent write.
 
 Production migration remains a separate authorized operation. The rolling
 implementation is not yet a complete operational release: canonical enrollment,
-late-source recovery, automatic first-use handoff, release compatibility,
+late-source recovery, automatic first-use handoff proof, release compatibility,
 composed rehearsal and final public review are still required. `migrateHostedLegacyRuntime` now starts a rolling campaign, reconciles
 provider discovery with creation intents, closes legacy creation and seals the
 ordered inventory. It never invokes the old fleet-draining path.
@@ -158,8 +158,7 @@ exists, including discoveries before the first baseline seal page. The source st
 sources cannot be relabeled empty or merged into an active Postgres owner.
 Encrypted legacy deletion payloads are not covered by the resource-table query;
 release proof must separately account for those runtime identities. Enrollment
-alone proves neither empty source nor completed member handoff. Automatic first
-use remains a release prerequisite.
+alone proves neither empty source nor completed member handoff.
 
 `next_object` persists one selected source before any local barrier can close.
 Concurrent operators and lost reservation replies keep that source selected even
@@ -169,6 +168,25 @@ empty imports/activation reject a different selection; the pointer has no expiry
 unfinished selection uses a single read-only statement without the campaign lock;
 every source effect rechecks it, so stale hints can only fail. Actual selection
 changes take a short exclusive transaction. Baseline work precedes late work.
+
+Ordinary ensure-processing retries drive one bounded migration continuation when
+Postgres reports draining or a legacy attempt returns retry during quiescence.
+The capability flag must be enabled and the campaign closed/sealed. The Worker
+enrolls the caller's deterministic source before obtaining a stub. Repeated
+exact enrollment is acknowledged from a read-only statement snapshot; it does
+not acquire the campaign lock or grant execution authority. New/conflicting
+bindings still enter the existing transaction and validation path.
+
+`select_first_use` resumes an unfinished durable selection or selects only the
+caller's pending/late source. It cannot start the next legacy baseline member
+after an operator canary. Every effect still validates current selection. The
+continuation uses the same deterministic token, frozen exports and activation
+as the operator. All its external steps share the original request deadline;
+a late acknowledgement cannot start the next step after timeout. The existing
+mailbox/Temporal retry owner requests the next continuation, and a subsequent
+request re-reads ownership before starting Postgres. No second scheduler or
+fleet enumeration runs in this path. Earlier paused sources resume before the
+caller's source, preserving one planned handoff at a time.
 
 The operator derives a stable token from namespace, object and member identity.
 It polls checkpoint/freeze progress within the same bounded run, avoiding workflow

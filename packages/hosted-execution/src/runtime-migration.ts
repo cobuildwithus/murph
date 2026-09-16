@@ -88,6 +88,7 @@ export type HostedRuntimeMigrationCommand =
   | ({ operation: "advance_empty" | "activate_empty" } & HostedRuntimeObjectMigrationIdentity)
   | ({ operation: "import_empty"; page: LegacyRuntimeExportPage } & HostedRuntimeObjectMigrationIdentity)
   | ({ operation: "advance_member" } & HostedRuntimeMemberMigrationIdentity)
+  | ({ operation: "select_first_use"; userId: string } & HostedRuntimeObjectMigrationIdentity)
   | ({ operation: "list_unenrolled" | "enroll_members" } & HostedRuntimeMigrationIdentity)
   | ({ operation: "enroll_sources"; bindings: Array<{ userId: string; objectId: string }> } & HostedRuntimeMigrationIdentity)
   | { operation: "status" }
@@ -135,6 +136,7 @@ export function parseHostedRuntimeMigrationCommand(value: unknown): HostedRuntim
   const campaign = parseCampaignMigrationCommand(record, identity);
   if (campaign) return campaign;
   switch (record.operation) {
+    case "select_first_use": return { operation: "select_first_use", ...identity, objectId: migrationDigest(record.objectId), userId: requireString(record.userId, "Migration member") };
     case "advance_member": return { operation: "advance_member", ...identity, ...memberMigrationIdentity(record) };
     case "advance_empty":
     case "activate_empty":

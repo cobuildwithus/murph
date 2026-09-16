@@ -1,3 +1,5 @@
+import { progressRuntimeMigrationForMember } from "../../runtime-migration-progress.ts";
+import { createRuntimeProcessingCommandBudget } from "../../user-runner/runtime-command-budget.ts";
 import { resolveAdmittedLegacyUserRunner } from "../../legacy-runtime-admission.ts";
 import { HostedRuntimeMemberMigratingError, usesPostgresRuntimeOwner } from "../../runtime-cutover.ts";
 import { readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
@@ -330,13 +332,19 @@ async function runRuntimeEnsureProcessingForUser(input: {
     orchestration: input.orchestration,
     userId: input.userId,
   };
+  const progressMigration = () => progressRuntimeMigrationForMember({ source: input.context.env, userId: input.userId,
+    budget: createRuntimeProcessingCommandBudget({ commandTimeoutMs: input.commandTimeoutMs,
+      startedAtMs: input.commandStartedAtEpochMs, webControlTimeoutMs: input.context.environment.webControlTimeoutMs }) });
   const postgres = await ensurePostgresRuntimeProcessing(input.context.env, command);
   if (postgres) return postgres;
   try {
     const stub = await resolveAdmittedLegacyUserRunner(input.context.env, input.userId);
-    return await stub.ensureRuntimeProcessingForUser(command);
+    const result = await stub.ensureRuntimeProcessingForUser(command);
+    if (result.kind === "retry_later") await progressMigration();
+    return result;
   } catch (error) {
     if (!(error instanceof HostedRuntimeMemberMigratingError)) throw error;
+    await progressMigration();
     return { kind: "retry_later", retryAt: new Date(Date.now() + 3_000).toISOString() };
   }
 }

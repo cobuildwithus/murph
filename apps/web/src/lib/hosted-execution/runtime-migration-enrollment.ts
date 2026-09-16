@@ -1,4 +1,4 @@
-import { Prisma, type HostedRuntimeCutover } from "@prisma/client";
+import { Prisma, type PrismaClient, type HostedRuntimeCutover } from "@prisma/client";
 import type { HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
 
 type Tx = Prisma.TransactionClient;
@@ -60,4 +60,24 @@ function requireEnrollmentPhase(gate: HostedRuntimeCutover) {
 
 export function runtimeInventoryClass(gate: HostedRuntimeCutover): "baseline" | "late" {
   return gate.creationClosedAt || gate.inventorySealedAt || gate.inventoryCount > 0 ? "late" : "baseline";
+}
+
+/** Idempotent acknowledgement from one statement snapshot. This grants no
+ * execution authority: later source operations still validate live selection.
+ * Avoid taking the exclusive campaign gate on every ordinary first-use retry.
+ */
+export async function runtimeSourcesAlreadyEnrolled(prisma: PrismaClient,
+  command: Extract<HostedRuntimeMigrationCommand, { operation: "enroll_sources" }>) {
+  const rows = await prisma.$queryRaw<Array<{ count: number }>>(Prisma.sql`
+    SELECT count(*)::integer AS count FROM hosted_runtime_cutover AS gate
+    JOIN (VALUES ${Prisma.join(command.bindings.map(row => Prisma.sql`(${row.objectId}, ${row.userId})`))})
+      AS binding(object_id, user_id) ON true
+    JOIN hosted_runtime_legacy_import AS source ON source.object_id = binding.object_id
+      AND source.admitted_user_id = binding.user_id
+      AND (source.user_id IS NULL OR source.user_id = binding.user_id)
+    JOIN hosted_runtime_owner AS owner ON owner.user_id = binding.user_id
+    WHERE gate.id = 'runtime' AND gate.phase = 'rolling'
+      AND gate.namespace_id = ${command.namespaceId} AND gate.worker_version = ${command.workerVersion}
+  `);
+  return rows[0]?.count === command.bindings.length;
 }

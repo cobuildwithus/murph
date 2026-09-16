@@ -57,12 +57,8 @@ export async function nextRuntimeObjectTx(tx: Tx, gate: HostedRuntimeCutover) {
   if (gate.phase !== "rolling" || !gate.inventorySealedAt || !gate.creationClosedAt) {
     throw new Error("Object selection requires a closed, sealed rolling campaign.");
   }
-  if (gate.selectedObjectId) {
-    const selected = await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: gate.selectedObjectId } });
-    const userId = selected.userId ?? selected.admittedUserId;
-    const owner = userId ? await tx.hostedRuntimeOwner.findUnique({ where: { userId } }) : null;
-    if (!selected.completedAt || (userId && owner?.migrationPhase !== "postgres")) return { objectId: selected.objectId };
-  }
+  const selectedObjectId = await unfinishedRuntimeSelectionTx(tx, gate);
+  if (selectedObjectId) return { objectId: selectedObjectId };
   const rows = await tx.$queryRaw<Array<{ objectId: string }>>`
     SELECT source.object_id AS "objectId"
     FROM hosted_runtime_legacy_import AS source
@@ -86,4 +82,32 @@ export async function requireRollingInventoryPageTx(tx: Tx, gate: HostedRuntimeC
   const rows = await tx.hostedRuntimeLegacyImport.findMany({ where: { inventoryClass: "baseline", objectId: { gt: command.after } }, orderBy: { objectId: "asc" }, take: command.objectIds.length + 1, select: { objectId: true } });
   if (rows.length < command.objectIds.length || command.objectIds.some((id, i) => rows[i]?.objectId !== id)
     || (command.complete && rows.length !== command.objectIds.length)) throw new Error("Rolling inventory page omits a registered legacy source.");
+}
+
+async function unfinishedRuntimeSelectionTx(tx: Tx, gate: HostedRuntimeCutover) {
+  if (gate.selectedObjectId) {
+    const selected = await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: gate.selectedObjectId } });
+    const userId = selected.userId ?? selected.admittedUserId;
+    const owner = userId ? await tx.hostedRuntimeOwner.findUnique({ where: { userId } }) : null;
+    if (!selected.completedAt || (userId && owner?.migrationPhase !== "postgres")) return selected.objectId;
+  }
+  return null;
+}
+
+/** Automatic first use may resume the existing selection or select its own
+ * pending/late source. It cannot advance the baseline fleet beyond an operator
+ * canary budget merely because an unrelated member retries processing.
+ */
+export async function selectFirstUseRuntimeObjectTx(tx: Tx, gate: HostedRuntimeCutover,
+  command: Extract<HostedRuntimeMigrationCommand, { operation: "select_first_use" }>) {
+  if (gate.phase !== "rolling" || !gate.inventorySealedAt || !gate.creationClosedAt) throw new Error("First-use selection requires a closed, sealed rolling campaign.");
+  const selected = await unfinishedRuntimeSelectionTx(tx, gate);
+  if (selected) return { objectId: selected };
+  const source = await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: command.objectId } });
+  if (source.admittedUserId !== command.userId || (source.userId !== null && source.userId !== command.userId)) throw new Error("First-use source identity changed.");
+  const owner = await tx.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: command.userId } });
+  if (owner.migrationPhase === "postgres" || (owner.migrationPhase === "legacy" && source.inventoryClass === "baseline")) return { objectId: null };
+  if (owner.migrationPhase !== "pending" && owner.migrationPhase !== "legacy") throw new Error("Unselected source already has migration authority.");
+  await tx.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { selectedObjectId: command.objectId } });
+  return { objectId: command.objectId };
 }

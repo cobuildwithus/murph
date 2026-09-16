@@ -1,5 +1,5 @@
-import { enrollRuntimeSourcesTx, listUnenrolledRuntimeMembersTx } from "./runtime-migration-enrollment";
-import { closeLegacyCreationTx, discoverRuntimeObjectsTx, listRuntimeInventoryTx, nextRuntimeObjectTx, readSelectedRuntimeObject, requireSelectedRuntimeObject, requireRollingInventoryPageTx } from "./runtime-migration-inventory";
+import { enrollRuntimeSourcesTx, listUnenrolledRuntimeMembersTx, runtimeSourcesAlreadyEnrolled } from "./runtime-migration-enrollment";
+import { closeLegacyCreationTx, discoverRuntimeObjectsTx, listRuntimeInventoryTx, nextRuntimeObjectTx, selectFirstUseRuntimeObjectTx, readSelectedRuntimeObject, requireSelectedRuntimeObject, requireRollingInventoryPageTx } from "./runtime-migration-inventory";
 import { activateEmptyRuntime, settleUnmaterializedRuntime } from "./runtime-migration-unmaterialized";
 import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient, type HostedRuntimeCutover } from "@prisma/client";
@@ -18,10 +18,11 @@ type MigrationCommand = Exclude<HostedRuntimeMigrationCommand, { operation: "sta
 export async function executeHostedRuntimeMigrationCommand(input: { prisma: PrismaClient; command: HostedRuntimeMigrationCommand }) {
   const command = parseHostedRuntimeMigrationCommand(input.command);
   if (command.operation === "status") return { gate: await input.prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } }) };
+  if (command.operation === "enroll_sources" && await runtimeSourcesAlreadyEnrolled(input.prisma, command)) return { enrolled: 0 };
   if (command.operation === "activate_empty") return activateEmptyRuntime({ prisma: input.prisma, command });
   if (command.operation === "settle_unmaterialized") return settleUnmaterializedRuntime({ prisma: input.prisma, command });
   if (command.operation === "enroll_members" || command.operation === "inspect_object" || command.operation === "advance_member" || command.operation === "advance_empty") throw new Error("Live member migration belongs to the source Worker.");
-  if (command.operation === "next_object") {
+  if (command.operation === "next_object" || command.operation === "select_first_use") {
     const objectId = await readSelectedRuntimeObject(input.prisma, command);
     if (objectId) return { objectId };
   }
@@ -41,6 +42,7 @@ export async function executeHostedRuntimeMigrationCommand(input: { prisma: Pris
       case "close_legacy_creation": return { gate: await closeLegacyCreationTx(tx, gate) };
       case "list_inventory": return listRuntimeInventoryTx(tx, gate, command.after);
       case "next_object": return nextRuntimeObjectTx(tx, gate);
+      case "select_first_use": return selectFirstUseRuntimeObjectTx(tx, gate, command);
       case "inventory": return { gate: await inventoryTx(tx, gate, command) };
       case "read_object":
         requireSelectedRuntimeObject(gate, command.objectId);

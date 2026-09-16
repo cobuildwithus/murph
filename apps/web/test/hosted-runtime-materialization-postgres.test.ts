@@ -138,6 +138,49 @@ describe.skipIf(!enabled)("finite legacy materialization census", () => {
     expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: late });
   });
 
+  it("automates pending first use without starting the next baseline member after a canary", async () => {
+    const baselineMember = await member(); const baselineObject = object();
+    await command({ operation: "begin_rolling", ...campaign });
+    await command({ operation: "enroll_sources", ...campaign, bindings: [{ userId: baselineMember, objectId: baselineObject }] });
+    await command({ operation: "discover", ...campaign, objectIds: [baselineObject], complete: true });
+    await command({ operation: "close_legacy_creation", ...campaign });
+    await command({ operation: "inventory", ...campaign, after: "", objectIds: [baselineObject], complete: true });
+    expect(await command({ operation: "select_first_use", ...campaign, userId: baselineMember, objectId: baselineObject })).toEqual({ objectId: null });
+    const created = await member(); const createdObject = object();
+    await command({ operation: "enroll_sources", ...campaign, bindings: [{ userId: created, objectId: createdObject }] });
+    await expect(command({ operation: "select_first_use", ...campaign, userId: created, objectId: baselineObject })).rejects.toThrow("source identity changed");
+    expect(await command({ operation: "select_first_use", ...campaign, userId: created, objectId: createdObject })).toEqual({ objectId: createdObject });
+    expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: createdObject });
+    // An ordinary baseline retry can help the selected handoff, but cannot
+    // select another baseline source after that handoff finishes.
+    expect(await command({ operation: "select_first_use", ...campaign, userId: baselineMember, objectId: baselineObject })).toEqual({ objectId: createdObject });
+    await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: createdObject }, data: { completedAt: new Date(), generation: 0n } });
+    await prisma.hostedRuntimeOwner.update({ where: { userId: created }, data: { migrationPhase: "postgres" } });
+    expect(await command({ operation: "select_first_use", ...campaign, userId: baselineMember, objectId: baselineObject })).toEqual({ objectId: null });
+    expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId: baselineMember } })).toMatchObject({ migrationPhase: "legacy" });
+    expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: baselineObject });
+  });
+
+  it("acknowledges repeated exact enrollment without contending with serving campaign readers", async () => {
+    const userId = await member(); const objectId = object();
+    await command({ operation: "begin_rolling", ...campaign });
+    const enroll = { operation: "enroll_sources" as const, ...campaign, bindings: [{ userId, objectId }] };
+    await command(enroll);
+    let release!: () => void; let locked!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const ready = new Promise<void>(resolve => { locked = resolve; });
+    const serving = prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
+      locked(); await held;
+    });
+    await ready;
+    const repeated = command(enroll);
+    try {
+      expect(await Promise.race([repeated, delay(1_000).then(() => "blocked")])).toEqual({ enrolled: 0 });
+    } finally { release(); await serving; await repeated; }
+    await expect(command({ ...enroll, workerVersion: "synthetic-stale" })).rejects.toThrow("serving Worker version changed");
+  });
+
   it("polls an unfinished selection without waiting for ordinary shared campaign holders", async () => {
     const source = object();
     await command({ operation: "begin_rolling", ...campaign });

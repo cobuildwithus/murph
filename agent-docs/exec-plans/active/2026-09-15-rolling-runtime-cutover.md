@@ -475,3 +475,35 @@ owner. The activation reply uses the ordinary member wake shape so the existing
 Web callback signals immediately instead of waiting for recovery polling. Automatic first use,
 release adoption, encrypted cleanup coverage, composed rehearsal and final public
 review remain release blockers. No production changes have occurred.
+
+
+## Automatic first-use progress
+
+A failing-before Worker orchestration test showed that repeated processing
+retries left a newly pending member permanently unactivated without an operator.
+The ordinary retry path now enrolls that exact source and advances one existing
+handoff continuation. It requires a compatible closed/sealed rolling campaign;
+legacy/global-draining/Postgres campaigns are never started or altered by it.
+Quiescing sources still route legacy for admitted callbacks, so the legacy RPC
+retry path also drives progress. Each external step shares the original request
+budget. A timed-out RPC may commit, but its late reply cannot start another step;
+the next ordinary retry recovers from source/canonical receipts.
+
+Automatic selection resumes an unfinished selection or chooses only the caller's
+pending/late source. It cannot migrate the next baseline member after a bounded
+operator canary. Real Postgres proof covers that boundary, explicit operator
+continuation and conflicting identity rejection. A second failing-before test
+showed repeated enrollment waiting on ordinary shared campaign holders; exact
+repeat bindings now receive a read-only acknowledgement without the exclusive
+gate. Source effects retain their live authority/selection checks.
+
+Validation passes: 26 real Postgres tests, 56 Worker migration/orchestration
+tests and eight focused HTTP ensure-processing cases, Web/Worker/shared
+typechecks and changed-source complexity including the new progress module.
+Disabled-capability proof confirms no migration calls on legacy deployments. The orchestration test completes four empty export pages and exact
+activation through retries, then starts Postgres without an operator. Boundary
+proof covers lost enrollment replies, serving mismatch, request expiry and
+resuming a different selected member with its own stable token. These remain
+local checks; live timing and composed rollout proof are outstanding. Future
+compatible release adoption and encrypted historical cleanup coverage are the
+next implementation requirements. Production remains unchanged.

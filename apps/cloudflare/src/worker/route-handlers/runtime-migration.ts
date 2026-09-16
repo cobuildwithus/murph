@@ -26,7 +26,7 @@ export const runtimeMigrationRoutes: readonly DeclarativeRoute<WorkerRouteContex
     if (command.operation === "inspect_object") return json(await inspectObject(context, command.objectId));
     if (!supportsPostgresRuntimeOwner(context.env)) throw new Error("Migration requires the Postgres-capable fleet deployment.");
     if (command.operation === "enroll_members") return json(await enrollRuntimeMembers(context.env, command));
-    if (command.operation === "enroll_sources" || command.operation === "list_unenrolled") throw new Error("Canonical source bindings must be derived by the Worker.");
+    if (command.operation === "enroll_sources" || command.operation === "list_unenrolled" || command.operation === "select_first_use") throw new Error("Canonical source bindings must be derived by the Worker.");
     if (command.operation === "advance_member") return json(await advanceRuntimeMemberMigration({ source: context.env,
       stub: exactLegacyObject(context, command.objectId), identity: command }));
     if (command.operation === "advance_empty") return json(await advanceRuntimeEmptyMigration({ source: context.env,

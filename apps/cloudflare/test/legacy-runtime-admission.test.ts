@@ -1,3 +1,4 @@
+import { progressRuntimeMigrationForMember } from "../src/runtime-migration-progress.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveAdmittedLegacyUserRunner } from "../src/legacy-runtime-admission.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
@@ -12,6 +13,7 @@ import { handleUserDataDeleteRoute } from "../src/worker/route-handlers/user-dat
 import { mapWorkerRouteError } from "../src/worker/errors.ts";
 
 vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
+vi.mock("../src/runtime-migration-progress.ts", () => ({ progressRuntimeMigrationForMember: vi.fn(async () => {}) }));
 vi.mock("../src/runtime-processing.ts", () => ({ ensurePostgresRuntimeProcessing: vi.fn(async () => null) }));
 const userId = "synthetic-admission-member";
 const objectId = "a".repeat(64);
@@ -34,7 +36,7 @@ function harness() {
 }
 
 describe("durable legacy materialization admission", () => {
-  beforeEach(() => { vi.mocked(commandHostedRuntimeOwner).mockReset().mockResolvedValue({ cutover: "legacy", status: "observed", owner: null }); });
+  beforeEach(() => { vi.mocked(progressRuntimeMigrationForMember).mockClear(); vi.mocked(commandHostedRuntimeOwner).mockReset().mockResolvedValue({ cutover: "legacy", status: "observed", owner: null }); });
 
   it("waits for intent acknowledgement before obtaining a legacy stub", async () => {
     const h = harness(); let release!: () => void;
@@ -98,7 +100,22 @@ describe("durable legacy materialization admission", () => {
       environment: readHostedExecutionEnvironment(createHostedExecutionTestEnv()), url, request }, userId);
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ kind: "retry_later", retryAt: expect.any(String) });
+    expect(progressRuntimeMigrationForMember).toHaveBeenCalledWith(expect.objectContaining({ source: h.source, userId,
+      budget: { deadlineAtMs: expect.any(Number) } }));
     expect(h.getByName).not.toHaveBeenCalled();
+  });
+
+  it("continues a quiescing source whose legacy RPC returns the ordinary retry response", async () => {
+    const h = harness();
+    h.source.USER_RUNNER.getByName = () => ({ bindUser: vi.fn(), deleteHostedUserData: vi.fn(),
+      publishHostedPrivateMedia: vi.fn(), runnerStatus: vi.fn(),
+      ensureRuntimeProcessingForUser: async () => ({ kind: "retry_later", retryAt: "2026-09-16T00:00:00.000Z" }) });
+    const url = new URL(`https://synthetic.example.test/internal/users/${userId}/runtime/ensure-processing`);
+    const response = await handleRuntimeEnsureProcessingRoute({ env: h.source,
+      environment: readHostedExecutionEnvironment(createHostedExecutionTestEnv()), url,
+      request: new Request(url, { method: "POST", body: JSON.stringify({ orchestrationAttemptId: "synthetic-orchestration" }) }) }, userId);
+    expect(await response.json()).toEqual({ kind: "retry_later", retryAt: "2026-09-16T00:00:00.000Z" });
+    expect(progressRuntimeMigrationForMember).toHaveBeenCalledOnce();
   });
 
   it("returns retryable deletion without touching either backend when source admission changes", async () => {
