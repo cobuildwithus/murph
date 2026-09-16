@@ -1,13 +1,23 @@
 import type { HostedWorkspaceSnapshotUploadSession } from "@murphai/hosted-execution/workspace-snapshot-store";
 import { HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE } from "@murphai/hosted-execution/workspace-snapshot-store";
 import type { HostedRuntimeManagedSnapshotUpload } from "@murphai/hosted-execution/runtime-resources";
-import type { R2BucketLike } from "./bundle-store.ts";
 import { completeManagedSnapshotUpload, prepareManagedSnapshotUpload } from "./managed-snapshot-upload.ts";
 import { commandHostedRuntimeSnapshot } from "./runtime-resource-client.ts";
 import { createHostedR2PresignedSnapshotPartUrl, readHostedR2PresignEnvironment } from "./r2-presigned-url.ts";
-import { asWorkerStringEnvironment } from "./worker-contracts.ts";
+import { asWorkerStringEnvironment, type WorkerEnvironmentContract } from "./worker-contracts.ts";
+import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
+import { parseHostedRuntimeSnapshotResponse, type HostedRuntimeManagedSnapshotCommand } from "@murphai/hosted-execution/runtime-resources";
 
-type SnapshotSource = Readonly<Record<string, unknown>> & { BUNDLES: R2BucketLike };
+type SnapshotSource = Readonly<Record<string, unknown>> & Pick<WorkerEnvironmentContract, "BUNDLES" | "USER_RUNNER">;
+
+async function commandSnapshotUpload(input: { source: SnapshotSource; userId: string; command: HostedRuntimeManagedSnapshotCommand }) {
+  if (await usesPostgresRuntimeOwner(input.source, input.userId)) return commandHostedRuntimeSnapshot(input);
+  const stub = input.source.USER_RUNNER.getByName(input.userId);
+  if (!stub.manageHostedWorkspaceSnapshotUpload) throw new Error("Legacy runtime does not support managed snapshots.");
+  const result = parseHostedRuntimeSnapshotResponse(await stub.manageHostedWorkspaceSnapshotUpload({ userId: input.userId, command: input.command }));
+  if (result.managedUpload && result.managedUpload.userId !== input.userId) throw new Error("Managed snapshot member mismatch.");
+  return result;
+}
 
 export async function presignManagedSnapshot(input: {
   source: SnapshotSource; session: HostedWorkspaceSnapshotUploadSession;
@@ -17,7 +27,7 @@ export async function presignManagedSnapshot(input: {
     bucket: input.source.BUNDLES, session: input.session,
     encryptedByteSize: input.encryptedByteSize, encryptedSha256: input.encryptedSha256,
     admit: async proposed => {
-      const result = await commandHostedRuntimeSnapshot({ source: input.source, userId: input.session.userId, command: {
+      const result = await commandSnapshotUpload({ source: input.source, userId: input.session.userId, command: {
         operation: "snapshot_managed_admit", expectedSession: input.session, uploadId: proposed.uploadId,
         encryptedByteSize: proposed.encryptedByteSize, encryptedSha256: proposed.encryptedSha256,
       } });
@@ -39,7 +49,7 @@ export async function completeManagedSnapshotForSession(input: {
   encryptedByteSize: number; encryptedSha256: string;
 }): Promise<string> {
   const { uploadId, etag } = parseManagedPart(input.part);
-  const result = await commandHostedRuntimeSnapshot({ source: input.source, userId: input.session.userId, command: {
+  const result = await commandSnapshotUpload({ source: input.source, userId: input.session.userId, command: {
     operation: "snapshot_managed_read", snapshotId: input.session.snapshotId,
     attemptId: input.session.attemptId, generation: input.session.leaseGeneration,
   } });
@@ -63,7 +73,7 @@ function parseManagedPart(part: unknown): { uploadId: string; etag: string } {
 }
 
 async function settle(source: SnapshotSource, receipt: HostedRuntimeManagedSnapshotUpload, verified: boolean): Promise<boolean> {
-  const result = await commandHostedRuntimeSnapshot({ source, userId: receipt.userId, command: {
+  const result = await commandSnapshotUpload({ source, userId: receipt.userId, command: {
     operation: "snapshot_managed_settled", snapshotId: receipt.snapshotId, uploadId: receipt.uploadId,
     attemptId: receipt.attemptId, generation: receipt.generation, verified,
   } });

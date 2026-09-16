@@ -147,6 +147,7 @@ export interface WorkerRunnerContainerNamespaceLike<
 }
 
 export interface WorkerUserRunnerStubLike {
+  manageHostedWorkspaceSnapshotUpload?(input: { userId: string; command: import("@murphai/hosted-execution/runtime-resources").HostedRuntimeManagedSnapshotCommand }): Promise<import("@murphai/hosted-execution/runtime-resources").HostedRuntimeSnapshotResponse>;
   inspectPostgresMigration?(): Promise<LegacyRuntimeInspection>;
   freezeForPostgresMigration?(): Promise<{ frozen: boolean }>;
   exportPostgresMigrationPage?(cursor: LegacyRuntimeExportCursor): Promise<LegacyRuntimeExportPage>;

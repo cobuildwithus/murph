@@ -3,6 +3,7 @@ import type { DurableObjectStateLike, DurableObjectSqlStorageLike } from "./type
 import { RUNNER_STATE_SCHEMA_VERSION } from "./runner-state-schema.ts";
 import { readLegacyRuntimeMigrationIdentity, requireLegacyRuntimeStorageCoverage } from "./legacy-runtime-export.ts";
 import { observeHostedBrowserVaultReplicaDirectPuts, readHostedWorkspaceSnapshotR2PutDrainUntil } from "./workspace-snapshot-sessions.ts";
+import { scanLegacyManagedSnapshots } from "./legacy-managed-snapshot.ts";
 
 /** Read supported existing storage directly. Never construct RunnerStateStore:
  * its schema initialization would mutate dormant objects during discovery.
@@ -32,6 +33,7 @@ export async function observeLegacyRuntime(state: DurableObjectStateLike): Promi
     workspaceVersion: meta?.active_workspace_version ?? null,
     snapshotPutDrainUntil, replicaPendingWrites: replica?.pendingWrites ?? 0,
     replicaRecoveryDrainUntil: replica?.recoveryDrainUntil ?? null,
+    managedSnapshotPendingUploads: identity.userId === null ? 0 : (await scanLegacyManagedSnapshots({ state, userId: identity.userId })).pending,
     observedAt: new Date().toISOString(),
   };
 }
@@ -45,7 +47,7 @@ function readExistingSchema(sql: DurableObjectSqlStorageLike) {
     : undefined;
   const version = typeof storedVersion === "number" && Number.isSafeInteger(storedVersion) ? storedVersion : null;
   const empty = tables.length === 0;
-  const supported = empty || (version === RUNNER_STATE_SCHEMA_VERSION && tables.length === 3
+  const supported = empty || ((version === 20 || version === RUNNER_STATE_SCHEMA_VERSION) && tables.length === 3
     && tables.includes("runner_meta") && tables.includes("runner_hosted_media_asset"));
   return { version, empty, supported };
 }

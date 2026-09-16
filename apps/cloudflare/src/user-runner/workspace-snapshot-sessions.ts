@@ -45,6 +45,8 @@ import type { RunnerStateStore } from "./runner-state-store.js";
 import type { DurableObjectStateLike } from "./types.js";
 import { safeCleanupErrorCode } from "./diagnostics.js";
 import { deleteR2ObjectIfSupported } from "./r2-delete.js";
+import { commandLegacyManagedSnapshot, readLegacyManagedSnapshot, abortLegacyManagedSnapshot } from "./legacy-managed-snapshot.ts";
+import { parseHostedRuntimeSnapshotCommand, type HostedRuntimeManagedSnapshotCommand, type HostedRuntimeSnapshotResponse } from "@murphai/hosted-execution/runtime-resources";
 
 export const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
 const WORKSPACE_SNAPSHOT_START_DIAGNOSTIC_MAX_DURATION_MS = 60_000;
@@ -80,6 +82,7 @@ type WorkspaceSnapshotSessionStateStore = Pick<
 >;
 
 export interface WorkspaceSnapshotSessionService {
+  manageSnapshotUpload(input: { userId: string; command: HostedRuntimeManagedSnapshotCommand }): Promise<HostedRuntimeSnapshotResponse>;
   cleanupOrphanCandidates(userId: string): Promise<void>;
   cleanupOrphanCandidatesBestEffort(userId: string): Promise<void>;
   completeCurrentOwner(input: {
@@ -147,10 +150,27 @@ export function createWorkspaceSnapshotSessionService(input: {
   runnerStoreCache: Pick<RunnerStoreCache, "ensure">;
   state: DurableObjectStateLike;
   stateStore: WorkspaceSnapshotSessionStateStore;
+  withSnapshotMutation<T>(run: () => Promise<T>): Promise<T>;
   readHostedWorkspaceFromWeb(userId: string): Promise<HostedWorkspaceReadResponse>;
   assertWorkspaceBelongsToRunnerUser(workspace: HostedWorkspaceState | null, userId: string): void;
 }): WorkspaceSnapshotSessionService {
   const service: WorkspaceSnapshotSessionService = {
+    async manageSnapshotUpload(manageInput) {
+      return input.withSnapshotMutation(async () => {
+        const command = parseHostedRuntimeSnapshotCommand(manageInput.command);
+        if (command.operation !== "snapshot_managed_admit" && command.operation !== "snapshot_managed_read" && command.operation !== "snapshot_managed_settled") throw new TypeError("Managed snapshot command is invalid.");
+        const expected = command.operation === "snapshot_managed_admit" ? command.expectedSession : null;
+        const snapshotId = expected?.snapshotId ?? ("snapshotId" in command ? command.snapshotId : "");
+        const session = command.operation === "snapshot_managed_settled" ? null : await service.read({ userId: manageInput.userId, snapshotId });
+        const suppliedOwner = expected ? { attemptId: expected.attemptId, leaseGeneration: expected.leaseGeneration }
+          : "attemptId" in command ? { attemptId: command.attemptId, leaseGeneration: command.generation } : null;
+        const ownsCurrentAttempt = session !== null && suppliedOwner !== null
+          && session.attemptId === suppliedOwner.attemptId && session.leaseGeneration === suppliedOwner.leaseGeneration
+          && (expected === null || workspaceSnapshotUploadSessionsMatchExactly(session, expected))
+          && await ownsWorkspaceSnapshotSessionOwner(input.stateStore, session);
+        return commandLegacyManagedSnapshot({ state: input.state, userId: manageInput.userId, command, currentSession: session, ownsCurrentAttempt });
+      });
+    },
     async admitBrowserVaultReplicaDirectPut(admitInput) {
       await input.stateStore.bindUser(admitInput.userId);
       const writeFence = await input.stateStore.validateWriteFenceToken({
@@ -215,62 +235,65 @@ export function createWorkspaceSnapshotSessionService(input: {
     },
 
     async rememberPresignedPut(rememberInput) {
-      const expectedSession = parseHostedWorkspaceSnapshotUploadSession(
-        rememberInput.expectedSession,
-        "Expected hosted workspace snapshot upload session",
-      );
-      await input.stateStore.bindUser(expectedSession.userId);
-      const currentValue = await input.state.storage.get<unknown>(
-        workspaceSnapshotUploadSessionCurrentStorageKey(),
-      );
-      if (currentValue === undefined) {
-        return null;
-      }
-      const currentSession = parseHostedWorkspaceSnapshotUploadSession(currentValue);
-      if (!workspaceSnapshotUploadSessionsMatchExactly(currentSession, expectedSession)) {
-        return null;
-      }
-      if (!await ownsWorkspaceSnapshotSessionOwner(input.stateStore, expectedSession)) {
-        return null;
-      }
-      const updatedSession = parseHostedWorkspaceSnapshotUploadSession({
-        ...currentSession,
-        r2PutDrainUntil: rememberInput.drainUntil,
-        r2PutExpiresAt: rememberInput.expiresAt,
-      });
+      return input.withSnapshotMutation(async () => {
+        const expectedSession = parseHostedWorkspaceSnapshotUploadSession(
+          rememberInput.expectedSession,
+          "Expected hosted workspace snapshot upload session",
+        );
+        await input.stateStore.bindUser(expectedSession.userId);
+        const currentValue = await input.state.storage.get<unknown>(
+          workspaceSnapshotUploadSessionCurrentStorageKey(),
+        );
+        if (currentValue === undefined) {
+          return null;
+        }
+        const currentSession = parseHostedWorkspaceSnapshotUploadSession(currentValue);
+        if (!workspaceSnapshotUploadSessionsMatchExactly(currentSession, expectedSession)) {
+          return null;
+        }
+        if (!await ownsWorkspaceSnapshotSessionOwner(input.stateStore, expectedSession)) {
+          return null;
+        }
+        if (await readLegacyManagedSnapshot(input.state, expectedSession.userId, expectedSession.snapshotId)) return null;
+        const updatedSession = parseHostedWorkspaceSnapshotUploadSession({
+          ...currentSession,
+          r2PutDrainUntil: rememberInput.drainUntil,
+          r2PutExpiresAt: rememberInput.expiresAt,
+        });
 
-      const previousDrainState = await input.state.storage.get<unknown>(
-        workspaceSnapshotR2PutDrainStorageKey(),
-      );
-      const previousDrainUntil = previousDrainState === undefined
-        ? null
-        : parseWorkspaceSnapshotR2PutDrainState(previousDrainState).drainUntil;
-      const drainUntil = selectLaterIsoTimestamp(
-        previousDrainUntil,
-        updatedSession.r2PutDrainUntil ?? null,
-      );
-      if (!drainUntil) {
-        throw new Error("Hosted workspace snapshot PUT drain deadline is unavailable.");
-      }
-      await input.state.storage.put(workspaceSnapshotR2PutDrainStorageKey(), {
-        drainUntil,
-        schema: WORKSPACE_SNAPSHOT_R2_PUT_DRAIN_STATE_SCHEMA,
-        userId: updatedSession.userId,
+        const previousDrainState = await input.state.storage.get<unknown>(
+          workspaceSnapshotR2PutDrainStorageKey(),
+        );
+        const previousDrainUntil = previousDrainState === undefined
+          ? null
+          : parseWorkspaceSnapshotR2PutDrainState(previousDrainState).drainUntil;
+        const drainUntil = selectLaterIsoTimestamp(
+          previousDrainUntil,
+          updatedSession.r2PutDrainUntil ?? null,
+        );
+        if (!drainUntil) {
+          throw new Error("Hosted workspace snapshot PUT drain deadline is unavailable.");
+        }
+        await input.state.storage.put(workspaceSnapshotR2PutDrainStorageKey(), {
+          drainUntil,
+          schema: WORKSPACE_SNAPSHOT_R2_PUT_DRAIN_STATE_SCHEMA,
+          userId: updatedSession.userId,
+        });
+        await input.state.storage.put(
+          workspaceSnapshotUploadSessionCurrentStorageKey(),
+          updatedSession,
+        );
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            r2PutDrainRecorded: true,
+          },
+          message: "Hosted runner recorded a snapshot PUT drain deadline.",
+          phase: "wake.running",
+          userId: updatedSession.userId,
+        });
+        return updatedSession;
       });
-      await input.state.storage.put(
-        workspaceSnapshotUploadSessionCurrentStorageKey(),
-        updatedSession,
-      );
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          r2PutDrainRecorded: true,
-        },
-        message: "Hosted runner recorded a snapshot PUT drain deadline.",
-        phase: "wake.running",
-        userId: updatedSession.userId,
-      });
-      return updatedSession;
     },
 
     async rememberReplacedSnapshotRef(rememberInput) {
@@ -580,6 +603,7 @@ export function createWorkspaceSnapshotSessionService(input: {
     },
 
     async cleanupOrphanCandidates(userId) {
+      return input.withSnapshotMutation(async () => {
       if (!input.bucket.delete || !input.state.storage.list) {
         return;
       }
@@ -699,6 +723,7 @@ export function createWorkspaceSnapshotSessionService(input: {
       }
       if (currentSession && sessionCleanupEligible) {
         try {
+          await abortLegacyManagedSnapshot({ state: input.state, bucket: input.bucket, userId, snapshotId: currentSession.snapshotId });
           await cleanupWorkspaceSnapshotUploadSessionObligations({
             bucket: input.bucket,
             currentObjectKey,
@@ -718,6 +743,7 @@ export function createWorkspaceSnapshotSessionService(input: {
       if (errors.length > 0) {
         throw errors[0];
       }
+      });
     },
 
     async read(readInput) {
@@ -1341,6 +1367,7 @@ async function cleanupWorkspaceSnapshotOrphanCandidate(input: {
     await input.state.storage.delete(input.key);
     return;
   }
+  await abortLegacyManagedSnapshot({ state: input.state, bucket: input.bucket, userId: candidate.userId, snapshotId: candidate.snapshotId });
   await cleanupV2WorkspaceSnapshotObligation({
     bucket: input.bucket,
     candidate,

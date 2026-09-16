@@ -132,14 +132,21 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
   tests pass. Web, Worker and shared-contract typechecks pass; complexity guard
   passes. The additive upload ledger migration is applied only to the isolated
   synthetic test database. Production remains unchanged.
-- Next upload work: add equivalent durable receipts to the legacy snapshot owner
-  and serialize managed/direct admission using its existing consent mutation
-  lock. Legacy cleanup, deletion, observational inspection and frozen export must
-  account for pending receipts; abort exact IDs before deletion or final freeze.
-  Switch new legacy uploads while each member remains live, then drain old direct
-  capabilities in the background before quiescence. No shorter deadline is being
-  assumed. The current Postgres-only implementation does not yet remove that
-  legacy handoff wait.
+- Extended controlled uploads to legacy members. Independent durable receipts
+  survive current-session replacement. Managed/direct admission and cleanup
+  share the existing consent mutex; exact abort precedes cleanup, member deletion
+  and final freeze. Unknown aborts retain state. Read-only inspection counts
+  pending receipts with bounded pages; frozen coverage rejects pending uploads.
+  Schema 21 prevents older writers from ignoring these obligations; inspection
+  accepts schema 20 without upgrading it. Compatible release convergence remains
+  required before enabling managed legacy uploads.
+- Legacy upload proof: 367 Worker tests across five focused files pass, including
+  competing upload modes, duplicate allocations, current-session loss, ambiguous
+  abort during deletion, terminal receipt retention, read-only paginated receipt
+  inspection and legacy/Postgres owner routing. Worker and shared typechecks and
+  the complexity guard pass. No production state was changed.
+- Old direct capabilities must still drain while members remain live, before
+  quiescence. Managed upload negotiation does not revoke previously issued URLs.
 - Remaining before a final candidate: member state transitions and conditional
   admission closure; controlled final checkpoint/upload; complete effect and
   control routing; durable activation wake; creation/inventory closure; hosted

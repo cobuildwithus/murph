@@ -51,6 +51,9 @@ import type {
   DurableObjectStateLike,
   DurableObjectStorageLike,
 } from "../src/user-runner/types.js";
+import { withSerializedLock } from "../src/serialized-lock.ts";
+import { abortAllLegacyManagedSnapshots, readLegacyManagedSnapshot, scanLegacyManagedSnapshots } from "../src/user-runner/legacy-managed-snapshot.ts";
+import { requireLegacyRuntimeStorageCoverage } from "../src/user-runner/legacy-runtime-export.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.js";
 
 const hostedExecutionMocks = vi.hoisted(() => ({
@@ -484,6 +487,7 @@ describe("hosted runner user data cleanup", () => {
       workspaceVersion: "7",
     };
     const service = createWorkspaceSnapshotSessionService({
+      withSnapshotMutation: run => run(),
       bucket,
       runnerStoreCache: createUnusedRunnerStoreCache(),
       state: durable.state,
@@ -543,6 +547,7 @@ describe("hosted runner user data cleanup", () => {
     const durable = createDurableObjectHarness();
     const bucket = new ListableMemoryEncryptedR2Bucket();
     const service = createWorkspaceSnapshotSessionService({
+      withSnapshotMutation: run => run(),
       bucket,
       runnerStoreCache: createUnusedRunnerStoreCache(),
       state: durable.state,
@@ -613,6 +618,7 @@ describe("hosted runner user data cleanup", () => {
     const durable = createDurableObjectHarness();
     const bucket = new ListableMemoryEncryptedR2Bucket();
     const service = createWorkspaceSnapshotSessionService({
+      withSnapshotMutation: run => run(),
       bucket,
       runnerStoreCache: createUnusedRunnerStoreCache(),
       state: durable.state,
@@ -743,6 +749,7 @@ describe("hosted runner user data cleanup", () => {
       };
     });
     const service = createWorkspaceSnapshotSessionService({
+      withSnapshotMutation: run => run(),
       bucket,
       runnerStoreCache: createUnusedRunnerStoreCache(),
       state: durable.state,
@@ -832,6 +839,7 @@ describe("hosted runner user data cleanup", () => {
       await bucket.put(storedObjectKey, "encrypted-replica-object");
     }
     const service = createWorkspaceSnapshotSessionService({
+      withSnapshotMutation: run => run(),
       bucket,
       runnerStoreCache: createUnusedRunnerStoreCache(),
       state: durable.state,
@@ -886,6 +894,7 @@ describe("hosted runner user data cleanup", () => {
     });
     await bucket.put(validObjectKey, "encrypted-snapshot");
     const service = createWorkspaceSnapshotSessionService({
+      withSnapshotMutation: run => run(),
       bucket,
       runnerStoreCache: createUnusedRunnerStoreCache(),
       state: durable.state,
@@ -1195,10 +1204,11 @@ function createDurableObjectHarness(input: {
       return value === undefined ? undefined : value as T;
     },
     getAlarm: async () => null,
-    list: async <T>(options: { prefix?: string } = {}): Promise<Map<string, T>> => {
+    list: async <T>(options: { prefix?: string; startAfter?: string; limit?: number } = {}): Promise<Map<string, T>> => {
       const result = new Map<string, T>();
-      for (const [key, value] of storageValues) {
-        if (!options.prefix || key.startsWith(options.prefix)) {
+      for (const [key, value] of [...storageValues].sort(([a], [b]) => a.localeCompare(b))) {
+        if (result.size >= (options.limit ?? Infinity)) break;
+        if (key > (options.startAfter ?? "") && (!options.prefix || key.startsWith(options.prefix))) {
           result.set(key, value as T);
         }
       }
@@ -1224,3 +1234,101 @@ function createDurableObjectHarness(input: {
     storageValues,
   };
 }
+
+
+function managedSnapshotHarness() {
+  const durable = createDurableObjectHarness();
+  const bucket = new ListableMemoryEncryptedR2Bucket();
+  const abort = vi.fn(async () => {});
+  const resumeMultipartUpload = vi.fn(() => ({ uploadId: "synthetic-upload", abort,
+    complete: async () => undefined, uploadPart: async () => ({ partNumber: 1, etag: "synthetic-etag" }) }));
+  const managedBucket = Object.assign(bucket, { resumeMultipartUpload });
+  let lock: Promise<void> | null = null;
+  const service = createWorkspaceSnapshotSessionService({
+    withSnapshotMutation: run => withSerializedLock({ get: () => lock, set: value => { lock = value; } }, run),
+    bucket: managedBucket, runnerStoreCache: createUnusedRunnerStoreCache(), state: durable.state,
+    stateStore: createOwningSnapshotStateStore(),
+    readHostedWorkspaceFromWeb: async userId => ({ fetchedAt: NOW, workspace: createWorkspaceState(userId) }),
+    assertWorkspaceBelongsToRunnerUser() {},
+  });
+  const snapshotId = "synthetic-managed-snapshot";
+  const objectKey = `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
+  const session: HostedWorkspaceSnapshotUploadSession = {
+    schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA, userId: USER_ID, snapshotId, objectKey,
+    attemptId: "attempt_1", leaseGeneration: "3", expectedWorkspaceVersion: "7", workspaceVersion: "7",
+    createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    encryption: { aad: buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId: USER_ID }),
+      ivBase64: "AQIDBAUGBwgJCgsM", rootKeyId: "root_1", scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME, wrappedDataKey: "wrapped" },
+  };
+  const admit = (uploadId = "synthetic-upload", encryptedSha256 = "a".repeat(64)) => service.manageSnapshotUpload({
+    userId: USER_ID, command: { operation: "snapshot_managed_admit", expectedSession: session,
+      uploadId, encryptedByteSize: 42, encryptedSha256 },
+  });
+  const direct = () => service.rememberPresignedPut({ expectedSession: session,
+    expiresAt: new Date(Date.now() + 600_000).toISOString(), drainUntil: new Date(Date.now() + 1_200_000).toISOString() });
+  return { ...durable, bucket: managedBucket, abort, resumeMultipartUpload, service, session, admit, direct };
+}
+
+describe("legacy managed checkpoint capability ownership", () => {
+  it.each([true, false])("serializes competing direct and managed admission (managed first: %s)", async managedFirst => {
+    const h = managedSnapshotHarness();
+    await h.service.create(h.session);
+    if (managedFirst) {
+      const [managed, direct] = await Promise.all([h.admit(), h.direct()]);
+      expect(managed.applied).toBe(true);
+      expect(direct).toBeNull();
+    } else {
+      const [direct, managed] = await Promise.all([h.direct(), h.admit()]);
+      expect(direct?.r2PutExpiresAt).toBeDefined();
+      expect(managed.applied).toBe(false);
+    }
+  });
+
+  it("reuses immutable admission and retains its independent receipt after current-session loss", async () => {
+    const h = managedSnapshotHarness();
+    await h.service.create(h.session);
+    const [first, duplicate] = await Promise.all([h.admit(), h.admit("unused-allocation")]);
+    expect(first.managedUpload?.uploadId).toBe("synthetic-upload");
+    expect(duplicate.managedUpload).toEqual(first.managedUpload);
+    expect((await h.admit("different-bytes", "b".repeat(64))).applied).toBe(false);
+    for (const key of [...h.storageValues.keys()]) if (!key.startsWith("workspace-snapshot-managed-upload:v1:")) h.storageValues.delete(key);
+    await abortAllLegacyManagedSnapshots({ state: h.state, bucket: h.bucket, userId: USER_ID });
+    expect(h.resumeMultipartUpload).toHaveBeenCalledExactlyOnceWith(h.session.objectKey, "synthetic-upload");
+    expect(await readLegacyManagedSnapshot(h.state, USER_ID, h.session.snapshotId)).toMatchObject({ completedAt: expect.any(String) });
+    await h.service.create(h.session);
+    expect((await h.admit("must-not-reopen")).managedUpload).toMatchObject({ uploadId: "synthetic-upload", completedAt: expect.any(String) });
+    expect(await h.direct()).toBeNull();
+  });
+
+  it("keeps unknown aborts pending and prevents both frozen export and member deletion", async () => {
+    const h = managedSnapshotHarness();
+    await h.service.create(h.session);
+    await h.admit();
+    h.abort.mockRejectedValue(new Error("synthetic abort response lost"));
+    await expect(requireLegacyRuntimeStorageCoverage(h.state, true)).rejects.toThrow("remains pending");
+    const deletion = createDeletionStateStore();
+    await expect(deleteHostedRunnerUserData({ bucket: h.bucket, runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {}, state: h.state, stateStore: deletion, userId: USER_ID })).rejects.toThrow("abort response lost");
+    expect(h.bucket.deleteBatches).toEqual([]);
+    expect(deletion.deleteStateCallCount).toBe(0);
+    expect(await scanLegacyManagedSnapshots({ state: h.state, userId: USER_ID })).toEqual({ pending: 1 });
+    h.abort.mockResolvedValue(undefined);
+    await abortAllLegacyManagedSnapshots({ state: h.state, bucket: h.bucket, userId: USER_ID });
+    await expect(requireLegacyRuntimeStorageCoverage(h.state, true)).resolves.toEqual(new Set([USER_ID]));
+    expect(await scanLegacyManagedSnapshots({ state: h.state, userId: USER_ID })).toEqual({ pending: 0 });
+  });
+
+  it("settles an exact admitted upload after session replacement without clearing prior verification", async () => {
+    const h = managedSnapshotHarness();
+    await h.service.create(h.session);
+    await h.admit();
+    for (const key of [...h.storageValues.keys()]) if (!key.startsWith("workspace-snapshot-managed-upload:v1:")) h.storageValues.delete(key);
+    const settle = (verified: boolean, uploadId = "synthetic-upload") => h.service.manageSnapshotUpload({ userId: USER_ID,
+      command: { operation: "snapshot_managed_settled", snapshotId: h.session.snapshotId,
+        attemptId: h.session.attemptId, generation: h.session.leaseGeneration, uploadId, verified } });
+    expect((await settle(true, "wrong-upload")).applied).toBe(false);
+    const verified = await settle(true);
+    expect(verified.managedUpload?.verifiedAt).toEqual(expect.any(String));
+    expect((await settle(false)).managedUpload).toEqual(verified.managedUpload);
+  });
+});

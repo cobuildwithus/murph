@@ -194,6 +194,10 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.migrationFreeze.run(() => this.runner.createHostedWorkspaceSnapshotUploadSession(input));
   }
 
+  async manageHostedWorkspaceSnapshotUpload(input: Parameters<HostedUserRunner["manageHostedWorkspaceSnapshotUpload"]>[0]) {
+    return this.migrationFreeze.run(() => this.runner.manageHostedWorkspaceSnapshotUpload(input));
+  }
+
   async heartbeatHostedWorkspaceSnapshotUploadSession(
     input: Parameters<HostedUserRunner["heartbeatHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["heartbeatHostedWorkspaceSnapshotUploadSession"]> {
@@ -270,9 +274,10 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
         if (userId) await runner.stopLegacyRuntimeForMigration(userId);
       },
       drained: async () => {
-        await requireLegacyRuntimeStorageCoverage(this.migrationState);
         const { userId } = await readLegacyRuntimeMigrationIdentity(this.migrationState);
-        return userId === null || runner.legacyRuntimeUploadsDrained(userId);
+        const drained = userId === null || await runner.legacyRuntimeUploadsDrained(userId);
+        await requireLegacyRuntimeStorageCoverage(this.migrationState, true);
+        return drained;
       },
     }) };
   }

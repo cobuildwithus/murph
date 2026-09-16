@@ -110,3 +110,30 @@ describe("live legacy migration inspection", () => {
     expect(h.mutation).not.toHaveBeenCalled();
   });
 });
+
+
+describe("managed upload observations", () => {
+  it.each([20, 21])("reads schema %s and pending receipts across pages without mutation", async version => {
+    const h = harness();
+    h.sql.exec("UPDATE runner_schema_meta SET value = ? WHERE key = 'runner_state_schema_version'", version);
+    for (let i = 0; i < 61; i++) {
+      const snapshotId = `synthetic-${String(i).padStart(3, "0")}`;
+      h.kv.set(`workspace-snapshot-managed-upload:v1:${snapshotId}`, {
+        schema: "murph.legacy-managed-snapshot-upload.v1", userId: "synthetic_member", snapshotId,
+        objectKey: `users/synthetic/workspace-snapshots/${snapshotId}.snapshot.enc`, uploadId: `upload-${i}`,
+        attemptId: "attempt-synthetic", generation: "1", encryptedByteSize: 42, encryptedSha256: "a".repeat(64),
+        completedAt: i < 10 ? "2026-09-15T00:00:00.000Z" : null, verifiedAt: null,
+      });
+    }
+    h.queries.length = 0;
+    expect(await observeLegacyRuntime(h.state)).toMatchObject({ kind: "observed", schemaVersion: version,
+      userId: "synthetic_member", managedSnapshotPendingUploads: 51 });
+    expect(h.queries.every(query => query.trim().startsWith("SELECT"))).toBe(true);
+    expect(h.mutation).not.toHaveBeenCalled();
+    expect(h.listCalls.some(call => call.startAfter?.endsWith("049"))).toBe(true);
+    const last = h.kv.get("workspace-snapshot-managed-upload:v1:synthetic-060") as Record<string, unknown>;
+    h.kv.set("workspace-snapshot-managed-upload:v1:synthetic-060", { ...last, userId: "synthetic_other" });
+    await expect(observeLegacyRuntime(h.state)).rejects.toThrow("conflicting member identities");
+    expect(h.mutation).not.toHaveBeenCalled();
+  });
+});

@@ -21,6 +21,7 @@ import {
   hostedWorkspaceSnapshotUserPrefix,
 } from "../storage-paths.js";
 import { safeCleanupErrorCode } from "./diagnostics.js";
+import { abortAllLegacyManagedSnapshots } from "./legacy-managed-snapshot.ts";
 import {
   assertR2ObjectAbsent,
   assertR2PrefixEmpty,
@@ -96,6 +97,7 @@ export async function deleteHostedRunnerUserData(input: HostedRunnerUserDataDele
 }): Promise<HostedRunnerUserDataDeletionResult> {
   await input.stateStore.assertStateForUser(input.userId);
   const runnerCleanup = await stopRunnerBeforeUserDataDeletion(input);
+  await abortAllLegacyManagedSnapshots(input);
   const browserVaultDrainUntil = await readHostedBrowserVaultReplicaPostStopDrainUntil({
     state: input.state,
     userId: input.userId,

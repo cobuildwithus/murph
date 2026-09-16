@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DurableObjectStateLike, DurableObjectSqlValue } from "./types.ts";
+import { LEGACY_MANAGED_SNAPSHOT_PREFIX, parseLegacyManagedSnapshot } from "./legacy-managed-snapshot.ts";
 import { browserVaultReplicaOrphanCandidateStoragePrefix, workspaceSnapshotOrphanCandidateStoragePrefix, workspaceSnapshotUploadSessionCurrentStorageKey } from "./workspace-snapshot-sessions.ts";
 
 const PAGE_SIZE = 50;
@@ -31,7 +32,7 @@ export async function readLegacyRuntimeMigrationIdentity(state: DurableObjectSta
     for (const row of sql.exec<{ user_id: string }>("SELECT DISTINCT user_id FROM runner_hosted_media_asset LIMIT 2").toArray()) members.add(row.user_id);
   }
   if (!state.storage.list) throw new Error("Legacy runtime migration requires bounded storage listing.");
-  for (const prefix of [...EXPORT_KV_PREFIXES, ...DRAIN_KEYS]) {
+  for (const prefix of [...EXPORT_KV_PREFIXES, ...DRAIN_KEYS, LEGACY_MANAGED_SNAPSHOT_PREFIX]) {
     const records = await state.storage.list<unknown>({ prefix, limit: 1 });
     for (const value of records.values()) {
       if (!value || typeof value !== "object" || !("userId" in value) || typeof value.userId !== "string" || !value.userId) throw new Error("Legacy resource member identity is missing.");
@@ -81,18 +82,15 @@ async function readResourcePage(state: DurableObjectStateLike, prefix: string, a
 
 /** Fail closed on unclassified durable KV state. This finite scan is paginated;
  * resources themselves are exported separately in resumable pages. */
-export async function requireLegacyRuntimeStorageCoverage(state: DurableObjectStateLike): Promise<Set<string>> {
+export async function requireLegacyRuntimeStorageCoverage(state: DurableObjectStateLike, requireTerminalUploads = false): Promise<Set<string>> {
   if (!state.storage.list) throw new Error("Legacy migration requires bounded storage listing.");
   const members = new Set<string>();
   let after = "";
   for (;;) {
     const page = await state.storage.list<unknown>({ limit: PAGE_SIZE, ...(after ? { startAfter: after } : {}) });
     for (const [key, value] of page) {
-      if (key === "runtime-migration-freeze:v1") continue;
-      if (!DRAIN_KEYS.includes(key)
-        && !EXPORT_KV_PREFIXES.some(prefix => key.startsWith(prefix))) throw new Error("Legacy migration encountered unclassified durable state.");
-      if (!value || typeof value !== "object" || !("userId" in value) || typeof value.userId !== "string" || !value.userId) throw new Error("Legacy resource member identity is missing.");
-      members.add(value.userId);
+      const userId = classifyLegacyStorageRecord(key, value, requireTerminalUploads);
+      if (userId !== null) members.add(userId);
       if (members.size > 1) throw new Error("Legacy runtime contains conflicting member identities.");
     }
     if (page.size < PAGE_SIZE) return members;
@@ -100,4 +98,21 @@ export async function requireLegacyRuntimeStorageCoverage(state: DurableObjectSt
     if (next <= after) throw new Error("Legacy storage listing did not advance.");
     after = next;
   }
+}
+
+function classifyLegacyStorageRecord(key: string, value: unknown, requireTerminalUploads: boolean): string | null {
+  if (key === "runtime-migration-freeze:v1") return null;
+  if (key.startsWith(LEGACY_MANAGED_SNAPSHOT_PREFIX)) {
+    const upload = parseLegacyManagedSnapshot(value);
+    if (key !== `${LEGACY_MANAGED_SNAPSHOT_PREFIX}${upload.snapshotId}`) throw new Error("Legacy managed upload key mismatch.");
+    if (requireTerminalUploads && upload.completedAt === null) throw new Error("Legacy snapshot upload remains pending.");
+    return upload.userId;
+  }
+  if (!DRAIN_KEYS.includes(key) && !EXPORT_KV_PREFIXES.some(prefix => key.startsWith(prefix))) {
+    throw new Error("Legacy migration encountered unclassified durable state.");
+  }
+  if (!value || typeof value !== "object" || !("userId" in value) || typeof value.userId !== "string" || !value.userId) {
+    throw new Error("Legacy resource member identity is missing.");
+  }
+  return value.userId;
 }

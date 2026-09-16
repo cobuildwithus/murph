@@ -68,6 +68,7 @@ export type LegacyRuntimeObservation =
     snapshotPutDrainUntil: string | null;
     replicaPendingWrites: number;
     replicaRecoveryDrainUntil: string | null;
+    managedSnapshotPendingUploads: number;
     observedAt: string;
   };
 export type LegacyRuntimeInspection = LegacyRuntimeObservation & {

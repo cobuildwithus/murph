@@ -1,7 +1,7 @@
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
 import { presignManagedSnapshot, completeManagedSnapshotForSession } from "./managed-snapshot-control.ts";
 import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, commandHostedRuntimeReplicaPut } from "./runtime-resource-client.ts";
-import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
+import { usesPostgresRuntimeOwner, supportsPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
 import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
 import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
@@ -1680,7 +1680,7 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     return jsonError("Hosted workspace snapshot presign target is outside the bound user namespace.", 403);
   }
 
-  if (body.supportsManagedUpload === true && await usesPostgresRuntimeOwner(input.env, input.userId)) {
+  if (body.supportsManagedUpload === true && supportsPostgresRuntimeOwner(input.env)) {
     return json(await presignManagedSnapshot({
       source: input.env, session, encryptedByteSize, encryptedSha256: encryptedObjectSha256,
       expiresSeconds: Math.min(HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS, remainingSessionSeconds),
@@ -3161,6 +3161,9 @@ async function retireWorkspaceSnapshotUploadSession(input: {
     await deleteWorkspaceSnapshotUploadSession(input);
     return;
   }
+  // The legacy owner aborts any managed upload under its deletion lock before
+  // releasing this session. Only then may physical cleanup remove its bytes.
+  await deleteWorkspaceSnapshotUploadSession(input);
   if (input.deleteObject && input.objectKey) {
     const deleted = await deleteWorkspaceSnapshotObjectBestEffort({
       bucket: input.bucket,
@@ -3180,12 +3183,6 @@ async function retireWorkspaceSnapshotUploadSession(input: {
       }
     }
   }
-  await deleteWorkspaceSnapshotUploadSession({
-    session: input.session,
-    env: input.env,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
 }
 
 async function deleteWorkspaceSnapshotObjectBestEffort(input: {
