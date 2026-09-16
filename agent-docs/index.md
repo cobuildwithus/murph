@@ -142,6 +142,8 @@ The deployment unblock retaining the dormant experiment namespace is tracked in
 Silent morning Journal capture, canonical plan context, retirement of the
 afternoon pass, and bounded private upcoming-context injection are owned by
 `product-specs/journal.md` and `ARCHITECTURE.md`.
+The reviewed implementation and verification are recorded in
+[`2026-09-15-upcoming-context-review.md`](exec-plans/completed/2026-09-15-upcoming-context-review.md).
 
 Retained device-import stall, cycling and long-backlog operator alerts are owned
 by `agent-docs/RELIABILITY.md`; connection ownership in diagnostic events is
