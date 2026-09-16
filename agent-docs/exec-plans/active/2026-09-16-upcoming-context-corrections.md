@@ -75,11 +75,17 @@ Updated: 2026-09-16
   token counts remain unavailable without the exact model tokenizer.
 - The new all-day correction live journey and updated calendar/retry journey
   are not yet proven on this candidate: local subscription authentication
-  failed before any model action. The owning retry contract is being followed;
-  no auth material is copied or persisted.
+  failed before any model action. The default home and all eight available
+  alternate authenticated homes were tried once; subscription sign-in must be
+  restored before this proof can run. No auth material was copied or persisted.
 - Remaining gates: focused live proof, exact-head CI, and a resolved final
   review for the new runtime delta. Prior ReviewGPT rounds remain recorded
   against their actual heads; none covers these subsequent corrections.
+- CI exposed two unnecessary dynamic import boundaries: production packaging
+  produced 26 static startup chunks against the existing limit of 24. Reusing
+  ordinary imports of the existing ledger and Knowledge owners removes those
+  boundaries without raising a budget. The full production runner assembly,
+  33 affected engine tests, engine typecheck, and import-boundary check pass.
 
 ## Review cap retrospective
 

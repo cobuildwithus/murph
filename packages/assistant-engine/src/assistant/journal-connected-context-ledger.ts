@@ -4,6 +4,7 @@ import { parseFrontmatterDocument } from '@murphai/core'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import * as z from '@murphai/contracts/zod-runtime'
 import { buildKnowledgePageRelativePath, normalizeKnowledgeBody } from '../knowledge/documents.js'
+import { getKnowledgePage, upsertKnowledgePage } from '../knowledge/service.js'
 
 export const CONNECTED_CONTEXT_LEDGER_SLUG = 'journal-connected-context'
 const POLICY_MAX_BYTES = 64 * 1024
@@ -48,7 +49,6 @@ export async function removeConnectedContextAccount(vaultRoot: string, accountId
   // Unknown/missing policy already excludes connected plans. Do not replace it
   // with default permissions or discard legacy opt-outs and source mappings.
   if (!await readConnectedContextPolicy(vaultRoot)) return
-  const { getKnowledgePage, upsertKnowledgePage } = await import('../knowledge/service.js')
   const { page } = await getKnowledgePage({ vault: vaultRoot, slug: CONNECTED_CONTEXT_LEDGER_SLUG })
   const { policy, suffix } = parseLedgerBody(normalizeKnowledgeBody(page.body))
   if (!policy.activeAccounts.some(account => account.id === accountId)) return

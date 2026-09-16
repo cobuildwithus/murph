@@ -1,6 +1,7 @@
 import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
 import { toolTextResult as connectedAppsTextResult } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
+import { removeConnectedContextAccount } from '../../assistant/journal-connected-context-ledger.js'
 
 import {
   hostedConnectedAppsExecuteInputSchema,
@@ -184,7 +185,6 @@ export async function executeConnectedAppsDynamicTool(input: {
     if (input.vaultRoot && requestBody.operation === 'manage' && requestBody.input.action === 'disconnect') {
       const disconnected = z.object({ status: z.literal('disconnected'), account: z.object({ id: z.string().min(1) }) }).parse(response.result)
       try {
-        const { removeConnectedContextAccount } = await import('../../assistant/journal-connected-context-ledger.js')
         await removeConnectedContextAccount(input.vaultRoot, disconnected.account.id)
       } catch (error) {
         return connectedAppsTextResult(false,
