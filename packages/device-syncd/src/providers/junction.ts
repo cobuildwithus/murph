@@ -88,7 +88,13 @@ import {
   type JunctionHistoricalBackfillEvidenceResource,
   type JunctionHistoricalBackfillStatus,
 } from "../junction-historical-backfill-progress.ts";
-import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH, JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, JUNCTION_RECONCILE_PROOF_METADATA_KEY } from "../metadata.ts";
+import {
+  DEVICE_SYNC_METADATA_MAX_STRING_LENGTH,
+  JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY,
+  JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY,
+  JUNCTION_RECONCILE_PROOF_METADATA_KEY,
+  JUNCTION_TEMPORAL_SWEEP_METADATA_KEY,
+} from "../metadata.ts";
 import {
   buildDeviceSyncSourceCanonicalCoverageBoundaryKey,
   buildDeviceSyncSourceCanonicalCoverageFinalizedAtKey,
@@ -412,10 +418,7 @@ interface JunctionHistoricalResourceJobWorkBudget {
 }
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
-const JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY = "junctionProfileSummaryCheckedAt";
 const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION = 2;
-const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY =
-  "junctionProfileSummaryNormalizationRevision";
 
 // `profile` is deliberately excluded: it is a current-state snapshot, so
 // counting it as completion evidence would mark every backfill useful and
@@ -1124,7 +1127,7 @@ export function createJunctionDeviceSyncProvider(
 
   function reconcileProbeEligibility(account: StoredDeviceSyncAccount, now: string): string | null {
     if (account.status !== "active" || account.credential.kind !== "provider_config") return "connection_ineligible";
-    if (!account.sources?.length) return "sources_missing";
+    if (!account.sources) return "sources_missing";
     if (summaryResources.includes("profile") && !hasCheckedJunctionProfileSummary(account.metadata)) return "profile_due";
     if (shouldImportClosedTimeseriesForReconcile(account.lastSyncCompletedAt, floorUtcDayTimestamp(now))) return "daily_repair_due";
     if (createScheduledJobs(account, now).jobs.length !== 1) return "history_or_recovery_due";

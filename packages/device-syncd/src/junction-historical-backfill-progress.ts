@@ -2,6 +2,10 @@ import { resolveJunctionDeviceConnectRouteByProviderSlug } from "./config/connec
 import { JUNCTION_CONNECT_SOURCE_TARGETS } from "./config/junction-connect-sources.ts";
 import {
   DEVICE_SYNC_METADATA_MAX_STRING_LENGTH,
+  JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY,
+  JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY,
+  JUNCTION_RECONCILE_PROOF_METADATA_KEY,
+  JUNCTION_TEMPORAL_SWEEP_METADATA_KEY,
   mergeStoredDeviceSyncMetadataPatch,
   sanitizeStoredDeviceSyncMetadata,
 } from "./metadata.ts";
@@ -179,6 +183,16 @@ const JUNCTION_LEGACY_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY
 export const JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS = Object.freeze([
   ...Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS),
   ...JUNCTION_LEGACY_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS,
+]);
+
+// Retention priority is separate from historical merge authority: a diagnostic
+// patch must not erase completed work, but hydration must not revive stale proof.
+export const JUNCTION_SYNC_PROGRESS_METADATA_KEYS = Object.freeze([
+  ...JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS,
+  JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY,
+  JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY,
+  JUNCTION_RECONCILE_PROOF_METADATA_KEY,
+  JUNCTION_TEMPORAL_SWEEP_METADATA_KEY,
 ]);
 
 export function readJunctionHistoricalBackfillProgress(
@@ -590,7 +604,7 @@ function canRetainJunctionExtendedTimeseriesHistoryCoverageUpdate(
   const merged = mergeStoredDeviceSyncMetadataPatch(
     existing,
     { [update.metadataKey]: update.value },
-    JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS,
+    JUNCTION_SYNC_PROGRESS_METADATA_KEYS,
   );
   return merged[update.metadataKey] === update.value
     && Object.keys(existing).every((key) => Object.hasOwn(merged, key));
@@ -951,7 +965,7 @@ function mergeJunctionExtendedTimeseriesHistoryCoverageMetadata(input: {
     metadata = mergeStoredDeviceSyncMetadataPatch(
       metadata,
       { [metadataKey]: encoded },
-      JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS,
+      JUNCTION_SYNC_PROGRESS_METADATA_KEYS,
     );
   }
 

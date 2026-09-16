@@ -699,6 +699,20 @@ before a cadence-only compare-and-set. Existing member/connection, mailbox
 append, and workspace locks serialize the final decision; provider and securebox
 work stay outside transactions. Missing proof/authority, accepted work, failed or
 incomplete reads, provider timeouts, and failed CAS keep the ordinary wake.
+A valid checkpoint-owned continuation behind the settled mailbox frontier does
+not block ordinary content comparison: its retained payload and workspace wake
+remain untouched. The bounded, strictly increasing continuation sequence list
+is included in authority revalidation. Missing or malformed ownership still
+falls back. An explicitly empty admitted source inventory can reuse a completed
+proof; absent source authority cannot. Live inventory and source additions still
+invalidate the binding or final source fingerprint.
+
+The existing 16-field metadata envelope prioritizes historical coverage, profile
+completion timestamp/revision, completed content proof, and temporal sweep
+progress over diagnostic counters on success and failure writes. Retention
+priority does not expand historical merge authority or revive a stale proof
+during hydration. Diagnostic patches cannot erase already completed work.
+
 The recovery route intentionally reaches the existing provider registry only
 through this preflight; other control-plane routes and recovery paths retain
 their provider-free package graph. Continuation proof is declared in both the
