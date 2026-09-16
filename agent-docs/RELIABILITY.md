@@ -2533,7 +2533,8 @@ to apply after cutover.
   recovery. The additive reader can deploy before the runner, but complete
   coverage starts only after keyed pass observations arrive. A gap over
   15 minutes resets continuous-backlog evidence; a silent queue remains eligible
-  when its canonical device wake is due, otherwise its last pending observation
+  when its canonical device wake is at least 15 minutes overdue; planned idle
+  time does not consume that allowance. Otherwise its last pending observation
   must be within ten minutes. Current runtime-access eligibility is reread before
   send admission. The diagnostic reader projects booleans and typed identifiers
   in memory from at most 50,000 relevant log events over two hours for at most

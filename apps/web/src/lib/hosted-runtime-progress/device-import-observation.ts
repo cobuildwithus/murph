@@ -5,7 +5,7 @@ import { readHostedRuntimeAiAllowedMemberIds } from "../hosted-onboarding/member
 import { getHostedRuntimeLogPool } from "../hosted-runtime-log/database";
 import { hostedRuntimeLogSubjectKey, type HostedRuntimeLogSqlDatabase } from "../hosted-runtime-log/store";
 import { getPrisma } from "../prisma";
-import { DEVICE_IMPORT_LOOKBACK_MS, summarizeDeviceImportHealth, type DeviceImportObservation } from "./device-import-health";
+import { DEVICE_IMPORT_LOOKBACK_MS, DEVICE_IMPORT_STALL_MS, summarizeDeviceImportHealth, type DeviceImportObservation } from "./device-import-health";
 
 export const DEVICE_IMPORT_MEMBER_LIMIT = 1_000;
 export const DEVICE_IMPORT_EVENT_LIMIT = 50_000;
@@ -37,7 +37,8 @@ export async function readDeviceImportHealth(input: {
     select: { userId: true, nextWakeAt: true, nextWakeReason: true },
   });
   const dueSubjects = new Set(workspaces.filter(row => row.nextWakeReason === "device-sync.reconcile"
-    && row.nextWakeAt !== null && row.nextWakeAt.getTime() <= input.now.getTime())
+    && row.nextWakeAt !== null
+    && row.nextWakeAt.getTime() <= input.now.getTime() - DEVICE_IMPORT_STALL_MS)
     .map(row => hostedRuntimeLogSubjectKey(row.userId)));
   const observations = await readDeviceImportObservations({ subjects, now: input.now, database: input.database });
   return summarizeDeviceImportHealth({ now: input.now, observations, dueSubjects });
