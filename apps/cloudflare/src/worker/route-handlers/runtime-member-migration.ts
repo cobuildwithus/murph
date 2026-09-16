@@ -25,7 +25,7 @@ export async function advanceRuntimeMemberMigration(input: {
     if (!prepared.quiesced) return { pending: "readiness" as const };
     const latest = await step(() => stub.inspectPostgresMigration!());
     if (latest.kind !== "observed" || latest.userId !== identity.userId) throw new Error("Legacy member changed during quiescence.");
-    if (latest.activeAttemptId) return { pending: "checkpoint" as const, checkpointStatus: prepared.checkpointStatus };
+    if (attemptMayStillComplete(latest.activeAttemptId, prepared.checkpointStatus)) return { pending: "checkpoint" as const, checkpointStatus: prepared.checkpointStatus };
     await send({ ...identity, operation: "freeze_member" });
   } else if (phase !== "freezing" && phase !== "importing") throw new Error("Member migration phase is invalid.");
   if (!(await step(() => stub.freezeForPostgresMigration!(identity))).frozen) return { pending: "freeze" as const };
@@ -34,6 +34,11 @@ export async function advanceRuntimeMemberMigration(input: {
   if (object.completedAt) return send({ ...identity, operation: "activate_member" });
   const page = await step(() => stub.exportPostgresMigrationPage!(parseLegacyRuntimeExportCursor(object.nextCursor)));
   return send({ ...identity, operation: "import_member", page });
+}
+/** A recorded attempt whose exact target reports no such invocation can never
+ * clear itself; the freeze's stop reconciles it instead of waiting forever. */
+function attemptMayStillComplete(activeAttemptId: unknown, checkpointStatus: unknown): boolean {
+  return Boolean(activeAttemptId) && checkpointStatus !== "absent";
 }
 function memberPhase(value: unknown): string {
   if (!value || typeof value !== "object" || !("migrationPhase" in value) || typeof value.migrationPhase !== "string") throw new Error("Member migration receipt is invalid.");

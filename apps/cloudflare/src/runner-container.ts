@@ -1419,7 +1419,9 @@ export class RunnerContainer extends Container {
     const request = parseHostedRuntimeMigrationCheckpointRequest(input);
     this.authorizeBoundUser(request.userId);
     const platform = this.ctx.container;
-    if (!platform || platform.running !== true) return "unconfirmed";
+    // A stopped process cannot be executing this exact attempt, and no
+    // replacement instance resumes it; only a lost reply stays unconfirmed.
+    if (!platform || platform.running !== true) return "absent";
     const signal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
     try {
       // Do not use containerFetch: the SDK may start a stopped container.

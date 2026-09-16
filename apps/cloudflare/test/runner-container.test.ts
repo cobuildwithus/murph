@@ -179,10 +179,10 @@ describe("RunnerContainer", () => {
     expect(h.destroy).not.toHaveBeenCalled();
   });
 
-  it("keeps checkpoint outcome unconfirmed when the process is absent or the reply is lost", async () => {
+  it("reports an absent invocation for a stopped process and keeps a lost reply unconfirmed", async () => {
     const request = { userId: "synthetic_member", attemptId: "synthetic_attempt", generation: "7" };
     const stopped = createContainerDouble({ platformRunning: false });
-    expect(await stopped.container.requestMigrationCheckpoint(request)).toBe("unconfirmed");
+    expect(await stopped.container.requestMigrationCheckpoint(request)).toBe("absent");
     expect(stopped.containerFetch).not.toHaveBeenCalled();
     expect(stopped.startAndWaitForPorts).not.toHaveBeenCalled();
     const lost = createContainerDouble({ platformRunning: true,
