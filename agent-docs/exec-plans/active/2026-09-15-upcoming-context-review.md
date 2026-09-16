@@ -50,3 +50,16 @@ existing context and returns skip with no provider calls.
 Exploratory ReviewGPT was sent against commit 5605db09f242 with the silent
 activation requirement explicitly called out as the next change. Its advice
 remains pending; no PR has been published yet.
+
+## Initial provider input measurement
+
+The opt-in `MURPH_MEASURE_UPCOMING_INPUT=1` scripted-provider journey captures the
+complete first Codex request at the provider boundary for identical direct/group
+fixtures. It uses the base's exact previous Journal routing line and omission of
+the upcoming block, while retaining the same production layers, tools, and history.
+With one synthetic trip, direct input grows from 143666 to 145055 UTF-8 bytes
+(+1389, approximately 0.97%); group remains 131269 bytes. Registered tool payloads
+are unchanged (direct 56443; group 40481). Transport-only prompt_cache_key is
+excluded. An exact Terra tokenizer is unavailable; token counts are explicitly
+unreported rather than treating scripted usage or authored-text counts as tokens.
+The two first-request captures passed with no external provider calls.
