@@ -151,7 +151,7 @@ Strong delete consistency alone does not cancel a concurrent write.
 
 Production migration remains a separate authorized operation. The rolling
 implementation is not yet a complete operational release: composed
-first-use/release-overlap rehearsal, measured
+full-stack reply rehearsal, measured
 handoff timing and final public review are still required. `migrateHostedLegacyRuntime` now starts a rolling campaign, reconciles
 provider discovery with creation intents, closes legacy creation and seals the
 ordered inventory. It never invokes the old fleet-draining path.
@@ -313,3 +313,15 @@ Inventory uses Cloudflare's [namespace list](https://developers.cloudflare.com/a
 and [serving deployment](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/deployments/methods/list/)
 APIs. Counts/hashes and operation phases are suitable evidence; raw object or
 member inventories and resource rows remain private.
+
+
+## Local migration protocol rehearsal
+
+`apps/cloudflare/test/runtime-migration-composed-postgres.test.ts` composes the
+actual source bridge and Web command handlers against isolated loopback Postgres.
+It proves busy-source readiness/quiescence, lost import acknowledgement, compatible
+release reload, generation/token and encrypted mailbox continuity, one activation
+wake, unrelated-member admission and automatic new-member empty activation without
+advancing the baseline canary. Transport and external checkpoint completion are
+simulated. This proof does not measure container replies, production handoff time
+or real R2 interoperability; those remain rollout gates.

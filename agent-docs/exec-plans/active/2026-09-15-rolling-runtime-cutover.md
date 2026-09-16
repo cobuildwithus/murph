@@ -567,3 +567,47 @@ complexity and documentation drift pass. The operator test uses the required
 non-finalizing mode; rolling namespace activation remains forbidden.
 Composed rehearsal, measured handoff pause, final public review/CI and rollout
 remain outstanding.
+
+
+## Composed source and canonical migration proof
+
+A new cross-app rehearsal uses the existing public Web testkit seam to connect
+actual UserRunner SQLite/KV quiescence, freeze and export to actual Web migration
+commands and real Postgres transactions. The protocol scenario passes along with
+Web and Worker typechecks. It covers a readiness hold before pause, busy exact
+checkpoint request, independent member admission at each phase, a lost committed
+import reply, later-release source reload, complete activation with generation
+and token retained, unchanged accepted encrypted mailbox work, one activation
+wake across retry and duplicate accepted-work suppression. New-member first use
+then completes exact empty-source activation while the remaining baseline member
+stays legacy and the original seal is preserved.
+
+The test simulates external checkpoint completion and the command transport; it
+does not claim real R2 durability, container reply execution, measured production
+pause or live latency. Existing transport/version and checkpoint tests cover their
+separate boundaries. Direct full-stack reply and provider interoperability proof
+remain necessary before production canary expansion. The public testkit resolves
+Web-only implementations at runtime, as its existing cross-app helpers do, so
+Worker typechecking does not import private Web path aliases.
+
+Private preliminary ReviewGPT returned one accepted coverage finding for its
+source-admission/credential boundary. Its original waiter timed out; exact-turn
+export recovered the completed response and model evidence. Executable tests now
+cover malformed refs, protected-main lookup, commit/ancestry/pin failures and
+credential scope. The Linux Bash behavior was checked with an existing local
+container image; explicit failed-condition exits also preserve rejection under
+macOS Bash 3.2. Private full verification and a new final review are pending.
+No production migration has started.
+
+
+### Next lifecycle correction identified during candidate review
+
+The campaign intentionally remains rolling after member migration. New cleanup
+receipts currently default to an unfinished enrollment cursor, but only operator
+census advances it; ordinary cleanup could therefore retain later receipts
+indefinitely after the operator finishes. Also, user-data deletion observes a
+pending member as retryable without driving the existing first-use continuation;
+a member deleted before first use may have no processing retry left to finish
+its source retirement. Prove and correct both through the existing cleanup retry
+and per-member continuation owners before declaring the candidate complete. Do
+not relax source proof or activate a deleted identity by absence.
