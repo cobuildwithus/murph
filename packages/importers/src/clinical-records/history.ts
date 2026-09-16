@@ -65,10 +65,16 @@ export function buildFhirHistoryNote(resource: Resource, sourceRevision: string 
   const clinicalDate = readClinicalDate(selected);
   const occurredAt = clinicalDate ?? readExactDate(sourceRevision);
   if (!occurredAt) return null;
+  // Note text is canonical content compared at the same source revision, so the
+  // sentence for a `meta.lastUpdated`-dated record must stay byte-identical to
+  // what earlier imports wrote; only the batch fallback gets its own wording.
+  const datedByResource = sourceRevision !== undefined && sourceRevision === resource.meta?.lastUpdated;
   const note = buildFhirSourceNote([
     `Provider ${resource.resourceType} record. Statuses and statements below are as recorded by the source.`,
     ...(resource.resourceType.startsWith("Medication") ? ["A medication order, statement or dispense does not establish that a dose was taken."] : []),
-    clinicalDate ? `Clinical record date: ${clinicalDate}` : `Record revision: ${occurredAt}. Clinical event date is not available.`,
+    clinicalDate ? `Clinical record date: ${clinicalDate}`
+      : datedByResource ? `Record updated: ${occurredAt}. Clinical event date is not available.`
+      : `Record retrieved: ${occurredAt}. Clinical event date is not available.`,
     JSON.stringify(selected, (_key, value: unknown) => {
       // JSON object order is not clinical content; array order remains meaningful.
       if (value === null || typeof value !== "object" || Array.isArray(value)) return value;

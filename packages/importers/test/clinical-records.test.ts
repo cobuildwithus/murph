@@ -89,7 +89,9 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     expect(notes).toHaveLength(1);
     expect(notes[0]?.note).toContain(JSON.stringify(value, null, 2).split("\n")[0] ?? "");
     expect(notes[0]?.note).toContain(field);
-    expect(notes[0]?.note).toContain("Clinical event date is not available");
+    // Exact sentence: a record dated by meta.lastUpdated must replay byte-identically
+    // against notes written by earlier importer versions at the same source revision.
+    expect(notes[0]?.note).toContain("Record updated: 2026-07-01T12:00:00.000Z. Clinical event date is not available.");
     expect(notes[0]?.externalRef).toMatchObject({ resourceId: "source-history", version: "2026-07-01T12:00:00.000Z" });
     expect(reviews(plan)).toEqual([]);
     if (resourceType.startsWith("Medication")) expect(notes[0]?.note).toContain("does not establish that a dose was taken");
@@ -4919,7 +4921,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     expect(upserts(plan)).toEqual([expect.objectContaining({
       kind: "note",
       occurredAt: "2026-07-03T08:00:00.000Z",
-      note: expect.stringContaining("Record revision: 2026-07-03T08:00:00.000Z. Clinical event date is not available."),
+      note: expect.stringContaining("Record retrieved: 2026-07-03T08:00:00.000Z. Clinical event date is not available."),
       externalRef: expect.objectContaining({ resourceId: "undated-history", version: "2026-07-03T08:00:00.000Z" }),
     })]);
   });
