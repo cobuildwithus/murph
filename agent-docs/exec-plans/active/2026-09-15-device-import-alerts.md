@@ -86,3 +86,28 @@ No scheduler, schema, provider credentials or member-facing behavior changes.
 - An initial package test invocation included an extra argument separator and
   started broader proof than intended. Its proven session-owned process tree
   was stopped; the explicit focused Vitest command then passed.
+
+## Review round 2 disposition
+
+- Reviewed head: `dd935d2a4919b94d915cfc55aa5899f696a67c2d`.
+- Validated GPT-6 Pro response and capture hashes; one High ORIGINAL_PR finding
+  accepted. The connection-isolation correction was confirmed.
+- A late control-plane failure emits a local queue snapshot and empty fallback
+  outgoing fingerprint, but the checkpoint saves the original retry obligation.
+  The old projection incorrectly credited continuation progress or recovery.
+- User resumed remediation. The projection now requires a completed or yielded
+  pass for fingerprint progress and empty-queue recovery. Failed incoming retained
+  jobs and positive local queues remain pending; proven applied imports can still
+  receive checkpoint credit. No producer, scheduler or durable-state change.
+- A shared synthetic fixture is asserted against the real failure producer and
+  passed through PostgreSQL and the classifier. Both zero/one local-job cases
+  failed before correction and passed afterward. Recovery requires a subsequent
+  successful drain and accepted checkpoint; applied-import credit is preserved.
+- Focused PostgreSQL: 3 passed; runtime failure producer: 2 passed; Web monitor,
+  classifier and cron: 31 passed. Web and runtime typechecks passed.
+- Round 2 CI: 34 checks passed; platform-a failed one foreground trace-count test
+  (13 versus 6), also failing its aggregate gate. Its isolated local reproduction
+  passed; do not classify the CI failure as resolved until exact-head CI passes.
+- Changed Web files pass ESLint; complexity guard passes with unchanged existing
+  hotspots. Parent review confirmed the fix stays at the projection boundary.
+- Round 3 final review and exact-head CI remain pending.

@@ -2494,8 +2494,12 @@ Last verified: 2026-09-04
   reset another connection's pending work. Applied imports or a changed valid
   continuation fingerprint with processed work are credited only after Web
   accepts a checkpoint from the same attempt; an empty local queue likewise
-  requires that acceptance before recovery. A checkpoint reaches only the
-  connections observed in that attempt since its preceding checkpoint; each
+  requires that acceptance before recovery. Continuation changes and empty-queue
+  recovery require a completed or yielded pass: a failed pass has no returned
+  continuation, and its checkpoint preserves the incoming retry obligation.
+  Positive pending evidence and separately applied imports remain valid.
+  A checkpoint reaches only the connections observed in that attempt since its
+  preceding checkpoint; each
   pass adds at most one checkpoint reference. Runtime restart counts use the
   shared ordered timeline without copying it for each connection.
   Unknown queue metadata does not clear pending evidence. Legacy or malformed

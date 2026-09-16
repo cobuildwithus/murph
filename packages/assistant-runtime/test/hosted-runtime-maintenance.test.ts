@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7627,7 +7627,13 @@ describe("runHostedDeviceSyncWakeLane", () => {
     }));
   });
 
-  it("retains processed-job progress when a later reconciliation stage fails", async () => {
+  it.each([0, 1])("retains failed-pass retry evidence with %i local jobs after late reconciliation failure", async (pendingJobCount) => {
+    const failedPass = JSON.parse(await readFile(new URL("./fixtures/device-import-failed-pass.json", import.meta.url), "utf8"));
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      listPendingJobsForAccount: () => Array.from({ length: pendingJobCount }, () => ({
+        attempts: 1, createdAt: "2026-04-08T00:00:00Z", kind: "resource", status: "queued",
+      })),
+    });
     const logRequests: HostedRuntimeLogRequest[] = [];
     const drainWorker = vi.fn()
       .mockResolvedValueOnce(1)
@@ -7663,9 +7669,11 @@ describe("runHostedDeviceSyncWakeLane", () => {
       wake: {
         eventId: "evt_device_sync_late_failure",
         kind: "device-sync.wake",
+        connectionId: "dsc_synthetic_retained",
+        hint: { jobs: [{ kind: "resource", dedupeKey: "synthetic-retained-job" }] },
         occurredAt: "2026-04-08T00:00:00.000Z",
         reason: "reconcile_due",
-        userId: "member_123",
+        userId: "synthetic-import-runtime",
       },
     })).rejects.toThrow("synthetic late reconciliation failure");
     await drainHostedRuntimeLogWritesBestEffort();
@@ -7674,9 +7682,8 @@ describe("runHostedDeviceSyncWakeLane", () => {
       .flatMap((request) => request.entries)
       .find((entry) => entry.eventCode === "device-sync.pass_finished");
     expect(finishedEntry?.redactedJson).toEqual(expect.objectContaining({
-      outcome: "failed",
-      passStage: "control_plane_reconcile",
-      processedJobs: 1,
+      ...failedPass,
+      pendingJobCountAfter: pendingJobCount,
     }));
   });
 });
