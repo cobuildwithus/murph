@@ -82,7 +82,7 @@ export async function handleUserDataDeleteRoute(
       ? result.retryAfterSeconds
       : 1;
     return new Response(JSON.stringify({
-      code: "r2_upload_drain_pending",
+      code: "reason" in result && result.reason === "runtime_migration_pending" ? "runtime_migration_pending" : "r2_upload_drain_pending",
       retryAfterSeconds,
     }), {
       headers: {

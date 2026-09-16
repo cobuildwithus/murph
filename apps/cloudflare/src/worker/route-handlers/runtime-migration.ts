@@ -1,4 +1,4 @@
-import { advanceRuntimeMemberMigration } from "./runtime-member-migration.ts";
+import { advanceRuntimeEmptyMigration, advanceRuntimeMemberMigration } from "./runtime-member-migration.ts";
 import { parseHostedRuntimeMigrationCommand, parseLegacyRuntimeExportCursor, type HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
 import { commandHostedRuntimeMigration } from "../../runtime-migration-client.ts";
 import { json, readOptionalJsonObject } from "../../json.ts";
@@ -24,8 +24,10 @@ export const runtimeMigrationRoutes: readonly DeclarativeRoute<WorkerRouteContex
     if (!supportsPostgresRuntimeOwner(context.env)) throw new Error("Migration requires the Postgres-capable fleet deployment.");
     if (command.operation === "advance_member") return json(await advanceRuntimeMemberMigration({ source: context.env,
       stub: exactLegacyObject(context, command.objectId), identity: command }));
+    if (command.operation === "advance_empty") return json(await advanceRuntimeEmptyMigration({ source: context.env,
+      stub: exactLegacyObject(context, command.objectId), identity: command }));
     // Member transitions and pages are produced by the exact-object handoff.
-    if (["quiesce_member", "freeze_member", "activate_member", "import_member"].includes(command.operation)) {
+    if (["quiesce_member", "freeze_member", "activate_member", "import_member", "import_empty"].includes(command.operation)) {
       throw new Error("Member migration requires an exact-object advance.");
     }
     // Import's page is produced below, never accepted as operator input.

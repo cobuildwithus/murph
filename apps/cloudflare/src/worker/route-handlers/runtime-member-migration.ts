@@ -1,4 +1,4 @@
-import { parseLegacyRuntimeExportCursor, type HostedRuntimeMemberMigrationIdentity } from "@murphai/hosted-execution/runtime-migration";
+import { parseLegacyRuntimeExportCursor, type HostedRuntimeMemberMigrationIdentity, type HostedRuntimeObjectMigrationIdentity } from "@murphai/hosted-execution/runtime-migration";
 import { commandHostedRuntimeMigration } from "../../runtime-migration-client.ts";
 import type { WorkerEnvironmentSource, UserRunnerDurableObjectStubLike } from "../../worker-routes/shared.ts";
 
@@ -13,10 +13,10 @@ export async function advanceRuntimeMemberMigration(input: {
   }
   const observed = await stub.inspectPostgresMigration();
   if (observed.kind !== "observed" || observed.userId !== identity.userId) throw new Error("Exact object does not match the migration member.");
-  const current = await commandHostedRuntimeMigration({ source, command: { ...identity, operation: "quiesce_member" } });
+  const current = await commandHostedRuntimeMigration({ source, command: { ...identity, operation: "read_member" } });
   const phase = memberPhase(current.member);
   if (phase === "postgres") return commandHostedRuntimeMigration({ source, command: { ...identity, operation: "activate_member" } });
-  if (phase === "quiescing") {
+  if (phase === "legacy" || phase === "quiescing") {
     const prepared = await stub.preparePostgresMemberMigration(identity);
     if (!prepared.quiesced) return { pending: "readiness" as const };
     const latest = await stub.inspectPostgresMigration();
@@ -39,4 +39,17 @@ function memberPhase(value: unknown): string {
 function importReceipt(value: unknown): { completedAt: unknown; nextCursor: unknown } {
   if (!value || typeof value !== "object" || !("completedAt" in value) || !("nextCursor" in value)) throw new Error("Member import receipt is invalid.");
   return { completedAt: value.completedAt, nextCursor: value.nextCursor };
+}
+
+export async function advanceRuntimeEmptyMigration(input: {
+  source: WorkerEnvironmentSource; stub: UserRunnerDurableObjectStubLike; identity: HostedRuntimeObjectMigrationIdentity;
+}) {
+  const { source, stub, identity } = input;
+  if (!stub.freezeEmptyForPostgresMigration || !stub.exportPostgresMigrationPage) throw new Error("Legacy object does not support empty migration.");
+  const receipt = await commandHostedRuntimeMigration({ source, command: { ...identity, operation: "read_object" } });
+  const object = importReceipt(receipt.object);
+  if (object.completedAt) return receipt;
+  if (!(await stub.freezeEmptyForPostgresMigration(identity)).frozen) return { pending: "source_changed" as const };
+  const page = await stub.exportPostgresMigrationPage(parseLegacyRuntimeExportCursor(object.nextCursor));
+  return commandHostedRuntimeMigration({ source, command: { ...identity, operation: "import_empty", page } });
 }

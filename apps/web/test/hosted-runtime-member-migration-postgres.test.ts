@@ -58,6 +58,7 @@ if (enabled) {
 const campaign = { namespaceId: "synthetic_rolling_namespace", workerVersion: "synthetic_rolling_version" };
 const objectId = "c".repeat(64);
 const otherObjectId = "d".repeat(64);
+const emptyObjectId = "e".repeat(64);
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 
 describe.skipIf(!enabled)("member-scoped canonical migration", () => {
@@ -79,7 +80,7 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
   });
   afterAll(async () => {
     if (originalGate) {
-      await prisma.hostedRuntimeLegacyImport.deleteMany({ where: { objectId: { in: [objectId, otherObjectId] } } });
+      await prisma.hostedRuntimeLegacyImport.deleteMany({ where: { objectId: { in: [objectId, otherObjectId, emptyObjectId] } } });
       await prisma.hostedRuntimeOwner.deleteMany({ where: { userId: { in: [userId, otherId] } } });
       await prisma.hostedMember.deleteMany({ where: { id: userId } });
       await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: originalGate });
@@ -91,7 +92,10 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
     await command({ operation: "begin_rolling", ...campaign });
     await expect(command({ operation: "begin", ...campaign })).rejects.toThrow("mode changed");
     await expect(command({ operation: "quiesce_member", ...identity })).rejects.toThrow("sealed");
-    await command({ operation: "inventory", ...campaign, after: "", objectIds: [objectId, otherObjectId], complete: true });
+    await command({ operation: "inventory", ...campaign, after: "", objectIds: [objectId, otherObjectId, emptyObjectId], complete: true });
+    expect(await command({ operation: "read_member", ...identity })).toMatchObject({ member: { migrationPhase: "legacy", migrationId: null } });
+    expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toBeNull();
+    expect(await prisma.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId } })).toMatchObject({ userId: null, lastHash: null });
     await command({ operation: "quiesce_member", ...identity });
     expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("legacy");
     expect(await readHostedRuntimeMemberBackend(prisma, otherId)).toBe("legacy");
@@ -148,8 +152,16 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
     await command({ operation: "activate_member", ...other });
     expect(await prisma.hostedMailboxItem.count({ where: { userId: otherId } })).toBe(0);
     await prisma.hostedRuntimeOwner.update({ where: { userId }, data: { phase: "starting", attemptId: "synthetic-active-attempt", allocationId: "synthetic-allocation", processingMode: "default" } });
-    const inventoryHash = digest(`${digest(`${digest("")}\n${objectId}`)}\n${otherObjectId}`);
-    await command({ operation: "activate", ...campaign, inventoryCount: 2, inventoryHash });
+    await expect(command({ operation: "import_empty", ...campaign, objectId: emptyObjectId, page: page(userId, 0) })).rejects.toThrow("cannot import member state");
+    for (let section = 0; section <= 3; section++) {
+      const payload = { ...page(userId, section), userId: null, generation: "0" };
+      const { hash: ignored, ...body } = payload;
+      const empty = { operation: "import_empty" as const, ...campaign, objectId: emptyObjectId, page: { ...body, hash: digest(JSON.stringify(body)) } };
+      await command(empty); await command(empty);
+    }
+    expect(await prisma.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: emptyObjectId } })).toMatchObject({ userId: null, generation: 0n, completedAt: expect.any(Date) });
+    const inventoryHash = [objectId, otherObjectId, emptyObjectId].reduce((hash, id) => digest(`${hash}\n${id}`), digest(""));
+    await command({ operation: "activate", ...campaign, inventoryCount: 3, inventoryHash });
     expect((await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).phase).toBe("postgres");
     expect(await command({ operation: "begin_rolling", ...campaign })).toMatchObject({ gate: { phase: "postgres" } });
   });

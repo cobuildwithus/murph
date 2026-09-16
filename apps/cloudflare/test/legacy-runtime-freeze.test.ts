@@ -103,6 +103,18 @@ describe("finite legacy runtime freeze", () => {
     await expect(h.freeze.runAdmission(async () => {})).rejects.toThrow("frozen");
   });
 
+  it("rechecks an empty object after admitted binding work and reopens only its unpersisted barrier", async () => {
+    const h = harness(); const started = deferred(); const release = deferred(); let bound = false;
+    const binding = h.freeze.run(async () => { started.resolve(); await release.promise; bound = true; });
+    await started.promise;
+    const freezing = h.freeze.freezeEmpty({ migrationId: "empty-synthetic", empty: async () => !bound });
+    await expect(h.freeze.run(async () => {})).rejects.toThrow("frozen");
+    release.resolve(); await binding;
+    expect(await freezing).toBe(false);
+    expect(await h.state.storage.get("runtime-migration-freeze:v1")).toBeUndefined();
+    await expect(h.freeze.runAdmission(async () => "live member")).resolves.toBe("live member");
+  });
+
   it("preserves old completed freeze records and rejects member freeze before quiescence", async () => {
     const h = harness();
     await expect(h.freeze.freeze({ migrationId: "migration-synthetic", stop: async () => {}, drained: async () => true })).rejects.toThrow("requires completed quiescence");

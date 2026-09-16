@@ -163,7 +163,7 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
   across retries, deleted members and fleet closure during migrated execution.
   Web, Worker and shared typechecks and the complexity guard pass.
 - Wired the authenticated exact-object member continuation: reserve canonical
-  identity, conditionally close local starts, request the exact active checkpoint,
+  identity after conditionally closing local starts and deletion, request the exact active checkpoint,
   wait for completion, freeze, import one page per request and activate. Raw
   operator freeze/activation/import commands are rejected; only the source Worker
   supplies pages and transitions. Replaying activation also retries its existing
@@ -186,15 +186,19 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
   operator. Busy pre-protocol processes remain live during readiness; release
   convergence and eventual completion of every held member must be proved in
   rehearsal and deployment. Do not mistake a skipped member for completion.
-- Control audit finding to resolve before candidate: deletion routes still select
-  legacy while the member is quiescing, and UserRunner deletion uses the callback
-  gate that remains open in that phase. Its final storage.deleteAll can remove
-  both source identity and the local migration barrier after canonical inventory
-  reservation. Merely blocking deletion after local quiescence is insufficient:
-  already-admitted deletion can finish before the barrier. Coordinate deletion
-  admission/closure with canonical migration or provide a proved terminal empty
-  source receipt without losing generation high-water. Add the race test before
-  changing behavior; do not treat the reserved member's missing source as success.
+- Resolved the deletion race with failing-before/passing-after source tests.
+  Read-only canonical observation precedes local closure; admitted deletion
+  settles before readiness, and durable closure precedes canonical reservation.
+  Deletion after closure retains the existing durable cleanup retry. Lost
+  reservation replies preserve the barrier for exact-token recovery.
+- Added exact-object empty migration. The barrier waits for admitted work and
+  rechecks emptiness before persistence; a racing bind keeps its legacy runtime.
+  Truly empty objects export four verified empty pages without constructing a
+  runner or initializing SQL. Empty imports create no member execution owner.
+- Verification for these changes: 25 Worker tests and five real Postgres tests
+  pass; Worker, Web and shared typechecks and the complexity guard pass. Earlier
+  deletion-focused proof also passes (40 Worker and four Postgres cases). These
+  are local correctness checks; no production mutation or latency claim.
 - Remaining before a final candidate: complete effect and
   control routing; creation/inventory closure; hosted
   operator; composed rehearsal; owner documentation and final review/CI. Keep

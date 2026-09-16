@@ -2,25 +2,25 @@ import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient, type HostedRuntimeCutover } from "@prisma/client";
 import { parseHostedRuntimeMigrationCommand, type HostedRuntimeMigrationCommand, type LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
 import { prepareLegacyMigrationResources, type LegacyMigrationResources } from "./runtime-migration-resources";
-import { isMemberMigrationCommand, lockMemberMigrationTx, transitionMemberMigrationTx, withMemberMigrationWake } from "./runtime-member-migration";
+import { isMemberMigrationCommand, lockMemberMigrationTx, readMemberMigrationTx, transitionMemberMigrationTx, withMemberMigrationWake } from "./runtime-member-migration";
 import type { PreparedHostedMailboxItemAppendCrypto } from "../hosted-mailbox/store";
 import { recordRuntimeOrphansTx } from "./runtime-orphans";
 
 const INITIAL_CURSOR = { section: 0, after: "" };
 const INITIAL_INVENTORY_HASH = digest("");
-type MigrationCommand = Exclude<HostedRuntimeMigrationCommand, { operation: "status" | "inspect_object" | "advance_member" }>;
+type MigrationCommand = Exclude<HostedRuntimeMigrationCommand, { operation: "status" | "inspect_object" | "advance_member" | "advance_empty" }>;
 
 /** Trusted finite campaign. Campaign transitions take the exclusive gate;
  * member transitions/pages share it and serialize only the affected owner. */
 export async function executeHostedRuntimeMigrationCommand(input: { prisma: PrismaClient; command: HostedRuntimeMigrationCommand }) {
   const command = parseHostedRuntimeMigrationCommand(input.command);
   if (command.operation === "status") return { gate: await input.prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } }) };
-  if (command.operation === "inspect_object" || command.operation === "advance_member") throw new Error("Live member migration belongs to the source Worker.");
-  const resources = command.operation === "import" || command.operation === "import_member" ? await validatePage(command.page) : null;
+  if (command.operation === "inspect_object" || command.operation === "advance_member" || command.operation === "advance_empty") throw new Error("Live member migration belongs to the source Worker.");
+  const resources = command.operation === "import" || command.operation === "import_member" || command.operation === "import_empty" ? await validatePage(command.page) : null;
   if (isMemberMigrationCommand(command)) return withMemberMigrationWake({ prisma: input.prisma, command,
     run: prepared => input.prisma.$transaction(tx => executeMemberTx(tx, command, resources, prepared), { maxWait: 5_000, timeout: 5_000 }) });
   return input.prisma.$transaction(async tx => {
-    if (command.operation === "read_object") await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
+    if (command.operation === "read_object" || command.operation === "import_empty") await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
     else await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR UPDATE`;
     const gate = await tx.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
     if (command.operation === "begin" || command.operation === "begin_rolling") return { gate: await beginTx(tx, gate, command) };
@@ -28,6 +28,10 @@ export async function executeHostedRuntimeMigrationCommand(input: { prisma: Pris
     switch (command.operation) {
       case "inventory": return { gate: await inventoryTx(tx, gate, command) };
       case "read_object": return { object: projectImport(await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: command.objectId } })) };
+      case "import_empty": {
+        await tx.$queryRaw`SELECT object_id FROM hosted_runtime_legacy_import WHERE object_id = ${command.objectId} FOR UPDATE`;
+        return { object: projectImport(await importPageTx(tx, gate, command, resources!)) };
+      }
       case "import": return { object: projectImport(await importPageTx(tx, gate, command, resources!)) };
       case "activate": return { gate: await activateTx(tx, gate, command) };
     }
@@ -41,6 +45,7 @@ async function executeMemberTx(tx: Prisma.TransactionClient,
   const gate = await tx.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
   requireIdentity(gate, command);
   if (gate.phase !== "rolling" || !gate.inventorySealedAt) throw new Error("Member migration requires a sealed rolling campaign.");
+  if (command.operation === "read_member") return { member: await readMemberMigrationTx(tx, command) };
   const owner = await lockMemberMigrationTx(tx, command);
   if (command.operation !== "import_member") return { member: await transitionMemberMigrationTx({ tx, command, owner, preparedWake }) };
   if (command.page.userId !== command.userId || (owner.migrationPhase !== "freezing" && owner.migrationPhase !== "importing")) {
@@ -81,12 +86,13 @@ async function inventoryTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCuto
   } });
 }
 
-async function importPageTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover, command: Extract<MigrationCommand, { operation: "import" | "import_member" }>, resources: LegacyMigrationResources) {
-  if (!gate.inventorySealedAt || (gate.phase !== "draining" && !(gate.phase === "rolling" && command.operation === "import_member"))) {
+async function importPageTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover, command: Extract<MigrationCommand, { operation: "import" | "import_member" | "import_empty" }>, resources: LegacyMigrationResources) {
+  if (!gate.inventorySealedAt || (gate.phase !== "draining" && !(gate.phase === "rolling" && (command.operation === "import_member" || command.operation === "import_empty")))) {
     throw new Error("Resource import requires the sealed draining inventory or a fenced member import.");
   }
   const row = await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: command.objectId } });
   const page = command.page;
+  if (command.operation === "import_empty") requireEmptyImport(row.userId, page);
   if (sameCursor(row.lastCursor, page.cursor)) {
     if (row.lastHash !== page.hash) throw new Error("Frozen legacy export changed after import.");
     return row;
@@ -147,3 +153,9 @@ function sameCursor(left: unknown, right: unknown): boolean {
     && left.section === right.section && left.after === right.after;
 }
 function digest(text: string) { return createHash("sha256").update(text).digest("hex"); }
+
+function requireEmptyImport(reservedUserId: string | null, page: LegacyRuntimeExportPage): void {
+  if (reservedUserId !== null || page.userId !== null || page.generation !== "0" || page.records.length !== 0) {
+    throw new Error("Empty migration cannot import member state.");
+  }
+}

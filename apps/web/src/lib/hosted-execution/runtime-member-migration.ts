@@ -27,6 +27,19 @@ export async function withMemberMigrationWake<T>(input: {
   return runWithPreparedHostedMailboxItemAppendCrypto({ prisma: input.prisma, userId: input.command.userId, append: input.run });
 }
 
+/** Routing observation before a local barrier. Never materialize an owner or
+ * reserve the source: deletion may still complete before local admission closes. */
+export async function readMemberMigrationTx(tx: Tx, command: HostedRuntimeMemberMigrationIdentity) {
+  const source = await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: command.objectId } });
+  const owner = await tx.hostedRuntimeOwner.findUnique({ where: { userId: command.userId } });
+  if (!owner || (owner.migrationPhase === "legacy" && owner.migrationId === null)) {
+    if (source.userId || source.completedAt || source.lastHash) throw new Error("Member migration source is already reserved.");
+    return { userId: command.userId, migrationId: null, migrationPhase: "legacy", generation: owner?.generation.toString() ?? "0" };
+  }
+  if (owner.migrationId !== command.migrationId || source.userId !== command.userId) throw new Error("Member migration identity changed.");
+  return projectMember(owner);
+}
+
 /** Lock campaign(shared), canonical member, owner, then exact inventory row.
  * No per-member page or transition takes the campaign's exclusive lock. */
 export async function lockMemberMigrationTx(tx: Tx, command: HostedRuntimeMemberMigrationCommand): Promise<HostedRuntimeOwner> {

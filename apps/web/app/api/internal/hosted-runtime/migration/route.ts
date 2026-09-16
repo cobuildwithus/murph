@@ -15,7 +15,7 @@ export const POST = withJsonError(async (request: Request) => {
   const result = await executeHostedRuntimeMigrationCommand({
     prisma: getPrisma(), command: parseHostedRuntimeMigrationCommand(JSON.parse(payloadText)),
   });
-  if (result && "member" in result && result.member && "mailboxItemId" in result.member && result.member.mailboxItemId) {
+  if (result && "member" in result && result.member && "mailboxItemId" in result.member && typeof result.member.mailboxItemId === "string") {
     const mailboxItemId = result.member.mailboxItemId;
     const expectedUserId = result.member.userId;
     after(async () => {

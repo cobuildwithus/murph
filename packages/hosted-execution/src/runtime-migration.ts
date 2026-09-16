@@ -76,6 +76,7 @@ export type LegacyRuntimeObservation =
 export type LegacyRuntimeInspection = LegacyRuntimeObservation & {
   freeze: { phase: "quiescing" | "freezing" | "frozen" | null; pendingOperations: number };
 };
+export interface HostedRuntimeObjectMigrationIdentity extends HostedRuntimeMigrationIdentity { objectId: string }
 export interface HostedRuntimeMemberMigrationIdentity extends HostedRuntimeMigrationIdentity {
   objectId: string; userId: string; migrationId: string;
 }
@@ -84,6 +85,8 @@ export type HostedRuntimeMemberMigrationCommand =
   | ({ operation: "import_member"; page: LegacyRuntimeExportPage } & HostedRuntimeMemberMigrationIdentity);
 export type HostedRuntimeMigrationCommand =
   | HostedRuntimeMemberMigrationCommand
+  | ({ operation: "advance_empty" } & HostedRuntimeObjectMigrationIdentity)
+  | ({ operation: "import_empty"; page: LegacyRuntimeExportPage } & HostedRuntimeObjectMigrationIdentity)
   | ({ operation: "advance_member" } & HostedRuntimeMemberMigrationIdentity)
   | { operation: "status" }
   | ({ operation: "begin" } & HostedRuntimeMigrationIdentity)
@@ -126,15 +129,12 @@ export function parseHostedRuntimeMigrationCommand(value: unknown): HostedRuntim
     case "advance_member": return { operation: "advance_member", ...identity, ...memberMigrationIdentity(record) };
     case "begin":
     case "begin_rolling": return { operation: record.operation, ...identity };
-    case "inventory": {
-      if (!Array.isArray(record.objectIds) || record.objectIds.length > 100 || typeof record.complete !== "boolean"
-        || typeof record.after !== "string") throw new TypeError("Migration inventory page is invalid.");
-      return { operation: "inventory", ...identity, after: record.after === "" ? "" : migrationDigest(record.after),
-        objectIds: record.objectIds.map(migrationDigest), complete: record.complete };
-    }
+    case "inventory": return parseInventoryCommand(record, identity);
+    case "advance_empty":
     case "read_object":
     case "inspect_object": return { operation: record.operation, ...identity, objectId: migrationDigest(record.objectId) };
-    case "import": return { operation: "import", ...identity, objectId: migrationDigest(record.objectId), page: parseLegacyRuntimeExportPage(record.page) };
+    case "import_empty":
+    case "import": return { operation: record.operation, ...identity, objectId: migrationDigest(record.objectId), page: parseLegacyRuntimeExportPage(record.page) };
     case "activate": {
       if (typeof record.inventoryCount !== "number" || !Number.isSafeInteger(record.inventoryCount) || record.inventoryCount < 0) throw new TypeError("Migration inventory count is invalid.");
       return { operation: "activate", ...identity, inventoryHash: migrationDigest(record.inventoryHash), inventoryCount: record.inventoryCount };
@@ -166,4 +166,11 @@ function parseMemberMigrationCommand(record: Record<string, unknown>, identity: 
     case "import_member": return { operation: "import_member", ...identity, ...memberMigrationIdentity(record), page: parseLegacyRuntimeExportPage(record.page) };
     default: return null;
   }
+}
+
+function parseInventoryCommand(record: Record<string, unknown>, identity: HostedRuntimeMigrationIdentity): Extract<HostedRuntimeMigrationCommand, { operation: "inventory" }> {
+  if (!Array.isArray(record.objectIds) || record.objectIds.length > 100 || typeof record.complete !== "boolean"
+    || typeof record.after !== "string") throw new TypeError("Migration inventory page is invalid.");
+  return { operation: "inventory", ...identity, after: record.after === "" ? "" : migrationDigest(record.after),
+    objectIds: record.objectIds.map(migrationDigest), complete: record.complete };
 }

@@ -1,4 +1,4 @@
-import { advanceRuntimeMemberMigration } from "../src/worker/route-handlers/runtime-member-migration.ts";
+import { advanceRuntimeEmptyMigration, advanceRuntimeMemberMigration } from "../src/worker/route-handlers/runtime-member-migration.ts";
 import { describe, expect, it, vi } from "vitest";
 import { UserRunnerDurableObject } from "../src/worker/user-runner-durable-object.ts";
 import { ensureRunnerStateSchema } from "../src/user-runner/runner-state-schema.ts";
@@ -32,10 +32,11 @@ function harness() {
     RUNNER_CONTAINER_SMOKE: { getByName }, BUNDLES: { put: unused, get: unused }, USER_RUNNER: { getByName: () => ({ bindUser: unused, deleteHostedUserData: unused, publishHostedPrivateMedia: unused, ensureRuntimeProcessingForUser: unused, runnerStatus: unused }) } };
   const stop = vi.fn(async () => { sql.exec("UPDATE runner_meta SET active_attempt_id = NULL, active_runner_container_name = NULL"); });
   const drained = vi.fn(async () => true);
-  const runner = { stopLegacyRuntimeForMigration: stop, legacyRuntimeUploadsDrained: drained };
+  const deletion = vi.fn(async () => { values.clear(); sql.exec("DELETE FROM runner_meta"); return { ok: true }; });
+  const runner = { stopLegacyRuntimeForMigration: stop, legacyRuntimeUploadsDrained: drained, deleteHostedUserData: deletion };
   canonical.command.mockReset().mockResolvedValue({ member: { ...identity, migrationPhase: "quiescing" } });
   const object = new UserRunnerDurableObject(state, source, runner as never);
-  return { sql, values, state, source, supports, checkpoint, getByName, stop, drained, object };
+  return { sql, values, state, source, supports, checkpoint, getByName, stop, drained, deletion, object };
 }
 
 describe("conditional member checkpoint handoff", () => {
@@ -122,5 +123,78 @@ describe("resumable member handoff continuation", () => {
     expect((await advance())).toMatchObject({ member: { migrationPhase: "postgres" } });
     expect(operations.filter(op => op === "import_member")).toHaveLength(4);
     expect(h.stop).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+describe("member deletion and migration ordering", () => {
+  it("waits for a pre-admitted deletion before reserving source identity", async () => {
+    const h = harness();
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const erase = h.deletion.getMockImplementation()!;
+    h.deletion.mockImplementation(async () => { await held; return erase(); });
+    let phase = "legacy";
+    canonical.command.mockImplementation(async ({ command }) => {
+      if (command.operation === "quiesce_member") phase = "quiescing";
+      return { member: { ...identity, migrationId: phase === "legacy" ? null : identity.migrationId, migrationPhase: phase } };
+    });
+    const deleting = h.object.deleteHostedUserData(identity.userId);
+    await vi.waitFor(() => expect(h.deletion).toHaveBeenCalledOnce());
+    const advancing = advanceRuntimeMemberMigration({ source: h.source, stub: h.object, identity });
+    try {
+      await vi.waitFor(() => expect(canonical.command).toHaveBeenCalled());
+      expect(canonical.command.mock.calls.some(([arg]) => arg.command.operation === "quiesce_member")).toBe(false);
+    } finally { release(); await deleting; }
+    expect(await advancing).toEqual({ pending: "readiness" });
+    expect(canonical.command.mock.calls.some(([arg]) => arg.command.operation === "quiesce_member")).toBe(false);
+    expect(h.values.has("runtime-migration-freeze:v1")).toBe(false);
+  });
+
+  it("keeps deletion closed when canonical reservation commits but its reply is lost", async () => {
+    const h = harness(); let reserved = false; let loseReply = true;
+    canonical.command.mockImplementation(async ({ command }) => {
+      if (command.operation === "quiesce_member") {
+        reserved = true;
+        if (loseReply) { loseReply = false; throw new Error("synthetic reservation response lost"); }
+      }
+      return { member: { ...identity, migrationId: reserved ? identity.migrationId : null, migrationPhase: reserved ? "quiescing" : "legacy" } };
+    });
+    await expect(h.object.preparePostgresMemberMigration(identity)).rejects.toThrow("response lost");
+    expect(h.values.get("runtime-migration-freeze:v1")).toMatchObject({ phase: "quiescing", migrationId: identity.migrationId });
+    expect(await h.object.deleteHostedUserData(identity.userId)).toMatchObject({ ok: false, reason: "runtime_migration_pending" });
+    expect(h.deletion).not.toHaveBeenCalled();
+    expect(await h.object.preparePostgresMemberMigration(identity)).toMatchObject({ quiesced: true, checkpointStatus: "accepted" });
+  });
+
+  it("defers a deletion arriving after local closure to durable cleanup retries", async () => {
+    const h = harness();
+    await h.object.preparePostgresMemberMigration(identity);
+    expect(await h.object.deleteHostedUserData(identity.userId)).toEqual({ ok: false,
+      reason: "runtime_migration_pending", retryAfterSeconds: 3, userId: identity.userId });
+    expect(h.deletion).not.toHaveBeenCalled();
+    expect((await h.object.inspectPostgresMigration()).freeze.phase).toBe("quiescing");
+  });
+});
+
+
+describe("empty namespace object migration", () => {
+  it("freezes and exports a schema-free object without initializing a runner or stopping a container", async () => {
+    const h = harness();
+    h.sql.exec("DROP TABLE runner_meta"); h.sql.exec("DROP TABLE runner_hosted_media_asset"); h.sql.exec("DROP TABLE runner_schema_meta");
+    let section = 0; let completed = false;
+    canonical.command.mockImplementation(async ({ command }) => {
+      if (command.operation === "status") return { gate: { phase: "rolling", inventorySealedAt: "synthetic-sealed" } };
+      if (command.operation === "read_object") return { object: { userId: null, completedAt: completed ? "synthetic-complete" : null, nextCursor: { section, after: "" } } };
+      if (command.operation !== "import_empty") throw new Error("Unexpected empty migration command.");
+      expect(command.page).toMatchObject({ userId: null, generation: "0", records: [], cursor: { section, after: "" } });
+      section++; completed = command.page.next === null;
+      return { object: { completedAt: completed ? "synthetic-complete" : null } };
+    });
+    for (let i = 0; i < 4; i++) await advanceRuntimeEmptyMigration({ source: h.source, stub: h.object, identity });
+    expect(await advanceRuntimeEmptyMigration({ source: h.source, stub: h.object, identity })).toMatchObject({ object: { completedAt: "synthetic-complete" } });
+    expect(h.stop).not.toHaveBeenCalled(); expect(h.drained).not.toHaveBeenCalled(); expect(h.checkpoint).not.toHaveBeenCalled();
+    expect(h.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table'").toArray()).toEqual([]);
+    expect(h.values.get("runtime-migration-freeze:v1")).toMatchObject({ phase: "frozen", migrationId: `empty-${identity.objectId}` });
   });
 });

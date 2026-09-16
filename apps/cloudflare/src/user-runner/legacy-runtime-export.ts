@@ -49,9 +49,9 @@ export async function readLegacyRuntimeExportPage(state: DurableObjectStateLike,
   if (!Number.isInteger(cursor.section) || cursor.section < 0 || cursor.section > EXPORT_KV_PREFIXES.length
     || typeof cursor.after !== "string" || cursor.after.length > 2048) throw new TypeError("Legacy export cursor is invalid.");
   const identity = await readLegacyRuntimeMigrationIdentity(state);
-  const active = state.storage.sql!.exec<{ active_attempt_id: string | null; active_runner_container_name: string | null }>(
+  const active = hasTable(state, "runner_meta") ? state.storage.sql!.exec<{ active_attempt_id: string | null; active_runner_container_name: string | null }>(
     "SELECT active_attempt_id, active_runner_container_name FROM runner_meta WHERE singleton = 1",
-  ).toArray()[0];
+  ).toArray()[0] : undefined;
   if (active?.active_attempt_id || active?.active_runner_container_name) throw new Error("Legacy runtime export still has an execution target.");
   const records = cursor.section === 0
     ? readMediaPage(state, cursor.after)
@@ -65,6 +65,7 @@ export async function readLegacyRuntimeExportPage(state: DurableObjectStateLike,
 }
 
 function readMediaPage(state: DurableObjectStateLike, after: string): LegacyRuntimeExportPage["records"] {
+  if (!hasTable(state, "runner_hosted_media_asset")) return [];
   return state.storage.sql!.exec<Record<string, DurableObjectSqlValue>>(`
     SELECT media_id, user_id, media_kind, byte_size, sha256, expires_at,
       retired_at, purged_at, revision, object_key, updated_at
@@ -115,4 +116,8 @@ function classifyLegacyStorageRecord(key: string, value: unknown, requireTermina
     throw new Error("Legacy resource member identity is missing.");
   }
   return value.userId;
+}
+
+function hasTable(state: DurableObjectStateLike, table: string): boolean {
+  return state.storage.sql!.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).toArray().length === 1;
 }

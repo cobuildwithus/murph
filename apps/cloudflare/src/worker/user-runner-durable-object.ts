@@ -1,4 +1,4 @@
-import type { HostedRuntimeMemberMigrationIdentity } from "@murphai/hosted-execution/runtime-migration";
+import type { HostedRuntimeMemberMigrationIdentity, HostedRuntimeObjectMigrationIdentity } from "@murphai/hosted-execution/runtime-migration";
 import { isLegacyMemberReady, observeMember, requestLegacyMemberCheckpoint, requireLegacyMemberMigrationPhase } from "../user-runner/legacy-member-migration.ts";
 import { commandHostedRuntimeMigration } from "../runtime-migration-client.ts";
 import { observeLegacyRuntime } from "../user-runner/legacy-runtime-observation.ts";
@@ -84,7 +84,11 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 
   async deleteHostedUserData(userId: string): ReturnType<HostedUserRunner["deleteHostedUserData"]> {
-    return this.migrationFreeze.run(() => this.runner.deleteHostedUserData(userId));
+    try { return await this.migrationFreeze.runAdmission(() => this.runner.deleteHostedUserData(userId)); }
+    catch (error) {
+      if (!(error instanceof LegacyRuntimeFrozenError)) throw error;
+      return { ok: false, reason: "runtime_migration_pending", retryAfterSeconds: 3, userId };
+    }
   }
 
   async reconcileRuntimeHealthDataConsentForUser(
@@ -262,9 +266,28 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async preparePostgresMemberMigration(identity: HostedRuntimeMemberMigrationIdentity) {
     const input = { source: this.source, state: this.migrationState, identity, userId: identity.userId };
-    await requireLegacyMemberMigrationPhase({ ...input, phases: ["quiescing"] });
+    await requireLegacyMemberMigrationPhase({ ...input, phases: ["legacy", "quiescing"] });
     const quiesced = await this.migrationFreeze.quiesce(identity.migrationId, () => isLegacyMemberReady(input));
-    return { quiesced, checkpointStatus: quiesced ? await requestLegacyMemberCheckpoint(input) : null };
+    if (!quiesced) return { quiesced: false, checkpointStatus: null };
+    // The local durable barrier closes deletion before canonical reservation.
+    // Lost reservation responses leave that barrier closed for exact-token retry.
+    await commandHostedRuntimeMigration({ source: this.source, command: { ...identity, operation: "quiesce_member" } });
+    return { quiesced: true, checkpointStatus: await requestLegacyMemberCheckpoint(input) };
+  }
+
+  async freezeEmptyForPostgresMigration(identity: HostedRuntimeObjectMigrationIdentity): Promise<{ frozen: boolean }> {
+    const metadata = this.source.CF_VERSION_METADATA;
+    if (!metadata || typeof metadata !== "object" || !("id" in metadata) || metadata.id !== identity.workerVersion) throw new Error("Legacy object is serving an incompatible migration version.");
+    const result = await commandHostedRuntimeMigration({ source: this.source, command: { ...identity, operation: "read_object" } });
+    const object = result.object;
+    if (!object || typeof object !== "object" || !("userId" in object) || object.userId !== null) throw new Error("Empty migration source is reserved by a member.");
+    const status = await commandHostedRuntimeMigration({ source: this.source, command: { operation: "status" } });
+    const gate = status.gate;
+    if (!gate || typeof gate !== "object" || !("phase" in gate) || gate.phase !== "rolling" || !("inventorySealedAt" in gate) || !gate.inventorySealedAt) throw new Error("Empty migration requires a sealed rolling campaign.");
+    return { frozen: await this.migrationFreeze.freezeEmpty({ migrationId: `empty-${identity.objectId}`, empty: async () => {
+      const observed = await observeLegacyRuntime(this.migrationState);
+      return observed.kind === "observed" && observed.userId === null;
+    } }) };
   }
 
   async freezeForPostgresMigration(identity?: HostedRuntimeMemberMigrationIdentity): Promise<{ frozen: boolean }> {

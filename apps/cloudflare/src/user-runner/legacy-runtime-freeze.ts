@@ -39,7 +39,7 @@ export class LegacyRuntimeFreeze {
     return this.track(Promise.resolve().then(operation));
   }
 
-  /** Only execution starts use this gate. Current-attempt callbacks continue
+  /** Execution starts and destructive deletion use this gate. Callbacks continue
    * through run() while quiescing, including the final workspace checkpoint. */
   async runAdmission<T>(operation: () => Promise<T>): Promise<T> {
     await this.loaded;
@@ -50,8 +50,7 @@ export class LegacyRuntimeFreeze {
     return admitted;
   }
 
-  /** The caller verifies the canonical member transition before closing this
-   * local gate. Wait for pre-barrier launches before selecting a checkpoint
+  /** The caller verifies campaign eligibility before closing this local gate. Wait for pre-barrier launches before selecting a checkpoint
    * target; background invocations remain tracked until the final freeze. */
   async quiesce(migrationId: string, ready?: () => Promise<boolean>): Promise<boolean> {
     if (!/^[A-Za-z0-9_-]{1,128}$/u.test(migrationId)) throw new TypeError("Legacy migration identity is invalid.");
@@ -121,6 +120,40 @@ export class LegacyRuntimeFreeze {
     await this.state.storage.deleteAlarm();
     await this.persist("frozen");
     this.phase = "frozen";
+    return true;
+  }
+
+  /** Empty objects have no execution target. Close all callbacks in memory,
+   * drain admitted work, and persist only after proving they stayed empty. */
+  async freezeEmpty(input: { migrationId: string; empty: () => Promise<boolean> }): Promise<boolean> {
+    await this.loaded;
+    if (this.phase && this.migrationId !== input.migrationId) throw new Error("Legacy migration identity changed.");
+    if (this.phase === "quiescing") throw new Error("A member barrier cannot become an empty-object barrier.");
+    if (this.phase === "frozen") return true;
+    if (this.freezing) return this.freezing;
+    const alreadyClosed = this.phase === "freezing";
+    this.phase = "freezing"; this.migrationId = input.migrationId;
+    this.freezing = this.finishEmptyFreeze(input.empty, alreadyClosed);
+    try { return await this.freezing; }
+    finally { this.freezing = null; }
+  }
+
+  private async finishEmptyFreeze(empty: () => Promise<boolean>, alreadyClosed: boolean): Promise<boolean> {
+    let eligible = false;
+    try {
+      do { await Promise.allSettled([...this.pending]); } while (this.pending.size > 0);
+      eligible = await empty();
+    } finally {
+      if (!eligible && !alreadyClosed) { this.phase = null; this.migrationId = null; }
+    }
+    if (!eligible) {
+      if (alreadyClosed) throw new Error("A closed empty object gained member state.");
+      return false;
+    }
+    await this.persist("freezing");
+    if (!this.state.storage.deleteAlarm) throw new Error("Legacy migration requires alarm deletion.");
+    await this.state.storage.deleteAlarm();
+    await this.persist("frozen"); this.phase = "frozen";
     return true;
   }
 

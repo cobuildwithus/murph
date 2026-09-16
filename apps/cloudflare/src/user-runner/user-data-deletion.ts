@@ -61,7 +61,7 @@ export interface HostedRunnerUserDataDeletionCompletedResult {
 
 export interface HostedRunnerUserDataDeletionPendingResult {
   ok: false;
-  reason: "r2_upload_drain_pending";
+  reason: "r2_upload_drain_pending" | "runtime_migration_pending";
   retryAfterSeconds: number;
   userId: string;
 }
