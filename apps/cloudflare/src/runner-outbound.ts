@@ -552,7 +552,7 @@ async function handleRunnerMediaRequest(input: {
       userId: input.userId,
     });
     const mediaStore = createHostedMediaStore({
-      bucket: usesPostgresRuntimeOwner(input.env) && descriptor ? createRuntimeMediaWriteBucket({
+      bucket: (await usesPostgresRuntimeOwner(input.env, input.userId)) && descriptor ? createRuntimeMediaWriteBucket({
         source: input.env, userId: input.userId, attemptId: writeAuthority.attemptId,
         generation: writeAuthority.generation, media: { descriptor },
       }) : input.bucket,
@@ -848,7 +848,7 @@ async function admitHostedMediaRead(input: {
   env: RunnerOutboundEnvironmentSource;
   userId: string;
 }) {
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
     const result = await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
       operation: "read", descriptor: { ...input.descriptor, expiresAt: input.descriptor.expiresAt ?? null },
     } });
@@ -871,7 +871,7 @@ async function recordHostedMediaAsset(input: {
   userId: string;
   writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<boolean> {
-  if (usesPostgresRuntimeOwner(input.env)) return (await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) return (await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
     operation: "register", attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation,
     descriptor: { ...input.descriptor, expiresAt: input.descriptor.expiresAt ?? null },
   } })).applied;
@@ -895,7 +895,7 @@ async function forgetHostedMediaAsset(input: {
   userId: string;
   writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<boolean> {
-  if (usesPostgresRuntimeOwner(input.env)) return (await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) return (await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
     operation: "retire", attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation, mediaId: input.mediaId,
   } })).applied;
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
@@ -2964,7 +2964,7 @@ async function rememberReplacedWorkspaceSnapshotCleanupInUploadSession(input: {
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
 }): Promise<boolean> {
-  if (usesPostgresRuntimeOwner(input.env)) return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
     operation: "snapshot_record_replaced", expectedSession: input.session, replacedSnapshotRef: input.replacedSnapshotRef,
   } })).applied;
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
@@ -2985,7 +2985,7 @@ async function rememberWorkspaceSnapshotPresignedPut(input: {
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
     const result = await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
       operation: "snapshot_admit_put", expectedSession: input.session, expiresAt: input.expiresAt, drainUntil: input.drainUntil,
     } });
@@ -3040,7 +3040,7 @@ async function recordWorkspaceSnapshotOrphanCandidate(
   env: RunnerOutboundEnvironmentSource,
   candidate: HostedWorkspaceSnapshotOrphanCandidate,
 ): Promise<boolean> {
-  if (usesPostgresRuntimeOwner(env)) {
+  if ((await usesPostgresRuntimeOwner(env, candidate.userId))) {
     await recordHostedRuntimeOrphan({ source: env, userId: candidate.userId, resource: candidate.kind === "legacy_workspace_snapshot"
       ? { kind: "legacy_snapshot", snapshotRef: candidate.snapshotRef }
       : { kind: "snapshot", objectKey: candidate.objectKey } });
@@ -3058,7 +3058,7 @@ async function recordBrowserVaultReplicaOrphanCandidate(
   env: RunnerOutboundEnvironmentSource,
   candidate: HostedBrowserVaultReplicaOrphanCandidate,
 ): Promise<void> {
-  if (usesPostgresRuntimeOwner(env)) {
+  if ((await usesPostgresRuntimeOwner(env, candidate.userId))) {
     await recordHostedRuntimeOrphan({ source: env, userId: candidate.userId, resource: { kind: "replica", objectKey: candidate.objectKey } });
     return;
   }
@@ -3148,7 +3148,7 @@ async function retireWorkspaceSnapshotUploadSession(input: {
   snapshotId: string;
   userId: string;
 }): Promise<void> {
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
     // Canonical protection, capability drains, and irreversible retirement now
     // belong to the Web retention transaction. Never delete ciphertext here.
     await deleteWorkspaceSnapshotUploadSession(input);
@@ -3498,7 +3498,7 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   });
   let admittedRootObjectKey: string | null = null;
   const replicaStore = createHostedBrowserVaultReplicaStore({
-    bucket: usesPostgresRuntimeOwner(input.env) ? createRuntimeReplicaWriteBucket({ source: input.env,
+    bucket: (await usesPostgresRuntimeOwner(input.env, input.userId)) ? createRuntimeReplicaWriteBucket({ source: input.env,
       userId: input.userId, attemptId: writeAuthority.attemptId, generation: writeAuthority.generation,
       readRootObjectKey: () => admittedRootObjectKey,
     }) : input.bucket,
@@ -3537,7 +3537,7 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
           }
           activePutWriteId = writeId;
           admittedRootObjectKey = plannedReplicaRef.objectKey;
-          if (!usesPostgresRuntimeOwner(input.env)) await recordBrowserVaultReplicaOrphanCandidate(input.env, {
+          if (!(await usesPostgresRuntimeOwner(input.env, input.userId))) await recordBrowserVaultReplicaOrphanCandidate(input.env, {
             createdAt: new Date().toISOString(),
             objectKey: plannedReplicaRef.objectKey,
             schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
@@ -3568,7 +3568,7 @@ async function admitBrowserVaultReplicaDirectPut(input: {
   userId: string;
   writeId: string;
 }): Promise<boolean> {
-  if (usesPostgresRuntimeOwner(input.env)) return commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) return commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: {
     operation: "admit", attemptId: input.attemptId, generation: input.leaseGeneration, writeId: input.writeId, objectKey: input.objectKey,
   } });
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
@@ -3590,7 +3590,7 @@ async function releaseBrowserVaultReplicaDirectPut(input: {
   userId: string;
   writeId: string;
 }): Promise<void> {
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
     await commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: { operation: "release", writeId: input.writeId } });
     return;
   }
@@ -3632,7 +3632,7 @@ async function requireWorkspaceSnapshotWriteFence(input: {
   request: Request;
   userId: string;
 }) {
-  if (input.deferToResourceCommand && usesPostgresRuntimeOwner(input.env)) {
+  if (input.deferToResourceCommand && (await usesPostgresRuntimeOwner(input.env, input.userId))) {
     const headers = readRunnerRuntimeWriteFenceHeaders(input.request);
     return headers?.workspaceVersion && /^[0-9]+$/u.test(headers.workspaceVersion)
       ? { ...headers, workspaceVersion: headers.workspaceVersion } : null;
@@ -3668,7 +3668,7 @@ async function createWorkspaceSnapshotUploadSession(input: {
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
     const result = await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: { operation: "snapshot_create", session: input.session } });
     return result.applied ? result.session : null;
   }
@@ -3687,7 +3687,7 @@ async function heartbeatWorkspaceSnapshotUploadSession(input: {
   snapshotId: string;
   userId: string;
 }): Promise<boolean> {
-  if (usesPostgresRuntimeOwner(input.env)) return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
     operation: "snapshot_heartbeat", snapshotId: input.snapshotId, attemptId: input.attemptId, generation: input.leaseGeneration,
   } })).applied;
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
@@ -3710,7 +3710,7 @@ async function completeWorkspaceSnapshotUploadSessionHandoff(input: {
   snapshotId: string;
   userId: string;
 }): Promise<boolean> {
-  if (usesPostgresRuntimeOwner(input.env)) return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
     operation: "snapshot_complete", snapshotId: input.snapshotId, attemptId: input.attemptId, generation: input.leaseGeneration,
   } })).applied;
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
@@ -3764,7 +3764,7 @@ async function readWorkspaceSnapshotUploadSession(input: {
   snapshotId: string;
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
     const result = await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
       operation: "snapshot_read", snapshotId: input.snapshotId, attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation,
     } });
@@ -3787,7 +3787,7 @@ async function deleteWorkspaceSnapshotUploadSession(input: {
   snapshotId: string;
   userId: string;
 }): Promise<void> {
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
     await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
       operation: "snapshot_delete", snapshotId: input.snapshotId, attemptId: input.session.attemptId, generation: input.session.leaseGeneration,
     } });

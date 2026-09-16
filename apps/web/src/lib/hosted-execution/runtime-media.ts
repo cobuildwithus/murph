@@ -1,8 +1,9 @@
+import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 import { HOSTED_RUNTIME_ORPHAN_GRACE_MS } from "@murphai/hosted-execution/runtime-resources";
 import type { HostedRuntimeMedia, PrismaClient, Prisma } from "@prisma/client";
 import { hostedMediaObjectKey, hostedPrivateMediaObjectKey } from "@murphai/hosted-execution/storage-paths";
 import { parseHostedRuntimeMediaCommand, type HostedRuntimeMediaCommand, type HostedRuntimeMediaPurge, type HostedRuntimeMediaResponse } from "@murphai/hosted-execution/runtime-media";
-import { lockHostedRuntimeCutoverTx, requireHostedRuntimeOwnerTx } from "./runtime-owner";
+import { requireHostedRuntimeOwnerTx } from "./runtime-owner";
 
 /** Retirement is terminal. External deletion happens after this transaction;
  * its acknowledgement is conditional on the exact metadata revision. */
@@ -16,7 +17,7 @@ export async function executeHostedRuntimeMediaCommand(input: {
   const objectKey = isPrivate ? await hostedPrivateMediaObjectKey({ userId: input.userId, sha256: mediaId })
     : await hostedMediaObjectKey({ userId: input.userId, mediaId });
   return input.prisma.$transaction(async (tx) => {
-    const cutover = await lockHostedRuntimeCutoverTx(tx);
+    const cutover = await lockHostedRuntimeMemberCutoverTx(tx, input.userId);
     const result = (applied: boolean, reason: HostedRuntimeMediaResponse["reason"] = null, purge: HostedRuntimeMediaPurge | null = null): HostedRuntimeMediaResponse => ({ cutover, applied, reason, purge });
     if (cutover !== "postgres") return result(false);
     if (command.operation === "register" || command.operation === "retire" || command.operation === "admit_put" || command.operation === "admit_private_put") await requireHostedRuntimeOwnerTx(tx, { ...command, userId: input.userId });

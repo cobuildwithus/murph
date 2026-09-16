@@ -73,7 +73,7 @@ export async function handleUserDataDeleteRoute(
     throw error;
   }
 
-  const result = usesPostgresRuntimeOwner(context.env)
+  const result = (await usesPostgresRuntimeOwner(context.env, userId))
     ? await deletePostgresRunnerUserData(context.env, userId)
     : await context.env.USER_RUNNER.getByName(userId).deleteHostedUserData(userId);
   if (typeof result === "object" && result !== null && "ok" in result && result.ok === false) {

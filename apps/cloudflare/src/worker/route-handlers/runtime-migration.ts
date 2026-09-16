@@ -1,7 +1,7 @@
 import { parseHostedRuntimeMigrationCommand, parseLegacyRuntimeExportCursor } from "@murphai/hosted-execution/runtime-migration";
 import { commandHostedRuntimeMigration } from "../../runtime-migration-client.ts";
 import { json, readOptionalJsonObject } from "../../json.ts";
-import { usesPostgresRuntimeOwner } from "../../runtime-cutover.ts";
+import { supportsPostgresRuntimeOwner } from "../../runtime-cutover.ts";
 import type { WorkerRouteContext } from "../../worker-routes/shared.ts";
 import type { DeclarativeRoute } from "../routes.ts";
 
@@ -19,7 +19,8 @@ export const runtimeMigrationRoutes: readonly DeclarativeRoute<WorkerRouteContex
     if (!metadata || typeof metadata !== "object" || !("id" in metadata) || metadata.id !== command.workerVersion) {
       throw new Error("Migration request reached a different serving Worker version.");
     }
-    if (!usesPostgresRuntimeOwner(context.env)) throw new Error("Migration requires the Postgres-capable fleet deployment.");
+    if (command.operation === "inspect_object") return json(await inspectObject(context, command.objectId));
+    if (!supportsPostgresRuntimeOwner(context.env)) throw new Error("Migration requires the Postgres-capable fleet deployment.");
     // Import's page is produced below, never accepted as operator input.
     if (command.operation !== "read_object") {
       if (command.operation === "import") throw new Error("Resource import requires an exact-object read.");
@@ -29,12 +30,22 @@ export const runtimeMigrationRoutes: readonly DeclarativeRoute<WorkerRouteContex
     const object = current.object;
     if (!object || typeof object !== "object" || !("completedAt" in object) || !("nextCursor" in object)) throw new Error("Migration receipt is invalid.");
     if (object.completedAt) return json(current);
-    const namespace = context.env.USER_RUNNER;
-    if (!namespace.get || !namespace.idFromString) throw new Error("Migration requires exact Durable Object addressing.");
-    const stub = namespace.get(namespace.idFromString(command.objectId));
+    const stub = exactLegacyObject(context, command.objectId);
     if (!stub.freezeForPostgresMigration || !stub.exportPostgresMigrationPage) throw new Error("Legacy object does not support the migration protocol.");
     if (!(await stub.freezeForPostgresMigration()).frozen) return json({ draining: true });
     const page = await stub.exportPostgresMigrationPage(parseLegacyRuntimeExportCursor(object.nextCursor));
     return json(await commandHostedRuntimeMigration({ source: context.env, command: { ...command, operation: "import", page } }));
   },
 }];
+
+function exactLegacyObject(context: WorkerRouteContext, objectId: string) {
+  const namespace = context.env.USER_RUNNER;
+  if (!namespace.get || !namespace.idFromString) throw new Error("Migration requires exact Durable Object addressing.");
+  return namespace.get(namespace.idFromString(objectId));
+}
+
+async function inspectObject(context: WorkerRouteContext, objectId: string) {
+  const stub = exactLegacyObject(context, objectId);
+  if (!stub.inspectPostgresMigration) throw new Error("Legacy object does not support observational inspection.");
+  return { objectId, observation: await stub.inspectPostgresMigration() };
+}

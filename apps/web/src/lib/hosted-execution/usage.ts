@@ -182,7 +182,7 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
         if (input.runtimeIdentity !== null && input.runtimeIdentity.userId !== memberId) {
           throw new TypeError("Hosted runtime usage member does not match its authority.");
         }
-        await requireHostedRuntimeCallbackTx(tx, input.runtimeIdentity);
+        await requireHostedRuntimeCallbackTx(tx, memberId, input.runtimeIdentity);
       }
       await persistHostedAiUsageRecordTx({
         memberId,

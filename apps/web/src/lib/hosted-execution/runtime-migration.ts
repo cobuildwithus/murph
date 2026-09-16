@@ -6,13 +6,14 @@ import { recordRuntimeOrphansTx } from "./runtime-orphans";
 
 const INITIAL_CURSOR = { section: 0, after: "" };
 const INITIAL_INVENTORY_HASH = digest("");
-type MigrationCommand = Exclude<HostedRuntimeMigrationCommand, { operation: "status" }>;
+type MigrationCommand = Exclude<HostedRuntimeMigrationCommand, { operation: "status" | "inspect_object" }>;
 
 /** Trusted, finite fleet operation. Every transition takes the exclusive gate;
  * canonical callbacks/claims take its shared lock. No network work enters it. */
 export async function executeHostedRuntimeMigrationCommand(input: { prisma: PrismaClient; command: HostedRuntimeMigrationCommand }) {
   const command = parseHostedRuntimeMigrationCommand(input.command);
   if (command.operation === "status") return { gate: await input.prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } }) };
+  if (command.operation === "inspect_object") throw new Error("Live inspection belongs to the source Worker.");
   const resources = command.operation === "import" ? await validatePage(command.page) : null;
   return input.prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR UPDATE`;

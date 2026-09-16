@@ -1,4 +1,4 @@
-import type { LegacyRuntimeExportCursor, LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
+import type { LegacyRuntimeExportCursor, LegacyRuntimeExportPage, LegacyRuntimeInspection } from "@murphai/hosted-execution/runtime-migration";
 import type { HostedExecutionContainerStubLike } from "./runner-container.ts";
 import type {
   HostedWorkspaceInvocationResult,
@@ -147,6 +147,7 @@ export interface WorkerRunnerContainerNamespaceLike<
 }
 
 export interface WorkerUserRunnerStubLike {
+  inspectPostgresMigration?(): Promise<LegacyRuntimeInspection>;
   freezeForPostgresMigration?(): Promise<{ frozen: boolean }>;
   exportPostgresMigrationPage?(cursor: LegacyRuntimeExportCursor): Promise<LegacyRuntimeExportPage>;
   recordRunnerContainerRetired?(input: {

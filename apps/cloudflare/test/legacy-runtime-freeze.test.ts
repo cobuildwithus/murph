@@ -18,6 +18,77 @@ function deferred() {
 }
 
 describe("finite legacy runtime freeze", () => {
+  it("quiesces only new starts, waits for admitted launches and preserves checkpoint callbacks across eviction", async () => {
+    const h = harness();
+    const launchStarted = deferred();
+    const finishLaunch = deferred();
+    const finishInvocation = deferred();
+    const launch = h.freeze.runAdmission(async () => {
+      launchStarted.resolve();
+      await finishLaunch.promise;
+      h.freeze.track(finishInvocation.promise);
+    });
+    await launchStarted.promise;
+    let quiesced = false;
+    const closing = h.freeze.quiesce("migration-synthetic").then(() => { quiesced = true; });
+    await expect(h.freeze.runAdmission(async () => {})).rejects.toThrow("frozen");
+    await expect(h.freeze.run(async () => "checkpoint callback")).resolves.toBe("checkpoint callback");
+    expect(quiesced).toBe(false);
+    finishLaunch.resolve();
+    await launch;
+    await closing;
+    expect(await h.freeze.observe()).toEqual({ phase: "quiescing", pendingOperations: 1 });
+    const evicted = new LegacyRuntimeFreeze(h.state);
+    await expect(evicted.runAdmission(async () => {})).rejects.toThrow("frozen");
+    await expect(evicted.run(async () => "completion callback")).resolves.toBe("completion callback");
+    await expect(evicted.quiesce("another-migration")).rejects.toThrow("identity changed");
+    await expect(evicted.quiesce("migration-synthetic")).resolves.toBeUndefined();
+    await expect(h.freeze.freeze({ stop: async () => {}, drained: async () => true })).rejects.toThrow("identity changed");
+    finishInvocation.resolve();
+    expect(await h.freeze.freeze({ migrationId: "migration-synthetic", stop: async () => {}, drained: async () => true })).toBe(true);
+    await expect(h.freeze.run(async () => {})).rejects.toThrow("frozen");
+  });
+
+  it("does not acknowledge quiescence before durable closure and retries a failed write without reopening admission", async () => {
+    const h = harness();
+    const stored = deferred();
+    const storeStarted = deferred();
+    const originalPut = h.state.storage.put;
+    h.state.storage.put = vi.fn(async (key, value) => {
+      storeStarted.resolve();
+      await stored.promise;
+      await originalPut(key, value);
+    });
+    let acknowledgements = 0;
+    const first = h.freeze.quiesce("migration-synthetic").then(() => { acknowledgements++; });
+    await storeStarted.promise;
+    const duplicate = h.freeze.quiesce("migration-synthetic").then(() => { acknowledgements++; });
+    await expect(h.freeze.runAdmission(async () => {})).rejects.toThrow("frozen");
+    expect(acknowledgements).toBe(0);
+    stored.resolve();
+    await Promise.all([first, duplicate]);
+    expect(acknowledgements).toBe(2);
+
+    const failed = harness();
+    const retryPut = failed.state.storage.put;
+    failed.state.storage.put = vi.fn().mockRejectedValueOnce(new Error("synthetic storage failure")).mockImplementation(retryPut);
+    await expect(failed.freeze.quiesce("migration-synthetic")).rejects.toThrow("storage failure");
+    await expect(failed.freeze.runAdmission(async () => {})).rejects.toThrow("frozen");
+    await failed.freeze.quiesce("migration-synthetic");
+    const evicted = new LegacyRuntimeFreeze(failed.state);
+    await expect(evicted.runAdmission(async () => {})).rejects.toThrow("frozen");
+  });
+
+  it("preserves old completed freeze records and rejects member freeze before quiescence", async () => {
+    const h = harness();
+    await expect(h.freeze.freeze({ migrationId: "migration-synthetic", stop: async () => {}, drained: async () => true })).rejects.toThrow("requires completed quiescence");
+    await h.state.storage.put("runtime-migration-freeze:v1", { schema: "murph.legacy-runtime-freeze.v1", phase: "frozen" });
+    const evicted = new LegacyRuntimeFreeze(h.state);
+    await expect(evicted.assertFrozen()).resolves.toBeUndefined();
+    await expect(evicted.runAdmission(async () => {})).rejects.toThrow("frozen");
+    await expect(evicted.quiesce("migration-synthetic")).rejects.toThrow("identity changed");
+  });
+
   it("blocks new work and waits for admitted RPCs and background writes before export", async () => {
     const h = harness();
     const started = deferred();

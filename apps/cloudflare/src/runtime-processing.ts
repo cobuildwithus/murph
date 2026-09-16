@@ -5,7 +5,7 @@ import type { HostedRuntimeOwnerCommand, HostedRuntimeOwnerSnapshot } from "@mur
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import type { WorkerEnvironmentSource } from "./worker-routes/shared.ts";
-import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
+import { supportsPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
 import { RuntimeInvocationPreparation } from "./runtime-invocation-preparation.ts";
@@ -33,11 +33,12 @@ type ProcessingContext = ReturnType<typeof createProcessingContext> & {
  * target owns execution evidence. Null is the finite legacy cutover bridge. */
 export async function ensurePostgresRuntimeProcessing(source: RuntimeProcessingSource, input: RuntimeProcessingInput): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   const context = createProcessingContext(source, input);
-  if (!usesPostgresRuntimeOwner(source)) {
+  if (!supportsPostgresRuntimeOwner(source)) {
     const state = await context.command({ operation: "reconcile" });
     return state.cutover === "legacy" ? null : retryProcessing();
   }
   let claim = await context.command({ operation: "claim", processingMode: context.mode });
+  if (claim.cutover === "legacy") return null;
   if (claim.cutover !== "postgres" || !context.namespace || !claim.owner) return retryProcessing();
   const ctx = { ...context, namespace: context.namespace };
   if (claim.status === "existing") {

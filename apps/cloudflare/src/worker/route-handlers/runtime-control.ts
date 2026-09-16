@@ -132,7 +132,7 @@ export async function handleStatusRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  if (usesPostgresRuntimeOwner(context.env)) return json(await readPostgresRunnerStatus(context.env, userId, readHostedStatusRouteOptions(context.url)));
+  if ((await usesPostgresRuntimeOwner(context.env, userId))) return json(await readPostgresRunnerStatus(context.env, userId, readHostedStatusRouteOptions(context.url)));
   const stub = await resolveUserRunnerStub(context.env, userId);
   const status = await stub.runnerStatus(readHostedStatusRouteOptions(context.url));
   return json(status);
@@ -304,7 +304,7 @@ export async function handleRuntimeHealthDataConsentRoute(
       "Hosted runtime health-data consent request must be empty.",
     );
   }
-  if (usesPostgresRuntimeOwner(context.env)) return json(await reconcilePostgresRuntimeConsent(context.env, userId));
+  if ((await usesPostgresRuntimeOwner(context.env, userId))) return json(await reconcilePostgresRuntimeConsent(context.env, userId));
   const stub = await resolveUserRunnerStub(context.env, userId);
   if (!stub.reconcileRuntimeHealthDataConsentForUser) {
     throw new Error(

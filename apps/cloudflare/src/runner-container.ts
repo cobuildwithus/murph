@@ -75,6 +75,7 @@ import type {
 } from "./worker-contracts.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
+import { HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER, parseHostedRuntimeMigrationCheckpointRequest, type HostedRuntimeMigrationCheckpointRequest, type HostedRuntimeMigrationCheckpointStatus } from "@murphai/hosted-execution/runtime-migration";
 import { RunnerInvocationReceiptStore, type RunnerInvocationReceipt } from "./runner-invocation-receipt.ts";
 
 const RUNNER_PORT = 8080;
@@ -303,6 +304,7 @@ interface HostedExecutionContainerRunnerInput {
 }
 
 export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSlotLifecycle> {
+  requestMigrationCheckpoint?(input: HostedRuntimeMigrationCheckpointRequest): Promise<HostedRuntimeMigrationCheckpointStatus>;
   abortWorkspaceInvocation?(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -986,7 +988,7 @@ export class RunnerContainer extends Container {
   }
 
   private async recordRuntimeFailureBeforeStop(request: { userId: string; attemptId: string; leaseGeneration: string }, error: unknown): Promise<void> {
-    if (!usesPostgresRuntimeOwner(this.environment)) return;
+    if (!await usesPostgresRuntimeOwner(this.environment, request.userId)) return;
     const phaseCode = readRunnerContainerErrorDetails(error)?.[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY];
     await commandHostedRuntimeOwner({ source: this.environment, userId: request.userId, timeoutMs: 1_000,
       command: { operation: "record_failure", attemptId: request.attemptId, generation: request.leaseGeneration,
@@ -1397,6 +1399,27 @@ export class RunnerContainer extends Container {
         return { kind: "cleanup_unsettled" };
       }
       throw error;
+    }
+  }
+
+  async requestMigrationCheckpoint(input: HostedRuntimeMigrationCheckpointRequest): Promise<HostedRuntimeMigrationCheckpointStatus> {
+    const request = parseHostedRuntimeMigrationCheckpointRequest(input);
+    this.authorizeBoundUser(request.userId);
+    const platform = this.ctx.container;
+    if (!platform || platform.running !== true) return "unconfirmed";
+    const signal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
+    try {
+      // Do not use containerFetch: the SDK may start a stopped container.
+      const response = await platform.getTcpPort(RUNNER_PORT).fetch(`http://container${HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH}`, {
+        method: "POST", body: JSON.stringify(request),
+        headers: { "content-type": "application/json; charset=utf-8" }, signal,
+      });
+      await drainRunnerContainerMetadataResponseBody(response, { signal });
+      const status = response.headers.get(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER);
+      return response.ok && (status === "accepted" || status === "stale" || status === "absent") ? status : "unconfirmed";
+    } catch {
+      // A lost reply must not be interpreted as checkpoint or stop evidence.
+      return "unconfirmed";
     }
   }
 
@@ -2197,7 +2220,7 @@ export class RunnerContainer extends Container {
     binding: Extract<HostedStandbySlotBinding, { state: "bound" }>,
   ): Promise<void> {
     try {
-      if (usesPostgresRuntimeOwner(this.environment)) {
+      if (await usesPostgresRuntimeOwner(this.environment, binding.userId)) {
         await commandHostedRuntimeOwner({ source: this.environment, userId: binding.userId, command: { operation: "target_retired", runnerContainerName: binding.slotName } });
         return;
       }
