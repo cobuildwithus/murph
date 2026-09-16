@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
+import { appendJsonlRecord, deleteEvent, readEvent, upsertEvent } from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { buildJournalView, readVault } from '@murphai/query'
 import { createBrowserVaultReplica, parseBrowserVaultReplica } from '@murphai/query/browser'
@@ -449,7 +450,7 @@ test('Journal notes preserve time precision and selected icons through canonical
   }
 })
 
-test('Journal plan creation preserves destination timezone, canonical metadata and retry identity', async () => {
+test('Journal plan creation preserves timezone and retry identity beside supported legacy wearable history', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'murph-cli-plan-'))
   try {
     requireData(await runSliceCli(['init', '--vault', vault, '--timezone', 'America/New_York']))
@@ -461,7 +462,19 @@ test('Journal plan creation preserves destination timezone, canonical metadata a
       '--plan-verified-at', '2026-10-01T08:00:00Z', '--plan-category', 'travel',
       '--plan-account-id', 'synthetic-calendar', '--plan-source-id', 'synthetic-calendar/calendar-a/occurrence-1',
     ]
+    const legacy = {
+      id: 'evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F7', kind: 'observation',
+      schemaVersion: 'murph.event.v1', source: 'device',
+      externalRef: { system: 'junction', resourceType: 'daily-summary', resourceId: 'legacy-body-summary-2026-07-15' },
+      metric: 'body-fat-pct', observationGrain: 'daily_timeseries_aggregate',
+      occurredAt: '2026-07-15T12:00:00.000Z', recordedAt: '2026-07-15T12:05:00.000Z',
+      dayKey: '2026-07-15', title: 'Legacy body composition summary', unit: '%', value: 18.4,
+    }
+    await appendJsonlRecord({ vaultRoot: vault, relativePath: 'ledger/events/2026-07.jsonl', record: legacy })
     const saved = requireData(await runSliceCli<EventAddEnvelope>(args))
+    await appendJsonlRecord({ vaultRoot: vault, relativePath: 'ledger/events/2026-07.jsonl', record: {
+      ...legacy, id: 'evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8', externalRef: { ...legacy.externalRef, resourceId: 'another-legacy-summary' },
+    } })
     const repeated = requireData(await runSliceCli<EventAddEnvelope>(args))
     assert.equal(repeated.eventId, saved.eventId)
     const shown = requireData(await runSliceCli<EventShowEnvelope>(['event', 'show', saved.eventId, '--vault', vault]))
@@ -471,6 +484,14 @@ test('Journal plan creation preserves destination timezone, canonical metadata a
       endsAt: '2026-10-04T18:00:00+02:00', status: 'tentative',
       lastVerifiedAt: '2026-10-01T08:00:00Z', category: 'travel', accountId: 'synthetic-calendar',
     })
+    const canonical = (await readEvent({ vaultRoot: vault, eventId: saved.eventId })).event
+    await upsertEvent({ vaultRoot: vault, payload: { ...canonical, title: 'Member corrected trip' }, expectedRevision: 1 })
+    assert.equal(requireData(await runSliceCli<EventAddEnvelope>(args)).eventId, saved.eventId)
+    assert.equal((await readEvent({ vaultRoot: vault, eventId: saved.eventId })).event.title, 'Member corrected trip')
+    await deleteEvent({ vaultRoot: vault, eventId: saved.eventId, expectedRevision: 2 })
+    const deletedRetry = await runSliceCli(args)
+    assert.equal(deletedRetry.ok, false)
+    assert.match(JSON.stringify(deletedRetry), /source plan was deleted/)
     const incomplete = await runSliceCli(['event', 'note', 'add', '--vault', vault, '--note', 'Trip', '--note-type', 'journal-plan', '--plan-status', 'planned'])
     assert.equal(incomplete.ok, false)
   } finally { await rm(vault, { recursive: true, force: true }) }

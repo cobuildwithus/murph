@@ -109,3 +109,23 @@ wake proof passed. Parent diff/privacy review and complexity guard passed.
 The PR remains unmerged and undeployed. Updated strict contract consumers must
 precede writers of optional canonical plan metadata; keep compatible readers
 after new metadata is persisted. Final ReviewGPT and exact-head CI remain pending.
+
+
+## Final review round 1
+
+ReviewGPT reviewed pushed head `17ae7989a50e08b2ac7362d19c9d18d10ae34b4d`
+in the Eragon lane with verified `gpt-6-pro`, exact accepted-turn capture, attached
+guarded archive, completion marker, and over eight minutes of response time.
+It returned one ORIGINAL_PR high finding, accepted: adding source-identity lookup
+before new Journal writes made unrelated supported legacy wearable rows fail
+strict validation and block creation/retry. The typed CLI regression reproduced
+`Stored event record is invalid` before correction.
+
+Within the requested green-PR remediation scope, narrow the existing lookup
+before validation: inspect source identity on discovery and candidate event id on
+revision recovery. Preserve matching-record validation, latest revision selection,
+member edits, and tombstones. No schema relaxation, history migration, new owner,
+or compatibility store. Core lookup/import/scheduled-log suites passed 185 tests;
+core/CLI typechecks and complexity passed. The extended typed CLI proof exercises
+legacy rows on initial creation and retry, destination timezone, member correction,
+and deleted-plan refusal. Round 2 will review the complete corrected patch.

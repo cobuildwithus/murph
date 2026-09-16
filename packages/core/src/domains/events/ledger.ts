@@ -362,11 +362,11 @@ function validateStoredEventRecord(record: JsonObject): EventRecord {
   );
 }
 
-function externalRefMatches(record: EventRecord, input: FindEventByExternalRefInput): boolean {
-  const externalRef = record.externalRef;
-  if (!externalRef) {
+function externalRefMatches(record: { externalRef?: unknown }, input: FindEventByExternalRefInput): boolean {
+  if (!record.externalRef || typeof record.externalRef !== "object" || Array.isArray(record.externalRef)) {
     return false;
   }
+  const externalRef = record.externalRef as Record<string, unknown>;
 
   return externalRef.system === input.system &&
     externalRef.resourceType === input.resourceType &&
@@ -388,11 +388,10 @@ export async function findEventByExternalRef(
     });
 
     for (const rawRecord of records) {
+      // Unrelated supported legacy records need not satisfy today's contract.
+      if (!externalRefMatches(rawRecord, input)) continue;
       const record = validateStoredEventRecord(rawRecord as JsonObject);
-
-      if (externalRefMatches(record, input)) {
-        candidateIds.add(record.id);
-      }
+      candidateIds.add(record.id);
     }
   }
 
@@ -408,11 +407,8 @@ export async function findEventByExternalRef(
     });
 
     for (const rawRecord of records) {
+      if (typeof rawRecord.id !== "string" || !candidateIds.has(rawRecord.id)) continue;
       const record = validateStoredEventRecord(rawRecord as JsonObject);
-      if (!candidateIds.has(record.id)) {
-        continue;
-      }
-
       const entry = { relativePath, record };
       const latest = latestByCandidateId.get(record.id);
       if (!latest || compareEventSpineEntries(latest, entry) < 0) {
