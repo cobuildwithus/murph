@@ -22,3 +22,5 @@ Run the guarded full PR packager on a snapshot whose expected exclusions produce
 ## Context
 
 This prevents the required final review for a provider branding change. No review request was accepted before the failure.
+
+The CLI audit coverage test also captured lean and full packagers with the default one-MiB child-output limit. Its archive listing already used a bounded 16-MiB limit; apply that same limit to both packaging child calls so expected exclusions cannot terminate the test before its archive assertions.

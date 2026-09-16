@@ -67,7 +67,7 @@ const hostedWebPackageJson = JSON.parse(
 ) as {
   scripts?: Record<string, string>
 }
-const auditZipEntryListMaxBufferBytes = 16 * 1024 * 1024
+const auditOutputMaxBufferBytes = 16 * 1024 * 1024
 
 type BrowserCommand = {
   listPollCount: number
@@ -991,6 +991,7 @@ exec "$(cobuild_repo_tool_bin cobuild-package-audit-context)" "$@"`,
       cwd: repoRoot,
       encoding: 'utf8',
       env: withoutNodeV8Coverage(),
+      maxBuffer: auditOutputMaxBufferBytes,
     },
   )
 }
@@ -1004,6 +1005,7 @@ function createAuditZip(scriptName: string, prefix: string) {
       cwd: repoRoot,
       encoding: 'utf8',
       env: withoutNodeV8Coverage(),
+      maxBuffer: auditOutputMaxBufferBytes,
     },
   )
   const result =
@@ -1030,7 +1032,7 @@ function listZipEntries(zipPath: string) {
     cwd: repoRoot,
     encoding: 'utf8',
     env: withoutNodeV8Coverage(),
-    maxBuffer: auditZipEntryListMaxBufferBytes,
+    maxBuffer: auditOutputMaxBufferBytes,
   })
     .split(/\r?\n/u)
     .map((entry) => entry.trim())
