@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Upcoming-context sparse plan edits, canonical timing precision, bounded ledger
+controls independent of source history, and disconnect invalidation are owned by
+`agent-docs/product-specs/journal.md` and `ARCHITECTURE.md`.
+
 Admission and occurrence-scoped recovery of colliding connection jobs during
 retained device history retries are owned by `agent-docs/RELIABILITY.md`; the
 existing mailbox claim preserves one continuation and exact job backoff across preemption and restoration.

@@ -31,9 +31,15 @@ or a requirement to notify. A missing ledger does not require a notice either.
 Do not send a connection heads-up, announcement, or onboarding message, and do
 not delay reading until another run. Continue directly to the applicable passes.
 
-Normalize the existing ledger to JSON (the Knowledge service adds a heading):
+Normalize the existing ledger with a compact JSON control object on its first
+body line (the Knowledge service adds a heading):
 
-    {"version":1,"optOuts":{"global":false,"accounts":[],"providers":[],"categories":[]},"activeAccounts":[{"id":"<account-id>","provider":"googlecalendar"}],"sources":[]}
+    {"version":1,"optOuts":{"global":false,"accounts":[],"providers":[],"categories":[]},"activeAccounts":[{"id":"<account-id>","provider":"googlecalendar"}]}
+
+Put the source mappings as a JSON array below a `## Sources` heading in that same
+page. Keep the control line below 32 KiB; do not embed mappings inside it. Move
+legacy `sources` into this section without dropping mappings. The bounded policy
+reader consumes the control line independently of accumulated source history.
 
 Keep existing source mappings and explicit opt-outs when normalizing legacy text;
 never interpret a missing field as permission to undo a saved opt-out. Preserve
@@ -142,7 +148,9 @@ For typed creation, use `vault-cli event note add` with `--note-type journal-pla
 - `--plan-category`: a consistent normalized category such as `travel` or `training`.
 - `--plan-account-id`: the exact connected account owning this captured plan.
 - `--plan-source-id`: stable identity combining account, calendar where applicable,
-  and provider occurrence/message id. Preserve it on updates.
+  and provider occurrence/message id, up to 500 characters. The command hashes
+  keys longer than 200 characters deterministically; reuse the original key on
+  create retries and preserve the saved external reference on updates.
 
 A repeated add with that identity returns the existing canonical event without
 changing it. It refuses to recreate a deleted source plan. After creation, save
@@ -151,8 +159,11 @@ If mapping persistence failed, retry the same source identity and recover the
 saved event. Read it before scheduling a follow-up; reuse any existing linked
 follow-up so the retry cannot create another one.
 
-For changes, read the exact canonical event and use its ordinary revision-checked
-edit surface. Update the same `plan` metadata and note, preserving timezone,
+For changes, read the exact canonical event and use `vault-cli event edit <id>
+--expected-revision <revision>`. Its `--plan-ends-at`, `--plan-status`,
+`--plan-verified-at`, `--plan-category`, and `--plan-account-id` flags update only
+the supplied plan fields. A changed start also uses `--occurred-at` and
+`--day-key-policy recompute`. Update the same metadata and note, preserving timezone,
 source identity, and useful detail. If the event has changed since the revision
 recorded in the source ledger, preserve that correction; do not overwrite it
 with an unchanged booking. A direct member cancellation or correction takes

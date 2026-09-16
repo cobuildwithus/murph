@@ -131,6 +131,9 @@ a repeated external source identity returns the existing plan; deletion prevents
 a retry from resurrecting it. Reconciliation reads the exact event and uses
 revision-checked edits, preserving direct member corrections and secondary
 calendar/email aliases in the existing connected-source ledger.
+`event edit` exposes the same sparse plan fields plus `--expected-revision`;
+rescheduling and successful re-verification update the existing record. Source
+keys longer than 200 characters are hashed deterministically on typed creation.
 
 The existing context snapshot derives upcoming entries from current canonical
 revisions. There is no separately authored factual Knowledge page. Canonical
@@ -140,6 +143,12 @@ normalizes global/account/provider/category opt-outs and supported active accoun
 Unrecognized legacy policy suppresses automatic context until the morning pass
 preserves and normalizes its controls. Opt-outs require no separate cleanup write.
 Historical Journal records remain intact.
+The ledger's first body line contains only compact JSON controls; its source
+mappings follow under `## Sources` in the same document. History growth cannot
+exhaust the bounded control read. Compact legacy JSON remains readable and the
+normal capture pass separates legacy mappings without discarding them. A
+successful account disconnect updates this same ledger immediately using the
+returned exact account ID and the Knowledge writer's revision check.
 
 The snapshot reader performs a bounded local read (128 KiB) and injects at most
 8 KiB of upcoming navigation and details. Projection work runs in the existing
@@ -151,6 +160,12 @@ Every private conversation, resumed turn, and ordinary scheduled turn reads fres
 state; groups and maintenance retain their existing isolation. Expiry is evaluated
 at read time, and verification older than 48 hours is stale. A planned departure
 does not prove arrival, current location, or realized experiment context.
+Navigation preserves canonical all-day/period/unknown timing independently of
+optional details; legacy summaries with no precision marker remain unknown.
+
+The current Journal page still navigates today and historical days. Upcoming
+context does not add a future-date browser to that page; a saved plan appears
+on its occurrence date once that date is selectable and the view is refreshed.
 
 The context improves wording, relevance, and interpretation only when useful. It
 never grants permission to reschedule a fixed reminder, change the member timezone,

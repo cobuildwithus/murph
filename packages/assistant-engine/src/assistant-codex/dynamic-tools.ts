@@ -3872,6 +3872,7 @@ async function dispatchMurphDynamicToolRequest(
         input.hostedToolContext?.currentUserActionScope?.() ?? null
       return await executeConnectedAppsDynamicTool({
         abortSignal: input.abortSignal ?? null,
+        vaultRoot: input.vaultRoot,
         connectedApps,
         emailSendAuthorized:
           userActionScope?.conversationScope === 'direct'

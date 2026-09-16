@@ -1,5 +1,13 @@
 # Testing And CI Map
 
+Upcoming-context corrections are covered by the typed CLI event suite and
+`assistant-upcoming-context.test.ts`: rescheduling/re-verification with stale
+revision rejection, long source-key retries, all-day precision, large source
+history, and successful connected-app disconnect through canonical receipts.
+The focused real-Codex Journal plan correction journey proves the public edit
+command preserves one all-day record; calendar capture/retry proves the ledger
+format and silent follow-up behavior.
+
 Last verified: 2026-09-11
 
 Foreground promotion regression proof lives in the assistant-runtime entrypoint

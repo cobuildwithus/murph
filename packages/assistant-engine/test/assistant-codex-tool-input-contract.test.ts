@@ -316,7 +316,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const context = buildUpcomingContextPrompt({ incomplete: false, entries: [{
         eventId: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1', summary: 'Conference trip',
         startsAt: '2026-10-01T00:00:00+02:00', endsAt: '2026-10-04T00:00:00+02:00',
-        timeZone: 'Europe/Paris', status: 'planned', lastVerifiedAt: '2026-10-01T06:00:00Z',
+        timeZone: 'Europe/Paris', timing: 'timed', status: 'planned', lastVerifiedAt: '2026-10-01T06:00:00Z',
         details: ['Away from the usual gym; hotel equipment unknown. Return Saturday evening.'],
       }] }, new Date('2026-10-01T08:00:00Z'))
       assert.ok(context)

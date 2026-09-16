@@ -7,7 +7,7 @@
     "priority": 4,
     "title": "Upcoming plans help Murph stay relevant",
     "summary": "One morning check updates Journal and brings useful travel and life context into private conversations and reminders.",
-    "details": "Active calendar and email connections participate without an extra setup step, while existing opt-outs remain respected. Useful dates, timezones, and logistics stay available while expired plans drop out. Journal updates and follow-ups remain, and your reminder schedules and experiment plans stay under your control.",
+    "details": "Active calendar and email connections participate without an extra setup step, while opt-outs and disconnections remain respected. Plan corrections and all-day dates carry through to private context, and expired plans drop out. Journal updates and follow-ups remain, and your reminder schedules and experiment plans stay under your control.",
     "relevanceTags": ["journal", "calendar", "travel", "reminders"],
     "sourcePullRequests": [3494]
   }

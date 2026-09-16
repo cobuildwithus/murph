@@ -55,6 +55,7 @@ import {
   listWorkoutFormats,
   listWriteOperationMetadataPaths,
   readHabitatAspect,
+  readEvent,
   readMemoryDocument,
   readPreferencesDocument,
   reconcileAutomationSupportSeries,
@@ -281,6 +282,7 @@ import {
 import { readAssistantCurrentStatePrompt } from '../src/assistant/current-state.ts'
 import { normalizeKnowledgeBody } from '../src/knowledge/documents.js'
 import { upcomingContextSchema } from '../src/assistant/upcoming-context.ts'
+import { readConnectedContextPolicy } from '../src/assistant/journal-connected-context-ledger.ts'
 import {
   prepareAssistantCronNotificationInput,
 } from '../src/assistant/cron/output-history.ts'
@@ -14347,7 +14349,7 @@ describeRealCodex('real Codex Journal connected account eligibility e2e', () => 
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
       if (scenario.optedOut) {
         expect(connectedAppRequests.every(request => request.operation === 'manage')).toBe(true)
-        expect(JSON.parse(normalizeKnowledgeBody((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body)).optOuts.global).toBe(true)
+        expect((await readConnectedContextPolicy(workingDirectory))?.optOuts.global).toBe(true)
       } else {
         expect(connectedAppRequests.map(request => request.operation)).toEqual(expect.arrayContaining(['manage', 'search', 'execute']))
         expect(connectedAppRequests.filter(request => request.operation === 'execute').every(request => request.input.account === scenario.accountId)).toBe(true)
@@ -14609,6 +14611,10 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toContain(
         'calendar_evt_tennis',
       )
+      const ledgerBody = normalizeKnowledgeBody((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body)
+      const controlsLine = ledgerBody.split('\n')[0] ?? ''
+      expect(JSON.parse(controlsLine)).not.toHaveProperty('sources')
+      expect(Buffer.byteLength(controlsLine)).toBeLessThan(32 * 1024)
       const repeated = await runTurn(true)
       process.stdout.write(`[journal-calendar-repeat-decision] ${JSON.stringify({ finalMessage: repeated.finalMessage, automationWrites: automationRequests.length })}\n`)
       expect(parseAssistantNotificationDecision(repeated.finalMessage).kind).toBe('skip')
@@ -18801,6 +18807,46 @@ describeRealCodex('real Codex generic transcript memory judgment e2e', () => {
 })
 
 describeRealCodex('real Codex upcoming context use e2e', () => {
+  it('corrects an all-day Journal plan through the public edit command', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-plan-correction-e2e-'))
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      await materializeJournalConnectedContextVaultCli({ binDirectory, vaultRoot: workingDirectory })
+      const saved = await upsertEvent({ vaultRoot: workingDirectory, payload: {
+        kind: 'note', noteType: 'journal-plan', source: 'manual', title: 'Conference trip',
+        occurredAt: '2026-10-02T00:00:00+02:00', timeZone: 'Europe/Warsaw',
+        tags: ['planned', 'timing-all-day'], note: 'All-day trip October 2 through October 3; tentative.',
+        plan: { endsAt: '2026-10-04T00:00:00+02:00', status: 'tentative', lastVerifiedAt: '2026-09-30T08:00:00Z', category: 'travel' },
+      } })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider,
+        fixtureBinDirectory: binDirectory,
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(), PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, null, [], '2026-10-01T08:00:00Z'),
+        dynamicTools: [],
+        prompt: 'My saved all-day conference trip has moved: it is now confirmed for October 3 through October 4, 2026, in Europe/Warsaw. Please correct that existing Journal plan and its end date, keeping it all-day. Do not create a duplicate or add a reminder.',
+        reasoningEffort: 'high', sandbox: 'workspace-write', workingDirectory,
+      })
+      const event = (await readEvent({ vaultRoot: workingDirectory, eventId: saved.eventId })).event
+      expect(event.kind).toBe('note')
+      if (event.kind !== 'note') throw new Error('Expected corrected Journal note')
+      expect(event.dayKey).toBe('2026-10-03')
+      expect(event.tags).toContain('timing-all-day')
+      expect(event.plan?.status).toBe('planned')
+      expect(Date.parse(event.plan?.endsAt ?? '')).toBe(Date.parse('2026-10-05T00:00:00+02:00'))
+      expect((await readVaultRawTolerant(workingDirectory)).events.filter(event => event.kind === 'note')).toHaveLength(1)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+      const projected = await refreshJournalTestContext(workingDirectory, '2026-10-01T08:00:00Z')
+      expect(projected.entries[0]).toMatchObject({ eventId: saved.eventId, timing: 'all_day', status: 'planned' })
+      process.stdout.write(`[journal-plan-correction] ${JSON.stringify({ reply: result.finalMessage, corrected: true, timing: projected.entries[0]?.timing })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it.each([false, true])('uses relevant travel context without changing plans (scheduled=%s)', async (scheduled) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-upcoming-use-e2e-'))

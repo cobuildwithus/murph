@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { JOURNAL_ICON_IDS, JOURNAL_TIMINGS } from '@murphai/contracts/journal-presentation'
 import { Cli, z } from 'incur'
 import {
@@ -265,6 +266,14 @@ function normalizeEventTags(value: readonly string[] | undefined): string[] {
   return normalizeRepeatableFlagOption(value, 'tag') ?? []
 }
 
+const journalPlanOptions = {
+  planEndsAt: z.string().datetime({ offset: true }).optional().describe('Journal plan end instant, with explicit offset. All-day plans use the exclusive local date boundary.'),
+  planStatus: z.enum(['planned', 'tentative', 'canceled']).optional(),
+  planVerifiedAt: z.string().datetime({ offset: true }).optional().describe('Actual successful source verification instant; never advance after a failed read.'),
+  planCategory: slugSchema.optional(),
+  planAccountId: z.string().min(1).max(200).optional().describe('Connected account owning an automatically captured plan; omit for a directly supplied member plan.'),
+}
+
 function buildJournalPlanPayloadFields(options: {
   noteType?: string
   planEndsAt?: string
@@ -284,7 +293,11 @@ function buildJournalPlanPayloadFields(options: {
       lastVerifiedAt: options.planVerifiedAt, category: options.planCategory,
       ...(options.planAccountId ? { accountId: options.planAccountId } : {}),
     },
-    ...(options.planSourceId ? { externalRef: { system: 'connected-context', resourceType: 'plan', resourceId: options.planSourceId } } : {}),
+    ...(options.planSourceId ? { externalRef: {
+      system: 'connected-context', resourceType: 'plan',
+      resourceId: options.planSourceId.length <= 200 ? options.planSourceId
+        : `sha256:${createHash('sha256').update(options.planSourceId).digest('hex')}`,
+    } } : {}),
   }
 }
 
@@ -465,6 +478,19 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         },
         description:
           'Edit one canonical event from typed fields.',
+        options: {
+          ...journalPlanOptions,
+          expectedRevision: z.number().int().positive().optional().describe('Require the revision returned by event show; reject if the event changed since that read.'),
+        },
+        buildPatch(options) {
+          const set: string[] = []
+          appendTypedSet(set, 'plan.endsAt', stringOption(options.planEndsAt))
+          appendTypedSet(set, 'plan.status', stringOption(options.planStatus))
+          appendTypedSet(set, 'plan.lastVerifiedAt', stringOption(options.planVerifiedAt))
+          appendTypedSet(set, 'plan.category', stringOption(options.planCategory))
+          appendTypedSet(set, 'plan.accountId', stringOption(options.planAccountId))
+          return { set: emptyToUndefined(set) }
+        },
         async run(input) {
           const result = await editEventRecord({
             vault: input.vault,
@@ -473,6 +499,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
             set: input.set,
             clear: input.clear,
             dayKeyPolicy: input.dayKeyPolicy,
+            expectedRevision: input.expectedRevision,
           })
 
           return {
@@ -518,11 +545,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         .optional()
         .describe('Optional structured note type, such as journal-factor or journal-outcome.'),
       timeZone: z.string().optional().describe('Event IANA timezone; defaults to the saved vault timezone for Journal notes.'),
-      planEndsAt: z.string().datetime({ offset: true }).optional().describe('Journal plan end instant, with explicit offset. All-day plans use the exclusive local date boundary.'),
-      planStatus: z.enum(['planned', 'tentative', 'canceled']).optional(),
-      planVerifiedAt: z.string().datetime({ offset: true }).optional().describe('Actual successful source verification instant; never advance after a failed read.'),
-      planCategory: slugSchema.optional(),
-      planAccountId: z.string().min(1).max(200).optional().describe('Connected account owning an automatically captured plan; omit for a directly supplied member plan.'),
+      ...journalPlanOptions,
       planSourceId: z.string().min(1).max(500).optional().describe('Stable account/calendar/provider-occurrence identity. A repeated add returns the saved plan; update that exact event id for changes.'),
       relatedId: eventRelatedIdOptionSchema,
       occurredAt: occurredAtOptionSchema

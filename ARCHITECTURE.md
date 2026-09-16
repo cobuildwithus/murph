@@ -269,6 +269,8 @@ time, category, and optional connected account; existing event fields own start,
 timezone, title, source identity, revision, and detailed logistics. Typed note
 creation accepts the event timezone. A repeated source identity recovers the
 existing plan without overwriting it or recreating a tombstone.
+Typed event edits accept sparse plan fields and the caller's expected revision.
+Creation hashes source keys over the canonical identity limit without truncation.
 
 The existing context snapshot builds a deterministic bounded projection; the
 model does not maintain a second factual page. Event and connected-source ledger
@@ -277,6 +279,12 @@ or unavailable plan context contributes retrieval guidance until rebuilt, while
 other current-state sections remain usable. The existing ledger's normalized
 negative controls and active accounts filter automatic plans during projection.
 Unrecognized policy suppresses automatic context until the ledger is normalized.
+The same ledger places its compact JSON controls on the first body line and
+source mappings below it, so bounded policy reads do not depend on history size.
+Successful connected-app disconnection removes the returned exact account from
+that ledger through the canonical Knowledge writer; its receipt invalidates the
+snapshot. Canonical timing tags remain in projected navigation, including when
+details are omitted.
 
 Private conversations and ordinary scheduled turns read this snapshot, expire
 plans at read time, label stale verification, and prioritize navigation before

@@ -496,3 +496,60 @@ test('Journal plan creation preserves timezone and retry identity beside support
     assert.equal(incomplete.ok, false)
   } finally { await rm(vault, { recursive: true, force: true }) }
 })
+
+test('Journal plan edits reconcile dates and verification through the public revision-checked command', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-cli-plan-edit-'))
+  try {
+    requireData(await runSliceCli(['init', '--vault', vault, '--timezone', 'Europe/Paris']))
+    const saved = requireData(await runSliceCli<EventAddEnvelope>([
+      'event', 'note', 'add', '--vault', vault, '--note-type', 'journal-plan',
+      '--title', 'Trip', '--note', 'Tentative rail trip', '--source', 'import',
+      '--occurred-at', '2026-10-02T10:00:00+02:00', '--time-zone', 'Europe/Paris',
+      '--plan-ends-at', '2026-10-04T18:00:00+02:00', '--plan-status', 'tentative',
+      '--plan-verified-at', '2026-10-01T08:00:00Z', '--plan-category', 'travel',
+      '--plan-account-id', 'synthetic-calendar', '--plan-source-id', 'synthetic-calendar/trip',
+    ]))
+    const edit = ['event', 'edit', saved.eventId, '--vault', vault]
+    requireData(await runSliceCli([...edit, '--expected-revision', '1',
+      '--occurred-at', '2026-10-03T10:00:00+02:00', '--day-key-policy', 'recompute',
+      '--plan-ends-at', '2026-10-05T18:00:00+02:00', '--plan-status', 'planned',
+      '--plan-verified-at', '2026-10-02T08:00:00Z', '--note', 'Confirmed rail trip',
+    ]))
+    const event = (await readEvent({ vaultRoot: vault, eventId: saved.eventId })).event
+    assert.equal(event.kind, 'note')
+    if (event.kind !== 'note') throw new Error('Expected note')
+    assert.equal(event.dayKey, '2026-10-03')
+    assert.deepEqual(event.plan, {
+      endsAt: '2026-10-05T18:00:00+02:00', status: 'planned',
+      lastVerifiedAt: '2026-10-02T08:00:00Z', category: 'travel', accountId: 'synthetic-calendar',
+    })
+    const stale = await runSliceCli([...edit, '--expected-revision', '1', '--plan-status', 'tentative'])
+    assert.equal(stale.ok, false)
+    requireData(await runSliceCli([...edit, '--expected-revision', '2', '--plan-verified-at', '2026-10-03T08:00:00Z']))
+    const verified = (await readEvent({ vaultRoot: vault, eventId: saved.eventId })).event
+    assert.equal(verified.kind === 'note' && verified.plan?.status, 'planned')
+    assert.equal(verified.kind === 'note' && verified.plan?.lastVerifiedAt, '2026-10-03T08:00:00Z')
+  } finally { await rm(vault, { recursive: true, force: true }) }
+})
+
+test('long connected source identities remain bounded, distinct and retry-safe', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-cli-plan-identity-'))
+  try {
+    requireData(await runSliceCli(['init', '--vault', vault, '--timezone', 'UTC']))
+    const args = ['event', 'note', 'add', '--vault', vault, '--note-type', 'journal-plan',
+      '--title', 'Trip', '--note', 'Rail travel', '--occurred-at', '2026-10-02T10:00:00Z',
+      '--plan-ends-at', '2026-10-04T18:00:00Z', '--plan-status', 'planned',
+      '--plan-verified-at', '2026-10-01T08:00:00Z', '--plan-category', 'travel']
+    for (const length of [200, 201, 500]) {
+      const sourceId = 'x'.repeat(length)
+      const saved = requireData(await runSliceCli<EventAddEnvelope>([...args, '--plan-source-id', sourceId]))
+      const retry = requireData(await runSliceCli<EventAddEnvelope>([...args, '--plan-source-id', sourceId]))
+      assert.equal(retry.eventId, saved.eventId)
+      const key = (await readEvent({ vaultRoot: vault, eventId: saved.eventId })).event.externalRef?.resourceId
+      assert.ok(key && key.length <= 200)
+      if (length === 200) assert.equal(key, sourceId)
+      const other = requireData(await runSliceCli<EventAddEnvelope>([...args, '--plan-source-id', sourceId.slice(0, -1) + 'y']))
+      assert.notEqual(other.eventId, saved.eventId)
+    }
+  } finally { await rm(vault, { recursive: true, force: true }) }
+})
