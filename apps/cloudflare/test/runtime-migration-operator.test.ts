@@ -9,6 +9,8 @@ const digest = (value: string) => createHash("sha256").update(value).digest("hex
 function harness(options: { drift?: boolean; split?: boolean; held?: boolean; intent?: boolean; loseAdvance?: boolean; loseSeal?: boolean; pending?: string[]; canonical?: boolean; loseEnrollment?: boolean } = {}) {
   const sent: Array<Record<string, unknown>> = [];
   const known = new Set<string>(options.intent ? [intentOnly] : []);
+  const late = new Set<string>();
+  let selected: string | null = null;
   const imported = new Set<string>();
   const activated = new Set<string>();
   const tokens = new Map<string, string>();
@@ -36,17 +38,20 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
       } else if (command.operation === "enroll_members") {
         if (options.canonical && !known.has(intentOnly)) {
           known.add(intentOnly);
+          if (gate.creationClosedAt || gate.inventorySealedAt || Number(gate.inventoryCount) > 0) late.add(intentOnly);
           if (options.loseEnrollment) { options.loseEnrollment = false; throw new Error("synthetic lost enrollment response"); }
           return Response.json({ enrolled: 1 });
         }
         return Response.json({ enrolled: 0 });
       } else if (command.operation === "discover") {
-        expect(gate.inventorySealedAt).toBeUndefined();
-        for (const id of command.objectIds) known.add(id);
+        for (const id of command.objectIds) {
+          if (!known.has(id) && (gate.creationClosedAt || gate.inventorySealedAt || Number(gate.inventoryCount) > 0)) late.add(id);
+          known.add(id);
+        }
       } else if (command.operation === "close_legacy_creation") {
         gate.creationClosedAt = "2026-09-15T00:00:00.000Z";
       } else if (command.operation === "list_inventory") {
-        return Response.json({ objects: [...known].sort().filter(id => id > command.after).map(objectId => ({ objectId })), nextAfter: null });
+        return Response.json({ objects: [...known].sort().filter(id => id > command.after).map(objectId => ({ objectId, inventoryClass: late.has(objectId) ? "late" : "baseline" })), nextAfter: null });
       } else if (command.operation === "inventory") {
         expect(gate.creationClosedAt).toBeTruthy();
         let hash = String(gate.inventoryHash);
@@ -55,11 +60,14 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
           inventoryAfter: command.objectIds.at(-1) ?? gate.inventoryAfter, inventorySealedAt: command.complete ? "2026-09-15T00:00:00.000Z" : null };
         if (options.loseSeal) { options.loseSeal = false; throw new Error("synthetic lost seal response"); }
       } else if (command.operation === "next_object") {
-        return Response.json({ objectId: [...known].sort().find(id => !activated.has(id)) ?? null });
+        if (!selected || activated.has(selected)) {
+          selected = [...known].sort((a, b) => Number(late.has(a)) - Number(late.has(b)) || a.localeCompare(b)).find(id => !activated.has(id)) ?? null;
+        }
+        return Response.json({ objectId: selected });
       } else if (command.operation === "inspect_object") {
         return Response.json({ objectId: command.objectId, observation: { kind: "observed", userId: command.objectId === first ? "synthetic-member" : null } });
       } else if (command.operation === "advance_member" || command.operation === "advance_empty") {
-        expect(command.objectId).toBe([...known].sort().find(id => !activated.has(id)));
+        expect(command.objectId).toBe(selected);
         if (command.operation === "advance_member") {
           if (tokens.has(command.objectId)) expect(command.migrationId).toBe(tokens.get(command.objectId));
           tokens.set(command.objectId, command.migrationId);
@@ -81,7 +89,7 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
       return Response.json({ gate });
     },
   };
-  return { input, sent, options, known, imported, activated, tokens, authorizations: () => authorizations };
+  return { input, sent, options, known, late, imported, activated, tokens, authorizations: () => authorizations };
 }
 
 describe("rolling runtime migration operator", () => {
@@ -176,22 +184,26 @@ describe("rolling runtime migration operator", () => {
     expect(h.sent.filter(c => c.operation === "advance_member")).toHaveLength(1);
   });
 
-  it("recovers an interrupted handoff before unrelated late provider objects block final accounting", async () => {
+  it("recovers an interrupted handoff before enrolling unrelated late provider objects", async () => {
     const h = harness({ loseAdvance: true, drift: true });
     await expect(migrateHostedLegacyRuntime({ ...h.input, activate: false })).rejects.toThrow("synthetic lost import");
     expect(h.imported.has(first)).toBe(true);
     expect(h.activated.size).toBe(0);
     const resumeStart = h.sent.length;
-    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: false })).rejects.toThrow("inventory changed");
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "rolling", pending: "late_sources" });
     expect(h.activated.has(first)).toBe(true);
     expect(h.sent.slice(resumeStart).filter(c => String(c.operation).startsWith("advance_"))[0]?.objectId).toBe(first);
     expect(h.sent.some(c => c.operation === "activate")).toBe(false);
   });
 
-  it("refuses final closure when a new provider object is outside the sealed census", async () => {
+  it("disposes late provider objects before reporting completion without changing the original seal", async () => {
     const h = harness({ drift: true });
-    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: false })).rejects.toThrow("inventory changed");
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "rolling", pending: "late_sources" });
     expect(h.activated.size).toBe(2);
+    expect(h.late).toEqual(new Set(["d".repeat(64)]));
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "members_migrated" });
+    expect(h.activated.size).toBe(3);
+    expect(h.sent.filter(c => c.operation === "inventory")).toHaveLength(1);
     expect(h.sent.some(c => c.operation === "activate")).toBe(false);
   });
 });

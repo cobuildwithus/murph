@@ -151,23 +151,32 @@ so deleting a member cannot remove it from that census. Its nonblocking campaign
 lock orders deletion against campaign start; it inserts no retained owner outside
 rolling mode. New creations are covered by the insert trigger above.
 
-This initial cohort is bounded by the inventory seal. Late-source enrollment,
-automatic first use and stable selection under late insertion remain unfinished.
+The seal covers an immutable `baseline` subset. Discovery and canonical
+enrollment after creation closure produce `late` rows, without changing the original
+hash/count or cursor. A late row never permits legacy admission merely because it
+exists, including discoveries before the first baseline seal page. The source still needs its exact frozen disposition; conflicting/nonempty
+sources cannot be relabeled empty or merged into an active Postgres owner.
 Encrypted legacy deletion payloads are not covered by the resource-table query;
 release proof must separately account for those runtime identities. Enrollment
-alone proves neither empty source nor completed member handoff.
+alone proves neither empty source nor completed member handoff. Automatic first
+use remains a release prerequisite.
 
-`next_object` selects the first source without a terminal empty disposition or
-complete member activation. A completed import stays selected until its owner
-is Postgres. Immutable inventory order and monotonic receipts keep concurrent
-retries on the same source; the operator derives a stable member token from
-namespace, object and member identity. The hosted driver polls checkpoint/freeze
-progress on the selected source within the same bounded run, avoiding workflow
-queue and install time during the pause. A readiness hold leaves that source live
-and returns; it delays later handoffs. Recovery of a sealed source verifies the
-serving identity but does not wait for unrelated provider object-list coverage.
-Other members keep running. Final provider scans
-must be covered by the registered census; an unknown late object holds closure.
+`next_object` persists one selected source before any local barrier can close.
+Concurrent operators and lost reservation replies keep that source selected even
+if an earlier late ID appears. It advances only after a terminal source receipt and activation of its expected
+or observed member, if any. Source reads, member transitions and
+empty imports/activation reject a different selection; the pointer has no expiry. Polling an
+unfinished selection uses a single read-only statement without the campaign lock;
+every source effect rechecks it, so stale hints can only fail. Actual selection
+changes take a short exclusive transaction. Baseline work precedes late work.
+
+The operator derives a stable token from namespace, object and member identity.
+It polls checkpoint/freeze progress within the same bounded run, avoiding workflow
+queue/install time during the pause. A readiness hold leaves that source live.
+Recovery verifies serving identity and resumes the selected source before
+unrelated enrollment or provider-list work. Final provider scans register unknown
+late sources and report pending; final checks also repeat canonical enrollment
+and selection before claiming completion. The sealed baseline remains unchanged.
 
 `apps/cloudflare/scripts/runtime-migration.cli.ts` is the protected hosted
 entrypoint. It accepts only private Murph Cloud main execution and uses that
@@ -206,18 +215,24 @@ closing creation preserves registered legacy execution while preventing new
 unregistered sources. A missing source after closure remains unresolved; an inventory omission is not
 proof of emptiness. Source resolution never activates an empty member implicitly.
 A stale route returns retry rather than trying another backend in the same
-operation. Seal only after reconciling discovery with the
-closed creation boundary and proving compatible serving-version convergence.
+operation. Seal the baseline only after reconciling discovery with the
+closed creation boundary and proving compatible serving-version convergence;
+retain later arrivals separately for exact disposition.
 
-After every sealed source has a terminal disposition, `settle_unmaterialized`
-handles one remaining default owner per call. It accepts only idle, generation
-zero identities without a migration or target and with exactly one completed,
-bound empty-source receipt. No receipt is an unresolved source, not permission
-to activate. Ownership and an encrypted maintenance wake commit together; deleted
-members receive no wake. This accounts for admitted
-but verified-empty sources without inventing execution history. Existing mailbox recovery
-owns a lost wake signal. The rolling path cannot switch the global default:
-complete provider scans do not prove an old caller cannot create another object.
+After an exact empty source has completed its frozen export, `advance_empty`
+calls canonical `activate_empty` for that selected source. It accepts only idle,
+generation-zero identities without a migration or target and with exactly one
+completed, bound empty-source receipt. No receipt is an unresolved source, not
+permission to activate. Ownership and an encrypted maintenance wake commit
+together; deleted members receive no wake. The ordinary migration callback
+signals that committed wake immediately; mailbox recovery owns lost signals.
+Activation does not wait for unrelated sources. Selection remains with the empty
+source until its expected member is Postgres; concurrent and lost-response
+retries return the same wake. Physical-only empty objects need no member owner.
+`settle_unmaterialized` is retained as a completion audit only: it checks source
+receipts and remaining owners without changing authority or creating wakes.
+The rolling path cannot switch the global default: complete provider scans do
+not prove an old caller cannot create another object.
 
 Managed checkpoint uploads use an exact, durably admitted multipart upload ID.
 Trusted completion seals the upload and streams the stored encrypted bytes to

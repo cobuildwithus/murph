@@ -32,7 +32,7 @@ export const runtimeMigrationRoutes: readonly DeclarativeRoute<WorkerRouteContex
     if (command.operation === "advance_empty") return json(await advanceRuntimeEmptyMigration({ source: context.env,
       stub: exactLegacyObject(context, command.objectId), identity: command }));
     // Member transitions and pages are produced by the exact-object handoff.
-    if (["quiesce_member", "freeze_member", "activate_member", "import_member", "import_empty"].includes(command.operation)) {
+    if (["quiesce_member", "freeze_member", "activate_member", "import_member", "import_empty", "activate_empty"].includes(command.operation)) {
       throw new Error("Member migration requires an exact-object advance.");
     }
     // Import's page is produced below, never accepted as operator input.

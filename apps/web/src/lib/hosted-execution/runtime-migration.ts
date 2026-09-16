@@ -1,6 +1,6 @@
 import { enrollRuntimeSourcesTx, listUnenrolledRuntimeMembersTx } from "./runtime-migration-enrollment";
-import { closeLegacyCreationTx, discoverRuntimeObjectsTx, listRuntimeInventoryTx, nextRuntimeObjectTx, requireRollingInventoryPageTx } from "./runtime-migration-inventory";
-import { settleUnmaterializedRuntime } from "./runtime-migration-unmaterialized";
+import { closeLegacyCreationTx, discoverRuntimeObjectsTx, listRuntimeInventoryTx, nextRuntimeObjectTx, readSelectedRuntimeObject, requireSelectedRuntimeObject, requireRollingInventoryPageTx } from "./runtime-migration-inventory";
+import { activateEmptyRuntime, settleUnmaterializedRuntime } from "./runtime-migration-unmaterialized";
 import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient, type HostedRuntimeCutover } from "@prisma/client";
 import { parseHostedRuntimeMigrationCommand, type HostedRuntimeMigrationCommand, type LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
@@ -18,13 +18,18 @@ type MigrationCommand = Exclude<HostedRuntimeMigrationCommand, { operation: "sta
 export async function executeHostedRuntimeMigrationCommand(input: { prisma: PrismaClient; command: HostedRuntimeMigrationCommand }) {
   const command = parseHostedRuntimeMigrationCommand(input.command);
   if (command.operation === "status") return { gate: await input.prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } }) };
+  if (command.operation === "activate_empty") return activateEmptyRuntime({ prisma: input.prisma, command });
   if (command.operation === "settle_unmaterialized") return settleUnmaterializedRuntime({ prisma: input.prisma, command });
   if (command.operation === "enroll_members" || command.operation === "inspect_object" || command.operation === "advance_member" || command.operation === "advance_empty") throw new Error("Live member migration belongs to the source Worker.");
+  if (command.operation === "next_object") {
+    const objectId = await readSelectedRuntimeObject(input.prisma, command);
+    if (objectId) return { objectId };
+  }
   const resources = command.operation === "import" || command.operation === "import_member" || command.operation === "import_empty" ? await validatePage(command.page) : null;
   if (isMemberMigrationCommand(command)) return withMemberMigrationWake({ prisma: input.prisma, command,
     run: prepared => input.prisma.$transaction(tx => executeMemberTx(tx, command, resources, prepared), { maxWait: 5_000, timeout: 5_000 }) });
   return input.prisma.$transaction(async tx => {
-    if (["read_object", "import_empty", "list_inventory", "list_unenrolled", "next_object"].includes(command.operation)) await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
+    if (["read_object", "import_empty", "list_inventory", "list_unenrolled"].includes(command.operation)) await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
     else await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR UPDATE`;
     const gate = await tx.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
     if (command.operation === "begin" || command.operation === "begin_rolling") return { gate: await beginTx(tx, gate, command) };
@@ -37,8 +42,11 @@ export async function executeHostedRuntimeMigrationCommand(input: { prisma: Pris
       case "list_inventory": return listRuntimeInventoryTx(tx, gate, command.after);
       case "next_object": return nextRuntimeObjectTx(tx, gate);
       case "inventory": return { gate: await inventoryTx(tx, gate, command) };
-      case "read_object": return { object: projectImport(await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: command.objectId } })) };
+      case "read_object":
+        requireSelectedRuntimeObject(gate, command.objectId);
+        return { object: projectImport(await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: command.objectId } })) };
       case "import_empty": {
+        requireSelectedRuntimeObject(gate, command.objectId);
         await tx.$queryRaw`SELECT object_id FROM hosted_runtime_legacy_import WHERE object_id = ${command.objectId} FOR UPDATE`;
         return { object: projectImport(await importPageTx(tx, gate, command, resources!)) };
       }
@@ -55,6 +63,7 @@ async function executeMemberTx(tx: Prisma.TransactionClient,
   const gate = await tx.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
   requireIdentity(gate, command);
   if (gate.phase !== "rolling" || !gate.inventorySealedAt || !gate.creationClosedAt) throw new Error("Member migration requires a sealed rolling campaign.");
+  requireSelectedRuntimeObject(gate, command.objectId);
   if (command.operation === "read_member") return { member: await readMemberMigrationTx(tx, command) };
   const owner = await lockMemberMigrationTx(tx, command);
   if (command.operation !== "import_member") return { member: await transitionMemberMigrationTx({ tx, command, owner, preparedWake }) };

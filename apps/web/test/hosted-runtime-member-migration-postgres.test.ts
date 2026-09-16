@@ -121,7 +121,7 @@ describe.skipIf(!enabled).each(["legacy", "pending"])("member-scoped canonical m
     expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("legacy");
     expect(await readHostedRuntimeMemberBackend(prisma, otherId)).toBe("legacy");
     await expect(command({ operation: "quiesce_member", ...identity, migrationId: "wrong-token" })).rejects.toThrow("identity changed");
-    await expect(command({ operation: "quiesce_member", ...identity, objectId: otherObjectId })).rejects.toThrow("identity changed");
+    await expect(command({ operation: "quiesce_member", ...identity, objectId: otherObjectId })).rejects.toThrow("selected object");
     await expect(command({ operation: "import_member", ...identity, page: page(userId, 0) })).rejects.toThrow("frozen");
   });
 
@@ -138,7 +138,8 @@ describe.skipIf(!enabled).each(["legacy", "pending"])("member-scoped canonical m
     let finished = false;
     const freezing = command({ operation: "freeze_member", ...identity }).then(result => { finished = true; return result; });
     try {
-      await command({ operation: "quiesce_member", ...other });
+      await expect(command({ operation: "quiesce_member", ...other })).rejects.toThrow("selected object");
+      expect(await prisma.$transaction(tx => lockHostedRuntimeMemberCutoverTx(tx, otherId))).toBe("legacy");
       expect(finished).toBe(false);
       expect(await readHostedRuntimeMemberBackend(prisma, otherId)).toBe("legacy");
     } finally { release(); }
@@ -166,11 +167,12 @@ describe.skipIf(!enabled).each(["legacy", "pending"])("member-scoped canonical m
     const wakes = await prisma.hostedMailboxItem.findMany({ where: { userId }, select: { kind: true, dedupeKey: true, payloadInlineCiphertext: true } });
     expect(wakes).toHaveLength(1);
     expect(wakes[0]).toMatchObject({ kind: "runtime.maintenance-requested", dedupeKey: migrationWakeEventId(identity), payloadInlineCiphertext: expect.any(String) });
-    await expect(command({ operation: "import_member", ...identity, page: page(userId, 0) })).rejects.toThrow("frozen");
+    await expect(command({ operation: "import_member", ...identity, page: page(userId, 0) })).rejects.toThrow("selected object");
     expect(await prisma.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({ generation: 17n, migrationPhase: "postgres" });
   });
 
   it("migrates all enrolled members while retaining the guarded namespace", async () => {
+    await command({ operation: "quiesce_member", ...other });
     await command({ operation: "freeze_member", ...other });
     for (let section = 0; section <= 3; section++) await command({ operation: "import_member", ...other, page: page(otherId, section) });
     await command({ operation: "activate_member", ...other });
@@ -179,39 +181,51 @@ describe.skipIf(!enabled).each(["legacy", "pending"])("member-scoped canonical m
     await prisma.hostedRuntimeOwner.update({ where: { userId }, data: { phase: "starting", attemptId: "synthetic-active-attempt", allocationId: "synthetic-allocation", processingMode: "default" } });
     await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: emptyObjectId }, data: { admittedUserId: emptyMemberId } });
     await expect(command({ operation: "settle_unmaterialized", ...campaign })).rejects.toThrow("every source disposition");
+    await expect(command({ operation: "activate_empty", ...campaign, objectId: neverStartedObjectId })).rejects.toThrow("selected object");
+    await expect(command({ operation: "activate_empty", ...campaign, objectId: emptyObjectId, workerVersion: "synthetic-stale" })).rejects.toThrow("sealed rolling census");
     await expect(command({ operation: "import_empty", ...campaign, objectId: emptyObjectId, page: page(userId, 0) })).rejects.toThrow("cannot import member state");
-    for (const sourceObjectId of [emptyObjectId, neverStartedObjectId, deletedEmptyObjectId]) {
+    await prisma.hostedRuntimeOwner.create({ data: { userId: deletedEmptyId } });
+    await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: deletedEmptyObjectId }, data: { admittedUserId: deletedEmptyId } });
+    for (const [sourceObjectId, memberId] of [[emptyObjectId, emptyMemberId], [neverStartedObjectId, neverStartedId], [deletedEmptyObjectId, deletedEmptyId]]) {
+      expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: sourceObjectId });
+      const activate = { operation: "activate_empty" as const, ...campaign, objectId: sourceObjectId! };
+      await expect(command(activate)).rejects.toThrow("complete exact empty-source receipt");
       for (let section = 0; section <= 3; section++) {
-      const payload = { ...page(userId, section), userId: null, generation: "0" };
-      const { hash: ignored, ...body } = payload;
-      const empty = { operation: "import_empty" as const, ...campaign, objectId: sourceObjectId, page: { ...body, hash: digest(JSON.stringify(body)) } };
-      await command(empty); await command(empty);
+        const payload = { ...page(userId, section), userId: null, generation: "0" };
+        const { hash: ignored, ...body } = payload;
+        const empty = { operation: "import_empty" as const, ...campaign, objectId: sourceObjectId!, page: { ...body, hash: digest(JSON.stringify(body)) } };
+        await command(empty); await command(empty);
+      }
+      // Even a completed empty export holds selection until its expected member
+      // is activated. Other incomplete sources must not delay that activation.
+      expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: sourceObjectId });
+      await prisma.hostedRuntimeOwner.update({ where: { userId: memberId }, data: { generation: 9n } });
+      await expect(command(activate)).rejects.toThrow("prior runtime authority");
+      await prisma.hostedRuntimeOwner.update({ where: { userId: memberId }, data: { generation: 0n } });
+      if (sourceObjectId === emptyObjectId) {
+        await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: otherObjectId }, data: { userId: emptyMemberId } });
+        await expect(command(activate)).rejects.toThrow("conflicting source identities");
+        expect(await prisma.hostedMailboxItem.count({ where: { userId: emptyMemberId } })).toBe(0);
+        await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: otherObjectId }, data: { userId: otherId } });
+      }
+      if (sourceObjectId === deletedEmptyObjectId) {
+        expect(await command({ operation: "settle_unmaterialized", ...campaign })).toEqual({ done: false });
+        expect(await readHostedRuntimeMemberBackend(prisma, deletedEmptyId)).toBe("legacy");
+      }
+      const [activated, retried] = await Promise.all([command(activate), command(activate)]);
+      expect(activated).toEqual(retried);
+      expect(activated).toMatchObject({ done: true, member: { userId: memberId,
+        mailboxItemId: memberId === deletedEmptyId ? null : expect.any(String) } });
+      expect(await readHostedRuntimeMemberBackend(prisma, memberId!)).toBe("postgres");
+      const wakes = await prisma.hostedMailboxItem.findMany({ where: { userId: memberId }, select: { kind: true, payloadInlineCiphertext: true } });
+      expect(wakes).toEqual(memberId === deletedEmptyId ? [] : [{ kind: "runtime.maintenance-requested", payloadInlineCiphertext: expect.any(String) }]);
+      if (sourceObjectId === emptyObjectId) {
+        expect(await readHostedRuntimeMemberBackend(prisma, neverStartedId)).toBe(initialPhase === "legacy" ? "legacy" : "draining");
+        expect(await prisma.hostedRuntimeLegacyImport.findUnique({ where: { objectId: neverStartedObjectId } })).toMatchObject({ completedAt: null });
       }
     }
-    expect(await prisma.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: emptyObjectId } })).toMatchObject({ userId: null, generation: 0n, completedAt: expect.any(Date) });
     expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: null });
-    await prisma.hostedRuntimeOwner.update({ where: { userId: emptyMemberId }, data: { generation: 9n } });
-    await expect(command({ operation: "settle_unmaterialized", ...campaign })).rejects.toThrow("prior runtime authority");
-    await prisma.hostedRuntimeOwner.update({ where: { userId: emptyMemberId }, data: { generation: 0n } });
-    // Concurrent and lost-response retries cannot append a second activation wake.
-    await Promise.all([command({ operation: "settle_unmaterialized", ...campaign }), command({ operation: "settle_unmaterialized", ...campaign })]);
-    await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: neverStartedObjectId }, data: { admittedUserId: null } });
-    await expect(command({ operation: "settle_unmaterialized", ...campaign })).rejects.toThrow("exact empty-source receipt");
-    expect(await readHostedRuntimeMemberBackend(prisma, neverStartedId)).toBe(initialPhase === "legacy" ? "legacy" : "draining");
-    expect(await prisma.hostedMailboxItem.count({ where: { userId: neverStartedId } })).toBe(0);
-    await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: neverStartedObjectId }, data: { admittedUserId: neverStartedId } });
-    await command({ operation: "settle_unmaterialized", ...campaign });
     expect(await command({ operation: "settle_unmaterialized", ...campaign })).toEqual({ done: true });
-    for (const id of [emptyMemberId, neverStartedId]) {
-      expect(await readHostedRuntimeMemberBackend(prisma, id)).toBe("postgres");
-      const wakes = await prisma.hostedMailboxItem.findMany({ where: { userId: id }, select: { kind: true, payloadInlineCiphertext: true } });
-      expect(wakes).toEqual([{ kind: "runtime.maintenance-requested", payloadInlineCiphertext: expect.any(String) }]);
-    }
-    await prisma.hostedRuntimeOwner.create({ data: { userId: deletedEmptyId } });
-    await expect(command({ operation: "settle_unmaterialized", ...campaign })).rejects.toThrow("exact empty-source receipt");
-    await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: deletedEmptyObjectId }, data: { admittedUserId: deletedEmptyId } });
-    expect(await command({ operation: "settle_unmaterialized", ...campaign })).toEqual({ done: false, mailboxItemId: null });
-    expect(await prisma.hostedMailboxItem.count({ where: { userId: deletedEmptyId } })).toBe(0);
     const inventoryHash = inventoryIds.reduce((hash, id) => digest(`${hash}\n${id}`), digest(""));
     await expect(command({ operation: "activate", ...campaign, inventoryCount: inventoryIds.length, inventoryHash }))
       .rejects.toThrow("namespace retirement requires separate proof");

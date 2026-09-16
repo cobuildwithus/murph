@@ -1359,6 +1359,7 @@ model HostedRuntimeCutover {
   inventoryHash   String?   @map("inventory_hash")
   inventoryCount Int       @default(0) @map("inventory_count")
   inventorySealedAt DateTime? @map("inventory_sealed_at")
+  selectedObjectId String? @map("selected_object_id")
   discoveryCompletedAt DateTime? @map("discovery_completed_at")
   creationClosedAt DateTime? @map("creation_closed_at")
   activatedAt     DateTime? @map("activated_at")
@@ -1371,6 +1372,7 @@ model HostedRuntimeCutover {
 /// window. No member FK: dormant and deleted-member objects must be covered.
 model HostedRuntimeLegacyImport {
   objectId     String    @id @map("object_id")
+  inventoryClass String @default("baseline") @map("inventory_class")
   admittedUserId String? @unique @map("admitted_user_id")
   userId       String?   @unique @map("user_id")
   generation   BigInt?
@@ -1380,6 +1382,7 @@ model HostedRuntimeLegacyImport {
   completedAt  DateTime? @map("completed_at")
 
   @@index([completedAt, objectId])
+  @@index([inventoryClass, objectId])
   @@map("hosted_runtime_legacy_import")
 }
 

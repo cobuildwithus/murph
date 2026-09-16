@@ -60,6 +60,7 @@ export async function migrateHostedLegacyRuntime(input: RollingOperator) {
     if (Date.now() >= deadline) return { phase: "rolling", steps: steps - 1, pending: "time_budget" };
     const next = await send({ operation: "next_object", ...identity });
     if (next.objectId === null) {
+      if (await enrollCanonicalSources(send, identity) > 0) continue;
       const settled = await send({ operation: "settle_unmaterialized", ...identity });
       if (settled.done === true) return finishRollingMigration(input, send, identity, gate, steps);
       if (settled.done !== false) throw new Error("Unmaterialized settlement receipt is invalid.");
@@ -121,19 +122,21 @@ async function prepareRollingInventory(input: RuntimeMigrationOperator, send: Co
     await discoverSources(send, identity, closed.objectIds);
   }
   const registered = await readRegisteredSources(send, identity);
-  requireProviderCoverage(inventory, identity, registered);
-  if (!gate.inventorySealedAt) gate = await sealRegisteredSources(send, identity, registered, gate);
-  requireSealedInventory(gate, registered);
+  requireProviderCoverage(inventory, identity, registered.all);
+  if (!gate.inventorySealedAt) gate = await sealRegisteredSources(send, identity, registered.baseline, gate);
+  requireSealedInventory(gate, registered.baseline);
   return gate;
 }
 
 async function enrollCanonicalSources(send: Commander, identity: CampaignIdentity) {
+  let enrolled = 0;
   for (let page = 0; page <= MAX_OBJECTS / 100; page++) {
     const result = await send({ operation: "enroll_members", ...identity });
-    if (result.enrolled === 0) return;
+    if (result.enrolled === 0) return enrolled;
     if (typeof result.enrolled !== "number" || !Number.isInteger(result.enrolled) || result.enrolled < 1 || result.enrolled > 100) {
       throw new Error("Canonical source enrollment receipt is invalid.");
     }
+    enrolled += result.enrolled;
   }
   throw new Error("Canonical source enrollment exceeded its page bound.");
 }
@@ -142,18 +145,22 @@ async function discoverSources(send: Commander, identity: CampaignIdentity, obje
     await send({ operation: "discover", ...identity, objectIds: objectIds.slice(index, index + 100), complete: index + 100 >= objectIds.length });
   }
 }
-async function readRegisteredSources(send: Commander, identity: CampaignIdentity): Promise<string[]> {
+async function readRegisteredSources(send: Commander, identity: CampaignIdentity): Promise<{ all: string[]; baseline: string[] }> {
   const ids: string[] = [];
+  const baseline: string[] = [];
   let after = "";
   for (let page = 0; page <= MAX_OBJECTS / 100; page++) {
     const result = await send({ operation: "list_inventory", ...identity, after });
     if (!Array.isArray(result.objects) || result.objects.length > 100) throw new Error("Registered source inventory is invalid.");
     for (const item of result.objects) {
-      const id = requireObjectId(record(item).objectId);
+      const row = record(item);
+      const id = requireObjectId(row.objectId);
+      if (row.inventoryClass !== "baseline" && row.inventoryClass !== "late") throw new Error("Registered source inventory class is invalid.");
+      if (row.inventoryClass === "baseline") baseline.push(id);
       if (id <= after || ids.length >= MAX_OBJECTS) throw new Error("Registered source inventory is unordered or exceeds its bound.");
       ids.push(id); after = id;
     }
-    if (result.nextAfter === null) return ids;
+    if (result.nextAfter === null) return { all: ids, baseline };
     if (!result.objects.length || result.nextAfter !== after) throw new Error("Registered source inventory cursor did not advance.");
   }
   throw new Error("Registered source inventory exceeded its page bound.");
@@ -176,8 +183,23 @@ async function finishRollingMigration(input: RuntimeMigrationOperator, send: Com
   identity: CampaignIdentity, gate: Record<string, unknown>, steps: number) {
   const finalInventory = await inventoryHostedLegacyRuntime(input);
   const registered = await readRegisteredSources(send, identity);
-  requireProviderCoverage(finalInventory, identity, registered);
-  requireSealedInventory(gate, registered);
+  requireSealedInventory(gate, registered.baseline);
+  const known = new Set(registered.all);
+  const late = finalInventory.objectIds.filter(id => !known.has(id));
+  if (finalInventory.namespaceId !== identity.namespaceId) throw new Error("Migration namespace changed during final accounting.");
+  if (late.length) {
+    await discoverSources(send, identity, late);
+    return { phase: "rolling", steps, pending: "late_sources" };
+  }
+  // New canonical identities or registered late sources may have arrived while
+  // the provider scan was running. Never label that wider cohort complete.
+  if (await enrollCanonicalSources(send, identity) > 0
+    || (await send({ operation: "next_object", ...identity })).objectId !== null) {
+    return { phase: "rolling", steps, pending: "late_sources" };
+  }
+  if ((await send({ operation: "settle_unmaterialized", ...identity })).done !== true) {
+    return { phase: "rolling", steps, pending: "member_activation" };
+  }
   return { phase: "members_migrated", steps };
 }
 function requireProviderCoverage(inventory: { namespaceId: string; objectIds: string[] }, identity: CampaignIdentity, registered: string[]) {

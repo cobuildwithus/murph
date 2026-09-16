@@ -150,6 +150,12 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
   [
+    "20260916053000_hosted_runtime_late_sources",
+    // The selection is nullable. Existing source rows receive the baseline
+    // default accepted by the new check; predeploy changes no serving phase.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
     "20260810010000_member_owned_device_provider_applications",
     // Both application-binding columns are introduced nullable in this same
     // migration, so every existing row has the accepted all-null shape. The

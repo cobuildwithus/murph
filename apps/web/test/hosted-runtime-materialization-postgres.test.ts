@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import type { PrismaClient, HostedRuntimeCutover } from "@prisma/client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
@@ -114,6 +115,95 @@ describe.skipIf(!enabled)("finite legacy materialization census", () => {
     expect(await prisma.hostedRuntimeLegacyImport.findUnique({ where: { objectId: occupied } })).toMatchObject({ admittedUserId: null, userId: first });
   });
 
+  it("retains the selected source if an earlier ID appears before reservation is acknowledged", async () => {
+    const [late, selected, next] = [object(), object(), object()].sort() as [string, string, string];
+    await command({ operation: "begin_rolling", ...campaign });
+    await command({ operation: "discover", ...campaign, objectIds: [selected, next], complete: true });
+    await command({ operation: "close_legacy_creation", ...campaign });
+    await command({ operation: "inventory", ...campaign, after: "", objectIds: [selected, next], complete: true });
+    // The caller may now persist a local barrier and lose its reservation reply.
+    expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: selected });
+    const sealed = await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
+    await command({ operation: "discover", ...campaign, objectIds: [late], complete: true });
+    expect(await Promise.all([command({ operation: "next_object", ...campaign }), command({ operation: "next_object", ...campaign })]))
+      .toEqual([{ objectId: selected }, { objectId: selected }]);
+    expect(await prisma.hostedRuntimeLegacyImport.findUnique({ where: { objectId: late } })).toMatchObject({ inventoryClass: "late" });
+    expect(await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).toMatchObject({
+      selectedObjectId: selected, inventoryHash: sealed.inventoryHash, inventoryCount: sealed.inventoryCount,
+    });
+    await expect(command({ operation: "read_object", ...campaign, objectId: late })).rejects.toThrow("selected object");
+    await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: selected }, data: { completedAt: new Date(), generation: 0n } });
+    expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: next });
+    await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: next }, data: { completedAt: new Date(), generation: 0n } });
+    expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: late });
+  });
+
+  it("polls an unfinished selection without waiting for ordinary shared campaign holders", async () => {
+    const source = object();
+    await command({ operation: "begin_rolling", ...campaign });
+    await command({ operation: "discover", ...campaign, objectIds: [source], complete: true });
+    await command({ operation: "close_legacy_creation", ...campaign });
+    await command({ operation: "inventory", ...campaign, after: "", objectIds: [source], complete: true });
+    expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: source });
+    let release!: () => void; let locked!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const ready = new Promise<void>(resolve => { locked = resolve; });
+    const ordinary = prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
+      locked(); await held;
+    });
+    await ready;
+    const polling = command({ operation: "next_object", ...campaign });
+    try {
+      expect(await Promise.race([polling, delay(1_000).then(() => "blocked")])).toEqual({ objectId: source });
+    } finally { release(); await ordinary; await polling; }
+  });
+
+  it("keeps new member and late materialization enrollment outside the original seal and legacy admission", async () => {
+    await command({ operation: "begin_rolling", ...campaign });
+    await command({ operation: "discover", ...campaign, objectIds: [], complete: true });
+    await command({ operation: "close_legacy_creation", ...campaign });
+    await command({ operation: "inventory", ...campaign, after: "", objectIds: [], complete: true });
+    const originalSeal = await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
+    const created = await member(); const createdSource = object();
+    await command({ operation: "enroll_sources", ...campaign, bindings: [{ userId: created, objectId: createdSource }] });
+    expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId: created } })).toMatchObject({ migrationPhase: "pending" });
+    expect(await prisma.hostedRuntimeLegacyImport.findUnique({ where: { objectId: createdSource } })).toMatchObject({ inventoryClass: "late", admittedUserId: created });
+    const historical = `materialization_deleted_${randomUUID()}`; members.push(historical); const historicalSource = object();
+    expect(await resolve(historical, historicalSource)).toMatchObject({ cutover: "draining" });
+    expect(await resolve(historical, historicalSource)).toMatchObject({ cutover: "draining" });
+    expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId: historical } })).toMatchObject({ migrationPhase: "legacy" });
+    expect(await prisma.hostedRuntimeLegacyImport.findUnique({ where: { objectId: historicalSource } })).toMatchObject({ inventoryClass: "late", admittedUserId: historical, completedAt: null });
+    const gate = await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
+    expect(gate.inventoryHash).toBe(originalSeal.inventoryHash); expect(gate.inventoryCount).toBe(0);
+  });
+
+  it("classifies post-closure discovery as late even before the first seal page", async () => {
+    const baseline = object(); const late = object();
+    await command({ operation: "begin_rolling", ...campaign });
+    await command({ operation: "discover", ...campaign, objectIds: [baseline], complete: true });
+    await command({ operation: "close_legacy_creation", ...campaign });
+    await command({ operation: "discover", ...campaign, objectIds: [late], complete: true });
+    const historical = `materialization_closed_${randomUUID()}`; members.push(historical);
+    expect(await resolve(historical, late)).toMatchObject({ cutover: "draining" });
+    expect(await prisma.hostedRuntimeLegacyImport.findUnique({ where: { objectId: late } })).toMatchObject({ inventoryClass: "late" });
+    await command({ operation: "inventory", ...campaign, after: "", objectIds: [baseline], complete: true });
+    expect(await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).toMatchObject({ inventoryCount: 1 });
+  });
+
+  it("keeps the baseline cursor valid when an earlier late source appears during sealing", async () => {
+    const [late, first, second] = [object(), object(), object()].sort() as [string, string, string];
+    await command({ operation: "begin_rolling", ...campaign });
+    await command({ operation: "discover", ...campaign, objectIds: [first, second], complete: true });
+    await command({ operation: "close_legacy_creation", ...campaign });
+    await command({ operation: "inventory", ...campaign, after: "", objectIds: [first], complete: false });
+    await command({ operation: "discover", ...campaign, objectIds: [late, first], complete: true });
+    await command({ operation: "inventory", ...campaign, after: first, objectIds: [second], complete: true });
+    expect(await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).toMatchObject({ inventoryCount: 2, inventoryAfter: second });
+    expect(await prisma.hostedRuntimeLegacyImport.findUnique({ where: { objectId: first } })).toMatchObject({ inventoryClass: "baseline" });
+    expect(await prisma.hostedRuntimeLegacyImport.findUnique({ where: { objectId: late } })).toMatchObject({ inventoryClass: "late" });
+  });
+
   it("persists first-use intent before a source call, including lost responses and member deletion", async () => {
     const userId = await member(); const objectId = object();
     expect(await resolve(userId, objectId)).toMatchObject({ cutover: "legacy" });
@@ -138,7 +228,9 @@ describe.skipIf(!enabled)("finite legacy materialization census", () => {
     await expect(command({ operation: "inventory", ...campaign, after: "", objectIds: [ids[0]!], complete: true })).rejects.toThrow("omits");
     await command({ operation: "inventory", ...campaign, after: "", objectIds: ids, complete: true });
     expect(await resolve(userId, late)).toMatchObject({ cutover: "legacy" });
-    await expect(command({ operation: "discover", ...campaign, objectIds: [object()], complete: true })).rejects.toThrow("unsealed");
+    const discoveredLate = object();
+    await command({ operation: "discover", ...campaign, objectIds: [discoveredLate], complete: true });
+    expect(await prisma.hostedRuntimeLegacyImport.findUnique({ where: { objectId: discoveredLate } })).toMatchObject({ inventoryClass: "late" });
   });
 
   it("requires exact enrollment of an undiscovered older member before creation closes", async () => {
@@ -162,7 +254,7 @@ describe.skipIf(!enabled)("finite legacy materialization census", () => {
     await command({ operation: "discover", ...campaign, objectIds: [objectId], complete: true });
     await command({ operation: "enroll_sources", ...campaign, bindings: [{ userId: other, objectId: object() }] });
     await command({ operation: "close_legacy_creation", ...campaign });
-    expect(await resolve(userId, object())).toMatchObject({ cutover: "draining" });
+    await expect(resolve(userId, object())).rejects.toThrow();
     expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toMatchObject({ migrationPhase: "legacy" });
   });
 

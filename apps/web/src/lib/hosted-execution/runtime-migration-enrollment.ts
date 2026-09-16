@@ -40,8 +40,8 @@ export async function enrollRuntimeSourcesTx(tx: Tx, gate: HostedRuntimeCutover,
   requireEnrollmentPhase(gate);
   const bindings = [...command.bindings].sort((a, b) => a.objectId.localeCompare(b.objectId));
   const rows = await tx.$queryRaw<Array<{ objectId: string }>>(Prisma.sql`
-    INSERT INTO hosted_runtime_legacy_import AS source (object_id, admitted_user_id, next_cursor)
-    VALUES ${Prisma.join(bindings.map(row => Prisma.sql`(${row.objectId}, ${row.userId}, '{"section":0,"after":""}'::jsonb)`))}
+    INSERT INTO hosted_runtime_legacy_import AS source (object_id, admitted_user_id, inventory_class, next_cursor)
+    VALUES ${Prisma.join(bindings.map(row => Prisma.sql`(${row.objectId}, ${row.userId}, ${runtimeInventoryClass(gate)}, '{"section":0,"after":""}'::jsonb)`))}
     ON CONFLICT (object_id) DO UPDATE SET admitted_user_id = EXCLUDED.admitted_user_id
     WHERE (source.admitted_user_id IS NULL OR source.admitted_user_id = EXCLUDED.admitted_user_id)
       AND (source.user_id IS NULL OR source.user_id = EXCLUDED.admitted_user_id)
@@ -53,7 +53,11 @@ export async function enrollRuntimeSourcesTx(tx: Tx, gate: HostedRuntimeCutover,
 }
 
 function requireEnrollmentPhase(gate: HostedRuntimeCutover) {
-  if (gate.phase !== "rolling" || gate.inventorySealedAt || gate.inventoryCount !== 0) {
-    throw new Error("Canonical enrollment requires an unsealed rolling inventory.");
+  if (gate.phase !== "rolling") {
+    throw new Error("Canonical enrollment requires a rolling campaign.");
   }
+}
+
+export function runtimeInventoryClass(gate: HostedRuntimeCutover): "baseline" | "late" {
+  return gate.creationClosedAt || gate.inventorySealedAt || gate.inventoryCount > 0 ? "late" : "baseline";
 }

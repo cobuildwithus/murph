@@ -48,7 +48,7 @@ export async function advanceRuntimeEmptyMigration(input: {
   if (!stub.freezeEmptyForPostgresMigration || !stub.exportPostgresMigrationPage) throw new Error("Legacy object does not support empty migration.");
   const receipt = await commandHostedRuntimeMigration({ source, command: { ...identity, operation: "read_object" } });
   const object = importReceipt(receipt.object);
-  if (object.completedAt) return receipt;
+  if (object.completedAt) return commandHostedRuntimeMigration({ source, command: { ...identity, operation: "activate_empty" } });
   if (!(await stub.freezeEmptyForPostgresMigration(identity)).frozen) return { pending: "source_changed" as const };
   const page = await stub.exportPostgresMigrationPage(parseLegacyRuntimeExportCursor(object.nextCursor));
   return commandHostedRuntimeMigration({ source, command: { ...identity, operation: "import_empty", page } });

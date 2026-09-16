@@ -35,9 +35,8 @@ async function admitSourceTx(tx: Prisma.TransactionClient, input: Input, owner: 
   // Non-discovery does not prove the remote source is empty: an old request
   // can materialize it without this registration protocol. Only a completed
   // exact-source handoff may activate the destination and its durable wake.
-  if (!source && closed) return { cutover: "draining", owner };
   if (!source) {
-    await tx.hostedRuntimeLegacyImport.createMany({ data: [{ objectId: input.objectId, nextCursor: { section: 0, after: "" } }], skipDuplicates: true });
+    await tx.hostedRuntimeLegacyImport.createMany({ data: [{ objectId: input.objectId, inventoryClass: closed ? "late" : "baseline", nextCursor: { section: 0, after: "" } }], skipDuplicates: true });
   }
   await tx.$queryRaw`SELECT object_id FROM hosted_runtime_legacy_import WHERE object_id = ${input.objectId} FOR UPDATE`;
   source = await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: input.objectId } });
@@ -50,5 +49,5 @@ async function admitSourceTx(tx: Prisma.TransactionClient, input: Input, owner: 
     return { cutover: "draining", owner };
   }
   await tx.hostedRuntimeLegacyImport.update({ where: { objectId: input.objectId }, data: { admittedUserId: input.userId } });
-  return { cutover: "legacy", owner };
+  return { cutover: source.inventoryClass === "baseline" ? "legacy" : "draining", owner };
 }

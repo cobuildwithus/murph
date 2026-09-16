@@ -85,7 +85,7 @@ export type HostedRuntimeMemberMigrationCommand =
   | ({ operation: "import_member"; page: LegacyRuntimeExportPage } & HostedRuntimeMemberMigrationIdentity);
 export type HostedRuntimeMigrationCommand =
   | HostedRuntimeMemberMigrationCommand
-  | ({ operation: "advance_empty" } & HostedRuntimeObjectMigrationIdentity)
+  | ({ operation: "advance_empty" | "activate_empty" } & HostedRuntimeObjectMigrationIdentity)
   | ({ operation: "import_empty"; page: LegacyRuntimeExportPage } & HostedRuntimeObjectMigrationIdentity)
   | ({ operation: "advance_member" } & HostedRuntimeMemberMigrationIdentity)
   | ({ operation: "list_unenrolled" | "enroll_members" } & HostedRuntimeMigrationIdentity)
@@ -137,6 +137,7 @@ export function parseHostedRuntimeMigrationCommand(value: unknown): HostedRuntim
   switch (record.operation) {
     case "advance_member": return { operation: "advance_member", ...identity, ...memberMigrationIdentity(record) };
     case "advance_empty":
+    case "activate_empty":
     case "read_object":
     case "inspect_object": return { operation: record.operation, ...identity, objectId: migrationDigest(record.objectId) };
     case "import_empty":

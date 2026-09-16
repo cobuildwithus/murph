@@ -428,3 +428,50 @@ resource-table census covers payloads it has not read.
   cannot start a second handoff; advance positive empty activation per member;
   finish automatic first use, encrypted historical cleanup coverage, compatible
   release adoption, composed rehearsal and final review/CI. Production is untouched.
+
+
+## Late-source accounting and durable selection
+
+A real Postgres failing-before test showed that a newly inserted lower object ID
+replaces the selected source before its canonical reservation acknowledges. The
+campaign now needs one nullable selected-source pointer, committed before any
+local barrier, rather than deriving selection from a growing sorted ledger. It has
+no clock or expiry and advances only after the source disposition and member
+activation. Source reads/transitions/imports reject a different selection.
+
+The existing import ledger gains baseline/late classification. Only baseline
+rows contribute to the immutable inventory seal; late discoveries and canonical
+bindings remain eligible for exact disposition but cannot admit legacy work by
+mere ledger presence. Enrollment/discovery may continue after the seal. Initial
+inventory pages still reconcile exactly against baseline rows. The operator
+resumes any selected source before unrelated enrollment or provider scans and
+checks for late work again before reporting completion. Per-member empty
+activation, first-use progress and compatible release adoption remain subsequent
+release requirements; no production mutation is authorized by passing this local
+increment alone.
+
+
+## Exact empty-source activation
+
+The previous empty-source path released selection after export but deferred its
+member activation until every source was complete. A failing-before Postgres
+case reproduced that early advancement from both legacy and pending ownership.
+Activation now addresses the selected exact source, requires its complete empty
+receipt and sole identity binding, and commits Postgres ownership with the
+existing encrypted durable wake. Deleted identities transfer without a wake.
+Selection includes expected identities as well as observed identities, so an
+empty member holds the selection until activation. Concurrent/lost-reply retries
+reuse the wake; prior runtime authority cannot be overwritten. The old fleet
+settlement command is a completion audit only and cannot activate an owner.
+Worker continuation calls exact activation after export completion.
+
+Late-source and selection verification recovered successfully: 24 real Postgres
+tests, 21 Worker/operator/CLI tests, Web typecheck, complexity and docs drift.
+The exact empty-activation increment passes 24 Postgres tests, 32 Worker tests,
+Web/Worker/shared typechecks, complexity and documentation drift. Failure cases
+cover stale versions, wrong selection, incomplete receipts, conflicting bindings
+and prior destination authority. Completion audit cannot activate a remaining
+owner. The activation reply uses the ordinary member wake shape so the existing
+Web callback signals immediately instead of waiting for recovery polling. Automatic first use,
+release adoption, encrypted cleanup coverage, composed rehearsal and final public
+review remain release blockers. No production changes have occurred.

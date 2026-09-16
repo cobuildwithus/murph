@@ -187,13 +187,14 @@ describe("empty namespace object migration", () => {
     canonical.command.mockImplementation(async ({ command }) => {
       if (command.operation === "status") return { gate: { phase: "rolling", inventorySealedAt: "synthetic-sealed" } };
       if (command.operation === "read_object") return { object: { userId: null, completedAt: completed ? "synthetic-complete" : null, nextCursor: { section, after: "" } } };
+      if (command.operation === "activate_empty") { expect(completed).toBe(true); return { done: true, member: { userId: identity.userId, mailboxItemId: "synthetic-wake" } }; }
       if (command.operation !== "import_empty") throw new Error("Unexpected empty migration command.");
       expect(command.page).toMatchObject({ userId: null, generation: "0", records: [], cursor: { section, after: "" } });
       section++; completed = command.page.next === null;
       return { object: { completedAt: completed ? "synthetic-complete" : null } };
     });
     for (let i = 0; i < 4; i++) await advanceRuntimeEmptyMigration({ source: h.source, stub: h.object, identity });
-    expect(await advanceRuntimeEmptyMigration({ source: h.source, stub: h.object, identity })).toMatchObject({ object: { completedAt: "synthetic-complete" } });
+    expect(await advanceRuntimeEmptyMigration({ source: h.source, stub: h.object, identity })).toEqual({ done: true, member: { userId: identity.userId, mailboxItemId: "synthetic-wake" } });
     expect(h.stop).not.toHaveBeenCalled(); expect(h.drained).not.toHaveBeenCalled(); expect(h.checkpoint).not.toHaveBeenCalled();
     expect(h.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table'").toArray()).toEqual([]);
     expect(h.values.get("runtime-migration-freeze:v1")).toMatchObject({ phase: "frozen", migrationId: `empty-${identity.objectId}` });
