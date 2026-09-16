@@ -29,8 +29,8 @@ describe.skipIf(!enabled)("member-scoped Postgres migration admission", () => {
   afterAll(async () => {
     if (prisma) {
       await prisma.hostedRuntimeOrphan.deleteMany({ where: { userId: { in: members } } });
-      await prisma.hostedRuntimeOwner.deleteMany({ where: { userId: { in: members } } });
       await prisma.hostedMember.deleteMany({ where: { id: { in: members } } });
+      await prisma.hostedRuntimeOwner.deleteMany({ where: { userId: { in: members } } });
       if (previousPhase) await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: previousPhase } });
       await prisma.$disconnect();
     }

@@ -28,8 +28,8 @@ by creation. The trigger takes a nonblocking shared campaign lock because some
 creators already hold identity/family locks. The current helper acquires that lock
 before insertion to return the existing retryable setup error; an old writer's
 contended insert fails atomically for retry. Neither path waits in an inverted
-lock order. Canonical enumeration, exact-source enrollment and automatic first-use
-progress for pending members remain release prerequisites for this draft.
+lock order. Initial canonical enrollment is implemented below; late-source enrollment and
+automatic first-use progress for pending members remain release prerequisites.
 
 The `UserRunnerDurableObject` implementation remains a finite migration bridge.
 Descriptions of its runtime ownership in the mailbox protocol apply only before
@@ -135,6 +135,27 @@ late-source recovery, automatic first-use handoff, release compatibility,
 composed rehearsal and final public review are still required. `migrateHostedLegacyRuntime` now starts a rolling campaign, reconciles
 provider discovery with creation intents, closes legacy creation and seals the
 ordered inventory. It never invokes the old fleet-draining path.
+
+Before closing creation, the Worker enrolls canonical members (including group
+runtime members) and retained runtime owners, snapshot uploads, write drains,
+media and orphan identities. Web returns at most 100 unenrolled identities per
+call using one statement with at most 100 distinct candidates per state owner;
+unique expected-source bindings replace a mutable pagination cursor. The Worker
+uses `USER_RUNNER.idFromName` without obtaining a stub, so enrollment does not
+materialize or start a source. One database transaction binds the page and retains
+missing owners, without replacing pending signup phases, generations or import
+receipts. Expected member identity stays separate from observed export identity.
+Conflicting bindings roll back the whole page. Creation closure rejects any
+unenrolled canonical candidate. A rolling-only deletion trigger retains the owner
+so deleting a member cannot remove it from that census. Its nonblocking campaign
+lock orders deletion against campaign start; it inserts no retained owner outside
+rolling mode. New creations are covered by the insert trigger above.
+
+This initial cohort is bounded by the inventory seal. Late-source enrollment,
+automatic first use and stable selection under late insertion remain unfinished.
+Encrypted legacy deletion payloads are not covered by the resource-table query;
+release proof must separately account for those runtime identities. Enrollment
+alone proves neither empty source nor completed member handoff.
 
 `next_object` selects the first source without a terminal empty disposition or
 complete member activation. A completed import stays selected until its owner

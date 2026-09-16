@@ -6,7 +6,7 @@ const first = "a".repeat(64);
 const second = "b".repeat(64);
 const intentOnly = "c".repeat(64);
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
-function harness(options: { drift?: boolean; split?: boolean; held?: boolean; intent?: boolean; loseAdvance?: boolean; loseSeal?: boolean; pending?: string[] } = {}) {
+function harness(options: { drift?: boolean; split?: boolean; held?: boolean; intent?: boolean; loseAdvance?: boolean; loseSeal?: boolean; pending?: string[]; canonical?: boolean; loseEnrollment?: boolean } = {}) {
   const sent: Array<Record<string, unknown>> = [];
   const known = new Set<string>(options.intent ? [intentOnly] : []);
   const imported = new Set<string>();
@@ -33,6 +33,13 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
       sent.push(command);
       if (command.operation === "begin_rolling") {
         if (gate.phase === "legacy") gate = { phase: "rolling", inventoryAfter: "", inventoryCount: 0, inventoryHash: digest("") };
+      } else if (command.operation === "enroll_members") {
+        if (options.canonical && !known.has(intentOnly)) {
+          known.add(intentOnly);
+          if (options.loseEnrollment) { options.loseEnrollment = false; throw new Error("synthetic lost enrollment response"); }
+          return Response.json({ enrolled: 1 });
+        }
+        return Response.json({ enrolled: 0 });
       } else if (command.operation === "discover") {
         expect(gate.inventorySealedAt).toBeUndefined();
         for (const id of command.objectIds) known.add(id);
@@ -92,6 +99,16 @@ describe("rolling runtime migration operator", () => {
     expect(h.sent.some(c => ["begin", "read_object", "import"].includes(String(c.operation)))).toBe(false);
     expect(h.activated.size).toBe(3);
     expect(h.authorizations()).toBe(h.sent.length);
+  });
+
+  it.each([false, true])("enrolls omitted canonical sources before closing creation (lost reply: %s)", async loseEnrollment => {
+    const h = harness({ canonical: true, loseEnrollment });
+    if (loseEnrollment) await expect(migrateHostedLegacyRuntime({ ...h.input, activate: false })).rejects.toThrow("lost enrollment response");
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "members_migrated" });
+    expect(h.activated.has(intentOnly)).toBe(true);
+    const closedAt = h.sent.findIndex(command => command.operation === "close_legacy_creation");
+    expect(h.sent.slice(0, closedAt).some(command => command.operation === "enroll_members")).toBe(true);
+    expect(h.sent.some(command => command.operation === "activate")).toBe(false);
   });
 
   it("holds only the selected source while readiness is pending and resumes its exact token", async () => {

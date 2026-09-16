@@ -1,0 +1,59 @@
+import { Prisma, type HostedRuntimeCutover } from "@prisma/client";
+import type { HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
+
+type Tx = Prisma.TransactionClient;
+const PAGE_SIZE = 100;
+
+/** One statement, at most 100 distinct candidates per existing state owner and
+ * 100 returned identities. Anti-joins use the unique source binding, so retry
+ * needs no cursor that could skip a concurrent creation or retained deletion.
+ * Group runtime identities are canonical hosted_member rows as well.
+ */
+export async function listUnenrolledRuntimeMembersTx(tx: Tx, gate: HostedRuntimeCutover) {
+  requireEnrollmentPhase(gate);
+  const owners = [
+    ["hosted_member", "id"], ["hosted_runtime_owner", "user_id"],
+    ["hosted_runtime_snapshot_upload", "user_id"], ["hosted_runtime_put_drain", "user_id"],
+    ["hosted_runtime_orphan", "user_id"], ["hosted_runtime_media", "user_id"],
+  ] as const;
+  // Identifiers are repository-owned constants, never command input.
+  const pages = owners.map(([table, column]) => Prisma.sql`(
+    SELECT DISTINCT candidate.${Prisma.raw(column)} AS "userId" FROM ${Prisma.raw(table)} AS candidate
+    WHERE NOT EXISTS (SELECT 1 FROM hosted_runtime_legacy_import AS source
+      WHERE source.admitted_user_id = candidate.${Prisma.raw(column)})
+    ORDER BY candidate.${Prisma.raw(column)} LIMIT ${PAGE_SIZE}
+  )`);
+  const rows = await tx.$queryRaw<Array<{ userId: string }>>(Prisma.sql`
+    SELECT DISTINCT "userId" FROM (${Prisma.join(pages, " UNION ALL ")}) AS candidates
+    ORDER BY "userId" LIMIT ${PAGE_SIZE}
+  `);
+  return { userIds: rows.map(row => row.userId) };
+}
+
+/** The bound Worker derives these exact object IDs without obtaining a stub.
+ * Expected identity is separate from exported identity: a binding proves neither
+ * emptiness nor completion. Conflicts fail the whole page without overwriting
+ * source receipts, pending signup state, generations or cleanup authority.
+ */
+export async function enrollRuntimeSourcesTx(tx: Tx, gate: HostedRuntimeCutover,
+  command: Extract<HostedRuntimeMigrationCommand, { operation: "enroll_sources" }>) {
+  requireEnrollmentPhase(gate);
+  const bindings = [...command.bindings].sort((a, b) => a.objectId.localeCompare(b.objectId));
+  const rows = await tx.$queryRaw<Array<{ objectId: string }>>(Prisma.sql`
+    INSERT INTO hosted_runtime_legacy_import AS source (object_id, admitted_user_id, next_cursor)
+    VALUES ${Prisma.join(bindings.map(row => Prisma.sql`(${row.objectId}, ${row.userId}, '{"section":0,"after":""}'::jsonb)`))}
+    ON CONFLICT (object_id) DO UPDATE SET admitted_user_id = EXCLUDED.admitted_user_id
+    WHERE (source.admitted_user_id IS NULL OR source.admitted_user_id = EXCLUDED.admitted_user_id)
+      AND (source.user_id IS NULL OR source.user_id = EXCLUDED.admitted_user_id)
+    RETURNING object_id AS "objectId"
+  `);
+  if (rows.length !== bindings.length) throw new Error("Source enrollment conflicts with an existing member identity.");
+  await tx.hostedRuntimeOwner.createMany({ data: bindings.map(row => ({ userId: row.userId })), skipDuplicates: true });
+  return { enrolled: rows.length };
+}
+
+function requireEnrollmentPhase(gate: HostedRuntimeCutover) {
+  if (gate.phase !== "rolling" || gate.inventorySealedAt || gate.inventoryCount !== 0) {
+    throw new Error("Canonical enrollment requires an unsealed rolling inventory.");
+  }
+}

@@ -88,6 +88,8 @@ export type HostedRuntimeMigrationCommand =
   | ({ operation: "advance_empty" } & HostedRuntimeObjectMigrationIdentity)
   | ({ operation: "import_empty"; page: LegacyRuntimeExportPage } & HostedRuntimeObjectMigrationIdentity)
   | ({ operation: "advance_member" } & HostedRuntimeMemberMigrationIdentity)
+  | ({ operation: "list_unenrolled" | "enroll_members" } & HostedRuntimeMigrationIdentity)
+  | ({ operation: "enroll_sources"; bindings: Array<{ userId: string; objectId: string }> } & HostedRuntimeMigrationIdentity)
   | { operation: "status" }
   | ({ operation: "begin" } & HostedRuntimeMigrationIdentity)
   | ({ operation: "begin_rolling" } & HostedRuntimeMigrationIdentity)
@@ -144,11 +146,14 @@ export function parseHostedRuntimeMigrationCommand(value: unknown): HostedRuntim
 }
 function parseCampaignMigrationCommand(record: Record<string, unknown>, identity: HostedRuntimeMigrationIdentity): HostedRuntimeMigrationCommand | null {
   switch (record.operation) {
+    case "list_unenrolled":
+    case "enroll_members":
     case "begin":
     case "close_legacy_creation":
     case "settle_unmaterialized":
     case "next_object":
     case "begin_rolling": return { operation: record.operation, ...identity };
+    case "enroll_sources": return { operation: "enroll_sources", ...identity, bindings: parseEnrollmentBindings(record.bindings) };
     case "inventory": return parseInventoryCommand(record, identity);
     case "discover": {
       const page = parseInventoryCommand({ ...record, after: "" }, identity);
@@ -193,4 +198,15 @@ function parseInventoryCommand(record: Record<string, unknown>, identity: Hosted
     || typeof record.after !== "string") throw new TypeError("Migration inventory page is invalid.");
   return { operation: "inventory", ...identity, after: record.after === "" ? "" : migrationDigest(record.after),
     objectIds: record.objectIds.map(migrationDigest), complete: record.complete };
+}
+
+function parseEnrollmentBindings(value: unknown): Array<{ userId: string; objectId: string }> {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 100) throw new TypeError("Source enrollment requires one to 100 bindings.");
+  const bindings = value.map(item => {
+    const row = requireObject(item, "Source enrollment binding");
+    return { userId: requireString(row.userId, "Enrollment member"), objectId: migrationDigest(row.objectId) };
+  });
+  if (new Set(bindings.map(row => row.userId)).size !== bindings.length
+    || new Set(bindings.map(row => row.objectId)).size !== bindings.length) throw new TypeError("Source enrollment bindings must be unique.");
+  return bindings;
 }

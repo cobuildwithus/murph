@@ -391,3 +391,40 @@ final review/CI remain required. No production mutation has occurred.
   docs drift. The new migration was applied only to the isolated synthetic DB.
   Both old-writer enrollment and forbidden rolling finalization have recorded
   failing-before proof. The public PR remains draft with the release gaps above.
+
+
+## Canonical source enrollment increment
+
+The next correction derives bounded candidate pages from canonical members and
+retained runtime owners/resources, excluding identities already bound to source
+receipts. The Worker derives exact object IDs with the bound namespace's
+`idFromName`; Web stores the expected identity separately from observed export
+identity. Enrollment creates no remote object and grants no Postgres authority.
+Creation closure must reject omitted canonical candidates. The database creation
+trigger covers concurrent new writers; deletion must retain an owner so a member
+cannot disappear between candidate discovery and enrollment. Source binding is
+idempotent, rejects conflicting identities, and runs in short database-only
+transactions. Initial implementation covers the unsealed cohort; late-source
+classification, stable selection and automatic first-use progress remain required
+before release. Encrypted legacy cleanup payloads need separate bounded coverage
+or proof that their runtime identities are already represented; do not claim the
+resource-table census covers payloads it has not read.
+
+- Implemented initial canonical enrollment through the bound Worker and the
+  existing import ledger. Source binding is set-based, idempotent and rejects
+  both expected-identity and observed-export conflicts. The operator completes
+  enrollment before creation closure. Closure now rejects missing candidates.
+- A rolling-only database deletion trigger retains missing runtime owners without
+  replacing existing authority, closing disappearance between enumeration and
+  binding. The trigger adds no retained owner outside rolling mode.
+- Validation: 35 real Postgres migration/admission tests and 69 migration-guard
+  tests pass; 21 Worker/operator/CLI tests pass. The 101-member pagination case
+  includes a new creation between pages and preserves its pending owner. Group
+  runtime and resource-only identities are covered; no runner stub is obtained
+  during Worker enrollment. Lost binding replies and conflicting pages are covered.
+  Web, Worker and shared-contract typechecks and docs drift pass. Complexity passed with both newly added source files included.
+- Next: distinguish baseline and late source receipts without changing the sealed
+  hash; retain a durable selected source before any local pause so late insertion
+  cannot start a second handoff; advance positive empty activation per member;
+  finish automatic first use, encrypted historical cleanup coverage, compatible
+  release adoption, composed rehearsal and final review/CI. Production is untouched.

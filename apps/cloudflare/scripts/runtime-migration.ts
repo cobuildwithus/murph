@@ -112,6 +112,7 @@ async function prepareRollingInventory(input: RuntimeMigrationOperator, send: Co
   let gate = initialGate;
   if (!gate.inventorySealedAt && gate.inventoryCount === 0) {
     await discoverSources(send, identity, inventory.objectIds);
+    await enrollCanonicalSources(send, identity);
     gate = record((await send({ operation: "close_legacy_creation", ...identity })).gate);
     // Census once more after closing materialization. The database inventory
     // also retains intents whose physical object never appeared in the listing.
@@ -126,6 +127,16 @@ async function prepareRollingInventory(input: RuntimeMigrationOperator, send: Co
   return gate;
 }
 
+async function enrollCanonicalSources(send: Commander, identity: CampaignIdentity) {
+  for (let page = 0; page <= MAX_OBJECTS / 100; page++) {
+    const result = await send({ operation: "enroll_members", ...identity });
+    if (result.enrolled === 0) return;
+    if (typeof result.enrolled !== "number" || !Number.isInteger(result.enrolled) || result.enrolled < 1 || result.enrolled > 100) {
+      throw new Error("Canonical source enrollment receipt is invalid.");
+    }
+  }
+  throw new Error("Canonical source enrollment exceeded its page bound.");
+}
 async function discoverSources(send: Commander, identity: CampaignIdentity, objectIds: string[]) {
   for (let index = 0; index < objectIds.length || index === 0; index += 100) {
     await send({ operation: "discover", ...identity, objectIds: objectIds.slice(index, index + 100), complete: index + 100 >= objectIds.length });
