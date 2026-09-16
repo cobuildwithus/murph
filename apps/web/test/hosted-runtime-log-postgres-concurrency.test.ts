@@ -21,6 +21,8 @@ import {
   type HostedRuntimeLogSqlResult,
 } from "@/src/lib/hosted-runtime-log/store";
 
+import { summarizeDeviceImportHealth } from "@/src/lib/hosted-runtime-progress/device-import-health";
+import { readDeviceImportObservations } from "@/src/lib/hosted-runtime-progress/device-import-observation";
 import { findHostedUsageLimitedPersonalPatternsOccurrences } from "@/src/lib/hosted-runtime-log/usage-gate";
 
 const { Client: PgClient, Pool: PgPool } = pg;
@@ -190,6 +192,89 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     );
     database = poolDatabase(pool);
   }, 30_000);
+
+  it("projects bounded device import metadata without exposing payloads", async () => {
+    const db = requireDatabase(database);
+    const now = new Date("2026-08-10T16:00:00Z");
+    const subject = hostedRuntimeLogSubjectKey("synthetic-import-runtime");
+    const entries = [
+      { event: "device-sync.pass_finished", details: { outcome: "yielded", processedJobs: 7, deviceSyncConnectionKey: "c".repeat(64),
+        incomingRetainedProgressFingerprint: "a".repeat(64), outgoingRetainedProgressFingerprint: "b".repeat(64),
+        outgoingRetainedJobCount: 10, pendingJobCountAfter: 10, queueSnapshotAfterPresent: true,
+        yieldReason: "outer_signal", privateCanary: "must-not-be-selected" } },
+      { event: "checkpoint.snapshot_finished", details: { webCheckpointAccepted: true } },
+      { event: "runner.processing_finished", details: { runtimeProcessingOutcome: "runtime_processing_accepted", runtimeProcessingAction: "woken" } },
+      { event: "runner.processing_finished", details: { runtimeProcessingOutcome: "runtime_processing_accepted", runtimeProcessingAction: "started" } },
+      { event: "device-sync.pass_finished", details: { processedJobs: "malformed", deviceSyncConnectionKey: "not-a-connection-key", pendingJobCountAfter: "malformed", queueSnapshotAfterPresent: true } },
+      { event: "device-sync.pass_finished", details: { outcome: "completed", processedJobs: 0, pendingJobCountAfter: 0, outgoingRetainedJobCount: 0, queueSnapshotAfterPresent: true } },
+      { event: "device-sync.pass_finished", details: { processedJobs: 4, deviceSyncImportAppliedCount: 4,
+        incomingRetainedProgressFingerprint: "a".repeat(64), outgoingRetainedProgressFingerprint: "a".repeat(64) } },
+      { event: "device-sync.pass_finished", details: { processedJobs: 4, deviceSyncImportNoopCount: 4,
+        incomingRetainedProgressFingerprint: "a".repeat(64), outgoingRetainedProgressFingerprint: "a".repeat(64) } },
+    ];
+    for (const [index, entry] of entries.entries()) {
+      await db.query(`INSERT INTO hosted_runtime_log (id, subject_key, at, level, component, phase, event_code, attempt_id, redacted_json)
+        VALUES ($1, $2, $3, 'info', 'runtime', 'invoke', $4, 'synthetic-attempt', $5::jsonb)`,
+        [randomUUID(), subject, new Date(+now - (entries.length - index) * 1000), entry.event, JSON.stringify(entry.details)]);
+    }
+    const observations = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+    expect(observations).toHaveLength(8);
+    expect(observations[0]).toMatchObject({ pending: true, progressed: true, cancelled: true, connectionKey: "c".repeat(64) });
+    expect(observations[1]).toMatchObject({ checkpointAccepted: true, connectionKey: null });
+    expect(observations[2]).toMatchObject({ restarted: false });
+    expect(observations[3]).toMatchObject({ restarted: true });
+    expect(observations[4]).toMatchObject({ pending: null, progressed: false, connectionKey: null });
+    expect(observations[5]).toMatchObject({ pending: false, connectionKey: null });
+    expect(observations[6]).toMatchObject({ progressed: true });
+    expect(observations[7]).toMatchObject({ progressed: false });
+    expect(JSON.stringify(observations)).not.toContain("must-not-be-selected");
+    expect(await readDeviceImportObservations({ database: db, now, subjects: ["unrelated-subject"] })).toEqual([]);
+  });
+
+  it.each([0, 1])("keeps failed retained work pending through retry checkpoints with %i local jobs", async (pendingJobCount) => {
+    // The runtime producer asserts this same metadata on a late reconciliation failure.
+    const failedPass = JSON.parse(await readFile(new URL(
+      "../../../packages/assistant-runtime/test/fixtures/device-import-failed-pass.json", import.meta.url,
+    ), "utf8"));
+    const db = requireDatabase(database);
+    const now = new Date("2026-08-10T16:00:00Z");
+    const subject = hostedRuntimeLogSubjectKey(`synthetic-failed-import-${pendingJobCount}`);
+    const insert = async (minutesAgo: number, event: string, details: Record<string, unknown>) => {
+      await db.query(`INSERT INTO hosted_runtime_log (id, subject_key, at, level, component, phase, event_code, attempt_id, redacted_json)
+        VALUES ($1, $2, $3, 'info', 'runtime', 'invoke', $4, 'synthetic-retry-attempt', $5::jsonb)`,
+      [randomUUID(), subject, new Date(+now - minutesAgo * 60_000), event, JSON.stringify(details)]);
+    };
+    for (const age of [20, 15, 10, 5]) {
+      await insert(age, "device-sync.pass_finished", { ...failedPass, pendingJobCountAfter: pendingJobCount });
+      await insert(age - 0.1, "checkpoint.snapshot_finished", { webCheckpointAccepted: true });
+      await insert(age - 0.2, "runner.processing_finished", {
+        runtimeProcessingOutcome: "runtime_processing_accepted", runtimeProcessingAction: "started",
+      });
+    }
+    const observations = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+    for (const pass of observations.filter(row => row.eventCode === "device-sync.pass_finished")) {
+      expect(pass).toMatchObject({ pending: true, progressed: false });
+    }
+    const health = () => summarizeDeviceImportHealth({ now, observations, dueSubjects: new Set([subject]) });
+    expect(health().stalled).toMatchObject({ anomalous: true, savedProgressPassCount: 0 });
+    expect(health().cycling).toMatchObject({ anomalous: true, savedProgressPassCount: 0 });
+    // Applied canonical imports can still be saved by a retry checkpoint.
+    await insert(3, "device-sync.pass_finished", { ...failedPass, pendingJobCountAfter: 0, deviceSyncImportAppliedCount: 1 });
+    await insert(2.9, "checkpoint.snapshot_finished", { webCheckpointAccepted: true });
+    const applied = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+    expect(applied.find(row => row.at.getTime() === +now - 3 * 60_000)).toMatchObject({ pending: true, progressed: true });
+    expect(summarizeDeviceImportHealth({ now, observations: applied, dueSubjects: new Set([subject]) }).cycling)
+      .toMatchObject({ anomalous: true, savedProgressPassCount: 1 });
+    // Only a successfully returned drain and its checkpoint resolve the retry obligation.
+    await insert(1, "device-sync.pass_finished", { ...failedPass, outcome: "completed", pendingJobCountAfter: 0 });
+    const beforeCheckpoint = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+    expect(summarizeDeviceImportHealth({ now, observations: beforeCheckpoint, dueSubjects: new Set([subject]) }).cycling.anomalous).toBe(true);
+    await insert(0.5, "checkpoint.snapshot_finished", { webCheckpointAccepted: true });
+    const recovered = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+    const result = summarizeDeviceImportHealth({ now, observations: recovered, dueSubjects: new Set([subject]) });
+    expect(result.stalled.anomalous).toBe(false);
+    expect(result.cycling.anomalous).toBe(false);
+  });
 
   afterAll(async () => {
     if (pool && subjectKeys.size > 0) {

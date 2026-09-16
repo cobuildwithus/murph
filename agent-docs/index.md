@@ -139,6 +139,11 @@ the warning regression and delivery evidence are tracked in
 The deployment unblock retaining the dormant experiment namespace is tracked in
 [`2026-09-15-defer-small-namespace-retirement.md`](exec-plans/completed/2026-09-15-defer-small-namespace-retirement.md).
 
+Retained device-import stall, cycling and long-backlog operator alerts are owned
+by `agent-docs/RELIABILITY.md`; connection ownership in diagnostic events is
+specified in `docs/hosted-runtime-log-database.md`. Classifier, bounded-reader and PostgreSQL proof
+are indexed in `agent-docs/references/testing-ci-map.md`.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
