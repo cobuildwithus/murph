@@ -1,6 +1,6 @@
 # Improve provider discovery and verify Epic automatic distribution
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-15
 
@@ -17,7 +17,7 @@ Updated: 2026-09-15
 
 ## Scope
 
-- In scope: connect-page presentation, autocomplete, static provider branding, outside-note eligibility evidence, and live import verification.
+- In scope: connect-page presentation, autocomplete, static provider branding, outside-note eligibility evidence, and a separate live-verification handoff.
 - Out of scope: changes to OAuth authority, consent, hospital endpoints, or canonical import ownership.
 
 ## Constraints
@@ -39,7 +39,7 @@ Updated: 2026-09-15
 2. Implement bounded autocomplete and compact branded provider rows using the existing design system.
 3. Update the production-component study and focused interaction tests.
 4. Verify rendering, accessibility, typecheck, scoped lint, and policy regressions; review and ship a scoped PR.
-5. Continue sandbox and real-account import verification through canonical readback.
+5. Carry sandbox and real-account verification forward in the separate active Epic import verification plan.
 
 ## Decisions
 
@@ -66,3 +66,11 @@ Updated: 2026-09-15
 
 - The hosted preview is ready and returns the actual provider-search study. CI found four consent-flow assertions still expecting the previous heading; those assertions now match the new heading, and all 10 composed consent tests pass.
 - Final review packaging exceeded the child output buffer with expected exclusion warnings. The wrapper now summarizes those warnings, preserves other diagnostics and exit status, and keeps all artifact/privacy guards.
+
+## Completion review
+
+- ReviewGPT round 1 passed on `155e6d97208f1e33950d305e7ae97f8ff3251627`, with no qualifying findings. GPT-6 Pro selection and response-model metadata agree; the exact response hash matches capture metadata, the complete artifact/target identity was checked, and capture exceeded the 180-second minimum (approximately seven minutes).
+- The parent reviewed request cancellation, consent and single-use intent recovery, local branding provenance, default API admission, and packaging error propagation. The reviewer did not rerun tests or inspect excluded binary logos; local tests and rendered browser evidence cover those boundaries.
+- The deployed study returns HTTP 200. Browser readback confirms the actual component, loaded same-origin logos, and no horizontal overflow. All 10 composed consent tests and review package format guards pass; the corrected full archive builds successfully and Web typecheck passes.
+- This closes implementation and review of provider discovery and eligibility. Final exact-head CI and merge remain release gates. The broader live-import outcome remains open in `agent-docs/exec-plans/active/2026-09-16-epic-import-live-verification.md`; no successful real authorization or imported lab result is claimed.
+Completed: 2026-09-15

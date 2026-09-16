@@ -342,3 +342,8 @@ agent-facing command and dedicated browser session.
 The hosted-local activity-expiry target correction is recorded in
 [`2026-09-15-recovery-test-targets.md`](exec-plans/completed/2026-09-15-recovery-test-targets.md);
 its active/retained target and namespace-routing proof is owned by the testing CI map.
+
+Provider-search delivery is recorded in
+[`2026-09-15-records-connect-polish.md`](exec-plans/completed/2026-09-15-records-connect-polish.md).
+The separate registration activation and composed import proof remain active in
+[`2026-09-16-epic-import-live-verification.md`](exec-plans/active/2026-09-16-epic-import-live-verification.md).
