@@ -26,6 +26,26 @@ export async function listRuntimeInventoryTx(tx: Tx, gate: HostedRuntimeCutover,
   return { objects, nextAfter: objects.length === 100 ? objects[objects.length - 1]!.objectId : null };
 }
 
+/** Immutable inventory order and monotonic source/activation receipts keep all
+ * operator retries on the same unfinished object. Import completion alone must
+ * not advance past a member whose destination has not activated. No expiring
+ * operator lease can authorize a second handoff after an ambiguous response.
+ */
+export async function nextRuntimeObjectTx(tx: Tx, gate: HostedRuntimeCutover) {
+  if ((gate.phase !== "rolling" && gate.phase !== "postgres") || !gate.inventorySealedAt || !gate.creationClosedAt) {
+    throw new Error("Object selection requires a closed, sealed rolling campaign.");
+  }
+  const rows = await tx.$queryRaw<Array<{ objectId: string }>>`
+    SELECT source.object_id AS "objectId"
+    FROM hosted_runtime_legacy_import AS source
+    LEFT JOIN hosted_runtime_owner AS owner ON owner.user_id = source.user_id
+    WHERE source.completed_at IS NULL
+      OR (source.user_id IS NOT NULL AND owner.migration_phase IS DISTINCT FROM 'postgres')
+    ORDER BY source.object_id ASC LIMIT 1
+  `;
+  return { objectId: rows[0]?.objectId ?? null };
+}
+
 export async function requireRollingInventoryPageTx(tx: Tx, gate: HostedRuntimeCutover, command: Extract<HostedRuntimeMigrationCommand, { operation: "inventory" }>) {
   if (!gate.creationClosedAt || !gate.discoveryCompletedAt) throw new Error("Rolling inventory cannot seal while legacy creation is open.");
   const rows = await tx.hostedRuntimeLegacyImport.findMany({ where: { objectId: { gt: command.after } }, orderBy: { objectId: "asc" }, take: command.objectIds.length + 1, select: { objectId: true } });

@@ -98,11 +98,13 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
 
   it("begins a rolling campaign without changing other members' admission", async () => {
     await command({ operation: "begin_rolling", ...campaign });
+    await expect(command({ operation: "next_object", ...campaign })).rejects.toThrow("sealed");
     await expect(command({ operation: "begin", ...campaign })).rejects.toThrow("mode changed");
     await expect(command({ operation: "quiesce_member", ...identity })).rejects.toThrow("sealed");
     await command({ operation: "discover", ...campaign, objectIds: [objectId, otherObjectId, emptyObjectId], complete: true });
     await command({ operation: "close_legacy_creation", ...campaign });
     await command({ operation: "inventory", ...campaign, after: "", objectIds: [objectId, otherObjectId, emptyObjectId], complete: true });
+    expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId });
     expect(await command({ operation: "read_member", ...identity })).toMatchObject({ member: { migrationPhase: "legacy", migrationId: null } });
     expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toBeNull();
     expect(await prisma.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId } })).toMatchObject({ userId: null, lastHash: null });
@@ -145,10 +147,13 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
       expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("draining");
     }
     expect(await prisma.hostedMailboxItem.count({ where: { userId } })).toBe(0);
+    expect(await Promise.all([command({ operation: "next_object", ...campaign }), command({ operation: "next_object", ...campaign })]))
+      .toEqual([{ objectId }, { objectId }]);
     await command({ operation: "activate_member", ...identity });
     await command({ operation: "activate_member", ...identity });
     expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("postgres");
     expect(await readHostedRuntimeMemberBackend(prisma, otherId)).toBe("legacy");
+    expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: otherObjectId });
     const wakes = await prisma.hostedMailboxItem.findMany({ where: { userId }, select: { kind: true, dedupeKey: true, payloadInlineCiphertext: true } });
     expect(wakes).toHaveLength(1);
     expect(wakes[0]).toMatchObject({ kind: "runtime.maintenance-requested", dedupeKey: migrationWakeEventId(identity), payloadInlineCiphertext: expect.any(String) });
@@ -160,6 +165,7 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
     await command({ operation: "freeze_member", ...other });
     for (let section = 0; section <= 3; section++) await command({ operation: "import_member", ...other, page: page(otherId, section) });
     await command({ operation: "activate_member", ...other });
+    expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: emptyObjectId });
     expect(await prisma.hostedMailboxItem.count({ where: { userId: otherId } })).toBe(0);
     await prisma.hostedRuntimeOwner.update({ where: { userId }, data: { phase: "starting", attemptId: "synthetic-active-attempt", allocationId: "synthetic-allocation", processingMode: "default" } });
     await prisma.hostedRuntimeOwner.createMany({ data: [emptyMemberId, neverStartedId].map(userId => ({ userId })) });
@@ -173,6 +179,7 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
       await command(empty); await command(empty);
     }
     expect(await prisma.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: emptyObjectId } })).toMatchObject({ userId: null, generation: 0n, completedAt: expect.any(Date) });
+    expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: null });
     await prisma.hostedRuntimeOwner.update({ where: { userId: emptyMemberId }, data: { generation: 9n } });
     await expect(command({ operation: "settle_unmaterialized", ...campaign })).rejects.toThrow("prior runtime authority");
     await prisma.hostedRuntimeOwner.update({ where: { userId: emptyMemberId }, data: { generation: 0n } });

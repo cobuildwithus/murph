@@ -7,8 +7,8 @@ export interface RuntimeMigrationOperator {
   workerVersion: string;
   cloudflareToken: string;
   workerBaseUrl: string;
-  /** Refresh OIDC for each bounded call; never persist a token in migration state. */
-  workerAuthorization: () => Promise<Headers>;
+  /** Fresh hosted signature or OIDC for each bounded call; never persist it. */
+  workerAuthorization: (request: { method: "POST"; path: string; payload: string }) => Promise<Headers>;
   fetchImpl?: typeof fetch;
 }
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -29,52 +29,131 @@ export async function inventoryHostedLegacyRuntime(input: RuntimeMigrationOperat
   return { namespaceId, workerVersion: input.workerVersion, objectIds, hash, count: objectIds.length };
 }
 
-/** Authorized hosted operator only. No deploy/rollback or destructive namespace
- * removal occurs here. It stops at held drains; rerunning resumes durable pages.
- * Activation is a separate explicit invocation after the import is complete. */
-export async function migrateHostedLegacyRuntime(input: RuntimeMigrationOperator & { activate: boolean }) {
+/** Hosted rolling driver. Each invocation is bounded and resumes from canonical
+ * receipts. A held or uncertain handoff never advances the ordered selection;
+ * all other members keep their existing backend. `activate` closes the campaign
+ * default only; each successfully imported member activates independently.
+ */
+export async function migrateHostedLegacyRuntime(input: RuntimeMigrationOperator & { activate: boolean; maxSteps?: number }) {
+  const maxSteps = input.maxSteps ?? 25;
+  if (!Number.isSafeInteger(maxSteps) || maxSteps < 1 || maxSteps > 1_000) throw new TypeError("Migration step bound must be between 1 and 1000.");
   const inventory = await inventoryHostedLegacyRuntime(input);
   const identity = { namespaceId: inventory.namespaceId, workerVersion: inventory.workerVersion };
   const send = workerCommander(input);
-  let gate = record((await send({ operation: "begin", ...identity })).gate);
-  if (gate.phase === "postgres") return { phase: "postgres", importedObjects: inventory.count };
-  gate = await registerInventory(send, inventory, gate);
-  if (gate.inventoryHash !== inventory.hash || gate.inventoryCount !== inventory.count) throw new Error("Namespace inventory changed after sealing; activation remains blocked.");
-  let importedObjects = 0;
-  for (const objectId of inventory.objectIds) {
-    for (let page = 0; page < 100_000; page++) {
-      const result = await send({ operation: "read_object", ...identity, objectId });
-      if (result.draining === true) return { phase: "draining", importedObjects };
-      if (record(result.object).completedAt) { importedObjects++; break; }
-      if (page === 99_999) throw new Error("Legacy object export exceeded the operator page bound.");
+  let gate = record((await send({ operation: "begin_rolling", ...identity })).gate);
+  if (gate.phase === "postgres") return { phase: "postgres", steps: 0 };
+  if (gate.phase !== "rolling") throw new Error("Rolling operator cannot continue a fleet-draining campaign.");
+  gate = await prepareRollingInventory(input, send, inventory, gate);
+  for (let steps = 1; steps <= maxSteps; steps++) {
+    const next = await send({ operation: "next_object", ...identity });
+    if (next.objectId === null) {
+      const settled = await send({ operation: "settle_unmaterialized", ...identity });
+      if (settled.done === true) return finishRollingMigration(input, send, identity, gate, steps);
+      if (settled.done !== false) throw new Error("Unmaterialized settlement receipt is invalid.");
+      continue;
     }
+    const objectId = requireObjectId(next.objectId);
+    const result = await advanceSelectedObject(send, identity, objectId);
+    if (typeof result.pending === "string") return { phase: "rolling", steps, pending: result.pending };
   }
-  if (!input.activate) return { phase: "imported", importedObjects };
-  const finalInventory = await inventoryHostedLegacyRuntime(input);
-  if (finalInventory.namespaceId !== inventory.namespaceId || finalInventory.hash !== inventory.hash || finalInventory.count !== inventory.count) throw new Error("Final namespace inventory changed; activation remains blocked.");
-  await send({ operation: "activate", ...identity, inventoryHash: finalInventory.hash, inventoryCount: finalInventory.count });
-  return { phase: "postgres", importedObjects };
+  return { phase: "rolling", steps: maxSteps, pending: "step_budget" };
 }
 
-async function registerInventory(
-  send: ReturnType<typeof workerCommander>,
-  inventory: Awaited<ReturnType<typeof inventoryHostedLegacyRuntime>>,
-  gate: Record<string, unknown>,
-) {
+type CampaignIdentity = { namespaceId: string; workerVersion: string };
+type Commander = ReturnType<typeof workerCommander>;
+async function advanceSelectedObject(send: Commander, identity: CampaignIdentity, objectId: string) {
+  const inspected = await send({ operation: "inspect_object", ...identity, objectId });
+  if (inspected.objectId !== objectId) throw new Error("Migration inspection returned a different source.");
+  const observed = record(inspected.observation);
+  if (observed.kind !== "observed") throw new Error("Legacy source schema requires recovery before migration.");
+  if (observed.userId === null) return send({ operation: "advance_empty", ...identity, objectId });
+  if (typeof observed.userId !== "string" || !observed.userId) throw new Error("Legacy source member identity is invalid.");
+  const userId = observed.userId;
+  const migrationId = digest(JSON.stringify([identity.namespaceId, objectId, userId]));
+  return send({ operation: "advance_member", ...identity, objectId, userId, migrationId });
+}
+
+async function prepareRollingInventory(input: RuntimeMigrationOperator, send: Commander,
+  inventory: Awaited<ReturnType<typeof inventoryHostedLegacyRuntime>>, initialGate: Record<string, unknown>) {
   const identity = { namespaceId: inventory.namespaceId, workerVersion: inventory.workerVersion };
-  if (!gate.inventorySealedAt) {
-    const count = gate.inventoryCount;
-    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0 || count > inventory.count) throw new Error("Migration inventory receipt is invalid.");
-    let expected = digest("");
-    for (const id of inventory.objectIds.slice(0, count)) expected = digest(`${expected}\n${id}`);
-    if (expected !== gate.inventoryHash || gate.inventoryAfter !== (inventory.objectIds[count - 1] ?? "")) throw new Error("Namespace inventory changed during migration.");
-    for (let index = count; index < inventory.count || index === count && count === inventory.count; index += 100) {
-      const objectIds = inventory.objectIds.slice(index, index + 100);
-      gate = record((await send({ operation: "inventory", ...identity, after: inventory.objectIds[index - 1] ?? "", objectIds, complete: index + 100 >= inventory.count })).gate);
-      if (gate.inventorySealedAt) break;
-    }
+  let gate = initialGate;
+  if (!gate.inventorySealedAt && gate.inventoryCount === 0) {
+    await discoverSources(send, identity, inventory.objectIds);
+    gate = record((await send({ operation: "close_legacy_creation", ...identity })).gate);
+    // Census once more after closing materialization. The database inventory
+    // also retains intents whose physical object never appeared in the listing.
+    const closed = await inventoryHostedLegacyRuntime(input);
+    if (closed.namespaceId !== identity.namespaceId) throw new Error("Migration namespace changed during creation closure.");
+    await discoverSources(send, identity, closed.objectIds);
   }
+  const registered = await readRegisteredSources(send, identity);
+  requireProviderCoverage(inventory, identity, registered);
+  if (!gate.inventorySealedAt) gate = await sealRegisteredSources(send, identity, registered, gate);
+  requireSealedInventory(gate, registered);
   return gate;
+}
+
+async function discoverSources(send: Commander, identity: CampaignIdentity, objectIds: string[]) {
+  for (let index = 0; index < objectIds.length || index === 0; index += 100) {
+    await send({ operation: "discover", ...identity, objectIds: objectIds.slice(index, index + 100), complete: index + 100 >= objectIds.length });
+  }
+}
+async function readRegisteredSources(send: Commander, identity: CampaignIdentity): Promise<string[]> {
+  const ids: string[] = [];
+  let after = "";
+  for (let page = 0; page <= MAX_OBJECTS / 100; page++) {
+    const result = await send({ operation: "list_inventory", ...identity, after });
+    if (!Array.isArray(result.objects) || result.objects.length > 100) throw new Error("Registered source inventory is invalid.");
+    for (const item of result.objects) {
+      const id = requireObjectId(record(item).objectId);
+      if (id <= after || ids.length >= MAX_OBJECTS) throw new Error("Registered source inventory is unordered or exceeds its bound.");
+      ids.push(id); after = id;
+    }
+    if (result.nextAfter === null) return ids;
+    if (!result.objects.length || result.nextAfter !== after) throw new Error("Registered source inventory cursor did not advance.");
+  }
+  throw new Error("Registered source inventory exceeded its page bound.");
+}
+async function sealRegisteredSources(send: Commander, identity: CampaignIdentity, ids: string[], initialGate: Record<string, unknown>) {
+  let gate = initialGate;
+  const count = gate.inventoryCount;
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0 || count > ids.length
+    || gate.inventoryHash !== inventoryHash(ids.slice(0, count)) || gate.inventoryAfter !== (ids[count - 1] ?? "")) {
+    throw new Error("Migration inventory receipt is stale or invalid.");
+  }
+  for (let index = count; index < ids.length || index === count; index += 100) {
+    gate = record((await send({ operation: "inventory", ...identity, after: ids[index - 1] ?? "",
+      objectIds: ids.slice(index, index + 100), complete: index + 100 >= ids.length })).gate);
+    if (gate.inventorySealedAt) return gate;
+  }
+  throw new Error("Migration inventory seal was not acknowledged.");
+}
+async function finishRollingMigration(input: RuntimeMigrationOperator & { activate: boolean }, send: Commander,
+  identity: CampaignIdentity, gate: Record<string, unknown>, steps: number) {
+  const finalInventory = await inventoryHostedLegacyRuntime(input);
+  const registered = await readRegisteredSources(send, identity);
+  requireProviderCoverage(finalInventory, identity, registered);
+  requireSealedInventory(gate, registered);
+  if (!input.activate) return { phase: "members_migrated", steps };
+  const activated = record((await send({ operation: "activate", ...identity, inventoryHash: inventoryHash(registered), inventoryCount: registered.length })).gate);
+  if (activated.phase !== "postgres") throw new Error("Campaign activation was not acknowledged.");
+  return { phase: "postgres", steps };
+}
+function requireProviderCoverage(inventory: { namespaceId: string; objectIds: string[] }, identity: CampaignIdentity, registered: string[]) {
+  const known = new Set(registered);
+  if (inventory.namespaceId !== identity.namespaceId || inventory.objectIds.some(id => !known.has(id))) {
+    throw new Error("Namespace inventory changed beyond the registered census; migration remains held.");
+  }
+}
+function requireSealedInventory(gate: Record<string, unknown>, ids: string[]) {
+  if (!gate.inventorySealedAt || gate.inventoryCount !== ids.length || gate.inventoryHash !== inventoryHash(ids)) {
+    throw new Error("Registered source inventory does not match its sealed receipt.");
+  }
+}
+function inventoryHash(ids: string[]) { return ids.reduce((hash, id) => digest(`${hash}\n${id}`), digest("")); }
+function requireObjectId(value: unknown): string {
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)) throw new Error("Migration source identity is invalid.");
+  return value;
 }
 
 async function findLegacyNamespace(get: (path: string) => Promise<Record<string, unknown>>, scriptName: string): Promise<string> {
@@ -133,9 +212,10 @@ function workerCommander(input: RuntimeMigrationOperator) {
   const url = new URL("/internal/runtime-migration", input.workerBaseUrl);
   if (url.protocol !== "https:" || url.username || url.password) throw new TypeError("Migration Worker URL must be an HTTPS origin.");
   return async (command: HostedRuntimeMigrationCommand) => {
-    const headers = await input.workerAuthorization();
+    const payload = JSON.stringify(command);
+    const headers = await input.workerAuthorization({ method: "POST", path: url.pathname, payload });
     headers.set("content-type", "application/json");
-    return readResponse(await (input.fetchImpl ?? fetch)(url, { method: "POST", headers, body: JSON.stringify(command),
+    return readResponse(await (input.fetchImpl ?? fetch)(url, { method: "POST", headers, body: payload,
       redirect: "error", signal: AbortSignal.timeout(30_000) }));
   };
 }

@@ -59,7 +59,7 @@ passing a timer never substitutes for safe handoff evidence.
    schema, locks and readiness evidence.
 2. [in progress] Implement all member routing, graceful/conditional handoff,
    controlled upload/drain behavior and durable activation wake.
-3. [pending] Implement hosted resumable operator, source discovery and creation
+3. [in progress] Implement hosted resumable operator, source discovery and creation
    barrier, new-member routing and full campaign closure.
 4. [pending] Focused race/crash tests, typechecks and composed rehearsal.
 5. [pending] Candidate/privacy/complexity review, owner docs, changelog decision,
@@ -246,3 +246,33 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
   advancement and final accounting. Late empty objects from old Worker requests
   require composed serving-version/creation-closure proof before deployment;
   no production mutation or handoff timing claim has been made.
+- Replaced the fleet-draining operator with a bounded rolling driver. It
+  discovers provider objects, closes materialization, rescans and joins durable
+  intents, verifies/resumes the inventory seal, advances exact source handoffs,
+  settles unmaterialized owners and independently verifies final accounting.
+- Ordered selection derives from existing source/activation receipts rather
+  than a new lease. A completed import remains selected until its member is
+  Postgres. Same-source retries use a deterministic token and cannot advance to
+  a later member after a lost import/activation response. Pending readiness
+  leaves the campaign live but delays later handoffs. Unknown late provider
+  objects hold final closure instead of being silently omitted.
+- Added the hosted CLI with read-only inventory default, bounded migration
+  steps and aggregate output. It requires private Murph Cloud main execution;
+  the private production environment has the required API and signing secret
+  names (metadata inspected only). Signed control admission reuses existing
+  method/path/body signatures and nonce replay protection alongside OIDC.
+- Local proof: seven rolling-driver tests cover serial activation, intent-only
+  sources, held readiness, restart after lost seal/import replies, bounded work
+  and final inventory drift. Four CLI tests cover execution boundary, options,
+  fresh signatures and aggregate-only output. Eleven Worker route/backpressure
+  tests pass, including signed payload tampering and replay rejection. Four real
+  Postgres handoff tests now prove ordered selection through activation. Worker,
+  Web and shared typechecks pass; the complexity guard passes.
+- Next: wire the protected private workflow, prove creation closure against
+  late old-release requests and compose full handoff/R2/latency rehearsal. Final
+  ReviewGPT, exact-head CI, merge, deployment and complete live migration remain
+  required. The PR stays draft; no production mutation has been performed.
+
+- Final operator route regression: 175 Worker tests across four files pass;
+  Worker typecheck and documentation drift pass. The private workflow and
+  late-old-request closure proof remain the next concrete work.

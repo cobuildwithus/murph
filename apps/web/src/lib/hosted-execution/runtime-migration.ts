@@ -1,4 +1,4 @@
-import { closeLegacyCreationTx, discoverRuntimeObjectsTx, listRuntimeInventoryTx, requireRollingInventoryPageTx } from "./runtime-migration-inventory";
+import { closeLegacyCreationTx, discoverRuntimeObjectsTx, listRuntimeInventoryTx, nextRuntimeObjectTx, requireRollingInventoryPageTx } from "./runtime-migration-inventory";
 import { settleUnmaterializedRuntime } from "./runtime-migration-unmaterialized";
 import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient, type HostedRuntimeCutover } from "@prisma/client";
@@ -23,7 +23,7 @@ export async function executeHostedRuntimeMigrationCommand(input: { prisma: Pris
   if (isMemberMigrationCommand(command)) return withMemberMigrationWake({ prisma: input.prisma, command,
     run: prepared => input.prisma.$transaction(tx => executeMemberTx(tx, command, resources, prepared), { maxWait: 5_000, timeout: 5_000 }) });
   return input.prisma.$transaction(async tx => {
-    if (command.operation === "read_object" || command.operation === "import_empty" || command.operation === "list_inventory") await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
+    if (["read_object", "import_empty", "list_inventory", "next_object"].includes(command.operation)) await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
     else await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR UPDATE`;
     const gate = await tx.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
     if (command.operation === "begin" || command.operation === "begin_rolling") return { gate: await beginTx(tx, gate, command) };
@@ -32,6 +32,7 @@ export async function executeHostedRuntimeMigrationCommand(input: { prisma: Pris
       case "discover": return { gate: await discoverRuntimeObjectsTx(tx, gate, command) };
       case "close_legacy_creation": return { gate: await closeLegacyCreationTx(tx, gate) };
       case "list_inventory": return listRuntimeInventoryTx(tx, gate, command.after);
+      case "next_object": return nextRuntimeObjectTx(tx, gate);
       case "inventory": return { gate: await inventoryTx(tx, gate, command) };
       case "read_object": return { object: projectImport(await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: command.objectId } })) };
       case "import_empty": {

@@ -18,6 +18,7 @@ import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
 
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.ts";
+import { createHostedWebCallbackSignatureHeaders, readHostedWebCallbackSigningEnvironment } from "../src/web-callback-auth.ts";
 
 const TEST_VERCEL_OIDC_TEAM_SLUG = "murph-team";
 const TEST_VERCEL_OIDC_PROJECT_NAME = "murph-web";
@@ -215,6 +216,23 @@ describe("cloudflare worker queue backpressure routes", () => {
     const response = await worker.fetch(await signControlRequest(request), harness.env as never);
     expect(response.ok).toBe(false);
     expect(control).not.toHaveBeenCalled();
+  });
+
+  it("admits protected hosted migration signatures with exact payload binding and nonce replay rejection", async () => {
+    const harness = createUserRunnerDurableObject({ CF_VERSION_METADATA: { id: "synthetic-version" }, HOSTED_RUNTIME_POSTGRES_ENABLED: "true" });
+    const control = vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration").mockResolvedValue({ objectId: null });
+    const path = "/internal/runtime-migration";
+    const body = JSON.stringify({ operation: "next_object", namespaceId: "synthetic-namespace", workerVersion: "synthetic-version" });
+    const headers = await createHostedWebCallbackSignatureHeaders({ environment: readHostedWebCallbackSigningEnvironment(createHostedExecutionTestEnv()),
+      method: "POST", path, payload: body, userId: null });
+    const request = (payload = body) => new Request(`https://runner.example.test${path}`, { method: "POST", headers, body: payload });
+    expect((await worker.fetch(request(body.replace("next_object", "begin_rolling")), harness.env as never)).status).toBe(401);
+    expect(control).not.toHaveBeenCalled();
+    const accepted = await worker.fetch(request(), harness.env as never);
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({ objectId: null });
+    expect((await worker.fetch(request(), harness.env as never)).status).toBe(401);
+    expect(control).toHaveBeenCalledOnce();
   });
 
   it("forwards managed AI revocation through the UserRunner Durable Object", async () => {

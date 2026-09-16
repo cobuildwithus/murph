@@ -93,6 +93,7 @@ export type HostedRuntimeMigrationCommand =
   | ({ operation: "begin_rolling" } & HostedRuntimeMigrationIdentity)
   | ({ operation: "close_legacy_creation" } & HostedRuntimeMigrationIdentity)
   | ({ operation: "settle_unmaterialized" } & HostedRuntimeMigrationIdentity)
+  | ({ operation: "next_object" } & HostedRuntimeMigrationIdentity)
   | ({ operation: "discover"; objectIds: string[]; complete: boolean } & HostedRuntimeMigrationIdentity)
   | ({ operation: "list_inventory"; after: string } & HostedRuntimeMigrationIdentity)
   | ({ operation: "inventory"; after: string; objectIds: string[]; complete: boolean } & HostedRuntimeMigrationIdentity)
@@ -146,6 +147,7 @@ function parseCampaignMigrationCommand(record: Record<string, unknown>, identity
     case "begin":
     case "close_legacy_creation":
     case "settle_unmaterialized":
+    case "next_object":
     case "begin_rolling": return { operation: record.operation, ...identity };
     case "inventory": return parseInventoryCommand(record, identity);
     case "discover": {

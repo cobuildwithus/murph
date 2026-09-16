@@ -123,10 +123,30 @@ Strong delete consistency alone does not cancel a concurrent write.
 ## Rolling migration readiness
 
 Production migration remains a separate authorized operation. The rolling
-implementation is not yet a complete operational release: the hosted fleet
-driver, composed creation-closure proof, rehearsal and final review are still
-required. Do not use the older `migrateHostedLegacyRuntime` helper for a rolling
-rollout; it still begins fleet draining and stops at its first held object.
+implementation is not yet a complete operational release: private workflow
+wiring, composed creation-closure proof, rehearsal and final review are still
+required. `migrateHostedLegacyRuntime` now starts a rolling campaign, reconciles
+provider discovery with creation intents, closes legacy creation and seals the
+ordered inventory. It never invokes the old fleet-draining path.
+
+`next_object` selects the first source without a terminal empty disposition or
+complete member activation. A completed import stays selected until its owner
+is Postgres. Immutable inventory order and monotonic receipts keep concurrent
+retries on the same source; the operator derives a stable member token from
+namespace, object and member identity. It stops a bounded invocation on pending
+readiness/checkpoint/freeze and resumes that source on retry. Other members keep
+running, but a held selected source delays later handoffs. Final provider scans
+must be covered by the registered census; an unknown late object holds closure.
+
+`apps/cloudflare/scripts/runtime-migration.cli.ts` is the protected hosted
+entrypoint. It accepts only private Murph Cloud main execution and uses that
+environment's existing Cloudflare API credential and callback-signing key.
+Inventory mode is read-only and outputs only count, hash and serving version.
+Migration mode defaults to one bounded continuation; `maxSteps` is capped at
+1000. `finalize` controls the final campaign default switch, while successful
+member handoffs activate independently. Each control request has a fresh
+signature over its method, path and exact body; the existing OIDC path remains
+supported. No production credentials or raw inventories belong in local output.
 
 The supported member continuation is an authenticated `advance_member` command
 bound to an exact namespace, Worker version, object ID, member ID and migration

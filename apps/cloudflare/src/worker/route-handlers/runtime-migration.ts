@@ -1,20 +1,22 @@
 import { advanceRuntimeEmptyMigration, advanceRuntimeMemberMigration } from "./runtime-member-migration.ts";
 import { parseHostedRuntimeMigrationCommand, parseLegacyRuntimeExportCursor, type HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
 import { commandHostedRuntimeMigration } from "../../runtime-migration-client.ts";
-import { json, readOptionalJsonObject } from "../../json.ts";
+import { json } from "../../json.ts";
 import { supportsPostgresRuntimeOwner } from "../../runtime-cutover.ts";
-import type { WorkerRouteContext } from "../../worker-routes/shared.ts";
+import { readCachedRequestText, type WorkerRouteContext } from "../../worker-routes/shared.ts";
 import type { DeclarativeRoute } from "../routes.ts";
 
-/** Temporary operator surface behind the existing control-plane OIDC boundary.
+/** Temporary operator surface behind existing OIDC or protected hosted signing.
  * The Worker obtains export pages from the bound namespace; callers cannot
  * submit manufactured resource pages or use a member lookup as fleet inventory. */
 export const runtimeMigrationRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [{
-  authorization: "vercel-oidc", authorizeBeforeMethod: true,
+  authorization: "web-callback-signature-or-vercel-oidc", authorizeBeforeMethod: true,
+  signatureBodyLimitBytes: 16 * 1024,
   match: pathname => pathname === "/internal/runtime-migration" ? {} : null,
   methods: ["POST"], name: "runtime-migration", wrongMethodResponse: "method-not-allowed",
   async handle(context) {
-    const command = parseHostedRuntimeMigrationCommand(await readOptionalJsonObject(context.request, { limitBytes: 16 * 1024 }));
+    const payload = await readCachedRequestText(context, { limitBytes: 16 * 1024 });
+    const command = parseHostedRuntimeMigrationCommand(JSON.parse(payload));
     if (command.operation === "status") return json(await commandHostedRuntimeMigration({ source: context.env, command }));
     const metadata = context.env.CF_VERSION_METADATA;
     if (!metadata || typeof metadata !== "object" || !("id" in metadata) || metadata.id !== command.workerVersion) {
