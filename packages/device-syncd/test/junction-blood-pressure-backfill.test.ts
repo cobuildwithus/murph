@@ -556,7 +556,7 @@ function createProvider(input: {
         };
         const noteWindowStart = url.searchParams.get("start_date");
         const noteWindowEnd = url.searchParams.get("end_date");
-        const logicalResource = resource === "body_fat" ? "fat" : resource;
+        const logicalResource = resource === "body_fat" ? "fat" : resource === "body_weight" ? "weight" : resource;
         const noteRecords = (input.noteRecords ?? []).filter((record) => {
           const timestamp = typeof record.start === "string" ? record.start : null;
           return timestamp !== null
@@ -6084,4 +6084,41 @@ test("prior coverage reopens all 13 resources at the fixed 180-day generation", 
       assert.equal(job.payload?.windowEnd, BACKFILL_WINDOW_END);
     }
   }
+});
+
+test("pending weight history imports available records and keeps one retry across day boundaries", async () => {
+  const historicalPullState: MutableHistoricalPullState = { resource: "weight", status: "in_progress" };
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    historicalPullState, requests, timeseriesResources: ["weight"],
+    providerState: { resourceAvailability: { weight: true }, status: "connected" },
+    timeseriesRecords: { weight: [{ id: "weight-history-1", timestamp: "2026-06-09T08:00:00.000Z", value: 70, unit: "kg" }] },
+  });
+  const schedule = requireValue(requireValue(provider.jobExecutor).createScheduledJobs);
+  const sources = [createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", { weight: true })];
+  const account = createStoredAccount({ sources });
+  const root = findResourceJob(schedule(account, NOW).jobs, "weight");
+  const tomorrow = "2026-06-12T12:00:00.000Z";
+  assert.equal(findResourceJob(schedule(account, tomorrow).jobs, "weight").dedupeKey, root.dedupeKey);
+  assert.equal(schedule(account, tomorrow, { findActiveDedupeKeys: () => new Set([root.dedupeKey!]) })
+    .jobs.some((job) => job.payload?.resource === "weight"), false);
+  const snapshots: unknown[] = [];
+  const initial = withHistoricalFixtureDays(root, 2);
+  const context = createJobContext({ account: createAccount({ sources }), importedSnapshots: snapshots });
+  const pending = await executeImmediateResourceContinuations({
+    context, job: toJobRecord({ ...initial, dedupeKey: "legacy-window-specific-key" }, 1), provider, resource: "weight",
+  });
+  assert.ok(requests.length > 0, "pending completion cannot prevent available historical reads");
+  const normalized = await Promise.all(snapshots.map(importWithRealJunctionNormalizer));
+  assert.equal(normalized.reduce((count, receipt) => count + receipt.canonicalEventCount, 0), 1,
+    "available weight becomes a canonical measurement while history is pending");
+  assertHistoryCoverage(pending.result.metadataPatch, "omron", "weight", false);
+  const retry = findResourceJob(pending.result.scheduledJobs ?? [], "weight");
+  assert.equal(retry.availableAt, tomorrow);
+  assert.equal(retry.dedupeKey, "legacy-window-specific-key", "accepted legacy windows keep their exact continuation owner");
+  historicalPullState.status = "success";
+  const completed = await executeImmediateResourceContinuations({
+    context: createJobContext({ account: createAccount({ sources }), now: tomorrow }), job: toJobRecord(retry, 2), provider, resource: "weight",
+  });
+  assertHistoryCoverage(completed.result.metadataPatch, "omron", "weight");
 });

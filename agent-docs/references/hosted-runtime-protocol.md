@@ -3124,8 +3124,14 @@ mailbox wake, including its retained job continuation. Bare webhook, dirty-remai
 and completion-fence wakes with no jobs still skip scheduling, and a generic
 runtime timer cannot admit provider cadence. The canonical scheduler checks the
 account cadence and active job dedupe keys after exact wake jobs are restored.
-A retained owner wakes at the earlier of its actual job retry and a future
-provider cadence; job retry times and attempts remain unchanged. A past cadence
+A retained owner normally wakes at the earlier of its actual job retry and a
+future provider cadence. Junction may instead wait until the earlier of its
+actual retry and content-proof expiry when the current scheduler finds no
+unowned history root and every retained job is future work. Its checkpointed
+content proof carries that bounded deadline so Web can compare ordinary content
+without treating already-owned history as new due work. Dirty remainder,
+unowned roots, missing/expired proof, and other providers retain the ordinary
+cadence path. Job retry times and attempts remain unchanged. A past cadence
 left by a failed scheduler never becomes an immediate continuation timer.
 A due plain scheduled hint for the same connection epoch can admit a future
 owner, just as a webhook hint can, unless the owner's carried cadence already

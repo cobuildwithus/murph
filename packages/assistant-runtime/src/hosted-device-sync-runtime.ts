@@ -43,6 +43,8 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
   findHostedExecutionDeviceSyncRuntimeApplyEntry,
+  encodeJunctionReconcileProof,
+  readJunctionReconcileProof,
   mergeHostedDeviceSyncConnectionMetadata,
   mergeHostedDeviceSyncEventToProviderSendBuckets,
   normalizeHostedDeviceSyncJobHints,
@@ -1126,12 +1128,16 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
     });
   }
   if (retryAt) {
+    const schedule = resolveHostedHistoryWakeSchedule(
+      input.service, store, account, retryAt, input.state.dirtyWorkRemaining === true,
+    );
     return {
-      retryAt: resolveHostedDeviceSyncRetainedWakeAt(account.nextReconcileAt, retryAt),
+      retryAt: schedule.retryAt,
       wake: {
         ...input.wake,
         hint: {
           ...retainedHint,
+          ...schedule.hint,
           jobs: retryHints,
           nextReconcileAt: account.nextReconcileAt ?? null,
         },
@@ -1188,7 +1194,13 @@ function buildHostedRetainedDeviceSyncWakeHint(
   hint: HostedExecutionDeviceSyncWake["hint"],
 ): NonNullable<HostedExecutionDeviceSyncWake["hint"]> {
   const sweep = metadata[JUNCTION_TEMPORAL_SWEEP_METADATA_KEY];
-  const proof = metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY];
+  const rawProof = metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY];
+  const parsedProof = readJunctionReconcileProof(rawProof);
+  // Every retained projection must re-prove future queue ownership. Never carry
+  // a prior deferral through a changed, failed, or completed set of jobs.
+  const proof = parsedProof
+    ? encodeJunctionReconcileProof({ ...parsedProof, historyDeferredUntil: undefined })
+    : rawProof;
   return {
     ...hint,
     // Exact recovered jobs now own the manual request. A cold restore must not
@@ -1211,6 +1223,38 @@ function resolveHostedDeviceSyncRetainedWakeAt(cadenceAt: string | null, retryAt
     && Date.parse(cadenceAt) < Date.parse(retryAt)
     ? cadenceAt
     : retryAt;
+}
+
+function resolveHostedHistoryWakeSchedule(
+  service: DeviceSyncService,
+  store: ReturnType<typeof requireHostedRuntimeDeviceSyncStore>,
+  account: StoredDeviceSyncAccount,
+  retryAt: string,
+  dirtyWorkRemaining: boolean,
+): { retryAt: string; hint: { junctionReconcileProof?: string } } {
+  const fallback = { retryAt: resolveHostedDeviceSyncRetainedWakeAt(account.nextReconcileAt, retryAt), hint: {} };
+  if (dirtyWorkRemaining || account.provider !== "junction" || Date.parse(retryAt) <= Date.now()) return fallback;
+  const proof = readJunctionReconcileProof(account.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY]);
+  if (!proof || Date.parse(proof.validUntil) <= Date.now()) return fallback;
+  const executor = service.registry.get(account.provider)?.jobExecutor;
+  // This is the ordinary pure scheduler with its bounded account-scoped lookup.
+  // Any root that has no queue owner must still reach a normal runtime pass.
+  let scheduled;
+  try {
+    scheduled = executor?.createScheduledJobs?.(account, new Date().toISOString(), {
+      findActiveDedupeKeys: (dedupeKeys) => store.findActiveJobDedupeKeys({
+        accountId: account.id, provider: account.provider, dedupeKeys,
+      }),
+    });
+  } catch {
+    return fallback;
+  }
+  if (!scheduled || scheduled.jobs.length !== 1 || scheduled.jobs[0]?.kind !== "reconcile") return fallback;
+  const historyDeferredUntil = Math.min(Date.parse(retryAt), Date.parse(proof.validUntil));
+  const encoded = encodeJunctionReconcileProof({ ...proof, historyDeferredUntil });
+  // Keep the existing metadata envelope. An unrepresentable proof falls open.
+  if (!readJunctionReconcileProof(encoded)) return fallback;
+  return { hint: { junctionReconcileProof: encoded }, retryAt: new Date(historyDeferredUntil).toISOString() };
 }
 
 function resolveHostedDeviceSyncWakeJobDedupeKey(input: {

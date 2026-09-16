@@ -51,6 +51,9 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
+  encodeJunctionReconcileProof,
+  readJunctionReconcileProof,
+  JUNCTION_RECONCILE_PROOF_METADATA_KEY,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
   type DeviceConnectionSourceResourceAvailabilitySummary,
@@ -13342,6 +13345,108 @@ describe("hosted device-sync runtime", () => {
       }
     },
   );
+
+  test.each(["2026-04-04T16:00:00.000Z", "2026-04-05T14:00:00.000Z"])(
+    "checkpoint-proven Junction history respects retry %s and proof expiry across restore", async (retry) => {
+      const now = "2026-04-04T14:00:00.000Z";
+      const cadence = "2026-04-04T15:00:00.000Z";
+      const expiry = "2026-04-05T00:00:00.000Z";
+      const expectedWake = retry < expiry ? retry : expiry;
+      const connectionId = "hosted_conn_deferred_history";
+      const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({ junction: {
+        apiKey: "sk_us_test_123", clientUserIdSecret: "synthetic-secret", environment: "sandbox", region: "us",
+        summaryResources: ["activity"], timeseriesResources: ["weight"], summaryBackfillDays: 2,
+        pushSourceRecoveryEnabled: false,
+        fetchImpl: async () => { throw new Error("Recovery must not fetch provider data"); },
+      } });
+      assert.ok(provider);
+      const contentProof = encodeJunctionReconcileProof({ windowStart: "2026-03-28T00:00:00.000Z",
+        validUntil: expiry, binding: "a".repeat(64), digest: "b".repeat(64), timeZone: "UTC" });
+      let wake: HostedExecutionDeviceSyncWake = buildDeviceSyncWake({ connectionId, provider: "junction", occurredAt: now, reason: "reconcile_due" });
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(now));
+      try {
+        for (let restore = 0; restore < 2; restore += 1) {
+          const workspace = await createHostedRuntimeWorkspace("hosted-deferred-history-");
+          const service = createDeviceSyncServiceForVault(workspace.vaultRoot, [provider]);
+          try {
+            const snapshot = buildRuntimeSnapshot({ connectionId, externalAccountId: "synthetic-junction-user", provider: "junction",
+              credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+              metadata: { [JUNCTION_RECONCILE_PROOF_METADATA_KEY]: contentProof,
+                junctionHistoricalBackfillStatus: "coverage_v3_complete",
+                junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
+                junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z" },
+              localState: { nextReconcileAt: cadence, lastSyncCompletedAt: now },
+              sources: [{ sourceProviderSlug: "garmin", sourceInstanceKey: "source-garmin", displayName: "Garmin",
+                firstSeenAt: "2026-04-01T00:00:00.000Z", lastSeenAt: now, lastDataAt: now, lastErrorCode: null,
+                status: "connected", resourceCount: 2, lastErrorMessage: null, resourceAvailabilitySummary: { activity: true, weight: true }, lifecycleEpoch: 1 }],
+            });
+            const state = await syncHostedDeviceSyncControlPlaneState({ service, secret: DEVICE_SYNC_SECRET, wake,
+              deviceSyncPort: { ...createNoDirtyStateDeviceSyncPortMethods(),
+                async fetchSnapshot() { return snapshot; },
+                async applyUpdates() { throw new Error("No publication before checkpoint"); },
+                async createConnectLink() { throw new Error("No connect during recovery"); },
+              },
+            });
+            const accountId = state.hostedToLocalAccountIds.get(connectionId)!;
+            const store = getStore(service);
+            if (restore === 0) {
+              const account = store.getAccountById(accountId)!;
+              const root = provider.jobExecutor!.createScheduledJobs!(account, now).jobs.find((job) => job.payload?.resource === "weight");
+              assert.ok(root);
+              store.enqueueJob({ ...root, accountId, provider: "junction", availableAt: retry });
+            }
+            const ownedAccount = store.getAccountById(accountId)!;
+            assert.ok(readJunctionReconcileProof(ownedAccount.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY]), "baseline remains readable");
+            assert.deepEqual(provider.jobExecutor!.createScheduledJobs!(ownedAccount, now, {
+              findActiveDedupeKeys: (dedupeKeys) => store.findActiveJobDedupeKeys({ accountId, provider: "junction", dedupeKeys }),
+            }).jobs.map((job) => [job.kind, job.payload?.resource]), [["reconcile", undefined]], "all history roots have owners");
+            const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+            assert.ok(recovery);
+            assert.equal(recovery.retryAt, expectedWake, "hourly cadence must not beat checkpoint-proven future work");
+            const proof = readJunctionReconcileProof(recovery.wake.hint?.junctionReconcileProof);
+            assert.equal(proof?.historyDeferredUntil, Date.parse(expectedWake));
+            assert.equal(recovery.wake.hint?.jobs?.[0]?.availableAt, retry);
+            assert.deepEqual(parseHostedExecutionWake(recovery.wake), recovery.wake);
+            assert.equal(ownedAccount.metadata[JUNCTION_RECONCILE_PROOF_METADATA_KEY], restore === 0 ? contentProof : wake.hint?.junctionReconcileProof,
+              "recovery does not publish uncheckpointed metadata");
+            let publishedProof: unknown;
+            await publishHostedDeviceSyncCheckpointedProgress({ wake: recovery.wake,
+              deviceSyncPort: { ...createNoDirtyStateDeviceSyncPortMethods(),
+                async fetchSnapshot() { return snapshot; },
+                async createConnectLink() { throw new Error("No connect during checkpoint publication"); },
+                async applyUpdates(input) {
+                  publishedProof = input.updates[0]?.connection?.metadata?.[JUNCTION_RECONCILE_PROOF_METADATA_KEY];
+                  return { appliedAt: now, userId: "member_123", updates: input.updates.map((update) => ({
+                    connection: null, connectionId: update.connectionId, status: "updated",
+                    tokenUpdate: "unchanged", writeUpdate: "applied",
+                  })) };
+                },
+              },
+            });
+            assert.equal(publishedProof, recovery.wake.hint?.junctionReconcileProof);
+            wake = recovery.wake;
+            if (restore === 1) {
+              state.dirtyWorkRemaining = true;
+              const dirtyRecovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+              assert.equal(dirtyRecovery?.retryAt, cadence);
+              assert.equal(readJunctionReconcileProof(dirtyRecovery?.wake.hint?.junctionReconcileProof)?.historyDeferredUntil, undefined);
+              state.dirtyWorkRemaining = false;
+              for (const job of [...store.iteratePendingJobsForAccount(accountId)]) store.completeJob(job.id, now);
+              store.enqueueJob({ accountId, provider: "junction", kind: "backfill", availableAt: retry, dedupeKey: "unrelated-future-work" });
+              const unownedHistory = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+              assert.equal(unownedHistory?.retryAt, cadence, "unrelated future work cannot own a missing weight root");
+              assert.equal(readJunctionReconcileProof(unownedHistory?.wake.hint?.junctionReconcileProof)?.historyDeferredUntil, undefined);
+              vi.setSystemTime(new Date(expiry));
+              assert.equal(resolveHostedDeviceSyncWakeRecovery({ service, state, wake })?.retryAt, retry);
+            }
+          } finally {
+            closeHostedRuntimeDeviceSyncService(service);
+            await workspace.cleanup();
+          }
+        }
+      } finally { vi.useRealTimers(); }
+  });
 
   test("admits provider cadence on retained connection jobs but skips bare webhook and completion wakes", () => {
     const state = {

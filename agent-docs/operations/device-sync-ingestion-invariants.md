@@ -659,7 +659,14 @@ introspection never prove absence of changes. No raw provider records are stored
 in control metadata or telemetry.
 
 A bounded scalar proof carries its original rolling summary start, expiry,
-source/configuration binding, digest, and vault timezone. Summary continuations
+source/configuration binding, digest, and vault timezone. An optional sixth numeric
+field records a future history deadline only when the restored runtime's bounded
+scheduler lookup proves every current history root already has a queued owner
+and all retained jobs are in the future. The deadline cannot exceed proof expiry.
+It travels with the exact retained jobs through the existing checkpoint fence;
+Web still compares content and live authority before avoiding a cadence wake.
+Missing or expired deferral retains normal history admission. Legacy readers
+reject the extended proof and fall back to ordinary work. Summary continuations
 carry partial proof in their existing job payload. Only successful completion
 of all ordinary summary/calendar work can write the final local metadata. Web
 publication is withheld until the existing checkpointed wake/completion fence
