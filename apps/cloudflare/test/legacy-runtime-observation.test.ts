@@ -76,7 +76,7 @@ describe("live legacy migration inspection", () => {
     h.kv.set("browser-vault-replica:active-direct-puts:v1", {
       schema: "murph.hosted-browser-vault-replica-active-put-state.v1",
       userId: "synthetic_member",
-      writes: [{ admittedAt: "2026-09-15T22:00:00.000Z", attemptId: "synthetic_attempt", generation: "7", writeId: "synthetic_write" }],
+      writes: [{ admittedAt: new Date(Date.now() - 30_000).toISOString(), attemptId: "synthetic_attempt", generation: "7", writeId: "synthetic_write" }],
     });
     h.queries.length = 0;
     expect(await observeLegacyRuntime(h.state)).toMatchObject({
@@ -86,6 +86,28 @@ describe("live legacy migration inspection", () => {
       replicaPendingWrites: 1, replicaRecoveryDrainUntil: null,
     });
     expect(h.queries.every(query => query.trim().startsWith("SELECT"))).toBe(true);
+    expect(h.mutation).not.toHaveBeenCalled();
+  });
+
+  it("leaves a replica admission older than the direct write window out of the pending count without erasing it", async () => {
+    const h = harness();
+    h.sql.exec(`INSERT INTO runner_meta (singleton, user_id, active_generation, active_attempt_id,
+      active_runner_container_name, active_workspace_version) VALUES (1, 'synthetic_member', 7, 'synthetic_attempt', 'synthetic_target', 'synthetic_workspace')`);
+    h.kv.set("browser-vault-replica:active-direct-puts:v1", {
+      schema: "murph.hosted-browser-vault-replica-active-put-state.v1",
+      userId: "synthetic_member",
+      writes: [
+        { admittedAt: new Date(Date.now() - 21 * 60_000).toISOString(), attemptId: "stale_attempt", generation: "6", writeId: "stale_write" },
+        { admittedAt: new Date(Date.now() - 19 * 60_000).toISOString(), attemptId: "synthetic_attempt", generation: "7", writeId: "recent_write" },
+      ],
+    });
+    expect(await observeLegacyRuntime(h.state)).toMatchObject({ kind: "observed", replicaPendingWrites: 1, replicaRecoveryDrainUntil: null });
+    h.kv.set("browser-vault-replica:active-direct-puts:v1", {
+      schema: "murph.hosted-browser-vault-replica-active-put-state.v1",
+      userId: "synthetic_member",
+      writes: [{ admittedAt: "2026-09-15T22:00:00.000Z", attemptId: "stale_attempt", generation: "6", writeId: "stale_write" }],
+    });
+    expect(await observeLegacyRuntime(h.state)).toMatchObject({ kind: "observed", replicaPendingWrites: 0 });
     expect(h.mutation).not.toHaveBeenCalled();
   });
 
