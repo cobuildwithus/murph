@@ -107,26 +107,26 @@ describe("Epic Clinical Records acquisition policy", () => {
     expect(ids).not.toContain("procedure-surgical-history");
     expect(ids).not.toContain("family-member-history");
     expect(ids).not.toContain("document-references-imaging");
-    expect(ids).not.toContain("document-references-outside-notes");
+    expect(ids).toContain("document-references-outside-notes");
     expect(ids).not.toContain("document-references-advance-directive");
     expect(EPIC_AUTOMATIC_RESOURCE_TYPES).not.toContain("FamilyMemberHistory");
     expect(plan.slices.every((slice) => slice.coverage === "whole-family")).toBe(true);
   });
 
-  it("accounts for the full registration catalog and requires both Epic eligibility sources", () => {
+  it("accounts for the full registration catalog and requires explicit Epic USCDI-v3 registration eligibility", () => {
     expect(registrationEvidence.apis.map(({ key, name }) => ({ key, name })))
       .toEqual(EPIC_ACQUISITION_POLICY.registrationApis.map(({ key, epicCatalogName }) => ({ key, name: epicCatalogName })));
     expect(new Set(registrationEvidence.apis.map((api) => api.apiId)).size).toBe(registrationEvidence.apis.length);
     for (const api of registrationEvidence.apis) {
-      expect(api.automaticDistribution).toBe(api.isUscdi && api.appendixName !== null);
+      expect(api.automaticDistribution).toBe(api.registrationAutoDownloadTypes.includes("USCDIv3") && api.appendixName !== null);
     }
-    expect(EPIC_AUTOMATIC_REGISTRATION_APIS).toHaveLength(42);
+    expect(EPIC_AUTOMATIC_REGISTRATION_APIS).toHaveLength(44);
     const eligibleKeys = new Set(EPIC_AUTOMATIC_REGISTRATION_APIS.map((api) => api.key));
     expect(EPIC_AUTOMATIC_QUERIES.every((query) => query.registrationApiKeys.every((key) => eligibleKeys.has(key)))).toBe(true);
-    for (const key of ["binary-read-labs", "binary-read-clinical-notes", "binary-read-generated-cdas", "binary-read-study", "media-read-study"]) {
+    for (const key of ["binary-read-labs", "binary-read-clinical-notes", "binary-read-generated-cdas", "binary-read-outside-clinical-notes", "binary-read-study", "media-read-study"]) {
       expect(eligibleKeys.has(key)).toBe(true);
     }
-    for (const key of ["binary-read-radiology-results", "binary-read-outside-clinical-notes", "binary-read-advance-directive"]) {
+    for (const key of ["binary-read-radiology-results", "binary-read-advance-directive"]) {
       expect(eligibleKeys.has(key)).toBe(false);
     }
   });
