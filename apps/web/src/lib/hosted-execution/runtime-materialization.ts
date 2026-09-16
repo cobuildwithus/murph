@@ -32,7 +32,10 @@ export async function resolveHostedLegacyMaterialization(input: Input) {
 
 async function admitSourceTx(tx: Prisma.TransactionClient, input: Input, owner: HostedRuntimeOwner, closed: boolean): Promise<{ cutover: HostedRuntimeBackend; owner: HostedRuntimeOwner }> {
   let source = await tx.hostedRuntimeLegacyImport.findUnique({ where: { objectId: input.objectId } });
-  if (!source && closed) return activateUnmaterializedTx(tx, owner);
+  // Non-discovery does not prove the remote source is empty: an old request
+  // can materialize it without this registration protocol. Only a completed
+  // exact-source handoff may activate the destination and its durable wake.
+  if (!source && closed) return { cutover: "draining", owner };
   if (!source) {
     await tx.hostedRuntimeLegacyImport.createMany({ data: [{ objectId: input.objectId, nextCursor: { section: 0, after: "" } }], skipDuplicates: true });
   }
@@ -44,20 +47,8 @@ async function admitSourceTx(tx: Prisma.TransactionClient, input: Input, owner: 
   if (source.completedAt) {
     if (!closed) throw new Error("Empty source activation requires closed legacy creation.");
     if (source.userId !== null || source.generation !== 0n) throw new Error("Completed member source cannot admit legacy work.");
-    return activateUnmaterializedTx(tx, owner);
+    return { cutover: "draining", owner };
   }
   await tx.hostedRuntimeLegacyImport.update({ where: { objectId: input.objectId }, data: { admittedUserId: input.userId } });
   return { cutover: "legacy", owner };
-}
-
-/** No source or a verified terminal empty source, after a closed creation
- * census, is positive evidence for first-use routing. Never reset an attempt,
- * imported generation or ambiguous migration to obtain that route.
- */
-async function activateUnmaterializedTx(tx: Prisma.TransactionClient, owner: HostedRuntimeOwner) {
-  if (owner.migrationPhase !== "legacy" || owner.migrationId || owner.generation !== 0n
-    || owner.phase !== "idle" || owner.attemptId || owner.runnerContainerName) throw new Error("Unmaterialized runtime has prior authority.");
-  const previous = await tx.hostedRuntimeLegacyImport.findUnique({ where: { admittedUserId: owner.userId } });
-  if (previous && (!previous.completedAt || previous.userId !== null || previous.generation !== 0n)) throw new Error("Legacy materialization remains unresolved.");
-  return { cutover: "postgres" as const, owner: await tx.hostedRuntimeOwner.update({ where: { userId: owner.userId }, data: { migrationPhase: "postgres" } }) };
 }

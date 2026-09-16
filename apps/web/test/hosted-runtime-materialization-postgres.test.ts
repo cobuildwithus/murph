@@ -70,14 +70,14 @@ describe.skipIf(!enabled)("finite legacy materialization census", () => {
     await expect(command({ operation: "discover", ...campaign, objectIds: [object()], complete: true })).rejects.toThrow("unsealed");
   });
 
-  it("routes an older member's first use directly to Postgres after creation closes", async () => {
+  it("keeps an undiscovered older member unresolved after creation closes", async () => {
     const userId = await member(); const objectId = object();
     await command({ operation: "begin_rolling", ...campaign });
     await command({ operation: "discover", ...campaign, objectIds: [], complete: true });
     await command({ operation: "close_legacy_creation", ...campaign });
-    expect(await resolve(userId, objectId)).toMatchObject({ cutover: "postgres", owner: { generation: "0", phase: "idle" } });
+    expect(await resolve(userId, objectId)).toMatchObject({ cutover: "draining", owner: { generation: "0", phase: "idle" } });
     expect(await prisma.hostedRuntimeLegacyImport.findUnique({ where: { objectId } })).toBeNull();
-    expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toMatchObject({ migrationPhase: "postgres" });
+    expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toMatchObject({ migrationPhase: "legacy" });
   });
 
   it("rejects contradictory member/object bindings and cannot hide an earlier intent", async () => {
@@ -88,7 +88,7 @@ describe.skipIf(!enabled)("finite legacy materialization census", () => {
     await command({ operation: "begin_rolling", ...campaign });
     await command({ operation: "discover", ...campaign, objectIds: [objectId], complete: true });
     await command({ operation: "close_legacy_creation", ...campaign });
-    await expect(resolve(userId, object())).rejects.toThrow("unresolved");
+    expect(await resolve(userId, object())).toMatchObject({ cutover: "draining" });
     expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toMatchObject({ migrationPhase: "legacy" });
   });
 
@@ -100,7 +100,7 @@ describe.skipIf(!enabled)("finite legacy materialization census", () => {
     expect(await resolve(userId, objectId)).toMatchObject({ cutover: "legacy" });
   });
 
-  it("uses a terminal empty-source receipt without reviving previous runtime authority", async () => {
+  it("leaves empty-source activation to the explicit durable-wake handoff", async () => {
     const userId = await member(); const objectId = object();
     await resolve(userId, objectId);
     await command({ operation: "begin_rolling", ...campaign });
@@ -108,9 +108,10 @@ describe.skipIf(!enabled)("finite legacy materialization census", () => {
     await command({ operation: "close_legacy_creation", ...campaign });
     await prisma.hostedRuntimeLegacyImport.update({ where: { objectId }, data: { generation: 0n, completedAt: new Date() } });
     await prisma.hostedRuntimeOwner.update({ where: { userId }, data: { generation: 7n } });
-    await expect(resolve(userId, objectId)).rejects.toThrow("prior authority");
+    expect(await resolve(userId, objectId)).toMatchObject({ cutover: "draining" });
+    expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toMatchObject({ migrationPhase: "legacy", generation: 7n });
     await prisma.hostedRuntimeOwner.update({ where: { userId }, data: { generation: 0n } });
-    expect(await resolve(userId, objectId)).toMatchObject({ cutover: "postgres" });
+    expect(await resolve(userId, objectId)).toMatchObject({ cutover: "draining" });
   });
 
   it("does not use an empty receipt to activate before legacy creation closes", async () => {

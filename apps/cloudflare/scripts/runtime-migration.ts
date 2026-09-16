@@ -18,16 +18,18 @@ const MAX_OBJECTS = 100_000;
 /** Read-only provider inventory. Includes every object returned by the namespace
  * API, even hasStoredData=false and objects absent from the member database. */
 export async function inventoryHostedLegacyRuntime(input: RuntimeMigrationOperator) {
+  const identity = await readServingIdentity(input);
+  const objectIds = await listAllObjects(cloudflareReader(input), identity.namespaceId);
+  return { ...identity, objectIds, hash: inventoryHash(objectIds), count: objectIds.length };
+}
+
+async function readServingIdentity(input: RuntimeMigrationOperator) {
   const get = cloudflareReader(input);
   const deployments = record((await get(`workers/scripts/${encodeURIComponent(input.scriptName)}/deployments`)).result);
   const latest = Array.isArray(deployments.deployments) ? record(deployments.deployments[0]) : {};
   const versions = Array.isArray(latest.versions) ? latest.versions.map(record) : [];
   if (versions.length !== 1 || versions[0]?.percentage !== 100 || versions[0]?.version_id !== input.workerVersion) throw new Error("Migration requires one exact Worker version serving 100% of traffic.");
-  const namespaceId = await findLegacyNamespace(get, input.scriptName);
-  const objectIds = await listAllObjects(get, namespaceId);
-  let hash = digest("");
-  for (const id of objectIds) hash = digest(`${hash}\n${id}`);
-  return { namespaceId, workerVersion: input.workerVersion, objectIds, hash, count: objectIds.length };
+  return { namespaceId: await findLegacyNamespace(get, input.scriptName), workerVersion: input.workerVersion };
 }
 
 /** Hosted rolling driver. Each invocation is bounded and resumes from canonical
@@ -40,13 +42,19 @@ type RollingOperator = RuntimeMigrationOperator & {
 };
 export async function migrateHostedLegacyRuntime(input: RollingOperator) {
   const { maxSteps, maxObjects, deadline } = readRollingLimits(input);
-  const inventory = await inventoryHostedLegacyRuntime(input);
-  const identity = { namespaceId: inventory.namespaceId, workerVersion: inventory.workerVersion };
+  const identity = await readServingIdentity(input);
   const send = workerCommander(input);
   let gate = record((await send({ operation: "begin_rolling", ...identity })).gate);
   if (gate.phase === "postgres") return { phase: "postgres", steps: 0 };
   if (gate.phase !== "rolling") throw new Error("Rolling operator cannot continue a fleet-draining campaign.");
-  gate = await prepareRollingInventory(input, send, inventory, gate);
+  // Recovery of a paused source must not depend on unrelated object-list
+  // drift or availability. Exact serving identity is still required; final
+  // campaign accounting independently checks the complete provider census.
+  if (!gate.inventorySealedAt) {
+    const inventory = await inventoryHostedLegacyRuntime(input);
+    if (inventory.namespaceId !== identity.namespaceId) throw new Error("Migration namespace changed before discovery.");
+    gate = await prepareRollingInventory(input, send, inventory, gate);
+  }
   const selected = new Set<string>();
   for (let steps = 1; steps <= maxSteps; steps++) {
     if (Date.now() >= deadline) return { phase: "rolling", steps: steps - 1, pending: "time_budget" };

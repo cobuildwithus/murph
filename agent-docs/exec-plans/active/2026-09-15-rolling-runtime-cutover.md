@@ -289,3 +289,63 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
   installation, serializes with Worker deployment, uses existing hosted-only
   credentials and defaults to aggregate inventory. Private verification/review
   and the public closure/rehearsal gates remain required before dispatch.
+
+## Creation-closure consultation and remaining correction
+
+The exact d0af2d04d362 design consultation completed with verified GPT-6 Pro
+metadata and response SHA
+`64b1902d33355c605c45e5cef74cbb625250bad32e58bf6c1c64e9d6170147be`.
+It is not the final PR gate. Parent inspection accepts these concrete defects:
+
+- Missing source rows and owner-only settlement do not prove remote absence.
+  An old request can bypass new registration. Remove inferred-empty activation;
+  require positive exact frozen-empty/import receipts and durable activation wakes.
+- Canonical coverage is incomplete. Enumerate personal/group runtime members,
+  retained owners and durable cleanup identities, deriving named object IDs in
+  the Worker. Expected identity stays separate from the source's observed identity.
+- New-member creation currently grants Postgres immediately. During unproved
+  old-version overlap, enroll creation transactionally without granting either
+  runtime authority, including older writers that bypass the new helper. A narrow
+  database enrollment trigger can cover that writer boundary. First-use processing
+  must progress exact-source retirement through existing retry ownership; do not
+  leave future signups waiting for a one-off operator after the campaign finishes.
+- A sealed provider list is not an exhaustive creation fence. Preserve its baseline
+  hash/count, distinguish late sources on the existing ledger, and require terminal
+  late dispositions. A late record is not permission to resume legacy execution.
+  Nonempty/conflicting late sources need explicit recovery, never an empty label.
+- Late enrollment must not change the selected source while its local barrier is
+  durable but its canonical reservation has not acknowledged. Prove one planned
+  paused member across concurrent selection, late insertion and lost replies;
+  immutable baseline ordering alone will not prove this for a growing late set.
+- Resume an already paused member before unrelated provider drift checks. This is
+  fixed locally with failing-before/passing-after lost-import-reply plus drift
+  proof; 15 operator/CLI tests, Worker typecheck and complexity pass.
+- Member completion requires exact source receipts and committed Postgres ownership
+  for the canonical cohort, with wakes where applicable. Keep the guarded legacy
+  namespace for residual accounting; do not infer physical namespace retirement
+  from repeated scans or a 100-percent deployment configuration. The private
+  workflow now explicitly disables the global default flip. All members must still
+  migrate, and new signups must remain functional: this is not a smaller rollout.
+- Before leaving the campaign in rolling, support subsequent compatible releases
+  without stranding pending/new-member retirement on the original Worker version.
+  Preserve fixed namespace, source receipts, tokens and authority; do not solve
+  release changes by clearing migration state or bypassing exact-source checks.
+
+Private companion PR152 contains the protected workflow. Initial full private
+verification passed, including 131 deployment-controller tests, coverage,
+typecheck, build and built-worker checks. Its removal of the global flip has
+passed Actionlint; full verification is running again. Required preliminary and
+final ReviewGPT are running on the clean pushed private head. These private gates
+cannot substitute for public completion, rehearsal or deployment evidence.
+
+The public PR remains draft. Canonical enrollment, late-source recovery,
+new-member first-use progress, release compatibility, composed rehearsal and
+final review/CI remain required. No production mutation has occurred.
+
+- Removed source-resolution activation based on non-discovery, including implicit
+  activation from an empty receipt without its durable wake. Settlement now
+  requires exactly one positive bound empty-source receipt. A real Postgres test
+  fails before the fix (unknown source incorrectly becomes Postgres) and passes
+  afterward. Eleven materialization/member migration tests and Web typecheck pass;
+  operator drift recovery has 15 passing CLI/operator tests, Worker typecheck,
+  complexity and documentation drift proof. Canonical enrollment is still pending.

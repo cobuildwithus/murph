@@ -25,6 +25,7 @@ export async function settleUnmaterializedRuntime(input: { prisma: PrismaClient;
       where: { OR: [{ userId: candidate.userId }, { admittedUserId: candidate.userId }] },
       take: 2, select: { userId: true, generation: true, completedAt: true },
     });
+    if (bound.length !== 1) throw new Error("Unmaterialized settlement requires an exact empty-source receipt.");
     if (bound.some(row => row.userId !== null || row.generation !== 0n || !row.completedAt)) throw new Error("Member source requires ordinary migration activation.");
     const eventId = `runtime-control:unmaterialized:${createHash("sha256").update(JSON.stringify([input.command.namespaceId, candidate.userId])).digest("hex")}`;
     const mailboxItemId = await appendRuntimeMigrationWakeTx({ tx, userId: candidate.userId, eventId, prepared });

@@ -136,7 +136,9 @@ retries on the same source; the operator derives a stable member token from
 namespace, object and member identity. The hosted driver polls checkpoint/freeze
 progress on the selected source within the same bounded run, avoiding workflow
 queue and install time during the pause. A readiness hold leaves that source live
-and returns; it delays later handoffs. Other members keep running. Final provider scans
+and returns; it delays later handoffs. Recovery of a sealed source verifies the
+serving identity but does not wait for unrelated provider object-list coverage.
+Other members keep running. Final provider scans
 must be covered by the registered census; an unknown late object holds closure.
 
 `apps/cloudflare/scripts/runtime-migration.cli.ts` is the protected hosted
@@ -172,16 +174,19 @@ Legacy source access records durable materialization intent before obtaining a
 stub. The source rechecks registration on activation before ordinary RPCs can
 initialize storage. Provider discovery and these intents form one inventory;
 closing creation preserves registered legacy execution while preventing new
-unregistered sources. A stale route returns retry rather than trying another
-backend in the same operation. Seal only after reconciling discovery with the
+unregistered sources. A missing source after closure remains unresolved; an inventory omission is not
+proof of emptiness. Source resolution never activates an empty member implicitly.
+A stale route returns retry rather than trying another backend in the same
+operation. Seal only after reconciling discovery with the
 closed creation boundary and proving compatible serving-version convergence.
 
 After every sealed source has a terminal disposition, `settle_unmaterialized`
 handles one remaining default owner per call. It accepts only idle, generation
-zero identities without a migration or target and with no nonempty bound
-source. Ownership and an encrypted maintenance wake commit together; deleted
-members receive no wake. This accounts for lost first-use requests and admitted
-but empty sources without inventing execution history. Existing mailbox recovery
+zero identities without a migration or target and with exactly one completed,
+bound empty-source receipt. No receipt is an unresolved source, not permission
+to activate. Ownership and an encrypted maintenance wake commit together; deleted
+members receive no wake. This accounts for admitted
+but verified-empty sources without inventing execution history. Existing mailbox recovery
 owns a lost wake signal. Final campaign activation still independently rejects
 any remaining legacy owner or incomplete source.
 

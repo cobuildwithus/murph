@@ -156,6 +156,18 @@ describe("rolling runtime migration operator", () => {
     expect(h.sent.filter(c => c.operation === "advance_member")).toHaveLength(1);
   });
 
+  it("recovers an interrupted handoff before unrelated late provider objects block final accounting", async () => {
+    const h = harness({ loseAdvance: true, drift: true });
+    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: true })).rejects.toThrow("synthetic lost import");
+    expect(h.imported.has(first)).toBe(true);
+    expect(h.activated.size).toBe(0);
+    const resumeStart = h.sent.length;
+    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: true })).rejects.toThrow("inventory changed");
+    expect(h.activated.has(first)).toBe(true);
+    expect(h.sent.slice(resumeStart).filter(c => String(c.operation).startsWith("advance_"))[0]?.objectId).toBe(first);
+    expect(h.sent.some(c => c.operation === "activate")).toBe(false);
+  });
+
   it("refuses final closure when a new provider object is outside the sealed census", async () => {
     const h = harness({ drift: true });
     await expect(migrateHostedLegacyRuntime({ ...h.input, activate: true })).rejects.toThrow("inventory changed");
