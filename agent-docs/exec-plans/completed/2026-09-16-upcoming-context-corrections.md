@@ -1,6 +1,6 @@
 # Upcoming context correctness through existing owners
 
-Status: active
+Status: completed
 Created: 2026-09-16
 Updated: 2026-09-16
 
@@ -75,15 +75,18 @@ Updated: 2026-09-16
 - Complete loopback provider-input fixtures passed: direct 143666 to 145028
   bytes before the proactive prompt edit, group 131269 unchanged. These fixtures omit the optional CLI contract;
   token counts remain unavailable without the exact model tokenizer.
-- The new all-day correction live journey and updated calendar/retry journey
-  are not yet proven on this candidate: local subscription authentication
-  initially failed before any model action. The earlier environment-based
-  alternate-home attempts were invalid because the runner discards that override.
-  Retrying with --codex-home reached a working subscription. No auth material
-  was copied or persisted.
-- Remaining gates: focused live proof, exact-head CI, and a resolved final
-  review for the new runtime delta. Prior ReviewGPT rounds remain recorded
-  against their actual heads; none covers these subsequent corrections.
+- All five focused live journeys now pass: Terra high covers proactive private
+  advice, reminder wording, an unrelated factual answer, and the all-day
+  correction; Luna high covers silent morning capture and same-occurrence retry.
+  Reply review: Ready. The capture/retry creates exactly one canonical plan and
+  one event-linked follow-up, preserving the same bounded 14-day source window.
+- Final round four passed at 75dcd01c5c88ee204275d3efa5b0617ced124aaa.
+  Exact accepted-turn identity, response digest, requested/responding Pro model,
+  attachment confirmation, and the enforced response-time floor were verified.
+  No unresolved accepted finding remains.
+- Implementation, local proof, and external review are complete. Final commit
+  CI, protected merge, consumer-first deployment, and release convergence remain
+  release gates tracked on PR #3494 by this same completion owner.
 - CI exposed two unnecessary dynamic import boundaries: production packaging
   produced 26 static startup chunks against the existing limit of 24. Reusing
   ordinary imports of the existing ledger and Knowledge owners removes those
@@ -142,3 +145,16 @@ Updated: 2026-09-16
   capture skill now gives the exact event reference shape. A materialized-skill
   contract assertion and the existing live exact-reference assertion cover it;
   no new reference resolver, persistence owner, or schema rule is introduced.
+
+## Final review disposition
+
+- Fourth and final ReviewGPT result: PASS. It checked the prior legacy-history
+  correction, all new fixes, old Journal behavior, private/group and opt-out
+  boundaries, independent follow-ups, and reader-before-writer deployment.
+- The reviewer found no qualifying Critical, High, or Complexity Collapse issue.
+  It independently checked snapshot/diff identity, workspace boundaries, changed
+  TypeScript syntax, and isolated production-function probes. Suite and live-model
+  results remain local/CI evidence rather than independently rerun reviewer proof.
+- Parent final review accepts the result. The final closure changes documentation
+  only; the reviewed runtime candidate remains unchanged.
+Completed: 2026-09-16
