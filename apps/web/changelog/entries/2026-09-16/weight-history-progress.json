@@ -9,6 +9,6 @@
     "summary": "Murph can import available weight history while a connected provider is still finishing its historical sync.",
     "details": "Pending history no longer creates a new waiting job each day. Murph keeps checking for new data and retries unfinished history without treating it as complete.",
     "relevanceTags": ["wearables", "sync"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3503]
   }
 }
