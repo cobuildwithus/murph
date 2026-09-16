@@ -54,3 +54,12 @@ Updated: 2026-09-15
 - Focused clinical-records page and policy tests, web typecheck, scoped ESLint, complexity diff, and docs checks.
 - Render real production components in the design study at phone and desktop widths; replay autocomplete races and selection on the actual component.
 - Live import proof remains a separate outcome from a passing UI study or merged PR.
+
+## Progress and evidence
+
+- All 1,245 real directory providers have a locally served official mark; the sandbox and unknown providers retain initials. Every manifest path resolves and matches its content hash.
+- The production search component uses debouncing, cancellation, generation checks, stable focus, and native result buttons. Keyboard arrows, phone/desktop layout, and image loading passed real-browser proof at 390 and 1280 pixels.
+- 241 clinical-records tests passed; 10 database tests were skipped in this run. Web typecheck and scoped source lint passed. Complexity debt remains zero, with no changed function above 20.
+- Portal metadata verifies 44 automatically distributed APIs and 25 retrieval queries. Outside-record clinical notes are eligible; advance directives remain excluded.
+- Live production-client authorization did not succeed. Registration activation and real canonical import readback remain a separate launch requirement, not a result established by the UI tests.
+- Draft PR: https://github.com/cobuildwithus/murph/pull/3497. Final review, exact-head CI, and a current branch preview are pending.
