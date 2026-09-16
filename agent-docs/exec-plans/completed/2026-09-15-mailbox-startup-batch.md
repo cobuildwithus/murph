@@ -1,6 +1,6 @@
 # Remove the serial startup mailbox fetch
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-15
 
@@ -104,3 +104,27 @@ Updated: 2026-09-15
   Frog reports `20260911184822-documented-changelog-test` and
   `20260912202546-changelog-focused-test` for the documented command's working
   directory/generated-input mismatch; no duplicate report was created.
+
+## Final review and closeout
+
+- Final ReviewGPT round 1 passed at
+  `211206af3dd1c3a91acf8556a1a55a05873072ad`, with zero findings.
+  Review: https://chatgpt.com/c/6aa9e962-88f4-83ea-9b05-af20e9ee44f5.
+  The Hercules lane returned verified `gpt-6-pro` evidence after approximately
+  eight minutes. Exact preceding-turn identity, prompt signature, response hash,
+  attachment confirmation, checked baseline and completion marker were verified.
+  The review covers the requested cursor, recovery, wake, provider, cancellation,
+  transport and lightweight-module boundaries; it reports 34 isolated helper
+  assertions, while composed test execution remains covered by local and CI proof.
+- CI passed 3,341 runtime tests and exposed one stale fetch-count assertion in a
+  replay-budget fixture whose snapshots contain mailbox state without vault
+  metadata. Bootstrap correctly discards the speculative page. Updated only the
+  two fetch-count expectations and added page-limit assertions; exact-once replay,
+  fresh-tail order and checkpoint watermark assertions remain intact. The complete
+  conversation-import suite passed all 22 tests, followed by runtime typecheck.
+- No production source changed after the passing review. This isolated test
+  correction and explanatory closeout use the review loop's no-new-round rule.
+- Implementation and parent review are complete. Final exact-head CI remains the
+  publication gate after this closeout commit; verify it and fresh-base
+  mergeability before handoff. No merge or deployment is authorized by this plan.
+Completed: 2026-09-15
