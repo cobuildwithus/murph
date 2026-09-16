@@ -1,3 +1,4 @@
+import { runtimeMigrationReleaseSql } from "./runtime-migration-compatibility";
 import { listUnenrolledRuntimeMembersTx, runtimeInventoryClass } from "./runtime-migration-enrollment";
 import type { HostedRuntimeCutover, Prisma, PrismaClient } from "@prisma/client";
 import type { HostedRuntimeMigrationCommand, HostedRuntimeMigrationIdentity } from "@murphai/hosted-execution/runtime-migration";
@@ -40,7 +41,7 @@ export async function readSelectedRuntimeObject(prisma: PrismaClient, identity: 
     JOIN hosted_runtime_legacy_import AS source ON source.object_id = gate.selected_object_id
     LEFT JOIN hosted_runtime_owner AS owner ON owner.user_id = COALESCE(source.user_id, source.admitted_user_id)
     WHERE gate.id = 'runtime' AND gate.phase = 'rolling'
-      AND gate.namespace_id = ${identity.namespaceId} AND gate.worker_version = ${identity.workerVersion}
+      AND gate.namespace_id = ${identity.namespaceId} AND ${runtimeMigrationReleaseSql(identity)}
       AND gate.inventory_sealed_at IS NOT NULL AND gate.creation_closed_at IS NOT NULL
       AND (source.completed_at IS NULL
         OR (COALESCE(source.user_id, source.admitted_user_id) IS NOT NULL AND owner.migration_phase IS DISTINCT FROM 'postgres'))

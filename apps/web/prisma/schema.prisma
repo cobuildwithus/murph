@@ -1360,6 +1360,7 @@ model HostedRuntimeCutover {
   inventoryCount Int       @default(0) @map("inventory_count")
   inventorySealedAt DateTime? @map("inventory_sealed_at")
   selectedObjectId String? @map("selected_object_id")
+  namespaceProbeId String? @map("namespace_probe_id")
   discoveryCompletedAt DateTime? @map("discovery_completed_at")
   creationClosedAt DateTime? @map("creation_closed_at")
   activatedAt     DateTime? @map("activated_at")

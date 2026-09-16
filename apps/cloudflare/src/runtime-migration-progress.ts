@@ -1,3 +1,5 @@
+import { readRuntimeMigrationCompatibility } from "./runtime-migration-compatibility.ts";
+import { matchesHostedRuntimeMigrationRelease } from "@murphai/hosted-execution/runtime-migration";
 import { createHash } from "node:crypto";
 import type { HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
 import { commandHostedRuntimeMigration } from "./runtime-migration-client.ts";
@@ -24,7 +26,7 @@ export async function progressRuntimeMigrationForMember(input: { source: Source;
   const step = <T>(operation: () => Promise<T>) => runRuntimeProcessingCommandStep({ budget, operation, stepTimeoutMs: env.webControlTimeoutMs });
   const send = (command: HostedRuntimeMigrationCommand) => step(() => commandHostedRuntimeMigration({ source, command }));
   const status = await send({ operation: "status" });
-  const identity = readReadyCampaignIdentity(status.gate, source.CF_VERSION_METADATA);
+  const identity = readReadyCampaignIdentity(status.gate, source);
   if (!identity) return;
   const namespace = source.USER_RUNNER;
   if (!namespace.idFromName || !namespace.idFromString || !namespace.get) throw new Error("Runtime migration requires exact source addressing.");
@@ -43,12 +45,16 @@ export async function progressRuntimeMigrationForMember(input: { source: Source;
   return advanceRuntimeMemberMigration({ source, stub, identity: { ...selectedIdentity, userId: observed.userId, migrationId }, step });
 }
 
-function readReadyCampaignIdentity(gate: unknown, metadata: unknown) {
+function readReadyCampaignIdentity(gate: unknown, source: Source) {
+  const metadata = source.CF_VERSION_METADATA;
   if (!gate || typeof gate !== "object" || !("phase" in gate)) throw new Error("Runtime migration status is invalid.");
   if (gate.phase !== "rolling") return null;
   if (!("creationClosedAt" in gate) || !gate.creationClosedAt || !("inventorySealedAt" in gate) || !gate.inventorySealedAt) return null;
   if (!metadata || typeof metadata !== "object" || !("id" in metadata) || typeof metadata.id !== "string"
-    || !("workerVersion" in gate) || gate.workerVersion !== metadata.id
+    || !("workerVersion" in gate) || typeof gate.workerVersion !== "string"
+    || !("namespaceProbeId" in gate) || typeof gate.namespaceProbeId !== "string"
     || !("namespaceId" in gate) || typeof gate.namespaceId !== "string") throw new Error("Runtime migration serving identity changed.");
+  if (!matchesHostedRuntimeMigrationRelease({ workerVersion: gate.workerVersion, namespaceProbeId: gate.namespaceProbeId },
+    { workerVersion: metadata.id, compatibility: readRuntimeMigrationCompatibility(source) })) throw new Error("Runtime migration serving identity changed.");
   return { namespaceId: gate.namespaceId, workerVersion: metadata.id };
 }

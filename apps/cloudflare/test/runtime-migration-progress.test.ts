@@ -8,7 +8,7 @@ const caller = "synthetic-first-use";
 const callerObject = "a".repeat(64);
 const selectedObject = "b".repeat(64);
 const gate = { phase: "rolling", namespaceId: "synthetic_namespace", workerVersion: "synthetic_version",
-  creationClosedAt: "synthetic-closed", inventorySealedAt: "synthetic-sealed" };
+  namespaceProbeId: callerObject, creationClosedAt: "synthetic-closed", inventorySealedAt: "synthetic-sealed" };
 function harness() {
   const unused = async (): Promise<never> => { throw new Error("Ordinary legacy execution is forbidden."); };
   const stub = {
@@ -63,11 +63,18 @@ describe("bounded automatic migration progress", () => {
     await h.run(); expect(h.namespace.get).not.toHaveBeenCalled();
     expect(commandHostedRuntimeMigration).toHaveBeenCalledTimes(1);
   });
-  it("rejects a stale serving version before enrollment or source access", async () => {
-    const h = harness(); h.source.CF_VERSION_METADATA.id = "synthetic-stale";
+  it("rejects a changed namespace binding before enrollment or source access", async () => {
+    const h = harness(); h.namespace.idFromName.mockReturnValue({ toString: () => "e".repeat(64) });
     await expect(h.run()).rejects.toThrow("serving identity changed");
     expect(h.namespace.get).not.toHaveBeenCalled();
     expect(commandHostedRuntimeMigration).toHaveBeenCalledTimes(1);
+  });
+  it("continues first use on a later compatible Worker with the original namespace", async () => {
+    const h = harness(); h.source.CF_VERSION_METADATA.id = "synthetic-compatible-release";
+    await h.run();
+    expect(commandHostedRuntimeMigration).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({
+      operation: "enroll_sources", namespaceId: gate.namespaceId, workerVersion: "synthetic-compatible-release" }) }));
+    expect(h.stub.exportPostgresMigrationPage).toHaveBeenCalledOnce();
   });
   it("does not touch a source after losing the enrollment acknowledgement", async () => {
     const h = harness(); vi.mocked(commandHostedRuntimeMigration).mockResolvedValueOnce({ gate }).mockRejectedValueOnce(new Error("synthetic enrollment reply lost"));

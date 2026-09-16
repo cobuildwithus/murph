@@ -14,7 +14,8 @@ if (enabled) {
   if (!["postgres:", "postgresql:"].includes(url.protocol) || !["127.0.0.1", "localhost"].includes(url.hostname)
     || !/^\/murph_test_[a-z0-9_]+$/u.test(url.pathname) || url.searchParams.has("host")) throw new Error("Materialization proof requires an isolated loopback database.");
 }
-const campaign = { namespaceId: "synthetic_namespace", workerVersion: "synthetic_version" };
+const campaign = { namespaceId: "synthetic_namespace", workerVersion: "synthetic_version",
+  compatibility: { protocol: "member-handoff-v1", namespaceProbeId: "9".repeat(64) } };
 
 describe.skipIf(!enabled)("finite legacy materialization census", () => {
   let prisma: PrismaClient;
@@ -138,6 +139,27 @@ describe.skipIf(!enabled)("finite legacy materialization census", () => {
     expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: late });
   });
 
+  it("continues the fixed campaign across compatible deployments without replacing its selection or seal", async () => {
+    const userId = await member(); const objectId = object();
+    await expect(command({ operation: "begin_rolling", ...campaign, compatibility: undefined })).rejects.toThrow("compatible namespace binding");
+    await command({ operation: "begin_rolling", ...campaign });
+    await command({ operation: "enroll_sources", ...campaign, bindings: [{ userId, objectId }] });
+    await command({ operation: "discover", ...campaign, objectIds: [objectId], complete: true });
+    await command({ operation: "close_legacy_creation", ...campaign });
+    await command({ operation: "inventory", ...campaign, after: "", objectIds: [objectId], complete: true });
+    expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId });
+    const before = await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
+    const release = { ...campaign, workerVersion: "synthetic_compatible_release" };
+    expect(await command({ operation: "next_object", ...release })).toEqual({ objectId });
+    expect(await executeHostedRuntimeOwnerCommand({ prisma, userId, command: { operation: "resolve_legacy", objectId,
+      workerVersion: release.workerVersion, compatibility: release.compatibility } })).toMatchObject({ cutover: "legacy" });
+    expect(await command({ operation: "begin_rolling", ...release })).toMatchObject({ gate: { workerVersion: campaign.workerVersion } });
+    expect(await command({ operation: "enroll_sources", ...release, bindings: [{ userId, objectId }] })).toEqual({ enrolled: 0 });
+    expect(await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).toEqual(before);
+    await expect(command({ operation: "next_object", ...release, compatibility: { ...release.compatibility, namespaceProbeId: "8".repeat(64) } })).rejects.toThrow("serving Worker version changed");
+    await expect(command({ operation: "next_object", ...release, compatibility: { ...release.compatibility, protocol: "incompatible-v2" } })).rejects.toThrow("serving Worker version changed");
+  });
+
   it("automates pending first use without starting the next baseline member after a canary", async () => {
     const baselineMember = await member(); const baselineObject = object();
     await command({ operation: "begin_rolling", ...campaign });
@@ -178,7 +200,7 @@ describe.skipIf(!enabled)("finite legacy materialization census", () => {
     try {
       expect(await Promise.race([repeated, delay(1_000).then(() => "blocked")])).toEqual({ enrolled: 0 });
     } finally { release(); await serving; await repeated; }
-    await expect(command({ ...enroll, workerVersion: "synthetic-stale" })).rejects.toThrow("serving Worker version changed");
+    await expect(command({ ...enroll, workerVersion: "synthetic-stale", compatibility: undefined })).rejects.toThrow("serving Worker version changed");
   });
 
   it("polls an unfinished selection without waiting for ordinary shared campaign holders", async () => {

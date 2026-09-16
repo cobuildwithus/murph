@@ -3,7 +3,7 @@ import { closeLegacyCreationTx, discoverRuntimeObjectsTx, listRuntimeInventoryTx
 import { activateEmptyRuntime, settleUnmaterializedRuntime } from "./runtime-migration-unmaterialized";
 import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient, type HostedRuntimeCutover } from "@prisma/client";
-import { parseHostedRuntimeMigrationCommand, type HostedRuntimeMigrationCommand, type LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
+import { HOSTED_RUNTIME_ROLLING_PROTOCOL, matchesHostedRuntimeMigrationRelease, parseHostedRuntimeMigrationCommand, type HostedRuntimeMigrationCommand, type LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
 import { prepareLegacyMigrationResources, type LegacyMigrationResources } from "./runtime-migration-resources";
 import { isMemberMigrationCommand, lockMemberMigrationTx, readMemberMigrationTx, transitionMemberMigrationTx, withMemberMigrationWake } from "./runtime-member-migration";
 import type { PreparedHostedMailboxItemAppendCrypto } from "../hosted-mailbox/store";
@@ -83,12 +83,16 @@ async function beginTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover,
     if (gate.phase !== "postgres" && gate.phase !== (command.operation === "begin_rolling" ? "rolling" : "draining")) throw new Error("Migration campaign mode changed.");
     return gate;
   }
+  if (command.operation === "begin_rolling" && command.compatibility?.protocol !== HOSTED_RUNTIME_ROLLING_PROTOCOL) {
+    throw new Error("Rolling migration requires a compatible namespace binding.");
+  }
   return tx.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: {
+    namespaceProbeId: command.operation === "begin_rolling" ? command.compatibility!.namespaceProbeId : null,
     phase: command.operation === "begin_rolling" ? "rolling" : "draining", namespaceId: command.namespaceId, workerVersion: command.workerVersion, inventoryHash: INITIAL_INVENTORY_HASH,
   } });
 }
 function requireIdentity(gate: HostedRuntimeCutover, command: MigrationCommand) {
-  if (gate.namespaceId !== command.namespaceId || gate.workerVersion !== command.workerVersion) throw new Error("Migration namespace or serving Worker version changed.");
+  if (gate.namespaceId !== command.namespaceId || !(gate.phase === "rolling" ? matchesHostedRuntimeMigrationRelease(gate, command) : gate.workerVersion === command.workerVersion)) throw new Error("Migration namespace or serving Worker version changed.");
 }
 async function inventoryTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover, command: Extract<MigrationCommand, { operation: "inventory" }>) {
   if ((gate.phase !== "draining" && gate.phase !== "rolling") || gate.inventorySealedAt || command.after !== gate.inventoryAfter

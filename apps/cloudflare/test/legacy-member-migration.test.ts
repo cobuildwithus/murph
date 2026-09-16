@@ -36,7 +36,7 @@ function harness() {
   const runner = { stopLegacyRuntimeForMigration: stop, legacyRuntimeUploadsDrained: drained, deleteHostedUserData: deletion };
   canonical.command.mockReset().mockResolvedValue({ member: { ...identity, migrationPhase: "quiescing" } });
   const object = new UserRunnerDurableObject(state, source, runner as never);
-  return { sql, values, state, source, supports, checkpoint, getByName, stop, drained, deletion, object };
+  return { sql, values, state, source, supports, checkpoint, getByName, stop, drained, deletion, object, runner };
 }
 
 describe("conditional member checkpoint handoff", () => {
@@ -72,6 +72,20 @@ describe("conditional member checkpoint handoff", () => {
     expect(h.drained).toHaveBeenCalledOnce();
     expect(h.values.get("runtime-migration-freeze:v1")).toMatchObject({ phase: "frozen", migrationId: identity.migrationId });
     expect(await h.object.exportPostgresMigrationPage({ section: 0, after: "" })).toMatchObject({ userId: identity.userId, generation: "7" });
+  });
+
+  it("preserves a frozen source and token after eviction into a compatible later release", async () => {
+    const h = harness(); await h.object.preparePostgresMemberMigration(identity);
+    h.sql.exec("UPDATE runner_meta SET active_attempt_id = NULL");
+    canonical.command.mockResolvedValue({ member: { ...identity, migrationPhase: "freezing" } });
+    expect(await h.object.freezeForPostgresMigration(identity)).toEqual({ frozen: true });
+    const before = await h.object.exportPostgresMigrationPage({ section: 0, after: "" });
+    const resumed = new UserRunnerDurableObject(h.state, { ...h.source, CF_VERSION_METADATA: { id: "synthetic-compatible-release" } }, h.runner as never);
+    await expect(resumed.freezeForPostgresMigration(identity)).rejects.toThrow("incompatible migration version");
+    expect(await resumed.freezeForPostgresMigration({ ...identity, workerVersion: "synthetic-compatible-release" })).toEqual({ frozen: true });
+    expect(await resumed.exportPostgresMigrationPage({ section: 0, after: "" })).toEqual(before);
+    expect(h.values.get("runtime-migration-freeze:v1")).toMatchObject({ phase: "frozen", migrationId: identity.migrationId });
+    await expect(resumed.bindUser(identity.userId)).rejects.toThrow("frozen");
   });
 
   it("rejects stale serving versions and canonical tokens before admission closes", async () => {

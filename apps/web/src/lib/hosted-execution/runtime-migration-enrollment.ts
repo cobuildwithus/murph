@@ -1,3 +1,4 @@
+import { runtimeMigrationReleaseSql } from "./runtime-migration-compatibility";
 import { Prisma, type PrismaClient, type HostedRuntimeCutover } from "@prisma/client";
 import type { HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
 
@@ -77,7 +78,7 @@ export async function runtimeSourcesAlreadyEnrolled(prisma: PrismaClient,
       AND (source.user_id IS NULL OR source.user_id = binding.user_id)
     JOIN hosted_runtime_owner AS owner ON owner.user_id = binding.user_id
     WHERE gate.id = 'runtime' AND gate.phase = 'rolling'
-      AND gate.namespace_id = ${command.namespaceId} AND gate.worker_version = ${command.workerVersion}
+      AND gate.namespace_id = ${command.namespaceId} AND ${runtimeMigrationReleaseSql(command)}
   `);
   return rows[0]?.count === command.bindings.length;
 }

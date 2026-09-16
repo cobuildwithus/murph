@@ -89,7 +89,7 @@ describe("Postgres runtime orchestration", () => {
       idFromString: vi.fn(() => ({ toString: () => objectId })), get: vi.fn(() => legacy), getByName: vi.fn(() => legacy) };
     vi.mocked(commandHostedRuntimeMigration).mockImplementation(async ({ command }) => {
       if (command.operation === "status") return { gate: { phase: "rolling", namespaceId: "synthetic_namespace",
-        workerVersion: "release_1", creationClosedAt: "synthetic-closed", inventorySealedAt: "synthetic-sealed" } };
+        workerVersion: "release_1", namespaceProbeId: objectId, creationClosedAt: "synthetic-closed", inventorySealedAt: "synthetic-sealed" } };
       if (command.operation === "enroll_sources") return { enrolled: 1 };
       if (command.operation === "select_first_use") return { objectId };
       if (command.operation === "read_object") return { object: { completedAt: section === 4 ? "synthetic-complete" : null, nextCursor: { section, after: "" } } };

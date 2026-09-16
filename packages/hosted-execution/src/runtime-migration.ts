@@ -1,5 +1,5 @@
 import { parseAllowedString, requireObject, requireString } from "./parsers/assertions.ts";
-import { parseHostedRuntimeOwnerIdentity } from "./runtime-owner.ts";
+import { parseHostedRuntimeMigrationCompatibility, type HostedRuntimeMigrationCompatibility, parseHostedRuntimeOwnerIdentity } from "./runtime-owner.ts";
 
 export const HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH = "/internal/workspace-invocation/migration-checkpoint";
 export const HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER = "x-runtime-migration-checkpoint-capability";
@@ -55,7 +55,7 @@ export interface LegacyRuntimeExportPage {
   records: Array<{ kind: "media" | "resource"; key: string; value: Record<string, unknown> }>;
   hash: string;
 }
-export interface HostedRuntimeMigrationIdentity { namespaceId: string; workerVersion: string }
+export interface HostedRuntimeMigrationIdentity { namespaceId: string; workerVersion: string; compatibility?: HostedRuntimeMigrationCompatibility }
 /** Observational only: a live scan does not establish a handoff barrier. */
 export type LegacyRuntimeObservation =
   | { kind: "unsupported_schema"; schemaVersion: number | null }
@@ -130,7 +130,7 @@ export function parseLegacyRuntimeExportPage(value: unknown): LegacyRuntimeExpor
 export function parseHostedRuntimeMigrationCommand(value: unknown): HostedRuntimeMigrationCommand {
   const record = requireObject(value, "Runtime migration command");
   if (record.operation === "status") return { operation: "status" };
-  const identity = { namespaceId: migrationIdentifier(record.namespaceId), workerVersion: migrationIdentifier(record.workerVersion) };
+  const identity = { namespaceId: migrationIdentifier(record.namespaceId), workerVersion: migrationIdentifier(record.workerVersion), ...parseHostedRuntimeMigrationCompatibility(record.compatibility) };
   const member = parseMemberMigrationCommand(record, identity);
   if (member) return member;
   const campaign = parseCampaignMigrationCommand(record, identity);
@@ -213,3 +213,5 @@ function parseEnrollmentBindings(value: unknown): Array<{ userId: string; object
     || new Set(bindings.map(row => row.objectId)).size !== bindings.length) throw new TypeError("Source enrollment bindings must be unique.");
   return bindings;
 }
+
+export { HOSTED_RUNTIME_ROLLING_PROTOCOL, HOSTED_RUNTIME_NAMESPACE_PROBE_NAME, matchesHostedRuntimeMigrationRelease, type HostedRuntimeMigrationCompatibility } from "./runtime-owner.ts";

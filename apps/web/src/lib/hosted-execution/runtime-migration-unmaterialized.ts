@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient, HostedRuntimeOwner } from "@prisma/client";
-import type { HostedRuntimeMigrationIdentity, HostedRuntimeObjectMigrationIdentity } from "@murphai/hosted-execution/runtime-migration";
+import { matchesHostedRuntimeMigrationRelease, type HostedRuntimeMigrationIdentity, type HostedRuntimeObjectMigrationIdentity } from "@murphai/hosted-execution/runtime-migration";
 import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 import { requireSelectedRuntimeObject } from "./runtime-migration-inventory";
 import { appendRuntimeMigrationWakeTx, withRuntimeMigrationActivationWake } from "./runtime-member-migration";
@@ -60,7 +60,7 @@ async function requireRollingCampaignTx(tx: Prisma.TransactionClient, identity: 
   await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
   const gate = await tx.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
   if (gate.phase !== "rolling" || gate.namespaceId !== identity.namespaceId
-    || gate.workerVersion !== identity.workerVersion || !gate.creationClosedAt || !gate.inventorySealedAt) {
+    || !matchesHostedRuntimeMigrationRelease(gate, identity) || !gate.creationClosedAt || !gate.inventorySealedAt) {
     throw new Error("Empty activation/completion requires a closed, sealed rolling census.");
   }
   return gate;

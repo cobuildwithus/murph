@@ -47,7 +47,7 @@ describe("durable legacy materialization admission", () => {
     expect(h.getByName).not.toHaveBeenCalled();
     release(); await getting;
     expect(h.getByName).toHaveBeenCalledExactlyOnceWith(userId);
-    expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({ userId, command: { operation: "resolve_legacy", objectId, workerVersion: "synthetic-version" } }));
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({ userId, command: { operation: "resolve_legacy", objectId, workerVersion: "synthetic-version", compatibility: { protocol: "member-handoff-v1", namespaceProbeId: objectId } } }));
   });
 
   it("does not instantiate a source after routing changes or an admission reply is lost", async () => {

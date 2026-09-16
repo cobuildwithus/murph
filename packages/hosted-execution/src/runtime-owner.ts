@@ -30,7 +30,7 @@ export interface HostedRuntimeOwnerSnapshot {
 
 export type HostedRuntimeOwnerCommand =
   | { operation: "reconcile" }
-  | { operation: "resolve_legacy"; objectId: string; workerVersion: string }
+  | { operation: "resolve_legacy"; objectId: string; workerVersion: string; compatibility?: HostedRuntimeMigrationCompatibility }
   | { operation: "deletion_ready" }
   | { operation: "target_retired"; runnerContainerName: string }
   | { operation: "authorize_provider"; runnerContainerName: string | null; providerEgressTokenHash: string | null; providerKind: string }
@@ -60,7 +60,7 @@ export function parseHostedRuntimeOwnerCommand(value: unknown): HostedRuntimeOwn
     const objectId = requireString(r.objectId, "Legacy object identity");
     const workerVersion = requireString(r.workerVersion, "Legacy serving version");
     if (!/^[a-f0-9]{64}$/u.test(objectId) || !/^[A-Za-z0-9_-]{1,128}$/u.test(workerVersion)) throw new TypeError("Legacy materialization identity is invalid.");
-    return { operation, objectId, workerVersion };
+    return { operation, objectId, workerVersion, ...parseHostedRuntimeMigrationCompatibility(r.compatibility) };
   }
   if (operation === "target_retired") return { operation, runnerContainerName: requireString(r.runnerContainerName, "Retired target") };
   if (operation === "claim") return { operation, processingMode: parseAllowedString(r.processingMode, "Runtime processing mode", HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES) };
@@ -153,4 +153,31 @@ function parseOwner(value: unknown): HostedRuntimeOwnerSnapshot {
     throw new TypeError("Claimed runtime ownership is incomplete.");
   }
   return owner;
+}
+
+/** Bump this protocol when a release cannot preserve the rolling handoff,
+ * schema-21 managed uploads, durable freeze records or source import receipts.
+ * A deployment ID is observational; the protocol and namespace bind admission.
+ */
+export const HOSTED_RUNTIME_ROLLING_PROTOCOL = "member-handoff-v1";
+export const HOSTED_RUNTIME_NAMESPACE_PROBE_NAME = "murph.runtime-migration.namespace.v1";
+export interface HostedRuntimeMigrationCompatibility { protocol: string; namespaceProbeId: string }
+
+export function parseHostedRuntimeMigrationCompatibility(value: unknown): { compatibility?: HostedRuntimeMigrationCompatibility } {
+  if (value === undefined) return {};
+  const record = requireObject(value, "Runtime migration compatibility");
+  const protocol = requireString(record.protocol, "Runtime migration protocol");
+  const namespaceProbeId = requireString(record.namespaceProbeId, "Runtime migration namespace binding");
+  if (!/^[A-Za-z0-9_-]{1,128}$/u.test(protocol) || !/^[a-f0-9]{64}$/u.test(namespaceProbeId)) throw new TypeError("Runtime migration compatibility is invalid.");
+  return { compatibility: { protocol, namespaceProbeId } };
+}
+
+export function matchesHostedRuntimeMigrationRelease(gate: { workerVersion: string | null; namespaceProbeId: string | null },
+  identity: { workerVersion: string; compatibility?: HostedRuntimeMigrationCompatibility }): boolean {
+  const compatibility = identity.compatibility;
+  // The original immutable deployment remains valid for requests already in
+  // flight. Other releases must positively attest the same protocol/binding.
+  if (!compatibility) return gate.workerVersion === identity.workerVersion;
+  return compatibility.protocol === HOSTED_RUNTIME_ROLLING_PROTOCOL
+    && gate.namespaceProbeId !== null && gate.namespaceProbeId === compatibility.namespaceProbeId;
 }

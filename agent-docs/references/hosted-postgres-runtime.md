@@ -130,9 +130,9 @@ Strong delete consistency alone does not cancel a concurrent write.
 ## Rolling migration readiness
 
 Production migration remains a separate authorized operation. The rolling
-implementation is not yet a complete operational release: canonical enrollment,
-late-source recovery, automatic first-use handoff proof, release compatibility,
-composed rehearsal and final public review are still required. `migrateHostedLegacyRuntime` now starts a rolling campaign, reconciles
+implementation is not yet a complete operational release: historical encrypted
+cleanup identity coverage, composed first-use/release-overlap rehearsal, measured
+handoff timing and final public review are still required. `migrateHostedLegacyRuntime` now starts a rolling campaign, reconciles
 provider discovery with creation intents, closes legacy creation and seals the
 ordered inventory. It never invokes the old fleet-draining path.
 
@@ -187,6 +187,26 @@ mailbox/Temporal retry owner requests the next continuation, and a subsequent
 request re-reads ownership before starting Postgres. No second scheduler or
 fleet enumeration runs in this path. Earlier paused sources resume before the
 caller's source, preserving one planned handoff at a time.
+
+Compatible Worker releases use `member-handoff-v1` plus the immutable
+`namespaceProbeId` recorded when rolling begins. The Worker derives this value
+with `USER_RUNNER.idFromName` and the fixed namespace-probe name, without obtaining
+a stub or creating an object. Migration transport replaces any caller-supplied
+compatibility assertion with its own bound namespace value. Legacy materialization
+registration carries the same assertion. Cloudflare's [namespace ID contract](https://developers.cloudflare.com/durable-objects/api/namespace/)
+rejects IDs created by a different namespace; changing the binding or jurisdiction
+therefore cannot silently replace the campaign's source.
+
+The initial deployment ID remains recorded. An original-version request without
+an assertion remains pinned to that immutable deployment; later versions need
+both the supported protocol and matching namespace binding. No deployment update
+resets the seal, selection, member token, generation, import cursor or frozen
+source. The Worker/DO handoff still requires the requested actual serving version
+at the exact source, so mixed-version uncertainty retries that source. Compatible
+old/new Workers can keep admitting other legacy members during overlap. Future
+changes that cannot read schema-21 uploads, v2 freeze records or current source
+receipts must use a different protocol and a separately reviewed migration.
+This compatibility assertion is not a creation fence or namespace-retirement proof.
 
 The operator derives a stable token from namespace, object and member identity.
 It polls checkpoint/freeze progress within the same bounded run, avoiding workflow

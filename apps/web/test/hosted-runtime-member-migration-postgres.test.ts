@@ -55,7 +55,8 @@ if (enabled) {
   if (!['postgres:', 'postgresql:'].includes(url.protocol) || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.searchParams.has('host')) throw new Error("Migration proof requires loopback PostgreSQL.");
 }
 
-const campaign = { namespaceId: "synthetic_rolling_namespace", workerVersion: "synthetic_rolling_version" };
+const campaign = { namespaceId: "synthetic_rolling_namespace", workerVersion: "synthetic_rolling_version",
+  compatibility: { protocol: "member-handoff-v1", namespaceProbeId: "9".repeat(64) } };
 const objectId = "c".repeat(64);
 const otherObjectId = "d".repeat(64);
 const emptyObjectId = "e".repeat(64);
@@ -152,15 +153,15 @@ describe.skipIf(!enabled).each(["legacy", "pending"])("member-scoped canonical m
     await expect(command({ operation: "import_member", ...identity, page: page(otherId, 0) })).rejects.toThrow("own frozen");
     await expect(command({ operation: "activate_member", ...identity })).rejects.toThrow("complete frozen import");
     for (let section = 0; section <= 3; section++) {
-      const imported = { operation: "import_member" as const, ...identity, page: page(userId, section) };
+      const imported = { operation: "import_member" as const, ...identity, ...(section >= 2 ? { workerVersion: "synthetic_compatible_release" } : {}), page: page(userId, section) };
       await command(imported); await command(imported);
       expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("draining");
     }
     expect(await prisma.hostedMailboxItem.count({ where: { userId } })).toBe(0);
     expect(await Promise.all([command({ operation: "next_object", ...campaign }), command({ operation: "next_object", ...campaign })]))
       .toEqual([{ objectId }, { objectId }]);
-    await command({ operation: "activate_member", ...identity });
-    await command({ operation: "activate_member", ...identity });
+    await command({ operation: "activate_member", ...identity, workerVersion: "synthetic_compatible_release" });
+    await command({ operation: "activate_member", ...identity, workerVersion: "synthetic_compatible_release" });
     expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("postgres");
     expect(await readHostedRuntimeMemberBackend(prisma, otherId)).toBe("legacy");
     expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: otherObjectId });
@@ -182,7 +183,7 @@ describe.skipIf(!enabled).each(["legacy", "pending"])("member-scoped canonical m
     await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: emptyObjectId }, data: { admittedUserId: emptyMemberId } });
     await expect(command({ operation: "settle_unmaterialized", ...campaign })).rejects.toThrow("every source disposition");
     await expect(command({ operation: "activate_empty", ...campaign, objectId: neverStartedObjectId })).rejects.toThrow("selected object");
-    await expect(command({ operation: "activate_empty", ...campaign, objectId: emptyObjectId, workerVersion: "synthetic-stale" })).rejects.toThrow("sealed rolling census");
+    await expect(command({ operation: "activate_empty", ...campaign, objectId: emptyObjectId, workerVersion: "synthetic-stale", compatibility: undefined })).rejects.toThrow("sealed rolling census");
     await expect(command({ operation: "import_empty", ...campaign, objectId: emptyObjectId, page: page(userId, 0) })).rejects.toThrow("cannot import member state");
     await prisma.hostedRuntimeOwner.create({ data: { userId: deletedEmptyId } });
     await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: deletedEmptyObjectId }, data: { admittedUserId: deletedEmptyId } });

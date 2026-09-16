@@ -1,3 +1,4 @@
+import { readRuntimeMigrationCompatibility } from "./runtime-migration-compatibility.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
 import { HostedRuntimeMemberMigratingError, supportsPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import type { WorkerUserRunnerNamespaceLike, WorkerUserRunnerStubLike } from "./worker-contracts.ts";
@@ -22,6 +23,6 @@ export async function resolveAdmittedLegacyUserRunner<T extends WorkerUserRunner
 export async function requireLegacyMaterialization(source: Readonly<Record<string, unknown>>, userId: string, objectId: string): Promise<void> {
   const metadata = source.CF_VERSION_METADATA;
   if (!metadata || typeof metadata !== "object" || !("id" in metadata) || typeof metadata.id !== "string") throw new Error("Legacy admission requires serving version metadata.");
-  const result = await commandHostedRuntimeOwner({ source, userId, command: { operation: "resolve_legacy", objectId, workerVersion: metadata.id } });
+  const result = await commandHostedRuntimeOwner({ source, userId, command: { operation: "resolve_legacy", objectId, workerVersion: metadata.id, compatibility: readRuntimeMigrationCompatibility(source) } });
   if (result.cutover !== "legacy") throw new HostedRuntimeMemberMigratingError();
 }
