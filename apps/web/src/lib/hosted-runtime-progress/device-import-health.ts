@@ -71,7 +71,9 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
     if (!evidence) continue;
     const { backlogAge, lastProgress, restarts, cancellations, savedPasses, recentPasses } = evidence;
     const conditions: DeviceImportCondition[] = [];
-    if (now - lastProgress >= DEVICE_IMPORT_STALL_MS) conditions.push("stalled");
+    if ((due || evidence.latestPassUncheckpointed) && now - lastProgress >= DEVICE_IMPORT_STALL_MS) {
+      conditions.push("stalled");
+    }
     if (Math.max(restarts, cancellations) >= DEVICE_IMPORT_CYCLE_LIMIT && savedPasses < 2) {
       conditions.push("cycling");
     }
@@ -126,6 +128,7 @@ function summarizeConnection(
   let lastProgress = 0;
   const pendingProgress = new Map<string, number[]>();
   const pendingSnapshots = new Map<string | null, boolean | null>();
+  let latestPassAttemptId: string | null = null;
   const savedAt: number[] = [];
   const passesAt: number[] = [];
   const cancellationsAt: number[] = [];
@@ -140,6 +143,7 @@ function summarizeConnection(
       lastPendingAt = at;
     }
     if (row.eventCode === "device-sync.pass_finished") {
+      latestPassAttemptId = row.attemptId;
       pendingSnapshots.set(row.attemptId, row.pending);
       passesAt.push(at);
       if (row.progressed && row.attemptId) {
@@ -168,6 +172,7 @@ function summarizeConnection(
   const recentAfter = Math.max(pendingSince, now - DEVICE_IMPORT_CYCLE_WINDOW_MS);
   const countRecent = (times: number[]) => times.filter(at => at >= recentAfter).length;
   return {
+    latestPassUncheckpointed: pendingSnapshots.has(latestPassAttemptId),
     backlogAge: now - pendingSince,
     lastProgress: Math.max(pendingSince, lastProgress),
     restarts: countAtOrAfter(restartTimes, recentAfter), cancellations: countRecent(cancellationsAt),
