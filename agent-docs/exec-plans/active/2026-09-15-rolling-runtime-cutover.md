@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-09-15
-Updated: 2026-09-15
+Updated: 2026-09-16
 
 ## Goal and invariants
 
@@ -621,3 +621,99 @@ created for the deleted member. The cleanup proof covers one and 201 retained
 identities, final receipt deletion and preservation of an existing Postgres
 owner. External checkpoint completion remains simulated; real container replies,
 R2 interoperability, handoff timing, final review/CI and deployment remain gates.
+
+
+## Protected operator companion merged
+
+Private PR #152 merged after the accepted preliminary coverage finding was
+resolved, full private verification and exact-head CI passed, and final round 2
+returned PASS with no findings on the corrected head. The reviewer independently
+executed the twelve new admission/credential cases. This publishes the manual
+operator workflow only; it does not dispatch a migration or approve public
+runtime readiness. Public native rehearsal and final review/CI remain required.
+
+The existing native Postgres cold/warm reply scenario now has a separate rolling
+migration process: deliver on the legacy runner, migrate through authenticated
+HTTP and actual source/Web owners, then check cold/warm Postgres delivery. Its
+first setup attempt stopped before execution because the external Temporal
+worker package was not configured. The documented package setting is available
+from the private companion and the configured rerun is underway. The prepared
+runner bundle passed its build/size/parity checks. Worker/harness typechecks and
+36 existing scenario-selection tests pass. No native migration result is claimed
+yet. Both candidates merged cleanly with their verified current base branches.
+
+
+### Native rehearsal exposed multipart signature ordering
+
+The configured run reached actual legacy native activation but could not publish
+its checkpoint. Local runtime-log evidence identified S3 `SignatureDoesNotMatch`
+at the upload stage. The multipart URL introduced lowercase query names alongside
+`X-Amz-*`; the existing signer used locale collation, which places those names
+in a different order from SigV4 encoded-byte ordering. A fixed signature computed
+independently with Python hashlib/hmac reproduced the error before the fix.
+
+The signer now encodes first and compares code units without locale collation.
+The existing test verifier also used locale collation; it now uses ordinary
+encoded-string ordering and the multipart case checks the independent fixed
+signature. All 26 presigning cases pass. The official AWS canonical-request
+contract requires ordering after URI encoding. The native rerun will test the
+corrected Worker signer against actual local storage; no handoff timing or
+successful native migration is claimed yet.
+
+
+### Native storage and operator boundary corrections
+
+Actual MinIO accepted the corrected signature, then rejected the multipart ID
+because allocation had gone to Wrangler's separate emulated R2 store. The
+existing explicit local S3 profile now routes snapshot allocation, completion,
+verification and cleanup to the same MinIO endpoint as native signed uploads.
+Production returns its original R2 binding unchanged; other object classes keep
+their existing local bindings. Thirty-eight signing/upload/local-storage cases,
+sixteen existing source/cleanup cases and Worker typecheck pass. The next native
+run successfully published a legacy checkpoint and delivered a legacy reply.
+
+The authenticated enrollment request then exposed operation leakage: the HTTP
+handler passed a whole command as an identity, allowing an enrollment operation
+to overwrite its canonical subcommands and an advance operation to reach source
+RPC guards. Three failing-before HTTP-handler cases prove the boundary error.
+The handler now projects only identity fields. All seven enrollment/handler
+cases and Worker typecheck pass. Native end-to-end continuation is underway;
+no successful handoff or timing is claimed until that proof finishes.
+
+
+### Native SQLite observation correction
+
+The next native request reached exact-source inspection but rejected a supported
+source. A focused test inside the actual Cloudflare Workers test runtime proved
+that `_cf_KV` and `_cf_METADATA` are visible in `sqlite_master`; the observation
+filter excluded only the documentation spelling `__cf_kv`. Cloudflare's engine
+reserves `_cf_*` for its own tables. Inspection now excludes that reserved prefix
+while retaining exact application-table and schema checks. The actual Workers
+case fails before and passes after this change. Unknown application schemas still
+fail closed. The native migration rerun remains the composed completion gate.
+
+### Native local metadata correction
+
+Resumed the native rehearsal and verified its copied Worker source matches the
+candidate. The supported schema-21 object also contains Miniflare's exact
+`__miniflare_do_name` table, which the ordinary Workers test runtime does not
+automatically create. A focused Workers-runtime case reproduces the rejection
+before the correction and passes after excluding that exact local metadata
+table. Unknown application tables remain rejected; inspection preserves the
+table inventory. Temporary diagnostics were removed.
+
+The rolling native rehearsal now passes using real signed HTTP, Worker/DO,
+native container execution, MinIO multipart storage, Web and Postgres. The
+selected member transferred in 1,929 ms across five continuations. Its next
+cold reply took 8,401 ms; warm typing began at 1,627 ms and the warm reply arrived
+at 5,434 ms on the same native target. Model and messaging providers were local
+stubs. This is one local sample, not production timing or actual R2 proof.
+The command was `pnpm hosted-local e2e postgres-runtime-warm-reuse --profile
+e2e:stub --process-shard 2/2 --no-bundle`, with the documented external Temporal
+worker package configured. The other scenario was deliberately excluded.
+
+Focused signing, storage, enrollment and source tests pass (55 cases), as do
+both Workers metadata cases, Worker/harness typechecks and changed-source
+complexity (no functions above 20). Final public review/CI, release convergence,
+actual R2, unrelated-member latency and live rollout remain outstanding. No
+production changes were performed.

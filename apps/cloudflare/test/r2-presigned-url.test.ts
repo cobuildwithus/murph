@@ -22,6 +22,9 @@ describe("R2 presigned URL helpers", () => {
     verifyLocalS3SigV4QueryUrl({ ...environment, key, amzDate: "20260915T000000Z", expiresSeconds: 60,
       method: "PUT", url: result.url, snapshotPart: { uploadId, encryptedByteSize: 123 } });
     const url = new URL(result.url);
+    // Independent Python hashlib/hmac fixture: SigV4 sorts encoded names by
+    // byte order, so X-Amz-* precedes lowercase partNumber and uploadId.
+    expect(url.searchParams.get("X-Amz-Signature")).toBe("20e2858d252a91e0000b48f35c9171f1dbec4fbc7f5a6a5a2a5354a7134f1a5c");
     expect(url.searchParams.get("partNumber")).toBe("1");
     expect(url.searchParams.get("uploadId")).toBe(uploadId);
     expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe("content-length;content-type;host");
@@ -550,10 +553,11 @@ function canonicalizeSigV4SearchParamsWithoutSignature(params: URLSearchParams):
 }
 
 function canonicalizeSigV4SearchParams(params: URLSearchParams): string {
+  // All fixture keys are unique; ordinary string sorting follows encoded byte
+  // order. The multipart case also checks an independent fixed signature.
   return [...params.entries()]
-    .sort(([leftKey, leftValue], [rightKey, rightValue]) =>
-      leftKey === rightKey ? leftValue.localeCompare(rightValue) : leftKey.localeCompare(rightKey))
     .map(([key, value]) => `${encodeSigV4PathSegment(key)}=${encodeSigV4PathSegment(value)}`)
+    .sort()
     .join("&");
 }
 

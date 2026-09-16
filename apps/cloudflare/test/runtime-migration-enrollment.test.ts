@@ -1,7 +1,12 @@
+import { readHostedExecutionEnvironment } from "../src/env.ts";
+import { runtimeMigrationRoutes } from "../src/worker/route-handlers/runtime-migration.ts";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { enrollRuntimeMembers } from "../src/worker/route-handlers/runtime-migration-enrollment.ts";
 import type { WorkerEnvironmentSource } from "../src/worker-routes/shared.ts";
+const advance = vi.hoisted(() => ({ member: vi.fn(), empty: vi.fn() }));
+vi.mock("../src/worker/route-handlers/runtime-member-migration.ts", () => ({ advanceRuntimeMemberMigration: advance.member, advanceRuntimeEmptyMigration: advance.empty }));
 const canonical = vi.hoisted(() => ({ command: vi.fn() }));
 vi.mock("../src/runtime-migration-client.ts", () => ({ commandHostedRuntimeMigration: canonical.command }));
 const identity = { namespaceId: "synthetic-namespace", workerVersion: "synthetic-version" };
@@ -54,4 +59,37 @@ describe("canonical migration source enrollment", () => {
     expect(await enrollRuntimeMembers(h.source, identity)).toEqual({ enrolled: 1, cleanupPending: true });
   });
 
+});
+
+
+describe("operator HTTP command identity boundary", () => {
+  async function request(operation: "enroll_members" | "advance_member" | "advance_empty") {
+    const h = harness();
+    const unused = async (): Promise<never> => { throw new Error("Unexpected source effect"); };
+    const stub = { bindUser: unused, deleteHostedUserData: unused, publishHostedPrivateMedia: unused, ensureRuntimeProcessingForUser: unused, runnerStatus: unused };
+    const env = { ...createHostedExecutionTestEnv(), ...h.source, HOSTED_RUNTIME_POSTGRES_ENABLED: "true",
+      CF_VERSION_METADATA: { id: identity.workerVersion }, USER_RUNNER: { ...h.source.USER_RUNNER,
+        idFromString: (id: string) => ({ toString: () => id }), get: () => stub } };
+    // Advance is mocked only after the actual handler has parsed and projected the command.
+    canonical.command.mockResolvedValueOnce({ userIds: ["synthetic-member"] }).mockResolvedValueOnce({ enrolled: 1 });
+    const body = { ...identity, operation, ...(operation === "enroll_members" ? {} : { objectId: objectId("synthetic-member") }),
+      ...(operation === "advance_member" ? { userId: "synthetic-member", migrationId: "synthetic-handoff" } : {}) };
+    const url = new URL("https://worker.invalid/internal/runtime-migration");
+    const response = await runtimeMigrationRoutes[0]!.handle({ env, environment: readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      url, request: new Request(url, { method: "POST", body: JSON.stringify(body) }) }, {});
+    return { response, body };
+  }
+  it("enrolls through canonical commands when the operator payload contains its operation", async () => {
+    const { response } = await request("enroll_members");
+    expect(await response.json()).toEqual({ enrolled: 1 });
+    expect(canonical.command.mock.calls.map(([arg]) => arg.command.operation)).toEqual(["list_unenrolled", "enroll_sources"]);
+  });
+  it.each(["advance_member", "advance_empty"] as const)("keeps %s out of the identity passed to source RPCs", async operation => {
+    const fn = operation === "advance_member" ? advance.member : advance.empty;
+    fn.mockReset().mockResolvedValue({ pending: "readiness" });
+    const { body } = await request(operation);
+    const { operation: _operation, ...expectedIdentity } = body;
+    expect(fn).toHaveBeenCalledOnce();
+    expect(fn.mock.calls[0]![0].identity).toEqual(expectedIdentity);
+  });
 });

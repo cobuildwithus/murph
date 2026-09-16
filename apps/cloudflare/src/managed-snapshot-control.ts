@@ -1,3 +1,4 @@
+import { workspaceSnapshotBucket } from "./workspace-snapshot-local-s3.ts";
 import { resolveAdmittedLegacyUserRunner } from "./legacy-runtime-admission.ts";
 import type { HostedWorkspaceSnapshotUploadSession } from "@murphai/hosted-execution/workspace-snapshot-store";
 import { HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE } from "@murphai/hosted-execution/workspace-snapshot-store";
@@ -25,7 +26,7 @@ export async function presignManagedSnapshot(input: {
   encryptedByteSize: number; encryptedSha256: string; expiresSeconds: number;
 }) {
   const receipt = await prepareManagedSnapshotUpload({
-    bucket: input.source.BUNDLES, session: input.session,
+    bucket: workspaceSnapshotBucket(input.source), session: input.session,
     encryptedByteSize: input.encryptedByteSize, encryptedSha256: input.encryptedSha256,
     admit: async proposed => {
       const result = await commandSnapshotUpload({ source: input.source, userId: input.session.userId, command: {
@@ -61,7 +62,7 @@ export async function completeManagedSnapshotForSession(input: {
     || receipt.encryptedByteSize !== input.encryptedByteSize || receipt.encryptedSha256 !== input.encryptedSha256) {
     throw new Error("Managed snapshot completion does not match its admitted bytes.");
   }
-  await completeManagedSnapshotUpload({ bucket: input.source.BUNDLES, receipt, etag,
+  await completeManagedSnapshotUpload({ bucket: workspaceSnapshotBucket(input.source), receipt, etag,
     settle: (receipt, verified) => settle(input.source, receipt, verified) });
   return receipt.encryptedSha256;
 }

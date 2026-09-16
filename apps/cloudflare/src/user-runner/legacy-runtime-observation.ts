@@ -39,8 +39,10 @@ export async function observeLegacyRuntime(state: DurableObjectStateLike): Promi
 }
 
 function readExistingSchema(sql: DurableObjectSqlStorageLike) {
+  // Engine metadata and Miniflare's exact local name table do not contain
+  // application state. Unknown application tables still fail closed below.
   const tables = sql.exec<{ name: string }>(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*' AND name != '__cf_kv' ORDER BY name LIMIT 5",
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' AND name NOT IN ('__cf_kv', '__miniflare_do_name') ORDER BY name LIMIT 5",
   ).toArray().map(row => row.name);
   const storedVersion = tables.includes("runner_schema_meta")
     ? sql.exec<{ value: number }>("SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'").toArray()[0]?.value

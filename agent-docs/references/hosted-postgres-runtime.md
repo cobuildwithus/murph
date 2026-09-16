@@ -142,6 +142,13 @@ rule on repeated finite registrations. A retired row can never be revived.
 Existing private
 image capability expiry and the R2 lifecycle policy remain the expiry owner.
 
+Hosted-local snapshot multipart operations use the existing explicitly enabled
+S3 control endpoint for allocation, completion, verification and deletion, so
+they share MinIO with native presigned uploads. Wrangler's R2 emulator is a
+separate store. Other local object classes retain their existing bindings;
+production retains its original R2 binding. SigV4 query ordering compares URI-
+encoded keys and values without locale collation, including multipart fields.
+
 R2 contracts: [multipart upload and abort](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/),
 [error codes](https://developers.cloudflare.com/r2/api/error-codes/), and
 [strong consistency](https://developers.cloudflare.com/r2/reference/consistency/).
@@ -333,3 +340,16 @@ and automatic new-member empty activation without
 advancing the baseline canary. Transport and external checkpoint completion are
 simulated. This proof does not measure container replies, production handoff time
 or real R2 interoperability; those remain rollout gates.
+
+
+`apps/cloudflare/test/workers/legacy-migration-observation.test.ts` runs source
+inspection inside Cloudflare's actual local Workers runtime, including real KV
+and alarm metadata, plus the named-object metadata used by local Wrangler.
+Observational schema discovery excludes the engine-reserved `_cf_*` tables,
+the documented `__cf_kv` table and Miniflare's exact `__miniflare_do_name` table,
+while still rejecting unknown application tables or schema versions.
+The engine names are documented in Cloudflare's
+[KV implementation](https://github.com/cloudflare/workerd/blob/main/src/workerd/util/sqlite-kv.h)
+and [alarm metadata implementation](https://github.com/cloudflare/workerd/blob/main/src/workerd/util/sqlite-metadata.h).
+The local name table belongs to Miniflare's
+[Durable Object wrapper](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/workers/core/do-wrapper.worker.ts).

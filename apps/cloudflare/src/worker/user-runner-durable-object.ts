@@ -1,3 +1,4 @@
+import { workspaceSnapshotBucket } from "../workspace-snapshot-local-s3.ts";
 import { requireLegacyMaterialization } from "../legacy-runtime-admission.ts";
 import { HostedRuntimeMemberMigratingError, supportsPostgresRuntimeOwner } from "../runtime-cutover.ts";
 import type { HostedRuntimeMemberMigrationIdentity, HostedRuntimeObjectMigrationIdentity } from "@murphai/hosted-execution/runtime-migration";
@@ -382,7 +383,7 @@ function createHostedUserRunner(
   return new HostedUserRunner(
     state,
     readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
-    env.BUNDLES,
+    workspaceSnapshotBucket(env),
     env,
     runnerContainerNamespace,
     env.HOSTED_RUNTIME_RETRY_ANALYTICS ?? null,
