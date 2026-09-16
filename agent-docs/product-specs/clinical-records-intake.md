@@ -1,6 +1,6 @@
 # Clinical Records Intake
 
-Last verified: 2026-09-11
+Last verified: 2026-09-15
 
 ## Product outcome
 
@@ -10,8 +10,10 @@ the provider's own SMART-on-FHIR sign-in, and import the authorized record
 families into the member's encrypted vault. The common path asks for no portal
 password inside Murph and no manual file download.
 
-The Epic policy collects 40 queries across 17 resource families, including
-labs, reports, medications, allergies and other chart records. Supported facts
+The default Epic policy collects 24 queries across 16 resource families, including
+labs, reports, medications, allergies and other chart records. Hospital-approved
+imports are behind a default-empty provider flag and use a separate Epic client.
+The broader catalog has 40 queries across 17 families. Supported facts
 become canonical records; other evidence remains raw. This is a bounded
 one-time import, not a complete medical record or continuous sync.
 
@@ -169,21 +171,25 @@ Epic's official R4 sandbox. It uses only
 `epic-policy.ts` authors one ordered literal query catalog: stable ids,
 resource family, operation, fingerprint template, fixed search parameters,
 optional executed window, and registration API keys. Scopes, family order and
-frozen plans derive from that catalog. All 40 queries across 17 primary families
-remain active; each granted family expands into all of its variants. The 70 API
-registration entries also cover supporting reads. Runtime performs only the
-explicitly bounded Media-to-Binary diagnostic-image hop and no general reference
-traversal or backfill. Unused capability metadata is absent; directory presence
+frozen plans derive from that catalog. The default new plan uses only the 24
+queries backed by the 42 verified USCDI-v3 automatic-distribution registrations.
+The full 40-query/70-registration catalog is available only to explicitly
+flagged hospital-approved providers using a separately configured client.
+The flag controls OAuth families, plan variants and page/document egress;
+a shared FHIR resource permission never enables every subtype by itself.
+Runtime performs only the explicitly bounded Media-to-Binary diagnostic-image
+hop and no general reference traversal or backfill. Unused capability metadata is absent; directory presence
 is not a capability guarantee.
 
 ### Additional patient-facing Epic variants
 
-New plans include radiology DocumentReferences (category `imaging-result`),
+The full catalog includes radiology DocumentReferences (category `imaging-result`),
 external C-CDA documents (`external-ccda`), outside clinical notes
 (`external-clinical-note`) and outside vital signs (`external-vital-signs`).
 Each uses the authorized patient, normal pagination and its own stable query
-identity, with no client date cutoff. Existing search permissions suffice;
-register the four additional patient-facing APIs in the Epic app before rollout.
+identity, with no client date cutoff. Outside vital signs remain enabled by
+default; the three additional document variants require hospital-approved mode.
+Register each exact selected API in the matching Epic app before rollout.
 Existing frozen plans retain their original query set.
 
 The variants retain source evidence through the current importer. Linked document
@@ -223,7 +229,7 @@ Once an import is queued, the retrieval runtime uses four signed POST operations
 - `/api/internal/clinical-records/runtime/record-outcome`
 
 The web control plane fetches only the exact configured FHIR origin and exact
-resource-family path. Patient uses a direct patient read; the other 39 primary
+resource-family path. Patient uses a direct patient read; the other selected primary
 queries use their policy-owned patient search template and fixed category where
 required. All new queries use a whole-family slice without a client-supplied lower
 or upper date cutoff. Clinical notes are no longer limited to 90 days, and
@@ -258,11 +264,10 @@ single retrieval representation; completed-slice references own completion.
 Families and counts are derived. Every page request, opaque cursor,
 server-derived request fingerprint, durable request claim, and terminal outcome
 is checked against the frozen query-scope and slice identity before provider
-egress or outcome mutation. New OAuth requests deduplicate the 40 queries into
-17 resource permissions, and each granted family expands back into every active
-query variant in the frozen run plan. A partial grant still requires Patient plus
-at least one clinical family and executes all active queries for each granted
-family.
+egress or outcome mutation. New OAuth requests deduplicate the selected queries into
+16 default resource permissions (17 for hospital-approved imports). Each granted
+family expands only into the selected query variants in the frozen run plan.
+A partial grant still requires Patient plus at least one clinical family.
 Each fetch reserves the full page allowance atomically before provider egress,
 then settles to the actual received UTF-8 bytes after a valid response,
 including whitespace. Normalized snapshot bounds are separate. A provider-side or
@@ -403,104 +408,31 @@ current Web/Worker/runner versions, no old active runs, ordinary pagination,
 saved partial counts, and a same-patient repeat import. Keep signed runtime
 fencing throughout; no direct provider-access fallback.
 
-Register an incoming OAuth 2.0 app for the patient consumer with a
-non-confidential client and S256 PKCE in
-[Epic's app portal](https://fhir.epic.com/Developer/Apps). Select R4, use the
-Murph product name without adding `Epic` to the app name, set Automatic
-Client Distribution to `None`, and register the following exact 70 names from
-Epic's current
-[FHIR catalog](https://open.epic.com/Interface/FHIR):
+Register an incoming OAuth 2.0 app for Patients, R4, a non-confidential client
+and S256 PKCE. The default app must select **USCDI v3 automatic distribution**
+and contain only the reviewed default registration set. The exact registration
+matrix, official-source cross-check, conservative exclusions, client-ID setup
+and feature flag are owned by
+[`epic-automatic-distribution.md`](../references/epic-automatic-distribution.md).
+Filtering runtime queries does not make an existing manually distributed app
+automatic; provision the correctly registered app before public authorization.
 
-```text
-AllergyIntolerance.Search (Patient Chart) (R4)
-Binary.Read (Clinical Notes) (R4)
-CarePlan.Search (Longitudinal) (R4)
-CareTeam.Search (Longitudinal CareTeam) (R4)
-Condition.Search (Encounter Diagnosis) (R4)
-Condition.Search (Problems) (R4)
-Device.Search (Implants) (R4)
-DiagnosticReport.Search (Results) (R4)
-DocumentReference.Search (Clinical Notes) (R4)
-Encounter.Read (Patient Chart) (R4)
-Encounter.Search (Patient Chart) (R4)
-FamilyMemberHistory.Search (R4)
-Goal.Search (Patient) (R4)
-Immunization.Search (Patient Chart) (R4)
-Location.Read (Organizational Directory) (R4)
-MedicationDispense.Search (Fill Status) (R4)
-Medication.Read (Organization Med List) (R4)
-MedicationRequest.Read (Signed Medication Order) (R4)
-MedicationRequest.Search (Signed Medication Order) (R4)
-Observation.Read (Assessments) (R4)
-Observation.Read (Labs) (R4)
-Observation.Search (Assessments) (R4)
-Observation.Search (Labs) (R4)
-Observation.Search (SDOH Assessments) (R4)
-Observation.Search (Social History) (R4)
-Observation.Search (Vital Signs) (R4)
-Organization.Read (Organizational Directory) (R4)
-Patient.Read (Demographics) (R4)
-Practitioner.Read (Organizational Directory) (R4)
-PractitionerRole.Read (Organizational Directory) (R4)
-Procedure.Search (Orders) (R4)
-Procedure.Search (Surgeries) (R4)
-Procedure.Search (Patient-Reported Surgical History) (R4)
-Provenance.Read (R4)
-ServiceRequest.Read (Orders) (R4)
-ServiceRequest.Search (Orders) (R4)
-Specimen.Read (Patient Chart) (R4)
-DocumentReference.Search (Radiology Results) (R4)
-DocumentReference.Search (External CCDA) (R4)
-DocumentReference.Search (Outside Record - Clinical Notes) (R4)
-Observation.Search (Outside Record Vital Signs) (R4)
-Binary.Read (External CCDA) (R4)
-Binary.Read (Outside Record - Clinical Notes) (R4)
-Binary.Read (Radiology Results) (R4)
-Binary.Read (Labs) (R4)
-Binary.Read (Generated CDAs) (R4)
-Binary.Read (Patient-Entered Questionnaires) (R4)
-Binary.Read (Correspondences) (R4)
-Binary.Read (Handoff) (R4)
-Binary.Read (Minimum Data Set) (R4)
-DocumentReference.Search (Labs) (R4)
-DocumentReference.Search (Generated CDAs) (R4)
-DocumentReference.Search (Patient-Entered Questionnaires) (R4)
-DocumentReference.Search (Correspondences) (R4)
-DocumentReference.Search (Handoff) (R4)
-DocumentReference.Search (Minimum Data Set) (R4)
-Binary.Read (Document Information) (R4)
-DocumentReference.Search (Document Information) (R4)
-Binary.Read (Clinical References) (R4)
-DocumentReference.Search (Clinical References) (R4)
-Binary.Read (HIS) (R4)
-DocumentReference.Search (HIS) (R4)
-Binary.Read (OASIS) (R4)
-DocumentReference.Search (OASIS) (R4)
-Binary.Read (IRF-PAI) (R4)
-DocumentReference.Search (IRF-PAI) (R4)
-Binary.Read (Advance Directive) (R4)
-DocumentReference.Search (Advance Directive) (R4)
-Media.Read (Study) (R4)
-Binary.Read (Study) (R4)
-```
+The default-empty `EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS` feature flag names
+only organizations that have provisioned the separate broad app. Listed
+organizations require the corresponding `EPIC_SMART_HOSPITAL_APPROVED_CLIENT_ID`
+or `EPIC_SMART_HOSPITAL_APPROVED_NON_PRODUCTION_CLIENT_ID`, without fallback.
+An OAuth callback whose selected client changed since start fails closed.
+Disabling a provider blocks subsequent gated page and document egress, including
+old frozen plans, without deleting saved records or rewriting their identities.
 
-Registration covers the 40 active primary queries and supporting dependency
-reads. Runtime requests 17 unique primary resource permissions plus a separate
-patient Binary read permission when document or diagnostic-report access is
-requested. Binary remains a supporting body download, never a primary search
-family. A useful partial grant without Binary access preserves primary records
-and reports linked document bodies as unavailable. Resource families without a canonical mapper
-are retained as patient-bound raw evidence with an explicit review decision; no
-family is silently dropped. The exact full-coverage registration cannot use
-USCDI-v3 automatic distribution: `FamilyMemberHistory.Search (R4)`,
-and `Procedure.Search (Patient-Reported Surgical History) (R4)` are absent
-from Epic's automatic-distribution appendix. Epic's patient-app registration
-also does not offer `Questionnaire.Read`; dependency traversal remains deferred,
-so the registration contract omits it instead of substituting unrelated
-`QuestionnaireResponse` APIs. Do not substitute Outside Record or SDOH APIs,
-because they expose different data surfaces. Each target Epic customer must
-instead download/request this client ID. Do not request refresh tokens or
-`offline_access`.
+Resource families without a canonical mapper remain patient-bound raw evidence
+with an explicit review decision. Binary and Media remain supporting reads,
+not primary searches. A partial grant without Binary access preserves primary
+records and reports linked bodies unavailable. Do not request refresh tokens
+or `offline_access`.
+
+The following describes full-catalog capabilities; only variants classified as
+default in the registration matrix run without the hospital-approved flag.
 [Media.Read (Study)](https://fhir.epic.com/Specifications?api=10989) and
 [Binary.Read (Study)](https://fhir.epic.com/Specifications?api=11002) support
 the key diagnostic images linked from DiagnosticReport, including cardiology
@@ -556,9 +488,9 @@ curated sandbox FHIR base is
 `https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4`.
 
 Before production authorization, add the exact HTTPS callback
-`https://<production-host>/api/clinical-records/oauth/callback`, keep Automatic
-Client Distribution set to `None`, complete Epic's Data Use Questionnaire,
-mark the app ready for production, coordinate each customer download, and set
+`https://www.withmurph.ai/api/clinical-records/oauth/callback`, keep Automatic
+Client Distribution set to `USCDI v3` for the default app, complete Epic's Data Use Questionnaire,
+mark the app ready for production, allow automatic client distribution, and set
 `EPIC_SMART_CLIENT_ID` to Epic's production client id. Preview hosts need their
 own registered callback and the non-production client id. A missing exact
 client id fails closed before redirect.

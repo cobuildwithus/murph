@@ -259,6 +259,7 @@ const runPostgresConcurrencyProof =
   process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const CALLBACK_ORIGIN = "https://join.example.test";
 const CALLBACK_PATH = "/api/clinical-records/oauth/callback";
+const CLINICAL_CLIENT_ID = "clinical-records-postgres-proof-client";
 const CALLBACK_TIMEOUT_MS = 15_000;
 const BLOCKING_TIMEOUT_MS = 6_000;
 const TEST_TIMEOUT_MS = 30_000;
@@ -361,6 +362,7 @@ afterEach(() => {
   installDefaultHostedSecureBoxStringTestCodec();
   restoreEnvironment?.();
   restoreEnvironment = null;
+  vi.unstubAllEnvs();
 });
 
 describe.skipIf(!runPostgresConcurrencyProof)(
@@ -375,7 +377,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const fixture = await createClinicalFixture();
       boundary.callbackPrisma = fixture.callbackBaseClient;
       const provider = readClinicalProviderDirectory().entries.find((entry) => entry.id === fixture.providerDirectoryEntryId)!;
-      vi.stubEnv(provider.clientIdEnvironmentKey, "clinical-records-proof-client");
       const request = new Request(`${CALLBACK_ORIGIN}/api/clinical-records/connect/start`, {
         method: "POST", headers: { origin: CALLBACK_ORIGIN },
       });
@@ -868,6 +869,8 @@ async function createClinicalFixture(): Promise<ClinicalFixture> {
   if (!provider) {
     throw new Error("Expected a Clinical Records provider fixture.");
   }
+  vi.stubEnv(provider.clientIdEnvironmentKey, CLINICAL_CLIENT_ID);
+  vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "");
   const secondResourceType = provider.resourceTypes.find(
     (resourceType) => resourceType !== "Patient",
   );
@@ -955,7 +958,7 @@ async function createClinicalFixture(): Promise<ClinicalFixture> {
       });
       await tx.clinicalRecordOauthSession.create({
         data: {
-          clientId: "clinical-records-postgres-proof-client",
+          clientId: CLINICAL_CLIENT_ID,
           codeVerifierEncrypted,
           connectIntentClaimHash,
           consumedAt: null,

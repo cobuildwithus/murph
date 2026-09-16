@@ -1,5 +1,7 @@
 import "server-only";
 
+import { readEpicImportConfiguration } from "./epic-import-config";
+
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
 
 import { createHash, randomBytes } from "node:crypto";
@@ -74,7 +76,8 @@ export async function startClinicalRecordConnection(input: {
     memberId: auth.member.id,
     providerDirectoryEntryId: provider.id,
   });
-  const clientId = requireConfiguredClientId(provider);
+  const configuration = readEpicImportConfiguration(provider);
+  const { clientId } = configuration;
   const intent = await claimClinicalRecordConnectIntentForStart({
     claim: input.claim,
     memberId: auth.member.id,
@@ -86,7 +89,7 @@ export async function startClinicalRecordConnection(input: {
       fetchImpl: input.fetchImpl,
       fhirBaseUrl: provider.fhirBaseUrl,
       requestedBaseScopes: provider.requestedBaseScopes,
-      resourceTypes: provider.resourceTypes,
+      resourceTypes: configuration.resourceTypes,
     });
     const publicBaseUrl = resolveHostedPublicBaseUrl() ?? new URL(input.request.url).origin;
     const redirectUri = new URL("/api/clinical-records/oauth/callback", `${publicBaseUrl}/`).toString();
@@ -172,6 +175,8 @@ export async function finishClinicalRecordAuthorization(input: {
   if (hashClinicalFhirBaseUrl(provider.fhirBaseUrl) !== session.fhirBaseHash) {
     throw providerConfigurationChangedError();
   }
+  const configuration = readEpicImportConfiguration(provider);
+  if (configuration.clientId !== session.clientId) throw providerConfigurationChangedError();
   const requestedScopes = parseStoredStringArray(session.requestedScopesJson, "requested SMART scopes");
   const verifier = await openClinicalOauthVerifier({
     encrypted: session.codeVerifierEncrypted,
@@ -187,8 +192,7 @@ export async function finishClinicalRecordAuthorization(input: {
     tokenEndpoint: session.tokenEndpoint,
     verifier,
   });
-  const resourceTypes = readGrantedSmartResourceTypes(token.grantedScopes, provider.resourceTypes)
-    .filter((resourceType) => provider.resourceTypes.includes(resourceType));
+  const resourceTypes = readGrantedSmartResourceTypes(token.grantedScopes, configuration.resourceTypes);
   if (!resourceTypes.includes("Patient") || resourceTypes.length < 2) {
     throw clinicalRecordsError({
       code: "CLINICAL_RECORD_SMART_SCOPES_INSUFFICIENT",
@@ -204,6 +208,7 @@ export async function finishClinicalRecordAuthorization(input: {
     provider,
     requestedScopes,
     resourceTypes,
+    hospitalApprovedImports: configuration.hospitalApprovedImports,
     authorizationStartedAt: session.createdAt,
     token,
   }));
@@ -269,6 +274,7 @@ async function consumeClinicalOauthSession(input: {
 }
 
 async function persistClinicalConnection(input: {
+  hospitalApprovedImports: boolean;
   authorizationStartedAt: Date;
   connectIntentClaimHash: string;
   fhirBaseHash: string;
@@ -372,6 +378,7 @@ async function persistClinicalConnection(input: {
     memberId: input.memberId,
     grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
     retrievalPlanJson: buildEpicBetaRetrievalPlan({
+      hospitalApprovedImports: input.hospitalApprovedImports,
       frozenAt: input.now,
       pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
       resourceTypes: input.resourceTypes,
@@ -516,19 +523,6 @@ function requireProviderEntry(entryId: string): ClinicalProviderDirectoryEntry {
     });
   }
   return entry;
-}
-
-function requireConfiguredClientId(provider: ClinicalProviderDirectoryEntry): string {
-  const value = process.env[provider.clientIdEnvironmentKey]?.trim();
-  if (!value || value.length > 512) {
-    throw clinicalRecordsError({
-      code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED",
-      httpStatus: 503,
-      message: "The selected Clinical Records provider is not configured yet.",
-      retryable: true,
-    });
-  }
-  return value;
 }
 
 function normalizeAuthorizationCode(value: string): string {
