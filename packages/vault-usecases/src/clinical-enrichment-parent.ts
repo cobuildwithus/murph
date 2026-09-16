@@ -13,10 +13,10 @@ import {
   listClinicalFhirAttachments,
   normalizeClinicalFhirPatientReference,
   rawRefForClinicalManifestFile,
+  resolveClinicalFhirSourceRevision,
   type ClinicalDocumentAttachment,
   type ClinicalRawManifest,
 } from "@murphai/clinical-records";
-import { isWritableIsoDateTime } from "@murphai/contracts";
 import { resolveVaultPathOnDisk } from "@murphai/core";
 
 const MAX_PARENT_PAGE_BYTES = 5 * 1024 * 1024;
@@ -39,8 +39,11 @@ export async function readClinicalEnrichmentParentEligibility(input: {
   const parent = await readAttestedParent({ ...input, manifest, attachment });
   validateParentPatient(parent, manifest);
   validateParentAttachment(parent, attachment);
-  const revision = isRecord(parent.meta) ? parent.meta.lastUpdated : undefined;
-  if (typeof revision !== "string" || revision.length > 200 || !isWritableIsoDateTime(revision)) throw invalidParent();
+  // Same revision rule as the importer: an absent `meta.lastUpdated` binds the
+  // parent to the retrieval batch, so derived facets match the imported parent.
+  const revision = resolveClinicalFhirSourceRevision({
+    lastUpdated: isRecord(parent.meta) ? parent.meta.lastUpdated : undefined, fetchedAt: manifest.fetchedAt });
+  if (revision === undefined) throw invalidParent();
   const parentExternalRef = externalRefForFhir({ fhirBaseUrlHash: manifest.fhirBaseUrlHash,
     patientIdHash: manifest.patientIdHash, sourceSystem: manifest.sourceSystem,
     resourceType: attachment.resourceType, resourceId: attachment.resourceId, version: revision });

@@ -10,6 +10,7 @@ import {
   clinicalImportPlanSchema,
   clinicalRawManifestSchema,
   clinicalRawPathSchema,
+  classifyClinicalFhirSourceRevision,
   countClinicalFhirPageResources,
   externalRefForFhir,
   fhirResourceTypeToSlug,
@@ -21,6 +22,7 @@ import {
   normalizeClinicalFhirPatientId,
   normalizeClinicalFhirPatientReference,
   rawRefForClinicalManifestFile,
+  resolveClinicalFhirSourceRevision,
 } from "../src/index.ts";
 import { describe, expect, it } from "vitest";
 
@@ -666,5 +668,20 @@ describe("clinical search warning completeness", () => {
 
   it("rejects malformed JSON at the evidence boundary", () => {
     expect(() => clinicalFhirPageHasIncompleteSearchOutcome("{")).toThrow(SyntaxError);
+  });
+});
+
+describe("clinical FHIR source revision", () => {
+  it("defers an absent meta.lastUpdated to the retrieval batch and fails closed on a non-comparable one", () => {
+    expect(classifyClinicalFhirSourceRevision(undefined)).toEqual({ source: "batch" });
+    expect(classifyClinicalFhirSourceRevision("2026-07-10T12:00:00.123456Z"))
+      .toEqual({ source: "resource", version: "2026-07-10T12:00:00.123456Z" });
+    for (const invalid of [null, "", "not-a-timestamp", "2026-07-10", `2026-01-03T00:00:00.${"1".repeat(190)}Z`, 1_720_000_000]) {
+      expect(classifyClinicalFhirSourceRevision(invalid)).toEqual({ source: "none" });
+    }
+    const fetchedAt = "2026-07-11T09:30:00.000Z";
+    expect(resolveClinicalFhirSourceRevision({ lastUpdated: undefined, fetchedAt })).toBe(fetchedAt);
+    expect(resolveClinicalFhirSourceRevision({ lastUpdated: "2026-07-10T12:00:00Z", fetchedAt })).toBe("2026-07-10T12:00:00Z");
+    expect(resolveClinicalFhirSourceRevision({ lastUpdated: "2026-07-10", fetchedAt })).toBeUndefined();
   });
 });

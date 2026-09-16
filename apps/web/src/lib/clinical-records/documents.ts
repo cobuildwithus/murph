@@ -29,7 +29,9 @@ export const clinicalDocumentTicketSchema = z.object({
   resourceType: z.enum(["DocumentReference", "DiagnosticReport"]),
   sourceKind: z.enum(["binary", "media"]).optional(),
   resourceId,
-  resourceVersion: z.string().datetime({ offset: true }),
+  // Absent when the parent omits `meta.lastUpdated`; the parent page hash and
+  // attachment slot already own the ticket's identity.
+  resourceVersion: z.string().datetime({ offset: true }).optional(),
   attachmentIndex: z.number().int().nonnegative().max(1_999),
   url: z.string().min(1).max(1_024),
   mediaType: z.string().max(255).optional(),

@@ -79,11 +79,20 @@ describe("clinical document bodies", () => {
   });
 
   it.each([
-    { meta: { lastUpdated: undefined } },
+    { meta: { lastUpdated: "not-a-comparable-revision" } },
     { modifierExtension: [{ url: "https://example.test/unknown-modifier", valueBoolean: true }] },
   ])("keeps unsafe raw-only document metadata on review", (invalid) => {
     const resource = { ...baseResource, ...invalid, content: [{ attachment: { contentType: "application/pdf", url: "Binary/scanned" } }] };
     expect(buildClinicalImportPlanFromSnapshot(snapshot(resource)).decisions[0]).toMatchObject({ action: "review" });
+  });
+
+  it("imports a document without meta.lastUpdated at the retrieval revision", () => {
+    const { meta: _meta, ...undated } = baseResource;
+    const input = snapshot({ ...undated, content: [{ attachment: { contentType: "application/pdf", url: "Binary/scanned" } }] });
+    expect(buildClinicalImportPlanFromSnapshot(input).decisions[0]).toMatchObject({
+      action: "upsert",
+      payload: { externalRef: { resourceId: "document-1", version: input.manifest.fetchedAt } },
+    });
   });
 
   it.each(["DocumentReference", "DiagnosticReport"])("uses a %s source-update receipt when clinical dates are absent or date-only", (resourceType) => {

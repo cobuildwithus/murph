@@ -34,6 +34,7 @@ import {
   clinicalImportUpsertDecisionSchema,
   clinicalRawManifestSchema,
   clinicalDocumentParentEligibility,
+  classifyClinicalFhirSourceRevision,
   externalRefForFhir,
   hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
@@ -42,6 +43,8 @@ import {
   isClinicalFhirUrlWithinBaseResourceType,
   normalizeClinicalFhirPatientReference,
   rawRefForClinicalManifestFile,
+  resolveClinicalFhirSourceRevision,
+  type ClinicalFhirSourceRevision,
   type ClinicalImportDecision,
   type ClinicalImportPlan,
   type ClinicalRawManifest,
@@ -193,6 +196,9 @@ const REVIEW_HOLD_RESOURCE_TYPES = new Set([
   "DocumentReference",
   "Observation",
 ]);
+/** Matches the canonical `externalRef.resourceId` bound in `@murphai/contracts`. */
+const FHIR_RESOURCE_ID_MAX_LENGTH = 200;
+const NON_COMPARABLE_REVISION_REASON = "FHIR resource lastUpdated is not a comparable revision";
 
 export function buildClinicalImportPlanFromSnapshot(
   input: BuildClinicalImportPlanFromSnapshotInput,
@@ -238,27 +244,19 @@ export function buildClinicalImportPlanFromSnapshot(
     ),
   );
 
-  // An undated representation cannot order this identity against any sibling
-  // revision. Keep its evidence and leave the last validated canonical fact alone.
-  const unorderable = new Set(
-    resourceContexts
-      .filter(
-        ({ resource }) =>
-          REVIEW_HOLD_RESOURCE_TYPES.has(resource.resourceType) &&
-          readResourceId(resource) &&
-          !readResourceUpdatedAt(resource),
-      )
-      .map(({ resource }) => `${resource.resourceType}/${readResourceId(resource)}`),
-  );
+  // An identity that cannot be ordered against its sibling revisions keeps its
+  // evidence and leaves the last validated canonical fact alone.
+  const unorderable = collectUnorderableIdentities(resourceContexts);
   for (const context of resourceContexts) {
     if (decisions.length >= CLINICAL_IMPORT_PLAN_MAX_DECISIONS) {
       throw new Error(
         `Clinical FHIR import plan decision count exceeds ${CLINICAL_IMPORT_PLAN_MAX_DECISIONS}.`,
       );
     }
+    const unorderableReason = unorderable.get(resourceIdentity(context.resource));
     decisions.push(
-      unorderable.has(`${context.resource.resourceType}/${readResourceId(context.resource)}`)
-        ? reviewOnly(context, "FHIR resource lastUpdated is missing", "incomplete")
+      unorderableReason !== undefined
+        ? reviewOnly(context, unorderableReason, "incomplete")
         : mapFhirResource(context),
     );
   }
@@ -699,11 +697,8 @@ function mapFhirResource(context: FhirResourceContext): MappedFhirResource {
   if (hasUnsupportedFhirModifier(context.resource)) {
     return reviewOnly(context, "FHIR modifier semantics are not importable");
   }
-  if (
-    isAllergyIntolerance(context.resource)
-    && !readResourceUpdatedAt(context.resource)
-  ) {
-    return reviewOnly(context, "FHIR resource lastUpdated is missing");
+  if (readResourceId(context.resource) !== undefined && readResourceRevision(context) === undefined) {
+    return reviewOnly(context, NON_COMPARABLE_REVISION_REASON);
   }
   const retractionReason = authoritativeRetractionReason(context.resource);
   if (retractionReason) {
@@ -733,7 +728,7 @@ function mapFhirResource(context: FhirResourceContext): MappedFhirResource {
 function mapClinicalHistory(context: FhirResourceContext): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) return reviewOnly(context, "FHIR resource id is missing");
-  const note = buildFhirHistoryNote(context.resource);
+  const note = buildFhirHistoryNote(context.resource, readResourceRevision(context));
   if (!note) return reviewOnly(context, "clinical history content or date is unavailable or exceeds supported import bounds");
   return upsertOrReview(context, {
     ...note,
@@ -759,7 +754,7 @@ function resourceContext<TResource extends Resource>(
 
 function reviewOnly(context: FhirResourceContext, reason: string, disposition?: "incomplete"): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
-  const externalRef = resourceId && readResourceUpdatedAt(context.resource)
+  const externalRef = resourceId && readResourceRevision(context) !== undefined
     ? externalRefForResource(context, context.resource.resourceType, resourceId)
     : undefined;
   return clinicalImportReviewDecisionSchema.parse({
@@ -1156,14 +1151,16 @@ function mapClinicalDocumentReceipt(
   const resource = context.resource;
   const resourceId = readResourceId(resource);
   const clinicalOccurredAt = readClinicalOccurredAt(resource);
-  const occurredAt = clinicalOccurredAt ?? readIsoDateTime(resource.meta?.lastUpdated);
+  // Without a clinical date the receipt is dated by its source revision, which
+  // is the retrieval batch when the server omits `meta.lastUpdated`.
+  const occurredAt = clinicalOccurredAt ?? readIsoDateTime(readResourceRevision(context));
   if (!resourceId || !occurredAt) return reviewOnly(context, "clinical timestamp is missing");
   const title = resource.resourceType === "DiagnosticReport"
     ? textForCodeableConcept(resource.code) ?? "FHIR diagnostic report"
     : readText(resource.description) ?? textForCodeableConcept(resource.type) ?? "FHIR document reference";
   const note = [
     `FHIR ${resource.resourceType} source document.`,
-    ...(!clinicalOccurredAt ? [`Record timestamp describes source-update metadata: ${occurredAt}.`] : []),
+    ...(!clinicalOccurredAt ? [`Record timestamp describes ${classifyResourceRevision(resource).source === "batch" ? "the retrieval revision" : "source-update metadata"}: ${occurredAt}.`] : []),
     `Source status: ${resource.status}.`,
     ...(resource.resourceType === "DocumentReference" && resource.docStatus ? [`Document status: ${resource.docStatus}.`] : []),
     `Attachment count: ${listClinicalFhirAttachments(resource).length}.`,
@@ -1418,7 +1415,7 @@ function externalRefForResource(
   resourceType: string,
   resourceId: string,
 ) {
-  const version = readResourceUpdatedAt(context.resource);
+  const version = readResourceRevision(context);
   if (!version) {
     throw new Error("Clinical FHIR source revision is missing after admission.");
   }
@@ -1546,7 +1543,7 @@ function isImportableNoKnownAllergySnapshotEvidence(resource: AllergyIntolerance
   const recordedDate = readString(resource.recordedDate);
   return isImportableGlobalNoKnownAllergyAssertion(resource)
     && readResourceId(resource) !== undefined
-    && readResourceUpdatedAt(resource) !== undefined
+    && classifyResourceRevision(resource).source !== "none"
     && recordedDate !== undefined
     && readIsoDateTime(recordedDate) !== undefined;
 }
@@ -1905,15 +1902,59 @@ function readIsoDateTime(value: unknown): string | undefined {
 
 function readResourceId(resource: Resource): string | undefined {
   const resourceId = readString(resource.id);
-  // Epic document identifiers can exceed the base FHIR id length; preserve them
-  // within the existing canonical external-reference bound.
-  const maxLength = resource.resourceType === "DocumentReference" || resource.resourceType === "DiagnosticReport" ? 200 : 64;
-  return resourceId && resourceId.length <= maxLength ? resourceId : undefined;
+  // FHIR R4 servers may exceed the base 64-character id length for any resource
+  // type (Epic documents this for its R4 ids). Preserve every id within the
+  // canonical external-reference bound instead of treating it as missing.
+  return resourceId && resourceId.length <= FHIR_RESOURCE_ID_MAX_LENGTH ? resourceId : undefined;
 }
 
-function readResourceUpdatedAt(resource: Resource): string | undefined {
-  const text = readString(resource.meta?.lastUpdated);
-  return text && text.length <= 200 && isWritableIsoDateTime(text) ? text : undefined;
+function resourceIdentity(resource: Resource): string {
+  return `${resource.resourceType}/${readResourceId(resource)}`;
+}
+
+function classifyResourceRevision(resource: Resource): ClinicalFhirSourceRevision {
+  return classifyClinicalFhirSourceRevision(resource.meta?.lastUpdated);
+}
+
+// `meta.lastUpdated` is optional in FHIR R4 and some servers omit it on every
+// resource. The manifest `fetchedAt` is already the ordered revision for the
+// aggregate allergy snapshot, so it doubles as the resource revision when the
+// server supplies none: a later retrieval supersedes an earlier one, the same
+// retrieval replayed is a same-revision replay that core skips, and an earlier
+// retrieval replayed later stays skipped as stale. A present but non-comparable
+// `lastUpdated` yields no revision so the fail-closed hold still applies. The
+// rule lives in `@murphai/clinical-records` because enrichment parent
+// attestation must bind derived document facets to the same revision.
+function readResourceRevision(context: FhirResourceContext): string | undefined {
+  return resolveClinicalFhirSourceRevision({
+    lastUpdated: context.resource.meta?.lastUpdated,
+    fetchedAt: context.manifest.fetchedAt,
+  });
+}
+
+// A hold-eligible identity is unorderable when a representation carries a
+// non-comparable revision, or when same-batch siblings mix a resource-local
+// revision with the retrieval fallback: neither timestamp can rank the other.
+function collectUnorderableIdentities(
+  contexts: readonly FhirResourceContext[],
+): Map<string, string> {
+  const sourcesByIdentity = new Map<string, Set<ClinicalFhirSourceRevision["source"]>>();
+  for (const { resource } of contexts) {
+    if (!REVIEW_HOLD_RESOURCE_TYPES.has(resource.resourceType) || readResourceId(resource) === undefined) continue;
+    const identity = resourceIdentity(resource);
+    const sources = sourcesByIdentity.get(identity) ?? new Set<ClinicalFhirSourceRevision["source"]>();
+    sources.add(classifyResourceRevision(resource).source);
+    sourcesByIdentity.set(identity, sources);
+  }
+  const unorderable = new Map<string, string>();
+  for (const [identity, sources] of sourcesByIdentity) {
+    if (sources.has("none")) {
+      unorderable.set(identity, NON_COMPARABLE_REVISION_REASON);
+    } else if (sources.has("resource") && sources.has("batch")) {
+      unorderable.set(identity, "FHIR resource revision cannot be ordered against a same-identity sibling");
+    }
+  }
+  return unorderable;
 }
 
 function readQuantityValue(
