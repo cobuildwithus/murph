@@ -90,31 +90,57 @@ change also creates one idempotent canonical `journal-context` event. Journal
 therefore shows when the context changed without keeping a second Environment
 history.
 
-New calendar and email connections are eligible for automatic context only
-after one private notice. Existing connections become a silent baseline and
-remain unchanged. The member can stop all automatic capture or one category
-without disconnecting the account.
+Active calendar and email connections are eligible for automatic context after
+one private notice, regardless of connection age or missing connection timestamps.
+Previously excluded baseline accounts receive that notice; existing notices and
+global/provider/category opt-outs survive migration. Opt-outs remove matching
+upcoming context without disconnecting the account or deleting Journal history.
 
-At 08:00 and 16:00 local time, calendar capture reads only the next 36 hours.
-The cron host supplies exact UTC start and end instants from the scheduled
-occurrence, including retries, so the model need not calculate timezone offsets.
-It includes clear training, matches, races, sauna, recovery, long travel,
-flights, and outdoor plans. It excludes medical care, dental care, therapy,
-tests, procedures, work, and private social events. It reconciles a moved or
-removed source event into the same Journal plan.
+One managed pass runs at 08:00 local time. It reads a fourteen-day calendar window,
+using exact UTC boundaries from the cron host, and reconciles known ongoing and
+future plans outside that discovery window by their source identities. It retains
+training, matches, races, sauna, recovery, long travel, flights, and outdoor plans,
+and relevant non-sensitive life changes affecting existing support. Clear all-day
+travel and races preserve date-only meaning. Medical care, dental care, therapy,
+tests, procedures, ordinary work, and private social events remain excluded.
 
-The 08:00 pass also uses narrow transport and lodging confirmation searches.
-Its first pass looks back at most 90 days for future travel. It groups one trip
-into one normalized itinerary and stores no message body, price, booking code,
-attachment, exact address, or other traveler. Calendar events and trips get at
-most one follow-up after passive evidence is checked first. Calendar check-ins
-are scheduled one hour after the event ends, using the event timezone.
+The same pass searches narrowly for transport, lodging, relevant registration,
+and change/cancellation confirmations. The first email pass looks back at most
+90 days for future travel; later passes read new or changed confirmations. One
+trip remains one normalized Journal itinerary, with linked calendar/email evidence,
+segments, departure/arrival and return timing, timezones, status, and practical
+constraints. It retains no email body, price, booking code, exact address,
+attachment, or other traveler's data. Complete source evidence reconciles moved
+or canceled plans and follow-ups; a failed read or window absence is not deletion.
 
-Both managed passes use `gpt-5.6-luna` with high reasoning effort, independent
-of the member's conversation model. Existing active managed records converge
-through ordinary seed reconciliation. These passes still use the existing
-connected-context agent and private ledger; model-free source reconciliation
-and a bounded classification-only model step are not implemented.
+Existing follow-ups remain: check passive evidence first, at most one per event
+or trip, and calendar check-ins one hour after a timed event ends. Date-only
+all-day plans never infer an overnight check-in from a midnight boundary. Routine Journal
+writes and upcoming-context refreshes stay silent.
+
+The morning pass uses `gpt-5.6-luna` with high reasoning effort. Ordinary managed
+reconciliation archives the fixed afternoon automation without removing its
+Journal records or standalone follow-ups. Existing paused/archived morning records
+retain their status; active records converge to the current recipe.
+
+A derived Knowledge page, `upcoming-context`, projects these canonical Journal
+plans into a version-1 JSON body. Entries retain event id, summary, start/end with
+explicit offsets, IANA timezone, planned/tentative/canceled status, verification
+time, and normalized practical details. Canonical events remain authoritative.
+The shared private current-state reader loads only this fixed file (at most
+64 KiB) alongside existing memory/context reads, without provider or database
+calls or a Knowledge graph scan. It injects at most 8 KiB of complete entries,
+with an explicit retrieval notice when more remain. Every private conversation,
+resumed turn, and ordinary scheduled model turn reads fresh state; group and
+maintenance scopes retain their existing isolation. Expiry and cancellation are
+filtered at read time, and verification older than 48 hours is labeled stale.
+Partial source failures preserve old verification; direct corrections update the
+canonical plan and derived view together. Missing/invalid data does not block replies.
+
+The context improves wording, relevance, and interpretation only when useful. It
+never grants permission to reschedule a fixed reminder, change the member timezone,
+pause an experiment, or treat a future plan as an observed confounder. Permanent
+experiment evidence continues through the existing canonical experiment owner.
 
 ## Read model
 

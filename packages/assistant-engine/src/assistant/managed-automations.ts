@@ -181,6 +181,7 @@ export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID =
 const MURPH_RETIRED_MANAGED_AUTOMATION_IDS = new Set<string>([
   MURPH_RETIRED_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
   MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
 ])
 
 export function isRetiredMurphManagedAutomationId(
@@ -404,8 +405,8 @@ export const MURPH_MANAGED_AUTOMATIONS = [
   {
     automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
     slug: 'journal-connected-context-morning',
-    title: 'Journal connected context morning pass',
-    summary: 'Checks new calendar plans and narrow email travel context.',
+    title: 'Morning Journal and upcoming context',
+    summary: 'Updates Journal plans and useful upcoming context from connected calendars and email.',
     schedule: {
       kind: 'dailyLocal',
       localTime: '08:00',
@@ -421,42 +422,13 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     instructions: [
       'Run the private Journal connected-context morning pass.',
       '',
-      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its connection-notice check, calendar pass, email travel pass, and due follow-up checks. Use the engine-supplied occurrence local date and timezone as the time anchor.',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its connection-notice check, calendar pass, email travel pass, due follow-up checks, and upcoming-context refresh. Preserve Journal writes, source reconciliation, and existing one-shot follow-ups. Use the engine-supplied occurrence local date and timezone as the time anchor.',
       '',
       'A newly sent connection notice is a hard stop for this occurrence. Persist its ledger state, then end the run without reading any connected account content.',
       '',
       'This scheduled run may read connected calendar and email only through that skill. It must never send email, create provider calendar events, or use group context.',
       '',
       'If the skill finds nothing user-facing, return `{"kind":"skip","privateSummary":"No new connected Journal context required attention."}`.',
-    ].join('\n'),
-  },
-  {
-    automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
-    slug: 'journal-connected-context-afternoon',
-    title: 'Journal connected context afternoon pass',
-    summary: 'Checks the next 36 hours of relevant calendar plans.',
-    schedule: {
-      kind: 'dailyLocal',
-      localTime: '16:00',
-    },
-    continuityPolicy: 'fresh',
-    ownerScope: 'member',
-    hostedRuntimeOnly: true,
-    assistantTargetOverride: {
-      model: 'gpt-5.6-luna',
-      reasoningEffort: 'high',
-    },
-    tags: ['murph-managed:journal-connected-context'],
-    instructions: [
-      'Run the private Journal connected-context afternoon pass.',
-      '',
-      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run only its connection-notice check, calendar pass, and due follow-up checks. Do not run the email travel pass. Use the engine-supplied occurrence local date and timezone as the time anchor.',
-      '',
-      'A newly sent connection notice is a hard stop for this occurrence. Persist its ledger state, then end the run without reading any connected account content.',
-      '',
-      'This scheduled run may read connected calendars only through that skill. It must never create provider calendar events or use group context.',
-      '',
-      'If the skill finds nothing user-facing, return `{"kind":"skip","privateSummary":"No new calendar Journal context required attention."}`.',
     ].join('\n'),
   },
   {
@@ -2239,12 +2211,12 @@ export function buildMurphManagedJournalCalendarWindowInstructions(
     || occurrenceAt === null
   ) return null
   const start = new Date(occurrenceAt)
-  const end = new Date(start.getTime() + 36 * 60 * 60 * 1_000)
+  const end = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1_000)
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return null
   return [
-    'Journal calendar read window (engine-computed, exactly 36 elapsed hours):',
+    'Journal calendar read window (engine-computed, exactly 14 elapsed days):',
     `- timeMin: ${start.toISOString()}`,
     `- timeMax: ${end.toISOString()}`,
-    '- Use these exact UTC instants for calendar reads. Do not recalculate or widen them. Notices, baseline exclusions, and opt-outs still take precedence over reading content.',
+    '- Use these exact UTC instants for calendar reads. Do not recalculate or widen them. Notices and opt-outs still take precedence over reading content.',
   ].join('\n')
 }
