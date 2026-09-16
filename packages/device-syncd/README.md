@@ -6,10 +6,7 @@ Junction `blood_oxygen` resource jobs that fail complete-day normalization and
 `electrocardiogram_voltage` jobs that fail recording binding stay queued for a
 30-minute recheck even after their initial attempt allowance. Existing data and
 the failed resource/window remain intact; corrected provider responses use the
-same import owner. When a reconcile or backfill timeseries continuation hits
-the ECG binding failure, the failing window is handed to such a resource job and
-the full job keeps going, so one inconsistent recording does not stall the rest
-of the sync. This does not revive already terminal jobs, weaken source
+same import owner. This does not revive already terminal jobs, weaken source
 binding, or bypass disconnect and lease fences. Other failure classes retain
 their existing retry behavior. See `agent-docs/RELIABILITY.md` for the finite
 normalization categories, ECG collection counts, and hosted progress diagnostics.

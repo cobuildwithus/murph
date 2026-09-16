@@ -1857,16 +1857,6 @@ to apply after cutover.
   A persisted matching validation failure also preserves lease-reclaim and
   dedupe ownership after an interrupted retry; it never grants import authority
   after disconnect. Jobs without that failure retain ordinary lease exhaustion.
-  When a reconcile or backfill timeseries continuation hits the ECG binding
-  failure, the full job hands that resource window to a resource job with the
-  same resource, window, and source scope, then continues with its next window
-  or resource. The handoff job carries the retained retry policy above, and it
-  dedupes per resource, window, and source so repeated reconciles over the same
-  inconsistent day converge on one retained job. The full job can therefore
-  finish, and one inconsistent recording no longer holds later resources or
-  `lastSyncCompletedAt` behind it. Blood-oxygen incomplete normalization only
-  occurs on calendar refresh resource jobs, which the retention above already
-  covers.
   Additive fields tolerate older readers. Updated runners are needed for the
   retained retry policy; rolling back can restore ordinary exhaustion.
   `device-sync.pass_finished` reports `deviceSyncBloodOxygen*Count` and
