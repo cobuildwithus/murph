@@ -23,7 +23,7 @@ export const runtimeMigrationRoutes: readonly DeclarativeRoute<WorkerRouteContex
     if (!supportsPostgresRuntimeOwner(context.env)) throw new Error("Migration requires the Postgres-capable fleet deployment.");
     // Import's page is produced below, never accepted as operator input.
     if (command.operation !== "read_object") {
-      if (command.operation === "import") throw new Error("Resource import requires an exact-object read.");
+      if (command.operation === "import" || command.operation === "import_member") throw new Error("Resource import requires an exact-object read.");
       return json(await commandHostedRuntimeMigration({ source: context.env, command }));
     }
     const current = await commandHostedRuntimeMigration({ source: context.env, command });

@@ -147,8 +147,25 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
   the complexity guard pass. No production state was changed.
 - Old direct capabilities must still drain while members remain live, before
   quiescence. Managed upload negotiation does not revoke previously issued URLs.
-- Remaining before a final candidate: member state transitions and conditional
-  admission closure; controlled final checkpoint/upload; complete effect and
-  control routing; durable activation wake; creation/inventory closure; hosted
+- Added canonical rolling campaign and token-bound member transitions. Each
+  member reserves one exact inventory object, serializes against its callbacks,
+  imports exact frozen pages, and activates independently. Member pages take a
+  shared campaign lock; campaign closure permits migrated active executions.
+  Import alone never activates routing. Wrong source, token and page identity
+  fail closed. Empty-object handling and new-object closure remain pending.
+- Activation commits an ordinary encrypted maintenance mailbox wake in the same
+  transaction as backend ownership. Existing Temporal mailbox recovery owns
+  missed signals; provider-capable crypto preparation stays outside the short
+  database transaction. Deleted members transfer without creating a wake.
+- Real Postgres proof passes: four new member migration tests plus the existing
+  fleet migration test. It covers same-member callback serialization with an
+  independently progressing member, complete import before activation, one wake
+  across retries, deleted members and fleet closure during migrated execution.
+  Web, Worker and shared typechecks and the complexity guard pass. Source-side
+  readiness, graceful checkpoint, local freeze and hosted operator wiring are
+  still required before these commands form a usable handoff.
+- Remaining before a final candidate: conditional local
+  admission closure and controlled final checkpoint; complete effect and
+  control routing; creation/inventory closure; hosted
   operator; composed rehearsal; owner documentation and final review/CI. Keep
   the PR draft and the production campaign inactive until those are complete.

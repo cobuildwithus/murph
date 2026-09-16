@@ -74,9 +74,17 @@ export type LegacyRuntimeObservation =
 export type LegacyRuntimeInspection = LegacyRuntimeObservation & {
   freeze: { phase: "quiescing" | "freezing" | "frozen" | null; pendingOperations: number };
 };
+export interface HostedRuntimeMemberMigrationIdentity extends HostedRuntimeMigrationIdentity {
+  objectId: string; userId: string; migrationId: string;
+}
+export type HostedRuntimeMemberMigrationCommand =
+  | ({ operation: "quiesce_member" | "read_member" | "freeze_member" | "activate_member" } & HostedRuntimeMemberMigrationIdentity)
+  | ({ operation: "import_member"; page: LegacyRuntimeExportPage } & HostedRuntimeMemberMigrationIdentity);
 export type HostedRuntimeMigrationCommand =
+  | HostedRuntimeMemberMigrationCommand
   | { operation: "status" }
   | ({ operation: "begin" } & HostedRuntimeMigrationIdentity)
+  | ({ operation: "begin_rolling" } & HostedRuntimeMigrationIdentity)
   | ({ operation: "inventory"; after: string; objectIds: string[]; complete: boolean } & HostedRuntimeMigrationIdentity)
   | ({ operation: "read_object"; objectId: string } & HostedRuntimeMigrationIdentity)
   | ({ operation: "inspect_object"; objectId: string } & HostedRuntimeMigrationIdentity)
@@ -109,8 +117,11 @@ export function parseHostedRuntimeMigrationCommand(value: unknown): HostedRuntim
   const record = requireObject(value, "Runtime migration command");
   if (record.operation === "status") return { operation: "status" };
   const identity = { namespaceId: migrationIdentifier(record.namespaceId), workerVersion: migrationIdentifier(record.workerVersion) };
+  const member = parseMemberMigrationCommand(record, identity);
+  if (member) return member;
   switch (record.operation) {
-    case "begin": return { operation: "begin", ...identity };
+    case "begin":
+    case "begin_rolling": return { operation: record.operation, ...identity };
     case "inventory": {
       if (!Array.isArray(record.objectIds) || record.objectIds.length > 100 || typeof record.complete !== "boolean"
         || typeof record.after !== "string") throw new TypeError("Migration inventory page is invalid.");
@@ -136,4 +147,19 @@ function migrationDigest(value: unknown): string {
   const text = requireString(value, "Migration digest");
   if (!/^[a-f0-9]{64}$/u.test(text)) throw new TypeError("Migration digest is invalid.");
   return text;
+}
+
+function memberMigrationIdentity(record: Record<string, unknown>) {
+  return { objectId: migrationDigest(record.objectId), userId: requireString(record.userId, "Migration member"), migrationId: migrationIdentifier(record.migrationId) };
+}
+
+function parseMemberMigrationCommand(record: Record<string, unknown>, identity: HostedRuntimeMigrationIdentity): HostedRuntimeMemberMigrationCommand | null {
+  switch (record.operation) {
+    case "quiesce_member":
+    case "read_member":
+    case "freeze_member":
+    case "activate_member": return { operation: record.operation, ...identity, ...memberMigrationIdentity(record) };
+    case "import_member": return { operation: "import_member", ...identity, ...memberMigrationIdentity(record), page: parseLegacyRuntimeExportPage(record.page) };
+    default: return null;
+  }
 }
