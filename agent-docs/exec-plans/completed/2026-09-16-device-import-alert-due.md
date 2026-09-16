@@ -1,6 +1,6 @@
 # Respect scheduled device import wake grace
 
-Status: active
+Status: completed
 Created: 2026-09-16
 Updated: 2026-09-16
 
@@ -36,8 +36,11 @@ A synthetic pending observation and accepted checkpoint followed by a planned id
 - `pnpm --dir apps/web typecheck`: passed.
 - `pnpm complexity:diff`: passed, zero debt and zero hotspots; maximum source complexity remains 5.
 - Parent review: the existing timestamp and duration are sufficient; query count, access admission, checkpoint ownership, and schemas are unchanged.
-- Pending: required ReviewGPT, exact-head CI, and production deployment verification.
+- ReviewGPT round 1: PASS at `0a394ad0779e2b3a12adea8217173196c960db97`; no accepted findings.
+- Final parent review: documentation-only closure preserves the reviewed production patch.
+- Release gate: exact-head CI and production deployment verification remain required before reporting this fix as deployed; the original task owner continues those checks after plan closure.
 
 ## Product UX and changelog
 
 Internal operator alert correctness only; no member-facing UI, assistant behavior, or public changelog entry.
+Completed: 2026-09-16
