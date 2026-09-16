@@ -63,3 +63,6 @@ Updated: 2026-09-15
 - Portal metadata verifies 44 automatically distributed APIs and 25 retrieval queries. Outside-record clinical notes are eligible; advance directives remain excluded.
 - Live production-client authorization did not succeed. Registration activation and real canonical import readback remain a separate launch requirement, not a result established by the UI tests.
 - Draft PR: https://github.com/cobuildwithus/murph/pull/3497. Final review, exact-head CI, and a current branch preview are pending.
+
+- The hosted preview is ready and returns the actual provider-search study. CI found four consent-flow assertions still expecting the previous heading; those assertions now match the new heading, and all 10 composed consent tests pass.
+- Final review packaging exceeded the child output buffer with expected exclusion warnings. The wrapper now summarizes those warnings, preserves other diagnostics and exit status, and keeps all artifact/privacy guards.
