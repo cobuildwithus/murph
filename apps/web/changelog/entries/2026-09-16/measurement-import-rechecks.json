@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-16",
+  "order": 100,
+  "item": {
+    "id": "measurement-import-rechecks",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Keep incomplete device imports pending",
+    "summary": "Blood-oxygen and ECG imports that fail data validation can keep checking for corrected device data instead of stopping after a few retries.",
+    "details": "Checks run every 30 minutes while the connection remains active. Previously saved data stays intact, and incomplete readings are not treated as a successful import.",
+    "relevanceTags": ["devices", "sync"],
+    "sourcePullRequests": []
+  }
+}

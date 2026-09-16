@@ -4017,11 +4017,11 @@ test.each([
 );
 
 test.each([
-  { label: "missing groups", reason: "feature_cardinality_mismatch" },
-  { label: "empty matching group", reason: "feature_cardinality_mismatch" },
-  { label: "missing device identity", reason: "feature_cardinality_mismatch" },
-  { label: "different device identity", reason: "feature_cardinality_mismatch" },
-  { label: "different source type", reason: "feature_cardinality_mismatch" },
+  { label: "missing groups", reason: "voltage_collection_empty" },
+  { label: "empty matching group", reason: "voltage_samples_empty" },
+  { label: "missing device identity", reason: "voltage_source_mismatch" },
+  { label: "different device identity", reason: "voltage_source_mismatch" },
+  { label: "different source type", reason: "voltage_source_mismatch" },
   { label: "missing sample", reason: "sample_count_mismatch" },
 ])("Junction ECG voltage rejects $label and recovers when corrected", async ({ label, reason }) => {
   let corrected = false;
@@ -4110,6 +4110,14 @@ test.each([
       assert.equal(error.failure.code, "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE");
       assert.equal(error.failure.retryable, true);
       assert.equal(error.failure.details?.reason, reason);
+      if (reason !== "sample_count_mismatch") {
+        assert.equal(error.failure.details?.pageCount, 1);
+        assert.equal(error.failure.details?.groupCount, label === "missing groups" ? 0 : 1);
+        assert.equal(error.failure.details?.providerMatchGroupCount, label === "missing groups" ? 0 : 1);
+        assert.equal(error.failure.details?.instanceMatchGroupCount,
+          label === "different source type" || label === "empty matching group" ? 1 : 0);
+        assert.equal(error.failure.details?.matchedGroupCount, label === "empty matching group" ? 1 : 0);
+      }
       assert.equal(error.windowStart, job.payload.windowStart);
       return true;
     },

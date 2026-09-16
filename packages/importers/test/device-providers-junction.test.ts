@@ -1379,6 +1379,32 @@ test("Junction complete source days reject lossy rows before the canonical write
   }
 });
 
+test.each([
+  { value: 0, unit: "%", valueKind: "number", valueRange: "zero", unitKind: "percent" },
+  { value: -1, unit: "percent", valueKind: "number", valueRange: "negative", unitKind: "percent" },
+  { value: "101", unit: "fraction", valueKind: "numeric_string", valueRange: "above_percentage", unitKind: "ratio" },
+  { value: 101, unit: undefined, valueKind: "number", valueRange: "above_percentage", unitKind: "missing" },
+  { value: "synthetic-private-value", spo2: 101, unit: "%", valueKind: "number", valueRange: "above_percentage", unitKind: "percent" },
+  { value: undefined, unit: undefined, valueKind: "missing", valueRange: undefined, unitKind: "missing" },
+  { value: Number.POSITIVE_INFINITY, unit: "%", valueKind: "non_finite", valueRange: undefined, unitKind: "percent" },
+  { value: "synthetic-private-value", unit: "synthetic-private-unit", valueKind: "non_numeric", valueRange: undefined, unitKind: "other" },
+])("Junction blood oxygen diagnostics classify $valueKind/$valueRange/$unitKind without raw values", ({ value, spo2, unit, valueKind, valueRange, unitKind }) => {
+  assert.throws(() => normalizeCompleteTemporalSourceDay({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    timeseries: { blood_oxygen: { groups: { withings: [{
+      source: { provider: "withings", type: "watch" },
+      data: [{ timestamp: "2026-04-22T07:00:00.000Z", unit, value, spo2 }],
+    }] } } },
+  }, "2026-04-22"), (error: unknown) => {
+    assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+    assert.equal(error.diagnostic.valueKind, valueKind);
+    assert.equal(error.diagnostic.valueRange, valueRange);
+    assert.equal(error.diagnostic.unitKind, unitKind);
+    assert.doesNotMatch(JSON.stringify(error.diagnostic), /synthetic-private|2026-|"value":|"unit":/u);
+    return true;
+  });
+});
+
 test("Junction Withings blood oxygen preserves valid facts across invalid days and recovers", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-oxygen-recovery");
   const importDay = (values: readonly number[], revisionAt: string) =>

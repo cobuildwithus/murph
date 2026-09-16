@@ -98,6 +98,11 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   junctionEcgActualRecordingCount?: number;
   junctionEcgActualSampleCount?: number;
   junctionEcgBindingReason?: string;
+  junctionEcgPageCount?: number;
+  junctionEcgGroupCount?: number;
+  junctionEcgProviderMatchGroupCount?: number;
+  junctionEcgInstanceMatchGroupCount?: number;
+  junctionEcgMatchedGroupCount?: number;
   junctionEcgExpectedRecordingCount?: number;
   junctionEcgExpectedSampleCount?: number;
   junctionEcgMaxRecordingCount?: number;
@@ -107,6 +112,11 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   normalizationSourceProvider?: string;
   normalizationTimestampKind?: string;
   normalizationTimestampSemantics?: string;
+  normalizationValueKind?: string;
+  normalizationValueRange?: string;
+  normalizationUnitKind?: string;
+  validationRetryDelayMs?: number;
+  providerHttpStatusSource?: string;
   providerHttpStatus?: number;
   providerHttpStatusText?: string;
   providerRequestAuthKind?: string;

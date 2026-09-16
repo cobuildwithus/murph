@@ -595,19 +595,34 @@ export class JunctionClient {
       resource: "electrocardiogram_voltage",
       sourceProviderSlug,
     };
+    const collection = {
+      pageCount: 0,
+      groupCount: 0,
+      providerMatchGroupCount: 0,
+      instanceMatchGroupCount: 0,
+      matchedGroupCount: 0,
+    };
     const records = await this.fetchWindowedCollection(
       requestInput,
-      (payload) => extractBoundElectrocardiogramVoltageRecords(payload, {
-        recordingId,
-        sessionEnd: input.windowEnd,
-        sessionStart: input.windowStart,
-        sourceInstanceId: normalizeString(input.sourceInstanceId),
-        sourceProviderSlug,
-        sourceType: normalizeString(input.sourceType),
-      }),
+      (payload) => {
+        collection.pageCount += 1;
+        return extractBoundElectrocardiogramVoltageRecords(payload, {
+          recordingId,
+          sessionEnd: input.windowEnd,
+          sessionStart: input.windowStart,
+          sourceInstanceId: normalizeString(input.sourceInstanceId),
+          sourceProviderSlug,
+          sourceType: normalizeString(input.sourceType),
+        }, collection);
+      },
       (cursor) => this.requestTimeseriesPage(requestInput, cursor),
     );
     assertSingleElectrocardiogramCollectionSource(records);
+    if (records.length === 0) {
+      const reason = collection.groupCount === 0 ? "voltage_collection_empty"
+        : collection.matchedGroupCount === 0 ? "voltage_source_mismatch" : "voltage_samples_empty";
+      throw junctionElectrocardiogramBindingError(reason, collection);
+    }
     return records;
   }
 
@@ -1985,6 +2000,12 @@ interface BoundElectrocardiogramVoltageIdentity {
 function extractBoundElectrocardiogramVoltageRecords(
   payload: unknown,
   identity: BoundElectrocardiogramVoltageIdentity,
+  collection: {
+    groupCount: number;
+    providerMatchGroupCount: number;
+    instanceMatchGroupCount: number;
+    matchedGroupCount: number;
+  },
 ): unknown[] {
   const envelope = readPlainObject(payload);
   const groups = readPlainObject(envelope?.groups);
@@ -2009,6 +2030,7 @@ function extractBoundElectrocardiogramVoltageRecords(
       throw junctionElectrocardiogramBindingError("group_collection_invalid");
     }
     for (const rawGroup of rawGroups) {
+      collection.groupCount += 1;
       const group = readPlainObject(rawGroup);
       if (!group || !Array.isArray(group.data)) {
         throw junctionElectrocardiogramBindingError("group_invalid");
@@ -2032,16 +2054,19 @@ function extractBoundElectrocardiogramVoltageRecords(
       ) {
         continue;
       }
+      collection.providerMatchGroupCount += 1;
       if (
         identity.sourceInstanceId
         && origin.sourceInstanceId !== identity.sourceInstanceId
       ) {
         continue;
       }
+      collection.instanceMatchGroupCount += 1;
       if (identity.sourceType && origin.sourceType !== identity.sourceType) {
         continue;
       }
 
+      collection.matchedGroupCount += 1;
       matchingGroupCount += 1;
       if (matchingGroupCount > 1) {
         throw junctionElectrocardiogramBindingError("group_ambiguous");
@@ -2239,10 +2264,10 @@ function incompleteJunctionCalendarCollectionError() {
   });
 }
 
-function junctionElectrocardiogramBindingError(reason: string) {
+function junctionElectrocardiogramBindingError(reason: string, details: Record<string, unknown> = {}) {
   return deviceSyncError({
     code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
-    details: { reason },
+    details: { ...details, reason },
     message: "Junction ECG summary and voltage response were inconsistent.",
     retryable: true,
     httpStatus: 502,

@@ -2428,6 +2428,9 @@ export interface JunctionCalendarRefreshNormalizationDiagnostic {
   sourceProvider?: string;
   timestampKind?: JunctionNormalizationTimestampKind;
   timestampSemantics?: TimestampSemantics;
+  valueKind?: "missing" | "non_numeric" | "non_finite" | "numeric_string" | "number";
+  valueRange?: "negative" | "zero" | "fraction" | "percentage" | "above_percentage";
+  unitKind?: "missing" | "percent" | "ratio" | "other";
 }
 
 export class JunctionSparseCalendarRepairNormalizationError extends Error {
@@ -3947,6 +3950,31 @@ function junctionDailyTimeseriesRowFailureReason(
     : "daily.timestamp_or_day_unresolved";
 }
 
+function junctionBloodOxygenValueDiagnostic(
+  entry: PlainObject,
+  numeric: number | undefined,
+): Pick<JunctionCalendarRefreshNormalizationDiagnostic, "valueKind" | "valueRange" | "unitKind"> {
+  // Classify the same alias that supplied the numeric value, when one parsed.
+  const value = JUNCTION_BLOOD_OXYGEN_VALUE_PATHS
+    .map((path) => readPath(entry, path))
+    .find((candidate) => finiteNumber(candidate) !== undefined)
+    ?? firstValueFromPaths(entry, JUNCTION_BLOOD_OXYGEN_VALUE_PATHS);
+  const unit = firstValueFromPaths(entry, ["unit", "units", "valueUnit", "value_unit"]);
+  const normalizedUnit = typeof unit === "string" ? unit.trim().toLowerCase() : "";
+  return {
+    valueKind: value === undefined || value === null ? "missing"
+      : typeof value === "number" && !Number.isFinite(value) ? "non_finite"
+        : numeric === undefined ? "non_numeric"
+          : typeof value === "string" ? "numeric_string" : "number",
+    valueRange: numeric === undefined ? undefined
+      : numeric < 0 ? "negative" : numeric === 0 ? "zero"
+        : numeric <= 1 ? "fraction" : numeric <= 100 ? "percentage" : "above_percentage",
+    unitKind: unit === undefined || unit === null ? "missing"
+      : ["%", "percent", "percentage"].includes(normalizedUnit) ? "percent"
+        : ["ratio", "fraction"].includes(normalizedUnit) ? "ratio" : "other",
+  };
+}
+
 function resolveJunctionDailyTimeseriesRow(
   input: JunctionDailyTimeseriesInput,
   { entry, originFallback }: JunctionResourceEntry,
@@ -4013,6 +4041,9 @@ function resolveJunctionDailyTimeseriesRow(
       );
   const resolvedRowDiagnostic = {
     ...rowDiagnostic,
+    ...(input.resource === "blood_oxygen"
+      ? junctionBloodOxygenValueDiagnostic(entry, numericProviderValue)
+      : {}),
     sourceProvider: normalizeKnownJunctionSourceProviderSlug(resourceContext.sourceProviderSlug),
     timestampKind: classifyJunctionNormalizationTimestampKind(
       timestamp.observedAtRaw ?? providerTimestamp,

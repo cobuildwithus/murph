@@ -5672,6 +5672,93 @@ test("device sync service retains one accepted companion RMSSD job until canonic
   }
 });
 
+test.each(["blood_oxygen", "electrocardiogram_voltage"])(
+  "Junction %s validation remains pending across exhaustion and restart until corrected",
+  async (resource) => {
+    const vaultRoot = await makeTempDirectory("murph-junction-validation-retry");
+    let now = new Date("2026-04-03T12:00:00.000Z");
+    let corrected = false;
+    let otherJobs = 0;
+    const createFixture = () => createServiceFixture({
+      secret: "secret-for-tests",
+      clock: { now: () => now },
+      config: { vaultRoot, publicBaseUrl: "https://sync.example.test", stateDatabasePath: path.join(vaultRoot, "state.sqlite") },
+      providers: [createFakeProvider({
+        provider: "junction",
+        descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+        async executeJob(_context, job) {
+          if (job.payload.resource !== resource) { otherJobs += 1; return {}; }
+          if (corrected) return {};
+          if (resource === "blood_oxygen") {
+            throw new JunctionSparseCalendarRepairNormalizationError({
+              reason: "daily.value_out_of_range", valueKind: "number",
+              valueRange: "zero", unitKind: "percent",
+            });
+          }
+          throw deviceSyncError({
+            code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+            message: "Synthetic incomplete ECG collection.", retryable: true,
+            details: { reason: "voltage_collection_empty", pageCount: 1, groupCount: 0,
+              providerMatchGroupCount: 0, instanceMatchGroupCount: 0, matchedGroupCount: 0 },
+          });
+        },
+      })],
+    });
+    let fixture = createFixture();
+    try {
+      const account = fixture.store.upsertAccount({
+        provider: "junction", externalAccountId: "junction-validation-retry",
+        displayName: "Junction", scopes: [], status: "active",
+        credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+        connectedAt: now.toISOString(),
+      });
+      const input = {
+        accountId: account.id, provider: "junction", kind: "resource", maxAttempts: 1,
+        availableAt: now.toISOString(), dedupeKey: "validation-resource-day",
+        payload: { resource, resourceCategory: "timeseries", sourceProviderSlug: "withings",
+          windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z" },
+      };
+      const original = fixture.store.enqueueJob(input);
+      for (let attempt = 1; attempt <= 6; attempt += 1) {
+        assert.equal((await fixture.service.runWorkerOnce())?.id, original.id);
+        const retained = fixture.store.getJobById(original.id);
+        assert.ok(retained);
+        assert.equal(retained.status, "queued");
+        assert.equal(retained.attempts, attempt);
+        assert.ok(retained.maxAttempts > retained.attempts);
+        assert.deepEqual(retained.payload, original.payload);
+        assert.equal(Date.parse(retained.availableAt) - now.getTime(), 30 * 60_000);
+        assert.equal(fixture.store.enqueueJob(input).id, original.id);
+        assert.equal(await fixture.service.runWorkerOnce(), null);
+        const diagnostic = fixture.service.listJobFailureDiagnostics().at(-1);
+        assert.equal(diagnostic?.details.validationRetryDelayMs, 30 * 60_000);
+        if (resource === "electrocardiogram_voltage") {
+          assert.equal(diagnostic?.details.junctionEcgGroupCount, 0);
+          assert.equal(diagnostic.details.providerHttpStatusSource, "local_validation");
+        }
+        if (attempt === 1) {
+          const other = fixture.store.enqueueJob({ ...input, dedupeKey: "other-resource",
+            payload: { ...input.payload, resource: "heartrate" } });
+          assert.equal((await fixture.service.runWorkerOnce())?.id, other.id);
+          assert.equal(fixture.store.getJobById(other.id)?.status, "succeeded");
+          fixture.close();
+          fixture = createFixture();
+          assert.equal(await fixture.service.runWorkerOnce(), null);
+        }
+        now = new Date(retained.availableAt);
+      }
+      corrected = true;
+      assert.equal((await fixture.service.runWorkerOnce())?.id, original.id);
+      assert.equal(fixture.store.getJobById(original.id)?.status, "succeeded");
+      assert.equal(otherJobs, 1);
+      assert.equal(fixture.store.getAccountById(account.id)?.lastErrorCode, null);
+    } finally {
+      fixture.close();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 test("device sync service retains one accepted sparse calendar job until canonical import succeeds", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-calendar-retained-import");
   let now = new Date("2026-07-10T13:46:00.000Z");
@@ -13123,6 +13210,9 @@ test.each([
             sourceProvider,
             timestampKind: "invalid",
             timestampSemantics: "unknown",
+            valueKind: "numeric_string",
+            valueRange: "above_percentage",
+            unitKind: "percent",
           });
         },
       }),
@@ -13148,6 +13238,9 @@ test.each([
         : {}),
       normalizationTimestampKind: "invalid",
       normalizationTimestampSemantics: "unknown",
+      normalizationValueKind: "numeric_string",
+      normalizationValueRange: "above_percentage",
+      normalizationUnitKind: "percent",
     });
   } finally {
     close();
@@ -13834,6 +13927,7 @@ test("device sync service preserves only safe Junction ECG binding diagnostics",
     assert.deepEqual(service.listJobFailureDiagnostics()[0]?.details, {
       ...expected,
       providerHttpStatus: 500,
+      providerHttpStatusSource: "local_validation",
     });
     assert.deepEqual(
       {

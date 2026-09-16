@@ -63,8 +63,9 @@ are specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
 Device-sync metadata priority within the existing bounded envelope is specified
-by `agent-docs/RELIABILITY.md`, including the service-owned finite ECG binding
-reason in hosted failure events; Junction's progress keys remain provider-owned.
+by `agent-docs/RELIABILITY.md`, including finite SpO2 categories, bounded ECG
+matching counts, retained validation retries, and resource completion counts;
+Junction's progress keys remain provider-owned.
 
 Runtime progress diagnostics (aggregate alerts, per-message warm/cold typing
 alerts with exact-chat silence resets, answered-input completion,

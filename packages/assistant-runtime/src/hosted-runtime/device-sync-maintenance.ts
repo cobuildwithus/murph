@@ -23,6 +23,8 @@ import type {
 } from "@murphai/device-syncd/types";
 import {
   JUNCTION_ECG_BINDING_REASONS,
+  JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT,
+  readSafeJunctionNormalizationDiagnostics,
   resolveDeviceSyncStoreNextJobWakeAt,
   type DeviceSyncService,
 } from "@murphai/device-syncd/service";
@@ -1535,6 +1537,7 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
         processedJobs: input.processedJobs,
         ...(input.lifecycle === "finished"
           ? {
+              ...summarizeJunctionMeasurementResourceOutcomes(input.jobTimingDiagnostics),
               ...buildHostedDeviceSyncPassProgressDiagnostics(input.input.wake, input.result),
               pendingJobCountAfter: queueSnapshotAfter?.jobCount ?? null,
               pendingJobCountAfterTruncated:
@@ -1591,6 +1594,26 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
     },
     platform: input.input.runtimeLogPlatform,
   });
+}
+
+function summarizeJunctionMeasurementResourceOutcomes(
+  diagnostics: readonly DeviceSyncJobTimingDiagnostic[],
+): Record<string, number> {
+  return Object.fromEntries([
+    ["blood_oxygen", "deviceSyncBloodOxygen"],
+    ["electrocardiogram_voltage", "deviceSyncEcg"],
+  ].flatMap(([resource, prefix]) => {
+    const matching = diagnostics.filter((item) => item.provider === "junction" && item.resource === resource);
+    if (matching.length === 0) return [];
+    return [
+      [`${prefix}CompletedJobCount`, matching.filter((item) => item.outcome === "completed").length],
+      [`${prefix}FailedJobCount`, matching.filter((item) => item.outcome === "failed").length],
+      [`${prefix}ImportAppliedCount`, matching.reduce((total, item) => total + item.snapshotImportOutcomes.applied, 0)],
+      [`${prefix}ImportNoopCount`, matching.reduce((total, item) => total + item.snapshotImportOutcomes.noop, 0)],
+      [`${prefix}ImportFailedCount`, matching.reduce((total, item) => total + item.snapshotImportOutcomes.failed, 0)],
+      [`${prefix}ImportUnknownCount`, matching.reduce((total, item) => total + item.snapshotImportOutcomes.unknown, 0)],
+    ];
+  }));
 }
 
 function buildHostedDeviceSyncPassProgressDiagnostics(
@@ -2049,6 +2072,14 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS = [
   "providerOAuthResponseErrorFieldPresent",
 ] as const satisfies readonly DeviceSyncFailureDiagnosticBooleanField[];
 
+const JUNCTION_ECG_DIAGNOSTIC_COUNT_FIELDS = [
+  "junctionEcgActualRecordingCount", "junctionEcgActualSampleCount",
+  "junctionEcgExpectedRecordingCount", "junctionEcgExpectedSampleCount",
+  "junctionEcgMaxRecordingCount", "junctionEcgMaxSampleCount",
+  "junctionEcgPageCount", "junctionEcgGroupCount", "junctionEcgProviderMatchGroupCount",
+  "junctionEcgInstanceMatchGroupCount", "junctionEcgMatchedGroupCount",
+] as const satisfies readonly DeviceSyncFailureDiagnosticNumberField[];
+
 function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
   diagnostic: DeviceSyncJobFailureDiagnostic,
 ): Record<string, boolean | number | string | null> {
@@ -2064,6 +2095,27 @@ function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
     && JUNCTION_ECG_BINDING_REASONS.has(ecgBindingReason)
   ) {
     redacted.junctionEcgBindingReason = ecgBindingReason;
+    for (const field of JUNCTION_ECG_DIAGNOSTIC_COUNT_FIELDS) {
+      const value = diagnostic.details[field];
+      if (typeof value === "number" && Number.isSafeInteger(value)
+        && value >= 0 && value <= JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT) {
+        redacted[field] = value;
+      }
+    }
+    redacted.providerHttpStatusSource = "local_validation";
+  }
+  if (diagnostic.code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION") {
+    Object.assign(redacted, readSafeJunctionNormalizationDiagnostics({
+      normalizationValueKind: diagnostic.details.normalizationValueKind,
+      normalizationValueRange: diagnostic.details.normalizationValueRange,
+      normalizationUnitKind: diagnostic.details.normalizationUnitKind,
+    }));
+  }
+  if (diagnostic.provider === "junction"
+    && (diagnostic.code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"
+      || diagnostic.code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE")
+    && diagnostic.details.validationRetryDelayMs === 30 * 60_000) {
+    redacted.validationRetryDelayMs = diagnostic.details.validationRetryDelayMs;
   }
 
   if (diagnostic.accountStatus) {
