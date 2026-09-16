@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-16",
+  "order": 100,
+  "item": {
+    "id": "faster-attachment-start",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting after sending an attachment",
+    "summary": "Murph can start working with a downloaded photo or file while its backup finishes in the background.",
+    "details": "This reduces the wait after sending attachments through Telegram or iMessage, including when backup storage is slow.",
+    "relevanceTags": ["messaging"],
+    "sourcePullRequests": []
+  }
+}

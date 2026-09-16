@@ -78,6 +78,7 @@ import {
   initializeVault,
 } from "@murphai/core";
 import { describe, expect, test, vi } from "vitest";
+import { persistCanonicalInboxCapture } from "@murphai/inboxd";
 
 import {
   HostedMailboxImportCheckpointConflictError,
@@ -5270,6 +5271,169 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
     }
   });
+
+  test.each([
+    { source: "telegram", image: true, fail: false },
+    { source: "telegram", image: true, fail: true },
+    { source: "linq", image: false, fail: false },
+    { source: "linq", image: false, fail: true },
+  ] as const)(
+    "starts the assistant before $source attachment backup (image=$image, fail=$fail)",
+    async ({ source, image, fail }) => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-attachment-start-"));
+      const uploadStarted = createDeferred<void>();
+      const uploadRelease = createDeferred<void>();
+      const assistantStarted = createDeferred<void>();
+      let followupCommitted = false;
+      const tracked: Promise<void>[] = [];
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const { mailboxPort } = createMailboxPort({ items: [createMailboxItem()] });
+      const bytes = image
+        ? Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cGfoAAAAASUVORK5CYII=", "base64")
+        : Buffer.from("Synthetic attachment contents\n");
+      let preparedBytes: Buffer | null = null;
+      let mediaUploadCount = 0;
+      const artifacts = new Map<string, Uint8Array>();
+      const holdUpload = async () => {
+        uploadStarted.resolve();
+        await uploadRelease.promise;
+        if (fail) throw new Error("Synthetic backup unavailable");
+      };
+      let attachmentPath: string | null = null;
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      await initializeVault({ vaultRoot, title: "Synthetic attachment vault", timezone: "UTC", createdAt: new Date(TEST_NOW) });
+      const platform = {
+        ...createPlatform({
+          artifactBytesByHash: artifacts,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+          async artifactPut(artifact) {
+            await holdUpload();
+            artifacts.set(artifact.sha256, artifact.bytes);
+          },
+        }),
+        mediaStore: {
+          async get() { return null; },
+          async put() { mediaUploadCount += 1; await holdUpload(); },
+        },
+      };
+      const operation = runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_attachment_start",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
+          attemptId: "attempt_synthetic_attachment_start",
+          checkpointRequests,
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          const capture = await persistCanonicalInboxCapture({
+            vaultRoot,
+            captureId: "cap_synthetic_attachment_start",
+            eventId: "evt_01JQ8PWXP5A68SQM1W0GYM41V4",
+            storedAt: TEST_NOW,
+            input: {
+              source,
+              externalId: "synthetic_attachment_message",
+              thread: { id: "synthetic_thread", isDirect: true },
+              actor: { isSelf: false },
+              occurredAt: TEST_NOW,
+              receivedAt: TEST_NOW,
+              text: "Read this attachment.",
+              attachments: [{
+                kind: image ? "image" : "document",
+                mime: image ? "image/png" : "text/plain",
+                fileName: image ? "sample.png" : "sample.txt",
+                data: bytes,
+              }],
+              raw: {},
+            },
+          });
+          attachmentPath = capture.stored.attachments[0]?.storedPath ?? null;
+          assert.ok(attachmentPath);
+          preparedBytes = await readFile(path.join(vaultRoot, attachmentPath));
+          if (image) {
+            assert.match(attachmentPath, /\.webp$/);
+            assert.equal(preparedBytes.subarray(8, 12).toString(), "WEBP");
+          } else {
+            assert.deepEqual(preparedBytes, bytes);
+          }
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform,
+        requestId: "request_synthetic_attachment_start",
+        trackLocalWorkspaceMutationCompletion(completion) {
+          if (completion) tracked.push(completion);
+        },
+        async runAssistantPhase() {
+          assert.ok(attachmentPath);
+          assert.deepEqual(await readFile(path.join(vaultRoot, attachmentPath)), preparedBytes);
+          assistantStarted.resolve();
+          if (fail) {
+            await uploadRelease.promise;
+          } else {
+            await applyCanonicalWriteBatch({
+              vaultRoot,
+              operationType: "synthetic_attachment_followup",
+              summary: "Save a synthetic attachment follow-up.",
+              audit: { action: "document_import", commandName: "test.followup", summary: "Save a synthetic note." },
+              textWrites: [{ relativePath: "bank/ordered-followup.md", content: "Follow-up\n" }],
+            });
+            followupCommitted = true;
+          }
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+      try {
+        await withTestTimeout(uploadStarted.promise, 5_000);
+        // The old importer cannot reach this boundary until uploadRelease.
+        await withTestTimeout(assistantStarted.promise, 5_000);
+        assert.equal(followupCommitted, false);
+        uploadRelease.resolve();
+        await operation;
+        await Promise.all(tracked);
+        assert.ok(attachmentPath);
+        assert.deepEqual(await readFile(path.join(vaultRoot, attachmentPath)), preparedBytes);
+        assert.equal(mediaUploadCount, image ? 1 : 0);
+        assert.equal(warn.mock.calls.some((call) => JSON.stringify(call).includes("persist inbox attachment backup")), fail);
+        if (!fail) {
+          assert.equal(followupCommitted, true);
+          assert.equal((await readHostedCanonicalWriteReceiptLog({
+            artifactStore: platform.artifactStore,
+            status: checkpointRequests.at(-1)?.redactedStatus,
+          })).entryCount, 2);
+          assert.ok([...artifacts.values()].some((value) =>
+            Buffer.from(value).toString().includes('"inbox_capture_persist"')
+          ));
+        }
+        // A failed best-effort backup must release canonical ownership.
+        await applyCanonicalWriteBatch({
+          vaultRoot,
+          operationType: "synthetic_followup",
+          summary: "Save a synthetic follow-up note.",
+          audit: { action: "document_import", commandName: "test.followup", summary: "Save a synthetic note." },
+          textWrites: [{ relativePath: "bank/followup.md", content: "Follow-up\n" }],
+        });
+      } finally {
+        uploadRelease.resolve();
+        await operation.catch(() => undefined);
+        await Promise.all(tracked);
+        warn.mockRestore();
+        await rm(vaultRoot, { force: true, recursive: true });
+      }
+    },
+  );
 
   test("runs staged mailbox projection effects before assistant input sampling without an extra checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));

@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, promises as fs, type Stats } from "node:fs";
 
-import { auditRecordSchema } from "@murphai/contracts";
+import { auditRecordSchema, inboxCaptureRecordSchema } from "@murphai/contracts";
 
 import {
   copyFileAtomic,
@@ -873,7 +873,7 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
     }
   }
 
-  if (await tryReconcileHostedCanonicalAuditAppend({
+  if (await tryReconcileHostedCanonicalIndependentAppend({
     bytes: input.bytes,
     comparisonOptions,
     existing,
@@ -889,7 +889,7 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   );
 }
 
-async function tryReconcileHostedCanonicalAuditAppend(input: {
+async function tryReconcileHostedCanonicalIndependentAppend(input: {
   bytes: Uint8Array;
   comparisonOptions: VaultPathComparisonOptions;
   existing: Uint8Array;
@@ -903,10 +903,18 @@ async function tryReconcileHostedCanonicalAuditAppend(input: {
     VAULT_LAYOUT.auditDirectory,
     input.comparisonOptions,
   );
-  if (
-    !comparisonRelativePath.startsWith(`${auditDirectory}/`) ||
-    !isJsonlRelativePath(input.target.relativePath, input.comparisonOptions)
-  ) {
+  const inboxDirectory = normalizeRelativeVaultPathForComparison(
+    VAULT_LAYOUT.inboxCaptureLedgerDirectory,
+    input.comparisonOptions,
+  );
+  // Best-effort inbox backups may omit an earlier capture. These immutable
+  // records, like audit records, can be replayed independently by identity.
+  const recordKind = comparisonRelativePath.startsWith(`${auditDirectory}/`)
+    ? "audit"
+    : comparisonRelativePath.startsWith(`${inboxDirectory}/`)
+      ? "inbox capture"
+      : null;
+  if (!recordKind || !isJsonlRelativePath(input.target.relativePath, input.comparisonOptions)) {
     return false;
   }
 
@@ -918,7 +926,7 @@ async function tryReconcileHostedCanonicalAuditAppend(input: {
   if (payloadLines.length !== 1 || payloadLines[0]?.length === 0) {
     return false;
   }
-  const incomingRecord = parseHostedAuditRecordLine(payloadLines[0]);
+  const incomingRecord = parseHostedIndependentAppendRecordLine(payloadLines[0], recordKind);
   if (!incomingRecord) {
     return false;
   }
@@ -934,14 +942,14 @@ async function tryReconcileHostedCanonicalAuditAppend(input: {
     if (line.length === 0) {
       return false;
     }
-    const record = parseHostedAuditRecordLine(line);
+    const record = parseHostedIndependentAppendRecordLine(line, recordKind);
     if (!record) {
       return false;
     }
     if (existingRecordIds.has(record.id)) {
       throw new VaultError(
         "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
-        "Hosted canonical audit replay found a duplicate existing audit record ID.",
+        `Hosted canonical ${recordKind} replay found a duplicate existing ${recordKind} record ID.`,
       );
     }
     existingRecordIds.add(record.id);
@@ -954,7 +962,7 @@ async function tryReconcileHostedCanonicalAuditAppend(input: {
     if (JSON.stringify(matchingRecord) !== JSON.stringify(incomingRecord)) {
       throw new VaultError(
         "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
-        "Hosted canonical audit replay found conflicting content for an existing audit record ID.",
+        `Hosted canonical ${recordKind} replay found conflicting content for an existing ${recordKind} record ID.`,
       );
     }
     return true;
@@ -964,15 +972,19 @@ async function tryReconcileHostedCanonicalAuditAppend(input: {
   return true;
 }
 
-function parseHostedAuditRecordLine(line: string) {
+function parseHostedIndependentAppendRecordLine(line: string, kind: "audit" | "inbox capture") {
   let value: unknown;
   try {
     value = JSON.parse(line);
   } catch {
     return null;
   }
+  if (kind === "inbox capture") {
+    const result = inboxCaptureRecordSchema.safeParse(value);
+    return result.success ? { id: result.data.captureId, record: result.data } : null;
+  }
   const result = auditRecordSchema.safeParse(value);
-  return result.success ? result.data : null;
+  return result.success ? { id: result.data.id, record: result.data } : null;
 }
 
 function isArchivedIntegrationIngestAppendError(
