@@ -116,6 +116,11 @@ the timing correction is tracked in
 The live v2 checkpoint and canonical-replica freshness correction is tracked in
 [`2026-09-14-canary-replica-freshness.md`](exec-plans/completed/2026-09-14-canary-replica-freshness.md).
 
+Startup mailbox-fetch overlap is tracked in
+[`2026-09-15-mailbox-startup-batch.md`](exec-plans/completed/2026-09-15-mailbox-startup-batch.md).
+Its cursor-hint, recovery and wake-invalidation contract is owned by
+`agent-docs/references/hosted-runtime-protocol.md`.
+
 Foreground promotion batch reuse and completion/wake race preservation are owned
 by `agent-docs/references/hosted-runtime-protocol.md`; focused admission, import
 overlap, and recovery proof is indexed in `agent-docs/references/testing-ci-map.md`.

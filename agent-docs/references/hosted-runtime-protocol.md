@@ -3793,6 +3793,24 @@ the warm idle window; actual cleanup failures use the provider-cleanup retry
 delay. Post-checkpoint delivery and provider-cleanup drains recompute cleanup
 wakes from the post-side-effect state, not from a pre-side-effect base wake.
 
+On an established default invocation, container preparation overlaps the ordinary
+write-fenced mailbox fetch with workspace restore. The versioned workspace's
+explicit conversation and system imported watermarks are speculative hints only;
+missing or malformed hints leave fetching with the restored importer. The
+lightweight mailbox-prefetch module shares the existing batch limit, lane order,
+and cursor matcher without loading the full runtime before restore. No message
+content is added to direct ensure, Temporal, or the launch-job contract.
+
+After restore, reuse requires matching local watermarks, lanes and batch limit.
+Bootstrap, canonical-receipt recovery fallback, and an already-pending startup
+wake discard the candidate. Provider/custom-inference observation runs only on a
+selected response. Fetch failures retain the importer's ordinary retry, while
+cancellation propagates through the existing invocation signal. A match uses the
+same request count with overlapping waits; a discarded or failed speculative
+request can add one bounded fetch. Existing Web policy, Worker inline decoding,
+sidecar reads, consumed replay, system barriers and checkpoint ownership remain
+unchanged. Active-runtime followups keep their existing fetch/prefetch behavior.
+
 Live hosted workspace restore accepts a v2 direct-R2 snapshot ref or null
 bootstrap state. Pre-v2 full/base, working `{base, delta}`, and layered
 `{base, hot}` refs fail before local mutation or artifact reads. Shared legacy
