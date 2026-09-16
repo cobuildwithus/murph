@@ -125,6 +125,11 @@ Startup mailbox-fetch overlap is tracked in
 Its cursor-hint, recovery and wake-invalidation contract is owned by
 `agent-docs/references/hosted-runtime-protocol.md`.
 
+Attachment turns starting before remote backup are tracked in
+[`2026-09-16-attachment-fast-start.md`](exec-plans/completed/2026-09-16-attachment-fast-start.md).
+Its best-effort backup, canonical-write contention retry, and inbox capture
+replay contract is owned by `agent-docs/references/hosted-runtime-protocol.md`.
+
 Foreground promotion batch reuse and completion/wake race preservation are owned
 by `agent-docs/references/hosted-runtime-protocol.md`; focused admission, import
 overlap, and recovery proof is indexed in `agent-docs/references/testing-ci-map.md`.

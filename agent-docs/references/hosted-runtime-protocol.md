@@ -3719,11 +3719,35 @@ retry the same source events without leaving duplicate transcript history.
 Final-delivery and hosted-tool effect keys use the newest accepted causal input
 as the stable
 replay anchor while the full answered-mailbox set remains attached as evidence.
-When mailbox import produces or reuses a canonical write receipt, the runner
+Mailbox attachment captures become replyable after download, normalization,
+local canonical storage, and attachment-evidence staging. Their media and receipt
+uploads run in the background and are best effort: upload failure does not roll
+back the local file or block provider start. The existing canonical write lock
+keeps that publication ordered with later canonical writes, and the invocation
+tracks its completion before replacing or releasing the workspace. A later
+snapshot can preserve a capture whose immediate backup failed. A crash before
+backup and checkpoint may lose that copy.
+
+Inbox capture receipt replay, like audit replay, reconciles a missing append
+prefix by immutable record identity. This lets a later successful backup restore
+without an earlier failed backup. It rejects malformed records, duplicate IDs,
+and conflicting contents; other canonical ledger append guards remain strict.
+The runtime reader and writer ship together. A rollback to a reader without inbox
+reconciliation may reject a receipt chain with an omitted capture and fall back
+to its snapshot; complete a current-reader snapshot before such a rollback.
+
+When ordinary mailbox import produces or reuses a canonical write receipt, the runner
 publishes the receipt-log fingerprint and the advanced imported watermark in
 the same status checkpoint. That progress checkpoint is still required when
 the receipt fingerprint is already durable: receipt durability proves the
-canonical write, not the corresponding mailbox watermark.
+canonical write, not the corresponding mailbox watermark. Pending attachment
+backups are excluded from the provider-start barrier. A completed attachment
+backup publishes its receipt status before releasing canonical write ownership,
+so a later writer observes the same receipt chain. A later attachment capture
+whose commit times out behind that outstanding backup stays a retryable
+mailbox block (`conversation-import.canonical-write-busy`): the item keeps its
+watermark position, records no terminal attachment evidence, admits no reply,
+and retries through the ordinary mailbox retry path.
 Receipt replay is fail-stop for each restore attempt. The encrypted R2 reader
 owns artifact failure disposition: transport, object-read, key-resolution
 request, and service failures remain retryable, while a persisted object with
