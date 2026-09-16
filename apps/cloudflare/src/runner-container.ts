@@ -986,7 +986,7 @@ export class RunnerContainer extends Container {
   }
 
   private async recordRuntimeFailureBeforeStop(request: { userId: string; attemptId: string; leaseGeneration: string }, error: unknown): Promise<void> {
-    if (!usesPostgresRuntimeOwner(this.environment)) return;
+    if (!await usesPostgresRuntimeOwner(this.environment, request.userId)) return;
     const phaseCode = readRunnerContainerErrorDetails(error)?.[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY];
     await commandHostedRuntimeOwner({ source: this.environment, userId: request.userId, timeoutMs: 1_000,
       command: { operation: "record_failure", attemptId: request.attemptId, generation: request.leaseGeneration,
@@ -2197,7 +2197,7 @@ export class RunnerContainer extends Container {
     binding: Extract<HostedStandbySlotBinding, { state: "bound" }>,
   ): Promise<void> {
     try {
-      if (usesPostgresRuntimeOwner(this.environment)) {
+      if (await usesPostgresRuntimeOwner(this.environment, binding.userId)) {
         await commandHostedRuntimeOwner({ source: this.environment, userId: binding.userId, command: { operation: "target_retired", runnerContainerName: binding.slotName } });
         return;
       }

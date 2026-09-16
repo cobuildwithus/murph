@@ -43,6 +43,11 @@ export class LegacyRuntimeFreeze {
     return operation;
   }
 
+  async observe(): Promise<{ phase: FreezeRecord["phase"] | null; pendingOperations: number }> {
+    await this.loaded;
+    return { phase: this.phase, pendingOperations: this.pending.size };
+  }
+
   async freeze(input: { stop: () => Promise<void>; drained: () => Promise<boolean> }): Promise<boolean> {
     await this.loaded;
     if (this.phase === "frozen") return true;

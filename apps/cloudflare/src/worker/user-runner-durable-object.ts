@@ -1,4 +1,5 @@
 import { commandHostedRuntimeMigration } from "../runtime-migration-client.ts";
+import { observeLegacyRuntime } from "../user-runner/legacy-runtime-observation.ts";
 import { requireLegacyRuntimeStorageCoverage, readLegacyRuntimeMigrationIdentity, readLegacyRuntimeExportPage, type LegacyRuntimeExportCursor } from "../user-runner/legacy-runtime-export.ts";
 import { LegacyRuntimeFreeze, LegacyRuntimeFrozenError } from "../user-runner/legacy-runtime-freeze.ts";
 import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
@@ -41,7 +42,8 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     userRunnerConstructorFinishedAtEpochMs: number;
   };
   private userRunnerFirstEnsureRuntimeProcessingAtEpochMs: number | null = null;
-  private readonly runner: HostedUserRunner;
+  private initializedRunner: HostedUserRunner | undefined;
+  private readonly trackedState: DurableObjectStateLike;
   private readonly migrationFreeze: LegacyRuntimeFreeze;
   private readonly source: WorkerEnvironmentSource;
   private readonly migrationState: DurableObjectStateLike;
@@ -56,14 +58,23 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     this.source = env;
     this.migrationState = state;
     this.migrationFreeze = new LegacyRuntimeFreeze(state);
-    const trackedState: DurableObjectStateLike = { storage: state.storage, waitUntil: promise => {
+    this.trackedState = { storage: state.storage, waitUntil: promise => {
       state.waitUntil(this.migrationFreeze.track(promise));
     } };
-    this.runner = runner ?? createHostedUserRunner(trackedState, env);
+    this.initializedRunner = runner;
     this.activationTiming = {
       userRunnerConstructorStartedAtEpochMs,
       userRunnerConstructorFinishedAtEpochMs: Date.now(),
     };
+  }
+
+  private get runner(): HostedUserRunner {
+    return this.initializedRunner ??= createHostedUserRunner(this.trackedState, this.source);
+  }
+
+  async inspectPostgresMigration() {
+    const observation = await observeLegacyRuntime(this.migrationState);
+    return { ...observation, freeze: await this.migrationFreeze.observe() };
   }
 
   async bindUser(userId: string): Promise<{ userId: string }> {
@@ -246,16 +257,19 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     if (!gate || typeof gate !== "object" || !("phase" in gate) || gate.phase !== "draining") {
       throw new Error("Legacy freeze requires the durable draining gate.");
     }
+    // The legacy fleet protocol initialized the schema on construction. Keep
+    // that mutation at its authorized freeze entry, never at live inspection.
+    const runner = this.runner;
     // Derive identity from this exact object, including resource-only records.
     return { frozen: await this.migrationFreeze.freeze({
       stop: async () => {
         const { userId } = await readLegacyRuntimeMigrationIdentity(this.migrationState);
-        if (userId) await this.runner.stopLegacyRuntimeForMigration(userId);
+        if (userId) await runner.stopLegacyRuntimeForMigration(userId);
       },
       drained: async () => {
         await requireLegacyRuntimeStorageCoverage(this.migrationState);
         const { userId } = await readLegacyRuntimeMigrationIdentity(this.migrationState);
-        return userId === null || this.runner.legacyRuntimeUploadsDrained(userId);
+        return userId === null || runner.legacyRuntimeUploadsDrained(userId);
       },
     }) };
   }

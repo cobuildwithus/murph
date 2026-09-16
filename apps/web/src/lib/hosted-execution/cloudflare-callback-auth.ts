@@ -72,7 +72,7 @@ export async function requireHostedCloudflareCallbackRequest(
   const legacyRuntimeHeaders = request.headers.has("x-hosted-runtime-attempt-id")
     || request.headers.has("x-hosted-runtime-lease-generation");
   if ((authority || legacyRuntimeHeaders) && options.runtimeAuthority !== "caller_transaction") {
-    await getPrisma().$transaction((tx) => requireHostedRuntimeCallbackTx(tx, authority ? { ...authority, userId } : null));
+    await getPrisma().$transaction((tx) => requireHostedRuntimeCallbackTx(tx, userId, authority ? { ...authority, userId } : null));
   }
   return userId;
 }

@@ -140,7 +140,7 @@ describe("cloudflare worker queue backpressure routes", () => {
       orchestration: {
         cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T11:59:59.900Z"),
         userRunnerConstructorStartedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
-        userRunnerConstructorFinishedAtEpochMs: Date.parse("2026-08-06T12:00:00.025Z"),
+        userRunnerConstructorFinishedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
         userRunnerFirstEnsureRuntimeProcessingAtEpochMs: Date.parse("2026-08-06T12:00:01.000Z"),
         userRunnerRpcStartedAtEpochMs: Date.parse("2026-08-06T12:00:01.000Z"),
       },
@@ -151,7 +151,7 @@ describe("cloudflare worker queue backpressure routes", () => {
       orchestration: {
         cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T12:00:01.900Z"),
         userRunnerConstructorStartedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
-        userRunnerConstructorFinishedAtEpochMs: Date.parse("2026-08-06T12:00:00.025Z"),
+        userRunnerConstructorFinishedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
         userRunnerFirstEnsureRuntimeProcessingAtEpochMs: Date.parse("2026-08-06T12:00:01.000Z"),
         userRunnerRpcStartedAtEpochMs: Date.parse("2026-08-06T12:00:02.000Z"),
       },
@@ -175,6 +175,33 @@ describe("cloudflare worker queue backpressure routes", () => {
     await expect(harness.durableObject.bindUser("member_123")).rejects.toThrow("frozen");
     await expect(harness.durableObject.alarm()).resolves.toBeUndefined();
     expect(alarm).not.toHaveBeenCalled();
+  });
+
+  it("authenticates exact-object inspection without enabling or freezing migration", async () => {
+    const harness = createUserRunnerDurableObject({
+      CF_VERSION_METADATA: { id: "synthetic-version" },
+      HOSTED_RUNTIME_POSTGRES_ENABLED: "false",
+    });
+    const inspect = vi.spyOn(harness.durableObject, "inspectPostgresMigration");
+    const freeze = vi.spyOn(harness.durableObject, "freezeForPostgresMigration");
+    const control = vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration");
+    const objectId = "a".repeat(64);
+    const get = vi.fn(() => harness.durableObject);
+    const env = { ...harness.env, USER_RUNNER: { get, idFromString: (id: string) => id } };
+    const request = () => new Request("https://runner.example.test/internal/runtime-migration", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ operation: "inspect_object", objectId, namespaceId: "synthetic-namespace", workerVersion: "synthetic-version" }),
+    });
+    const denied = await worker.fetch(request(), env as never);
+    expect(denied.status).toBe(401);
+    expect(get).not.toHaveBeenCalled();
+    const response = await worker.fetch(await signControlRequest(request()), env as never);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ objectId, observation: { kind: "unsupported_schema" } });
+    expect(get).toHaveBeenCalledWith(objectId);
+    expect(inspect).toHaveBeenCalledOnce();
+    expect(freeze).not.toHaveBeenCalled();
+    expect(control).not.toHaveBeenCalled();
   });
 
   it("forwards managed AI revocation through the UserRunner Durable Object", async () => {

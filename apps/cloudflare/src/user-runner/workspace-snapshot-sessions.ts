@@ -1015,6 +1015,15 @@ export async function readHostedBrowserVaultReplicaPostStopDrainUntil(input: {
   return recoveryDrainUntil;
 }
 
+/** Live inspection must not start or expire the post-stop recovery clock. */
+export async function observeHostedBrowserVaultReplicaDirectPuts(input: {
+  state: DurableObjectStateLike;
+  userId: string;
+}): Promise<{ pendingWrites: number; recoveryDrainUntil: string | null }> {
+  const active = await readBrowserVaultReplicaActivePutState(input);
+  return { pendingWrites: active?.writes.length ?? 0, recoveryDrainUntil: active?.recoveryDrainUntil ?? null };
+}
+
 async function readBrowserVaultReplicaActivePutState(input: {
   state: DurableObjectStateLike;
   userId: string;

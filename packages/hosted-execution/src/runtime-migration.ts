@@ -1,4 +1,32 @@
-import { requireObject, requireString } from "./parsers/assertions.ts";
+import { parseAllowedString, requireObject, requireString } from "./parsers/assertions.ts";
+
+export const HOSTED_RUNTIME_MEMBER_MIGRATION_PHASES = [
+  "legacy", "quiescing", "freezing", "importing", "postgres",
+] as const;
+export type HostedRuntimeMemberMigrationPhase =
+  (typeof HOSTED_RUNTIME_MEMBER_MIGRATION_PHASES)[number];
+export type HostedRuntimeBackend = "legacy" | "draining" | "postgres";
+
+export function parseHostedRuntimeMemberMigrationPhase(value: unknown): HostedRuntimeMemberMigrationPhase {
+  return parseAllowedString(value, "Member runtime migration phase", HOSTED_RUNTIME_MEMBER_MIGRATION_PHASES);
+}
+
+/** A route is a hint, not admission. Quiescing keeps the legacy backend for
+ * the current attempt's checkpoint; local admission rejects new attempts.
+ * Missing member state remains legacy throughout the rolling campaign.
+ */
+export function resolveHostedRuntimeMemberBackend(
+  campaignPhase: string,
+  memberPhase: string | null,
+): HostedRuntimeBackend {
+  if (campaignPhase === "legacy" || campaignPhase === "draining" || campaignPhase === "postgres") {
+    return campaignPhase;
+  }
+  if (campaignPhase !== "rolling") throw new Error("Unknown runtime migration campaign phase.");
+  const phase = memberPhase === null ? "legacy" : parseHostedRuntimeMemberMigrationPhase(memberPhase);
+  if (phase === "legacy" || phase === "quiescing") return "legacy";
+  return phase === "postgres" ? "postgres" : "draining";
+}
 
 /** Finite fleet migration protocol; never carries live runtime authority. */
 export const HOSTED_RUNTIME_MIGRATION_PATH = "/api/internal/hosted-runtime/migration";
@@ -15,11 +43,31 @@ export interface LegacyRuntimeExportPage {
   hash: string;
 }
 export interface HostedRuntimeMigrationIdentity { namespaceId: string; workerVersion: string }
+/** Observational only: a live scan does not establish a handoff barrier. */
+export type LegacyRuntimeObservation =
+  | { kind: "unsupported_schema"; schemaVersion: number | null }
+  | {
+    kind: "observed";
+    schemaVersion: number | null;
+    userId: string | null;
+    generation: string;
+    activeAttemptId: string | null;
+    activeRunnerContainerName: string | null;
+    workspaceVersion: string | null;
+    snapshotPutDrainUntil: string | null;
+    replicaPendingWrites: number;
+    replicaRecoveryDrainUntil: string | null;
+    observedAt: string;
+  };
+export type LegacyRuntimeInspection = LegacyRuntimeObservation & {
+  freeze: { phase: "freezing" | "frozen" | null; pendingOperations: number };
+};
 export type HostedRuntimeMigrationCommand =
   | { operation: "status" }
   | ({ operation: "begin" } & HostedRuntimeMigrationIdentity)
   | ({ operation: "inventory"; after: string; objectIds: string[]; complete: boolean } & HostedRuntimeMigrationIdentity)
   | ({ operation: "read_object"; objectId: string } & HostedRuntimeMigrationIdentity)
+  | ({ operation: "inspect_object"; objectId: string } & HostedRuntimeMigrationIdentity)
   | ({ operation: "import"; objectId: string; page: LegacyRuntimeExportPage } & HostedRuntimeMigrationIdentity)
   | ({ operation: "activate"; inventoryHash: string; inventoryCount: number } & HostedRuntimeMigrationIdentity);
 
@@ -57,7 +105,8 @@ export function parseHostedRuntimeMigrationCommand(value: unknown): HostedRuntim
       return { operation: "inventory", ...identity, after: record.after === "" ? "" : migrationDigest(record.after),
         objectIds: record.objectIds.map(migrationDigest), complete: record.complete };
     }
-    case "read_object": return { operation: "read_object", ...identity, objectId: migrationDigest(record.objectId) };
+    case "read_object":
+    case "inspect_object": return { operation: record.operation, ...identity, objectId: migrationDigest(record.objectId) };
     case "import": return { operation: "import", ...identity, objectId: migrationDigest(record.objectId), page: parseLegacyRuntimeExportPage(record.page) };
     case "activate": {
       if (typeof record.inventoryCount !== "number" || !Number.isSafeInteger(record.inventoryCount) || record.inventoryCount < 0) throw new TypeError("Migration inventory count is invalid.");

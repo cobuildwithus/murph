@@ -18,24 +18,28 @@ import type { LegacyRuntimeExportCursor, LegacyRuntimeExportPage } from "@murpha
 export async function readLegacyRuntimeMigrationIdentity(state: DurableObjectStateLike): Promise<{ userId: string | null; generation: string }> {
   const sql = state.storage.sql;
   if (!sql) throw new Error("Legacy runtime migration requires SQLite storage.");
-  const meta = sql.exec<{ user_id: string; active_generation: number; active_attempt_id: string | null; active_runner_container_name: string | null }>(
+  const tables = new Set(sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('runner_meta', 'runner_hosted_media_asset')").toArray().map(row => row.name));
+  const meta = tables.has("runner_meta") ? sql.exec<{ user_id: string; active_generation: number; active_attempt_id: string | null; active_runner_container_name: string | null }>(
     "SELECT user_id, active_generation, active_attempt_id, active_runner_container_name FROM runner_meta WHERE singleton = 1",
-  ).toArray()[0];
+  ).toArray()[0] : undefined;
+  const members = new Set<string>();
   if (meta) {
     if (!Number.isSafeInteger(meta.active_generation) || meta.active_generation < 0) throw new Error("Legacy runtime generation is invalid.");
-    return { userId: meta.user_id, generation: String(meta.active_generation) };
+    members.add(meta.user_id);
   }
-  const members = new Set(sql.exec<{ user_id: string }>("SELECT DISTINCT user_id FROM runner_hosted_media_asset LIMIT 2").toArray().map(row => row.user_id));
+  if (tables.has("runner_hosted_media_asset")) {
+    for (const row of sql.exec<{ user_id: string }>("SELECT DISTINCT user_id FROM runner_hosted_media_asset LIMIT 2").toArray()) members.add(row.user_id);
+  }
   if (!state.storage.list) throw new Error("Legacy runtime migration requires bounded storage listing.");
   for (const prefix of [...EXPORT_KV_PREFIXES, ...DRAIN_KEYS]) {
     const records = await state.storage.list<unknown>({ prefix, limit: 1 });
     for (const value of records.values()) {
-      if (!value || typeof value !== "object" || !("userId" in value) || typeof value.userId !== "string") throw new Error("Legacy resource member identity is missing.");
+      if (!value || typeof value !== "object" || !("userId" in value) || typeof value.userId !== "string" || !value.userId) throw new Error("Legacy resource member identity is missing.");
       members.add(value.userId);
     }
   }
   if (members.size > 1) throw new Error("Legacy runtime contains conflicting member identities.");
-  return { userId: members.values().next().value ?? null, generation: "0" };
+  return { userId: members.values().next().value ?? null, generation: String(meta?.active_generation ?? 0) };
 }
 
 /** Caller holds the durable completed freeze. Keyset pages avoid loading an
@@ -77,16 +81,21 @@ async function readResourcePage(state: DurableObjectStateLike, prefix: string, a
 
 /** Fail closed on unclassified durable KV state. This finite scan is paginated;
  * resources themselves are exported separately in resumable pages. */
-export async function requireLegacyRuntimeStorageCoverage(state: DurableObjectStateLike): Promise<void> {
+export async function requireLegacyRuntimeStorageCoverage(state: DurableObjectStateLike): Promise<Set<string>> {
   if (!state.storage.list) throw new Error("Legacy migration requires bounded storage listing.");
+  const members = new Set<string>();
   let after = "";
   for (;;) {
     const page = await state.storage.list<unknown>({ limit: PAGE_SIZE, ...(after ? { startAfter: after } : {}) });
-    for (const key of page.keys()) {
-      if (key !== "runtime-migration-freeze:v1" && !DRAIN_KEYS.includes(key)
+    for (const [key, value] of page) {
+      if (key === "runtime-migration-freeze:v1") continue;
+      if (!DRAIN_KEYS.includes(key)
         && !EXPORT_KV_PREFIXES.some(prefix => key.startsWith(prefix))) throw new Error("Legacy migration encountered unclassified durable state.");
+      if (!value || typeof value !== "object" || !("userId" in value) || typeof value.userId !== "string" || !value.userId) throw new Error("Legacy resource member identity is missing.");
+      members.add(value.userId);
+      if (members.size > 1) throw new Error("Legacy runtime contains conflicting member identities.");
     }
-    if (page.size < PAGE_SIZE) return;
+    if (page.size < PAGE_SIZE) return members;
     const next = [...page.keys()].at(-1)!;
     if (next <= after) throw new Error("Legacy storage listing did not advance.");
     after = next;

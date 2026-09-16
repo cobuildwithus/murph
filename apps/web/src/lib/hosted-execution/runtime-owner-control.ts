@@ -1,3 +1,4 @@
+import { readHostedRuntimeMemberBackend } from "./runtime-cutover";
 import { reconcileHostedRuntimeUploads } from "./runtime-upload-recovery";
 import type { HostedRuntimeOwner, PrismaClient } from "@prisma/client";
 import { parseHostedRuntimeOwnerResponse, type HostedRuntimeOwnerCommand, type HostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
@@ -15,8 +16,8 @@ type IdentityCommand = Extract<HostedRuntimeOwnerCommand, { attemptId: string }>
 /** Coarse ownership commands. Container and provider work stays in the Worker. */
 export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Promise<HostedRuntimeOwnerResponse> {
   const result = await executeCommand(input);
-  const cutover = await input.prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
-  return parseHostedRuntimeOwnerResponse({ cutover: cutover.phase, status: result.status, owner: projectOwner(result.owner) });
+  const cutover = await readHostedRuntimeMemberBackend(input.prisma, input.userId);
+  return parseHostedRuntimeOwnerResponse({ cutover, status: result.status, owner: projectOwner(result.owner) });
 }
 
 async function executeCommand(input: CommandInput): Promise<CommandResult> {

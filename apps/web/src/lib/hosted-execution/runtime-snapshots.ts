@@ -1,3 +1,4 @@
+import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
 import { Prisma, type PrismaClient, type HostedRuntimeSnapshotUpload } from "@prisma/client";
 import { HOSTED_RUNTIME_ORPHAN_GRACE_MS, type HostedRuntimeSnapshotCommand, type HostedRuntimeSnapshotResponse } from "@murphai/hosted-execution/runtime-resources";
@@ -5,7 +6,7 @@ import { HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA, parseHostedWorkspaceSn
 import { isHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
 import { parseHostedRuntimeOwnerIdentity } from "@murphai/hosted-execution/runtime-owner";
 import { recordRuntimeOrphansTx, snapshotOrphanCandidates } from "./runtime-orphans";
-import { lockHostedRuntimeCutoverTx, requireHostedRuntimeOwnerTx } from "./runtime-owner";
+import { requireHostedRuntimeOwnerTx } from "./runtime-owner";
 
 /** All session state, ownership, and capability drains commit together. R2 and
  * encryption stay in the Worker before/after these database-only commands.
@@ -29,7 +30,7 @@ export async function executeHostedRuntimeSnapshotCommand(input: {
     : { ...command, userId: input.userId };
   const runtimeIdentity = { userId: input.userId, ...parseHostedRuntimeOwnerIdentity(identity) };
   return input.prisma.$transaction(async (tx) => {
-    const cutover = await lockHostedRuntimeCutoverTx(tx);
+    const cutover = await lockHostedRuntimeMemberCutoverTx(tx, input.userId);
     if (cutover !== "postgres") return { cutover, applied: false, session: null };
     await requireHostedRuntimeOwnerTx(tx, runtimeIdentity);
     const current = await tx.hostedRuntimeSnapshotUpload.findUnique({ where: { userId: input.userId } });
