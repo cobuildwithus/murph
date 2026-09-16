@@ -129,3 +129,23 @@ or compatibility store. Core lookup/import/scheduled-log suites passed 185 tests
 core/CLI typechecks and complexity passed. The extended typed CLI proof exercises
 legacy rows on initial creation and retry, destination timezone, member correction,
 and deleted-plan refusal. Round 2 will review the complete corrected patch.
+
+
+## Round 2 and CI packaging correction
+
+Verified Pro round 2 passed on `4cb5f93fdf696d79c39a83a5f99be09f6f316f39`:
+no remaining Critical, High, or Complexity Collapse findings. The marked response
+confirmed the accepted lookup correction and reviewed the full corrected patch,
+including restore/replay and audience boundaries. Same accepted conversation,
+exact captured turn/model, full guarded snapshot, and minimum response time passed.
+
+CI identified a direct Zod root import in the new projector. It violated the
+existing workspace boundary and pulled the locale catalog into runner startup.
+Use the existing `@murphai/contracts/zod-runtime` namespace instead; no schema or
+product behavior changes. All 32 focused snapshot/projector tests and engine
+typecheck passed. Full production runner assembly passed: entry 71430 bytes,
+static closure 2050664 bytes across 24 chunks, total 12170868 bytes. The workspace
+boundary check passed after assembly. Concurrent scanning had raced a generated
+old-output directory; task-owned Frog entry records that independent tooling issue.
+Round 3 reviews this final packaging correction on its pushed head; CI must still
+pass on the final authored head.

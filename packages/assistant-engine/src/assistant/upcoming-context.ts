@@ -9,7 +9,7 @@ import {
   visitEventLedgerShardRecordsInterruptible,
 } from '@murphai/core'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import { buildKnowledgePageRelativePath, normalizeKnowledgeBody } from '../knowledge/documents.js'
 
 export const CONNECTED_CONTEXT_LEDGER_SLUG = 'journal-connected-context'
