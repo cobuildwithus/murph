@@ -71,7 +71,7 @@ export async function handleRunnerPrivateImageUrlPublishRequest(input: {
   try {
     const publication = { attemptId: writeFence.attemptId, generation: writeFence.generation,
       userId: input.userId, bytes, contentType: request.contentType };
-    const staged = usesPostgresRuntimeOwner(input.env)
+    const staged = (await usesPostgresRuntimeOwner(input.env, input.userId))
       ? await publishPostgresRuntimePrivateMedia({ ...publication, source: input.env })
       : await publishLegacyPrivateMedia(input.env, publication);
     if (!staged.ok) {

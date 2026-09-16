@@ -1,3 +1,4 @@
+import { InitialPasskeySetupView } from "@/src/components/settings/hosted-passkey-settings";
 import { ApprovalPasskeyStatus, ApprovalPasskeyUpdate } from "@/src/components/settings/approval-passkey-status";
 
 export function ApprovalPasskeyStudy() {
@@ -22,6 +23,15 @@ export function ApprovalPasskeyStudy() {
         <p className="mb-4 text-xs text-muted-foreground">Updated</p>
         <ApprovalPasskeyStatus />
         <ApprovalPasskeyUpdate error={null} registered />
+      </div>
+      <div className="rounded-2xl border border-border bg-background p-5">
+        <p className="mb-4 text-xs text-muted-foreground">Legacy approval update — synthetic account</p>
+        <InitialPasskeySetupView enrollmentEnabled legacyRepair pending={false} registered={false} error={null} />
+      </div>
+      <div className="rounded-2xl border border-border bg-background p-5">
+        <p className="mb-4 text-xs text-muted-foreground">Legacy update — confirming sign-in</p>
+        <InitialPasskeySetupView enrollmentEnabled legacyRepair pending registered={false} error={null}
+          pendingLabel="Sign in again to add your passkey…" />
       </div>
     </div>
   );

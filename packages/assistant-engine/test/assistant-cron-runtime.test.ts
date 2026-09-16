@@ -6438,11 +6438,6 @@ describe('assistant cron runtime orchestration', () => {
       occurrenceAt: '2026-04-08T08:00:00.000Z',
     },
     {
-      automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
-      name: 'Journal afternoon',
-      occurrenceAt: '2026-04-08T16:00:00.000Z',
-    },
-    {
       automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
       name: 'Personal Patterns',
       occurrenceAt: '2026-04-08T13:00:00.000Z',
@@ -6550,12 +6545,6 @@ describe('assistant cron runtime orchestration', () => {
       hasAccount: false,
     },
     {
-      automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
-      name: 'Journal afternoon without accounts',
-      occurrenceAt: '2026-04-08T16:00:00.000Z',
-      hasAccount: false,
-    },
-    {
       automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
       name: 'Journal morning with a new account',
       occurrenceAt: '2026-04-08T08:00:00.000Z',
@@ -6606,7 +6595,7 @@ describe('assistant cron runtime orchestration', () => {
     if (hasAccount) {
       expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
-          instructions: expect.stringContaining('timeMax: 2026-04-09T20:00:00.000Z'),
+          instructions: expect.stringContaining('timeMax: 2026-04-22T08:00:00.000Z'),
           scheduledInvocationAuthority: { automationId, occurrenceAt },
           serviceTier: 'flex',
         }),
@@ -10616,14 +10605,17 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
-  it('skips a persisted Sunday superlatives occurrence after the seed is retired', async () => {
+  it.each([
+    { automationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ', slug: 'group-sunday-superlatives', threadIsDirect: false },
+    { automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID, slug: 'journal-connected-context-afternoon', threadIsDirect: true },
+  ])('skips a persisted $slug occurrence after the seed is retired', async ({ automationId, slug, threadIsDirect }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-retired-sunday-superlatives-',
     )
     getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ',
+      automationId,
       continuityPolicy: 'fresh',
       createdAt: '2026-04-12T16:00:00.000Z',
       instructions: 'Legacy Sunday group recap.',
@@ -10634,10 +10626,10 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: null,
         threadId: 'legacy-group-room',
-        threadIsDirect: false,
+        threadIsDirect,
       },
       schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
-      slug: 'group-sunday-superlatives',
+      slug,
       status: 'active',
       summary: null,
       tags: ['assistant', 'scheduled', 'murph-managed'],

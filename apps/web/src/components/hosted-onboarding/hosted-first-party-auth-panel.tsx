@@ -26,6 +26,8 @@ export interface HostedFirstPartyAuthPanelProps {
   inviteCode?: string | null;
   initialEmailAddress?: string;
   methods: readonly Method[];
+  reauthenticate?: boolean;
+  onReauthenticated?: () => void;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
   onViewChange?: (view: HostedFirstPartyAuthPanelView) => void;
@@ -37,9 +39,11 @@ export interface HostedFirstPartyAuthPanelProps {
 
 export function HostedFirstPartyAuthPanel({
   methods, inviteCode, initialEmailAddress, onCompleted, onSignOut, onViewChange,
+  reauthenticate, onReauthenticated,
   requireLaunchConsentOnCompletion = false, showPassiveLegalNotice = false,
   autoSendPastedPhoneNumber = false, phoneInputAutoFocus = false, size = "default",
 }: HostedFirstPartyAuthPanelProps) {
+  const request = authRequestContext(reauthenticate, inviteCode);
   const [method, setMethod] = useState<Method>(methods[0] ?? "phone");
   const [step, setStep] = useState<"entry" | "resume" | "consent">("entry");
   const [active, setActive] = useState(false);
@@ -82,8 +86,13 @@ export function HostedFirstPartyAuthPanel({
   }
 
   async function verify(url: "/api/auth/otp/verify" | "/api/auth/telegram/verify", payload: Record<string, unknown>, signal: AbortSignal) {
-    await verifyHostedAppSession({ url, payload: { ...payload, ...signupContext(inviteCode) }, signal });
+    await verifyHostedAppSession({ url, payload: { ...payload, ...request.verify() }, signal });
     if (signal.aborted || !mounted.current) return;
+    if (reauthenticate) {
+      if (!onReauthenticated) throw new Error("Sign-in completed. Please try the request again.");
+      onReauthenticated();
+      return;
+    }
     setStep("resume"); setActive(false);
     await complete();
   }
@@ -114,13 +123,13 @@ export function HostedFirstPartyAuthPanel({
       onRequirementChange={(required) => { if (!required) void complete(); }}
       preferredScope="launch.legal" source="homepage-auth-dialog"
     /> : step === "resume" ? <HostedAuthCompletionRetry pending={pending} onContinue={() => void complete()} onSignOut={() => void endSession(false)} /> : <>
-      {method === "telegram" ? <HostedTelegramProofButton key="telegram" purpose="login"
+      {method === "telegram" ? <HostedTelegramProofButton key="telegram" purpose={request.purpose}
         onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)} />
         : <HostedContactCodeForm key={method} method={method} size={size} autoFocus={method === "email" || phoneInputAutoFocus}
           initialValue={method === "email" ? initialEmailAddress : undefined}
           autoSendPastedPhoneNumber={autoSendPastedPhoneNumber} onActiveChange={setActive}
           onSend={async (value, signal) => {
-            const result = await requestHostedOnboardingJson<{ ok: true }>({ url: "/api/auth/otp/send", payload: { kind: method, value }, signal });
+            const result = await requestHostedOnboardingJson<{ ok: true }>({ url: "/api/auth/otp/send", payload: { kind: method, value, ...request.send }, signal });
             if (result.ok !== true) throw new Error("The code could not be sent. Try again.");
           }}
           onVerify={(value, code, signal) => verify("/api/auth/otp/verify", { kind: method, value, code }, signal)}
@@ -134,7 +143,7 @@ export function HostedFirstPartyAuthPanel({
         <SettingsStatusLine message={telegramError} tone="destructive" className="empty:hidden" />
         <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
           {(["telegram", "phone", "email"] as const).filter((entry) => methods.includes(entry) && entry !== method).map((entry) => entry === "telegram" ? <HostedTelegramProofButton
-            key={entry} purpose="login" label="Telegram" onErrorChange={setTelegramError}
+            key={entry} purpose={request.purpose} label="Telegram" onErrorChange={setTelegramError}
             onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)}
           /> : <HostedInlineAuthButton
             key={entry}
@@ -150,6 +159,12 @@ export function HostedFirstPartyAuthPanel({
     </>}
     {error ? <Alert variant="destructive"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
   </div>;
+}
+
+// Reauthentication proves the current member again; it never carries signup context.
+function authRequestContext(reauthenticate: boolean | undefined, inviteCode?: string | null) {
+  if (reauthenticate) return { purpose: "reauthenticate" as const, send: { reauthenticate: true }, verify: () => ({ reauthenticate: true }) };
+  return { purpose: "login" as const, send: {}, verify: () => signupContext(inviteCode) };
 }
 
 function signupContext(inviteCode?: string | null) {

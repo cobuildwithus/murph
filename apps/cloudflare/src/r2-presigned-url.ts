@@ -146,6 +146,44 @@ function normalizeHostedR2Sha256ChecksumBase64(value: string): string {
   return normalized;
 }
 
+/** A part URL cannot publish an object. Trusted completion verifies the actual
+ * encrypted SHA-256 before recording publication eligibility. The signature
+ * binds its exact upload, sole part and byte length; abort revokes that upload. */
+export async function createHostedR2PresignedSnapshotPartUrl(input: {
+  environment: HostedR2PresignEnvironment; key: string; uploadId: string;
+  contentType: string; encryptedByteSize: number; expiresSeconds?: number; now?: Date;
+}): Promise<{ expiresAt: string; url: string }> {
+  if (!input.uploadId || input.uploadId.length > 1024 || !Number.isSafeInteger(input.encryptedByteSize) || input.encryptedByteSize <= 0) {
+    throw new TypeError("Managed snapshot part identity is invalid.");
+  }
+  const endpoint = new URL(input.environment.endpoint);
+  return createHostedR2PresignedObjectUrl({
+    canonicalHeaders: `content-length:${input.encryptedByteSize}\ncontent-type:${input.contentType}\nhost:${endpoint.host}\n`,
+    canonicalUri: `/${encodeR2PathSegment(input.environment.bucketName)}/${encodeR2ObjectKey(input.key)}`,
+    endpoint, environment: input.environment,
+    expiresSeconds: normalizeHostedR2PresignExpiresSeconds(input.expiresSeconds), method: "PUT", now: input.now ?? new Date(),
+    signedHeaders: "content-length;content-type;host", queryParams: { uploadId: input.uploadId, partNumber: "1" },
+  });
+}
+
+/** Hosted-local S3 control only. Production continues to use its R2 binding. */
+export async function createHostedLocalS3ControlUrl(input: {
+  environment: HostedR2PresignEnvironment; key: string; method: "GET" | "HEAD" | "POST" | "DELETE";
+  query?: Readonly<Record<string, string>>; headers?: Readonly<Record<string, string>>;
+}): Promise<string> {
+  if (!input.environment.localEndpointAllowed || !input.environment.controlEndpoint) {
+    throw new Error("Local snapshot control requires the isolated S3 control endpoint.");
+  }
+  const endpoint = new URL(input.environment.controlEndpoint);
+  const headers = Object.entries({ ...input.headers, host: endpoint.host }).sort(([a], [b]) => a < b ? -1 : Number(a > b));
+  const result = await createHostedR2PresignedObjectUrl({ environment: input.environment, endpoint,
+    canonicalUri: `/${encodeR2PathSegment(input.environment.bucketName)}/${encodeR2ObjectKey(input.key)}`,
+    canonicalHeaders: headers.map(([key, value]) => `${key}:${value}\n`).join(""),
+    signedHeaders: headers.map(([key]) => key).join(";"), queryParams: input.query,
+    method: input.method, expiresSeconds: 60, now: new Date() });
+  return result.url;
+}
+
 export async function createHostedR2PresignedGetUrl(input: {
   environment: HostedR2PresignEnvironment;
   expiresSeconds?: number;
@@ -418,10 +456,16 @@ function encodeR2PathSegment(value: string): string {
 }
 
 function canonicalizeSearchParams(params: URLSearchParams): string {
+  // SigV4 compares encoded bytes; locale collation puts multipart's lowercase
+  // keys before X-Amz-* and produces a signature S3 cannot verify.
   return [...params.entries()]
-    .sort(([leftKey, leftValue], [rightKey, rightValue]) =>
-      leftKey === rightKey ? leftValue.localeCompare(rightValue) : leftKey.localeCompare(rightKey))
-    .map(([key, value]) => `${encodeR2PathSegment(key)}=${encodeR2PathSegment(value)}`)
+    .map(([key, value]) => [encodeR2PathSegment(key), encodeR2PathSegment(value)] as const)
+    .sort(([leftKey, leftValue], [rightKey, rightValue]) => {
+      const left = leftKey === rightKey ? leftValue : leftKey;
+      const right = leftKey === rightKey ? rightValue : rightKey;
+      return left < right ? -1 : Number(left > right);
+    })
+    .map(([key, value]) => `${key}=${value}`)
     .join("&");
 }
 
@@ -469,9 +513,10 @@ async function createHostedR2PresignedObjectUrl(input: {
   endpoint: URL;
   environment: HostedR2PresignEnvironment;
   expiresSeconds: number;
-  method: "DELETE" | "GET" | "HEAD" | "PUT";
+  method: "DELETE" | "GET" | "HEAD" | "PUT" | "POST";
   now: Date;
   signedHeaders: string;
+  queryParams?: Readonly<Record<string, string>>;
 }): Promise<{
   expiresAt: string;
   url: string;
@@ -487,6 +532,7 @@ async function createHostedR2PresignedObjectUrl(input: {
     "X-Amz-Expires": String(input.expiresSeconds),
     "X-Amz-SignedHeaders": input.signedHeaders,
   });
+  for (const [key, value] of Object.entries(input.queryParams ?? {})) query.set(key, value);
   const canonicalQuery = canonicalizeSearchParams(query);
   const canonicalRequest = [
     input.method,

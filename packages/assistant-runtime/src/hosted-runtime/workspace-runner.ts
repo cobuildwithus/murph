@@ -14,6 +14,7 @@ import type {
   AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  acquireCanonicalWriteLock,
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePort,
   type HostedCanonicalWriteReceipt,
@@ -802,6 +803,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const hostedCanonicalWritePort = createAssistantCanonicalWritePort();
   const hostedCanonicalMailboxWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
+    deferInboxAttachmentPersistence: true,
     deferRuntimeStatusCheckpoint: true,
     input,
     onAssistantContextSnapshotDirty: () => {
@@ -2962,6 +2964,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
   canonicalWriteCheckpointCoalescer?:
     HostedWorkspaceCanonicalWriteCheckpointCoalescer;
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  deferInboxAttachmentPersistence?: boolean;
   deferRuntimeStatusCheckpoint?: boolean;
   generatedImageRetentionWakeAt?: string | null;
   input: HostedWorkspaceRunnerInput;
@@ -3068,6 +3071,15 @@ function createHostedWorkspaceCanonicalWritePort(input: {
       });
     },
     async persistCanonicalWrite(writeInput) {
+      const deferAttachmentPersistence = input.deferInboxAttachmentPersistence === true
+        && writeInput.receipt.operationType === "inbox_capture_persist"
+        && writeInput.receipt.actions.some((action) =>
+          action.kind === "raw_upsert"
+          && action.targetRelativePath.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`)
+          && action.targetRelativePath.includes("/attachments/")
+        );
+      const deferStatusCheckpoint = input.deferRuntimeStatusCheckpoint === true
+        && !deferAttachmentPersistence;
       const persist = async () => {
         const assistantAutomationScheduleChanged =
           hostedCanonicalWriteChangesAssistantAutomationSchedule(
@@ -3106,7 +3118,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           receipt: canonicalWritePersistence.receipt,
         });
         const receiptLogStatus = hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate);
-        if (input.deferRuntimeStatusCheckpoint === true) {
+        if (deferStatusCheckpoint) {
           const coalescer = input.canonicalWriteCheckpointCoalescer;
           const deferredWrite = {
             assistantAutomationScheduleChanged,
@@ -3181,6 +3193,26 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           input.onAssistantAutomationScheduleChanged?.();
         }
       };
+      if (deferAttachmentPersistence) {
+        // Keep receipt publication ordered with later canonical writes while
+        // releasing the importer to admit the locally available attachment.
+        // A failed backup must not roll back the file already given to Codex.
+        const lock = await acquireCanonicalWriteLock(input.input.vaultRoot);
+        const completion = (async () => {
+          try {
+            await runWithCanonicalWritePersistence(persist);
+          } finally {
+            await lock.release();
+          }
+        })().catch((error: unknown) => {
+          warnAssistantBestEffortFailure({
+            error,
+            operation: "persist inbox attachment backup",
+          });
+        });
+        input.input.trackLocalWorkspaceMutationCompletion?.(completion);
+        return;
+      }
       await runWithCanonicalWritePersistence(persist);
     },
     async persistRuntimeState() {

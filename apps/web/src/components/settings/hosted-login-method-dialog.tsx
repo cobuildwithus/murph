@@ -82,9 +82,9 @@ export function HostedLoginMethodEditor({ method, operation, onOpenChange, onSav
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]);
     const task = Promise.all([
       requestHostedOnboardingJson<MethodResponse>({ url: "/api/settings/login-methods", signal }),
-      requestHostedOnboardingJson<{ initialEnrollmentAllowed: boolean }>({ url: "/api/settings/approval-passkeys", signal }),
+      requestHostedOnboardingJson<{ initialEnrollmentAllowed: boolean; legacyRepairAllowed?: boolean }>({ url: "/api/settings/approval-passkeys", signal }),
     ]).then(([state, factors]) => {
-      if (!controller.signal.aborted) { setCurrent(state); setInitialPasskeyNeeded(factors.initialEnrollmentAllowed === true); }
+      if (!controller.signal.aborted) { setCurrent(state); setInitialPasskeyNeeded(factors.initialEnrollmentAllowed === true || factors.legacyRepairAllowed === true); }
       return state;
     });
     loading.current = task;

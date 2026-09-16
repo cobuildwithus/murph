@@ -1,8 +1,8 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-// Version 20 requires the durable migration freeze barrier. Older writers must
-// fail before running RPCs or alarms against an object participating in cutover.
-export const RUNNER_STATE_SCHEMA_VERSION = 20;
+// Version 21 requires managed-upload receipts during admission and deletion.
+// Older writers must fail before ignoring those pending physical obligations.
+export const RUNNER_STATE_SCHEMA_VERSION = 21;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`

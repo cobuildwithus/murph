@@ -152,6 +152,19 @@ describe("device import progress and efficiency alerts", () => {
     expect(health([row(70), row(60)], false).backlog.anomalous).toBe(false);
   });
 
+  it("keeps a continuing backlog eligible until its evidence gap lapses", () => {
+    // Ten-minute retry passes checked every five minutes must stay one
+    // incident instead of clearing between passes and re-alerting.
+    const passes = (latest: number) => Array.from({ length: 7 }, (_, index) => row(latest + index * 10));
+    for (const latest of [0.5, 5, 10, 12, 15]) {
+      expect(health(passes(latest), false).backlog.anomalous).toBe(true);
+    }
+    expect(health(passes(16), false).backlog.anomalous).toBe(false);
+    const overdue = health(passes(16), true);
+    expect(overdue.backlog.anomalous).toBe(false);
+    expect(overdue.stalled.anomalous).toBe(true);
+  });
+
   it("isolates runtimes and exports aggregate counts without identifiers", () => {
     const result = health([row(20), row(10), row(1, { subjectKey: "healthy-subject", progressed: true }),
       checkpoint(0.5, { subjectKey: "healthy-subject" })]);

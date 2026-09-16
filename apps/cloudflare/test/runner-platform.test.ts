@@ -921,6 +921,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform/presign-put",
       );
       await expect(presignRequest.json()).resolves.toEqual({
+        supportsManagedUpload: true,
         encryptedByteSize: encryptedBytes.byteLength,
         encryptedObjectSha256: "c".repeat(64),
         objectKey,
@@ -943,6 +944,45 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         force: true,
         recursive: true,
       });
+    }
+  });
+
+  it("uploads a managed part and binds its exact ETag to canonical snapshot completion", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-managed-snapshot-proof-"));
+    try {
+      const sourceFilePath = path.join(tempRoot, "snapshot.enc");
+      await writeFile(sourceFilePath, encryptedBytes);
+      const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: encryptedBytes.length });
+      const putUrl = "https://r2.example.test/snapshot?uploadId=synthetic-upload&partNumber=1";
+      let completion: unknown;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "managed snapshot request");
+        if (request.url.endsWith("/presign-put")) {
+          expect(await request.json()).toMatchObject({ supportsManagedUpload: true });
+          return Response.json({ putUrl, expiresAt: new Date(Date.now() + 60_000).toISOString(), managedUploadId: "synthetic-upload" });
+        }
+        if (request.url === putUrl) {
+          expect(request.headers.get("if-none-match")).toBeNull();
+          expect(request.headers.get("x-amz-meta-encryptedsha256")).toBeNull();
+          expect(request.headers.get("content-length")).toBe(String(encryptedBytes.length));
+          expect(new Uint8Array(await request.arrayBuffer())).toEqual(encryptedBytes);
+          return new Response(null, { status: 200, headers: { etag: '"synthetic-part-etag"' } });
+        }
+        if (request.url.endsWith("/complete")) {
+          completion = await request.json();
+          return createWorkspaceSnapshotCompleteResponse(ref);
+        }
+        if (request.url.endsWith("/heartbeat")) return Response.json({ alive: true });
+        throw new Error("Unexpected managed snapshot request.");
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({ boundUserId: "member_123", fetchImpl: fetchMock as typeof fetch });
+      await platform.workspaceSnapshotPort!.putSnapshotObjectDirect({ sourceFilePath, objectKey: ref.objectKey,
+        snapshotId: ref.snapshotId, encryptedByteSize: encryptedBytes.length, encryptedObjectSha256: ref.archive.encryptedObjectSha256 });
+      await platform.workspaceSnapshotPort!.completeSnapshotSession({ ref, checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref) });
+      expect(completion).toMatchObject({ managedPart: { uploadId: "synthetic-upload", etag: '"synthetic-part-etag"' } });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
     }
   });
 
@@ -1482,6 +1522,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const firstBody = await firstPresignRequest.json();
       const secondBody = await secondPresignRequest.json();
       expect(firstBody).toEqual({
+        supportsManagedUpload: true,
         encryptedByteSize: encryptedBytes.byteLength,
         encryptedObjectSha256: "c".repeat(64),
         objectKey,

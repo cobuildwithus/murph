@@ -193,3 +193,44 @@ test("places a Telegram failure above both alternative buttons and clears it on 
   await act(async () => { mocks.telegram!.onErrorChange?.(null); });
   expect(rendered!.container.querySelector('[role="alert"]')?.textContent).toBe("");
 });
+
+
+test.each(["phone", "email", "telegram"] as const)("bound %s reauthentication resumes inline without signup context or account bootstrap", async (method) => {
+  const resumed = vi.fn();
+  await render({ methods: [method], reauthenticate: true, onReauthenticated: resumed, inviteCode: "must-not-be-sent" });
+  const signal = new AbortController().signal;
+  if (method === "telegram") {
+    expect(mocks.telegram!.purpose).toBe("reauthenticate");
+    await act(async () => { await mocks.telegram!.onProof("synthetic-id-token", signal); });
+    expect(mocks.request).toHaveBeenCalledWith(expect.objectContaining({
+      url: "/api/auth/telegram/verify", payload: { idToken: "synthetic-id-token", reauthenticate: true },
+    }));
+  } else {
+    const value = method === "email" ? "bound@example.test" : "+12025550127";
+    await act(async () => { await mocks.contact!.onSend(value, signal); });
+    expect(mocks.request).toHaveBeenLastCalledWith(expect.objectContaining({
+      url: "/api/auth/otp/send", payload: { kind: method, value, reauthenticate: true },
+    }));
+    await act(async () => { await mocks.contact!.onVerify(value, "123456", signal); });
+    expect(mocks.request).toHaveBeenLastCalledWith(expect.objectContaining({
+      url: "/api/auth/otp/verify", payload: { kind: method, value, code: "123456", reauthenticate: true },
+    }));
+  }
+  expect(resumed).toHaveBeenCalledOnce();
+  expect(mocks.request.mock.calls.some(([input]) => input.url.endsWith("/complete"))).toBe(false);
+  expect(mocks.completed).not.toHaveBeenCalled();
+  expect(mocks.navigate).not.toHaveBeenCalled();
+});
+
+test("closing bound reauthentication discards late primary-proof completion", async () => {
+  const resumed = vi.fn();
+  let finish!: (value: { ok: true; memberId: string }) => void;
+  mocks.request.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  await render({ reauthenticate: true, onReauthenticated: resumed });
+  let pending!: Promise<void>;
+  await act(async () => { pending = mocks.contact!.onVerify("+12025550127", "123456", new AbortController().signal); });
+  await rendered!.cleanup(); rendered = null;
+  await act(async () => { finish({ ok: true, memberId: "synthetic-member" }); await pending; });
+  expect(resumed).not.toHaveBeenCalled();
+  expect(mocks.completed).not.toHaveBeenCalled();
+});

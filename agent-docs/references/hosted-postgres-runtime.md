@@ -4,10 +4,37 @@
 
 `HostedRuntimeOwner` in Web's primary Postgres database owns member execution
 admission. The durable `HostedRuntimeCutover` gate selects `legacy`, `draining`,
-or `postgres`; `HOSTED_RUNTIME_POSTGRES_ENABLED` selects the deployed Worker
-adapter. Both must agree before execution starts. The flag defaults to false.
-A flag mismatch stops admission; it never falls back to another owner after
-the gate leaves `legacy`.
+`rolling`, or `postgres`. `HOSTED_RUNTIME_POSTGRES_ENABLED` is a deployment
+capability, not a fleet-wide backend selector. With that capability enabled,
+`rolling` routes each member by explicit migration phase; unregistered existing
+members remain legacy. Disabled deployments cannot start migrated members.
+
+Migration phase is separate from execution phase: `legacy -> quiescing ->
+freezing -> importing -> postgres`. Importing an owner row alone never activates
+execution. Quiescing keeps admitted callbacks available for checkpointing while
+closing new starts and destructive deletion. Readiness counts a browser-vault
+replica direct write as pending only inside its bounded admission window; an
+older admission cannot still be writing, and only the stop-side recovery clock
+or deletion erases its record. Freezing/importing admit no new
+execution. A recorded attempt whose exact container reports no such invocation
+(or is not running) cannot complete itself; the freeze's stop reconciles it
+instead of holding the quiesced member indefinitely. Activation requires the complete exact-source import and commits a
+durable wake through the existing mailbox/Temporal scheduler.
+
+Canonical `hosted_member` insertion enrolls new personal and group runtime
+members as `pending` during rolling mode through a database trigger, in the same
+transaction as creation. This covers older Web writers as well as the current
+`hosted-member-store.ts::createHostedMember` helper. Pending admits neither runtime:
+a new member row cannot prove an overlapping old Worker never created its source.
+It requires the same exact-source retirement and durable activation wake as an
+existing member. Global legacy/Postgres modes derive their backend from the gate.
+The FK-free owner survives deletion; a conflicting old owner cannot be overwritten
+by creation. The trigger takes a nonblocking shared campaign lock because some
+creators already hold identity/family locks. The current helper acquires that lock
+before insertion to return the existing retryable setup error; an old writer's
+contended insert fails atomically for retry. Neither path waits in an inverted
+lock order. Canonical and late-source enrollment and automatic first-use progress are
+implemented below; composed onboarding/rollout proof remains a release prerequisite.
 
 The `UserRunnerDurableObject` implementation remains a finite migration bridge.
 Descriptions of its runtime ownership in the mailbox protocol apply only before
@@ -16,6 +43,26 @@ sessions, media, replica writes, status, consent, and deletion use Web/Postgres.
 The native `RunnerContainer` and memberless standby inventory remain in use.
 Temporal remains the pointer-only scheduler and retry owner. No Workflow names,
 signals, task queues, or replay command ordering change.
+
+Historical account-deletion receipts also contribute runtime identities. The
+existing canonical enrollment request decrypts one receipt outside transactions,
+with a five-second provider deadline, and retains at most 100 runtime identities
+in the existing FK-free owner table. A nullable cursor on that cleanup receipt
+advances atomically with those owners; null means all its identities are retained.
+Ciphertext, environment, key and cursor are revalidated before committing.
+Concurrent or lost-reply retries cannot skip identities, and existing owner
+phase/generation remains unchanged. Only runtime IDs leave the cleanup owner;
+provider account identifiers and plaintext payloads are never returned or logged.
+
+During rolling mode, a database deletion guard prevents any cleanup writer from
+erasing a receipt with an unfinished enrollment cursor, even if every vendor
+cleanup has completed. The existing Worker subsequently derives exact source
+bindings. Owner retention grants no runtime authority and proves neither source
+emptiness nor deletion. Creation closure and final completion reject outstanding
+cleanup enrollment. Duplicate-only pages carry a pending signal so the operator
+continues to later encrypted pages. Late receipts join late source accounting
+without changing the baseline seal. This work is operator census work, not part
+of ordinary foreground processing.
 
 ## Claim, launch, completion, and recovery
 
@@ -100,55 +147,219 @@ rule on repeated finite registrations. A retired row can never be revived.
 Existing private
 image capability expiry and the R2 lifecycle policy remain the expiry owner.
 
+Hosted-local snapshot multipart operations use the existing explicitly enabled
+S3 control endpoint for allocation, completion, verification and deletion, so
+they share MinIO with native presigned uploads. Wrangler's R2 emulator is a
+separate store. Other local object classes retain their existing bindings;
+production retains its original R2 binding. SigV4 query ordering compares URI-
+encoded keys and values without locale collation, including multipart fields.
+
 R2 contracts: [multipart upload and abort](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/),
 [error codes](https://developers.cloudflare.com/r2/api/error-codes/), and
 [strong consistency](https://developers.cloudflare.com/r2/reference/consistency/).
 Strong delete consistency alone does not cancel a concurrent write.
 
-## Finite fleet cutover
+## Rolling migration readiness
 
-Production activation is a separate authorized operation, never a consequence of
-merging this code or toggling the Worker flag. Keep the namespace and migration
-receipts through rollback verification. Do not deploy an older legacy writer
-after freezing: SQLite schema 20 rejects writers below that floor.
+Production migration remains a separate authorized operation. The rolling
+implementation is not yet a complete operational release: composed
+full-stack reply rehearsal, measured
+handoff timing and final public review are still required. `migrateHostedLegacyRuntime` now starts a rolling campaign, reconciles
+provider discovery with creation intents, closes legacy creation and seals the
+ordered inventory. It never invokes the old fleet-draining path.
 
-1. Apply the runtime owner, resource, legacy-import, and upload-recovery schema
-   migrations. Deploy compatible Web readers and Worker code with the flag false.
-2. Prepare the private deploy workflow to forward the flag through config
-   rendering, validation, and deployment. In a separately authorized cutover,
-   deploy the flag-enabled Worker and verify one exact version serves 100%.
-   Its mismatch with the legacy gate intentionally pauses fresh admission.
-3. In the authorized hosted operator context, import
-   `migrateHostedLegacyRuntime` from `apps/cloudflare/scripts/runtime-migration.ts`.
-   Supply the account, script, exact Worker version, Worker HTTPS origin, a
-   Cloudflare inventory credential in memory, and fresh Vercel OIDC headers for
-   each call. Invoke with `activate: false`. Never put credentials in arguments,
-   artifacts, or local environment files.
-4. The helper inventories the actual SQLite UserRunner namespace, including
-   dormant, deleted-member, empty, and resource-only objects. It sets the durable
-   gate to `draining`, seals an ordered inventory hash, and freezes each object.
-   Freeze closes RPC admission before waiting for admitted work, repeatedly
-   stops the exact target, proves existing capability drains, and removes alarms.
-   Unknown state or stop outcomes keep the object closed and activation blocked.
-5. Export/import uses bounded 50-record pages, a one-MiB page limit, content
-   hashes, and durable cursors. It transfers resources and generation high-water
-   only. It never imports active attempts, provider tokens, or live authority.
-   Lost responses resume from committed receipts; changed frozen content fails.
-   Rerun the same version-bound import while drains remain held.
-6. After all imports finish, explicitly invoke the same helper with
-   `activate: true`. It repeats deployment and full namespace inventory checks.
-   Web activates only if every registered object completed, no target remains
-   active, and the final inventory hash/count match. Never reset the gate to
-   legacy. An unexpected deployment or inventory change requires a reviewed
-   recovery; changing the recorded identity to bypass the gate is unsupported.
-7. Verify cold and warm replies, typing-before-send, checkpoint publication,
-   managed usage denial, consent stop, resource recovery, and deletion on the
-   activated deployment. Observe metadata only. Roll forward with compatible
-   readers if recovery is needed; removal of the frozen namespace is a later
-   separately reviewed change.
+Before closing creation, the Worker enrolls canonical members (including group
+runtime members) and retained runtime owners, snapshot uploads, write drains,
+media and orphan identities. Web returns at most 100 unenrolled identities per
+call using one statement with at most 100 distinct candidates per state owner;
+unique expected-source bindings replace a mutable pagination cursor. The Worker
+uses `USER_RUNNER.idFromName` without obtaining a stub, so enrollment does not
+materialize or start a source. One database transaction binds the page and retains
+missing owners, without replacing pending signup phases, generations or import
+receipts. Expected member identity stays separate from observed export identity.
+Conflicting bindings roll back the whole page. Creation closure rejects any
+unenrolled canonical candidate. A rolling-only deletion trigger retains the owner
+so deleting a member cannot remove it from that census. Its nonblocking campaign
+lock orders deletion against campaign start; it inserts no retained owner outside
+rolling mode. New creations are covered by the insert trigger above.
+
+The seal covers an immutable `baseline` subset. Discovery and canonical
+enrollment after creation closure produce `late` rows, without changing the original
+hash/count or cursor. A late row never permits legacy admission merely because it
+exists, including discoveries before the first baseline seal page. The source still needs its exact frozen disposition; conflicting/nonempty
+sources cannot be relabeled empty or merged into an active Postgres owner.
+Encrypted legacy deletion payloads are not covered by the resource-table query;
+release proof must separately account for those runtime identities. Enrollment
+alone proves neither empty source nor completed member handoff.
+
+`next_object` persists one selected source before any local barrier can close.
+Concurrent operators and lost reservation replies keep that source selected even
+if an earlier late ID appears. It advances only after a terminal source receipt and activation of its expected
+or observed member, if any. Source reads, member transitions and
+empty imports/activation reject a different selection; the pointer has no expiry. Polling an
+unfinished selection uses a single read-only statement without the campaign lock;
+every source effect rechecks it, so stale hints can only fail. Actual selection
+changes take a short exclusive transaction. Baseline work precedes late work.
+
+Ordinary ensure-processing retries drive one bounded migration continuation when
+Postgres reports draining or a legacy attempt returns retry during quiescence.
+The capability flag must be enabled and the campaign closed/sealed. The Worker
+enrolls the caller's deterministic source before obtaining a stub. Repeated
+exact enrollment is acknowledged from a read-only statement snapshot; it does
+not acquire the campaign lock or grant execution authority. New/conflicting
+bindings still enter the existing transaction and validation path.
+
+`select_first_use` resumes an unfinished durable selection or selects only the
+caller's pending/late source. It cannot start the next legacy baseline member
+after an operator canary. Every effect still validates current selection. The
+continuation uses the same deterministic token, frozen exports and activation
+as the operator. All its external steps share the original request deadline;
+a late acknowledgement cannot start the next step after timeout. The existing
+mailbox/Temporal retry owner requests the next continuation, and a subsequent
+request re-reads ownership before starting Postgres. No second scheduler or
+fleet enumeration runs in this path. Earlier paused sources resume before the
+caller's source, preserving one planned handoff at a time.
+
+Compatible Worker releases use `member-handoff-v1` plus the immutable
+`namespaceProbeId` recorded when rolling begins. The Worker derives this value
+with `USER_RUNNER.idFromName` and the fixed namespace-probe name, without obtaining
+a stub or creating an object. Migration transport replaces any caller-supplied
+compatibility assertion with its own bound namespace value. Legacy materialization
+registration carries the same assertion. Cloudflare's [namespace ID contract](https://developers.cloudflare.com/durable-objects/api/namespace/)
+rejects IDs created by a different namespace; changing the binding or jurisdiction
+therefore cannot silently replace the campaign's source.
+
+The initial deployment ID remains recorded. An original-version request without
+an assertion remains pinned to that immutable deployment; later versions need
+both the supported protocol and matching namespace binding. No deployment update
+resets the seal, selection, member token, generation, import cursor or frozen
+source. The Worker/DO handoff still requires the requested actual serving version
+at the exact source, so mixed-version uncertainty retries that source. Compatible
+old/new Workers can keep admitting other legacy members during overlap. Future
+changes that cannot read schema-21 uploads, v2 freeze records or current source
+receipts must use a different protocol and a separately reviewed migration.
+This compatibility assertion is not a creation fence or namespace-retirement proof.
+
+The operator derives a stable token from namespace, object and member identity.
+It polls checkpoint/freeze progress within the same bounded run, avoiding workflow
+queue/install time during the pause. A readiness hold leaves that source live.
+Recovery verifies serving identity and resumes the selected source before
+unrelated enrollment or provider-list work. Final provider scans register unknown
+late sources and report pending; final checks also repeat canonical enrollment
+and selection before claiming completion. The sealed baseline remains unchanged.
+
+`apps/cloudflare/scripts/runtime-migration.cli.ts` is the protected hosted
+entrypoint. It accepts only private Murph Cloud main execution and uses that
+environment's existing Cloudflare API credential and callback-signing key.
+Inventory mode is read-only and outputs only count, hash and serving version.
+Migration mode defaults to one source object, up to 1000 continuations and a
+ten-minute work window. The object budget is checked before durably selecting a
+different source; automatic first-use retries therefore cannot advance the next
+baseline member beyond the canary. The invocation retains its exact source
+through every import page and activation. Optional
+`MURPH_RUNTIME_MIGRATION_MEMBER_ID` selects one enrolled member with a one-object
+budget, refuses to replace another unfinished selection, and returns without
+expanding the cohort if that member already activated. A pending or
+failed result after quiescence requires same-source roll-forward recovery; the
+work window is not a guarantee of member-pause duration. The hosted entrypoint
+and canonical rolling campaign reject namespace finalization. Successful member
+handoffs activate independently; completing them leaves the gate rolling with
+explicit Postgres owners and the guarded namespace retained. Each control request has a fresh
+signature over its method, path and exact body; the existing OIDC path remains
+supported. No production credentials or raw inventories belong in local output.
+
+The supported member continuation is an authenticated `advance_member` command
+bound to an exact namespace, Worker version, object ID, member ID and migration
+token. It conditionally closes local starts/deletion, checkpoints the exact
+active attempt, proves its completion and stop, exports bounded frozen pages,
+and activates the member. Incoming work stays durably queued. Preparation that
+finds old direct-PUT capabilities or unsupported active code leaves legacy live.
+A committed or ambiguous freeze requires same-token roll-forward recovery.
+
+Deletion admitted before local closure must settle before source reservation.
+Deletion after closure retains its canonical cleanup receipt and retries; it
+cannot clear the frozen source. A pending deletion retry also advances one existing
+per-member handoff continuation within its original five-second budget. This
+keeps a member deleted before first use recoverable after its processing wake
+is gone. The response stays retryable; a later request re-reads authority before
+deleting. Ordinary cleanup retries reuse the already-decrypted payload to retain
+up to 100 runtime identities and their cursor in one short transaction. They can
+finish after the operator stops; vendor completion alone cannot erase unretained
+identities. Existing Postgres owners are never reset by identity retention. Empty-object migration closes callbacks, waits
+for admitted work and rechecks emptiness before persisting a freeze. It exports
+four hashed empty pages without constructing a runner or initializing SQL.
+Account for empty and deleted/resource-only objects as well as active members.
+
+Legacy source access records durable materialization intent before obtaining a
+stub. The source rechecks registration on activation before ordinary RPCs can
+initialize storage. Provider discovery and these intents form one inventory;
+closing creation preserves registered legacy execution while preventing new
+unregistered sources. A missing source after closure remains unresolved; an inventory omission is not
+proof of emptiness. Source resolution never activates an empty member implicitly.
+A stale route returns retry rather than trying another backend in the same
+operation. Seal the baseline only after reconciling discovery with the
+closed creation boundary and proving compatible serving-version convergence;
+retain later arrivals separately for exact disposition.
+
+After an exact empty source has completed its frozen export, `advance_empty`
+calls canonical `activate_empty` for that selected source. It accepts only idle,
+generation-zero identities without a migration or target and with exactly one
+completed, bound empty-source receipt. No receipt is an unresolved source, not
+permission to activate. Ownership and an encrypted maintenance wake commit
+together; deleted members receive no wake. The ordinary migration callback
+signals that committed wake immediately; mailbox recovery owns lost signals.
+Activation does not wait for unrelated sources. Selection remains with the empty
+source until its expected member is Postgres; concurrent and lost-response
+retries return the same wake. Physical-only empty objects need no member owner.
+`settle_unmaterialized` is retained as a completion audit only: it checks source
+receipts and remaining owners without changing authority or creating wakes.
+The rolling path cannot switch the global default: complete provider scans do
+not prove an old caller cannot create another object.
+
+Managed checkpoint uploads use an exact, durably admitted multipart upload ID.
+Trusted completion seals the upload and streams the stored encrypted bytes to
+verify size and SHA-256 before canonical publication. Unknown completion/abort
+outcomes retain the obligation. Old direct-PUT capabilities still need their
+full drain; negotiation of the new path does not revoke them. Schema 21 protects
+managed legacy receipts from older writers. Every serving version must support
+those receipts and the new quiescence record before they can be enabled.
+
+Release acceptance requires complete canonical-member and known-source accounting,
+no remaining legacy execution ownership, measured member handoffs and unrelated
+member latency, correct resumed cold/warm replies, mailbox continuity, effect
+receipts, cleanup, consent and deletion. Local tests establish only their tested
+boundaries. Do not treat a skipped member, a timer, or imported metadata as a
+completed handoff. Retain the fixed namespace and receipts during the campaign;
+removal and any rollback require their own authorized operational action.
 
 Inventory uses Cloudflare's [namespace list](https://developers.cloudflare.com/api/resources/durable_objects/subresources/namespaces/methods/list/),
 [object list](https://developers.cloudflare.com/api/resources/durable_objects/subresources/namespaces/subresources/objects/methods/list/),
 and [serving deployment](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/deployments/methods/list/)
 APIs. Counts/hashes and operation phases are suitable evidence; raw object or
 member inventories and resource rows remain private.
+
+
+## Local migration protocol rehearsal
+
+`apps/cloudflare/test/runtime-migration-composed-postgres.test.ts` composes the
+actual source bridge and Web command handlers against isolated loopback Postgres.
+It proves busy-source readiness/quiescence, lost import acknowledgement, compatible
+release reload, generation/token and encrypted mailbox continuity, one activation
+wake, unrelated-member admission, cleanup-driven deleted-member continuation
+and automatic new-member empty activation without
+advancing the baseline canary. Transport and external checkpoint completion are
+simulated. This proof does not measure container replies, production handoff time
+or real R2 interoperability; those remain rollout gates.
+
+
+`apps/cloudflare/test/workers/legacy-migration-observation.test.ts` runs source
+inspection inside Cloudflare's actual local Workers runtime, including real KV
+and alarm metadata, plus the named-object metadata used by local Wrangler.
+Observational schema discovery excludes the engine-reserved `_cf_*` tables,
+the documented `__cf_kv` table and Miniflare's exact `__miniflare_do_name` table,
+while still rejecting unknown application tables or schema versions.
+The engine names are documented in Cloudflare's
+[KV implementation](https://github.com/cloudflare/workerd/blob/main/src/workerd/util/sqlite-kv.h)
+and [alarm metadata implementation](https://github.com/cloudflare/workerd/blob/main/src/workerd/util/sqlite-metadata.h).
+The local name table belongs to Miniflare's
+[Durable Object wrapper](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/workers/core/do-wrapper.worker.ts).

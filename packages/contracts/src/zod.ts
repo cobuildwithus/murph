@@ -1282,6 +1282,13 @@ const noteEventFieldsShape = {
   ...experimentLinkShape,
   note: boundedString(1, 4000),
   noteType: boundedString(1, 120).optional(),
+  plan: z.object({
+    endsAt: isoDateTimeString(),
+    status: z.enum(["planned", "tentative", "canceled"]),
+    lastVerifiedAt: isoDateTimeString(),
+    accountId: boundedString(1, 200).optional(),
+    category: patternedString(SLUG_PATTERN),
+  }).strict().optional(),
   authoredAt: isoDateTimeString().optional(),
   signedAt: isoDateTimeString().optional(),
   author: boundedString(1, 160).optional(),

@@ -69,7 +69,7 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
   for (const connectionRows of groupConnectionObservations(rows).values()) {
     const evidence = summarizeConnection(connectionRows, now, due, restartTimes);
     if (!evidence) continue;
-    const { backlogAge, lastProgress, restarts, cancellations, savedPasses, recentPasses } = evidence;
+    const { backlogAge, lastProgress, restarts, cancellations, savedPasses } = evidence;
     const conditions: DeviceImportCondition[] = [];
     if ((due || evidence.latestPassUncheckpointed) && now - lastProgress >= DEVICE_IMPORT_STALL_MS) {
       conditions.push("stalled");
@@ -77,7 +77,7 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
     if (Math.max(restarts, cancellations) >= DEVICE_IMPORT_CYCLE_LIMIT && savedPasses < 2) {
       conditions.push("cycling");
     }
-    if (backlogAge >= DEVICE_IMPORT_BACKLOG_MS && recentPasses >= 2) conditions.push("backlog");
+    if (backlogAge >= DEVICE_IMPORT_BACKLOG_MS && evidence.evidenceCurrent) conditions.push("backlog");
     for (const condition of conditions) {
       const health = result[condition];
       health.anomalous = true;
@@ -130,7 +130,6 @@ function summarizeConnection(
   const pendingSnapshots = new Map<string | null, boolean | null>();
   let latestPassAttemptId: string | null = null;
   const savedAt: number[] = [];
-  const passesAt: number[] = [];
   const cancellationsAt: number[] = [];
   for (const row of rows) {
     const at = row.at.getTime();
@@ -145,7 +144,6 @@ function summarizeConnection(
     if (row.eventCode === "device-sync.pass_finished") {
       latestPassAttemptId = row.attemptId;
       pendingSnapshots.set(row.attemptId, row.pending);
-      passesAt.push(at);
       if (row.progressed && row.attemptId) {
         const passes = pendingProgress.get(row.attemptId) ?? [];
         passes.push(at);
@@ -168,15 +166,22 @@ function summarizeConnection(
     }
     if (row.cancelled) cancellationsAt.push(at);
   }
-  if (pendingSince === null || (!due && now - lastPendingAt > 10 * MINUTE)) return null;
+  if (pendingSince === null) return null;
+  // Eligibility shares the continuity threshold above. A quiet gap that has not
+  // reset the evidence cannot clear an incident, so a continuing condition
+  // reminds instead of re-alerting on the next pass. An overdue wake keeps a
+  // silent queue eligible for stall detection only.
+  const evidenceCurrent = now - lastPendingAt <= DEVICE_IMPORT_STALL_MS;
+  if (!due && !evidenceCurrent) return null;
   const recentAfter = Math.max(pendingSince, now - DEVICE_IMPORT_CYCLE_WINDOW_MS);
   const countRecent = (times: number[]) => times.filter(at => at >= recentAfter).length;
   return {
+    evidenceCurrent,
     latestPassUncheckpointed: pendingSnapshots.has(latestPassAttemptId),
     backlogAge: now - pendingSince,
     lastProgress: Math.max(pendingSince, lastProgress),
     restarts: countAtOrAfter(restartTimes, recentAfter), cancellations: countRecent(cancellationsAt),
-    savedPasses: countRecent(savedAt), recentPasses: countRecent(passesAt),
+    savedPasses: countRecent(savedAt),
   };
 }
 

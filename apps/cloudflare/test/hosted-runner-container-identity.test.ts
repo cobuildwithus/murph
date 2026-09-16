@@ -2387,6 +2387,10 @@ function createRunnerDurableState(): {
     get: async <T,>(key: string): Promise<T | undefined> =>
       values.get(key) as T | undefined,
     getAlarm: async () => null,
+    list: async <T,>(options: { prefix?: string; startAfter?: string; limit?: number } = {}) => new Map(
+      [...values].sort(([a], [b]) => a.localeCompare(b))
+        .filter(([key]) => key.startsWith(options.prefix ?? "") && key > (options.startAfter ?? ""))
+        .slice(0, options.limit).map(([key, value]) => [key, value as T])),
     put: async <T,>(key: string, value: T): Promise<void> => {
       values.set(key, value);
     },

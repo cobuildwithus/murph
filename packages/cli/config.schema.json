@@ -8956,6 +8956,43 @@
                             "recompute"
                           ],
                           "description": "Required for event-backed edits when occurredAt or timeZone changes and dayKey is not patched directly. `keep` preserves the saved dayKey; `recompute` drops it so core recalculates from the explicit event timeZone."
+                        },
+                        "planEndsAt": {
+                          "description": "Journal plan end instant, with explicit offset. All-day plans use the exclusive local date boundary.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "planStatus": {
+                          "type": "string",
+                          "enum": [
+                            "planned",
+                            "tentative",
+                            "canceled"
+                          ]
+                        },
+                        "planVerifiedAt": {
+                          "description": "Actual successful source verification instant; never advance after a failed read.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "planCategory": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                          "description": "Stable lowercase kebab-case identifier."
+                        },
+                        "planAccountId": {
+                          "description": "Connected account owning an automatically captured plan; omit for a directly supplied member plan.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "expectedRevision": {
+                          "description": "Require the revision returned by event show; reject if the event changed since that read.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
                         }
                       }
                     }
@@ -9552,6 +9589,47 @@
                                   "description": "Optional structured note type, such as journal-factor or journal-outcome.",
                                   "type": "string",
                                   "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                                },
+                                "timeZone": {
+                                  "description": "Event IANA timezone; defaults to the saved vault timezone for Journal notes.",
+                                  "type": "string"
+                                },
+                                "planEndsAt": {
+                                  "description": "Journal plan end instant, with explicit offset. All-day plans use the exclusive local date boundary.",
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                },
+                                "planStatus": {
+                                  "type": "string",
+                                  "enum": [
+                                    "planned",
+                                    "tentative",
+                                    "canceled"
+                                  ]
+                                },
+                                "planVerifiedAt": {
+                                  "description": "Actual successful source verification instant; never advance after a failed read.",
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                },
+                                "planCategory": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                                  "description": "Stable lowercase kebab-case identifier."
+                                },
+                                "planAccountId": {
+                                  "description": "Connected account owning an automatically captured plan; omit for a directly supplied member plan.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "planSourceId": {
+                                  "description": "Stable account/calendar/provider-occurrence identity. A repeated add returns the saved plan; update that exact event id for changes.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
                                 },
                                 "relatedId": {
                                   "description": "Optional related event ids. Repeat --related-id for multiple events.",

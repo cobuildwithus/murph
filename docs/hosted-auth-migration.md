@@ -14,7 +14,7 @@ Use no planned service outage. Prefer natural compatibility drain over elaborate
 
 | PR | Usable result | Activation prerequisite | Temporary ownership |
 | --- | --- | --- | --- |
-| 1. Approval migration | Protected members enroll Murph passkeys and approve actions without wallet signatures | Real WebAuthn, storage, concurrency and enrollment proof; production RP qualified; compatible readers deployed before enrollment is enabled | Existing approved factor authorizes transition; old proof reader remains for unmigrated members |
+| 1. Approval migration | Protected members enroll Murph passkeys and approve actions without wallet signatures | Real WebAuthn, storage, concurrency and enrollment proof; production RP qualified; compatible readers deployed before enrollment is enabled | Existing-factor migration plus the explicit never-migrated repair policy below; replacement readers always fence old proof |
 | 2. Better Auth and compatibility | Email/SMS login and same-member session compatibility; new native protocol accepts requests | Adapter/privacy and same-member proof; deploy readers with issuance off until PR 3 is ready | Per-member monotonic handoff, local old-session reader, exact-route native bridge |
 | 3. Client adoption | Web/native clients, Telegram login and credential controls use Better Auth | All login methods and credential controls qualified; new backend works before dependent apps are distributed | Valid old browser sessions drain; supported old native clients retain bounded admission |
 | 4. Retirement | No supported client, live service or cleanup job needs Privy | All retirement gates below met | Remove temporary code, mappings, vendor configuration and obsolete schema |
@@ -134,21 +134,93 @@ Use the same action challenge and member/session binding for both proof formats.
 
 Enrollment must be authorized by the member's existing approved factor, or by a separately defined independent recovery operation. A normal authenticated session alone cannot replace established protection. Verify authorization at options generation and final registration, then consume it with the credential write. Do not issue a login session from enrollment.
 
-New Better Auth accounts without any legacy identity or established approval credential can enroll their first passkey after primary authentication within five minutes. Silent exchange and session renewal do not count as primary proof. The fixed initial-options route creates an ordinary member/session-bound enrollment challenge; registration verifies WebAuthn, rechecks the current session and absent legacy binding, then atomically consumes the challenge and writes the first credential. Concurrent setup has one winner. An imported or protected member must use the existing-factor or independent-recovery path.
+New Better Auth accounts without any legacy identity or established approval credential can enroll their first passkey after primary authentication within five minutes. Silent exchange and session renewal do not count as primary proof. The fixed initial-options route creates an ordinary member/session-bound enrollment challenge; registration verifies WebAuthn, rechecks the current session and absent legacy binding, then atomically consumes the challenge and writes the first credential. Concurrent setup has one winner. An imported member without any approval aggregate may instead use the explicit legacy repair policy below. An existing Murph approval aggregate always requires its current factor or saved-key recovery.
 
 Credential state is bounded and encrypted under the existing member crypto owner. Verify and prepare crypto before the transaction; recheck the exact state and current session under member locks. Commit signature-counter changes, one-use challenge acceptance and the protected mutation together. Counterless synced passkeys still depend on challenge consumption for replay protection.
 
 Once replacement protection is established, do not try a legacy wallet after a failed passkey assertion. Corrupt credential state fails closed. The legacy proof reader is temporary and cannot become a recovery mechanism that ignores newer revocations.
 
-First-party approval hooks do not load the legacy SDK. Account settings omit its
-provider for initial or established Murph passkeys. For an unmigrated factor,
-the action endpoint selects the expected legacy principal from the current
-member; the temporary client restores that principal with its existing passkey,
-checks the same principal before and after wallet loading, and signs the bound
-action. It never creates a missing factor during approval or changes the Murph
-session. Legacy factor setup uses a separate provider dialog and checks the
-current member before provider mutations. Qualify passkey login in the existing
-provider configuration and real-device restoration before enabling migration.
+First-party approval hooks do not load the legacy SDK. The approval page and
+shared Settings passkey controls select native assertion or the explicit legacy
+repair below, not wallet restoration. The temporary server wallet verifier and
+unrelated provider setup/login/native/cleanup owners remain compatibility code;
+none is a fallback after native verification fails.
+
+### Never-migrated legacy repair (explicit exception)
+
+This is a deliberate weaker-factor recovery policy for **never-migrated approval
+state**, not a claim of security equivalence to proving the old Privy factor.
+A person controlling an already-bound primary sign-in method can establish the
+first Murph approval passkey without that old factor. Email-account takeover,
+SIM swap, or compromise of the bound Telegram account therefore matters. Once a
+Murph approval aggregate exists, this exception is permanently unavailable:
+assertion failure, missing local passkeys, corrupt/empty ciphertext and client
+claims cannot downgrade it. The credential owner never deletes protection to
+make an account eligible again.
+
+`legacy-passkey-repair.ts` requires all of the following at options and commit:
+current authenticated member/session; canonical legacy identity bound to that
+member; **no approval-credential row at all**; and Better Auth primary proof no
+more than five minutes old and not in the future. Its already-adopted encrypted
+login projection must agree exactly with the canonical verified email/phone or
+bound Telegram identity. Credential-change fencing must not postdate the proof.
+No old cookie, approval-link possession, silent legacy/native exchange, session
+renewal, routing-only contact, or newly supplied contact qualifies as fresh proof.
+Registration does not create primary login authority or change a sign-in method.
+
+When primary proof is stale, the existing auth dialog runs a same-account
+reauthentication continuation. Fixed OTP send/verify and Telegram start/verify
+routes accept an explicit browser-only `reauthenticate` intent. The current
+session selects the member; the submitted method must already match its canonical
+verified sign-in. This branch never calls the importer, searches for another
+member by contact, creates an account, attaches a contact, merges accounts, or
+runs signup completion. Telegram's nonce is one-use and bound to the original
+member/session. Actual OTP or signed Telegram proof issues the new primary
+session through the existing auth owner. Recheck the old session and exact
+canonical/login snapshot at that commit. Canceling closes the dialog and does
+not resume enrollment.
+
+The existing Approve control calls `/approval-passkeys/legacy-options`, performs
+user-verified WebAuthn registration and submits the distinct `legacyRepairToken`
+to the existing register route. One five-minute, member/session/primary-proof/
+canonical-generation-bound challenge is pending per member; a new attempt
+supersedes an abandoned one. Member/IP admission and the existing twenty-session
+ceiling bound work. Prepare WebAuthn, encrypted writes, login/root state and all
+session roots outside locks. Under the member/current-session locks, a
+provider-disabled database-only transaction rechecks exact authority, absence of
+any native aggregate, freshness and rollout gates; consumes the challenge with
+its absent-state credential CAS; stamps `credentialsChangedAt`; revokes other
+first-party sessions and all legacy browser sessions. The fresh authorizing
+browser remains signed in. No provider/KMS call is permitted under these locks.
+
+Registration **does not approve the requested action**. The client requests a
+fresh challenge for the captured approval ID (reauthentication may have changed
+the session) and obtains a separate native assertion through the existing
+verification/decision owner. Terminal or expired actions cannot be approved.
+Deny and return-to-conversation behavior are unchanged. Closing, failed proof or
+registration never sends a decision. A lost registration response may mean the
+passkey was saved: explicit retry/reload reselects the durable native factor, not
+repair or an automatic irreversible retry. Concurrent enrollment has one winner;
+a losing attempt retries using that winning factor. The same enrollment hook is
+available from the existing Security and protected-action controls; there is no
+new Settings product or generic recovery framework.
+
+**Activation and rollback:** both existing switches,
+`HOSTED_BETTER_AUTH_ENABLED=true` and
+`HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED=true`, must be enabled after reader,
+canonical-login and browser qualification. This patch adds no new switch,
+changes no deployment configuration and needs no new schema migration. Pausing
+either switch blocks repair options and commit, not existing native approvals.
+Keep the native credential reader and session fences as the rollback floor;
+never restore wallet fallback for a repaired member or delete their aggregate.
+
+**Retirement prerequisite:** every in-scope legacy account must already have an
+independently reconciled Better Auth login projection and a usable canonical
+verified sign-in before Privy becomes unavailable. The repair cannot safely
+invent that ownership for unimported, conflicting or inaccessible identities.
+Resolve those in the existing bounded migration inventory first. Qualify all
+supported browser authenticators, first-party delivery and the inline stale-login
+continuation; checked-in tests or a merged patch are not deployment evidence.
 
 ### Independent recovery
 
@@ -182,13 +254,12 @@ simultaneous redemption, another member/session, changed keys, revoked sessions,
 and provider-independent completion. Qualify storage/copying and WebAuthn on
 supported browsers before widening.
 
-A member who lost every legacy factor before enrolling cannot create a recovery
-key from an OTP. Keep that case unresolved in the retirement inventory until
-existing independent proof can restore protection through a separately reviewed
-operation. Support has no email/SMS-only override. Do not retire the provider
-while those accounts still depend on its factor; the deployment plan must not
-represent an unresolved account as migrated. Saved-key recovery follows the
-options described in [OWASP's MFA recovery guidance](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html#resetting-mfa).
+A previously saved key remains mandatory for replacement of any established
+Murph approval aggregate. Primary proof alone cannot provision or redeem that
+path. Never-migrated legacy accounts instead use the distinct, narrowly scoped
+repair policy above; accounts outside its canonical-ownership prerequisites
+remain unresolved retirement gates, not an email/SMS support override. Saved-key
+recovery follows [OWASP's MFA recovery guidance](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html#resetting-mfa).
 
 ## Credential settings
 
@@ -316,7 +387,7 @@ Retirement requires all of the following:
 - No valid old browser session needs its verifier, and no supported callback or recovery build needs the old format.
 - Supported native clients can migrate, renew, recover and handle upgrade requirements; dormant users have an explicit path.
 - Every retained member/provider principal has a terminal import/conflict/recovery disposition. No live lookup needs Privy.
-- Previously protected members have replacement protection or operational independent recovery; no silent primary-OTP downgrade exists.
+- Established Murph-passkey members retain their factor or saved-key recovery. Never-migrated legacy members have a reconciled first-party login and the qualified explicit repair policy above; other unresolved factor/identity cases still block retirement. Do not describe the exception as old-factor-equivalent recovery.
 - Wallet/export obligations are resolved and destructive vendor retirement has its explicit authorization.
 - Encrypted durable receipts preserve every provider target before detaching unused bindings. Provider calls happen outside transactions, with rebound checks and retries.
 - Cleanup readers support the next payload before writers emit it. Remaining Stripe, Cloudflare, runtime-log and Temporal work keeps its leases, cursors, attempts and outcomes. Missing configuration never means successful deletion.
@@ -328,7 +399,7 @@ Remove live Privy SDKs, verifiers, hooks, wallet code, native dependencies, CSP/
 
 ## Completion evidence
 
-Each PR needs focused tests/typecheck, candidate review, applicable ReviewGPT and green required exact-head CI. Auth proof covers actual enabled adapter operations, atomic OTP completion, same-member linking/unlinking, signed transport classification, current-session/factor checks and deletion races. Approval proof includes real signatures, missing UV, wrong origin/action/session, replay, counters and enrollment races. Native proof uses actual apps/devices, including skipped-version upgrades.
+Each PR needs focused tests/typecheck, candidate review, applicable ReviewGPT and green required exact-head CI. Auth proof covers actual enabled adapter operations, atomic OTP completion, same-member linking/unlinking, signed transport classification, current-session/factor checks and deletion races. Approval proof includes real signatures, missing UV, wrong origin/action/session, replay, counters and enrollment races. Legacy-repair proof additionally covers stale/exchanged primary sessions, exact canonical sign-in, established/corrupt aggregate exclusion, flags at commit, session fencing/rollback, inline cancellation/reload/lost response, terminal actions and a separate native decision with Privy unavailable. Native proof uses actual apps/devices, including skipped-version upgrades.
 
 Final completion also inspects dependency graphs/bundles, schema/catalog, deployed configuration, operational jobs and durable cleanup outcomes. Startup without Privy configuration and cold/warm login must work. Static source review or a grep result alone does not establish vendor retirement.
 

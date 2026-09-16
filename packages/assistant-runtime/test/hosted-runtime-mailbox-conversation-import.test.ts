@@ -51,6 +51,7 @@ import {
 import {
   serializeHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
+import { VaultError } from "@murphai/core";
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 
 import { createHostedAssistantChannelTypingDependencies } from "../src/hosted-runtime/channel-activity.ts";
@@ -387,6 +388,122 @@ describe("hosted mailbox conversation import adapter", () => {
     );
     assert.equal(afterProjection.events[0]?.attachmentEvidence.source, "hosted-inbox-projection");
     assert.equal(afterProjection.events[0]?.attachmentEvidence.attachments.length, 0);
+  });
+
+  test.each([
+    {
+      admitted: false,
+      label: "attachment",
+      part: {
+        attachmentId: "att_synthetic_contention",
+        fileName: "sample.txt",
+        mimeType: "text/plain",
+        size: 30,
+        type: "media",
+        url: "redacted-attachment-url-sentinel",
+      },
+    },
+    {
+      admitted: true,
+      label: "link-only",
+      part: { type: "link", value: "https://example.invalid/contended" },
+    },
+  ] as const)("keeps a $label capture retryable under active canonical write contention", async ({ admitted, part }) => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-contention-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_synthetic_contention",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_synthetic_contention",
+          parts: [{ type: "text", value: "Read this." }, part],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    let importAttempt = 0;
+    const importConversationWake = vi.fn(async () => {
+      importAttempt += 1;
+      if (importAttempt === 1) {
+        // The default importer wraps the commit failure raised when an earlier
+        // attachment backup still owns the canonical write lock.
+        throw new HostedConversationInboxProjectionError(
+          "Canonical inbox capture projection failed.",
+          {
+            cause: new VaultError(
+              "CANONICAL_WRITE_LOCKED",
+              "Canonical vault writes are already in progress.",
+              { lockState: "active", relativePath: ".runtime/locks/canonical-write" },
+            ),
+          },
+        );
+      }
+      return {
+        captureId: "cap_synthetic_contention",
+        metrics: { nextWakeAt: null, parserProcessed: 0 },
+      };
+    });
+    const importInput = {
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      importConversationWake,
+      item,
+      async loadAttachmentEvidenceCapture(input: { captureId: string }) {
+        return {
+          attachments: [{
+            attachmentId: "att_synthetic_contention",
+            byteSize: 30,
+            fileName: "sample.txt",
+            kind: "document",
+            mime: "text/plain",
+            ordinal: 1,
+            storedPath: "raw/inbox/2026/04/26/synthetic/attachments/01__sample.txt",
+          }],
+          captureId: input.captureId,
+        };
+      },
+      async prepareWakeContext() {},
+      runtime: createRuntime(),
+      vaultRoot,
+    };
+
+    const contended = await importHostedConversationMailboxItem(importInput);
+    const staged = await listAssistantInputEvents({ vault: vaultRoot });
+    assert.equal(staged.events.length, 1);
+    const inputId = staged.events[0]!.inputId;
+    if (admitted) {
+      // The reply was admitted before projection, so contention keeps the
+      // existing terminal projection path instead of re-admitting on retry.
+      assert.equal(contended.status, "imported");
+      assert.equal(contended.reasonCode, "conversation-import.projection-failed");
+      assert.equal(staged.events[0]?.projection.status, "failed");
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [inputId]);
+      return;
+    }
+
+    assert.deepEqual(contended, {
+      reasonCode: "conversation-import.canonical-write-busy",
+      retryable: true,
+      status: "blocked",
+    });
+    assert.equal(staged.events[0]?.projection.status, "pending");
+    assert.notEqual(staged.events[0]?.attachmentEvidence.status, "failed");
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+
+    const retried = await importHostedConversationMailboxItem(importInput);
+    assert.equal(retried.status, "imported");
+    assert.equal(retried.assistantInputId, inputId);
+    const settled = await readAssistantInputEvent({ inputId, vault: vaultRoot });
+    assert.equal(settled?.projection.status, "succeeded");
+    assert.equal(settled?.projection.captureId, "cap_synthetic_contention");
+    assert.equal(settled?.attachmentEvidence.status, "available");
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [inputId]);
+    expect(importConversationWake).toHaveBeenCalledTimes(2);
   });
 
   test("starts typing during blocked audio evidence without admitting a model input", async () => {

@@ -21,6 +21,7 @@ import {
   hostedWorkspaceSnapshotUserPrefix,
 } from "../storage-paths.js";
 import { safeCleanupErrorCode } from "./diagnostics.js";
+import { abortAllLegacyManagedSnapshots } from "./legacy-managed-snapshot.ts";
 import {
   assertR2ObjectAbsent,
   assertR2PrefixEmpty,
@@ -60,7 +61,7 @@ export interface HostedRunnerUserDataDeletionCompletedResult {
 
 export interface HostedRunnerUserDataDeletionPendingResult {
   ok: false;
-  reason: "r2_upload_drain_pending";
+  reason: "r2_upload_drain_pending" | "runtime_migration_pending";
   retryAfterSeconds: number;
   userId: string;
 }
@@ -96,6 +97,7 @@ export async function deleteHostedRunnerUserData(input: HostedRunnerUserDataDele
 }): Promise<HostedRunnerUserDataDeletionResult> {
   await input.stateStore.assertStateForUser(input.userId);
   const runnerCleanup = await stopRunnerBeforeUserDataDeletion(input);
+  await abortAllLegacyManagedSnapshots(input);
   const browserVaultDrainUntil = await readHostedBrowserVaultReplicaPostStopDrainUntil({
     state: input.state,
     userId: input.userId,

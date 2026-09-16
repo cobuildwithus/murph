@@ -5,6 +5,7 @@ import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider
 import { useRouter } from "next/navigation";
 import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 import { HostedOnboardingApiError, requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import { useLegacyApprovalRepair } from "./use-legacy-approval-repair";
 import { useSensitiveActionAuthorization } from "./use-sensitive-action-authorization";
 
 export function useApprovalPasskeyEnrollment() {
@@ -12,6 +13,7 @@ export function useApprovalPasskeyEnrollment() {
   const router = useRouter();
   const inFlight = useRef(false);
   const authorization = useSensitiveActionAuthorization();
+  const repair = useLegacyApprovalRepair();
   const [pending, setPending] = useState(false);
   const [registered, setRegistered] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +28,12 @@ export function useApprovalPasskeyEnrollment() {
     setPending(true);
     setError(null);
     try {
-      const status = await requestHostedOnboardingJson<{ initialEnrollmentAllowed: boolean }>({ url: "/api/settings/approval-passkeys" });
+      const status = await requestHostedOnboardingJson<{ initialEnrollmentAllowed: boolean; legacyRepairAllowed?: boolean }>({ url: "/api/settings/approval-passkeys" });
+      if (status.legacyRepairAllowed === true) {
+        try { await repair.repair(); setRegistered(true); }
+        finally { router.refresh(); }
+        return;
+      }
       let options: PublicKeyCredentialCreationOptionsJSON;
       let proof: Record<string, unknown>;
       if (status.initialEnrollmentAllowed === true) {
@@ -62,5 +69,5 @@ export function useApprovalPasskeyEnrollment() {
     }
   }
 
-  return { enroll, error, pending, registered };
+  return { enroll, error, pending, registered, pendingLabel: repair.pendingLabel };
 }

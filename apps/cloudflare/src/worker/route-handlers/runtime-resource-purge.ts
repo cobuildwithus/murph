@@ -1,3 +1,4 @@
+import { workspaceSnapshotBucket } from "../../workspace-snapshot-local-s3.ts";
 import { abortRuntimeMultipartUpload } from "../../runtime-object-upload.ts";
 import { parseHostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
 import { readHostedExecutionSnapshotBaseRef, readHostedExecutionSnapshotDeltaRef, readHostedExecutionSnapshotHotRef } from "@murphai/hosted-execution/parsers";
@@ -30,12 +31,12 @@ export const runtimeResourcePurgeRoutes: readonly DeclarativeRoute<WorkerRouteCo
 export async function purgeHostedRuntimeResource(input: {
   source: Pick<WorkerRouteContext["env"], "BUNDLES"> & Readonly<Record<string, unknown>>; userId: string; resource: ReturnType<typeof parseHostedRuntimeResourcePurge>;
 }): Promise<void> {
-  const bucket = input.source.BUNDLES;
+  const bucket = workspaceSnapshotBucket(input.source);
   if (!bucket.delete) throw new Error("Runtime resource deletion is unavailable.");
   const resource = parseHostedRuntimeResourcePurge(input.resource);
   if (resource.kind === "multipart") {
     if (!bucket.resumeMultipartUpload) throw new Error("Runtime multipart recovery is unavailable.");
-    const prefixes = await Promise.all([hostedMediaUserPrefix({ userId: input.userId }), hostedPrivateMediaUserPrefix({ userId: input.userId }), hostedBrowserVaultReplicaUserPrefix({ userId: input.userId })]);
+    const prefixes = await Promise.all([hostedMediaUserPrefix({ userId: input.userId }), hostedPrivateMediaUserPrefix({ userId: input.userId }), hostedBrowserVaultReplicaUserPrefix({ userId: input.userId }), hostedWorkspaceSnapshotUserPrefix({ userId: input.userId })]);
     if (!prefixes.some(prefix => resource.objectKey.startsWith(prefix) && !resource.objectKey.slice(prefix.length).includes("/"))) throw new TypeError("Multipart upload is outside the member namespace.");
     await abortRuntimeMultipartUpload(bucket.resumeMultipartUpload(resource.objectKey, resource.uploadId));
     return;

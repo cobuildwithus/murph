@@ -158,7 +158,8 @@ describe("hosted-member-store", () => {
     await createHostedMemberStore({
       billingStatus: HostedBillingStatus.incomplete,
       memberId: "member_new_onboarding",
-      prisma: { hostedMember: { create } } as never,
+      prisma: { hostedMember: { create }, $queryRaw: vi.fn().mockResolvedValue([{ phase: "legacy" }]),
+        hostedRuntimeOwner: { create: vi.fn().mockResolvedValue({}) } } as never,
     });
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({

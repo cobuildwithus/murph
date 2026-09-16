@@ -6,6 +6,8 @@ import {
   useCallback,
   useContext,
   useLayoutEffect,
+  useEffect,
+  useRef,
   useMemo,
   useState,
   type ReactNode,
@@ -52,6 +54,7 @@ interface AuthContextValue {
   authenticated: boolean;
   authenticationStatus: "ready" | "unavailable";
   openAuthDialog: () => void;
+  reauthenticate?: () => Promise<void>;
   openDataPrivacyAuthDialog?: () => void;
   prepareAuth: () => void;
   shared: boolean;
@@ -86,9 +89,45 @@ export function AuthProvider({
     : null;
   const [promptPath, setPromptPath] = useState(autoOpenPath);
   const [open, setOpen] = useState(autoOpenPath !== null);
-  const [authIntent, setAuthIntent] = useState<"default" | "data-privacy">(
+  const [authIntent, setAuthIntent] = useState<"default" | "data-privacy" | "reauthenticate">(
     "default",
   );
+
+  const continuation = useRef<{ promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } | null>(null);
+  const cancelReauthentication = useCallback(() => {
+    const current = continuation.current;
+    continuation.current = null;
+    current?.reject(new Error("Sign-in was canceled. Nothing was approved."));
+  }, []);
+  useEffect(() => cancelReauthentication, [cancelReauthentication]);
+  const continuationPath = useRef(pathname);
+  useEffect(() => {
+    if (continuationPath.current === pathname) return;
+    continuationPath.current = pathname;
+    if (continuation.current) {
+      cancelReauthentication();
+      setOpen(false);
+      setAuthIntent("default");
+    }
+  }, [pathname, cancelReauthentication]);
+  const reauthenticate = useCallback(() => {
+    if (continuation.current) return continuation.current.promise;
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+    continuation.current = { promise, resolve, reject };
+    setAuthIntent("reauthenticate");
+    setOpen(true);
+    return promise;
+  }, []);
+  const handleReauthenticated = useCallback(() => {
+    const current = continuation.current;
+    if (!current) return;
+    continuation.current = null;
+    setOpen(false);
+    setAuthIntent("default");
+    current.resolve();
+  }, []);
 
   if (promptPath !== autoOpenPath) {
     setPromptPath(autoOpenPath);
@@ -97,21 +136,24 @@ export function AuthProvider({
   }
 
   const openAuthDialog = useCallback(() => {
+    cancelReauthentication();
     setAuthIntent("default");
     setOpen(true);
-  }, []);
+  }, [cancelReauthentication]);
 
   const openDataPrivacyAuthDialog = useCallback(() => {
+    cancelReauthentication();
     setAuthIntent("data-privacy");
     setOpen(true);
-  }, []);
+  }, [cancelReauthentication]);
 
   const handleOpenChange = useCallback((nextOpen: boolean) => {
     setOpen(nextOpen);
     if (!nextOpen) {
+      cancelReauthentication();
       setAuthIntent("default");
     }
-  }, []);
+  }, [cancelReauthentication]);
 
   useLayoutEffect(() => subscribeBrowserVaultSessionInvalidation((source) => {
     if (source === "cross-document" || source === "same-document-expired") {
@@ -151,11 +193,12 @@ export function AuthProvider({
       authenticated,
       authenticationStatus,
       openAuthDialog,
+      reauthenticate,
       openDataPrivacyAuthDialog,
       prepareAuth: () => {},
       shared: false,
     }),
-    [authenticated, authenticationStatus, openAuthDialog, openDataPrivacyAuthDialog],
+    [authenticated, authenticationStatus, openAuthDialog, openDataPrivacyAuthDialog, reauthenticate],
   );
 
   return (
@@ -163,6 +206,8 @@ export function AuthProvider({
       {children}
       <AuthDialog
         open={open}
+        reauthenticate={authIntent === "reauthenticate"}
+        onReauthenticated={handleReauthenticated}
         title={authIntent === "data-privacy"
           ? "Log in to manage your data"
           : authenticated
@@ -170,6 +215,8 @@ export function AuthProvider({
             : undefined}
         description={authIntent === "data-privacy"
           ? "Use the email address or phone number already linked to your Murph account."
+          : authIntent === "reauthenticate"
+            ? "Use a sign-in method already linked to this account. Then add your Murph passkey and confirm the request."
           : authenticated
             ? "Verify this device to manage secure approvals."
             : undefined}

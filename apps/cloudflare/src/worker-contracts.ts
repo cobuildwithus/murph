@@ -1,4 +1,4 @@
-import type { LegacyRuntimeExportCursor, LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
+import type { HostedRuntimeObjectMigrationIdentity, HostedRuntimeMemberMigrationIdentity, HostedRuntimeMigrationCheckpointStatus, LegacyRuntimeExportCursor, LegacyRuntimeExportPage, LegacyRuntimeInspection } from "@murphai/hosted-execution/runtime-migration";
 import type { HostedExecutionContainerStubLike } from "./runner-container.ts";
 import type {
   HostedWorkspaceInvocationResult,
@@ -147,7 +147,11 @@ export interface WorkerRunnerContainerNamespaceLike<
 }
 
 export interface WorkerUserRunnerStubLike {
-  freezeForPostgresMigration?(): Promise<{ frozen: boolean }>;
+  manageHostedWorkspaceSnapshotUpload?(input: { userId: string; command: import("@murphai/hosted-execution/runtime-resources").HostedRuntimeManagedSnapshotCommand }): Promise<import("@murphai/hosted-execution/runtime-resources").HostedRuntimeSnapshotResponse>;
+  inspectPostgresMigration?(): Promise<LegacyRuntimeInspection>;
+  freezeEmptyForPostgresMigration?(identity: HostedRuntimeObjectMigrationIdentity): Promise<{ frozen: boolean }>;
+  preparePostgresMemberMigration?(identity: HostedRuntimeMemberMigrationIdentity): Promise<{ quiesced: boolean; checkpointStatus: HostedRuntimeMigrationCheckpointStatus | null }>;
+  freezeForPostgresMigration?(identity?: HostedRuntimeMemberMigrationIdentity): Promise<{ frozen: boolean }>;
   exportPostgresMigrationPage?(cursor: LegacyRuntimeExportCursor): Promise<LegacyRuntimeExportPage>;
   recordRunnerContainerRetired?(input: {
     runnerContainerName: string;
@@ -249,6 +253,7 @@ export interface WorkerUserRunnerNamespaceLike<
   TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
 > {
   getByName(name: string): TStub;
+  idFromName?(name: string): { toString(): string };
   idFromString?(id: string): unknown;
   get?(id: unknown): TStub;
 }

@@ -54,6 +54,7 @@ import {
 import type {
   AssistantModelTarget,
 } from "@murphai/operator-config/assistant-cli-contracts";
+import { isActiveCanonicalWriteLockError } from "@murphai/core";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 
 import type {
@@ -110,6 +111,8 @@ const CONVERSATION_INBOX_RUNTIME_UNAVAILABLE_REASON =
   "conversation-import.inbox-runtime-unavailable";
 const CONVERSATION_PARSER_RETRY_REASON =
   "conversation-import.parser-retry";
+const CONVERSATION_CANONICAL_WRITE_BUSY_REASON =
+  "conversation-import.canonical-write-busy";
 const CONVERSATION_RAW_EMAIL_MISSING_REASON =
   "conversation-import.raw-email-missing";
 const ATTACHMENT_EVIDENCE_PARTIAL_REASON =
@@ -562,9 +565,9 @@ async function stageHostedConversationMailboxItem(
         if (attachmentAdmissionDeferred) {
           assertHostedConversationMailboxImportLive(input.signal ?? null);
         }
-        if (projectionEffect.parserRetry) {
+        if (projectionEffect.retryReasonCode) {
           return {
-            reasonCode: CONVERSATION_PARSER_RETRY_REASON,
+            reasonCode: projectionEffect.retryReasonCode,
             retryable: true,
             status: "blocked",
           };
@@ -1018,7 +1021,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
   wake: HostedExecutionConversationMessageWake;
 }): Promise<{
   effect: HostedMailboxPostCheckpointEffectResult;
-  parserRetry: boolean;
+  retryReasonCode: string | null;
   timing: HostedMailboxConversationImportTiming;
 }> {
   const projectionStartedAt = Date.now();
@@ -1070,6 +1073,27 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
       timing.projectionImportMs = elapsedHostedConversationImportMs(importStartedAt);
     }
 
+    if (
+      input.stagedInput.attachmentEvidenceRequired
+      && isHostedConversationCanonicalWriteContention(error)
+    ) {
+      // An outstanding best-effort attachment backup still owns canonical
+      // writes. The reply is not admitted yet, so keep this attachment pending
+      // for the mailbox retry instead of recording terminal failed evidence.
+      timing.projectionTotalMs = projectionElapsedMs();
+      return {
+        effect: {
+          attachmentEvidenceUpdated: null,
+          kind: "inbox_projection",
+          projectionUpdated: null,
+          reasonCode: CONVERSATION_CANONICAL_WRITE_BUSY_REASON,
+          status: "failed",
+        },
+        retryReasonCode: CONVERSATION_CANONICAL_WRITE_BUSY_REASON,
+        timing,
+      };
+    }
+
     const reasonCode = readHostedConversationProjectionFailureReason(error);
     const projectionUpdated = await recordHostedConversationProjectionBestEffort(input.stagedInput, {
       captureId: null,
@@ -1092,7 +1116,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
         reasonCode,
         status: "failed",
       },
-      parserRetry: false,
+      retryReasonCode: null,
       timing,
     };
   }
@@ -1107,7 +1131,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
         reasonCode: null,
         status: "succeeded",
       },
-      parserRetry: true,
+      retryReasonCode: CONVERSATION_PARSER_RETRY_REASON,
       timing,
     };
   }
@@ -1122,7 +1146,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
         reasonCode: null,
         status: "succeeded",
       },
-      parserRetry: false,
+      retryReasonCode: null,
       timing,
     };
   }
@@ -1147,7 +1171,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
       attachmentEvidenceResult,
       projectionUpdated,
     }),
-    parserRetry: false,
+    retryReasonCode: null,
     timing,
   };
 }
@@ -1576,6 +1600,17 @@ function readHostedConversationFailureCause(error: unknown): unknown {
   return error && typeof error === "object" && "cause" in error
     ? (error as { cause?: unknown }).cause
     : null;
+}
+
+function isHostedConversationCanonicalWriteContention(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current; depth += 1) {
+    if (isActiveCanonicalWriteLockError(current)) {
+      return true;
+    }
+    current = readHostedConversationFailureCause(current);
+  }
+  return false;
 }
 
 function isRawAttachmentMaterializationFailureCode(code: string | null): boolean {

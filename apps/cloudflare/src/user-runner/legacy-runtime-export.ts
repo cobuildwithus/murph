@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DurableObjectStateLike, DurableObjectSqlValue } from "./types.ts";
+import { LEGACY_MANAGED_SNAPSHOT_PREFIX, parseLegacyManagedSnapshot } from "./legacy-managed-snapshot.ts";
 import { browserVaultReplicaOrphanCandidateStoragePrefix, workspaceSnapshotOrphanCandidateStoragePrefix, workspaceSnapshotUploadSessionCurrentStorageKey } from "./workspace-snapshot-sessions.ts";
 
 const PAGE_SIZE = 50;
@@ -18,24 +19,28 @@ import type { LegacyRuntimeExportCursor, LegacyRuntimeExportPage } from "@murpha
 export async function readLegacyRuntimeMigrationIdentity(state: DurableObjectStateLike): Promise<{ userId: string | null; generation: string }> {
   const sql = state.storage.sql;
   if (!sql) throw new Error("Legacy runtime migration requires SQLite storage.");
-  const meta = sql.exec<{ user_id: string; active_generation: number; active_attempt_id: string | null; active_runner_container_name: string | null }>(
+  const tables = new Set(sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('runner_meta', 'runner_hosted_media_asset')").toArray().map(row => row.name));
+  const meta = tables.has("runner_meta") ? sql.exec<{ user_id: string; active_generation: number; active_attempt_id: string | null; active_runner_container_name: string | null }>(
     "SELECT user_id, active_generation, active_attempt_id, active_runner_container_name FROM runner_meta WHERE singleton = 1",
-  ).toArray()[0];
+  ).toArray()[0] : undefined;
+  const members = new Set<string>();
   if (meta) {
     if (!Number.isSafeInteger(meta.active_generation) || meta.active_generation < 0) throw new Error("Legacy runtime generation is invalid.");
-    return { userId: meta.user_id, generation: String(meta.active_generation) };
+    members.add(meta.user_id);
   }
-  const members = new Set(sql.exec<{ user_id: string }>("SELECT DISTINCT user_id FROM runner_hosted_media_asset LIMIT 2").toArray().map(row => row.user_id));
+  if (tables.has("runner_hosted_media_asset")) {
+    for (const row of sql.exec<{ user_id: string }>("SELECT DISTINCT user_id FROM runner_hosted_media_asset LIMIT 2").toArray()) members.add(row.user_id);
+  }
   if (!state.storage.list) throw new Error("Legacy runtime migration requires bounded storage listing.");
-  for (const prefix of [...EXPORT_KV_PREFIXES, ...DRAIN_KEYS]) {
+  for (const prefix of [...EXPORT_KV_PREFIXES, ...DRAIN_KEYS, LEGACY_MANAGED_SNAPSHOT_PREFIX]) {
     const records = await state.storage.list<unknown>({ prefix, limit: 1 });
     for (const value of records.values()) {
-      if (!value || typeof value !== "object" || !("userId" in value) || typeof value.userId !== "string") throw new Error("Legacy resource member identity is missing.");
+      if (!value || typeof value !== "object" || !("userId" in value) || typeof value.userId !== "string" || !value.userId) throw new Error("Legacy resource member identity is missing.");
       members.add(value.userId);
     }
   }
   if (members.size > 1) throw new Error("Legacy runtime contains conflicting member identities.");
-  return { userId: members.values().next().value ?? null, generation: "0" };
+  return { userId: members.values().next().value ?? null, generation: String(meta?.active_generation ?? 0) };
 }
 
 /** Caller holds the durable completed freeze. Keyset pages avoid loading an
@@ -44,9 +49,9 @@ export async function readLegacyRuntimeExportPage(state: DurableObjectStateLike,
   if (!Number.isInteger(cursor.section) || cursor.section < 0 || cursor.section > EXPORT_KV_PREFIXES.length
     || typeof cursor.after !== "string" || cursor.after.length > 2048) throw new TypeError("Legacy export cursor is invalid.");
   const identity = await readLegacyRuntimeMigrationIdentity(state);
-  const active = state.storage.sql!.exec<{ active_attempt_id: string | null; active_runner_container_name: string | null }>(
+  const active = hasTable(state, "runner_meta") ? state.storage.sql!.exec<{ active_attempt_id: string | null; active_runner_container_name: string | null }>(
     "SELECT active_attempt_id, active_runner_container_name FROM runner_meta WHERE singleton = 1",
-  ).toArray()[0];
+  ).toArray()[0] : undefined;
   if (active?.active_attempt_id || active?.active_runner_container_name) throw new Error("Legacy runtime export still has an execution target.");
   const records = cursor.section === 0
     ? readMediaPage(state, cursor.after)
@@ -60,6 +65,7 @@ export async function readLegacyRuntimeExportPage(state: DurableObjectStateLike,
 }
 
 function readMediaPage(state: DurableObjectStateLike, after: string): LegacyRuntimeExportPage["records"] {
+  if (!hasTable(state, "runner_hosted_media_asset")) return [];
   return state.storage.sql!.exec<Record<string, DurableObjectSqlValue>>(`
     SELECT media_id, user_id, media_kind, byte_size, sha256, expires_at,
       retired_at, purged_at, revision, object_key, updated_at
@@ -77,18 +83,41 @@ async function readResourcePage(state: DurableObjectStateLike, prefix: string, a
 
 /** Fail closed on unclassified durable KV state. This finite scan is paginated;
  * resources themselves are exported separately in resumable pages. */
-export async function requireLegacyRuntimeStorageCoverage(state: DurableObjectStateLike): Promise<void> {
+export async function requireLegacyRuntimeStorageCoverage(state: DurableObjectStateLike, requireTerminalUploads = false): Promise<Set<string>> {
   if (!state.storage.list) throw new Error("Legacy migration requires bounded storage listing.");
+  const members = new Set<string>();
   let after = "";
   for (;;) {
     const page = await state.storage.list<unknown>({ limit: PAGE_SIZE, ...(after ? { startAfter: after } : {}) });
-    for (const key of page.keys()) {
-      if (key !== "runtime-migration-freeze:v1" && !DRAIN_KEYS.includes(key)
-        && !EXPORT_KV_PREFIXES.some(prefix => key.startsWith(prefix))) throw new Error("Legacy migration encountered unclassified durable state.");
+    for (const [key, value] of page) {
+      const userId = classifyLegacyStorageRecord(key, value, requireTerminalUploads);
+      if (userId !== null) members.add(userId);
+      if (members.size > 1) throw new Error("Legacy runtime contains conflicting member identities.");
     }
-    if (page.size < PAGE_SIZE) return;
+    if (page.size < PAGE_SIZE) return members;
     const next = [...page.keys()].at(-1)!;
     if (next <= after) throw new Error("Legacy storage listing did not advance.");
     after = next;
   }
+}
+
+function classifyLegacyStorageRecord(key: string, value: unknown, requireTerminalUploads: boolean): string | null {
+  if (key === "runtime-migration-freeze:v1") return null;
+  if (key.startsWith(LEGACY_MANAGED_SNAPSHOT_PREFIX)) {
+    const upload = parseLegacyManagedSnapshot(value);
+    if (key !== `${LEGACY_MANAGED_SNAPSHOT_PREFIX}${upload.snapshotId}`) throw new Error("Legacy managed upload key mismatch.");
+    if (requireTerminalUploads && upload.completedAt === null) throw new Error("Legacy snapshot upload remains pending.");
+    return upload.userId;
+  }
+  if (!DRAIN_KEYS.includes(key) && !EXPORT_KV_PREFIXES.some(prefix => key.startsWith(prefix))) {
+    throw new Error("Legacy migration encountered unclassified durable state.");
+  }
+  if (!value || typeof value !== "object" || !("userId" in value) || typeof value.userId !== "string" || !value.userId) {
+    throw new Error("Legacy resource member identity is missing.");
+  }
+  return value.userId;
+}
+
+function hasTable(state: DurableObjectStateLike, table: string): boolean {
+  return state.storage.sql!.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).toArray().length === 1;
 }

@@ -154,7 +154,7 @@ export async function handleRunnerWebControlRequest(input: {
   ) && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceHeaders;
   try {
-    writeAuthority = usesPostgresRuntimeOwner(input.env) ? requireRunnerRuntimeWriteFenceHeaders(input.request) : await (
+    writeAuthority = (await usesPostgresRuntimeOwner(input.env, input.userId)) ? requireRunnerRuntimeWriteFenceHeaders(input.request) : await (
       isBrowserVaultReplicaPublishRequest
         ? requireRunnerRuntimeWriteFenceWorkspaceWrite({
           env: input.env,
@@ -323,7 +323,7 @@ async function forwardWithRuntimeUsageSettlement(input: {
 }): Promise<Response> {
   if (!input.usageRecord) return input.forward();
   let receipt: Awaited<ReturnType<typeof beginHostedRuntimeUsageSettlement>> | null = null;
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
     const payload: unknown = JSON.parse(input.body ?? "{}");
     if (!isHostedRunnerRecord(payload) || typeof payload.usage.usageId !== "string") return jsonError("Usage identity is required.", 400);
     receipt = await beginHostedRuntimeUsageSettlement({ env: input.env, userId: input.userId,

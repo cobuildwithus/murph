@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Upcoming-context sparse plan edits, canonical timing precision, bounded ledger
+controls independent of source history, and disconnect invalidation are owned by
+`agent-docs/product-specs/journal.md` and `ARCHITECTURE.md`.
+
 Admission and occurrence-scoped recovery of colliding connection jobs during
 retained device history retries are owned by `agent-docs/RELIABILITY.md`; the
 existing mailbox claim preserves one continuation and exact job backoff across preemption and restoration.
@@ -122,6 +126,11 @@ Startup mailbox-fetch overlap is tracked in
 Its cursor-hint, recovery and wake-invalidation contract is owned by
 `agent-docs/references/hosted-runtime-protocol.md`.
 
+Attachment turns starting before remote backup are tracked in
+[`2026-09-16-attachment-fast-start.md`](exec-plans/completed/2026-09-16-attachment-fast-start.md).
+Its best-effort backup, canonical-write contention retry, and inbox capture
+replay contract is owned by `agent-docs/references/hosted-runtime-protocol.md`.
+
 Foreground promotion batch reuse and completion/wake race preservation are owned
 by `agent-docs/references/hosted-runtime-protocol.md`; focused admission, import
 overlap, and recovery proof is indexed in `agent-docs/references/testing-ci-map.md`.
@@ -144,6 +153,14 @@ the warning regression and delivery evidence are tracked in
 
 The deployment unblock retaining the dormant experiment namespace is tracked in
 [`2026-09-15-defer-small-namespace-retirement.md`](exec-plans/completed/2026-09-15-defer-small-namespace-retirement.md).
+
+Silent morning Journal capture, canonical plan context, retirement of the
+afternoon pass, and bounded private upcoming-context injection are owned by
+`product-specs/journal.md` and `ARCHITECTURE.md`.
+The reviewed implementation and verification are recorded in
+[`2026-09-15-upcoming-context-review.md`](exec-plans/completed/2026-09-15-upcoming-context-review.md).
+Subsequent corrections, proactive guidance, regression proof, and final review are in
+[`2026-09-16-upcoming-context-corrections.md`](exec-plans/completed/2026-09-16-upcoming-context-corrections.md).
 
 Retained device-import stall, cycling and long-backlog operator alerts are owned
 by `agent-docs/RELIABILITY.md`; connection ownership in diagnostic events is
@@ -261,7 +278,7 @@ for preserving collection scope are recorded in
 | `agent-docs/exec-plans/completed/2026-09-13-source-list-projection-independence.md` | Completed wearable-projection implementation and parent validation evidence; cohort reporting correction, retained global-position diagnosis, and final exact-head completion gates. | Source-health execution plan | Medium | 2026-09-13 |
 | `packages/vault-usecases/bench/README.md` | Synthetic experiment-progress timing through the composed usecase, semantic parity, and baseline comparison limits. | Experiment progress performance | Medium | 2026-09-11 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
-| `agent-docs/references/hosted-postgres-runtime.md` | Postgres execution authority, native completion, recoverable uploads, deletion obligations, and the finite legacy fleet cutover. | Hosted runtime ownership | High | 2026-09-15 |
+| `agent-docs/references/hosted-postgres-runtime.md` | Postgres execution authority, mixed member routing, transactional pending-member enrollment across old writers, bounded canonical source enrollment and deletion retention, durable legacy materialization and creation closure, exact per-member empty-source activation, durable single-source selection, separate late accounting and bounded automatic first-use handoff and namespace-bound compatible releases, bounded encrypted cleanup enrollment through operator and ordinary cleanup retries, deletion-driven continuation and composed source/Postgres protocol proof, bounded same-source polling, pre-selection canary budgets and explicit member targeting in the protected hosted operator, native completion, managed uploads, coherent hosted-local snapshot storage, and rolling migration readiness, bounded browser-vault replica admission window for rolling readiness, freeze reconciliation of dead recorded attempts. | Hosted runtime ownership | High | 2026-09-16 |
 | `agent-docs/references/hosted-runtime-protocol.md` | Hosted operator provider authentication, mailbox/workspace checkpoints, v2-only live restore, derived artifact availability, inert legacy cache manifests, retained legacy object cleanup and canonical receipt recovery, hot admission and bounded history reads, stale delivery-wake recovery, exact ownership, idle restore publication, and accepted-work monitoring, including independent workspace attempts, shared canonical publication, single-pass device-hint coverage, bounded late system-mailbox import after completion recording with covered-schedule retirement and locked stale-schedule rejection, validated continuation scheduling, provider cadence separated from runtime retry deadlines, independent maintenance, bounded retention failure/blocker retries and stage diagnostics, future retry wakes after cold restore, vault-share deadline revalidation, fenced prior-snapshot reuse, background Browser Vault freshness, retired member shell hints with historical latency reads, deadline-bound operator diagnostic execution and status, exact future-continuation owner release, metadata-only checkpoint timing, committed Browser Vault publication before subsequent ordinary due work with timeout continuation delivery, completion ownership across foreground handoff and reuse, observation-only active-fence liveness without cleanup deferral, and bounded consent-aware group wearable freshness requests with shared-history recovery, honest check times and optional schedule recovery. | Hosted execution architecture and bounded device-sync drain budgets | High | 2026-09-12 |
 | `agent-docs/references/hosted-temporal-orchestration.md` | Hosted Temporal orchestration, compatible controller-first bootstrap, acknowledged checkpoint rechecks, digest-bound production-core release admission, and explicit Web admission status delivery. | Hosted Temporal orchestration target | High | 2026-09-11 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
@@ -285,7 +302,7 @@ for preserving collection scope are recorded in
 | `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle, guarded retirement, and dependency hook setup. | Local rebuildable-storage lifecycle | High | 2026-09-11 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Local hosted runtime workflow, call-scoped cancellation, and exact-child startup/exit cleanup ownership. | Local hosted runtime workflow | Medium | 2026-09-05 |
 | `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, exact tracked archive inputs, no base-update limit, response timing and evidence requirements, same-session waiting or paced polling by default, exact-metadata recovery after capture failure, and invalid-first-attempt baseline recovery. | Final PR ReviewGPT loop | Medium | 2026-09-11 |
-| `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion, daily recovery, checkpoint-owned continuation preflight, and bounded completion-marker retention. | Device-sync ingestion contract | High | 2026-09-15 |
+| `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion, daily recovery, checkpoint-owned continuation preflight, bounded deferral of future history, pending-start history scans, and bounded completion-marker retention. | Device-sync ingestion contract | High | 2026-09-16 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/2026-09-13-cli-validation-diagnostics.md` | Bounded optional schema diagnostics, three existing knowledge source classifications and consumer-first rollout contract. | CLI diagnostics execution plan | High | 2026-09-13 |
 | `agent-docs/exec-plans/completed/2026-09-13-browser-vault-source-read-telemetry.md` | Fixed source-operation timing through existing Browser Vault timeout telemetry, with behavior-preserving proof and rollout gates. | Completed diagnostic implementation | High | 2026-09-13 |

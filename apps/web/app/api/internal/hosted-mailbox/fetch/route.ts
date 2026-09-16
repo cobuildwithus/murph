@@ -46,7 +46,7 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedMailboxFetchRequest(rawBody);
   const authority = readHostedRuntimeCallbackAuthority(request);
   const { mailbox, includeGroupRunningBit } = await prisma.$transaction(async (tx) => {
-    await requireHostedRuntimeCallbackTx(tx, authority ? { ...authority, userId } : null);
+    await requireHostedRuntimeCallbackTx(tx, userId, authority ? { ...authority, userId } : null);
     // One fresh projection supplies access, consent and read-first allowance.
     const memberState = await tx.hostedMember.findUnique({
       where: { id: userId },

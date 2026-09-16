@@ -230,7 +230,7 @@ describe("requireHostedCloudflareCallbackRequest", () => {
       privateJwkJson: currentPrivateJwkJson, userId: "member_runtime_admission" });
     const options = { maxBodyBytes: 0, nowMs: FIXED_NOW_MS, nonceStore: new MemoryNonceStore() };
     await expect(requireHostedCloudflareCallbackRequest(signed, options)).resolves.toBe("member_runtime_admission");
-    expect(runtimeAdmission.check).toHaveBeenLastCalledWith(tx, { ...authority, userId: "member_runtime_admission" });
+    expect(runtimeAdmission.check).toHaveBeenLastCalledWith(tx, "member_runtime_admission", { ...authority, userId: "member_runtime_admission" });
     runtimeAdmission.check.mockRejectedValueOnce(new Error("synthetic retired runtime"));
     const legacy = await createSignedCallbackRequest({ body: "", method: "POST",
       nonce: "legacyadmissionnonce000000000001", path: url.pathname,
@@ -238,7 +238,7 @@ describe("requireHostedCloudflareCallbackRequest", () => {
     legacy.headers.set("x-hosted-runtime-attempt-id", "legacy-attempt");
     legacy.headers.set("x-hosted-runtime-lease-generation", "1");
     await expect(requireHostedCloudflareCallbackRequest(legacy, options)).rejects.toThrow("synthetic retired runtime");
-    expect(runtimeAdmission.check).toHaveBeenLastCalledWith(tx, null);
+    expect(runtimeAdmission.check).toHaveBeenLastCalledWith(tx, "member_runtime_admission", null);
   });
 
   it("rejects a signed callback as replay when reindex raises a nonce conflict", async () => {

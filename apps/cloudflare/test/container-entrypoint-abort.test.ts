@@ -323,11 +323,25 @@ describe("container entrypoint abort boundary", () => {
     });
     expect(healthDuringCompletion.status).toBe(200);
     expect(healthDuringCompletion.json).toMatchObject({
-      activeJobCount: 0,
+      activeJobCount: 1,
       poisoned: false,
     });
     expect(exit).not.toHaveBeenCalled();
     expect(mocks.reportHostedContainerFatalBestEffort).not.toHaveBeenCalled();
+
+    const whileCompleting = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildWorkspaceJobBody({ eventId: "evt_during_completion" })),
+      headers: { "content-type": "application/json; charset=utf-8" },
+      method: "POST",
+    });
+    expect(whileCompleting.status).toBe(409);
+    await whileCompleting.arrayBuffer();
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
+    releaseCompletion.resolve();
+    await vi.waitFor(async () => {
+      const health = await sendHostedContainerGetRequest({ path: "/health", port: address.port });
+      expect(health.json).toMatchObject({ activeJobCount: 0, poisoned: false });
+    });
 
     const nextInvocation = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: JSON.stringify(buildWorkspaceJobBody({ eventId: "evt_after_response_close" })),
@@ -341,7 +355,6 @@ describe("container entrypoint abort boundary", () => {
     expect(
       mocks.recordHostedContainerRuntimeCompletionBestEffort,
     ).toHaveBeenCalledTimes(2);
-    releaseCompletion.resolve();
   });
 
   it("aborts an accepted workspace invocation through the internal abort endpoint", async () => {

@@ -124,6 +124,38 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     new Set(["ADD COLUMN NOT NULL"]),
   ],
   [
+    "20260915234500_hosted_runtime_member_cutover",
+    // Backend phase is a new column with a legacy default accepted by its
+    // new check. Predeploy leaves legacy serving unchanged; campaign start is
+    // a separate operation after compatible readers have converged.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
+    "20260915234600_hosted_runtime_rolling_campaign",
+    // This replacement only widens the existing phase vocabulary. Old phase
+    // values remain valid; predeploy does not start the rolling campaign.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260915234700_hosted_runtime_managed_snapshots",
+    // Every new byte-verification field is nullable and the all-null old-writer
+    // shape passes. The broad ADD COLUMN scanner also sees the later check.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
+    "20260916044500_hosted_runtime_member_enrollment",
+    // The phase check widens to pending. The insert trigger grants no new
+    // execution authority and changes ownership only after rolling begins;
+    // both current and older creators remain valid in the legacy deploy window.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
+    "20260916053000_hosted_runtime_late_sources",
+    // The selection is nullable. Existing source rows receive the baseline
+    // default accepted by the new check; predeploy changes no serving phase.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK"]),
+  ],
+  [
     "20260810010000_member_owned_device_provider_applications",
     // Both application-binding columns are introduced nullable in this same
     // migration, so every existing row has the accepted all-null shape. The

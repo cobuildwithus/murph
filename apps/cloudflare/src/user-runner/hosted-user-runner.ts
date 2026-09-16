@@ -73,6 +73,7 @@ import {
   createWorkspaceSnapshotSessionService,
   type WorkspaceSnapshotSessionService,
 } from "./workspace-snapshot-sessions.js";
+import { abortAllLegacyManagedSnapshots, abortLegacyManagedSnapshot } from "./legacy-managed-snapshot.ts";
 import {
   deleteHostedRunnerUserData,
   type HostedRunnerUserDataDeletionServiceInput,
@@ -210,6 +211,7 @@ export class HostedUserRunner {
     });
     this.runtimeInvocation = runtimeInvocation;
     this.workspaceSnapshotSessions = createWorkspaceSnapshotSessionService({
+      withSnapshotMutation: run => this.withRuntimeConsentMutationLock(run),
       bucket,
       runnerStoreCache: this.runnerStoreCache,
       state,
@@ -294,6 +296,7 @@ export class HostedUserRunner {
   }
 
   async legacyRuntimeUploadsDrained(userId: string): Promise<boolean> {
+    await abortAllLegacyManagedSnapshots({ state: this.state, bucket: this.privateMediaBucket, userId });
     const replica = await readHostedBrowserVaultReplicaPostStopDrainUntil({ state: this.state, userId });
     const snapshot = await readHostedWorkspaceSnapshotR2PutDrainUntil({ state: this.state, userId });
     return (replica === null || Date.parse(replica) <= Date.now())
@@ -648,6 +651,10 @@ export class HostedUserRunner {
     return await this.workspaceSnapshotSessions.create(input);
   }
 
+  async manageHostedWorkspaceSnapshotUpload(input: Parameters<WorkspaceSnapshotSessionService["manageSnapshotUpload"]>[0]) {
+    return this.workspaceSnapshotSessions.manageSnapshotUpload(input);
+  }
+
   async heartbeatHostedWorkspaceSnapshotUploadSession(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -721,7 +728,10 @@ export class HostedUserRunner {
     snapshotId: string;
     userId: string;
   }): Promise<{ deleted: boolean }> {
-    return await this.workspaceSnapshotSessions.delete(input);
+    return this.withRuntimeConsentMutationLock(async () => {
+      await abortLegacyManagedSnapshot({ state: this.state, bucket: this.privateMediaBucket, ...input });
+      return this.workspaceSnapshotSessions.delete(input);
+    });
   }
 
   private async readHostedRuntimeStatusFromWeb(

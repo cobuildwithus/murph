@@ -41,11 +41,11 @@ interface PreparedTelegramLogin {
   expiresAt: number;
 }
 
-async function prepareTelegramLogin(purpose: "login" | "credential", signal: AbortSignal): Promise<PreparedTelegramLogin> {
-  const start = purpose === "login" ? "/api/auth/telegram/start" : "/api/settings/login-methods/telegram/start";
+async function prepareTelegramLogin(purpose: "login" | "credential" | "reauthenticate", signal: AbortSignal): Promise<PreparedTelegramLogin> {
+  const start = purpose === "credential" ? "/api/settings/login-methods/telegram/start" : "/api/auth/telegram/start";
   const [api, proof] = await Promise.all([
     loadTelegramLogin(),
-    requestHostedOnboardingJson<{ ok: true; nonce: string; clientId: string }>({ url: start, method: "POST", payload: {}, signal }),
+    requestHostedOnboardingJson<{ ok: true; nonce: string; clientId: string }>({ url: start, method: "POST", payload: purpose === "reauthenticate" ? { reauthenticate: true } : {}, signal }),
   ]);
   const clientId = Number(proof.clientId);
   if (proof.ok !== true || !Number.isSafeInteger(clientId) || clientId <= 0 || !/^[A-Za-z0-9_-]{43}$/u.test(proof.nonce)) {
@@ -55,7 +55,7 @@ async function prepareTelegramLogin(purpose: "login" | "credential", signal: Abo
 }
 
 export function HostedTelegramProofButton({ purpose, onProof, onErrorChange, label = "Continue with Telegram" }: {
-  purpose: "login" | "credential";
+  purpose: "login" | "credential" | "reauthenticate";
   onProof: (idToken: string, signal: AbortSignal) => Promise<void>;
   label?: string;
   onErrorChange?: (error: string | null) => void;

@@ -3471,6 +3471,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         {
           kind: "resource",
           payload: {
+            historicalPullPending: true,
             objectId: "",
             resource: "workout_stream",
             resourceCategory: "timeseries",
@@ -3484,6 +3485,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
 
     expect(hint?.jobs?.[0]?.payload).toEqual({
+      historicalPullPending: true,
       resource: "workout_stream",
       resourceCategory: "timeseries",
       workoutStreamEmptyReplay: true,

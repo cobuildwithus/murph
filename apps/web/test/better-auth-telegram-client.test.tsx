@@ -13,7 +13,7 @@ beforeEach(() => {
   mocks.proof.mockResolvedValue(undefined);
 });
 afterEach(async () => { await rendered?.cleanup(); rendered = null; vi.useRealTimers(); });
-async function render(purpose: "login" | "credential" = "login", onErrorChange?: (error: string | null) => void) {
+async function render(purpose: "login" | "credential" | "reauthenticate" = "login", onErrorChange?: (error: string | null) => void) {
   rendered = await renderClientComponent(createElement("button", null, "Mount"));
   rendered.window.Telegram = { Login: { auth: mocks.auth, close: mocks.close } };
   await rendered.rerender(createElement(HostedTelegramProofButton, { purpose, onProof: mocks.proof, onErrorChange }));
@@ -183,4 +183,15 @@ test("expired preparation refreshes inside the same click", async () => {
   await click("Continue with Telegram");
   expect(mocks.request).toHaveBeenCalledTimes(2);
   expect(mocks.auth).toHaveBeenCalledOnce();
+});
+
+
+test("bound reauthentication explicitly selects its nonce purpose without a credential-change or signup request", async () => {
+  await render("reauthenticate");
+  expect(mocks.request).toHaveBeenCalledWith(expect.objectContaining({
+    url: "/api/auth/telegram/start", method: "POST", payload: { reauthenticate: true },
+  }));
+  await click("Continue with Telegram");
+  await finish({ id_token: "synthetic-bound-token" });
+  expect(mocks.proof).toHaveBeenCalledWith("synthetic-bound-token", expect.any(AbortSignal));
 });

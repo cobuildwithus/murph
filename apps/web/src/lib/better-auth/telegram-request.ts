@@ -11,6 +11,7 @@ import { buildHostedSignupNotificationContext } from "../hosted-onboarding/signu
 import { isHostedSignupNotificationEmailConfigured } from "../hosted-onboarding/signup-notification-email-config";
 import { resolveHostedSignupTimeZone } from "../hosted-onboarding/time-zone-hint";
 import { hostedAuthAdapter, hostedAuthTransactionAdapter } from "./adapter";
+import { hostedReauthenticationBinding, prepareHostedReauthentication } from "./bound-reauthentication";
 import { hostedAuthRequestIp } from "./admission";
 import { assertHostedBetterAuthIssuanceEnabled, requireHostedBetterAuthConfig } from "./config";
 import { hostedAuthRateLimitStorage } from "./rate-limit";
@@ -22,7 +23,7 @@ import { commitHostedAuthSession } from "./verified-session";
 
 const noncePattern = /^[A-Za-z0-9_-]{43}$/u;
 const bodySchema = z.object({
-  idToken: z.string().min(1).max(8_192), inviteCode: z.string().min(1).max(256).optional(), timeZone: z.unknown().optional(),
+  reauthenticate: z.boolean().optional(), idToken: z.string().min(1).max(8_192), inviteCode: z.string().min(1).max(256).optional(), timeZone: z.unknown().optional(),
 }).strict();
 const nonceCookieName = () => process.env.NODE_ENV === "production" ? "__Host-murph-telegram-login" : "murph-telegram-login";
 const identifier = (nonce: string) => `telegram-login:${nonce}`;
@@ -53,7 +54,9 @@ function readNonce(request: Request): string {
 
 export async function startHostedTelegramLogin(request: Request): Promise<Response> {
   const prisma = await admit(request, "start");
-  return createHostedTelegramProof(prisma, "telegram-login");
+  const body = z.object({ reauthenticate: z.boolean().optional() }).strict().safeParse(await readOptionalJsonObject(request));
+  if (!body.success) throw invalidLogin();
+  return createHostedTelegramProof(prisma, body.data.reauthenticate ? await hostedReauthenticationBinding(request) : "telegram-login");
 }
 
 export async function createHostedTelegramProof(prisma: PrismaClient, binding: string): Promise<Response> {
@@ -90,12 +93,17 @@ export async function verifyHostedTelegramLogin(request: Request): Promise<Respo
   const config = requireHostedBetterAuthConfig();
   const parsed = bodySchema.safeParse(await readOptionalJsonObject(request, { limitBytes: 10_240 }));
   if (!parsed.success) throw invalidLogin();
-  const proof = await readHostedTelegramProof({ request, token: parsed.data.idToken, prisma, binding: "telegram-login" });
+  const reauthenticate = parsed.data.reauthenticate === true;
+  if (reauthenticate && (parsed.data.inviteCode !== undefined || parsed.data.timeZone !== undefined)) throw invalidLogin();
+  const proof = await readHostedTelegramProof({ request, token: parsed.data.idToken, prisma,
+    binding: reauthenticate ? await hostedReauthenticationBinding(request) : "telegram-login" });
   const { verified } = proof;
   return runWithFreshHostedDomainRootUnwrapCache(async () => {
-    const prepared = await prepareHostedAuthTelegramMember({ prisma, telegramUserId: verified.telegramUserId, inviteCode: parsed.data.inviteCode });
+    const prepared = reauthenticate
+      ? await prepareHostedReauthentication({ request, prisma, method: "telegram", value: verified.telegramUserId })
+      : await prepareHostedAuthTelegramMember({ prisma, telegramUserId: verified.telegramUserId, inviteCode: parsed.data.inviteCode });
     const timeZone = resolveHostedSignupTimeZone({ clientTimeZone: parsed.data.timeZone, headers: request.headers });
-    const context = isHostedSignupNotificationEmailConfigured() ? buildHostedSignupNotificationContext({
+    const context = !reauthenticate && isHostedSignupNotificationEmailConfigured() ? buildHostedSignupNotificationContext({
       headers: request.headers, occurredAt: new Date(), surface: "website", timeZone,
     }) : undefined;
     const issued = await commitHostedAuthSession({
@@ -103,7 +111,7 @@ export async function verifyHostedTelegramLogin(request: Request): Promise<Respo
       commitMember: async (tx) => {
         await proof.consume(tx);
         await prepared.commitMember(tx);
-        if (timeZone) await updateHostedMemberPendingActivationTimeZoneIfActivationPending({ memberId: prepared.memberId, pendingActivationTimeZone: timeZone, prisma: tx });
+        if (!reauthenticate && timeZone) await updateHostedMemberPendingActivationTimeZoneIfActivationPending({ memberId: prepared.memberId, pendingActivationTimeZone: timeZone, prisma: tx });
         if (context) await writeHostedMemberSignupNotificationContextIfPendingTx({ memberId: prepared.memberId, context, preparedControlRoot: prepared.preparedControlRoot, prisma: tx });
       },
     });

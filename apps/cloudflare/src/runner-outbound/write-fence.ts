@@ -51,7 +51,7 @@ export async function requireRunnerRuntimeWriteFence(input: {
   userId: string;
 }): Promise<RunnerRuntimeWriteFenceHeaders> {
   const headers = requireRunnerRuntimeWriteFenceHeaders(input.request);
-  if (usesPostgresRuntimeOwner(input.env)) {
+  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
     const result = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: {
       operation: "authorize_effect", attemptId: headers.attemptId, generation: headers.generation, runnerContainerName: null, managedAi: false,
     } });

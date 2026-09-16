@@ -21,6 +21,8 @@ import {
 import { MURPH_ATTACH_RESPONSE_CARD_TOOL, MURPH_PERSONALIZATION_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import { MURPH_AUTOMATION_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import type { AssistantProviderDynamicTool } from '../src/assistant/providers/types.ts'
+import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
+import { buildUpcomingContextPrompt } from '../src/assistant/upcoming-context.ts'
 import { buildAssistantSystemPromptLayers } from '../src/assistant/system-prompt.ts'
 import { writeHostedOpenAiMixedModeModelCatalogJson } from './support/codex-model-catalog.ts'
 import { assertNoSongAttachmentFailure } from './support/song-receipt-proof.ts'
@@ -289,6 +291,77 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       expect(buildCodexThreadResumeParams({ input: registration(tools), codexThreadId: 'existing-thread' })).not.toHaveProperty('dynamicTools')
     }
   })
+
+  it.skipIf(process.env.MURPH_MEASURE_UPCOMING_INPUT !== '1').each(['direct', 'group'] as const)(
+    'upcoming context: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: false, progressUpdatesAvailable: false,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-10-01',
+        currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      const context = buildUpcomingContextPrompt({ incomplete: false, entries: [{
+        eventId: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1', summary: 'Conference trip',
+        startsAt: '2026-10-01T00:00:00+02:00', endsAt: '2026-10-04T00:00:00+02:00',
+        timeZone: 'Europe/Paris', timing: 'timed', status: 'planned', lastVerifiedAt: '2026-10-01T06:00:00Z',
+        details: ['Away from the usual gym; hotel equipment unknown. Return Saturday evening.'],
+      }] }, new Date('2026-10-01T08:00:00Z'))
+      assert.ok(context)
+      // The base has the same prompt layers/tools; its only authored routing
+      // difference is this line, and it has no upcoming-context injection.
+      const currentRoute = '- For connected calendar or email Journal plans, upcoming-context corrections, and opt-outs, read `journal-connected-context`.'
+      const baseRoute = '- For connected calendar or email Journal capture and opt-outs, read `journal-connected-context`.'
+      const headInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      if (scope === 'direct') assert.ok(headInstructions.includes(currentRoute))
+      const measurements = []
+      for (const phase of ['base', 'head'] as const) {
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        const developerInstructions = phase === 'base' ? headInstructions.replace(currentRoute, baseRoute) : headInstructions
+        const prompt = [layers.dynamicTurnContextPrompt,
+          phase === 'head' && scope === 'direct' ? context : null,
+          'Help me prepare for tomorrow.'].filter(Boolean).join('\n\n')
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          dynamicTools: tools, developerInstructions, prompt, groupConversation: scope === 'group',
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(stub.requestCountSinceBaseline(), 1)
+        const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(captured)
+        const body = readRecord(JSON.parse(captured.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        if (scope === 'group' || phase === 'base') assert.ok(!captured.json.includes('evt_01JNV422Y2M5ZBV64ZP4N1DRB1'))
+        else assert.ok(captured.json.includes('evt_01JNV422Y2M5ZBV64ZP4N1DRB1'))
+        measurements.push({ phase, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+          registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+          instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, prompt].join('\n\n')),
+          exclusions: [...new Set([...captured.excludedTransportFields, 'prompt_cache_key'])],
+        })
+      }
+      process.stdout.write('[upcoming-input-proof] ' + JSON.stringify({ scope, measurements,
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured; scripted usage is not tokenization.',
+        baseline: '810fba9d0890; exact one-line routing ablation and no upcoming context; same tools and synthetic history',
+      }) + '\n')
+    },
+  )
 
   it.skipIf(process.env.MURPH_MEASURE_MEAL_INPUT !== '1').each(['direct', 'group'] as const)(
     'meal recovery: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {

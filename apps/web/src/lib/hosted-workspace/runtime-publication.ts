@@ -19,7 +19,7 @@ export async function checkpointHostedRuntimeWorkspace(
   input: Omit<Parameters<typeof checkpointHostedWorkspaceTx>[0], "tx"> & RuntimePublication,
 ) {
   return (input.prisma ?? getPrisma()).$transaction(async (tx) => {
-    const owner = await requireHostedRuntimeCallbackTx(tx, input.runtimeAuthority
+    const owner = await requireHostedRuntimeCallbackTx(tx, input.userId, input.runtimeAuthority
       ? { ...input.runtimeAuthority, userId: input.userId }
       : null);
     if (owner) await requireRuntimeResourcesPublishableTx(tx, input.userId, snapshotOrphanCandidates(parseHostedExecutionSnapshotRef(input.snapshotRef)));
@@ -38,7 +38,7 @@ export async function publishHostedRuntimeBrowserVaultReplica(
   input: Omit<Parameters<typeof publishLatestBrowserVaultReplicaRefTx>[0], "tx"> & RuntimePublication,
 ) {
   return (input.prisma ?? getPrisma()).$transaction(async (tx) => {
-    const owner = await requireHostedRuntimeCallbackTx(tx, input.runtimeAuthority
+    const owner = await requireHostedRuntimeCallbackTx(tx, input.userId, input.runtimeAuthority
       ? { ...input.runtimeAuthority, userId: input.userId }
       : null);
     const replica = parseHostedBrowserVaultReplicaRef(input.replicaRef);

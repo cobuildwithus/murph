@@ -1,5 +1,13 @@
 # Testing And CI Map
 
+Upcoming-context corrections are covered by the typed CLI event suite and
+`assistant-upcoming-context.test.ts`: rescheduling/re-verification with stale
+revision rejection, long source-key retries, all-day precision, large source
+history, and successful connected-app disconnect through canonical receipts.
+The focused real-Codex Journal plan correction journey proves the public edit
+command preserves one all-day record; calendar capture/retry proves the ledger
+format and silent follow-up behavior.
+
 Last verified: 2026-09-11
 
 Foreground promotion regression proof lives in the assistant-runtime entrypoint
@@ -20,6 +28,18 @@ release build/typecheck job, in addition to normal package coverage. CI policy
 tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 
 ## Current Repo Checks
+
+Morning Journal and upcoming-context proof lives in
+`packages/assistant-engine/test/assistant-upcoming-context.test.ts`,
+`managed-automations.test.ts`, and `assistant-codex-turn-planning.test.ts`.
+These cover canonical persistence and write-receipt invalidation, expiry, stale
+verification, bounded navigation/detail injection, opt-outs without cleanup, source
+retry/tombstone handling, private/group isolation, and retirement of only the
+managed afternoon pass while preserving independent follow-ups. Focused live
+journeys in `assistant-codex-real-e2e.test.ts` cover silent first-pass eligibility for new connections and undated baseline accounts, calendar capture with Journal/context readback and retry
+dedupe, email itinerary capture, and tasteful private/scheduled context use
+without granting provider text action authority. Typed note metadata and destination
+timezone are covered by `packages/cli/test/cli-expansion-event-typed.test.ts`.
 
 Phone-welcome preflight proof lives in `apps/web/test/hosted-phone-welcome.test.ts`.
 Its opt-in `MURPH_TEST_POSTGRES_CONCURRENCY=1` case uses a loopback `murph_test`
@@ -128,6 +148,28 @@ exercise encrypted challenge state, concurrent budgets, resend/expiry fences,
 provider-approval recovery and atomic browser/native canonical login/session
 creation. Only provider/KMS boundaries use synthetic ports. Live Verify receipt,
 provider configuration and real-device qualification remain rollout gates.
+
+Legacy approval repair uses the same required PostgreSQL lane, not a new gate.
+`better-auth-member-postgres-concurrency.test.ts` exercises the actual repair
+routes, real P-256 WebAuthn registration/assertion and canonical transactions:
+strict absent-state eligibility, stale/exchanged sessions, member/session/origin/
+RP/UV binding, one-winner enrollment, canonical/session drift, failed fencing
+rollback/retry and flags at both options and commit. It proves registration leaves
+the requested action pending until a separate native verification/decision and
+that Privy is never called. `better-auth-telegram-postgres-concurrency.test.ts`
+covers signed, nonce-bound same-member reauthentication and replay/foreign-account
+rejection. Provider/KMS ports remain synthetic, not live provider proof.
+
+Focused client/route regressions are `legacy-approval-repair-client.test.tsx`,
+`auth-reauthentication-continuation.test.tsx`, `better-auth-login-client.test.tsx`,
+`better-auth-telegram-client.test.tsx`, `action-approval-page.test.tsx`,
+`better-auth-account-settings-page.test.tsx`, and `settings-page.test.ts`.
+They cover inline resume/cancel, shared controls without the Privy SDK,
+registration failure/lost response/reload, concurrent winner retry, expired or
+terminal action and unchanged native approval/deny. Run with the existing Web
+Vitest configuration; these do not replace migrated PostgreSQL execution,
+full typecheck or supported-browser qualification. The inert legacy setup states
+in `/design/approval-passkey-study` reuse `InitialPasskeySetupView`.
 
 `apps/cloudflare/test/helpers/hosted-local-workspace-snapshot.test.ts` proves the
 shared hosted-local v2 snapshot seed with actual signed runtime-envelope

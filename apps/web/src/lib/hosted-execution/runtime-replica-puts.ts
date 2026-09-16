@@ -1,9 +1,10 @@
+import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 import { HOSTED_RUNTIME_ORPHAN_GRACE_MS } from "@murphai/hosted-execution/runtime-resources";
 import type { PrismaClient } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { hostedBrowserVaultReplicaUserPrefix, listHostedBrowserVaultReplicaSiblingObjectKeys } from "@murphai/hosted-execution/storage-paths";
 import { parseHostedRuntimeReplicaPutCommand, type HostedRuntimeReplicaPutCommand } from "@murphai/hosted-execution/runtime-resources";
-import { lockHostedRuntimeCutoverTx, requireHostedRuntimeOwnerTx } from "./runtime-owner";
+import { requireHostedRuntimeOwnerTx } from "./runtime-owner";
 import { recordRuntimeOrphansTx, requireRuntimeResourcesPublishableTx } from "./runtime-orphans";
 
 export async function executeHostedRuntimeReplicaPutCommand(input: {
@@ -17,7 +18,7 @@ export async function executeHostedRuntimeReplicaPutCommand(input: {
     if (command.multipart && ![command.objectKey, ...listHostedBrowserVaultReplicaSiblingObjectKeys(command.objectKey)].includes(command.multipart.objectKey)) throw new TypeError("Replica upload is outside its root resource.");
   }
   return input.prisma.$transaction(async tx => {
-    if (await lockHostedRuntimeCutoverTx(tx) !== "postgres") return { applied: false };
+    if (await lockHostedRuntimeMemberCutoverTx(tx, input.userId) !== "postgres") return { applied: false };
     const writeId = `replica:${command.writeId}`;
     const where = { userId_writeId: { userId: input.userId, writeId } };
     if (command.operation === "release") {
