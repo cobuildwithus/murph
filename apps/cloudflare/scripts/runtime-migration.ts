@@ -249,7 +249,9 @@ async function findLegacyNamespace(get: (path: string) => Promise<Record<string,
         matches.push(namespace.id);
       }
     }
-    const totalPages = record(response.result_info).total_pages;
+    const info = record(response.result_info);
+    // The live namespace list reports total_count without total_pages; derive the page count from either.
+    const totalPages = info.total_pages ?? (typeof info.total_count === "number" ? Math.ceil(info.total_count / 50) : undefined);
     if (typeof totalPages !== "number" || !Number.isSafeInteger(totalPages) || totalPages < 0 || totalPages > 100) throw new Error("Cloudflare namespace pagination is incomplete.");
     if (page >= totalPages) {
       if (matches.length !== 1) throw new Error("Expected exactly one legacy runtime namespace for the serving script.");

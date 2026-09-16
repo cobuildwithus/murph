@@ -55,4 +55,15 @@ describe("protected hosted migration entrypoint", () => {
     expect(JSON.stringify(result)).not.toContain("b".repeat(64));
     expect(JSON.stringify(result)).not.toContain("synthetic-token");
   });
+
+  it("derives namespace paging from total_count when Cloudflare omits total_pages", async () => {
+    const inventory = (resultInfo: Record<string, unknown>) => runRuntimeMigrationOperator({ ...source, HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: undefined }, async request => {
+      const url = new URL(String(request));
+      if (url.pathname.endsWith("/deployments")) return Response.json({ success: true, result: { deployments: [{ versions: [{ percentage: 100, version_id: "synthetic-version" }] }] } });
+      if (url.pathname.endsWith("/namespaces")) return Response.json({ success: true, result: [{ id: "c".repeat(32), script: "synthetic-worker", class: "UserRunnerDurableObject", use_sqlite: true }], result_info: resultInfo });
+      return Response.json({ success: true, result: [], result_info: {} });
+    });
+    await expect(inventory({ page: 1, per_page: 50, count: 1, total_count: 1 })).resolves.toMatchObject({ phase: "inventory", objectCount: 0 });
+    await expect(inventory({ page: 1, per_page: 50, count: 1 })).rejects.toThrow("Cloudflare namespace pagination is incomplete.");
+  });
 });
