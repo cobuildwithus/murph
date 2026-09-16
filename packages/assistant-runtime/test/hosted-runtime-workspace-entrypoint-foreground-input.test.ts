@@ -1911,6 +1911,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+    let latencyTraceRetryObserved = false;
     const missingAcceptedInputId = "ain_00000000000000000000000000000000";
     const mailboxItems = [createMailboxItem({
       id: "mailbox_item_image_evidence_retry_origin",
@@ -2041,7 +2042,13 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
               }),
               latencyTracePort: {
                 async record(request) {
-                  latencyTraceRequests.push(request);
+                  // The best-effort sender retries the same emitted request.
+                  // Count logical acceptance events separately from attempts.
+                  if (latencyTraceRequests.includes(request)) {
+                    latencyTraceRetryObserved = true;
+                  } else {
+                    latencyTraceRequests.push(request);
+                  }
                   throw new Error("Synthetic latency trace write failure.");
                 },
               },
@@ -2291,6 +2298,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       assert.equal(imageProviderInvocationCount, 2);
       assert.ok(firstCompletionInputId);
       assert.ok(secondCompletionInputId);
+      await waitUntil(() => assert.equal(latencyTraceRetryObserved, true));
       await waitUntil(() => {
         assert.equal(
           latencyTraceRequests.filter(({ event }) =>

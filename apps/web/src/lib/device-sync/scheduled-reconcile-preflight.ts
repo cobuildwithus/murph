@@ -1,3 +1,4 @@
+import { HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT } from "@murphai/hosted-execution/runtime-control";
 import type { Prisma } from "@prisma/client";
 import { isDeviceSyncSourceResourceAvailabilityMetadataKey } from "@murphai/device-syncd/fitbit-migration";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT, JUNCTION_RECONCILE_PROOF_METADATA_KEY } from "@murphai/device-syncd/hosted-runtime";
@@ -136,7 +137,7 @@ async function readAuthority(
     where: { connectionId: record.id }, orderBy: { id: "asc" },
     take: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT + 1,
   });
-  if (sources.length === 0 || sources.length > HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT) return reject("source_set_ineligible");
+  if (sources.length > HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT) return reject("source_set_ineligible");
   const dirty = await tx.deviceSyncDirtyConnection.findUnique({
     where: { connectionId: record.id }, select: { dirtyRevision: true, processedRevision: true },
   });
@@ -175,8 +176,19 @@ async function readSettledMailboxCheckpoint(
     || String(status.hostedMailboxSystemHandledThroughSeq) !== system.consumedSeq.toString()
     || status.hostedMailboxSystemFirstPendingSeq !== null
     || !Array.isArray(status.hostedMailboxSystemDeviceSyncContinuationSeqs)
-    || status.hostedMailboxSystemDeviceSyncContinuationSeqs.length !== 0) return reject("checkpoint_work_unsettled");
+    || status.hostedMailboxSystemDeviceSyncContinuationSeqs.length > HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT) return reject("checkpoint_work_unsettled");
+  // These checkpoint-owned jobs have their own wake/retry schedule. They are
+  // behind the ordinary mailbox frontier and do not invalidate content proof.
+  const continuationSeqs = status.hostedMailboxSystemDeviceSyncContinuationSeqs;
+  let previousSeq = 0n;
+  for (const value of continuationSeqs) {
+    if (typeof value !== "string" || !/^[1-9]\d*$/u.test(value)) return reject("checkpoint_work_unsettled");
+    const seq = BigInt(value);
+    if (seq <= previousSeq || seq > system.consumedSeq) return reject("checkpoint_work_unsettled");
+    previousSeq = seq;
+  }
   return {
+    continuationSeqs,
     workspaceVersion: workspace.version.toString(),
     lanes: counters.map((counter) => [counter.lane, counter.nextSeq.toString(), counter.consumedSeq.toString()]),
   };
