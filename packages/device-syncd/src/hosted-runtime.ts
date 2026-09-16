@@ -792,6 +792,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   historicalProofFirstSeenAt: "isoTimestamp",
   historicalProofSourceProviderSlug: "string",
   historicalProviderRecordsSeen: "boolean",
+  historicalPullPending: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",
   historicalUnresolvedProviderRecordCount: "number",

@@ -3371,7 +3371,11 @@ export function createJunctionDeviceSyncProvider(
       const deferred = await deferHistoricalTimeseriesImport(
         context, job, effectiveResource, sourceProviderSlug, window, extendedHistoricalPolicy,
       );
-      if (deferred) return deferred;
+      if (deferred.result) return deferred.result;
+      // The first window is the only readiness observation a scan makes. Carry
+      // a pending start through every continuation so the final segment cannot
+      // certify windows that were read before upstream finished populating them.
+      job = withHistoricalPullPending(job, deferred.historicalPullReadiness === "pending");
     }
     const timeseriesPolicy = resolveJunctionTimeseriesResourcePolicy(effectiveResource);
     const historicalResourceJobWorkBudget =
@@ -3546,38 +3550,63 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug: string | null,
     window: { windowStart: string; windowEnd: string },
     policy: JunctionExtendedTimeseriesBackfillPolicy | null,
-  ): Promise<ProviderJobResult | null> {
+  ): Promise<{
+    historicalPullReadiness: JunctionHistoricalPullReadiness;
+    result: ProviderJobResult | null;
+  }> {
     const historicalPullReadiness = await readHistoricalPullReadiness(
       context,
       resource,
       sourceProviderSlug,
     );
     if (historicalPullReadiness === "no_obligation") {
-      return withJunctionExtendedTimeseriesBackfillFollowUp({
-        context,
+      return {
         historicalPullReadiness,
-        importResult: buildUncollectedTimeseriesImportResult(true),
-        job,
-        resource,
-        result: { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
-        window,
-      });
+        result: withJunctionExtendedTimeseriesBackfillFollowUp({
+          context,
+          historicalPullReadiness,
+          importResult: buildUncollectedTimeseriesImportResult(true),
+          job,
+          resource,
+          result: { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+          window,
+        }),
+      };
     }
     if (historicalPullReadiness === "pending" && policy?.completion !== "exact_records") {
       const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.at(-1) ?? 0;
       return {
-        nextReconcileAt: clampWebhookJobNextReconcileAt(context),
-        scheduledJobs: [buildExtendedTimeseriesBackfillFollowUp(job, {
-          availableAt: addMilliseconds(context.now, retryDelayMs),
-          windowEnd: window.windowEnd,
-          windowStart: window.windowStart,
-        })],
+        historicalPullReadiness,
+        result: {
+          nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+          scheduledJobs: [buildExtendedTimeseriesBackfillFollowUp(job, {
+            availableAt: addMilliseconds(context.now, retryDelayMs),
+            windowEnd: window.windowEnd,
+            windowStart: window.windowStart,
+          })],
+        },
       };
     }
     if (historicalPullReadiness === "terminal_failure") {
-      return { nextReconcileAt: clampWebhookJobNextReconcileAt(context) };
+      return {
+        historicalPullReadiness,
+        result: { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+      };
     }
-    return null;
+    return { historicalPullReadiness, result: null };
+  }
+
+  function withHistoricalPullPending(
+    job: DeviceSyncJobRecord,
+    pending: boolean,
+  ): DeviceSyncJobRecord {
+    return {
+      ...job,
+      payload: stripUndefined({
+        ...job.payload,
+        historicalPullPending: pending ? true : undefined,
+      }),
+    };
   }
 
   function buildUncollectedTimeseriesImportResult(
@@ -3764,11 +3793,15 @@ export function createJunctionDeviceSyncProvider(
     const historicalPullReadiness =
       requiresJunctionHistoricalPullReadiness(extendedHistoricalPolicy)
       && timeseriesImport.fetchComplete
-        ? await readHistoricalPullReadiness(
-            context,
-            effectiveResource,
-            sourceProviderSlug,
-          )
+        ? job.payload.historicalPullPending === true
+          // A scan that began before upstream finished cannot certify its
+          // earlier windows; keep the daily continuation without another read.
+          ? "pending"
+          : await readHistoricalPullReadiness(
+              context,
+              effectiveResource,
+              sourceProviderSlug,
+            )
         : undefined;
     if (
       extendedHistoricalBackfill

@@ -514,6 +514,9 @@ exact history retains its window identity. Already accepted legacy jobs preserve
 their frozen windows and continuation keys until completion. A pending upstream
 weight pull still permits bounded reads and canonical import of available exact
 records; it prevents coverage certification and retains a daily continuation.
+A scan that began while the pull was pending carries that observation through
+its continuations and never certifies coverage; its daily continuation restarts
+from the history start and re-reads readiness there.
 Daily aggregate history continues to wait for provider readiness before its
 scan. Hosted future history can share the checkpoint-fenced reconcile proof's
 bounded deferral; content changes, dirty work, and proof expiry still admit the

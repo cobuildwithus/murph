@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-09-12
+Last verified: 2026-09-16
 
 ## Purpose
 
@@ -417,7 +417,9 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    with any row rejected by the canonical aggregate parser retries only that
    date on the existing bounded ladder before it becomes terminal.
    Historical-pull status is re-read at the first date and before
-   coverage. Source matching canonicalizes supported connect-route aliases on
+   coverage. An exact-record scan whose first date observed a pending pull
+   carries that observation through every continuation and cannot close
+   coverage until a later scan starts ready. Source matching canonicalizes supported connect-route aliases on
    both the persisted and introspection sides before applying the status table:
    A matching pulled entry owns contradictory envelopes: `success` permits
    terminal empty history, nonterminal state waits, and explicit failure remains
