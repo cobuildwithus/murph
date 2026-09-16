@@ -452,9 +452,15 @@ const JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCE_SET = new Set<strin
   JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCES,
 );
 
-type JunctionOptionalResourceFailureReason = "not_found" | "unavailable" | "unsupported" | "ambiguous";
+type JunctionOptionalResourceFailureReason =
+  | "not_found"
+  | "unavailable"
+  | "unsupported"
+  | "ambiguous"
+  | "validation_incomplete";
 
 interface JunctionOptionalResourceFailure {
+  errorCode?: string;
   reason: JunctionOptionalResourceFailureReason;
   responseStatus: number;
   responseDetail?: string;
@@ -5439,7 +5445,7 @@ export function createJunctionDeviceSyncProvider(
             window,
           });
         }
-        throw error;
+        skipIsolatedJunctionTimeseriesResourceOrRethrow(context, resource, error, skippedOptionalResources);
       }
     }
 
@@ -6005,7 +6011,7 @@ export function createJunctionDeviceSyncProvider(
     failure: JunctionOptionalResourceFailure,
   ): void {
     context.logger.warn?.("Skipping unavailable Junction resource response.", {
-      errorCode: "JUNCTION_API_REQUEST_FAILED",
+      errorCode: failure.errorCode ?? "JUNCTION_API_REQUEST_FAILED",
       provider: "junction",
       reason: failure.reason,
       resource,
@@ -6013,6 +6019,25 @@ export function createJunctionDeviceSyncProvider(
       responseStatus: failure.responseStatus,
       ...(failure.responseDetail ? { responseDetail: failure.responseDetail } : {}),
     });
+  }
+
+  // One resource's incomplete response is skipped like an unavailable optional
+  // resource: proof is withheld and the job continues. Anything else rethrows.
+  function skipIsolatedJunctionTimeseriesResourceOrRethrow(
+    context: ProviderJobContext,
+    resource: string,
+    error: unknown,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+  ): void {
+    const failure = classifyIsolatedJunctionResourceValidationFailure(error);
+    if (!failure) {
+      throw error;
+    }
+    if (!skippedOptionalResources.some((entry) =>
+      entry.resource === resource && entry.reason === failure.reason)) {
+      logSkippedOptionalJunctionResource(context, "timeseries", resource, failure);
+    }
+    skippedOptionalResources.push({ ...failure, resource, resourceCategory: "timeseries" });
   }
 
   function buildYieldedJunctionJobResult(input: {
@@ -7080,6 +7105,34 @@ function addJunctionWorkoutStreamCandidateFailureContext(
     message: error.message,
     retryable: error.retryable,
   });
+}
+
+// Murph-side validation of one resource's response, such as an ECG summary
+// whose voltage samples cannot be bound, must not abort the other resources in
+// a reconcile window. The skip withholds reconcile proof, so the window is
+// fetched again on the next reconcile. Standalone resource jobs keep their own
+// retry contract.
+const JUNCTION_ISOLATED_VALIDATION_FAILURE_CODES: ReadonlySet<string> = new Set([
+  "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+]);
+
+function classifyIsolatedJunctionResourceValidationFailure(
+  error: unknown,
+): JunctionOptionalResourceFailure | null {
+  if (
+    !isDeviceSyncError(error)
+    || !error.retryable
+    || !JUNCTION_ISOLATED_VALIDATION_FAILURE_CODES.has(error.code)
+  ) {
+    return null;
+  }
+  const reason = readJunctionDiagnosticString(error.details?.reason);
+  return {
+    errorCode: error.code,
+    reason: "validation_incomplete",
+    responseStatus: error.httpStatus,
+    ...(reason && /^[a-z_]{1,64}$/u.test(reason) ? { responseDetail: reason } : {}),
+  };
 }
 
 function classifyOptionalJunctionResourceFailure(

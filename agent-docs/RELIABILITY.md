@@ -1834,6 +1834,13 @@ to apply after cutover.
   malformed, and unknown reasons are omitted. ECG recording/sample counts,
   identifiers, raw errors, URLs, paths, and payloads remain excluded. This reason
   describes local binding validation, not proof of an upstream HTTP response.
+  Inside a reconcile job's timeseries continuation, that binding failure is
+  isolated to its resource: the unit records a `validation_incomplete` skip
+  (same warn shape as an unavailable optional resource, with the real error
+  code and reason token), withholds reconcile proof so the window is fetched
+  again on the next reconcile, and continues with the other resources. One
+  unbindable recording therefore cannot exhaust the whole connection's retry
+  allowance. Standalone resource jobs keep their own failure and retry contract.
   Junction sync-result metadata preserves the existing historical progress and
   coverage keys before optional diagnostics when the 16-entry envelope fills.
   The provider owner supplies that priority to the shared sanitized merge for
@@ -2538,8 +2545,12 @@ to apply after cutover.
   grace for stall detection only while the latest connection pass lacks its
   own accepted checkpoint. An unchanged checkpoint does not count as import
   progress; once accepted, the canonical wake controls stall eligibility.
-  Cycling and backlog detection still admit pending observations within ten
-  minutes independently of the wake. Current runtime-access eligibility is reread before
+  Cycling and backlog detection admit pending observations within that same
+  15-minute continuity window independently of the wake, so eligibility cannot
+  lapse before the evidence itself resets and a continuing incident reminds
+  instead of re-alerting after the next pass. The backlog notice also requires
+  an observation inside that window when the wake is overdue; stale pending
+  evidence is a stall question, not an active backlog. Current runtime-access eligibility is reread before
   send admission. The diagnostic reader projects booleans and typed identifiers
   in memory from at most 50,000 relevant log events over two hours for at most
   1,000 active connection owners. It never selects full log payloads. Truncation

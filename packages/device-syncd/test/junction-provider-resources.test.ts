@@ -32,6 +32,7 @@ import {
 } from "@murphai/contracts";
 import { test, vi } from "vitest";
 import { DeviceSyncError } from "../src/errors.ts";
+import { JUNCTION_RECONCILE_PROOF_METADATA_KEY } from "../src/metadata.ts";
 import { JunctionTimeseriesProgressError } from "../src/junction-timeseries-progress.ts";
 import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
@@ -4095,6 +4096,110 @@ test("Junction ECG voltage retries when summary cardinality and voltage disagree
       return true;
     },
   );
+});
+
+test("Junction reconcile windows skip an unbindable ECG recording and keep importing other resources", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const importedSnapshots: unknown[] = [];
+  const source = { provider: "apple_health_kit", type: "watch", device_id: "watch-a" };
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-apple-health-1",
+          slug: "apple_health_kit",
+          name: "Apple Health",
+          status: "connected",
+          resource_availability: { electrocardiogram_voltage: true, glucose: true },
+        }],
+      });
+    }
+    if (url.pathname.includes("/summary/electrocardiogram/")) {
+      return createJsonResponse({
+        electrocardiogram: [{
+          id: "ecg-recording-a",
+          session_start: "2026-04-02T12:00:00.000Z",
+          session_end: "2026-04-02T12:01:00.000Z",
+          voltage_sample_count: 2,
+          source_provider: "apple_health_kit",
+          source_type: "watch",
+          source_device_id: "watch-a",
+          created_at: "2026-04-02T12:01:00.000Z",
+          updated_at: "2026-04-02T12:01:00.000Z",
+          user_id: "junction-user-1",
+          source,
+        }],
+      });
+    }
+    if (url.pathname.includes("/electrocardiogram_voltage/grouped")) {
+      return createJsonResponse({
+        groups: {
+          apple_health_kit: [{
+            source,
+            data: [{ timestamp: "2026-04-02T12:00:00.000Z", type: "lead_i", unit: "mV", value: 0.1 }],
+          }],
+        },
+      });
+    }
+    if (url.pathname.includes("/glucose/grouped")) {
+      return createJsonResponse({
+        groups: {
+          apple_health_kit: [{
+            source,
+            data: [{ timestamp: "2026-04-02T08:00:00.000Z", unit: "mg/dL", value: 98 }],
+          }],
+        },
+      });
+    }
+    if (url.pathname.startsWith("/v2/summary/")) {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["electrocardiogram_voltage", "glucose"],
+  });
+
+  const result = await executeJunctionFullJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-03T12:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      timeseriesCursor: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+
+  const timeseries = importedSnapshots.map((snapshot) =>
+    (snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {});
+  assert.equal(timeseries.some((snapshot) => (snapshot.glucose?.length ?? 0) > 0), true);
+  assert.equal(timeseries.every((snapshot) => !snapshot.electrocardiogram_voltage?.length), true);
+  assert.deepEqual(warnings, [{
+    errorCode: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
+    provider: "junction",
+    reason: "validation_incomplete",
+    resource: "electrocardiogram_voltage",
+    resourceCategory: "timeseries",
+    responseStatus: 502,
+    responseDetail: "sample_count_mismatch",
+  }]);
+  assert.equal(
+    result.metadataPatch?.junctionSkippedResourceLast,
+    "timeseries.electrocardiogram_voltage.502.validation_incomplete",
+  );
+  assert.equal(result.metadataPatch?.[JUNCTION_RECONCILE_PROOF_METADATA_KEY], undefined);
 });
 
 test("Junction ECG voltage validates summary cardinality after cross-page deduplication", async () => {
