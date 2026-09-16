@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHostedMember } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -38,20 +38,32 @@ describe.skipIf(!enabled)("member-scoped Postgres migration admission", () => {
   async function member(exists = true) {
     const userId = `rolling_proof_${randomUUID()}`;
     members.push(userId);
-    if (exists) await prisma.hostedMember.create({ data: { id: userId, billingStatus: "active" } });
+    if (exists) {
+      // Existing-member fixtures precede campaign start; new-writer cases below
+      // deliberately insert during rolling without going through this helper.
+      await prisma.$transaction(async tx => {
+        await tx.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "legacy" } });
+        await tx.hostedMember.create({ data: { id: userId, billingStatus: "active" } });
+        await tx.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "rolling" } });
+      });
+    }
     return userId;
   }
+
+  const create = (tx: Prisma.TransactionClient, userId: string, writer: string) => writer === "current"
+    ? createHostedMember({ prisma: tx, memberId: userId, billingStatus: "active" })
+    : tx.hostedMember.create({ data: { id: userId, billingStatus: "active" } });
 
   it.each(["legacy", "rolling", "postgres"])("assigns new runtime ownership atomically during %s", async phase => {
     const userId = await member(false);
     await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase } });
     try {
       await prisma.$transaction(tx => createHostedMember({ prisma: tx, memberId: userId, billingStatus: "active" }));
-      const expected = phase === "legacy" ? "legacy" : "postgres";
+      const expected = phase === "rolling" ? "draining" : phase;
       expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe(expected);
       const owner = await prisma.hostedRuntimeOwner.findUnique({ where: { userId } });
-      if (phase === "legacy") expect(owner).toBeNull();
-      else expect(owner).toMatchObject({ migrationPhase: expected, generation: 0n, phase: "idle" });
+      if (phase !== "rolling") expect(owner).toBeNull();
+      else expect(owner).toMatchObject({ migrationPhase: "pending", generation: 0n, phase: "idle" });
       await prisma.hostedMember.delete({ where: { id: userId } });
       expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe(expected);
     } finally {
@@ -59,31 +71,46 @@ describe.skipIf(!enabled)("member-scoped Postgres migration admission", () => {
     }
   });
 
-  it("does not resurrect or overwrite a deleted runtime identity", async () => {
+  it("enrolls an old writer's new member without granting either runtime authority", async () => {
+    const userId = await member(false);
+    // Deliberately bypass the current Web helper, as an older deployment can.
+    await prisma.hostedMember.create({ data: { id: userId, billingStatus: "active" } });
+    expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toMatchObject({
+      migrationPhase: "pending", migrationId: null, generation: 0n,
+    });
+    expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("draining");
+    expect(await claimHostedRuntime({ prisma, userId, processingMode: "default" })).toEqual({ status: "blocked", reason: "cutover" });
+    await expect(prisma.$transaction(tx => requireHostedRuntimeCallbackTx(tx, userId, null)))
+      .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+    await prisma.hostedMember.delete({ where: { id: userId } });
+    expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("draining");
+  });
+
+  it.each(["current", "old"])("does not resurrect or overwrite a deleted runtime identity (%s writer)", async writer => {
     const userId = await member(false);
     await prisma.hostedRuntimeOwner.create({ data: { userId, migrationPhase: "importing", migrationId: "synthetic_existing", generation: 9n } });
-    await expect(prisma.$transaction(tx => createHostedMember({ prisma: tx, memberId: userId, billingStatus: "active" }))).rejects.toThrow();
+    await expect(prisma.$transaction(tx => create(tx, userId, writer))).rejects.toThrow();
     expect(await prisma.hostedMember.findUnique({ where: { id: userId } })).toBeNull();
     expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toMatchObject({ migrationPhase: "importing", generation: 9n });
   });
 
-  it("rolls the route back with failed member creation", async () => {
+  it.each(["current", "old"])("rolls the route back with failed member creation (%s writer)", async writer => {
     const userId = await member(false);
     await expect(prisma.$transaction(async tx => {
-      await createHostedMember({ prisma: tx, memberId: userId, billingStatus: "active" });
+      await create(tx, userId, writer);
       throw new Error("synthetic creation failure");
     })).rejects.toThrow("synthetic creation failure");
     expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toBeNull();
     expect(await prisma.hostedMember.findUnique({ where: { id: userId } })).toBeNull();
   });
 
-  it("keeps creation on one side of campaign start", async () => {
+  it.each(["current", "old"])("keeps creation on one side of campaign start (%s writer)", async writer => {
     const userId = await member(false);
     await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "legacy" } });
     const created = latch();
     const release = latch();
     const creation = prisma.$transaction(async tx => {
-      await createHostedMember({ prisma: tx, memberId: userId, billingStatus: "active" });
+      await create(tx, userId, writer);
       created.resolve();
       await release.promise;
     }, { timeout: 10_000 });
@@ -100,8 +127,8 @@ describe.skipIf(!enabled)("member-scoped Postgres migration admission", () => {
     }
     expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("legacy");
     const next = await member(false);
-    await prisma.$transaction(tx => createHostedMember({ prisma: tx, memberId: next, billingStatus: "active" }));
-    expect(await readHostedRuntimeMemberBackend(prisma, next)).toBe("postgres");
+    await prisma.$transaction(tx => create(tx, next, writer));
+    expect(await readHostedRuntimeMemberBackend(prisma, next)).toBe("draining");
   });
 
   it("retries creation without waiting behind an exclusive campaign transition", async () => {
@@ -121,7 +148,26 @@ describe.skipIf(!enabled)("member-scoped Postgres migration admission", () => {
       expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toBeNull();
     } finally { release.resolve(); await transition; }
     await prisma.$transaction(tx => createHostedMember({ prisma: tx, memberId: userId, billingStatus: "active" }));
-    expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("postgres");
+    expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("draining");
+  });
+
+  it("makes an old writer retry when a campaign transition already holds the lock", async () => {
+    const userId = await member(false);
+    const locked = latch();
+    const release = latch();
+    const transition = prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM hosted_runtime_cutover WHERE id = 'runtime' FOR UPDATE`;
+      locked.resolve(); await release.promise;
+    }, { timeout: 10_000 });
+    try {
+      await locked.promise;
+      await expect(prisma.hostedMember.create({ data: { id: userId, billingStatus: "active" } }))
+        .rejects.toThrow(/could not obtain lock/u);
+      expect(await prisma.hostedMember.findUnique({ where: { id: userId } })).toBeNull();
+      expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toBeNull();
+    } finally { release.resolve(); await transition; }
+    await prisma.hostedMember.create({ data: { id: userId, billingStatus: "active" } });
+    expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("draining");
   });
 
   it("keeps missing and partially imported owners closed to Postgres while migrated members can claim", async () => {

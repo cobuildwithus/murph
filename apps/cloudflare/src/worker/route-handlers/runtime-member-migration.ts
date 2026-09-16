@@ -16,7 +16,7 @@ export async function advanceRuntimeMemberMigration(input: {
   const current = await commandHostedRuntimeMigration({ source, command: { ...identity, operation: "read_member" } });
   const phase = memberPhase(current.member);
   if (phase === "postgres") return commandHostedRuntimeMigration({ source, command: { ...identity, operation: "activate_member" } });
-  if (phase === "legacy" || phase === "quiescing") {
+  if (phase === "legacy" || phase === "pending" || phase === "quiescing") {
     const prepared = await stub.preparePostgresMemberMigration(identity);
     if (!prepared.quiesced) return { pending: "readiness" as const };
     const latest = await stub.inspectPostgresMigration();

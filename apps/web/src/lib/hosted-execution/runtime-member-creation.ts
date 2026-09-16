@@ -1,13 +1,11 @@
 import type { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
-/** Creation, unlike a missing route for an existing member, proves this is a
- * new runtime. Serialize against campaign start in the creation transaction.
- * The FK-free owner survives account deletion so cleanup keeps the same route.
- * A pre-existing owner is a conflicting identity, never permission to overwrite
- * generation, migration or resource authority.
+/** Take the campaign lock before inserting the member so current creators
+ * expose a retryable setup error. The database insert trigger owns enrollment
+ * for both current and older writers, in the canonical creation transaction.
  */
-export async function initializeHostedRuntimeMemberRouteTx(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+export async function lockHostedRuntimeMemberCreationTx(tx: Prisma.TransactionClient): Promise<void> {
   // Signup may already hold contact or family locks. Never wait here behind an
   // exclusive campaign transition while holding those earlier locks.
   const gates = await tx.$queryRaw<Array<{ phase: string }>>`
@@ -20,6 +18,4 @@ export async function initializeHostedRuntimeMemberRouteTx(tx: Prisma.Transactio
   if (phase !== "legacy" && phase !== "draining" && phase !== "rolling" && phase !== "postgres") {
     throw new Error("Hosted runtime creation requires a known cutover state.");
   }
-  if (phase === "legacy" || phase === "draining") return;
-  await tx.hostedRuntimeOwner.create({ data: { userId, migrationPhase: "postgres" } });
 }

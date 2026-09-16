@@ -16,13 +16,20 @@ closing new starts and destructive deletion. Freezing/importing admit no new
 execution. Activation requires the complete exact-source import and commits a
 durable wake through the existing mailbox/Temporal scheduler.
 
-`hosted-member-store.ts::createHostedMember` initializes an explicit Postgres
-route for new personal and group runtime members during rolling/Postgres mode,
-in the same transaction as creation. Existing missing routes never imply a new
-member. The FK-free route survives deletion; a conflicting old owner cannot be
-overwritten by creation. The creation path takes a nonblocking shared campaign
-lock because some callers already hold identity/family locks; contention returns
-a retryable setup error rather than waiting in an inverted lock order.
+Canonical `hosted_member` insertion enrolls new personal and group runtime
+members as `pending` during rolling mode through a database trigger, in the same
+transaction as creation. This covers older Web writers as well as the current
+`hosted-member-store.ts::createHostedMember` helper. Pending admits neither runtime:
+a new member row cannot prove an overlapping old Worker never created its source.
+It requires the same exact-source retirement and durable activation wake as an
+existing member. Global legacy/Postgres modes derive their backend from the gate.
+The FK-free owner survives deletion; a conflicting old owner cannot be overwritten
+by creation. The trigger takes a nonblocking shared campaign lock because some
+creators already hold identity/family locks. The current helper acquires that lock
+before insertion to return the existing retryable setup error; an old writer's
+contended insert fails atomically for retry. Neither path waits in an inverted
+lock order. Canonical enumeration, exact-source enrollment and automatic first-use
+progress for pending members remain release prerequisites for this draft.
 
 The `UserRunnerDurableObject` implementation remains a finite migration bridge.
 Descriptions of its runtime ownership in the mailbox protocol apply only before
@@ -123,9 +130,9 @@ Strong delete consistency alone does not cancel a concurrent write.
 ## Rolling migration readiness
 
 Production migration remains a separate authorized operation. The rolling
-implementation is not yet a complete operational release: private workflow
-review, composed creation-closure proof, rehearsal and final review are still
-required. `migrateHostedLegacyRuntime` now starts a rolling campaign, reconciles
+implementation is not yet a complete operational release: canonical enrollment,
+late-source recovery, automatic first-use handoff, release compatibility,
+composed rehearsal and final public review are still required. `migrateHostedLegacyRuntime` now starts a rolling campaign, reconciles
 provider discovery with creation intents, closes legacy creation and seals the
 ordered inventory. It never invokes the old fleet-draining path.
 
@@ -149,9 +156,10 @@ Migration mode defaults to one source object, up to 1000 continuations and a
 ten-minute work window. The object budget is checked before starting a different
 source, so a canary can finish all pages and activate in one run. A pending or
 failed result after quiescence requires same-source roll-forward recovery; the
-work window is not a guarantee of member-pause duration. `finalize` controls the
-final campaign default switch, while successful
-member handoffs activate independently. Each control request has a fresh
+work window is not a guarantee of member-pause duration. The hosted entrypoint
+and canonical rolling campaign reject namespace finalization. Successful member
+handoffs activate independently; completing them leaves the gate rolling with
+explicit Postgres owners and the guarded namespace retained. Each control request has a fresh
 signature over its method, path and exact body; the existing OIDC path remains
 supported. No production credentials or raw inventories belong in local output.
 
@@ -187,8 +195,8 @@ bound empty-source receipt. No receipt is an unresolved source, not permission
 to activate. Ownership and an encrypted maintenance wake commit together; deleted
 members receive no wake. This accounts for admitted
 but verified-empty sources without inventing execution history. Existing mailbox recovery
-owns a lost wake signal. Final campaign activation still independently rejects
-any remaining legacy owner or incomplete source.
+owns a lost wake signal. The rolling path cannot switch the global default:
+complete provider scans do not prove an old caller cannot create another object.
 
 Managed checkpoint uploads use an exact, durably admitted multipart upload ID.
 Trusted completion seals the upload and streams the stored encrypted bytes to
@@ -198,7 +206,7 @@ full drain; negotiation of the new path does not revoke them. Schema 21 protects
 managed legacy receipts from older writers. Every serving version must support
 those receipts and the new quiescence record before they can be enabled.
 
-Release acceptance requires complete namespace and creation-intent accounting,
+Release acceptance requires complete canonical-member and known-source accounting,
 no remaining legacy execution ownership, measured member handoffs and unrelated
 member latency, correct resumed cold/warm replies, mailbox continuity, effect
 receipts, cleanup, consent and deletion. Local tests establish only their tested

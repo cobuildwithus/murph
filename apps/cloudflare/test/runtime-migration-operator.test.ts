@@ -70,10 +70,6 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
       } else if (command.operation === "settle_unmaterialized") {
         expect(activated.size).toBe(known.size);
         return Response.json({ done: true });
-      } else if (command.operation === "activate") {
-        expect(command.inventoryCount).toBe(known.size);
-        expect(command.inventoryHash).toBe(gate.inventoryHash);
-        gate.phase = "postgres";
       } else throw new Error(`Unexpected synthetic operator command: ${command.operation}`);
       return Response.json({ gate });
     },
@@ -91,7 +87,7 @@ describe("rolling runtime migration operator", () => {
 
   it("migrates serially through activation and includes intents absent from provider listing", async () => {
     const h = harness({ intent: true });
-    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true })).toEqual({ phase: "postgres", steps: 5 });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toEqual({ phase: "members_migrated", steps: 5 });
     expect(h.sent.filter(c => String(c.operation).startsWith("advance_")).map(c => c.objectId)).toEqual([first, first, second, intentOnly]);
     expect(h.sent.some(c => ["begin", "read_object", "import"].includes(String(c.operation)))).toBe(false);
     expect(h.activated.size).toBe(3);
@@ -100,31 +96,38 @@ describe("rolling runtime migration operator", () => {
 
   it("holds only the selected source while readiness is pending and resumes its exact token", async () => {
     const h = harness({ held: true });
-    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true })).toMatchObject({ phase: "rolling", pending: "readiness" });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "rolling", pending: "readiness" });
     expect(h.activated.size).toBe(0);
     expect(h.sent.some(c => c.operation === "advance_empty")).toBe(false);
     const token = h.tokens.get(first);
     h.options.held = false;
-    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true })).toMatchObject({ phase: "postgres" });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "members_migrated" });
     expect(h.tokens.get(first)).toBe(token);
   });
 
   it.each(["loseAdvance", "loseSeal"] as const)("recovers %s from durable receipts without moving past an unactivated member", async fault => {
     const h = harness({ [fault]: true });
-    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: true })).rejects.toThrow("synthetic lost");
+    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: false })).rejects.toThrow("synthetic lost");
     expect(h.activated.size).toBe(0);
-    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true })).toMatchObject({ phase: "postgres" });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "members_migrated" });
     expect(h.sent.filter(c => c.operation === "inventory")).toHaveLength(1);
   });
 
-  it("bounds each invocation and keeps final default activation explicit", async () => {
+  it("bounds each invocation and retains individual ownership after all handoffs", async () => {
     const h = harness();
     expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false, maxSteps: 1 })).toEqual({ phase: "rolling", steps: 1, pending: "step_budget" });
     expect(h.imported.has(first)).toBe(true);
     expect(h.activated.has(first)).toBe(false);
     expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "members_migrated" });
     expect(h.sent.some(c => c.operation === "activate")).toBe(false);
-    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true })).toMatchObject({ phase: "postgres" });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "members_migrated" });
+  });
+
+  it("rejects a global finalization request before any source or campaign mutation", async () => {
+    const h = harness();
+    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: true })).rejects.toThrow("cannot finalize the namespace");
+    expect(h.sent).toEqual([]);
+    expect(h.activated.size).toBe(0);
   });
 
   it("finishes one canary through checkpoint, drain, import and activation in the same run", async () => {
@@ -141,28 +144,28 @@ describe("rolling runtime migration operator", () => {
   it("bounds polling without activating or moving past an unresolved handoff", async () => {
     vi.useFakeTimers();
     const h = harness({ pending: ["freeze", "freeze"] });
-    const result = migrateHostedLegacyRuntime({ ...h.input, activate: true, waitForPending: true, maxDurationMs: 1_000 });
+    const result = migrateHostedLegacyRuntime({ ...h.input, activate: false, waitForPending: true, maxDurationMs: 1_000 });
     await vi.advanceTimersByTimeAsync(1_000);
     expect(await result).toEqual({ phase: "rolling", steps: 1, pending: "time_budget" });
     expect(h.activated.size).toBe(0);
     expect(h.sent.some(c => c.operation === "advance_empty")).toBe(false);
     h.options.pending = [];
-    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true })).toMatchObject({ phase: "postgres" });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "members_migrated" });
   });
 
   it("leaves a readiness-held member live instead of polling or moving to another source", async () => {
     const h = harness({ held: true });
-    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true, waitForPending: true })).toEqual({ phase: "rolling", steps: 1, pending: "readiness" });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false, waitForPending: true })).toEqual({ phase: "rolling", steps: 1, pending: "readiness" });
     expect(h.sent.filter(c => c.operation === "advance_member")).toHaveLength(1);
   });
 
   it("recovers an interrupted handoff before unrelated late provider objects block final accounting", async () => {
     const h = harness({ loseAdvance: true, drift: true });
-    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: true })).rejects.toThrow("synthetic lost import");
+    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: false })).rejects.toThrow("synthetic lost import");
     expect(h.imported.has(first)).toBe(true);
     expect(h.activated.size).toBe(0);
     const resumeStart = h.sent.length;
-    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: true })).rejects.toThrow("inventory changed");
+    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: false })).rejects.toThrow("inventory changed");
     expect(h.activated.has(first)).toBe(true);
     expect(h.sent.slice(resumeStart).filter(c => String(c.operation).startsWith("advance_"))[0]?.objectId).toBe(first);
     expect(h.sent.some(c => c.operation === "activate")).toBe(false);
@@ -170,7 +173,7 @@ describe("rolling runtime migration operator", () => {
 
   it("refuses final closure when a new provider object is outside the sealed census", async () => {
     const h = harness({ drift: true });
-    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: true })).rejects.toThrow("inventory changed");
+    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: false })).rejects.toThrow("inventory changed");
     expect(h.activated.size).toBe(2);
     expect(h.sent.some(c => c.operation === "activate")).toBe(false);
   });

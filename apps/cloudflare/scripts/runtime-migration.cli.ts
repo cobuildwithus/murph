@@ -36,8 +36,8 @@ function readMigrationOptions(source: Source) {
   const maxObjects = Number(source.MURPH_RUNTIME_MIGRATION_MAX_OBJECTS ?? "1");
   if (!Number.isSafeInteger(maxObjects) || maxObjects < 1 || maxObjects > 1_000) throw new Error("Runtime migration requires an object bound from 1 to 1000.");
   const finalize = source.MURPH_RUNTIME_MIGRATION_FINALIZE ?? "false";
-  if (finalize !== "true" && finalize !== "false") throw new Error("Runtime migration finalize must be true or false.");
-  return { mode, maxSteps, maxObjects, activate: finalize === "true" };
+  if (finalize !== "false") throw new Error("Rolling migration cannot finalize the namespace.");
+  return { mode, maxSteps, maxObjects, activate: false };
 }
 
 export async function runRuntimeMigrationOperator(source: Source, fetchImpl?: typeof fetch) {

@@ -19,7 +19,7 @@ export async function settleUnmaterializedRuntime(input: { prisma: PrismaClient;
     await lockHostedRuntimeMemberCutoverTx(tx, candidate.userId);
     const owner = await tx.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: candidate.userId } });
     if (owner.migrationPhase === "postgres") return { done: false };
-    if (owner.migrationPhase !== "legacy" || owner.migrationId || owner.generation !== 0n || owner.phase !== "idle"
+    if ((owner.migrationPhase !== "legacy" && owner.migrationPhase !== "pending") || owner.migrationId || owner.generation !== 0n || owner.phase !== "idle"
       || owner.attemptId || owner.runnerContainerName) throw new Error("Unmaterialized settlement cannot replace prior runtime authority.");
     const bound = await tx.hostedRuntimeLegacyImport.findMany({
       where: { OR: [{ userId: candidate.userId }, { admittedUserId: candidate.userId }] },

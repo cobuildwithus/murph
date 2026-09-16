@@ -64,7 +64,7 @@ const deletedEmptyObjectId = "f".repeat(63) + "1";
 const inventoryIds = [objectId, otherObjectId, emptyObjectId, neverStartedObjectId, deletedEmptyObjectId];
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 
-describe.skipIf(!enabled)("member-scoped canonical migration", () => {
+describe.skipIf(!enabled).each(["legacy", "pending"])("member-scoped canonical migration from %s", initialPhase => {
   let prisma: PrismaClient;
   let originalGate: Awaited<ReturnType<PrismaClient["hostedRuntimeCutover"]["findUniqueOrThrow"]>>;
   const userId = `rolling_proof_${randomUUID()}`;
@@ -81,6 +81,7 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
     originalGate = await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
     if (originalGate.namespaceId) throw new Error("Synthetic proof requires an unused cutover record.");
     await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "legacy" } });
+    if (initialPhase === "pending") await command({ operation: "begin_rolling", ...campaign });
     await prisma.hostedMember.create({ data: { id: userId, billingStatus: "active" } });
     await provisionHostedCryptoDomainRootsForUser({ prisma, userId, reason: "synthetic-rolling-proof" });
     for (const id of [emptyMemberId, neverStartedId]) {
@@ -108,8 +109,10 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
     await command({ operation: "close_legacy_creation", ...campaign });
     await command({ operation: "inventory", ...campaign, after: "", objectIds: inventoryIds, complete: true });
     expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId });
-    expect(await command({ operation: "read_member", ...identity })).toMatchObject({ member: { migrationPhase: "legacy", migrationId: null } });
-    expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId } })).toBeNull();
+    expect(await command({ operation: "read_member", ...identity })).toMatchObject({ member: { migrationPhase: initialPhase, migrationId: null } });
+    const owner = await prisma.hostedRuntimeOwner.findUnique({ where: { userId } });
+    if (initialPhase === "legacy") expect(owner).toBeNull();
+    else expect(owner).toMatchObject({ migrationPhase: "pending", migrationId: null });
     expect(await prisma.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId } })).toMatchObject({ userId: null, lastHash: null });
     await command({ operation: "quiesce_member", ...identity });
     expect(await readHostedRuntimeMemberBackend(prisma, userId)).toBe("legacy");
@@ -164,14 +167,14 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
     expect(await prisma.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({ generation: 17n, migrationPhase: "postgres" });
   });
 
-  it("migrates deleted-member obligations without a wake and closes despite active migrated execution", async () => {
+  it("migrates all enrolled members while retaining the guarded namespace", async () => {
     await command({ operation: "freeze_member", ...other });
     for (let section = 0; section <= 3; section++) await command({ operation: "import_member", ...other, page: page(otherId, section) });
     await command({ operation: "activate_member", ...other });
     expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: emptyObjectId });
     expect(await prisma.hostedMailboxItem.count({ where: { userId: otherId } })).toBe(0);
     await prisma.hostedRuntimeOwner.update({ where: { userId }, data: { phase: "starting", attemptId: "synthetic-active-attempt", allocationId: "synthetic-allocation", processingMode: "default" } });
-    await prisma.hostedRuntimeOwner.createMany({ data: [emptyMemberId, neverStartedId].map(userId => ({ userId })) });
+    if (initialPhase === "legacy") await prisma.hostedRuntimeOwner.createMany({ data: [emptyMemberId, neverStartedId].map(userId => ({ userId })) });
     await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: emptyObjectId }, data: { admittedUserId: emptyMemberId } });
     await expect(command({ operation: "settle_unmaterialized", ...campaign })).rejects.toThrow("every source disposition");
     await expect(command({ operation: "import_empty", ...campaign, objectId: emptyObjectId, page: page(userId, 0) })).rejects.toThrow("cannot import member state");
@@ -191,7 +194,7 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
     // Concurrent and lost-response retries cannot append a second activation wake.
     await Promise.all([command({ operation: "settle_unmaterialized", ...campaign }), command({ operation: "settle_unmaterialized", ...campaign })]);
     await expect(command({ operation: "settle_unmaterialized", ...campaign })).rejects.toThrow("exact empty-source receipt");
-    expect(await readHostedRuntimeMemberBackend(prisma, neverStartedId)).toBe("legacy");
+    expect(await readHostedRuntimeMemberBackend(prisma, neverStartedId)).toBe(initialPhase === "legacy" ? "legacy" : "draining");
     expect(await prisma.hostedMailboxItem.count({ where: { userId: neverStartedId } })).toBe(0);
     await prisma.hostedRuntimeLegacyImport.update({ where: { objectId: neverStartedObjectId }, data: { admittedUserId: neverStartedId } });
     await command({ operation: "settle_unmaterialized", ...campaign });
@@ -207,9 +210,13 @@ describe.skipIf(!enabled)("member-scoped canonical migration", () => {
     expect(await command({ operation: "settle_unmaterialized", ...campaign })).toEqual({ done: false, mailboxItemId: null });
     expect(await prisma.hostedMailboxItem.count({ where: { userId: deletedEmptyId } })).toBe(0);
     const inventoryHash = inventoryIds.reduce((hash, id) => digest(`${hash}\n${id}`), digest(""));
-    await command({ operation: "activate", ...campaign, inventoryCount: inventoryIds.length, inventoryHash });
-    expect((await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).phase).toBe("postgres");
-    expect(await command({ operation: "begin_rolling", ...campaign })).toMatchObject({ gate: { phase: "postgres" } });
+    await expect(command({ operation: "activate", ...campaign, inventoryCount: inventoryIds.length, inventoryHash }))
+      .rejects.toThrow("namespace retirement requires separate proof");
+    expect((await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).phase).toBe("rolling");
+    expect(await command({ operation: "begin_rolling", ...campaign })).toMatchObject({ gate: { phase: "rolling" } });
+    for (const id of [userId, otherId, emptyMemberId, neverStartedId, deletedEmptyId]) {
+      expect(await readHostedRuntimeMemberBackend(prisma, id)).toBe("postgres");
+    }
   });
 });
 

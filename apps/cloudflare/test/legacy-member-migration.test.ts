@@ -86,9 +86,9 @@ describe("conditional member checkpoint handoff", () => {
 
 
 describe("resumable member handoff continuation", () => {
-  it("waits on unsupported busy code, then checkpoints, freezes, imports bounded pages and activates on retry", async () => {
+  it.each(["legacy", "pending", "quiescing"])("checkpoints, freezes, imports and activates from %s on retry", async initialPhase => {
     const h = harness();
-    let phase = "quiescing";
+    let phase = initialPhase;
     let section = 0;
     let imported = false;
     const operations: string[] = [];
@@ -96,6 +96,7 @@ describe("resumable member handoff continuation", () => {
       operations.push(command.operation);
       expect(command.objectId).toBe(identity.objectId);
       if (command.operation === "read_object") return { object: { completedAt: imported ? "synthetic-complete" : null, nextCursor: { section, after: "" } } };
+      if (command.operation === "quiesce_member") phase = "quiescing";
       if (command.operation === "freeze_member") phase = "freezing";
       if (command.operation === "import_member") {
         expect(phase === "freezing" || phase === "importing").toBe(true);
@@ -106,7 +107,7 @@ describe("resumable member handoff continuation", () => {
         return { object: { completedAt: imported ? "synthetic-complete" : null } };
       }
       if (command.operation === "activate_member") { expect(imported).toBe(true); phase = "postgres"; }
-      return { member: { ...identity, migrationPhase: phase } };
+      return { member: { ...identity, migrationId: phase === "legacy" || phase === "pending" ? null : identity.migrationId, migrationPhase: phase } };
     });
     const advance = () => advanceRuntimeMemberMigration({ source: h.source, stub: h.object, identity });
     h.supports.mockResolvedValue(false);

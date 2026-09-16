@@ -34,8 +34,8 @@ async function readServingIdentity(input: RuntimeMigrationOperator) {
 
 /** Hosted rolling driver. Each invocation is bounded and resumes from canonical
  * receipts. A held or uncertain handoff never advances the ordered selection;
- * all other members keep their existing backend. `activate` closes the campaign
- * default only; each successfully imported member activates independently.
+ * all other members keep their existing backend. Members activate independently;
+ * namespace retirement requires a separate proof and is not supported here.
  */
 type RollingOperator = RuntimeMigrationOperator & {
   activate: boolean; maxSteps?: number; maxObjects?: number; waitForPending?: boolean; maxDurationMs?: number;
@@ -81,6 +81,7 @@ export async function migrateHostedLegacyRuntime(input: RollingOperator) {
 }
 
 function readRollingLimits(input: RollingOperator) {
+  if (input.activate) throw new Error("Rolling migration cannot finalize the namespace.");
   const maxSteps = input.maxSteps ?? 25;
   const maxObjects = input.maxObjects ?? 1_000;
   const maxDurationMs = input.maxDurationMs ?? 600_000;
@@ -160,16 +161,13 @@ async function sealRegisteredSources(send: Commander, identity: CampaignIdentity
   }
   throw new Error("Migration inventory seal was not acknowledged.");
 }
-async function finishRollingMigration(input: RuntimeMigrationOperator & { activate: boolean }, send: Commander,
+async function finishRollingMigration(input: RuntimeMigrationOperator, send: Commander,
   identity: CampaignIdentity, gate: Record<string, unknown>, steps: number) {
   const finalInventory = await inventoryHostedLegacyRuntime(input);
   const registered = await readRegisteredSources(send, identity);
   requireProviderCoverage(finalInventory, identity, registered);
   requireSealedInventory(gate, registered);
-  if (!input.activate) return { phase: "members_migrated", steps };
-  const activated = record((await send({ operation: "activate", ...identity, inventoryHash: inventoryHash(registered), inventoryCount: registered.length })).gate);
-  if (activated.phase !== "postgres") throw new Error("Campaign activation was not acknowledged.");
-  return { phase: "postgres", steps };
+  return { phase: "members_migrated", steps };
 }
 function requireProviderCoverage(inventory: { namespaceId: string; objectIds: string[] }, identity: CampaignIdentity, registered: string[]) {
   const known = new Set(registered);

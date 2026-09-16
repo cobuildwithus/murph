@@ -9,7 +9,7 @@ import {
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
-import { initializeHostedRuntimeMemberRouteTx } from "../hosted-execution/runtime-member-creation";
+import { lockHostedRuntimeMemberCreationTx } from "../hosted-execution/runtime-member-creation";
 import { normalizeHostedEmailReplyAliasLookupKey } from "@murphai/hosted-execution/hosted-email";
 
 import {
@@ -270,7 +270,7 @@ export async function createHostedMember(input: {
   prisma: Prisma.TransactionClient;
   suspendedAt?: Date | null;
 }): Promise<HostedMemberCoreState> {
-  await initializeHostedRuntimeMemberRouteTx(input.prisma, input.memberId);
+  await lockHostedRuntimeMemberCreationTx(input.prisma);
   return input.prisma.hostedMember.create({
     data: {
       ...(input.assistantModelPreference === undefined

@@ -40,9 +40,9 @@ export async function readMemberMigrationTx(tx: Tx, command: HostedRuntimeMember
   const source = await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: command.objectId } });
   if (source.admittedUserId !== null && source.admittedUserId !== command.userId) throw new Error("Legacy source admission identity changed.");
   const owner = await tx.hostedRuntimeOwner.findUnique({ where: { userId: command.userId } });
-  if (!owner || (owner.migrationPhase === "legacy" && owner.migrationId === null)) {
+  if (!owner || ((owner.migrationPhase === "legacy" || owner.migrationPhase === "pending") && owner.migrationId === null)) {
     if (source.userId || source.completedAt || source.lastHash) throw new Error("Member migration source is already reserved.");
-    return { userId: command.userId, migrationId: null, migrationPhase: "legacy", generation: owner?.generation.toString() ?? "0" };
+    return { userId: command.userId, migrationId: null, migrationPhase: owner?.migrationPhase ?? "legacy", generation: owner?.generation.toString() ?? "0" };
   }
   if (owner.migrationId !== command.migrationId || source.userId !== command.userId) throw new Error("Member migration identity changed.");
   return projectMember(owner);
@@ -56,7 +56,7 @@ export async function lockMemberMigrationTx(tx: Tx, command: HostedRuntimeMember
   await tx.$queryRaw`SELECT object_id FROM hosted_runtime_legacy_import WHERE object_id = ${command.objectId} FOR UPDATE`;
   const source = await tx.hostedRuntimeLegacyImport.findUniqueOrThrow({ where: { objectId: command.objectId } });
   if (source.admittedUserId !== null && source.admittedUserId !== command.userId) throw new Error("Legacy source admission identity changed.");
-  if (command.operation === "quiesce_member" && owner.migrationPhase === "legacy") {
+  if (command.operation === "quiesce_member" && (owner.migrationPhase === "legacy" || owner.migrationPhase === "pending")) {
     if (owner.migrationId || owner.phase !== "idle" || owner.attemptId || owner.runnerContainerName || source.completedAt || source.lastHash
       || (source.userId !== null && source.userId !== command.userId)) throw new Error("Legacy member is not eligible for migration.");
     await tx.hostedRuntimeLegacyImport.update({ where: { objectId: command.objectId }, data: { userId: command.userId } });

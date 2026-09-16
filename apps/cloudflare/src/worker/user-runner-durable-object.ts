@@ -292,7 +292,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async preparePostgresMemberMigration(identity: HostedRuntimeMemberMigrationIdentity) {
     const input = { source: this.source, state: this.migrationState, identity, userId: identity.userId };
-    await requireLegacyMemberMigrationPhase({ ...input, phases: ["legacy", "quiescing"] });
+    await requireLegacyMemberMigrationPhase({ ...input, phases: ["legacy", "pending", "quiescing"] });
     const quiesced = await this.migrationFreeze.quiesce(identity.migrationId, () => isLegacyMemberReady(input));
     if (!quiesced) return { quiesced: false, checkpointStatus: null };
     // The local durable barrier closes deletion before canonical reservation.

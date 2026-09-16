@@ -18,7 +18,7 @@ describe("protected hosted migration entrypoint", () => {
     expect(readRuntimeMigrationOperator(source)).toMatchObject({ mode: "inventory", activate: false, maxSteps: 1000, maxObjects: 1 });
     for (const overrides of [{ MURPH_RUNTIME_MIGRATION_MAX_STEPS: "0" }, { MURPH_RUNTIME_MIGRATION_MAX_STEPS: "1001" },
       { MURPH_RUNTIME_MIGRATION_MAX_OBJECTS: "0" }, { MURPH_RUNTIME_MIGRATION_MAX_OBJECTS: "1001" },
-      { MURPH_RUNTIME_MIGRATION_FINALIZE: "yes" }, { MURPH_RUNTIME_MIGRATION_MODE: "activate" }, { CF_PUBLIC_BASE_URL: "http://worker.example.test" }]) {
+      { MURPH_RUNTIME_MIGRATION_FINALIZE: "yes" }, { MURPH_RUNTIME_MIGRATION_FINALIZE: "true" }, { MURPH_RUNTIME_MIGRATION_MODE: "activate" }, { CF_PUBLIC_BASE_URL: "http://worker.example.test" }]) {
       expect(() => readRuntimeMigrationOperator({ ...source, ...overrides })).toThrow();
     }
   });

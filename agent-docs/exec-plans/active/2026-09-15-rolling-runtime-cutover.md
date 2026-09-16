@@ -349,3 +349,45 @@ final review/CI remain required. No production mutation has occurred.
   afterward. Eleven materialization/member migration tests and Web typecheck pass;
   operator drift recovery has 15 passing CLI/operator tests, Worker typecheck,
   complexity and documentation drift proof. Canonical enrollment is still pending.
+
+
+## Transactional new-member enrollment
+
+- Reproduced the older-writer gap with a real Postgres insert that bypasses the
+  current creation helper: no owner was enrolled. The added database trigger now
+  records `pending` in that same transaction during rolling mode. It shares the
+  campaign lock with NOWAIT, survives member deletion, rolls back with creation,
+  and rejects conflicting retained identities. Legacy and global Postgres mode
+  continue deriving backend authority from the gate; no extra owner is needed.
+- Removed immediate Postgres activation from the application creation helper.
+  It only takes the early nonblocking campaign lock for the existing retryable
+  signup error. Pending owners admit neither runtime before their exact source
+  is retired; ordinary member and positive-empty handoff paths can advance them.
+- Focused proof covers both current and older creators across campaign-start
+  races, rollback, deletion and owner conflicts. Existing and pending member
+  handoffs both preserve generation and append one durable wake. Worker tests
+  exercise legacy, pending and quiescing entry phases through actual local
+  freeze/export logic. Automatic first-use source enrollment/progress remains
+  unfinished and is still a release blocker, not a completed signup journey.
+- Found the draft's migration SQL had not been admitted by the production
+  predeploy scanner. Verified its four flagged migrations are expansions: new
+  defaulted phase fields, nullable verification metadata, and widened checks.
+  Added narrowly named compatibility reasons; no SQL operation category was
+  globally exempted. Predeploy still leaves the campaign legacy.
+- Private companion final ReviewGPT passed at its exact pushed head; local full
+  verification and exact-head CI passed. Its preliminary review is still running.
+  Public completion, rehearsal, measured pause and production migration remain
+  outstanding. No production mutation has occurred.
+
+- Removed rolling namespace finalization from the public operator and CLI; the
+  canonical Web command now rejects that global transition as well. Every exact
+  member can still activate independently and keep serving with the gate rolling.
+  Failing-before Postgres proof demonstrated the former global switch despite
+  absence of physical namespace closure. The draining legacy protocol is separate.
+
+- Final focused validation for this increment passed: 32 real Postgres tests
+  across four migration/admission suites, 27 Worker/operator/CLI tests, 69
+  production migration-guard tests, Web/Worker/shared typechecks, complexity and
+  docs drift. The new migration was applied only to the isolated synthetic DB.
+  Both old-writer enrollment and forbidden rolling finalization have recorded
+  failing-before proof. The public PR remains draft with the release gaps above.

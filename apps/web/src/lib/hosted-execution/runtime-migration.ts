@@ -128,11 +128,10 @@ async function importHighWaterTx(tx: Prisma.TransactionClient, userId: string, g
 async function activateTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover, command: Extract<MigrationCommand, { operation: "activate" }>) {
   if (!gate.inventorySealedAt || command.inventoryHash !== gate.inventoryHash || command.inventoryCount !== gate.inventoryCount) throw new Error("Final namespace inventory does not match the sealed inventory.");
   if (gate.phase === "postgres") return gate;
-  if (gate.phase === "rolling" && !gate.creationClosedAt) throw new Error("Legacy creation remains open.");
-  if (gate.phase !== "draining" && gate.phase !== "rolling") throw new Error("Postgres activation requires a migration campaign.");
+  if (gate.phase === "rolling") throw new Error("Rolling migration completes individual members; namespace retirement requires separate proof.");
+  if (gate.phase !== "draining") throw new Error("Postgres activation requires a draining campaign.");
   if (await tx.hostedRuntimeLegacyImport.findFirst({ where: { completedAt: null }, select: { objectId: true } })) throw new Error("Legacy resource import is incomplete.");
-  if (gate.phase === "rolling" && await tx.hostedRuntimeOwner.findFirst({ where: { migrationPhase: { not: "postgres" } }, select: { userId: true } })) throw new Error("Legacy member ownership remains during migration.");
-  if (gate.phase === "draining" && await tx.hostedRuntimeOwner.findFirst({ where: { OR: [ { phase: { not: "idle" } }, { runnerContainerName: { not: null } }, { attemptId: { not: null } } ] }, select: { userId: true } })) throw new Error("Runtime targets remain active during migration.");
+  if (await tx.hostedRuntimeOwner.findFirst({ where: { OR: [ { phase: { not: "idle" } }, { runnerContainerName: { not: null } }, { attemptId: { not: null } } ] }, select: { userId: true } })) throw new Error("Runtime targets remain active during migration.");
   return tx.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "postgres", activatedAt: new Date() } });
 }
 

@@ -65,5 +65,5 @@ function exactTarget(source: WorkerEnvironmentSource, name: string) {
 }
 
 function matchesMigrationToken(member: object & { migrationId: unknown }, migrationId: string): boolean {
-  return member.migrationId === migrationId || (member.migrationId === null && "migrationPhase" in member && member.migrationPhase === "legacy");
+  return member.migrationId === migrationId || (member.migrationId === null && "migrationPhase" in member && (member.migrationPhase === "legacy" || member.migrationPhase === "pending"));
 }

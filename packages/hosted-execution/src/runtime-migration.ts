@@ -14,7 +14,7 @@ export function parseHostedRuntimeMigrationCheckpointRequest(value: unknown): Ho
 }
 
 export const HOSTED_RUNTIME_MEMBER_MIGRATION_PHASES = [
-  "legacy", "quiescing", "freezing", "importing", "postgres",
+  "legacy", "pending", "quiescing", "freezing", "importing", "postgres",
 ] as const;
 export type HostedRuntimeMemberMigrationPhase =
   (typeof HOSTED_RUNTIME_MEMBER_MIGRATION_PHASES)[number];
