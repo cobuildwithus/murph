@@ -1,6 +1,6 @@
 # Isolate per-resource Junction validation failures and stop device import alert flapping
 
-Status: active
+Status: completed
 Created: 2026-09-16
 Updated: 2026-09-16
 
@@ -94,3 +94,10 @@ Updated: 2026-09-16
   `pnpm --dir packages/device-syncd typecheck`; `pnpm complexity:diff`;
   `pnpm test:diff <changed paths>`.
 - Expected outcomes: all pass; complexity debt unchanged.
+- Result: focused Web tests 40/40, device-syncd ECG tests 7/7, device-syncd
+  typecheck and `pnpm complexity:diff` pass. `pnpm test:diff` ran twice; every
+  package passed except one pre-existing assistant-runtime Environment
+  recording test whose exact wake-timestamp assertion drifts under fanout load
+  and passes 9/9 in isolation (logged as Frog friction
+  `20260916155845-environment-interrupted-recording`). PR #3506.
+Completed: 2026-09-16
