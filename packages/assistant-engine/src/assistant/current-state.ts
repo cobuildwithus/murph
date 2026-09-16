@@ -8,6 +8,7 @@ import {
 import { readMemoryDocument } from '@murphai/core'
 
 import { readAssistantContextSnapshotPrompt } from './context-snapshot.js'
+import { readUpcomingContextPrompt } from './upcoming-context.js'
 
 export const ASSISTANT_CURRENT_STATE_MEMORY_MAX_PROMPT_BYTES = 4 * 1024
 export const ASSISTANT_CURRENT_STATE_MEMORY_MAX_RECORDS_PER_SECTION = 3
@@ -83,11 +84,12 @@ export function buildAssistantCurrentStateMemoryPrompt(
 export async function readAssistantCurrentStatePrompt(input: {
   vaultRoot: string
 }): Promise<string | null> {
-  const [contextSnapshotPrompt, memoryPrompt] = await Promise.all([
+  const [contextSnapshotPrompt, memoryPrompt, upcomingContextPrompt] = await Promise.all([
     readAssistantContextSnapshotPrompt(input),
     readAssistantCurrentStateMemoryPrompt(input),
+    readUpcomingContextPrompt(input),
   ])
-  const sections = [contextSnapshotPrompt, memoryPrompt]
+  const sections = [contextSnapshotPrompt, memoryPrompt, upcomingContextPrompt]
     .map((section) => section?.trim() ?? '')
     .filter(Boolean)
   return sections.length > 0 ? sections.join('\n\n') : null

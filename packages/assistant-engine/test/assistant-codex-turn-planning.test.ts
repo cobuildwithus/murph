@@ -26,6 +26,7 @@ import {
 const planningMocks = vi.hoisted(() => ({
   readAssistantCliSurfaceBootstrapContext:
     vi.fn(async (): Promise<string | null> => 'bootstrap contract'),
+  readUpcomingContextPrompt: vi.fn(async (): Promise<string | null> => null),
   readAssistantContextSnapshotPrompt:
     vi.fn(async (): Promise<string | null> => null),
   refreshAssistantContextSnapshotBestEffort: vi.fn(async (_input?: {
@@ -78,6 +79,8 @@ vi.mock('../src/assistant/codex-runtime.js', () => ({
 vi.mock('../src/assistant/service.js', () => ({
   sendAssistantMessage: planningMocks.sendAssistantMessage,
 }))
+
+vi.mock('../src/assistant/upcoming-context.js', () => ({ readUpcomingContextPrompt: planningMocks.readUpcomingContextPrompt }))
 
 vi.mock('../src/assistant/context-snapshot.js', () => ({
   readAssistantContextSnapshotPrompt:
@@ -212,6 +215,8 @@ const priorFactoredAutomationSchema = {
 }
 
 afterEach(() => {
+  planningMocks.readUpcomingContextPrompt.mockReset()
+  planningMocks.readUpcomingContextPrompt.mockResolvedValue(null)
   planningMocks.readAssistantCliSurfaceBootstrapContext.mockReset()
   planningMocks.readAssistantContextSnapshotPrompt.mockReset()
   planningMocks.refreshAssistantContextSnapshotBestEffort.mockReset()
@@ -418,11 +423,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "d0de16dc90ad429d04bcf049f8cf19810763443423e82da98b9ff06624327ccc",
+        "direct": "90aa6bf5dbe176f5897013f5deb70d7dceb2707331187ec8712623392cf4ade4",
         "group": "291673e1aabd16643ff8d2e02b2d32241a60b154e20ac3085cd3ceab51084232",
         "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "0ef9d25f26e5aefb9b7bf5ed2f493cf9522a4a4a325c24f3ede3de4bd706a086",
+        "scheduledEmail": "65d91495401ca9cb15006f350f509fc9976a570b55603f0545054523f6e4e965",
       }
     `)
   })
@@ -1793,6 +1798,28 @@ describe('assistant Codex turn planning', () => {
     })
     expect(planningMocks.readAssistantGroupRoomModelPrompt).not.toHaveBeenCalled()
     expect(localGroupPlan.systemPrompt).not.toContain('Optional rough room tips')
+  })
+
+  it.each([true, false])('injects upcoming context only for private conversations and reminders (direct=%s)', async (direct) => {
+    planningMocks.readUpcomingContextPrompt.mockResolvedValue('Upcoming context: synthetic race logistics.')
+    for (const scheduled of [false, true]) {
+      planningMocks.readUpcomingContextPrompt.mockClear()
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: { ...createMessageInput(), threadIsDirect: direct,
+          turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply',
+          ...(scheduled ? { scheduledOccurrenceAt: '2026-10-01T08:00:00Z' } : {}),
+        },
+        profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+        promptTimeContext: { currentLocalDate: '2026-10-01', currentTimeZone: 'UTC' },
+        route: createRoute(), session: createSession(),
+        sharedPlan: createSharedPlan({}, { threadIsDirect: direct }),
+      })
+      expect(planningMocks.readUpcomingContextPrompt).toHaveBeenCalledTimes(direct ? 1 : 0)
+      if (direct) expect(plan.systemPrompt).toContain('synthetic race logistics')
+      else expect(plan.systemPrompt).not.toContain('synthetic race logistics')
+    }
+    planningMocks.readUpcomingContextPrompt.mockResolvedValue(null)
   })
 
   it('uses the narrow group room-model maintenance prompt without ordinary group context', async () => {

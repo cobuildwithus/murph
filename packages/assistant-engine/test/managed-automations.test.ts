@@ -545,7 +545,7 @@ describe('applyMurphManagedAutomations', () => {
       updated: 0,
       yielded: true,
     })
-    expect(managedAutomationMocks.showAutomation).toHaveBeenCalledTimes(2)
+    expect(managedAutomationMocks.showAutomation).toHaveBeenCalledTimes(3)
     expect(managedAutomationMocks.showAutomation).toHaveBeenNthCalledWith(1, {
       automationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ',
       vaultRoot,
@@ -1752,7 +1752,25 @@ describe('applyMurphManagedAutomations', () => {
     ).toBe(false)
   })
 
-  it('defines hosted Journal context passes on Luna high at 08:00 and 16:00 local time', () => {
+  it('archives the old afternoon pass without changing an existing one-shot follow-up', async () => {
+    const options = { defaultRoute, vaultRoot, runtimeEnv: { [HOSTED_RUNTIME_PROCESS_ENV]: '1' } }
+    await applyMurphManagedAutomations(options)
+    const morning = managedAutomationMocks.records.get(MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID)
+    if (!morning) throw new Error('Missing morning automation')
+    managedAutomationMocks.records.set(MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID, {
+      ...morning, automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+      slug: 'journal-connected-context-afternoon', schedule: { kind: 'dailyLocal', localTime: '16:00' },
+    })
+    const followup = { ...morning, automationId: 'automation_synthetic_followup', slug: 'synthetic-followup',
+      schedule: { kind: 'at' as const, at: '2026-10-03T18:00:00Z' } }
+    managedAutomationMocks.records.set(followup.automationId, followup)
+    await applyMurphManagedAutomations(options)
+    expect(managedAutomationMocks.records.get(MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID)?.status).toBe('archived')
+    expect(managedAutomationMocks.records.get(followup.automationId)).toEqual(followup)
+    expect(managedAutomationMocks.records.get(morning.automationId)?.status).toBe('active')
+  })
+
+  it('defines one hosted morning Journal context pass on Luna high', () => {
     const morning = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) =>
         seed.automationId ===
@@ -1773,15 +1791,10 @@ describe('applyMurphManagedAutomations', () => {
       schedule: { kind: 'dailyLocal', localTime: '08:00' },
       slug: 'journal-connected-context-morning',
     })
-    expect(afternoon).toMatchObject({
-      assistantTargetOverride: {
-        model: 'gpt-5.6-luna',
-        reasoningEffort: 'high',
-      },
-      hostedRuntimeOnly: true,
-      schedule: { kind: 'dailyLocal', localTime: '16:00' },
-      slug: 'journal-connected-context-afternoon',
-    })
+    expect(afternoon).toBeUndefined()
+    expect(morning?.instructions).toContain('Do not send a connection announcement or wait for a prior notice')
+    expect(morning?.instructions).toContain('Read eligible active sources in this run while preserving explicit opt-outs')
+    expect(morning?.instructions).not.toContain('connection-notice check')
   })
 
   it.each([
@@ -1801,10 +1814,7 @@ describe('applyMurphManagedAutomations', () => {
       },
       vaultRoot,
     }
-    const journalIds = [
-      MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
-      MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
-    ]
+    const journalIds = [MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID]
     const lunaOverride = { model: 'gpt-5.6-luna', reasoningEffort: 'high' }
 
     await applyMurphManagedAutomations(options)
@@ -1845,9 +1855,9 @@ describe('applyMurphManagedAutomations', () => {
 
     await expect(applyMurphManagedAutomations(options)).resolves.toMatchObject({
       created: 0,
-      updated: 2,
+      updated: 1,
     })
-    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
     expect(managedAutomationMocks.upsertAutomation.mock.calls.map(
       ([input]) => input.automationId,
     )).toEqual(journalIds)
@@ -1879,7 +1889,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 8,
+      created: 7,
       skipped: 0,
       updated: 0,
     })
@@ -3499,9 +3509,9 @@ describe('applyMurphManagedAutomations', () => {
 
 describe('managed Journal calendar read window', () => {
   it.each([
-    { occurrenceAt: '2026-08-31T08:00:00+02:00', start: '2026-08-31T06:00:00.000Z', end: '2026-09-01T18:00:00.000Z' },
-    { occurrenceAt: '2026-08-31T16:00:00+02:00', start: '2026-08-31T14:00:00.000Z', end: '2026-09-02T02:00:00.000Z' },
-    { occurrenceAt: '2026-10-24T16:00:00+02:00', start: '2026-10-24T14:00:00.000Z', end: '2026-10-26T02:00:00.000Z' },
+    { occurrenceAt: '2026-08-31T08:00:00+02:00', start: '2026-08-31T06:00:00.000Z', end: '2026-09-14T06:00:00.000Z' },
+    { occurrenceAt: '2026-08-31T16:00:00+02:00', start: '2026-08-31T14:00:00.000Z', end: '2026-09-14T14:00:00.000Z' },
+    { occurrenceAt: '2026-10-24T16:00:00+02:00', start: '2026-10-24T14:00:00.000Z', end: '2026-11-07T14:00:00.000Z' },
   ])('uses elapsed UTC hours across offsets and clock changes: $occurrenceAt', ({ occurrenceAt, start, end }) => {
     for (const id of [MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID]) {
       const instructions = buildMurphManagedJournalCalendarWindowInstructions(id, occurrenceAt)

@@ -203,7 +203,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'journal-connected-context',
     name: 'journal-connected-context',
     triggerHint:
-      'Use for automatic private Journal context from newly connected calendars or narrow email travel confirmations, and when a member changes or stops that capture. Owns the private connection notice, new-account baseline, category filters, normalized Journal plans, reconciliation, follow-ups, and opt-outs.',
+      'Use for private Journal plans and upcoming context from active calendars and relevant email confirmations, and when a member corrects or stops that capture. Owns silent capture regardless of account age or old notice state, category filters, normalized Journal plans, reconciliation, follow-ups, opt-outs, and the derived upcoming-context page.',
   },
   {
     slug: 'computer-use',

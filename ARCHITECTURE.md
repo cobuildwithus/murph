@@ -263,10 +263,27 @@ unavailable evidence or pages keep the ordinary maintenance path. The rolling
 evidence window remains intact so corrections and late committed events are
 not hidden behind a last-run timestamp.
 
+The morning Journal connected-context automation maintains canonical Journal plans
+and a bounded `upcoming-context` derived Knowledge page. The existing private
+current-state reader loads the page on each private conversation or scheduled
+model turn, filters expired/canceled entries, labels stale verification, and
+renders normalized logistics as data rather than instructions or effect authority.
+It adds one bounded local file read in parallel with memory and snapshot reads,
+no database/network work, and no graph traversal. Journal events remain the fact
+owner; corrections/cancellations update the derivative after canonical writes.
+The fourteen-day discovery window does not delete known plans outside it. Failed
+reads preserve old verification. Missing/malformed pages fail open; oversized
+prompt content uses an explicit retrieval notice rather than silent truncation.
+Group, maintenance, and detached-system scopes do not receive this private page.
+Managed reconciliation archives the former afternoon id while preserving one-shot
+follow-ups. Active accounts are eligible without an announcement or notice gate, regardless
+of connection age or legacy baseline markers; explicit opt-outs still apply. The detailed
+capture and expiry contract is owned by `agent-docs/product-specs/journal.md`.
+
 The canonical cron lifecycle skips a managed Journal connected-context pass
 only when its ledger is genuinely missing and its complete connected-account
 inventory is empty. Existing ledgers, new accounts, unavailable ports, and
-failed reads keep the normal pass, preserving notices and due follow-ups.
+failed reads keep the normal pass, preserving capture and due follow-ups.
 The account inventory owner rejects malformed pages instead of presenting them
 as empty. Journal and Personal Patterns retain the common hosted cron policy:
 eligible first attempts request Flex; failed-attempt retries use Standard, and
