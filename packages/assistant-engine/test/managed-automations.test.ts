@@ -1792,6 +1792,9 @@ describe('applyMurphManagedAutomations', () => {
       slug: 'journal-connected-context-morning',
     })
     expect(afternoon).toBeUndefined()
+    expect(morning?.instructions).toContain('Do not send a connection announcement or wait for a prior notice')
+    expect(morning?.instructions).toContain('Read eligible active sources in this run while preserving explicit opt-outs')
+    expect(morning?.instructions).not.toContain('connection-notice check')
   })
 
   it.each([

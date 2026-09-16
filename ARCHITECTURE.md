@@ -276,14 +276,14 @@ reads preserve old verification. Missing/malformed pages fail open; oversized
 prompt content uses an explicit retrieval notice rather than silent truncation.
 Group, maintenance, and detached-system scopes do not receive this private page.
 Managed reconciliation archives the former afternoon id while preserving one-shot
-follow-ups. Active accounts use the existing notice/opt-out path regardless of
-connection age; former baseline entries migrate through one notice. The detailed
+follow-ups. Active accounts are eligible without an announcement or notice gate, regardless
+of connection age or legacy baseline markers; explicit opt-outs still apply. The detailed
 capture and expiry contract is owned by `agent-docs/product-specs/journal.md`.
 
 The canonical cron lifecycle skips a managed Journal connected-context pass
 only when its ledger is genuinely missing and its complete connected-account
 inventory is empty. Existing ledgers, new accounts, unavailable ports, and
-failed reads keep the normal pass, preserving notices and due follow-ups.
+failed reads keep the normal pass, preserving capture and due follow-ups.
 The account inventory owner rejects malformed pages instead of presenting them
 as empty. Journal and Personal Patterns retain the common hosted cron policy:
 eligible first attempts request Flex; failed-attempt retries use Standard, and

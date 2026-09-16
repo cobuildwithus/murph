@@ -14223,11 +14223,11 @@ describeRealCodex('real Codex Personal Patterns vocabulary normalization e2e', (
   }, 720_000)
 })
 
-describeRealCodex('real Codex Journal connected account notice e2e', () => {
+describeRealCodex('real Codex Journal connected account eligibility e2e', () => {
   it.each([
-    { name: 'notices a new calendar before reading its events', accountId: 'calendar_new', notice: true, ledgerText: undefined },
-    { name: 'migrates an undated baseline account through one notice', accountId: 'calendar_old', notice: true, ledgerText: '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline' },
-    { name: 'respects a global opt-out without reading provider content', accountId: 'calendar_ready', notice: false,
+    { name: 'reads a newly connected mailbox silently on its first pass', accountId: 'gmail_new', toolkit: 'gmail', optedOut: false, ledgerText: '# Journal connected context' },
+    { name: 'reads an undated baseline calendar silently in the same pass', accountId: 'calendar_old', toolkit: 'googlecalendar', optedOut: false, ledgerText: '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline' },
+    { name: 'respects a global opt-out without reading provider content', accountId: 'calendar_ready', toolkit: 'googlecalendar', optedOut: true,
       ledgerText: '# Journal connected context\n\nGlobal opt-out: all automatic Journal capture is disabled.\n\n- account: calendar_ready\n  toolkit: googlecalendar\n  state: notice-sent' },
   ])('$name', async (scenario) => {
     const config = await resolveRealCodexE2eConfig()
@@ -14238,7 +14238,7 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
       throw new Error('Expected the managed Journal connected-context automation.')
     }
     const workingDirectory = await mkdtemp(
-      path.join(tmpdir(), 'murph-journal-connected-notice-e2e-'),
+      path.join(tmpdir(), 'murph-journal-connected-eligibility-e2e-'),
     )
 
     try {
@@ -14248,7 +14248,7 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
         vaultRoot: workingDirectory,
         ledgerText: scenario.ledgerText,
       })
-      if (!scenario.notice) {
+      if (scenario.optedOut) {
         await upsertKnowledgePage({ vault: workingDirectory, slug: 'upcoming-context', title: 'Upcoming context', body: JSON.stringify({
           version: 1, entries: [{ eventId: 'event_synthetic_old_plan', summary: 'Previously captured travel',
             startsAt: '2026-09-01T10:00:00Z', endsAt: '2026-09-03T18:00:00Z', timeZone: 'UTC',
@@ -14256,7 +14256,7 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
           }],
         }) })
       }
-      const connectedAppRequests: Array<{ operation: string }> = []
+      const connectedAppRequests: Array<{ operation: string, input: Record<string, unknown> }> = []
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: false,
         approvalPolicy: 'never',
@@ -14288,9 +14288,21 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
           computerToolsAvailable: false,
           connectedApps: {
             request: async (request) => {
-              connectedAppRequests.push({ operation: request.operation })
+              connectedAppRequests.push({ operation: request.operation, input: request.input })
               if (request.operation !== 'manage') {
-                throw new Error('The notice run must not read provider content.')
+                if (scenario.optedOut) throw new Error('An opted-out run must not read provider content.')
+                if (request.operation === 'search') return { result: { success: true, tool_schemas: {
+                  [scenario.toolkit === 'gmail' ? 'GMAIL_SEARCH_EMAILS' : 'GOOGLECALENDAR_LIST_EVENTS']: {
+                    input_schema: { type: 'object', additionalProperties: false,
+                      properties: scenario.toolkit === 'gmail'
+                        ? { query: { type: 'string' } }
+                        : { timeMin: { type: 'string' }, timeMax: { type: 'string' } },
+                      required: scenario.toolkit === 'gmail' ? ['query'] : ['timeMin', 'timeMax'],
+                    },
+                  },
+                } } }
+                if (request.operation === 'execute') return { result: scenario.toolkit === 'gmail' ? { messages: [] } : { items: [] } }
+                throw new Error('Unexpected provider operation.')
               }
               return {
                 result: {
@@ -14300,7 +14312,7 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
                       connectedAt: scenario.accountId === 'calendar_old' ? null : '2026-08-31T05:30:00.000Z',
                       id: scenario.accountId,
                       status: 'ACTIVE',
-                      toolkit: 'googlecalendar',
+                      toolkit: scenario.toolkit,
                     },
                   ],
                 },
@@ -14329,23 +14341,22 @@ describeRealCodex('real Codex Journal connected account notice e2e', () => {
         workingDirectory,
       })
 
-      expect(parseAssistantNotificationDecision(result.finalMessage).kind).toBe(scenario.notice ? 'send_message' : 'skip')
-      expect(connectedAppRequests.every(request => request.operation === 'manage')).toBe(true)
+      expect(parseAssistantNotificationDecision(result.finalMessage).kind).toBe('skip')
       expect((await readVaultRawTolerant(workingDirectory)).events).toEqual([])
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
-      expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toContain(scenario.accountId)
-      if (scenario.notice) {
-        expect(connectedAppRequests).toEqual([{ operation: 'manage' }])
-        expect(result.finalMessage).toMatch(/calendar|Journal/iu)
-        expect(result.finalMessage).toMatch(/stop|opt out|turn off/iu)
+      if (scenario.optedOut) {
+        expect(connectedAppRequests.every(request => request.operation === 'manage')).toBe(true)
+        expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toContain('Global opt-out')
       } else {
-        const upcoming = upcomingContextSchema.parse(JSON.parse(normalizeKnowledgeBody(
-          (await getKnowledgePage({ vault: workingDirectory, slug: 'upcoming-context' })).page.body,
-        )))
-        expect(upcoming.entries).toEqual([])
+        expect(connectedAppRequests.map(request => request.operation)).toEqual(expect.arrayContaining(['manage', 'search', 'execute']))
+        expect(connectedAppRequests.filter(request => request.operation === 'execute').every(request => request.input.account === scenario.accountId)).toBe(true)
       }
+      const upcoming = upcomingContextSchema.parse(JSON.parse(normalizeKnowledgeBody(
+        (await getKnowledgePage({ vault: workingDirectory, slug: 'upcoming-context' })).page.body,
+      )))
+      expect(upcoming.entries).toEqual([])
       process.stdout.write(
-        `[journal-connected-notice-e2e] ${JSON.stringify({
+        `[journal-connected-eligibility-e2e] ${JSON.stringify({
           finalMessage: result.finalMessage,
           providerOperations: connectedAppRequests.map(
             (request) => request.operation,

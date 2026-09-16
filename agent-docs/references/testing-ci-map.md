@@ -27,8 +27,7 @@ Morning Journal and upcoming-context proof lives in
 These cover real Knowledge persistence, expiry, stale verification, bounded
 injection, replacement, private/group isolation, and retirement of only the
 managed afternoon pass while preserving independent follow-ups. Focused live
-journeys in `assistant-codex-real-e2e.test.ts` cover undated baseline connection
-notice migration, calendar capture with Journal/context readback and retry
+journeys in `assistant-codex-real-e2e.test.ts` cover silent first-pass eligibility for new connections and undated baseline accounts, calendar capture with Journal/context readback and retry
 dedupe, email itinerary capture, and tasteful private/scheduled context use
 without granting provider text action authority.
 

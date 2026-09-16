@@ -90,10 +90,10 @@ change also creates one idempotent canonical `journal-context` event. Journal
 therefore shows when the context changed without keeping a second Environment
 history.
 
-Active calendar and email connections are eligible for automatic context after
-one private notice, regardless of connection age or missing connection timestamps.
-Previously excluded baseline accounts receive that notice; existing notices and
-global/provider/category opt-outs survive migration. Opt-outs remove matching
+Active calendar and email connections are eligible for automatic context in the
+first scheduled pass, regardless of connection age, missing timestamps, or legacy
+baseline/notice markers. No heads-up message is sent and no extra day is required.
+Global/provider/category opt-outs and source mappings survive migration. Opt-outs remove matching
 upcoming context without disconnecting the account or deleting Journal history.
 
 One managed pass runs at 08:00 local time. It reads a fourteen-day calendar window,

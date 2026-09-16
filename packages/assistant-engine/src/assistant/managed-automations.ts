@@ -422,9 +422,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     instructions: [
       'Run the private Journal connected-context morning pass.',
       '',
-      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its connection-notice check, calendar pass, email travel pass, due follow-up checks, and upcoming-context refresh. Preserve Journal writes, source reconciliation, and existing one-shot follow-ups. Use the engine-supplied occurrence local date and timezone as the time anchor.',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its eligibility and opt-out check, calendar pass, email travel pass, due follow-up checks, and upcoming-context refresh. Preserve Journal writes, source reconciliation, and existing one-shot follow-ups. Use the engine-supplied occurrence local date and timezone as the time anchor.',
       '',
-      'A newly sent connection notice is a hard stop for this occurrence. Persist its ledger state, then end the run without reading any connected account content.',
+      'Do not send a connection announcement or wait for a prior notice. Read eligible active sources in this run while preserving explicit opt-outs.',
       '',
       'This scheduled run may read connected calendar and email only through that skill. It must never send email, create provider calendar events, or use group context.',
       '',
@@ -2217,6 +2217,6 @@ export function buildMurphManagedJournalCalendarWindowInstructions(
     'Journal calendar read window (engine-computed, exactly 14 elapsed days):',
     `- timeMin: ${start.toISOString()}`,
     `- timeMax: ${end.toISOString()}`,
-    '- Use these exact UTC instants for calendar reads. Do not recalculate or widen them. Notices and opt-outs still take precedence over reading content.',
+    '- Use these exact UTC instants for calendar reads. Do not recalculate or widen them. Opt-outs still take precedence over reading content.',
   ].join('\n')
 }
