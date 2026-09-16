@@ -37,6 +37,31 @@ describe("device import progress and efficiency alerts", () => {
       .stalled.anomalous).toBe(true);
   });
 
+  it("requires an overdue wake for a checkpointed queue but not for unsaved active work", () => {
+    const rows = [row(20), checkpoint(19), row(10), checkpoint(9), row(1)];
+    expect(health([...rows, checkpoint(0.5)], false).stalled.anomalous).toBe(false);
+    expect(health(rows, false).stalled.anomalous).toBe(true);
+    expect(health([...rows, checkpoint(0.5, { checkpointAccepted: false })], false).stalled.anomalous).toBe(true);
+    expect(health([...rows, checkpoint(0.5, { attemptId: "other" })], false).stalled.anomalous).toBe(true);
+    expect(health([...rows, checkpoint(0.5)], true).stalled.anomalous).toBe(true);
+  });
+
+  it("does not let a late checkpoint for an older attempt save the latest pass", () => {
+    const rows = [row(20, { attemptId: "older" }), row(10, { attemptId: "latest" }),
+      row(1, { attemptId: "latest" }), checkpoint(0.5, { attemptId: "older" })];
+    expect(health(rows, false).stalled.anomalous).toBe(true);
+    expect(health([...rows, checkpoint(0, { attemptId: "latest" })], false).stalled.anomalous).toBe(false);
+  });
+
+  it("keeps cycling and backlog signals when checkpointed work awaits its wake", () => {
+    const rows = Array.from({ length: 13 }, (_, index) => 60 - index * 5)
+      .flatMap(age => [row(age + 0.1, { restarted: true }), checkpoint(age)]);
+    const result = health(rows, false);
+    expect(result.stalled.anomalous).toBe(false);
+    expect(result.cycling.anomalous).toBe(true);
+    expect(result.backlog.anomalous).toBe(true);
+  });
+
   it("keeps a stalled connection pending while another connection drains and checkpoints", () => {
     const stalled = Array.from({ length: 15 }, (_, index) => row(70 - index * 5));
     const draining = Array.from({ length: 14 }, (_, index) => {

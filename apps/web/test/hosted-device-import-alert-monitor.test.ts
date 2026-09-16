@@ -83,6 +83,30 @@ describe("device import incident integration", () => {
 
 describe("bounded import diagnostic observation", () => {
   it.each([
+    { overdueMinutes: -40, stalled: false },
+    { overdueMinutes: 0, stalled: false },
+    { overdueMinutes: 14.99, stalled: false },
+    { overdueMinutes: 15, stalled: true },
+  ])("respects wake grace after a recent checkpointed no-progress pass ($overdueMinutes minutes overdue)", async ({ overdueMinutes, stalled }) => {
+    mocks.workspaces.mockResolvedValueOnce([{ userId: "synthetic-active",
+      nextWakeAt: new Date(+now - overdueMinutes * 60_000), nextWakeReason: "device-sync.reconcile" }]);
+    const observations: DeviceImportObservation[] = [18, 4].flatMap((minutesAgo, index) => {
+      const pass: DeviceImportObservation = {
+        subjectKey: hostedRuntimeLogSubjectKey("synthetic-active"), connectionKey: "a".repeat(64),
+        attemptId: `synthetic-attempt-${index}`, at: new Date(+now - minutesAgo * 60_000),
+        eventCode: "device-sync.pass_finished", pending: true, progressed: index === 0,
+        checkpointAccepted: false, restarted: false, cancelled: false,
+      };
+      return [pass, { ...pass, at: new Date(+pass.at + 1_000),
+        eventCode: "checkpoint.snapshot_finished", connectionKey: null,
+        pending: null, progressed: false, checkpointAccepted: true }];
+    });
+    mocks.logQuery.mockResolvedValueOnce({ rows: observations });
+
+    expect((await readDeviceImportHealth({ now })).stalled.anomalous).toBe(stalled);
+  });
+
+  it.each([
     { overdueMinutes: -30, stalled: false },
     { overdueMinutes: 0, stalled: false },
     { overdueMinutes: 0.2, stalled: false },
