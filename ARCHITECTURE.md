@@ -3239,9 +3239,26 @@ challenge rather than creating a second session or permit lifecycle. Provider
 verification and crypto preparation precede the short database transaction;
 member and current-session locks plus an exact-ciphertext comparison fence
 stale proof. The counter update and approved mutation share the challenge's
-transaction. Unmigrated members retain the legacy wallet verifier; enrolled
-members cannot fall back. The reader-first rollout and original browser-session
+transaction. The legacy wallet verifier remains a temporary compatibility
+reader; enrolled members cannot fall back, and current legacy approval controls
+select the explicit repair owner instead of loading the provider. The reader-first rollout and original browser-session
 drain are owned by `docs/hosted-auth-migration.md`.
+
+`sensitive-actions/legacy-passkey-repair.ts` owns the narrow never-migrated
+exception: canonical legacy binding, strictly absent approval aggregate and
+fresh first-party primary proof with an already-adopted canonical verified login.
+`better-auth/bound-reauthentication.ts` reuses the encrypted login/canonical
+owners and existing OTP/Telegram issuers for same-member inline reauthentication;
+it has no contact discovery, import or linking branch. A separate one-use
+registration challenge binds the member/session/proof and exact canonical
+generation. The session-limit owner prepares at most twenty authenticated rows
+outside locks and rejects changed snapshots inside provider-disabled commits.
+Registration writes the first credential, consumes the challenge and fences
+other sessions atomically; it never grants primary login or approves the action.
+The shared enrollment/approval hooks then obtain a fresh exact-action challenge
+and native assertion. Existing/corrupt native state can never enter repair.
+The migration and Security owners define the explicit reduction in assurance and
+require reconciled usable primary login before provider retirement.
 
 The same approval aggregate holds one optional encrypted digest for a saved
 recovery key. A current Murph passkey authorizes generation; fresh first-party
@@ -3249,8 +3266,8 @@ primary proof plus the previously saved random key authorizes replacement.
 Recovery reuses the one-use challenge, atomically replaces all approval
 credentials, consumes the key and revokes other sessions through the existing
 auth owners. It creates no login session, contact claim, separate ledger or
-operator override. Existing protected accounts cannot bootstrap recovery from
-primary login alone. The rollout owner defines unresolved-factor retirement
+operator override. Accounts with existing Murph approval credentials cannot bootstrap saved-key
+recovery from primary login alone. The rollout owner defines unresolved-factor retirement
 gates and the additive nullable-column deployment order.
 
 Hosted browser wearable OAuth is a same-browser, same-member, same-host

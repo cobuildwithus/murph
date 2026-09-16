@@ -131,6 +131,8 @@ export function AuthDialog({
   title = DEFAULT_AUTH_DIALOG_TITLE,
   description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
   onCompleted,
+  reauthenticate = false,
+  onReauthenticated,
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,
 }: {
@@ -141,6 +143,8 @@ export function AuthDialog({
   onOpenChange: (open: boolean) => void;
   title?: string;
   description?: string;
+  reauthenticate?: boolean;
+  onReauthenticated?: () => void;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   requireLaunchConsentOnCompletion?: boolean;
   showPassiveLegalNotice?: boolean;
@@ -247,7 +251,7 @@ export function AuthDialog({
     return () => observer.disconnect();
   }, [open, phoneInputAutoFocus, readyAuthPanelModule]);
 
-  const dismissLocked = panelView !== "auth";
+  const dismissLocked = !reauthenticate && panelView !== "auth";
   const consentPresentation = panelView === "consent";
 
   function handleOpenChange(nextOpen: boolean) {
@@ -265,6 +269,8 @@ export function AuthDialog({
   }
 
   const authPanelProps = {
+    reauthenticate,
+    onReauthenticated,
     autoSendPastedPhoneNumber,
     methods,
     onViewChange: setPanelView,

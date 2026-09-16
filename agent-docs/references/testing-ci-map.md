@@ -149,6 +149,28 @@ provider-approval recovery and atomic browser/native canonical login/session
 creation. Only provider/KMS boundaries use synthetic ports. Live Verify receipt,
 provider configuration and real-device qualification remain rollout gates.
 
+Legacy approval repair uses the same required PostgreSQL lane, not a new gate.
+`better-auth-member-postgres-concurrency.test.ts` exercises the actual repair
+routes, real P-256 WebAuthn registration/assertion and canonical transactions:
+strict absent-state eligibility, stale/exchanged sessions, member/session/origin/
+RP/UV binding, one-winner enrollment, canonical/session drift, failed fencing
+rollback/retry and flags at both options and commit. It proves registration leaves
+the requested action pending until a separate native verification/decision and
+that Privy is never called. `better-auth-telegram-postgres-concurrency.test.ts`
+covers signed, nonce-bound same-member reauthentication and replay/foreign-account
+rejection. Provider/KMS ports remain synthetic, not live provider proof.
+
+Focused client/route regressions are `legacy-approval-repair-client.test.tsx`,
+`auth-reauthentication-continuation.test.tsx`, `better-auth-login-client.test.tsx`,
+`better-auth-telegram-client.test.tsx`, `action-approval-page.test.tsx`,
+`better-auth-account-settings-page.test.tsx`, and `settings-page.test.ts`.
+They cover inline resume/cancel, shared controls without the Privy SDK,
+registration failure/lost response/reload, concurrent winner retry, expired or
+terminal action and unchanged native approval/deny. Run with the existing Web
+Vitest configuration; these do not replace migrated PostgreSQL execution,
+full typecheck or supported-browser qualification. The inert legacy setup states
+in `/design/approval-passkey-study` reuse `InitialPasskeySetupView`.
+
 `apps/cloudflare/test/helpers/hosted-local-workspace-snapshot.test.ts` proves the
 shared hosted-local v2 snapshot seed with actual signed runtime-envelope
 verification, wrapped data keys, tar/zstd/AES-GCM construction, and the current
