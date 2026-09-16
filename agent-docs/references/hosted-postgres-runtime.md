@@ -4,10 +4,25 @@
 
 `HostedRuntimeOwner` in Web's primary Postgres database owns member execution
 admission. The durable `HostedRuntimeCutover` gate selects `legacy`, `draining`,
-or `postgres`; `HOSTED_RUNTIME_POSTGRES_ENABLED` selects the deployed Worker
-adapter. Both must agree before execution starts. The flag defaults to false.
-A flag mismatch stops admission; it never falls back to another owner after
-the gate leaves `legacy`.
+`rolling`, or `postgres`. `HOSTED_RUNTIME_POSTGRES_ENABLED` is a deployment
+capability, not a fleet-wide backend selector. With that capability enabled,
+`rolling` routes each member by explicit migration phase; unregistered existing
+members remain legacy. Disabled deployments cannot start migrated members.
+
+Migration phase is separate from execution phase: `legacy -> quiescing ->
+freezing -> importing -> postgres`. Importing an owner row alone never activates
+execution. Quiescing keeps admitted callbacks available for checkpointing while
+closing new starts and destructive deletion. Freezing/importing admit no new
+execution. Activation requires the complete exact-source import and commits a
+durable wake through the existing mailbox/Temporal scheduler.
+
+`hosted-member-store.ts::createHostedMember` initializes an explicit Postgres
+route for new personal and group runtime members during rolling/Postgres mode,
+in the same transaction as creation. Existing missing routes never imply a new
+member. The FK-free route survives deletion; a conflicting old owner cannot be
+overwritten by creation. The creation path takes a nonblocking shared campaign
+lock because some callers already hold identity/family locks; contention returns
+a retryable setup error rather than waiting in an inverted lock order.
 
 The `UserRunnerDurableObject` implementation remains a finite migration bridge.
 Descriptions of its runtime ownership in the mailbox protocol apply only before
@@ -105,47 +120,44 @@ R2 contracts: [multipart upload and abort](https://developers.cloudflare.com/r2/
 [strong consistency](https://developers.cloudflare.com/r2/reference/consistency/).
 Strong delete consistency alone does not cancel a concurrent write.
 
-## Finite fleet cutover
+## Rolling migration readiness
 
-Production activation is a separate authorized operation, never a consequence of
-merging this code or toggling the Worker flag. Keep the namespace and migration
-receipts through rollback verification. Do not deploy an older legacy writer
-after freezing: SQLite schema 20 rejects writers below that floor.
+Production migration remains a separate authorized operation. The rolling
+implementation is not yet a complete operational release: legacy creation
+closure, the hosted fleet driver, composed rehearsal and final review are still
+required. Do not use the older `migrateHostedLegacyRuntime` helper for a rolling
+rollout; it still begins fleet draining and stops at its first held object.
 
-1. Apply the runtime owner, resource, legacy-import, and upload-recovery schema
-   migrations. Deploy compatible Web readers and Worker code with the flag false.
-2. Prepare the private deploy workflow to forward the flag through config
-   rendering, validation, and deployment. In a separately authorized cutover,
-   deploy the flag-enabled Worker and verify one exact version serves 100%.
-   Its mismatch with the legacy gate intentionally pauses fresh admission.
-3. In the authorized hosted operator context, import
-   `migrateHostedLegacyRuntime` from `apps/cloudflare/scripts/runtime-migration.ts`.
-   Supply the account, script, exact Worker version, Worker HTTPS origin, a
-   Cloudflare inventory credential in memory, and fresh Vercel OIDC headers for
-   each call. Invoke with `activate: false`. Never put credentials in arguments,
-   artifacts, or local environment files.
-4. The helper inventories the actual SQLite UserRunner namespace, including
-   dormant, deleted-member, empty, and resource-only objects. It sets the durable
-   gate to `draining`, seals an ordered inventory hash, and freezes each object.
-   Freeze closes RPC admission before waiting for admitted work, repeatedly
-   stops the exact target, proves existing capability drains, and removes alarms.
-   Unknown state or stop outcomes keep the object closed and activation blocked.
-5. Export/import uses bounded 50-record pages, a one-MiB page limit, content
-   hashes, and durable cursors. It transfers resources and generation high-water
-   only. It never imports active attempts, provider tokens, or live authority.
-   Lost responses resume from committed receipts; changed frozen content fails.
-   Rerun the same version-bound import while drains remain held.
-6. After all imports finish, explicitly invoke the same helper with
-   `activate: true`. It repeats deployment and full namespace inventory checks.
-   Web activates only if every registered object completed, no target remains
-   active, and the final inventory hash/count match. Never reset the gate to
-   legacy. An unexpected deployment or inventory change requires a reviewed
-   recovery; changing the recorded identity to bypass the gate is unsupported.
-7. Verify cold and warm replies, typing-before-send, checkpoint publication,
-   managed usage denial, consent stop, resource recovery, and deletion on the
-   activated deployment. Observe metadata only. Roll forward with compatible
-   readers if recovery is needed; removal of the frozen namespace is a later
-   separately reviewed change.
+The supported member continuation is an authenticated `advance_member` command
+bound to an exact namespace, Worker version, object ID, member ID and migration
+token. It conditionally closes local starts/deletion, checkpoints the exact
+active attempt, proves its completion and stop, exports bounded frozen pages,
+and activates the member. Incoming work stays durably queued. Preparation that
+finds old direct-PUT capabilities or unsupported active code leaves legacy live.
+A committed or ambiguous freeze requires same-token roll-forward recovery.
+
+Deletion admitted before local closure must settle before source reservation.
+Deletion after closure retains its canonical cleanup receipt and retries; it
+cannot clear the frozen source. Empty-object migration closes callbacks, waits
+for admitted work and rechecks emptiness before persisting a freeze. It exports
+four hashed empty pages without constructing a runner or initializing SQL.
+Account for empty and deleted/resource-only objects as well as active members.
+
+Managed checkpoint uploads use an exact, durably admitted multipart upload ID.
+Trusted completion seals the upload and streams the stored encrypted bytes to
+verify size and SHA-256 before canonical publication. Unknown completion/abort
+outcomes retain the obligation. Old direct-PUT capabilities still need their
+full drain; negotiation of the new path does not revoke them. Schema 21 protects
+managed legacy receipts from older writers. Every serving version must support
+those receipts and the new quiescence record before they can be enabled.
+
+Release acceptance requires complete namespace and creation-intent accounting,
+no remaining legacy execution ownership, measured member handoffs and unrelated
+member latency, correct resumed cold/warm replies, mailbox continuity, effect
+receipts, cleanup, consent and deletion. Local tests establish only their tested
+boundaries. Do not treat a skipped member, a timer, or imported metadata as a
+completed handoff. Retain the fixed namespace and receipts during the campaign;
+removal and any rollback require their own authorized operational action.
 
 Inventory uses Cloudflare's [namespace list](https://developers.cloudflare.com/api/resources/durable_objects/subresources/namespaces/methods/list/),
 [object list](https://developers.cloudflare.com/api/resources/durable_objects/subresources/namespaces/subresources/objects/methods/list/),

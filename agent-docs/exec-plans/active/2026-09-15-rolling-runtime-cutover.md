@@ -199,6 +199,23 @@ and no planned fleet pause. An operator success or green CI alone is insufficien
   pass; Worker, Web and shared typechecks and the complexity guard pass. Earlier
   deletion-focused proof also passes (40 Worker and four Postgres cases). These
   are local correctness checks; no production mutation or latency claim.
+- Centralized member creation now assigns an explicit Postgres route in the
+  creation transaction during rolling/Postgres mode. Personal identities, auth,
+  referral/family signup and group containers all use this creation owner.
+  Creation takes a nonblocking shared campaign lock: callers may already hold
+  identity/family locks, so an exclusive transition yields retryable setup rather
+  than an inverted lock wait. Deleted routes survive; conflicting owners cannot
+  be overwritten; failed creation rolls back both records.
+- Creation proof: eleven real Postgres cases cover route selection, transaction
+  rollback, deletion, conflicting prior identity and campaign concurrency,
+  including immediate retry during an exclusive transition. The affected signup
+  suites were exercised; mock fixtures now include campaign reads while their
+  canonical member lock-order assertions remain intact. Web typecheck passes.
+- Creation/inventory closure still requires durable materialization intent before
+  legacy object access, including ensure-processing, bound user routes, deletion,
+  outbound callbacks and provider authorization. New-member routing alone does
+  not cover older members' first use. The existing immutable inventory cannot be
+  sealed while an unregistered legacy object can still materialize.
 - Remaining before a final candidate: complete effect and
   control routing; creation/inventory closure; hosted
   operator; composed rehearsal; owner documentation and final review/CI. Keep
