@@ -5384,18 +5384,12 @@ export function createJunctionDeviceSyncProvider(
         throw error;
       }
     } else {
+      const importWindow = resolveFullJobContinuationImportWindow(
+        resource,
+        timeseriesCursor,
+        executionWindowEnd,
+      );
       try {
-        const calendarDayAggregate =
-          JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource);
-        const importWindow = calendarDayAggregate
-          ? {
-              windowEnd: floorUtcDayTimestamp(executionWindowEnd),
-              windowStart: floorUtcDayTimestamp(timeseriesCursor),
-            }
-          : {
-              windowEnd: executionWindowEnd,
-              windowStart: timeseriesCursor,
-            };
         if (Date.parse(importWindow.windowStart) < Date.parse(importWindow.windowEnd)) {
           const timeseriesImport = await importJunctionTimeseriesResourceSnapshot({
             collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT,
@@ -5417,6 +5411,25 @@ export function createJunctionDeviceSyncProvider(
             && timeseriesImport.historicalRecordsSeen === true;
         }
       } catch (error) {
+        const handoffResult = await buildRetainedValidationHandoffResult({
+          baseTimeseriesWindowStart,
+          context,
+          error,
+          executionWindowEnd,
+          historicalProviderRecordsSeen,
+          historicalRecordsSeen,
+          importWindow,
+          job,
+          resource,
+          skippedOptionalResources,
+          sourceProviderSlug,
+          sourceProviders,
+          timeseriesWindowHours,
+          window,
+        });
+        if (handoffResult) {
+          return handoffResult;
+        }
         if (
           isJunctionTimeseriesWindowTooLarge(error)
           && timeseriesWindowHours === 24
@@ -6145,6 +6158,60 @@ export function createJunctionDeviceSyncProvider(
     await projectJunctionSources(input.context, input.sourceProviders, {
       historicalBackfillCompletedProviderSlug: input.sourceProviderSlug,
     });
+  }
+
+  // A retained validation failure inside a full-job continuation moves to a
+  // resource job that owns the failing window; the full job keeps advancing so
+  // one inconsistent recording cannot hold every later resource, and the
+  // sync-complete marker, behind it. Returns null for every other failure.
+  async function buildRetainedValidationHandoffResult(input: {
+    baseTimeseriesWindowStart: string;
+    context: ProviderJobContext;
+    error: unknown;
+    executionWindowEnd: string;
+    historicalProviderRecordsSeen: boolean;
+    historicalRecordsSeen: boolean;
+    importWindow: { windowEnd: string; windowStart: string };
+    job: DeviceSyncJobRecord;
+    resource: string;
+    skippedOptionalResources: JunctionSkippedOptionalResource[];
+    sourceProviderSlug: string | null;
+    sourceProviders: readonly JunctionProviderConnection[];
+    timeseriesWindowHours: 1 | 24;
+    window: { windowEnd: string; windowStart: string };
+  }): Promise<ProviderJobResult | null> {
+    const handoff = buildJunctionRetainedValidationHandoffJob({
+      error: input.error,
+      job: input.job,
+      now: input.context.now,
+      resource: input.resource,
+      sourceProviderSlug: input.sourceProviderSlug,
+      window: input.importWindow,
+    });
+    if (!handoff) {
+      return null;
+    }
+    const result = await buildFullJobTimeseriesContinuationResult({
+      context: input.context,
+      historicalProviderRecordsSeen: input.historicalProviderRecordsSeen,
+      historicalRecordsSeen: input.historicalRecordsSeen,
+      job: input.job,
+      skippedOptionalResources: input.skippedOptionalResources,
+      sourceProviders: input.sourceProviders,
+      continuation: resolveNextFullJobTimeseriesContinuation({
+        baseTimeseriesWindowStart: input.baseTimeseriesWindowStart,
+        executionWindowEnd: input.executionWindowEnd,
+        resource: input.resource,
+        resources: timeseriesResources,
+        timeseriesWindowHours: input.timeseriesWindowHours,
+        windowEnd: input.window.windowEnd,
+      }),
+      window: input.window,
+    });
+    return {
+      ...result,
+      scheduledJobs: [...(result.scheduledJobs ?? []), handoff],
+    };
   }
 
   async function buildFullJobTimeseriesContinuationResult(input: {
@@ -11496,6 +11563,78 @@ function withJunctionWorkoutStreamEmptyReplay(input: {
       ...(input.result.scheduledJobs ?? []),
       replayJob,
     ],
+  };
+}
+
+// Validation failures the service retains for a 30-minute recheck when they
+// occur on a resource job (see isRetainedJunctionValidationFailure in the
+// service). Inside a reconcile or backfill timeseries continuation the same
+// failure would otherwise fail the whole full job, so the failing window is
+// handed to a resource job with the same resource, window, and source scope.
+// Blood-oxygen incomplete normalization only occurs on calendar refresh
+// resource jobs, so it needs no handoff here.
+const JUNCTION_RETAINED_VALIDATION_HANDOFF_CODES: ReadonlyMap<string, string> = new Map([
+  ["electrocardiogram_voltage", "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE"],
+]);
+
+function resolveFullJobContinuationImportWindow(
+  resource: string,
+  timeseriesCursor: string,
+  executionWindowEnd: string,
+): { windowEnd: string; windowStart: string } {
+  return JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource)
+    ? {
+        windowEnd: floorUtcDayTimestamp(executionWindowEnd),
+        windowStart: floorUtcDayTimestamp(timeseriesCursor),
+      }
+    : {
+        windowEnd: executionWindowEnd,
+        windowStart: timeseriesCursor,
+      };
+}
+
+function buildJunctionRetainedValidationHandoffJob(input: {
+  error: unknown;
+  job: DeviceSyncJobRecord;
+  now: string;
+  resource: string;
+  sourceProviderSlug: string | null;
+  window: { windowEnd: string; windowStart: string };
+}): DeviceSyncJobInput | null {
+  const failure = input.error instanceof JunctionTimeseriesProgressError
+    ? input.error.failure
+    : input.error;
+  if (
+    !isRetryableDeviceSyncFailure(failure)
+    || JUNCTION_RETAINED_VALIDATION_HANDOFF_CODES.get(input.resource) !== failure.code
+    || Date.parse(input.window.windowStart) >= Date.parse(input.window.windowEnd)
+  ) {
+    return null;
+  }
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const payload = {
+    resource: input.resource,
+    resourceCategory: "timeseries",
+    ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+    windowEnd: input.window.windowEnd,
+    windowStart: input.window.windowStart,
+  } satisfies JunctionDeviceSyncJobPayloads["resource"];
+  return {
+    availableAt: input.now,
+    // One handoff per resource, window, and source: repeated reconciles over
+    // the same inconsistent day dedupe onto the retained job instead of
+    // multiplying it.
+    dedupeKey: sha256Text(JSON.stringify([
+      "junction",
+      "validation-handoff",
+      input.resource,
+      input.window.windowStart,
+      input.window.windowEnd,
+      sourceProviderSlug,
+    ])),
+    kind: "resource",
+    payload,
+    priority: input.job.priority,
   };
 }
 
