@@ -37,6 +37,7 @@ import {
   readAssistantContextSnapshotState,
   saveAssistantAutomationState,
   upsertAssistantInputEvent,
+  type InboxCaptureAttachmentLike,
 } from "@murphai/assistant-engine";
 import {
   hasPendingAssistantAutoReplyInput,
@@ -76,6 +77,7 @@ import {
 import {
   applyCanonicalWriteBatch,
   initializeVault,
+  isActiveCanonicalWriteLockError,
 } from "@murphai/core";
 import { describe, expect, test, vi } from "vitest";
 import { persistCanonicalInboxCapture } from "@murphai/inboxd";
@@ -5434,6 +5436,229 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       }
     },
   );
+
+  test("keeps the next attachment pending when its commit times out behind an outstanding backup", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-attachment-contention-"));
+    const uploadRelease = createDeferred<void>();
+    const secondCaptureStarted = createDeferred<void>();
+    let secondCaptureSettled = false;
+    let secondCaptureError: unknown = null;
+    const tracked: Promise<void>[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const artifacts = new Map<string, Uint8Array>();
+    const captureAttempts = new Map<number, number>();
+    const attachmentPaths = new Map<number, string>();
+    const storedAttachments = new Map<string, readonly InboxCaptureAttachmentLike[]>();
+    const assistantPhases: number[] = [];
+    let ledgerPath: string | null = null;
+    const bytesFor = (ordinal: number) => Buffer.from(`Synthetic attachment ${ordinal}\n`);
+    const wakeFor = (ordinal: 1 | 2): HostedExecutionConversationMessageWake => ({
+      ...createRunnerConversationWake(),
+      eventId: `evt_synthetic_runner_contention_${ordinal}`,
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_synthetic_runner_contention",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: `msg_synthetic_runner_contention_${ordinal}`,
+          parts: [
+            { type: "text", value: `Read attachment ${ordinal}.` },
+            {
+              attachmentId: `att_synthetic_runner_contention_${ordinal}`,
+              fileName: `sample-${ordinal}.txt`,
+              mimeType: "text/plain",
+              size: bytesFor(ordinal).byteLength,
+              type: "media",
+              url: `https://cdn.example.test/sample-${ordinal}.txt`,
+            },
+          ],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const wakes = { 1: wakeFor(1), 2: wakeFor(2) } as const;
+    const { mailboxPort } = createMailboxPort({
+      items: [1, 2].map((ordinal) => createMailboxItem({
+        dedupeKey: `evt_synthetic_runner_contention_${ordinal}`,
+        id: `mailbox_item_runner_contention_${ordinal}`,
+        laneSeq: String(ordinal),
+      })),
+    });
+    await initializeVault({ vaultRoot, title: "Synthetic contention vault", timezone: "UTC", createdAt: new Date(TEST_NOW) });
+    const platform = createPlatform({
+      artifactBytesByHash: artifacts,
+      logRequests,
+      mailboxPort,
+      workspacePort: createWorkspacePort({ checkpointRequests }),
+      async artifactPut(artifact) {
+        await uploadRelease.promise;
+        artifacts.set(artifact.sha256, artifact.bytes);
+      },
+    });
+    const conversationImportItem = createHostedConversationMailboxImportItem({
+      decodePayload: {
+        async decode(input) {
+          return { status: "decoded", wake: input.itemRef.id.endsWith("_1") ? wakes[1] : wakes[2] };
+        },
+      },
+      async importConversationWake({ wake }) {
+        const ordinal = wake.eventId.endsWith("_1") ? 1 : 2;
+        captureAttempts.set(ordinal, (captureAttempts.get(ordinal) ?? 0) + 1);
+        if (ordinal === 2) secondCaptureStarted.resolve();
+        const captureId = `cap_synthetic_runner_contention_${ordinal}`;
+        try {
+          const capture = await persistCanonicalInboxCapture({
+            vaultRoot,
+            captureId,
+            eventId: ordinal === 1 ? "evt_01JQ8PWXP5A68SQM1W0GYM41V4" : "evt_01JQ8PWXP5A68SQM1W0GYM41V5",
+            storedAt: TEST_NOW,
+            input: {
+              source: "linq",
+              externalId: `synthetic_contention_message_${ordinal}`,
+              thread: { id: "synthetic_thread", isDirect: true },
+              actor: { isSelf: false },
+              occurredAt: TEST_NOW,
+              receivedAt: TEST_NOW,
+              text: `Read attachment ${ordinal}.`,
+              attachments: [{
+                kind: "document",
+                mime: "text/plain",
+                fileName: `sample-${ordinal}.txt`,
+                data: bytesFor(ordinal),
+              }],
+              raw: {},
+            },
+          });
+          ledgerPath = capture.capture.relativePath;
+          storedAttachments.set(captureId, capture.stored.attachments);
+          attachmentPaths.set(ordinal, capture.stored.attachments[0]?.storedPath ?? "");
+          return { captureId, metrics: { nextWakeAt: null, parserProcessed: 0 } };
+        } catch (error) {
+          if (ordinal === 2) secondCaptureError = error;
+          throw error;
+        } finally {
+          if (ordinal === 2) secondCaptureSettled = true;
+        }
+      },
+      async loadAttachmentEvidenceCapture(input) {
+        return { attachments: storedAttachments.get(input.captureId) ?? [], captureId: input.captureId };
+      },
+      async prepareWakeContext() {},
+      runtime: createConversationRuntime(),
+      vaultRoot,
+    });
+    const run = (ordinal: 1 | 2) => runHostedWorkspaceUntilIdleOrBudget({
+      checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        attemptId: `attempt_synthetic_contention_${ordinal}`,
+        expectedWorkspaceVersion: "0",
+        leaseGeneration: "1",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        snapshotRef: null,
+      }),
+      checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
+        attemptId: `attempt_synthetic_contention_${ordinal}`,
+        checkpointRequests,
+        expectedWorkspaceVersion: "0",
+        leaseGeneration: "1",
+      }),
+      expectedUserId: TEST_USER_ID,
+      importItem: (item) => conversationImportItem(item),
+      limitPerLane: 10,
+      platform,
+      requestId: `request_synthetic_contention_${ordinal}`,
+      trackLocalWorkspaceMutationCompletion(completion) {
+        if (completion) tracked.push(completion);
+      },
+      async runAssistantPhase() {
+        assistantPhases.push(ordinal);
+        const attachmentPath = attachmentPaths.get(ordinal);
+        assert.ok(attachmentPath);
+        assert.deepEqual(await readFile(path.join(vaultRoot, attachmentPath)), bytesFor(ordinal));
+        uploadRelease.resolve();
+        return { progressed: false };
+      },
+      vaultRoot,
+      workspace: null,
+      now: () => TEST_NOW,
+    });
+    const eventFor = async (ordinal: number) => {
+      const listed = await listAssistantInputEvents({ vault: vaultRoot });
+      const event = listed.events.find((candidate) =>
+        candidate.content.attachmentDescriptors[0]?.fileName === `sample-${ordinal}.txt`
+      );
+      assert.ok(event);
+      return event;
+    };
+    try {
+      const firstOperation = run(1);
+      await withTestTimeout(secondCaptureStarted.promise, 5_000);
+      // The first backup still owns the canonical lock. Its commit deadline is
+      // 30 seconds of wall clock; advance only Date so the real lock loop gives
+      // up while its retry timers keep running.
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+      while (!secondCaptureSettled) {
+        vi.setSystemTime(Date.now() + 31_000);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      vi.useRealTimers();
+      assert.equal(isActiveCanonicalWriteLockError(secondCaptureError), true);
+      const first = await withTestTimeout(firstOperation, 10_000);
+      await Promise.all(tracked.splice(0));
+
+      assert.deepEqual(assistantPhases, [1]);
+      assert.equal(first.latestMailboxImport.state.watermarks.conversation, "1");
+      const importLog = logRequests.flatMap((request) => request.entries)
+        .find((entry) => entry.eventCode === "mailbox.imported");
+      assert.ok(importLog);
+      assert.equal(importLog.redactedJson?.fetchedCount, 2);
+      assert.equal(importLog.redactedJson?.importedCount, 1);
+      assert.equal(importLog.redactedJson?.conversationSeqEnd, "1");
+      assert.deepEqual(importLog.redactedJson?.blockCodes, [
+        "conversation-import.canonical-write-busy",
+      ]);
+      assert.equal(importLog.redactedJson?.retryableBlockedCount, 1);
+      assert.deepEqual([captureAttempts.get(1), captureAttempts.get(2)], [1, 1]);
+      const firstEvent = await eventFor(1);
+      assert.equal(firstEvent.projection.status, "succeeded");
+      assert.equal(firstEvent.attachmentEvidence.status, "available");
+      const pendingEvent = await eventFor(2);
+      assert.equal(pendingEvent.projection.status, "pending");
+      assert.notEqual(pendingEvent.attachmentEvidence.status, "failed");
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [firstEvent.inputId]);
+      assert.ok(ledgerPath);
+      const ledgerAfterBlock = await readFile(path.join(vaultRoot, ledgerPath), "utf8");
+      assert.equal(ledgerAfterBlock.includes("cap_synthetic_runner_contention_2"), false);
+
+      const second = await withTestTimeout(run(2), 10_000);
+      await Promise.all(tracked.splice(0));
+
+      assert.deepEqual(assistantPhases, [1, 2]);
+      assert.equal(second.latestMailboxImport.state.watermarks.conversation, "2");
+      assert.deepEqual(second.latestMailboxImport.importResult.blocked, []);
+      assert.deepEqual([captureAttempts.get(1), captureAttempts.get(2)], [1, 2]);
+      const retriedEvent = await eventFor(2);
+      assert.equal(retriedEvent.inputId, pendingEvent.inputId);
+      assert.equal(retriedEvent.projection.status, "succeeded");
+      assert.equal(retriedEvent.projection.captureId, "cap_synthetic_runner_contention_2");
+      assert.equal(retriedEvent.attachmentEvidence.status, "available");
+      assert.deepEqual(
+        await readHostedPendingAssistantInputIds({ vaultRoot }),
+        [firstEvent.inputId, retriedEvent.inputId],
+      );
+      const ledger = (await readFile(path.join(vaultRoot, ledgerPath), "utf8")).split("\n").filter(Boolean);
+      assert.equal(ledger.filter((line) => line.includes("cap_synthetic_runner_contention_1")).length, 1);
+      assert.equal(ledger.filter((line) => line.includes("cap_synthetic_runner_contention_2")).length, 1);
+    } finally {
+      vi.useRealTimers();
+      uploadRelease.resolve();
+      await Promise.all(tracked).catch(() => undefined);
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
 
   test("runs staged mailbox projection effects before assistant input sampling without an extra checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));

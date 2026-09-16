@@ -3743,7 +3743,11 @@ the receipt fingerprint is already durable: receipt durability proves the
 canonical write, not the corresponding mailbox watermark. Pending attachment
 backups are excluded from the provider-start barrier. A completed attachment
 backup publishes its receipt status before releasing canonical write ownership,
-so a later writer observes the same receipt chain.
+so a later writer observes the same receipt chain. A later attachment capture
+whose commit times out behind that outstanding backup stays a retryable
+mailbox block (`conversation-import.canonical-write-busy`): the item keeps its
+watermark position, records no terminal attachment evidence, admits no reply,
+and retries through the ordinary mailbox retry path.
 Receipt replay is fail-stop for each restore attempt. The encrypted R2 reader
 owns artifact failure disposition: transport, object-read, key-resolution
 request, and service failures remain retryable, while a persisted object with
