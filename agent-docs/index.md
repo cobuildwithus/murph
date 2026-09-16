@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Upcoming-context sparse plan edits, canonical timing precision, bounded ledger
+controls independent of source history, and disconnect invalidation are owned by
+`agent-docs/product-specs/journal.md` and `ARCHITECTURE.md`.
+
 Admission and occurrence-scoped recovery of colliding connection jobs during
 retained device history retries are owned by `agent-docs/RELIABILITY.md`; the
 existing mailbox claim preserves one continuation and exact job backoff across preemption and restoration.
@@ -143,6 +147,14 @@ the warning regression and delivery evidence are tracked in
 
 The deployment unblock retaining the dormant experiment namespace is tracked in
 [`2026-09-15-defer-small-namespace-retirement.md`](exec-plans/completed/2026-09-15-defer-small-namespace-retirement.md).
+
+Silent morning Journal capture, canonical plan context, retirement of the
+afternoon pass, and bounded private upcoming-context injection are owned by
+`product-specs/journal.md` and `ARCHITECTURE.md`.
+The reviewed implementation and verification are recorded in
+[`2026-09-15-upcoming-context-review.md`](exec-plans/completed/2026-09-15-upcoming-context-review.md).
+Subsequent corrections, proactive guidance, regression proof, and final review are in
+[`2026-09-16-upcoming-context-corrections.md`](exec-plans/completed/2026-09-16-upcoming-context-corrections.md).
 
 Retained device-import stall, cycling and long-backlog operator alerts are owned
 by `agent-docs/RELIABILITY.md`; connection ownership in diagnostic events is

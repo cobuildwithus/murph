@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-15",
+  "order": 100,
+  "item": {
+    "id": "morning-upcoming-context",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Upcoming plans help Murph stay relevant",
+    "summary": "One morning check updates Journal and brings useful travel and life context into private conversations and reminders.",
+    "details": "Active calendar and email connections participate without an extra setup step, while opt-outs and disconnections remain respected. Murph can suggest practical preparations when an upcoming plan matters to your question, even if you do not mention it. Plan corrections and all-day dates carry through to private context, and expired plans drop out. Journal updates and follow-ups remain, and your reminder schedules and experiment plans stay under your control.",
+    "relevanceTags": ["journal", "calendar", "travel", "reminders"],
+    "sourcePullRequests": [3494]
+  }
+}

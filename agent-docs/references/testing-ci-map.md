@@ -1,5 +1,13 @@
 # Testing And CI Map
 
+Upcoming-context corrections are covered by the typed CLI event suite and
+`assistant-upcoming-context.test.ts`: rescheduling/re-verification with stale
+revision rejection, long source-key retries, all-day precision, large source
+history, and successful connected-app disconnect through canonical receipts.
+The focused real-Codex Journal plan correction journey proves the public edit
+command preserves one all-day record; calendar capture/retry proves the ledger
+format and silent follow-up behavior.
+
 Last verified: 2026-09-11
 
 Foreground promotion regression proof lives in the assistant-runtime entrypoint
@@ -20,6 +28,18 @@ release build/typecheck job, in addition to normal package coverage. CI policy
 tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 
 ## Current Repo Checks
+
+Morning Journal and upcoming-context proof lives in
+`packages/assistant-engine/test/assistant-upcoming-context.test.ts`,
+`managed-automations.test.ts`, and `assistant-codex-turn-planning.test.ts`.
+These cover canonical persistence and write-receipt invalidation, expiry, stale
+verification, bounded navigation/detail injection, opt-outs without cleanup, source
+retry/tombstone handling, private/group isolation, and retirement of only the
+managed afternoon pass while preserving independent follow-ups. Focused live
+journeys in `assistant-codex-real-e2e.test.ts` cover silent first-pass eligibility for new connections and undated baseline accounts, calendar capture with Journal/context readback and retry
+dedupe, email itinerary capture, and tasteful private/scheduled context use
+without granting provider text action authority. Typed note metadata and destination
+timezone are covered by `packages/cli/test/cli-expansion-event-typed.test.ts`.
 
 Phone-welcome preflight proof lives in `apps/web/test/hosted-phone-welcome.test.ts`.
 Its opt-in `MURPH_TEST_POSTGRES_CONCURRENCY=1` case uses a loopback `murph_test`

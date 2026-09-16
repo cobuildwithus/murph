@@ -55,7 +55,7 @@ describe('assistant context snapshot', () => {
       listAssistantContextSnapshotDirtyDomainsForPath(
         'ledger/events/2026-06.jsonl',
       ),
-    ).toEqual(['blood_tests'])
+    ).toEqual(['blood_tests', 'journal_plans'])
     expect(
       listAssistantContextSnapshotDirtyDomainsForPath(
         'ledger/metric-samples/2026-06.jsonl',
@@ -857,7 +857,7 @@ describe('assistant context snapshot', () => {
       expect(promptText).toContain('Penicillin allergy')
       expect(JSON.parse(await readFile(snapshotPath, 'utf8'))).toMatchObject({
         schema: 'murph.assistant-context-snapshot',
-        schemaVersion: 6,
+        schemaVersion: 7,
       })
     } finally {
       await rm(vaultRoot, { force: true, recursive: true })
