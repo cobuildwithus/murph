@@ -59,6 +59,16 @@ interface StoredJobRow {
 
 const EXPIRED_JOB_LEASE_ERROR_CODE = "LEASE_EXPIRED";
 const EXPIRED_JOB_LEASE_ERROR_MESSAGE = "Device sync job lease expired before completion.";
+// Lease recovery and dedupe share the retained validation predicate. This does
+// not grant the credential-independent authority of accepted companion work.
+const RETAINED_JUNCTION_VALIDATION_SQL = `
+  provider = 'junction' and kind = 'resource' and (
+    (coalesce(json_extract(payload_json, '$.resource'), '') = 'blood_oxygen'
+      and coalesce(last_error_code, '') = 'JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION')
+    or (coalesce(json_extract(payload_json, '$.resource'), '') = 'electrocardiogram_voltage'
+      and coalesce(last_error_code, '') = 'JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE')
+  )
+`;
 export const DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT = 396;
 
 function readCanonicalImportReceipts(value: string): DeviceSyncCanonicalImportReceipt[] {
@@ -189,12 +199,13 @@ function deadLetterExpiredExhaustedDeviceSyncJobs(database: DatabaseSync, now: s
       and lease_expires_at is not null
       and lease_expires_at <= ?
       and attempts >= max_attempts
+      and not (${RETAINED_JUNCTION_VALIDATION_SQL})
       and not (
         provider = 'junction'
         and kind = 'resource'
         and (
           coalesce(json_extract(payload_json, '$.resource'), '') = ?
-          or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+          or coalesce(json_type(payload_json, '$.calendarRefreshDay'), '') = 'text'
         )
       )
   `).run(
@@ -379,12 +390,13 @@ export function claimDueDeviceSyncJob(
           and candidate.lease_expires_at <= ?
           and (
             candidate.attempts < candidate.max_attempts
+            or (${RETAINED_JUNCTION_VALIDATION_SQL})
             or (
               candidate.provider = 'junction'
               and candidate.kind = 'resource'
               and (
                 coalesce(json_extract(candidate.payload_json, '$.resource'), '') = ?
-                or json_type(candidate.payload_json, '$.calendarRefreshDay') = 'text'
+                or coalesce(json_type(candidate.payload_json, '$.calendarRefreshDay'), '') = 'text'
               )
             )
           )
@@ -420,7 +432,8 @@ export function claimDueDeviceSyncJob(
       set status = 'running',
           lease_owner = ?,
           lease_expires_at = ?,
-          max_attempts = case when ? = 1 then max(max_attempts, attempts + 1) else max_attempts end,
+          max_attempts = case when ? = 1 or (${RETAINED_JUNCTION_VALIDATION_SQL})
+            then max(max_attempts, attempts + 1) else max_attempts end,
           attempts = attempts + 1,
           started_at = coalesce(started_at, ?),
           updated_at = ?
@@ -746,7 +759,7 @@ export function wakeRetainedDeviceSyncJobsForAccount(
       and kind = 'resource'
       and (
         json_extract(payload_json, '$.resource') = ?
-        or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+        or coalesce(json_type(payload_json, '$.calendarRefreshDay'), '') = 'text'
       )
   `).run(
     input.now,
@@ -937,8 +950,8 @@ export function markPendingDeviceSyncJobsDeadForAccount(
         provider = 'junction'
         and kind = 'resource'
         and (
-          json_extract(payload_json, '$.resource') = ?
-          or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+          coalesce(json_extract(payload_json, '$.resource'), '') = ?
+          or coalesce(json_type(payload_json, '$.calendarRefreshDay'), '') = 'text'
         )
       )
   `).run(
@@ -1042,8 +1055,8 @@ export function markPendingDeviceSyncJobsDeadForAccountIfCurrent(
         provider = 'junction'
         and kind = 'resource'
         and (
-          json_extract(payload_json, '$.resource') = ?
-          or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+          coalesce(json_extract(payload_json, '$.resource'), '') = ?
+          or coalesce(json_type(payload_json, '$.calendarRefreshDay'), '') = 'text'
         )
       )
       and exists (
@@ -1088,12 +1101,13 @@ export function enqueueDeviceSyncJobInTransaction(
           and lease_expires_at is not null
           and lease_expires_at <= ?
           and attempts >= max_attempts
+          and not (${RETAINED_JUNCTION_VALIDATION_SQL})
           and not (
             provider = 'junction'
             and kind = 'resource'
             and (
               coalesce(json_extract(payload_json, '$.resource'), '') = ?
-              or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+              or coalesce(json_type(payload_json, '$.calendarRefreshDay'), '') = 'text'
             )
           )
         )

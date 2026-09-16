@@ -1854,6 +1854,9 @@ to apply after cutover.
   as a complete collection. Other jobs can run during the delay. Existing
   disconnect, account-generation, and lease fences remain authoritative; this
   policy does not resurrect terminal history or change other failure codes.
+  A persisted matching validation failure also preserves lease-reclaim and
+  dedupe ownership after an interrupted retry; it never grants import authority
+  after disconnect. Jobs without that failure retain ordinary lease exhaustion.
   Additive fields tolerate older readers. Updated runners are needed for the
   retained retry policy; rolling back can restore ordinary exhaustion.
   `device-sync.pass_finished` reports `deviceSyncBloodOxygen*Count` and
