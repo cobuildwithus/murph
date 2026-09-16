@@ -13,6 +13,7 @@ export const SENSITIVE_ACTION_KINDS = [
   ...SETTINGS_SENSITIVE_ACTION_KINDS,
   "account.credential.change",
   "approval.passkey.recover",
+  "approval.passkey.legacy-repair",
   "assistant.action.approve",
 ] as const;
 
@@ -110,4 +111,4 @@ export type HostedSecureApprovalStatus = (
   | { status: "needs_support" }
   | { status: "not_configured" }
   | { status: "unavailable" }
-) & { method?: "passkey" | "initial" };
+) & { method?: "passkey" | "initial" | "legacy-repair" };

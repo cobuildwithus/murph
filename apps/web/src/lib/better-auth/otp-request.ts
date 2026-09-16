@@ -6,6 +6,7 @@ import { isHostedSignupNotificationEmailConfigured } from "../hosted-onboarding/
 import { getPrisma } from "../prisma";
 import { runWithFreshHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { prepareHostedReauthentication } from "./bound-reauthentication";
 import { hostedAuthAdapter } from "./adapter";
 import { admitHostedAuthOtpRequest, type HostedAuthTransport } from "./admission";
 import { assertHostedBetterAuthIssuanceEnabled, requireHostedBetterAuthConfig } from "./config";
@@ -21,7 +22,8 @@ import { hostedAuthSmsVerification } from "./twilio-verify";
 export async function sendHostedAuthOtpRequest(request: Request, transport: HostedAuthTransport): Promise<void> {
   assertHostedBetterAuthIssuanceEnabled();
   const prisma = getPrisma();
-  const { contact } = await admitHostedAuthOtpRequest({ request, transport, operation: "send", prisma });
+  const { contact, reauthenticate } = await admitHostedAuthOtpRequest({ request, transport, operation: "send", prisma });
+  if (reauthenticate) await prepareHostedReauthentication({ request, prisma, method: contact.kind, value: contact.value });
   await sendHostedAuthOtp({
     ...requireHostedBetterAuthConfig(), prisma, contact, delivery: hostedAuthDelivery(request.signal),
     smsVerification: hostedAuthSmsVerification(request.signal),
@@ -31,7 +33,7 @@ export async function sendHostedAuthOtpRequest(request: Request, transport: Host
 export async function verifyHostedAuthOtpRequest(request: Request, transport: HostedAuthTransport) {
   assertHostedBetterAuthIssuanceEnabled();
   const prisma = getPrisma();
-  const { contact, code, inviteCode, timeZone } = await admitHostedAuthOtpRequest({ request, transport, operation: "verify", prisma });
+  const { contact, code, inviteCode, timeZone, reauthenticate } = await admitHostedAuthOtpRequest({ request, transport, operation: "verify", prisma });
   if (!code) throw invalidCode();
   // No provider lookup or KMS preparation for an unsolicited/expired code.
   const verification = await hostedAuthAdapter(prisma)({}).findOne<AuthRecord>({
@@ -39,12 +41,14 @@ export async function verifyHostedAuthOtpRequest(request: Request, transport: Ho
   });
   if (!verification || !(verification.expiresAt instanceof Date) || verification.expiresAt <= new Date()) throw invalidCode();
   return runWithFreshHostedDomainRootUnwrapCache(async () => {
-    const prepared = await prepareHostedAuthOtpMember({ contact, prisma, inviteCode });
+    const prepared = reauthenticate
+      ? await prepareHostedReauthentication({ request, prisma, method: contact.kind, value: contact.value })
+      : await prepareHostedAuthOtpMember({ contact, prisma, inviteCode });
     const otp = contact.kind === "email" ? { kind: "email" as const, address: contact.value, code }
       : { kind: "phone" as const, phoneNumber: contact.value, code, verificationId: await prepareHostedAuthSmsOtp({
         prisma, phoneNumber: contact.value, code, verification: hostedAuthSmsVerification(request.signal),
       }) };
-    const context = isHostedSignupNotificationEmailConfigured() ? buildHostedSignupNotificationContext({
+    const context = !reauthenticate && isHostedSignupNotificationEmailConfigured() ? buildHostedSignupNotificationContext({
       headers: request.headers, occurredAt: new Date(), surface: transport === "browser" ? "website" : "mobile_app", timeZone,
     }) : undefined;
     try {
@@ -52,7 +56,7 @@ export async function verifyHostedAuthOtpRequest(request: Request, transport: Ho
         ...requireHostedBetterAuthConfig(), ...prepared, prisma,
         commitMember: async (tx) => {
           await prepared.commitMember(tx);
-          if (timeZone) await updateHostedMemberPendingActivationTimeZoneIfActivationPending({ memberId: prepared.memberId, pendingActivationTimeZone: timeZone, prisma: tx });
+          if (!reauthenticate && timeZone) await updateHostedMemberPendingActivationTimeZoneIfActivationPending({ memberId: prepared.memberId, pendingActivationTimeZone: timeZone, prisma: tx });
           if (context) await writeHostedMemberSignupNotificationContextIfPendingTx({ memberId: prepared.memberId, context, preparedControlRoot: prepared.preparedControlRoot, prisma: tx });
         },
         otp,

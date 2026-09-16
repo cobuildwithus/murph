@@ -31,6 +31,8 @@ import { POST as prepareCredential } from "../app/api/settings/login-methods/tel
 import { POST as verifyCredential } from "../app/api/settings/login-methods/telegram/verify/route";
 import { POST as removeCredential } from "../app/api/settings/login-methods/remove/route";
 import { POST as credentialChallenge } from "../app/api/settings/login-methods/challenge/route";
+import { POST as legacyRepairOptions } from "../app/api/settings/approval-passkeys/legacy-options/route";
+import { readHostedMemberIdentity } from "../src/lib/hosted-onboarding/hosted-member-identity-store";
 import { POST as initialPasskeyOptions } from "../app/api/settings/approval-passkeys/initial-options/route";
 import { POST as registerPasskey } from "../app/api/settings/approval-passkeys/register/route";
 import { authenticator } from "./approval-webauthn-fixture";
@@ -78,6 +80,9 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
       { lookupKey: { in: [...nonces].map((nonce) => authLookupKey("verification", "identifier", `telegram-login:${nonce}`)) } },
       { id: { in: ["start", "verify"].map((operation) => `arl_${authLookupKey("verification", "rate-limit", `telegram:${operation}:ip:${ip}`)}`) } },
     ] } });
+    await prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: [
+      `legacy-approval-repair:ip:${ip}`, ...[...memberIds].map((id) => `legacy-approval-repair:member:${id}`),
+    ].map((value) => `arl_${authLookupKey("verification", "rate-limit", value)}`) } } });
     memberIds.clear(); telegramIds.clear(); nonces.clear();
   });
   afterAll(async () => { if (enabled) await getPrisma().$disconnect(); });
@@ -100,6 +105,86 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
   }
   const finish = (flow: Awaited<ReturnType<typeof begin>>, extra: Record<string, unknown> = {}) =>
     verify(request("/api/auth/telegram/verify", { idToken: flow.idToken, ...extra }, flow.cookie));
+
+  async function beginReauthentication(cookie: string, id: string) {
+    const response = await start(request("/api/auth/telegram/start", { reauthenticate: true }, cookie));
+    expect(response.status).toBe(200);
+    const { nonce } = await response.json(); nonces.add(nonce);
+    const nonceCookie = response.headers.getSetCookie()[0].split(";")[0];
+    const idToken = await new SignJWT({ id: Number(id), nonce })
+      .setProtectedHeader({ alg: "ES256" }).setIssuer("https://oauth.telegram.org").setAudience(clientId)
+      .setSubject("not-the-canonical-profile-id").setIssuedAt().setExpirationTime("5m").sign(keys.privateKey);
+    return { cookie: `${cookie}; ${nonceCookie}`, nonceCookie, idToken };
+  }
+  function issuedCookie(response: Response) {
+    return response.headers.getSetCookie().find((value) => value.startsWith("murph-auth-session="))!.split(";")[0];
+  }
+
+  it("bound Telegram primary proof repairs never-migrated approval without a Privy provider or signup completion", async () => {
+    const flow = await begin();
+    const login = await finish(flow);
+    expect(login.status).toBe(200);
+    const { memberId } = await login.json(); memberIds.add(memberId);
+    const cookie = issuedCookie(login); const prisma = getPrisma();
+    const identity = await readHostedMemberIdentity({ memberId, prisma });
+    await prisma.$transaction((tx) => upsertHostedMemberIdentity({ ...identity!, memberId,
+      privyUserId: `did:privy:${memberId}`, preparedControlRoot: { domain: "control", userId: memberId, rootKeyId: "synthetic-root" }, prisma: tx,
+    }));
+    // Match an imported legacy user rather than a newly created first-party user.
+    await hostedAuthAdapter(prisma)({ user: { additionalFields: { credentialsChangedAt: { type: "date" } } } }).update({
+      model: "user", where: [{ field: "id", value: memberId }], update: { credentialsChangedAt: null },
+    });
+    const session = await getHostedAppSessionFromRequest(request("/home", {}, cookie));
+    await hostedAuthAdapter(prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
+      model: "session", where: [{ field: "id", value: session!.sessionId }], update: { primaryAuthenticatedAt: null },
+    });
+    mocks.provider.mockRejectedValue(new Error("Privy is unavailable"));
+    vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "true");
+    expect((await legacyRepairOptions(request("/api/settings/approval-passkeys/legacy-options", {}, cookie))).status).toBe(403);
+    const proof = await beginReauthentication(cookie, flow.id);
+    const result = await verify(request("/api/auth/telegram/verify", { idToken: proof.idToken, reauthenticate: true }, proof.cookie));
+    expect(result.status).toBe(200);
+    expect(await result.json()).toMatchObject({ memberId });
+    const renewedCookie = issuedCookie(result);
+    expect((await getHostedAppSessionFromRequest(request("/home", {}, renewedCookie)))?.primaryAuthenticatedAt).toBeInstanceOf(Date);
+    const options = await legacyRepairOptions(request("/api/settings/approval-passkeys/legacy-options", {}, renewedCookie));
+    expect(options.status).toBe(200);
+    const registration = await options.json();
+    const key = authenticator("synthetic Telegram legacy repair", baseURL);
+    expect((await registerPasskey(request("/api/settings/approval-passkeys/register", {
+      legacyRepairToken: registration.token, response: key.registration(true, registration.options.challenge),
+    }, renewedCookie))).status).toBe(200);
+    expect(await getHostedAppSessionFromRequest(request("/home", {}, cookie))).toBeNull();
+    expect(mocks.provider).not.toHaveBeenCalled();
+  });
+
+  it("reauthentication nonce cannot move between sessions/members, become ordinary login, or be replayed", async () => {
+    const first = await begin(); const login = await finish(first);
+    const { memberId } = await login.json(); memberIds.add(memberId);
+    const cookie = issuedCookie(login);
+    const secondLogin = await finish(await begin(first.id));
+    const secondCookie = issuedCookie(secondLogin);
+    const otherLogin = await finish(await begin());
+    const other = await otherLogin.json(); memberIds.add(other.memberId);
+    const proof = await beginReauthentication(cookie, first.id);
+    const payload = { idToken: proof.idToken, reauthenticate: true };
+    for (const foreignCookie of [secondCookie, issuedCookie(otherLogin)]) {
+      expect((await verify(request("/api/auth/telegram/verify", payload, `${foreignCookie}; ${proof.nonceCookie}`))).status).toBe(401);
+    }
+    expect((await verify(request("/api/auth/telegram/verify", { idToken: proof.idToken }, proof.cookie))).status).toBe(401);
+    expect((await verify(request("/api/auth/telegram/verify", payload, proof.cookie))).status).toBe(200);
+    expect((await verify(request("/api/auth/telegram/verify", payload, proof.cookie))).status).toBe(401);
+    expect(mocks.provider).not.toHaveBeenCalled();
+  });
+
+  it("bound Telegram reauthentication cannot adopt an unlinked profile", async () => {
+    const login = await finish(await begin()); const { memberId } = await login.json(); memberIds.add(memberId);
+    const otherId = String(randomInt(100_000_000, 999_999_999)); telegramIds.add(otherId);
+    const proof = await beginReauthentication(issuedCookie(login), otherId);
+    expect((await verify(request("/api/auth/telegram/verify", { idToken: proof.idToken, reauthenticate: true }, proof.cookie))).status).toBe(409);
+    expect(await getPrisma().hostedAuthRecord.count({ where: { model: "account", lookupKey: authLookupKey("account", "accountId", otherId) } })).toBe(0);
+    expect(mocks.provider).not.toHaveBeenCalled();
+  });
 
   async function credentialMember(withApproval = true) {
     const prisma = getPrisma();

@@ -99,7 +99,7 @@ export function credentialRecordOptions(prisma: PrismaClient) {
   } });
 }
 
-async function readCanonicalCredentialIdentity(prisma: PrismaClient, memberId: string, methods: Awaited<ReturnType<typeof readHostedLoginMethods>>["methods"]) {
+export async function readCanonicalCredentialIdentity(prisma: PrismaClient, memberId: string, methods: Awaited<ReturnType<typeof readHostedLoginMethods>>["methods"]) {
   const [identity, email, routing] = await Promise.all([
     readHostedMemberIdentity({ memberId, prisma }), readHostedMemberEmailAuthorization({ memberId, prisma }), readHostedMemberRoutingState({ memberId, prisma }),
   ]);

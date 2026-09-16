@@ -29,30 +29,37 @@ export function HostedPasskeySettings({
   if (secureApprovalStatus.method === "passkey") {
     return <HostedApprovalRecoverySettings enabled={enrollmentEnabled} />;
   }
-  if (secureApprovalStatus.method === "initial") return <InitialPasskeySetup enrollmentEnabled={enrollmentEnabled} />;
+  if (secureApprovalStatus.method === "initial" || secureApprovalStatus.method === "legacy-repair") {
+    return <InitialPasskeySetup enrollmentEnabled={enrollmentEnabled} legacyRepair={secureApprovalStatus.method === "legacy-repair"} />;
+  }
   return <PasskeySetup enrollmentEnabled={enrollmentEnabled} secureApprovalStatus={secureApprovalStatus} />;
 }
 
-function InitialPasskeySetup({ enrollmentEnabled }: { enrollmentEnabled: boolean }) {
+function InitialPasskeySetup({ enrollmentEnabled, legacyRepair }: { enrollmentEnabled: boolean; legacyRepair: boolean }) {
   const enrollment = useApprovalPasskeyEnrollment();
-  return <InitialPasskeySetupView enrollmentEnabled={enrollmentEnabled} {...enrollment} onEnroll={() => void enrollment.enroll()} />;
+  return <InitialPasskeySetupView legacyRepair={legacyRepair} enrollmentEnabled={enrollmentEnabled} {...enrollment} onEnroll={() => void enrollment.enroll()} />;
 }
 
-export function InitialPasskeySetupView({ enrollmentEnabled, pending, registered, error, onEnroll }: {
+export function InitialPasskeySetupView({ enrollmentEnabled, pending, registered, error, onEnroll, legacyRepair = false, pendingLabel }: {
+  legacyRepair?: boolean;
+  pendingLabel?: string | null;
   enrollmentEnabled: boolean;
   pending: boolean;
   registered: boolean;
   error: string | null;
-  onEnroll: () => void;
+  onEnroll?: () => void;
 }) {
   return <div className="flex flex-col gap-2">
     {registered ? <ApprovalPasskeyStatus /> : <SettingsRow
       icon={<Fingerprint className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
-      label="Passkey" value={pending ? "Setting up…" : "Not set up"} empty
-      action={<Button aria-label="Set up passkey" aria-busy={pending} disabled={!enrollmentEnabled || pending} type="button" onClick={onEnroll}>
-        {pending ? "Setting up…" : "Set up"}
+      label="Passkey" value={pending ? "Setting up…" : legacyRepair ? "Update needed" : "Not set up"} empty
+      action={<Button aria-label={legacyRepair ? "Add Murph passkey" : "Set up passkey"} aria-busy={pending} disabled={!enrollmentEnabled || pending} type="button" onClick={onEnroll}>
+        {pending ? "Setting up…" : legacyRepair ? "Add Murph passkey" : "Set up"}
       </Button>}
     />}
+    {legacyRepair && !registered ? <SettingsStatusLine tone="neutral"
+      message={pendingLabel ?? "Add a Murph passkey using a sign-in method already linked to your account. Your existing Murph passkeys cannot be replaced here."}
+    /> : null}
     {error ? <SettingsStatusLine message={error} tone="destructive" /> : null}
   </div>;
 }

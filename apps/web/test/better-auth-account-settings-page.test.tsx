@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); });
 
-test.each(["initial", "passkey"] as const)("%s protection does not mount legacy SDK state", async (method) => {
+test.each(["initial", "passkey", "legacy-repair"] as const)("%s protection does not mount legacy SDK state", async (method) => {
   vi.stubEnv("NEXT_PUBLIC_PRIVY_APP_ID", "synthetic-app");
   mocks.approval.mockResolvedValue({ method, status: method === "initial" ? "not_configured" : "configured" });
   renderToStaticMarkup(await AccountSettingsPage({ searchParams: Promise.resolve({}) }));
@@ -43,11 +43,11 @@ test.each(["initial", "passkey"] as const)("%s protection does not mount legacy 
   expect(mocks.passkeys).toHaveBeenCalledOnce();
 });
 
-test("an unmigrated factor retains its temporary SDK provider", async () => {
+test("unavailable approval state does not load the legacy SDK", async () => {
   vi.stubEnv("NEXT_PUBLIC_PRIVY_APP_ID", "synthetic-app");
-  mocks.approval.mockResolvedValue({ status: "configured" });
+  mocks.approval.mockResolvedValue({ status: "unavailable" });
   renderToStaticMarkup(await AccountSettingsPage({ searchParams: Promise.resolve({}) }));
-  expect(mocks.provider).toHaveBeenCalledOnce();
+  expect(mocks.provider).not.toHaveBeenCalled();
 });
 
 test("unfinished signup can reach canonical account connections and initial passkey setup", async () => {

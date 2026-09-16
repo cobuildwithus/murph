@@ -32,6 +32,10 @@ vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   requestHostedOnboardingJson: mocks.requestJson,
 }));
 
+vi.mock("@/src/components/sensitive-actions/use-legacy-approval-repair", () => ({
+  useLegacyApprovalRepair: () => ({ repair: vi.fn(), pendingLabel: null }),
+}));
+
 import { LegacyWalletApprovalProvider } from "@/src/components/sensitive-actions/legacy-wallet-approval-provider";
 import { useSensitiveActionAuthorization } from "@/src/components/sensitive-actions/use-sensitive-action-authorization";
 

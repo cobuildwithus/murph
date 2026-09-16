@@ -13,12 +13,12 @@ export type HostedAuthTransport = "browser" | "native";
 const otpBody = z.object({
   kind: z.enum(["email", "phone"]), value: z.string().min(1).max(320),
   code: z.string().regex(/^\d{6}$/u).optional(), inviteCode: z.string().min(1).max(256).optional(),
-  timeZone: z.unknown().optional(),
+  timeZone: z.unknown().optional(), reauthenticate: z.boolean().optional(),
 });
 
 export async function admitHostedAuthOtpRequest(input: {
   request: Request; transport: HostedAuthTransport; operation: "send" | "verify"; prisma: PrismaClient;
-}): Promise<{ contact: HostedLinqParticipantContact; code: string | undefined; inviteCode: string | undefined; timeZone: string | null }> {
+}): Promise<{ contact: HostedLinqParticipantContact; code: string | undefined; inviteCode: string | undefined; timeZone: string | null; reauthenticate: boolean }> {
   if (input.request.headers.has("authorization") || (input.transport === "native" && input.request.headers.has("cookie"))) {
     throw invalidRequest();
   }
@@ -26,6 +26,7 @@ export async function admitHostedAuthOtpRequest(input: {
   const parsed = otpBody.safeParse(await readOptionalJsonObject(input.request, { limitBytes: 2_048 }));
   if (!parsed.success) throw invalidRequest();
   const body = parsed.data;
+  if (body.reauthenticate && (input.transport !== "browser" || body.inviteCode !== undefined || body.timeZone !== undefined)) throw invalidRequest();
   const contact = requireOtpContact(body);
   const { code, inviteCode } = body;
   if (input.operation === "verify" && !code) throw invalidRequest();
@@ -41,7 +42,7 @@ export async function admitHostedAuthOtpRequest(input: {
       throw hostedOnboardingError({ code: "AUTH_RATE_LIMITED", httpStatus: 429, message: "Too many sign-in attempts. Wait a moment and try again.", retryable: true });
     }
   }
-  return { contact, code, inviteCode, timeZone: resolveHostedSignupTimeZone({ clientTimeZone: body.timeZone, headers: input.request.headers }) };
+  return { contact, code, inviteCode, reauthenticate: body.reauthenticate === true, timeZone: resolveHostedSignupTimeZone({ clientTimeZone: body.timeZone, headers: input.request.headers }) };
 }
 
 function requireOtpContact(body: { kind: "email" | "phone"; value: string }): HostedLinqParticipantContact {

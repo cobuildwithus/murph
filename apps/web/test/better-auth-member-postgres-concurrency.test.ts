@@ -22,6 +22,13 @@ vi.mock("../src/lib/hosted-crypto/domain-root-store", async (original) => ({
   revalidatePreparedHostedDomainRootForWebTx: async () => ({ rootKeyId: "synthetic-root", root: Promise.resolve({ rootKey: Buffer.alloc(32, 7) }) }),
 }));
 
+import { POST as legacyRepairOptions } from "../app/api/settings/approval-passkeys/legacy-options/route";
+import { GET as passkeyStatus } from "../app/api/settings/approval-passkeys/route";
+import * as passkeyStore from "../src/lib/sensitive-actions/passkey-store";
+import { prepareHostedReauthentication } from "../src/lib/better-auth/bound-reauthentication";
+import { verifySensitiveActionChallenge } from "../src/lib/sensitive-actions/server";
+import { requestHostedActionApproval, issueHostedActionApprovalChallenge, requirePendingHostedActionApproval,
+  decideHostedActionApprovalTx, readHostedActionApproval } from "../src/lib/action-approvals";
 import { POST as initialPasskeyOptions } from "../app/api/settings/approval-passkeys/initial-options/route";
 import { POST as registerPasskey } from "../app/api/settings/approval-passkeys/register/route";
 import { POST as rotateRecoveryKey } from "../app/api/settings/approval-passkeys/recovery-key/route";
@@ -159,6 +166,255 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       });
     } finally { await prisma.hostedMember.deleteMany({ where: { id: issued.memberId } }); }
   }
+
+  // Already-adopted login identity, but no approval aggregate has ever existed.
+  // Keep the existing real Better Auth / PostgreSQL / WebAuthn fixtures; only
+  // delivery and KMS ports are synthetic. No provider fallback is permitted.
+  async function withLegacyRepairMember(run: (f: Parameters<Parameters<typeof withInitialPasskeyMember>[0]>[0]) => Promise<void>,
+    initialKind: "email" | "phone" = "email") {
+    return withInitialPasskeyMember(async (f) => {
+      vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+      vi.stubEnv("VERCEL", "1");
+      const ip = `2001:db8:${randomUUID().replaceAll("-", "").slice(0, 24).match(/.{4}/gu)!.join(":")}`;
+      const identity = await readHostedMemberIdentity(f);
+      await f.prisma.$transaction((tx) => upsertHostedMemberIdentity({
+        ...identity!, memberId: f.memberId, privyUserId: `did:privy:${f.memberId}`,
+        preparedControlRoot: { domain: "control", userId: f.memberId, rootKeyId: "synthetic-root" }, prisma: tx,
+      }));
+      // Imported legacy users have no first-party credential-change fence yet.
+      // New-account issuance above sets one, so mirror the migration owner here.
+      await hostedAuthAdapter(f.prisma)({ user: { additionalFields: { credentialsChangedAt: { type: "date" } } } }).update({
+        model: "user", where: [{ field: "id", value: f.memberId }], update: { credentialsChangedAt: null },
+      });
+      provider.read.mockRejectedValue(new Error("Privy is retired"));
+      const contactRateKeys = new Set<string>();
+      const request: typeof f.request = (...args) => {
+        const body = args[0] as { kind?: string; value?: string } | null;
+        if ((body?.kind === "email" || body?.kind === "phone") && body.value) {
+          for (const prefix of ["send:contact", "verify:contact", "send:cooldown"]) contactRateKeys.add(`${prefix}:${body.kind}:${body.value}`);
+        }
+        const req = f.request(...args); req.headers.set("x-vercel-forwarded-for", ip); return req;
+      };
+      try { await run({ ...f, request }); expect(provider.read).not.toHaveBeenCalled(); }
+      finally {
+        const keys = [`legacy-approval-repair:member:${f.memberId}`, `legacy-approval-repair:ip:${ip}`,
+          `send:ip:${ip}`, `verify:ip:${ip}`, ...contactRateKeys].map((value) => `arl_${authLookupKey("verification", "rate-limit", value)}`);
+        await f.prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: keys } } });
+      }
+    }, initialKind);
+  }
+
+  async function legacyEnrollment(request: (body: unknown) => Request) {
+    const result = await legacyRepairOptions(request({}));
+    expect(result.status).toBe(200);
+    const options: { token: string; options: { challenge: string; rp: { id: string }; authenticatorSelection: { userVerification: string } } } = await result.json();
+    expect(options.options).toMatchObject({ rp: { id: "www.withmurph.ai" }, authenticatorSelection: { userVerification: "required" } });
+    const key = authenticator();
+    return { key, options, payload: { legacyRepairToken: options.token, response: key.registration(true, options.options.challenge) } };
+  }
+
+  it("legacy repair: registration alone leaves the exact pending action untouched; native assertion completes it", () => withLegacyRepairMember(async (f) => {
+    const otherCookie = await f.loginAgain();
+    const session = await getHostedAppSessionFromRequest(f.request({}));
+    const original = await requestHostedActionApproval({ ...f, request: {
+      actionFingerprint: "b".repeat(64), actionId: `vault-file-send:${"a".repeat(64)}`, actionKind: "vault.file.send.v1",
+      presentation: { title: "Send a synthetic file?", body: "Send the requested synthetic file to this conversation." }, returnContactKind: "text",
+    } });
+    const originalChallenge = await issueHostedActionApprovalChallenge({ ...f, approvalId: original.approvalId, sessionId: session!.sessionId });
+    expect((await (await credentialAuthenticationOptions(f.request({ token: originalChallenge.token }))).json()).method).toBe("legacy-repair");
+    const registration = await legacyEnrollment(f.request);
+    const authRowsBefore = await f.prisma.hostedAuthRecord.count({ where: { memberId: f.memberId, model: "session" } });
+    expect(authRowsBefore).toBe(2);
+    expect((await registerPasskey(f.request(registration.payload))).status).toBe(200);
+    expect((await readApprovalPasskeyState(f)).credentials).toEqual([registration.key.credential]);
+    expect((await readHostedActionApproval({ ...f, approvalId: original.approvalId })).status).toBe("pending");
+    expect((await f.prisma.hostedMemberApprovalCredentials.findUniqueOrThrow({ where: { memberId: f.memberId } })).recoveryHashEncrypted).toBeNull();
+    expect(await getHostedAppSessionFromRequest(f.request({}, otherCookie))).toBeNull();
+    expect((await getHostedAppSessionFromRequest(f.request({})))?.sessionId).toBe(session!.sessionId);
+    expect(await f.prisma.hostedAuthRecord.count({ where: { memberId: f.memberId, model: "session" } })).toBe(1);
+    expect((await readHostedLoginMethods(f.prisma, f.memberId)).user.credentialsChangedAt).toBeInstanceOf(Date);
+    const challenge = await issueHostedActionApprovalChallenge({ ...f, approvalId: original.approvalId, sessionId: session!.sessionId });
+    const pending = await requirePendingHostedActionApproval({ ...f, approvalId: original.approvalId });
+    const authorization = { method: "passkey", token: challenge.token, assertion: registration.key.assertion({ customMessage: challenge.message }) };
+    const proof = await verifySensitiveActionChallenge({ ...f, authorization, bindingHash: pending.bindingHash,
+      kind: "assistant.action.approve", privyUserId: session!.privyUserId });
+    const decided = await f.prisma.$transaction(async (tx) => {
+      await assertHostedAppSessionCurrentTx({ memberId: f.memberId, prisma: tx, request: f.request({}), sessionId: session!.sessionId, authProof: session!.authProof });
+      return decideHostedActionApprovalTx({ approval: pending, challenge: proof, decision: "approved", memberId: f.memberId, tx });
+    });
+    expect(decided.approval).toMatchObject({ approvalId: original.approvalId, status: "approved" });
+    expect((await registerPasskey(f.request(registration.payload))).status).toBe(409); // lost response/replay cannot overwrite
+    expect((await (await passkeyStatus(f.request({}))).json())).toMatchObject({ configured: true, legacyRepairAllowed: false });
+  }));
+
+  it("legacy repair: at most one concurrent registration commits and canceled options are superseded", () => withLegacyRepairMember(async (f) => {
+    const abandoned = await legacyEnrollment(f.request);
+    const current = await legacyEnrollment(f.request);
+    expect(await f.prisma.hostedSensitiveActionChallenge.count({ where: { memberId: f.memberId, kind: "approval.passkey.legacy-repair" } })).toBe(1);
+    expect((await registerPasskey(f.request(abandoned.payload))).status).toBe(409);
+    const alternate = authenticator();
+    const results = await Promise.all([
+      registerPasskey(f.request(current.payload)),
+      registerPasskey(f.request({ legacyRepairToken: current.options.token, response: alternate.registration(true, current.options.options.challenge) })),
+    ]);
+    expect(results.filter((result) => result.status === 200)).toHaveLength(1);
+    expect((await readApprovalPasskeyState(f)).credentials).toHaveLength(1);
+    expect(await f.prisma.hostedSensitiveActionChallenge.count({ where: { memberId: f.memberId, kind: "approval.passkey.legacy-repair" } })).toBe(0);
+  }));
+
+  it("legacy repair: failed session fencing rolls back credential/challenge changes and permits retry", () => withLegacyRepairMember(async (f) => {
+    const registration = await legacyEnrollment(f.request);
+    const adapterModule = await import("../src/lib/better-auth/adapter");
+    const build = adapterModule.hostedAuthTransactionAdapter;
+    const failure = vi.spyOn(adapterModule, "hostedAuthTransactionAdapter").mockImplementationOnce((...args) => {
+      const adapter = build(...args);
+      return { ...adapter, deleteMany: async () => { throw new Error("Synthetic revocation storage failure"); } };
+    });
+    try {
+      expect((await registerPasskey(f.request(registration.payload))).status).toBe(500);
+      expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
+      expect(await f.prisma.hostedSensitiveActionChallenge.count({ where: { memberId: f.memberId, kind: "approval.passkey.legacy-repair" } })).toBe(1);
+    } finally { failure.mockRestore(); }
+    expect((await registerPasskey(f.request(registration.payload))).status).toBe(200);
+  }));
+
+  it("legacy repair: established and corrupt native aggregates cannot enter repair", () => withLegacyRepairMember(async (f) => {
+    const state = await readApprovalPasskeyState(f);
+    const write = await prepareApprovalPasskeyWrite({ ...f, state, credentials: [authenticator().credential] });
+    await f.prisma.$transaction((prisma) => commitApprovalPasskeyWriteTx({ prepared: write, prisma }));
+    expect((await legacyRepairOptions(f.request({}))).status).toBe(409);
+    const before = await readApprovalPasskeyState(f);
+    expect((await registerPasskey(f.request({ legacyRepairToken: `sac_${"a".repeat(32)}`, response: authenticator().registration() }))).status).toBe(409);
+    expect(await readApprovalPasskeyState(f)).toEqual(before);
+    await f.prisma.hostedMemberApprovalCredentials.update({ where: { memberId: f.memberId }, data: { credentialsEncrypted: "synthetic-corrupt-state" } });
+    expect((await legacyRepairOptions(f.request({}))).status).toBe(409);
+  }));
+
+  it("legacy repair: rejects an ordinary first-party account with no legacy binding", () => withInitialPasskeyMember(async (f) => {
+    vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+    expect((await legacyRepairOptions(f.request({}))).status).toBe(409);
+    expect((await initialPasskeyOptions(f.request({}))).status).toBe(200);
+  }));
+
+  it.each(["stale", "exchanged", "future"] as const)("legacy repair: %s sessions are not fresh proof", (kind) => withLegacyRepairMember(async (f) => {
+    await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
+      model: "session", where: [{ field: "token", value: f.token }],
+      update: { primaryAuthenticatedAt: kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -6 : 6) * 60_000) },
+    });
+    const result = await legacyRepairOptions(f.request({}));
+    expect(result.status).toBe(403);
+    expect(await result.json()).toMatchObject({ error: { code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED" } });
+    expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
+  }));
+
+  it("legacy repair: a credential change after primary authentication requires new proof", () => withLegacyRepairMember(async (f) => {
+    const session = await getHostedAppSessionFromRequest(f.request({}));
+    await hostedAuthAdapter(f.prisma)({ user: { additionalFields: { credentialsChangedAt: { type: "date" } } } }).update({
+      model: "user", where: [{ field: "id", value: f.memberId }],
+      update: { credentialsChangedAt: new Date(session!.primaryAuthenticatedAt!.getTime() + 1) },
+    });
+    expect((await legacyRepairOptions(f.request({}))).status).toBe(409);
+    const cookie = await f.loginAgain();
+    expect((await legacyRepairOptions(f.request({}, cookie))).status).toBe(200);
+  }));
+
+  it("legacy repair: binds token to member, browser, canonical login generation and required UV/origin/RP", () => withLegacyRepairMember(async (f) => withLegacyRepairMember(async (other) => {
+    const cookie = await f.loginAgain();
+    const registration = await legacyEnrollment(f.request);
+    expect((await registerPasskey(other.request(registration.payload))).status).toBe(409);
+    expect((await registerPasskey(f.request(registration.payload, cookie))).status).toBe(409);
+    expect((await registerPasskey(f.request({ ...registration.payload, response: registration.key.registration(false, registration.options.options.challenge) }))).status).toBe(403);
+    expect((await registerPasskey(f.request({ ...registration.payload, response: authenticator("synthetic", "https://untrusted.example").registration(true, registration.options.options.challenge) }))).status).toBe(403);
+    const wrongRp = authenticator("synthetic", "https://untrusted.example").registration(true, registration.options.options.challenge);
+    const clientData = JSON.parse(Buffer.from(wrongRp.response.clientDataJSON, "base64url").toString());
+    wrongRp.response.clientDataJSON = Buffer.from(JSON.stringify({ ...clientData, origin: "https://www.withmurph.ai" })).toString("base64url");
+    expect((await registerPasskey(f.request({ ...registration.payload, response: wrongRp }))).status).toBe(403);
+    const missingOrigin = f.request(registration.payload); missingOrigin.headers.delete("origin");
+    expect((await registerPasskey(missingOrigin)).status).toBe(403);
+    const foreignOrigin = f.request(registration.payload); foreignOrigin.headers.set("origin", "https://untrusted.example");
+    expect((await registerPasskey(foreignOrigin)).status).toBe(403);
+    expect((await registerPasskey(f.request(registration.payload, ""))).status).toBe(401);
+    expect((await registerPasskey(f.request({ ...registration.payload, initialToken: registration.options.token }))).status).toBe(400);
+    expect((await registerPasskey(f.request({ ...registration.payload, authorization: {} }))).status).toBe(400);
+    await hostedAuthAdapter(f.prisma)({}).update({ model: "user", where: [{ field: "id", value: f.memberId }], update: { updatedAt: new Date(Date.now() + 1_000) } });
+    expect((await registerPasskey(f.request(registration.payload))).status).toBe(409);
+    expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
+  })));
+
+  it.each(["credential", "revoked", "stale", "expired-challenge", "paused", "login-changed", "session-renewed"] as const)(
+    "legacy repair: commit rechecks %s after successful cryptographic verification/preparation", (drift) => withLegacyRepairMember(async (f) => {
+      const registration = await legacyEnrollment(f.request);
+      const prepare = passkeyStore.prepareApprovalPasskeyWrite;
+      const established = await prepare({ ...f, state: await readApprovalPasskeyState(f), credentials: [authenticator().credential] });
+      vi.spyOn(passkeyStore, "prepareApprovalPasskeyWrite").mockImplementationOnce(async (input) => {
+        const write = await prepare(input);
+        if (drift === "credential") await f.prisma.$transaction((prisma) => commitApprovalPasskeyWriteTx({ prepared: established, prisma }));
+        if (drift === "revoked") await logoutBrowser(f.request({}));
+        if (drift === "stale") vi.spyOn(Date, "now").mockReturnValue(Date.now() + 6 * 60_000);
+        if (drift === "expired-challenge") await f.prisma.hostedSensitiveActionChallenge.updateMany({ where: { memberId: f.memberId, kind: "approval.passkey.legacy-repair" }, data: { expiresAt: new Date(0) } });
+        if (drift === "session-renewed") await hostedAuthAdapter(f.prisma)({}).update({ model: "session", where: [{ field: "token", value: f.token }], update: { updatedAt: new Date(Date.now() + 1_000) } });
+        if (drift === "paused") vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "false");
+        if (drift === "login-changed") await hostedAuthAdapter(f.prisma)({}).update({ model: "user", where: [{ field: "id", value: f.memberId }], update: { updatedAt: new Date(Date.now() + 1_000) } });
+        return write;
+      });
+      const response = await registerPasskey(f.request(registration.payload));
+      expect(response.status).not.toBe(200);
+      expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(drift === "credential" ? 1 : 0);
+      if (drift === "credential") expect((await readApprovalPasskeyState(f)).credentials[0].id).not.toBe(registration.key.credential.id);
+    }),
+  );
+
+  it.each(["HOSTED_BETTER_AUTH_ENABLED", "HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED"])(
+    "legacy repair: %s pauses options and commit, never native verification", (flag) => withLegacyRepairMember(async (f) => {
+      const registration = await legacyEnrollment(f.request);
+      vi.stubEnv(flag, "false");
+      expect((await legacyRepairOptions(f.request({}))).status).toBe(503);
+      expect((await registerPasskey(f.request(registration.payload))).status).toBe(503);
+      vi.stubEnv(flag, "true");
+      expect((await registerPasskey(f.request(registration.payload))).status).toBe(200);
+      vi.stubEnv(flag, "false");
+      const challenge = await (await settingsChallenge(f.request({ kind: "vault.export" }))).json();
+      expect((await (await credentialAuthenticationOptions(f.request({ token: challenge.token }))).json()).method).toBe("passkey");
+    }),
+  );
+
+  it.each(["email", "phone"] as const)("legacy repair: bound %s reauthentication uses primary proof without import, account creation or signup completion", (kind) => withLegacyRepairMember(async (f) => {
+    const current = await readHostedLoginMethods(f.prisma, f.memberId);
+    const value = current.methods[kind]!;
+    await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
+      model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt: null },
+    });
+    const userCount = await f.prisma.hostedAuthRecord.count({ where: { memberId: f.memberId, model: "user" } });
+    expect((await legacyRepairOptions(f.request({}))).status).toBe(403);
+    expect((await sendBrowserCode(f.request({ kind, value, reauthenticate: true }))).status).toBe(200);
+    const code = provider.codes.get(value)!;
+    expect(code).toMatch(/^\d{6}$/u);
+    const response = await verifyBrowserCode(f.request({ kind, value, code, reauthenticate: true }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ memberId: f.memberId });
+    const cookie = response.headers.getSetCookie().find((entry) => entry.startsWith("murph-auth-session="))!.split(";")[0];
+    expect((await getHostedAppSessionFromRequest(f.request({}, cookie)))?.primaryAuthenticatedAt).toBeInstanceOf(Date);
+    expect((await legacyRepairOptions(f.request({}, cookie))).status).toBe(200);
+    expect(await f.prisma.hostedAuthRecord.count({ where: { memberId: f.memberId, model: "user" } })).toBe(userCount);
+  }, kind));
+
+  it("legacy repair: reauthentication cannot claim a new contact, another member or an unverified canonical contact", () => withLegacyRepairMember(async (f) => withLegacyRepairMember(async (other) => {
+    const value = (await readHostedLoginMethods(other.prisma, other.memberId)).methods.email!;
+    for (const email of [value, `unbound-${randomUUID()}@example.test`]) {
+      expect((await sendBrowserCode(f.request({ kind: "email", value: email, reauthenticate: true }))).status).toBe(409);
+      expect(provider.codes.has(email)).toBe(false);
+    }
+    const own = (await readHostedLoginMethods(f.prisma, f.memberId)).methods.email!;
+    const native = f.request({ kind: "email", value: own, reauthenticate: true }, "");
+    native.headers.delete("cookie");
+    expect((await sendNativeCode(native)).status).toBe(400);
+    expect((await sendBrowserCode(f.request({ kind: "email", value: own, reauthenticate: true, inviteCode: "synthetic" }))).status).toBe(400);
+    const prepared = await prepareHostedReauthentication({ request: f.request({}), prisma: f.prisma, method: "email", value: own });
+    await logoutBrowser(f.request({}));
+    await expect(f.prisma.$transaction((tx) => prepared.commitMember(tx))).rejects.toThrow();
+    await f.prisma.hostedMemberEmailAuthorization.update({ where: { memberId: other.memberId }, data: { verifiedEmailVerifiedAt: null } });
+    expect((await legacyRepairOptions(other.request({}))).status).toBe(409);
+  })));
 
   async function initialEnrollment(request: (body: unknown) => Request) {
     const optionsResponse = await initialPasskeyOptions(request({}));
@@ -650,7 +906,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect(provider.read).not.toHaveBeenCalled();
   }));
 
-  it("selects legacy factor restoration only for the canonical session identity", () => withInitialPasskeyMember(async (f) => {
+  it("selects legacy repair from canonical state, never a client-selected legacy identity", () => withInitialPasskeyMember(async (f) => {
     const { token } = await (await initialPasskeyOptions(f.request({}))).json();
     expect((await credentialAuthenticationOptions(f.request({ token }))).status).toBe(403);
     const expectedUserId = `did:privy:${f.memberId}`;
@@ -662,7 +918,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       preparedControlRoot: { domain: "control", userId: f.memberId, rootKeyId: "synthetic-root" }, prisma: tx,
     }));
     const response = await credentialAuthenticationOptions(f.request({ token, privyUserId: "did:privy:synthetic-other-member" }));
-    expect(await response.json()).toEqual({ method: "wallet", privyUserId: expectedUserId });
+    expect(await response.json()).toEqual({ method: "legacy-repair" });
     expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
     expect(provider.read).not.toHaveBeenCalled();
   }));

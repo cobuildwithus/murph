@@ -672,7 +672,7 @@ test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for s
   assert.match(markup, /href="\/legal\/privacy"/);
 });
 
-test.each(["legacy", "passkey", "outage"])("Data privacy preserves deletion and selects optional SDK for %s factor state", async (state) => {
+test.each(["legacy", "passkey", "outage"])("Data privacy preserves deletion without loading an SDK for %s factor state", async (state) => {
   const original = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   process.env.NEXT_PUBLIC_PRIVY_APP_ID = "synthetic-app";
   try {
@@ -681,7 +681,7 @@ test.each(["legacy", "passkey", "outage"])("Data privacy preserves deletion and 
     else mocks.readApprovalPasskeyState.mockResolvedValueOnce({ credentials: state === "passkey" ? [{ id: "synthetic" }] : [] });
     const { default: Page } = await import("../app/settings/data-privacy/page");
     expect(renderToStaticMarkup(await Page())).toContain("Hosted data privacy settings true");
-    expect(mocks.HostedPrivyProvider).toHaveBeenCalledTimes(state === "legacy" ? 1 : 0);
+    expect(mocks.HostedPrivyProvider).not.toHaveBeenCalled();
     expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
   } finally {
     if (original === undefined) delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
@@ -1238,7 +1238,7 @@ test("SettingsPage reads the app session and persisted account settings into the
       authenticated: true,
       secureApprovalStatus: { status: "configured" },
     }), undefined);
-    expect(mocks.HostedPrivyProvider).toHaveBeenCalledTimes(1);
+    expect(mocks.HostedPrivyProvider).not.toHaveBeenCalled();
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
     }), undefined);
