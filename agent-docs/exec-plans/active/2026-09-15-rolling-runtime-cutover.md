@@ -858,3 +858,23 @@ disposition, non-Postgres owner, concurrent repeat, compatible-release and
 new-member routing cases; operator proof covers held members, late provider
 objects and the closed-gate re-run. Physical namespace deletion and bridge
 removal remain the next task and need explicit authorization.
+
+
+### Retirement continuation verification
+
+The retirement candidate is on `feat/runtime-namespace-retirement`. Recovery
+of the interrupted implementation found that repeating activation after a new
+Postgres-mode signup incorrectly required a legacy owner enrollment. A synthetic
+Postgres regression failed for both legacy and pending entry phases. The closed
+gate now revalidates source accounting and returns before transition-only member
+and cleanup enrollment checks. All 24 focused migration/cutover tests and Web
+typecheck pass; the existing operator/compatibility proof and Cloudflare typecheck
+remain applicable. Complexity has no changed hotspot above 20. No provider-input
+or foreground reply work was added. This is internal migration tooling and has
+no public changelog entry.
+
+Finalization still requires external serving-version convergence and closure of
+old creation paths. Census and database checks alone do not establish that proof.
+The protected private workflow needs a separately reviewed explicit finalize
+input before the live gate can be closed. Public/private review, exact-head CI,
+deployment, closure evidence, finalization and bridge removal remain outstanding.

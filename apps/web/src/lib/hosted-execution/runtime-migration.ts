@@ -191,12 +191,14 @@ async function retireRollingNamespaceTx(tx: Prisma.TransactionClient, gate: Host
   if (unbound?.count !== 0n || await tx.hostedRuntimeOwner.findFirst({ where: { migrationPhase: { not: "postgres" } }, select: { userId: true } })) {
     throw new Error("Namespace retirement requires every runtime identity on Postgres authority.");
   }
+  // Post-cutover signups need no legacy enrollment; their owner is created on
+  // first claim. Only the transition requires complete canonical enrollment.
+  if (gate.phase === "postgres") return gate;
   const [ownerless] = await tx.$queryRaw<Array<{ count: bigint }>>`
     SELECT COUNT(*)::bigint AS count FROM hosted_member AS member
     WHERE NOT EXISTS (SELECT 1 FROM hosted_runtime_owner AS owner WHERE owner.user_id = member.id)
   `;
   if (ownerless?.count !== 0n || await hasPendingRuntimeCleanupEnrollment(tx)) throw new Error("Namespace retirement has unenrolled canonical identities.");
-  if (gate.phase === "postgres") return gate;
   return tx.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "postgres", activatedAt: new Date(), selectedObjectId: null } });
 }
 function inventoryDigest(objectIds: string[]) {

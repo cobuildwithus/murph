@@ -277,6 +277,7 @@ describe.skipIf(!enabled).each(["legacy", "pending"])("member-scoped canonical m
     await prisma.hostedMember.create({ data: { id: newcomerId, billingStatus: "active" } });
     expect(await prisma.$transaction(tx => lockHostedRuntimeMemberCutoverTx(tx, newcomerId))).toBe("postgres");
     expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId: newcomerId } })).toBeNull();
+    expect(await command({ operation: "activate", ...campaign, ...census(registered) })).toEqual(retired);
   });
 });
 
