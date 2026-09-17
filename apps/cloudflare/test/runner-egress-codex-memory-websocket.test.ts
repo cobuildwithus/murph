@@ -1,5 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
+import { HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES } from "../src/runner-egress-codex-memory.ts";
+import type { HostedRunnerDiagnosticJson } from "../src/runner-egress-responses-diagnostics.ts";
 
 import {
   startHostedOpenAiResponsesWebSocketRelay,
@@ -79,6 +82,23 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function expectQueueDiagnostic(
+  diagnostic: HostedRunnerDiagnosticJson | undefined,
+  bytes: number,
+  messages: number,
+  highWaterBytes: number,
+  highWaterMessages: number,
+) {
+  expect(diagnostic).toMatchObject({
+    acceptedPendingBytes: bytes,
+    acceptedPendingMessageCount: messages,
+    acceptedPendingHighWaterBytes: highWaterBytes,
+    acceptedPendingHighWaterMessageCount: highWaterMessages,
+    pendingLimitBytes: HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
+    pendingLimitMessageCount: 4096,
+  });
+}
+
 const createdAt = 1_775_000_000;
 
 afterEach(() => vi.useRealTimers());
@@ -126,6 +146,32 @@ test("separates metadata, acknowledgement, progress and forwarding with bounded 
   expect(upstream.sent).toEqual([request]);
   expect(downstream.sent).toHaveLength(54);
   expect(JSON.stringify(reportDiagnostic.mock.calls)).not.toMatch(/PRIVATE_|synthetic-turn/);
+
+  // Exercise the full emitted shape plus the existing reporter's two fields.
+  const entries = reportDiagnostic.mock.calls.map(([diagnostic]) => ({
+    at: "2026-09-01T00:00:00.000Z",
+    component: "runner", eventCode: "runner.provider_egress_diagnostic",
+    level: "debug", phase: "fetch",
+    redactedJson: { ...diagnostic, droppedRecords: 0, runtimeLogScheduled: true },
+  }));
+  for (const entry of entries) {
+    expect(entry.redactedJson).toMatchObject({
+      acceptedPendingBytes: expect.any(Number),
+      acceptedPendingMessageCount: expect.any(Number),
+      acceptedPendingHighWaterBytes: expect.any(Number),
+      acceptedPendingHighWaterMessageCount: expect.any(Number),
+      pendingLimitBytes: HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
+      pendingLimitMessageCount: 4096,
+    });
+  }
+  expect(parseHostedRuntimeLogRequest({ entries }).entries).toEqual(entries);
+  const olderEntries = entries.map((entry) => ({
+    ...entry,
+    redactedJson: Object.fromEntries(Object.entries(entry.redactedJson).filter(
+      ([key]) => !key.startsWith("acceptedPending") && !key.startsWith("pendingLimit"),
+    )),
+  }));
+  expect(parseHostedRuntimeLogRequest({ entries: olderEntries }).entries).toEqual(olderEntries);
 });
 
 test("keeps a queued terminal observation attached to the request received at the relay", async () => {
@@ -346,11 +392,66 @@ test.each([
   expect(JSON.stringify(reportDiagnostic.mock.calls)).not.toContain("PRIVATE_");
 });
 
+test("observes accepted reservations at unchanged milestones while authorization blocks a mixed backlog", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const authorization = deferred<Response | null>();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({
+    authorizeClientFrame: () => authorization.promise,
+    downstream, upstream, reportDiagnostic,
+  });
+  const binary = new ArrayBuffer(8);
+  downstream.emitMessage("🙂"); // Four UTF-8 bytes, not two UTF-16 code units.
+  await Promise.resolve();
+  upstream.emitMessage(binary);
+  downstream.emitMessage("é"); // Two UTF-8 bytes.
+  upstream.emitMessage(""); // Reserves a message, but no bytes or new milestone.
+  expect(upstream.sent).toEqual([]);
+  expect(downstream.sent).toEqual([]);
+  const received = reportDiagnostic.mock.calls.map(([value]) => value);
+  expect(received.map((value) => value.websocketMilestone)).toEqual([
+    "client_received", "upstream_received", "client_received",
+  ]);
+  // Receive observations exclude the arriving frame, even if later accepted.
+  expectQueueDiagnostic(received[0], 0, 0, 0, 0);
+  expectQueueDiagnostic(received[1], 4, 1, 4, 1);
+  expectQueueDiagnostic(received[2], 12, 2, 12, 2);
+  authorization.resolve(null);
+  await controller.drain();
+  downstream.emitClose();
+  const diagnostics = reportDiagnostic.mock.calls.map(([value]) => value);
+  expect(diagnostics.map((value) => value.websocketMilestone)).toEqual([
+    "client_received", "upstream_received", "client_received", "upstream_sent",
+    "downstream_sent", "upstream_sent", "downstream_sent", "closed",
+  ]);
+  // Sends include their own reservation until the existing release runs.
+  expectQueueDiagnostic(diagnostics[3], 14, 4, 14, 4);
+  expectQueueDiagnostic(diagnostics[4], 10, 3, 14, 4);
+  expectQueueDiagnostic(diagnostics[5], 2, 2, 14, 4);
+  expectQueueDiagnostic(diagnostics[6], 0, 1, 14, 4);
+  expectQueueDiagnostic(diagnostics[7], 0, 0, 14, 4);
+  expect(upstream.sent).toEqual(["🙂", "é"]);
+  expect(downstream.sent).toEqual([binary, ""]);
+  expect(upstream.closes).toEqual([{ code: 1000, reason: "" }]);
+  expect(downstream.closes).toEqual([{ code: 1000, reason: "" }]);
+
+  const freshDownstream = new FakeSocket();
+  const freshReport = vi.fn();
+  startHostedOpenAiResponsesWebSocketRelay({
+    downstream: freshDownstream, upstream: new FakeSocket(), reportDiagnostic: freshReport,
+  });
+  freshDownstream.emitClose();
+  expect(freshReport).toHaveBeenCalledOnce();
+  expectQueueDiagnostic(freshReport.mock.calls[0]?.[0], 0, 0, 0, 0);
+});
+
 test("throwing diagnostic callbacks preserve relay forwarding and failure handling", async () => {
   const downstream = new FakeSocket();
   const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn((_diagnostic: HostedRunnerDiagnosticJson) => { throw new Error("offline"); });
   const controller = startHostedOpenAiResponsesWebSocketRelay({
-    downstream, upstream, reportDiagnostic: () => { throw new Error("offline"); },
+    downstream, upstream, reportDiagnostic,
   });
   downstream.emitMessage("request");
   upstream.emitMessage("response");
@@ -360,16 +461,23 @@ test("throwing diagnostic callbacks preserve relay forwarding and failure handli
   upstream.emitError();
   await controller.drain();
   expect(downstream.closes).toEqual([{ code: 1011, reason: "Responses WebSocket relay failed" }]);
+  expect(upstream.closes).toEqual(downstream.closes);
+  expect(reportDiagnostic.mock.calls.map(([value]) => value.websocketMilestone)).toEqual([
+    "client_received", "upstream_received", "upstream_sent", "downstream_sent", "failed",
+  ]);
+  expectQueueDiagnostic(reportDiagnostic.mock.calls.at(-1)?.[0], 0, 0, 15, 2);
 });
 
 test("bounds provider bytes before enqueue and drains accepted frames before closing Codex", async () => {
   const downstream = new FakeSocket();
   const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
   const authorization = deferred<Response | null>();
   const controller = startHostedOpenAiResponsesWebSocketRelay({
     authorizeClientFrame: () => authorization.promise,
     downstream,
     upstream,
+    reportDiagnostic,
   });
   downstream.emitMessage("request");
   await Promise.resolve();
@@ -383,6 +491,13 @@ test("bounds provider bytes before enqueue and drains accepted frames before clo
   authorization.resolve(null);
   await controller.drain();
   expect(downstream.sent).toHaveLength(15);
+  const diagnostics = reportDiagnostic.mock.calls.map(([value]) => value);
+  expect(diagnostics.map((value) => value.websocketMilestone)).toEqual([
+    "client_received", "upstream_received", "downstream_sent", "failed",
+  ]);
+  expectQueueDiagnostic(diagnostics[1], 7, 1, 7, 1);
+  expectQueueDiagnostic(diagnostics[2], 15 * frame.byteLength, 15, 7 + 15 * frame.byteLength, 16);
+  expectQueueDiagnostic(diagnostics[3], 0, 0, 7 + 15 * frame.byteLength, 16);
   expect(upstream.sent).toHaveLength(0);
   expect(downstream.closes).toEqual([expect.objectContaining({ code: 1009 })]);
 });
@@ -390,11 +505,13 @@ test("bounds provider bytes before enqueue and drains accepted frames before clo
 test.each(["client", "provider"] as const)("bounds empty %s messages while authorization waits", async (direction) => {
   const downstream = new FakeSocket();
   const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
   const authorization = deferred<Response | null>();
   const controller = startHostedOpenAiResponsesWebSocketRelay({
     authorizeClientFrame: () => authorization.promise,
     downstream,
     upstream,
+    reportDiagnostic,
   });
   downstream.emitMessage("request");
   await Promise.resolve();
@@ -406,16 +523,24 @@ test.each(["client", "provider"] as const)("bounds empty %s messages while autho
   authorization.resolve(null);
   await controller.drain();
   expect(downstream.closes).toEqual([expect.objectContaining({ code: 1009 })]);
+  // Client overflow fails immediately; provider overflow fails after draining.
+  expectQueueDiagnostic(reportDiagnostic.mock.calls.at(-1)?.[0],
+    direction === "client" ? 7 : 0, direction === "client" ? 4096 : 0, 7, 4096);
+  expect(reportDiagnostic).toHaveBeenCalledTimes(direction === "client" ? 4098 : 4);
+  expect(upstream.sent).toHaveLength(0);
+  expect(downstream.sent).toHaveLength(direction === "client" ? 0 : 4095);
 });
 
 test("counts provider UTF-8 bytes before its serial queue is available", async () => {
   const downstream = new FakeSocket();
   const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
   const authorization = deferred<Response | null>();
   const controller = startHostedOpenAiResponsesWebSocketRelay({
     authorizeClientFrame: () => authorization.promise,
     downstream,
     upstream,
+    reportDiagnostic,
   });
   downstream.emitMessage("request");
   await Promise.resolve();
@@ -427,12 +552,20 @@ test("counts provider UTF-8 bytes before its serial queue is available", async (
   authorization.resolve(null);
   await controller.drain();
   expect(downstream.sent).toEqual([frame]);
+  const bytes = 17 * 1024 * 1024;
+  const diagnostics = reportDiagnostic.mock.calls.map(([value]) => value);
+  expect(diagnostics.map((value) => value.websocketMilestone)).toEqual([
+    "client_received", "upstream_received", "downstream_sent", "failed",
+  ]);
+  expectQueueDiagnostic(diagnostics[2], bytes, 1, bytes + 7, 2);
+  expectQueueDiagnostic(diagnostics[3], 0, 0, bytes + 7, 2);
 });
 
 test("releases byte and message reservations after each drained batch", async () => {
   const downstream = new FakeSocket();
   const upstream = new FakeSocket();
-  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream });
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
   const frame = new ArrayBuffer(16 * 1024 * 1024);
   for (let batch = 0; batch < 3; batch++) {
     upstream.emitMessage(frame);
@@ -444,12 +577,22 @@ test("releases byte and message reservations after each drained batch", async ()
   expect(downstream.sent).toHaveLength(3 * (2 + 4096));
   expect(downstream.closes).toHaveLength(0);
   expect(upstream.closes).toHaveLength(0);
+  upstream.emitClose();
+  await controller.drain();
+  const diagnostics = reportDiagnostic.mock.calls.map(([value]) => value);
+  expect(diagnostics.map((value) => value.websocketMilestone)).toEqual([
+    "upstream_received", "downstream_sent", "closed",
+  ]);
+  expectQueueDiagnostic(diagnostics[0], 0, 0, 0, 0);
+  expectQueueDiagnostic(diagnostics[1], HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES, 2,
+    HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES, 2);
+  expectQueueDiagnostic(diagnostics[2], 0, 0, HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES, 4096);
 });
 
 test.each([false, true])("preserves a billed terminal when overflow races accounting (write fails=%s)", async (writeFails) => {
   const persistence = deferred<void>();
   const persistUsage = vi.fn(() => persistence.promise);
-  const { controller, downstream, reportFailure, upstream } = setup({ persistUsage });
+  const { controller, downstream, reportDiagnostic, reportFailure, upstream } = setup({ persistUsage });
   downstream.emitMessage(createFrame());
   await controller.drain();
   const completed = completedFrame();
@@ -466,6 +609,13 @@ test.each([false, true])("preserves a billed terminal when overflow races accoun
   if (writeFails) persistence.reject(new Error("synthetic accounting failure"));
   else persistence.resolve();
   await controller.drain();
+  const peakBytes = new TextEncoder().encode(completed).byteLength + 15 * frame.byteLength;
+  const diagnostics = reportDiagnostic.mock.calls.map(([value]) => value);
+  expect(diagnostics.map((value) => value.websocketMilestone)).toEqual([
+    "client_received", "upstream_sent", "upstream_received", "downstream_sent", "failed",
+  ]);
+  expectQueueDiagnostic(diagnostics[3], peakBytes, 16, peakBytes, 16);
+  expectQueueDiagnostic(diagnostics[4], 0, 0, peakBytes, 16);
   expect(persistUsage).toHaveBeenCalledOnce();
   expect(upstream.sent).toHaveLength(1);
   expect(downstream.sent[0]).toBe(completed);
@@ -481,8 +631,9 @@ test("rejects a single oversized provider message before waiting for authorizati
   const downstream = new FakeSocket();
   const upstream = new FakeSocket();
   const authorization = deferred<Response | null>();
+  const reportDiagnostic = vi.fn();
   const controller = startHostedOpenAiResponsesWebSocketRelay({
-    authorizeClientFrame: () => authorization.promise, downstream, upstream,
+    authorizeClientFrame: () => authorization.promise, downstream, upstream, reportDiagnostic,
   });
   downstream.emitMessage("request");
   await Promise.resolve();
@@ -495,17 +646,25 @@ test("rejects a single oversized provider message before waiting for authorizati
   expect(upstream.sent).toHaveLength(0);
   expect(downstream.closes).toHaveLength(1);
   expect(upstream.closes).toHaveLength(1);
+  const diagnostics = reportDiagnostic.mock.calls.map(([value]) => value);
+  expect(diagnostics.map((value) => value.websocketMilestone)).toEqual([
+    "client_received", "upstream_received", "closed",
+  ]);
+  expectQueueDiagnostic(diagnostics[1], 7, 1, 7, 1);
+  expectQueueDiagnostic(diagnostics[2], 7, 1, 7, 1);
 });
 
 test("bounds queued client bytes while image authorization is pending", async () => {
   const downstream = new FakeSocket();
   const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
   let allow: ((result: null) => void) | undefined;
   const access = new Promise<null>((resolve) => { allow = resolve; });
   const controller = startHostedOpenAiResponsesWebSocketRelay({
     authorizeClientFrame: async () => await access,
     downstream,
     upstream,
+    reportDiagnostic,
   });
   const frame = JSON.stringify({ type: "response.create", input: "x".repeat(17 * 1024 * 1024) });
   downstream.emitMessage(frame);
@@ -516,6 +675,14 @@ test("bounds queued client bytes while image authorization is pending", async ()
   allow?.(null);
   await controller.drain();
   expect(upstream.sent).toHaveLength(0);
+  const bytes = new TextEncoder().encode(frame).byteLength;
+  const diagnostics = reportDiagnostic.mock.calls.map(([value]) => value);
+  expect(diagnostics.map((value) => value.websocketMilestone)).toEqual([
+    "client_received", "client_received", "failed",
+  ]);
+  expectQueueDiagnostic(diagnostics[0], 0, 0, 0, 0);
+  expectQueueDiagnostic(diagnostics[1], bytes, 1, bytes, 1);
+  expectQueueDiagnostic(diagnostics[2], bytes, 1, bytes, 1);
 });
 
 function createFrame(input?: {
@@ -571,6 +738,7 @@ function setup(input?: {
   const upstream = new FakeSocket();
   const persistUsage = input?.persistUsage ?? vi.fn(async () => undefined);
   const deferred: Promise<void>[] = [];
+  const reportDiagnostic = vi.fn();
   const reportFailure = vi.fn();
   const controller = startHostedOpenAiResponsesWebSocketRelay({
     defer: (promise) => {
@@ -578,6 +746,7 @@ function setup(input?: {
     },
     downstream,
     persistUsage,
+    reportDiagnostic,
     reportFailure,
     upstream,
   });
@@ -586,6 +755,7 @@ function setup(input?: {
     deferred,
     downstream,
     persistUsage,
+    reportDiagnostic,
     reportFailure,
     upstream,
   };

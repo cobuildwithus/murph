@@ -59,7 +59,6 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   }) => void;
   upstream: HostedOpenAiSocketPort;
 }): HostedOpenAiWebSocketRelayController {
-  const diagnostics = createHostedWebSocketDiagnostics(input.reportDiagnostic);
   let activeRequest: HostedCodexMemoryRequestMetadata | null = null;
   let downstreamClosed = false;
   let upstreamClosed = false;
@@ -67,12 +66,24 @@ export function startHostedOpenAiResponsesWebSocketRelay(input: {
   let queue = Promise.resolve();
   let pendingBytes = 0;
   let pendingMessages = 0;
+  let pendingHighWaterBytes = 0;
+  let pendingHighWaterMessages = 0;
+  const diagnostics = createHostedWebSocketDiagnostics(input.reportDiagnostic, () => ({
+    acceptedPendingBytes: pendingBytes,
+    acceptedPendingMessageCount: pendingMessages,
+    acceptedPendingHighWaterBytes: pendingHighWaterBytes,
+    acceptedPendingHighWaterMessageCount: pendingHighWaterMessages,
+    pendingLimitBytes: HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
+    pendingLimitMessageCount: RESPONSES_MAX_PENDING_MESSAGES,
+  }));
 
   const reserveMessage = (bytes: number): boolean => {
     if (bytes + pendingBytes > HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES
       || pendingMessages >= RESPONSES_MAX_PENDING_MESSAGES) return false;
     pendingBytes += bytes;
     pendingMessages += 1;
+    pendingHighWaterBytes = Math.max(pendingHighWaterBytes, pendingBytes);
+    pendingHighWaterMessages = Math.max(pendingHighWaterMessages, pendingMessages);
     return true;
   };
 

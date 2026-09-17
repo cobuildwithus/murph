@@ -4,6 +4,16 @@ import { createHostedWebSocketResponseDiagnostics } from "./runner-egress-websoc
 type Milestone = "client_received" | "upstream_sent" | "upstream_received"
   | "downstream_sent" | "response_received" | "response_forwarded" | "closed" | "failed";
 
+/** Accepted reservations in the relay's shared queue, not isolate memory usage. */
+export interface HostedWebSocketQueueDiagnostics {
+  acceptedPendingBytes: number;
+  acceptedPendingMessageCount: number;
+  acceptedPendingHighWaterBytes: number;
+  acceptedPendingHighWaterMessageCount: number;
+  pendingLimitBytes: number;
+  pendingLimitMessageCount: number;
+}
+
 const MESSAGE_KINDS = new Set([
   "response.created", "response.in_progress", "response.completed", "response.failed",
   "response.output_item.added", "response.output_text.delta", "error",
@@ -26,6 +36,7 @@ function readMessageKind(data: ArrayBuffer | string): string {
 /** Content-free observations of the existing relay, never a recovery owner. */
 export function createHostedWebSocketDiagnostics(
   report: ((diagnostic: HostedRunnerDiagnosticJson) => void) | undefined,
+  readQueue: () => HostedWebSocketQueueDiagnostics,
 ) {
   const startedAt = Date.now();
   const correlation = crypto.randomUUID();
@@ -72,6 +83,7 @@ export function createHostedWebSocketDiagnostics(
         upstreamFrameObserved: receivedAt !== null,
         firstUpstreamMessageKind,
         downstreamSendObserved: forwardedAt !== null,
+        ...readQueue(),
         ...responses.snapshot(now),
         ...extra,
       });
