@@ -439,6 +439,13 @@ member inventories and resource rows remain private.
 
 ## Physical namespace retirement deployment
 
+The production rolling migration and authorized namespace retirement completed
+on 2026-09-17. All 892 inventoried sources were terminal, with no remaining
+legacy execution owners. Protected deployment `35266558770` removed the exact
+approved namespace and production binding; member container applications were
+retained unchanged. The [completed execution record](../exec-plans/completed/2026-09-15-rolling-runtime-cutover.md)
+contains release identities, smoke results and bounded post-deploy evidence.
+
 Cloudflare [class deletion migrations](https://developers.cloudflare.com/durable-objects/reference/durable-object-class-migrations-legacy/)
 permanently erase every object and its storage. Namespace deletion is separate
 from canonical Postgres activation and requires explicit approval for the exact
