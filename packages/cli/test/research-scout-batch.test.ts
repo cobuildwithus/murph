@@ -10,6 +10,9 @@ import {
   type ResearchScoutBatchResult,
 } from '@murphai/contracts'
 import { Cli } from 'incur'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { type CliTiming, normalizeCliTiming } from '@murphai/runtime-state/cli-timing'
+import { timeCliDispatch, withCliTiming } from '@murphai/runtime-state/node/cli-timing'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { registerResearchCommands } from '../src/commands/research.js'
@@ -405,5 +408,46 @@ describe('research scout batch scheduling', () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
+  })
+})
+
+
+describe('research scout batch missing-configuration telemetry', () => {
+  it('uses the real client with empty injected env, zero fetches and unchanged original rejection', async () => {
+    vi.stubEnv('MURPH_CLI_TIMING_ENDPOINT', '')
+    // Ambient configuration must not replace the explicitly empty client env.
+    vi.stubEnv('EXA_API_KEY', 'PRIVATE_AMBIENT_TOKEN')
+    const fetchImpl = vi.fn<typeof fetch>(async () => { throw new Error('PRIVATE_UNEXPECTED_FETCH') })
+    vi.stubGlobal('fetch', fetchImpl)
+    const input = structuredClone(INPUT)
+    let original: unknown
+    const run = async () => {
+      try { return await fetchExaResearchScoutBatchCandidates(input, { env: {}, fetchImpl }) }
+      catch (error) { original = error; throw error }
+    }
+    const baseline = await run().catch((error: unknown) => error)
+    expect(baseline).toBeInstanceOf(VaultCliError)
+    if (!(baseline instanceof VaultCliError)) throw new Error('Expected the source-owned client error')
+    expect(baseline.code).toBe('research_exa_token_missing')
+    expect(baseline.message).toBe('Exa research scout is not configured. Set EXA_API_KEY in the runtime environment before using research scout.')
+    expect(baseline.context).toEqual({ retryable: false })
+    const reports: CliTiming[] = []
+    const caught = await withCliTiming(() => timeCliDispatch('research scout-batch', async () => { await run() }),
+      (report) => { reports.push(report) }).catch((error: unknown) => error)
+    expect(caught).toBe(original)
+    expect(caught).toBeInstanceOf(VaultCliError)
+    if (!(caught instanceof VaultCliError)) throw new Error('Expected the unchanged client rejection')
+    expect({ code: caught.code, name: caught.name, message: caught.message, context: caught.context }).toEqual({
+      code: baseline.code, name: baseline.name, message: baseline.message, context: baseline.context,
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(input).toEqual(INPUT)
+    expect(reports).toHaveLength(1)
+    expect(reports[0].commands).toHaveLength(1)
+    expect(reports[0].commands[0]).toMatchObject({ command: 'research scout-batch', outcome: 'error', calls: 1,
+      failures: [{ code: 'research_exa_token_missing', stage: 'unknown', count: 1 }] })
+    expect(normalizeCliTiming(reports[0])).toEqual(reports[0])
+    expect(JSON.stringify(reports)).not.toContain('PRIVATE_')
+    expect(JSON.stringify(reports)).not.toContain(baseline.message)
   })
 })

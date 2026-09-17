@@ -8,6 +8,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   ensureRuntimeProcessing: vi.fn(),
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(async () => ({ matchedCount: 1, recorded: true })),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   recordHostedIngressAcceptedFromMailboxItem: vi.fn(async () => undefined),
   recordHostedIngressDirectEnsureTiming: vi.fn(async () => ({
@@ -29,6 +30,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery: mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
   recordHostedIngressAcceptedFromMailboxItem:
     mocks.recordHostedIngressAcceptedFromMailboxItem,
   recordHostedIngressDirectEnsureTiming:
@@ -108,6 +110,49 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing: mocks.ensureRuntimeProcessing,
     });
+  });
+
+  it.each([false, true])("links accepted instant replies after response even when the wake fails: %s", async (wakeFails) => {
+    const tasks: Array<() => Promise<void>> = [];
+    if (wakeFails) mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("synthetic signal failure"));
+    const result = maybeHandoffHostedExecutionWebhookWake({
+      response,
+      webhookReceivedAt: new Date("2026-09-01T12:00:00Z"),
+      scheduleAfterResponse: (task) => { tasks.push(task); },
+      wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant" }),
+    });
+    if (wakeFails) await expect(result).rejects.toThrow("synthetic signal failure");
+    else await result;
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
+    for (const task of tasks) await task();
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).toHaveBeenCalledExactlyOnceWith({
+      authenticatedUserId: "member_123",
+      answeredMailboxItemIds: ["mailbox_123"],
+      linqDeliveryId: "delivery_instant",
+      replyRuntimeAttemptId: null,
+    });
+  });
+
+  it("retains ingress timing when optional instant-reply linking fails", async () => {
+    const tasks: Array<() => Promise<void>> = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery.mockRejectedValueOnce(new Error("synthetic telemetry failure"));
+    await maybeHandoffHostedExecutionWebhookWake({
+      response,
+      scheduleAfterResponse: (task) => { tasks.push(task); },
+      wakeHandoff: buildWakeHandoff({ acceptedLinqDeliveryId: "delivery_instant" }),
+    });
+    for (const task of tasks) await expect(task()).resolves.toBeUndefined();
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith("Hosted instant reply latency delivery link failed.", { errorName: "Error", source: "linq" });
+    warn.mockRestore();
+  });
+
+  it("does not link ordinary inbound wakes as answered", async () => {
+    const tasks: Array<() => Promise<void>> = [];
+    await maybeHandoffHostedExecutionWebhookWake({ response, scheduleAfterResponse: (task) => { tasks.push(task); }, wakeHandoff: buildWakeHandoff() });
+    for (const task of tasks) await task();
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
   });
 
   it.each(["linq", "telegram"] as const)("starts the authorized %s direct ensure while Temporal acknowledgement is pending", async (source) => {
@@ -210,6 +255,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       phaseBreakdown: {
         schemaVersion: 1,
         orchestration: {
+          directWakeStartedAtEpochMs: expect.any(Number),
+          directWakeAttemptCount: 1,
+          directWakeRetryWaitMs: 0,
           tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -274,6 +322,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       phaseBreakdown: {
         schemaVersion: 1,
         orchestration: {
+          directWakeStartedAtEpochMs: expect.any(Number),
+          directWakeAttemptCount: 1,
+          directWakeRetryWaitMs: 0,
           tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -419,6 +470,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
           schemaVersion: 1,
           orchestration: expect.objectContaining({
             directEnsureAction: "woken",
+            directWakeStartedAtEpochMs: Date.parse("2026-07-02T00:00:00.000Z"),
+            directWakeAttemptCount: 2,
+            directWakeRetryWaitMs: 3000,
             directEnsureRequestStartedAtEpochMs: 1_777_000_003_012,
             directEnsureResponseReceivedAtEpochMs: 1_777_000_003_120,
             directEnsureResultKind: "runtime_processing_accepted",

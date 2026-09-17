@@ -558,6 +558,24 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 
 ## Private Operational Telemetry
 
+Responses WebSocket observations retain completion, close-side, close-code and
+diagnostic scheduling fields through the structured logger's bounded 64-key
+objects. The relay keeps at most four ordinary diagnostic writes and one
+reserved terminal write in flight. It uses request-scoped `waitUntil` when the
+Containers outbound context does not supply it; persistence remains best-effort
+and never delays forwarding or changes accounting. Missing log rows remain
+missing evidence, not successful transport. Upstream and client frame inspection
+share a six-megacharacter bound; larger frames remain uninspected and are
+forwarded under the existing relay admission rules. First-frame classification
+reuses the response observation parser.
+
+Postgres processing logs the failed operation, elapsed time, remaining command
+budget and timeout classification. Command-budget and execution transport
+timeouts return the existing three-second retry response without retiring or
+releasing an uncertain runtime owner. Replica admission preserves the finite
+`HOSTED_RUNTIME_OWNER_STALE` and `HOSTED_RUNTIME_RESOURCE_RETIRED` reasons as
+HTTP 409 responses; neither authorizes a write or bypasses upload cleanup.
+
 Existing hosted fetch-failure logs may include `fetchNetworkErrorCode`: the first
 exact allowlisted code (`ECONNREFUSED`, `ECONNRESET`, `ENOTFOUND`, `EPIPE`,
 `ETIMEDOUT`, `UND_ERR_SOCKET`, `UND_ERR_CONNECT_TIMEOUT`, `UND_ERR_HEADERS_TIMEOUT`,

@@ -116,6 +116,7 @@ import {
 } from "./hosted-runtime-crypto-fixtures.ts";
 import { createTestSqlStorage, type TestSqlStorageLike } from "./sql-storage.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
+import { RunnerSecretsService } from "../src/user-runner/runner-secrets.js";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -2697,7 +2698,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("starts container readiness while workspace preparation is in flight", async () => {
+  it("starts container readiness while workspace preparation is in flight", async ({ onTestFinished }) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspaceRead = createDeferred<void>();
@@ -2734,11 +2735,33 @@ describe("HostedUserRunner execution coordination", () => {
     });
     await runner.bindUser(TEST_USER_ID);
 
+    const originalBind = RunnerStateStore.prototype.bindWriteFenceInvocationFacts;
+    const bindTiming = vi.spyOn(RunnerStateStore.prototype, "bindWriteFenceInvocationFacts")
+      .mockImplementation(async function (this: RunnerStateStore, input) {
+        const result = await originalBind.call(this, input);
+        vi.setSystemTime(Date.now() + 175);
+        return result;
+      });
+    const originalSecretsRead = RunnerSecretsService.prototype.readRunnerSecrets;
+    const secretsTiming = vi.spyOn(RunnerSecretsService.prototype, "readRunnerSecrets")
+      .mockImplementation(async function (this: RunnerSecretsService, userId) {
+        const result = await originalSecretsRead.call(this, userId);
+        vi.setSystemTime(Date.now() + 225);
+        return result;
+      });
+    onTestFinished(() => {
+      bindTiming.mockRestore();
+      secretsTiming.mockRestore();
+    });
     const accepted = runner.ensureRuntimeProcessingForUser({
       orchestration: {
         freshStartContainerReadyAtEpochMs: 999_995,
         freshStartInvocationPreparedAtEpochMs: 999_996,
         runtimeInvocationPreparationElapsedMs: 999_997,
+        runtimeInvocationInputsWaitElapsedMs: 999_996,
+        runtimeInvocationAdmissionElapsedMs: 999_995,
+        runtimeInvocationFenceBindElapsedMs: 999_994,
+        runtimeInvocationJobPrepareElapsedMs: 999_993,
         runtimeStoreEnsureElapsedMs: 999_998,
         workspaceReadElapsedMs: 999_999,
       },
@@ -2803,7 +2826,11 @@ describe("HostedUserRunner execution coordination", () => {
       freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_043,
       freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_042,
       freshStartInvocationPreparedAtEpochMs: expect.any(Number),
-      runtimeInvocationPreparationElapsedMs: 1_250,
+      runtimeInvocationPreparationElapsedMs: 1_650,
+      runtimeInvocationInputsWaitElapsedMs: 1_250,
+      runtimeInvocationAdmissionElapsedMs: 0,
+      runtimeInvocationFenceBindElapsedMs: 175,
+      runtimeInvocationJobPrepareElapsedMs: 225,
       runtimeStoreEnsureElapsedMs: 1_250,
       workspaceReadElapsedMs: 1_250,
     });
@@ -2826,6 +2853,7 @@ describe("HostedUserRunner execution coordination", () => {
       }),
     }));
     expect(preparedLog?.details).not.toHaveProperty("runnerContainerName");
+
   });
 
   it("invokes the runner without prepared snapshot restore data when cold-restore acquisition is unavailable", async () => {

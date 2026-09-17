@@ -1,4 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
+import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import { HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES } from "../src/runner-egress-codex-memory.ts";
 import type { HostedRunnerDiagnosticJson } from "../src/runner-egress-responses-diagnostics.ts";
@@ -265,6 +266,37 @@ test.each([
   expect(JSON.stringify(reportDiagnostic.mock.calls)).not.toMatch(/PRIVATE_|resp_other|resp_expected/);
 });
 
+test("observes large prewarm and generation responses across socket reuse without retaining content", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const reportDiagnostic = vi.fn();
+  const controller = startHostedOpenAiResponsesWebSocketRelay({ downstream, upstream, reportDiagnostic });
+  const frames: string[] = [];
+  for (const generate of [false, true]) {
+    downstream.emitMessage(JSON.stringify({ type: "response.create", generate }));
+    await controller.drain();
+    for (const type of ["response.created", "response.completed"]) {
+      const frame = JSON.stringify({
+        type, response: { id: "PRIVATE_RESPONSE", instructions: "PRIVATE_CONTENT".repeat(16_384) },
+      });
+      frames.push(frame);
+      upstream.emitMessage(frame);
+      await controller.drain();
+      expect(reportDiagnostic.mock.calls.at(-1)?.[0]).toMatchObject({
+        firstUpstreamMessageKind: "response.created",
+        responseAcknowledged: true, responseInspectionIncomplete: false,
+        responseAssociationKind: "single-request",
+        responseRequestKind: generate ? "generation" : "prewarm",
+        responseClientMessageOrdinal: generate ? 2 : 1,
+        responseMilestone: type === "response.created" ? "acknowledged" : "terminal",
+        responseTerminalKind: type === "response.completed" ? type : null,
+      });
+    }
+  }
+  expect(downstream.sent).toEqual(frames);
+  expect(JSON.stringify(reportDiagnostic.mock.calls)).not.toContain("PRIVATE_");
+});
+
 test("forwards uninspectable and malformed frames without claiming acknowledgement", async () => {
   const downstream = new FakeSocket();
   const upstream = new FakeSocket();
@@ -276,7 +308,7 @@ test("forwards uninspectable and malformed frames without claiming acknowledgeme
     JSON.stringify({ type: "response.created" }),
     JSON.stringify({ type: "response.completed" }),
     JSON.stringify({ type: "response.created", response: { id: "x".repeat(257) } }),
-    JSON.stringify({ type: "response.created", private: "x".repeat(65_536) }),
+    JSON.stringify({ type: "response.created", private: "x".repeat(6 * 1024 * 1024) }),
     "invalid json", new ArrayBuffer(8),
   ];
   for (const frame of frames) upstream.emitMessage(frame);
@@ -314,6 +346,33 @@ test("records a forwarded request with no upstream messages when a silent socket
   expect(upstream.sent).toEqual(["PRIVATE_REQUEST_FIXTURE"]);
 });
 
+test("preserves response completion and close evidence through structured log sanitization", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const records: ReturnType<typeof buildHostedExecutionStructuredLogRecord>[] = [];
+  const controller = startHostedOpenAiResponsesWebSocketRelay({
+    downstream, upstream,
+    reportDiagnostic: (diagnostic) => records.push(buildHostedExecutionStructuredLogRecord({
+      component: "runner", phase: "wake.running", message: "Synthetic relay observation.",
+      details: { ...diagnostic, droppedRecords: 0, runtimeLogScheduled: true },
+    })),
+  });
+  downstream.emitMessage(JSON.stringify({ type: "response.create", input: "PRIVATE_REQUEST" }));
+  await controller.drain();
+  upstream.emitMessage(JSON.stringify({ type: "response.completed", response: {
+    id: "synthetic-response", status: "completed", output: "PRIVATE_RESPONSE",
+  } }));
+  await controller.drain();
+  downstream.emitClose(1000);
+  await controller.drain();
+  expect(records.at(-1)?.details).toMatchObject({
+    websocketMilestone: "closed", closeSide: "client", closeCode: 1000,
+    providerResponseOutcomeKind: "closed", responseTerminalKind: "response.completed",
+    upstreamFrameCount: 1, downstreamFrameCount: 1, runtimeLogScheduled: true, droppedRecords: 0,
+  });
+  expect(JSON.stringify(records)).not.toContain("PRIVATE_");
+});
+
 test("records first upstream latency and last frame age without logging every token", async () => {
   vi.useFakeTimers();
   const downstream = new FakeSocket();
@@ -346,7 +405,9 @@ test("records first upstream latency and last frame age without logging every to
 test.each([
   { data: JSON.stringify({ type: "PRIVATE_EVENT_TYPE", text: "PRIVATE_CONTENT" }), kind: "other" },
   { data: "PRIVATE_INVALID_JSON", kind: "invalid_json" },
-  { data: "PRIVATE_CONTENT".repeat(5_000), kind: "too_large" },
+  { data: "null", kind: "other" },
+  { data: "[]", kind: "other" },
+  { data: "PRIVATE_CONTENT".repeat(450_000), kind: "too_large" },
   { data: new TextEncoder().encode("PRIVATE_BINARY_CONTENT").buffer, kind: "binary" },
 ])("keeps first-frame diagnostics bounded and content-free ($kind)", async ({ data, kind }) => {
   const downstream = new FakeSocket();

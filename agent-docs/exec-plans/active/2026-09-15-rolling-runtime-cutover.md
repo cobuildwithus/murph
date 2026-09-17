@@ -68,10 +68,10 @@ passing a timer never substitutes for safe handoff evidence.
    versions and inactive campaign before canary.
 7. [complete] Canary, full inventory migration including busy members and held
    obligations, and final live outcome verification.
-8. [in progress] Namespace retirement proof: prove complete accounting inside the
+8. [complete] Namespace retirement proof: prove complete accounting inside the
    campaign lock, close the gate to `postgres`, verify existing and new-member
    routing, then soak for legacy traffic.
-9. [pending] Remove the finite legacy bridge, the deployment capability and the
+9. [in progress] Remove the finite legacy bridge, the deployment capability and the
    legacy namespace after the soak, with explicit authorization for the
    irreversible namespace deletion.
 
@@ -897,3 +897,80 @@ exemption. Final-head CI and the remaining operational tasks still apply.
   once with FORCE and zero times with ordinary DROP DATABASE. Removed FORCE; all
   12 actual runtime-log PostgreSQL tests and Web typecheck pass. This isolated
   test correction leaves the reviewed runtime candidate unchanged.
+
+- Public retirement PR #3524 and protected workflow PR #154 are merged after
+  their exact-head CI and applicable final reviews passed. Compatible Web and
+  Worker deployment is in progress; the global gate has not yet been finalized.
+- Preparing the final bridge cleanup on a follow-up branch. Production dispatch
+  remains gated on successful finalization and observed absence of legacy
+  traffic. Remove Worker legacy routing, the temporary deployment capability,
+  and the obsolete namespace export/binding; retain canonical Postgres authority
+  and historical migration receipts. Namespace deletion remains a separate
+  irreversible deployment action requiring its exact authorization.
+
+
+### Production retirement gate closed
+
+Public source `251f3c8f6fc979fc4eae278809cb4e4ddc7e1ede` passed Vercel
+production admission and protected Worker deployment `35238928693`, attempt 2.
+The first attempt failed while uploading a container image and left the serving
+Worker unchanged; the retry passed endpoint smokes and live release verification.
+The compatible Worker serves 100 percent with Postgres capability enabled.
+
+Protected inventory `35244906897` independently returned 892 physical sources,
+matching the registered census. Every source is terminal and all 297 owner rows
+are Postgres-owned. The preceding two-hour bounded observability query returned
+zero legacy UserRunner events; the durable creation fence and full-version
+convergence supply closure beyond that observational absence. Finalization
+`35245393417` completed in one operator step with phase `postgres`. A separate
+read-only database check confirms activation, cleared selection, no unfinished
+sources and no non-Postgres owners. Namespace storage remains intact. Follow-up
+traffic observation and reviewed bridge/namespace cleanup remain in progress.
+
+
+### Postgres-only normal runtime candidate
+
+The follow-up removes ordinary Worker routing and provider/resource callbacks to
+UserRunner, including redundant owner-selection reads. Web/Postgres remains the
+canonical authority; native containers retain execution and usage receipts.
+Frozen migration inspection, capability configuration, class export and physical
+namespace remain intact for the separately authorized retirement step.
+
+Focused normal-runtime proof passed 1,840 tests across 46 passing files; later
+local-control changes passed 174 route/harness tests, and the final snapshot
+simplification passed 570 outbound/container tests. The Worker-runtime lane
+passed all 26 tests, including real WebSocket relay and privacy-safe authorization
+alerts. Four actual-Postgres tests prove fresh local initialization, refusal to
+reinterpret an existing legacy database, target-preserving stale-attempt
+injection, and local-database guards. Web and Cloudflare typechecks, complexity
+and docs drift passed.
+
+A full isolated local stack with real Temporal, Web, Worker, native containers,
+Postgres and scripted provider HTTP passed cold reply delivery, warm typing before
+delivery, exact native-target reuse, empty mailbox lag and healthy runtime logs.
+Measured cold reply was 13,045 ms, warm typing 550 ms, warm reply 2,628 ms. This is
+scripted-provider composed evidence, not live-model response-quality evidence.
+An earlier run returned HTTP 500 at initial ensure-processing; the diagnostic
+rerun passed without a production runtime correction, so its cause is unproven.
+
+The later bounded production runtime-log window contained 19 completed invocations,
+67 assistant passes and 68 checkpoints, with no error-level entries. One warning
+was delivery-related. These aggregates support traffic continuity; they do not
+replace the separate legacy namespace traffic observation or deletion approval.
+
+
+### Normal-runtime final review and census test isolation
+
+ReviewGPT round 1 passed the normal-runtime cleanup candidate with no qualifying
+findings. Mechanical base reconciliation preserves current admission, timeout
+and proxy diagnostics; 345 focused tests and Cloudflare typecheck pass. The
+composed stack passed again with cold reply 5,233 ms, warm typing 336 ms and warm
+reply 1,484 ms. A post-finalization Cloudflare query from 16:20 to 17:06 UTC
+returned zero UserRunner events, completing the traffic observation for task 8.
+
+CI exposed an unrelated database fixture leak: the action-approval suite left
+nine synthetic members behind, which the migration census correctly included.
+Running those two suites sequentially against one fresh isolated database
+reproduced five failures. Exact-ID teardown fixes the producer; all 19 tests now
+pass in the same order and Web typecheck passes. Production census behavior is
+unchanged. Required CI remains the normal-runtime candidate's merge gate.

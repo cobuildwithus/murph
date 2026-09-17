@@ -1711,6 +1711,9 @@ describe("hosted runtime control contracts", () => {
         temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
         tokenAcquireStartedAtEpochMs: 1_777_000_000_011,
         tokenAcquiredAtEpochMs: 1_777_000_000_012,
+        directWakeStartedAtEpochMs: 1_777_000_000_001,
+        directWakeAttemptCount: 2,
+        directWakeRetryWaitMs: 250,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_013,
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
         directEnsureAuthDurationMs: 0,
@@ -1788,6 +1791,10 @@ describe("hosted runtime control contracts", () => {
         shellPrewarmOutcome: "cold_start_observed",
         shellPrewarmSource: "linq-message-routing",
         workspaceReadElapsedMs: 30,
+        runtimeInvocationInputsWaitElapsedMs: 1,
+        runtimeInvocationAdmissionElapsedMs: 2,
+        runtimeInvocationFenceBindElapsedMs: 3,
+        runtimeInvocationJobPrepareElapsedMs: 4,
         runtimeStoreEnsureElapsedMs: 40,
         runtimeInvocationPreparationElapsedMs: 60,
       },
@@ -1817,6 +1824,8 @@ describe("hosted runtime control contracts", () => {
         runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
         foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
         foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+        foregroundPrefetchPrepareElapsedMs: 2,
+        foregroundPrefetchWaitElapsedMs: 250,
         foregroundWakeOrdinal: 1,
         activeRuntimePassOrdinal: 2,
         activeRuntimePassStartedAtEpochMs: 1_777_000_000_090,
@@ -2055,6 +2064,9 @@ describe("hosted runtime control contracts", () => {
       { temporalActivityStartedAtEpochMs: 1, requestUrl: 1 }, // unknown sub key
       { tokenAcquireStartedAtEpochMs: -1 }, // web-side negative leaf
       { directEnsureResponseReceivedAtEpochMs: 1.5 }, // web-side non-integer leaf
+      { directWakeStartedAtEpochMs: -1 },
+      { directWakeAttemptCount: 1.5 },
+      { directWakeRetryWaitMs: "250" },
       { directEnsureAuthDurationMs: -1 },
       { directEnsureAuthDurationMs: "42" },
       { directEnsureHandlerDurationMs: Number.POSITIVE_INFINITY },
@@ -2095,6 +2107,10 @@ describe("hosted runtime control contracts", () => {
       { activeWakeAccepted: 1 }, // boolean leaf must stay boolean
       { activeWakeFoundNoActiveChild: "true" }, // boolean leaf must stay boolean
       { activeWakeElapsedMs: 1.5 }, // duration must be an integer
+      { runtimeInvocationInputsWaitElapsedMs: -1 },
+      { runtimeInvocationAdmissionElapsedMs: "1" },
+      { runtimeInvocationFenceBindElapsedMs: 1.5 },
+      { runtimeInvocationJobPrepareElapsedMs: Number.POSITIVE_INFINITY },
       { freshStartRequestedAtEpochMs: "1777000000070" }, // string leaf
       { freshStartContainerPortsReadyAtEpochMs: -1 }, // container timestamps stay non-negative
       { shellPrewarmHintCount: -1 }, // counts must be non-negative
@@ -2146,6 +2162,8 @@ describe("hosted runtime control contracts", () => {
       { runtimeWakeNotifiedAtEpochMs: 1, threadId: 1 }, // unknown sub key
       { foregroundWaitResolvedAtEpochMs: 1.5 }, // non-integer leaf
       { foregroundImportStartedAtEpochMs: -1 }, // negative leaf
+      { foregroundPrefetchPrepareElapsedMs: -1 },
+      { foregroundPrefetchWaitElapsedMs: "250" },
       { runtimeWakeNotifiedAtEpochMs: "1777000000100" }, // string leaf
       { activeRuntimePassForeground: 0 }, // boolean leaf must stay boolean
     ]) {

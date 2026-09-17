@@ -1,7 +1,4 @@
-import { progressRuntimeMigrationForMember } from "../../runtime-migration-progress.ts";
-import { createRuntimeProcessingCommandBudget } from "../../user-runner/runtime-command-budget.ts";
-import { resolveAdmittedLegacyUserRunner } from "../../legacy-runtime-admission.ts";
-import { HostedRuntimeMemberMigratingError, usesPostgresRuntimeOwner } from "../../runtime-cutover.ts";
+import { buildRuntimeProcessingSummaryEntry, recordRuntimeProcessingSummary, type RuntimeProcessingDiagnostics } from "../../user-runner/diagnostics.ts";
 import { readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
 import {
   emitHostedExecutionStructuredLog,
@@ -37,9 +34,7 @@ import {
   requireJsonObject,
 } from "../../json.ts";
 import {
-  readCachedRequestText,
-  resolveUserRunnerStub,
-  type WorkerRouteContext,
+  readCachedRequestText, type WorkerRouteContext
 } from "../../worker-routes/shared.ts";
 import {
   readPresentedWorkerRouteAuthorization,
@@ -135,10 +130,7 @@ export async function handleStatusRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  if ((await usesPostgresRuntimeOwner(context.env, userId))) return json(await readPostgresRunnerStatus(context.env, userId, readHostedStatusRouteOptions(context.url)));
-  const stub = await resolveUserRunnerStub(context.env, userId);
-  const status = await stub.runnerStatus(readHostedStatusRouteOptions(context.url));
-  return json(status);
+  return json(await readPostgresRunnerStatus(context.env, userId, readHostedStatusRouteOptions(context.url)));
 }
 
 function readHostedStatusRouteOptions(url: URL): { logLimit?: number } | undefined {
@@ -307,14 +299,7 @@ export async function handleRuntimeHealthDataConsentRoute(
       "Hosted runtime health-data consent request must be empty.",
     );
   }
-  if ((await usesPostgresRuntimeOwner(context.env, userId))) return json(await reconcilePostgresRuntimeConsent(context.env, userId));
-  const stub = await resolveUserRunnerStub(context.env, userId);
-  if (!stub.reconcileRuntimeHealthDataConsentForUser) {
-    throw new Error(
-      "Hosted runtime health-data consent reconciliation is unavailable.",
-    );
-  }
-  return json(await stub.reconcileRuntimeHealthDataConsentForUser(userId));
+  return json(await reconcilePostgresRuntimeConsent(context.env, userId));
 }
 
 async function runRuntimeEnsureProcessingForUser(input: {
@@ -332,21 +317,27 @@ async function runRuntimeEnsureProcessingForUser(input: {
     orchestration: input.orchestration,
     userId: input.userId,
   };
-  const progressMigration = () => progressRuntimeMigrationForMember({ source: input.context.env, userId: input.userId,
-    budget: createRuntimeProcessingCommandBudget({ commandTimeoutMs: input.commandTimeoutMs,
-      startedAtMs: input.commandStartedAtEpochMs, webControlTimeoutMs: input.context.environment.webControlTimeoutMs }) });
-  const postgres = await ensurePostgresRuntimeProcessing(input.context.env, command);
-  if (postgres) return postgres;
+  const diagnostics: RuntimeProcessingDiagnostics = {
+    stage: "admission",
+    details: {
+      runtimeProcessingBackend: "postgres",
+      commandStartedAtEpochMs: input.commandStartedAtEpochMs,
+      runtimeProcessingRequestedMode: input.ensureRequest.processingMode ?? "default",
+      triggeredByWebDirect: input.orchestration.triggeredByWebDirect === true,
+    },
+  };
+  let postgres: HostedRuntimeEnsureProcessingResponse | undefined;
   try {
-    const stub = await resolveAdmittedLegacyUserRunner(input.context.env, input.userId);
-    const result = await stub.ensureRuntimeProcessingForUser(command);
-    if (result.kind === "retry_later") await progressMigration();
-    return result;
-  } catch (error) {
-    if (!(error instanceof HostedRuntimeMemberMigratingError)) throw error;
-    await progressMigration();
-    return { kind: "retry_later", retryAt: new Date(Date.now() + 3_000).toISOString() };
+    postgres = await ensurePostgresRuntimeProcessing(input.context.env, command, diagnostics);
+  } finally {
+    // Snapshot before detaching so telemetry cannot extend the command budget.
+    const entry = buildRuntimeProcessingSummaryEntry(diagnostics, postgres, input.commandStartedAtEpochMs);
+    const telemetry = Promise.resolve().then(() => recordRuntimeProcessingSummary({
+      env: input.context.environment, entry, orchestrationAttemptId: command.orchestrationAttemptId, userId: input.userId,
+    })).catch(() => undefined);
+    try { input.context.executionCtx?.waitUntil(telemetry); } catch { /* Rejection is already owned. */ }
   }
+  return postgres;
 }
 
 export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {

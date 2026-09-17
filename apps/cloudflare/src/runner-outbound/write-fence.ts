@@ -1,13 +1,7 @@
-import { usesPostgresRuntimeOwner } from "../runtime-cutover.ts";
 import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
-import type {
-  HostedRuntimeUsageRecordResponse,
-} from "@murphai/hosted-execution/runtime-control";
 
 import {
-  requireRunnerOutboundUserStubMethod,
-  resolveRunnerOutboundUserRunnerStub,
-  type RunnerOutboundEnvironmentSource,
+  type RunnerOutboundEnvironmentSource
 } from "./shared.ts";
 import {
   RunnerRuntimeWriteFenceError,
@@ -51,23 +45,10 @@ export async function requireRunnerRuntimeWriteFence(input: {
   userId: string;
 }): Promise<RunnerRuntimeWriteFenceHeaders> {
   const headers = requireRunnerRuntimeWriteFenceHeaders(input.request);
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
-    const result = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: {
-      operation: "authorize_effect", attemptId: headers.attemptId, generation: headers.generation, runnerContainerName: null, managedAi: false,
-    } });
-    if (result.cutover !== "postgres" || result.status !== "authorized") throw new RunnerRuntimeWriteFenceError();
-    return headers;
-  }
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const ownsWriteFence = await validateRunnerRuntimeWriteFence(stub, {
-    attemptId: headers.attemptId,
-    generation: headers.generation,
-    userId: input.userId,
-  });
-  if (!ownsWriteFence) {
-    throw new RunnerRuntimeWriteFenceError();
-  }
-
+  const result = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: {
+    operation: "authorize_effect", attemptId: headers.attemptId, generation: headers.generation, runnerContainerName: null, managedAi: false,
+  } });
+  if (result.cutover !== "postgres" || result.status !== "authorized") throw new RunnerRuntimeWriteFenceError();
   return headers;
 }
 
@@ -87,44 +68,11 @@ export async function requireRunnerRuntimeWriteFenceWorkspaceWrite(input: {
   };
 }
 
-export async function applyRunnerRuntimeUsageSettlement(input: {
-  env: RunnerOutboundEnvironmentSource;
-  settlement: HostedRuntimeUsageRecordResponse | null;
-  userId: string;
-  writeAuthority: RunnerRuntimeWriteFenceHeaders;
-}): Promise<void> {
-  if (input.settlement?.platformAiUsageAllowedAfter === true) {
-    return;
-  }
-
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(stub, "revokeActiveRuntimePlatformAiUsage");
-  await stub.revokeActiveRuntimePlatformAiUsage({
-    attemptId: input.writeAuthority.attemptId,
-    generation: input.writeAuthority.generation,
-    userId: input.userId,
-  });
-}
-
 function readValidWorkspaceVersionOrNull(value: string | null): string | null {
   if (!value || !/^[0-9]+$/u.test(value)) {
     return null;
   }
   return value;
-}
-
-async function validateRunnerRuntimeWriteFence(
-  stub: Awaited<ReturnType<typeof resolveRunnerOutboundUserRunnerStub>>,
-  input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-  },
-): Promise<boolean> {
-  if (typeof stub.validateRuntimeWriteFence !== "function") {
-    throw new TypeError("Hosted user runner does not implement validateRuntimeWriteFence.");
-  }
-  return await stub.validateRuntimeWriteFence(input);
 }
 
 export function requireRunnerRuntimeWriteFenceHeaders(

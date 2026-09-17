@@ -1,3 +1,8 @@
+import { createOutboundMultipartTestBucket } from "./multipart-bucket-fixtures.ts";
+import { mockPostgresOwnerCommand, createPostgresTestOwner } from "./postgres-owner-fixtures.ts";
+import * as runtimeResourceClient from "../src/runtime-resource-client.ts";
+import * as runtimeUserControl from "../src/runtime-user-control.ts";
+import * as runtimeProcessing from "../src/runtime-processing.ts";
 import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import { HOSTED_RUNTIME_OWNER_PATH, type HostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
 import { createHash, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
@@ -381,8 +386,6 @@ describe("cloudflare worker routes", () => {
     ]);
     expect(hostedLocalTestInternalRoutes.map(({ name }) => name)).toEqual([
       "test-artifact-seed",
-      "test-run-until-idle",
-      "test-run-alarm",
       "test-canonical-checkpoint-lost-ack",
       "test-foreground-priority-ordering",
       "test-arm-generated-image-provider-barrier",
@@ -392,8 +395,6 @@ describe("cloudflare worker routes", () => {
       "test-container-activity-expired",
       "test-container-active-operation-drop",
       "test-read-active-runtime-fence",
-      "test-age-active-runtime-fence",
-      "test-start-stuck-invocation",
       "test-ensure-standby-ready",
       "test-temporal-mailbox-signal-fault-arm",
       "test-temporal-mailbox-signal-fault-clear",
@@ -1524,10 +1525,8 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(runResponse.status).toBe(401);
-    await expect(runResponse.json()).resolves.toEqual({
-      error: "Hosted execution bound user does not match the test runner user.",
-    });
+    expect(runResponse.status).toBe(404);
+    await expect(runResponse.json()).resolves.toEqual({ error: "Not found" });
 
     const alarmResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
@@ -1541,10 +1540,8 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(alarmResponse.status).toBe(401);
-    await expect(alarmResponse.json()).resolves.toEqual({
-      error: "Hosted execution bound user does not match the test runner user.",
-    });
+    expect(alarmResponse.status).toBe(404);
+    await expect(alarmResponse.json()).resolves.toEqual({ error: "Not found" });
 
     const stuckInvocationResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
@@ -1558,10 +1555,8 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(stuckInvocationResponse.status).toBe(401);
-    await expect(stuckInvocationResponse.json()).resolves.toEqual({
-      error: "Hosted execution bound user does not match the test runner user.",
-    });
+    expect(stuckInvocationResponse.status).toBe(404);
+    await expect(stuckInvocationResponse.json()).resolves.toEqual({ error: "Not found" });
 
     const activeOperationDropResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
@@ -1946,7 +1941,7 @@ describe("cloudflare worker routes", () => {
     expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(snapshotBytes);
   });
 
-  it("runs the hosted-local test alarm route for correctly bound callers", async () => {
+  it("keeps the retired Worker alarm route hidden for bound callers", async () => {
     const stub = createUserRunnerStub({
       runAlarmForTest: vi.fn(async () => ({ ok: true })),
     });
@@ -1967,9 +1962,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true });
-    expect(stub.runAlarmForTest).toHaveBeenCalledWith({ userId: "member_123" });
+    expect(response.status).toBe(404);
   });
 
   it("drops the hosted-local runner active-operation pointer for correctly bound callers", async () => {
@@ -2374,7 +2367,7 @@ describe("cloudflare worker routes", () => {
     expect(invalidResponse.status).toBe(400);
   });
 
-  it("starts the hosted-local stuck invocation test route for correctly bound callers", async () => {
+  it("keeps the retired Worker stuck-invocation route hidden for bound callers", async () => {
     const stub = createUserRunnerStub({
       startStuckInvocationForTest: vi.fn(async () => ({
         attemptId: "workspace-invocation-test",
@@ -2399,13 +2392,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      attemptId: "workspace-invocation-test",
-      nextWakeAt: "2026-05-09T00:00:00.000Z",
-      ok: true,
-    });
-    expect(stub.startStuckInvocationForTest).toHaveBeenCalledWith({ userId: "member_123" });
+    expect(response.status).toBe(404);
   });
 
   it("reads the active hosted-local runtime fence for correctly bound callers", async () => {
@@ -2436,13 +2423,14 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       attemptId: "workspace-invocation-test",
       processingMode: "system_mailbox",
+      runnerContainerName: "member_123",
     });
     expect(stub.readActiveRuntimeFenceForTest).toHaveBeenCalledWith({
       userId: "member_123",
     });
   });
 
-  it("ages the active hosted-local runtime fence for correctly bound callers", async () => {
+  it("keeps the retired Worker fence-aging route hidden", async () => {
     const stub = createUserRunnerStub({
       ageActiveRuntimeFenceForTest: vi.fn(async () => ({
         attemptId: "workspace-invocation-test",
@@ -2466,19 +2454,10 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      attemptId: "workspace-invocation-test",
-      ok: true,
-      startedAt: "2026-05-08T23:59:25.000Z",
-    });
-    expect(stub.ageActiveRuntimeFenceForTest).toHaveBeenCalledWith({
-      startedAgoMs: 35_000,
-      userId: "member_123",
-    });
+    expect(response.status).toBe(404);
   });
 
-  it("starts a stale hosted-local stuck invocation test route for correctly bound callers", async () => {
+  it("keeps retired stale-invocation query hints unavailable", async () => {
     const stub = createUserRunnerStub({
       startStuckInvocationForTest: vi.fn(async () => ({
         attemptId: "workspace-invocation-test",
@@ -2503,14 +2482,10 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
-    expect(stub.startStuckInvocationForTest).toHaveBeenCalledWith({
-      startedAgoMs: 35000,
-      userId: "member_123",
-    });
+    expect(response.status).toBe(404);
   });
 
-  it("starts a same-version hosted-local stuck invocation for correctly bound callers", async () => {
+  it("keeps retired same-version invocation query hints unavailable", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
@@ -2528,11 +2503,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
-    expect(stub.startStuckInvocationForTest).toHaveBeenCalledWith({
-      sameWorkerVersion: true,
-      userId: "member_123",
-    });
+    expect(response.status).toBe(404);
   });
 
   it("keeps the removed internal dispatch route hidden from OIDC callers", async () => {
@@ -2671,6 +2642,7 @@ describe("cloudflare worker routes", () => {
         workspace: null,
       })),
     });
+    vi.spyOn(runtimeUserControl, "readPostgresRunnerStatus").mockImplementation(async (_source, _userId, options) => ({ lastErrorCode: null, lastInvocationAt: null, ...await (stub as WorkerTestUserRunnerStub).runnerStatus(options), nextAlarmAt: null }));
 
     const statusResponse = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status?logLimit=999", {
@@ -2714,6 +2686,7 @@ describe("cloudflare worker routes", () => {
         workspace: null,
       })),
     });
+    vi.spyOn(runtimeUserControl, "readPostgresRunnerStatus").mockImplementation(async (_source, _userId, options) => ({ lastErrorCode: null, lastInvocationAt: null, ...await (stub as WorkerTestUserRunnerStub).runnerStatus(options), nextAlarmAt: null }));
 
     const statusResponse = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status?logLimit=10abc", {
@@ -2733,6 +2706,7 @@ describe("cloudflare worker routes", () => {
         throw new Error("Hosted workspace read returned a different user.");
       }),
     });
+    vi.spyOn(runtimeUserControl, "readPostgresRunnerStatus").mockImplementation(async (_source, _userId, options) => ({ lastErrorCode: null, lastInvocationAt: null, ...await (stub as WorkerTestUserRunnerStub).runnerStatus(options), nextAlarmAt: null }));
 
     const statusResponse = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
@@ -3288,7 +3262,7 @@ describe("cloudflare worker routes", () => {
     expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
-  it("passes a reason-less test run-until-idle request to the Durable Object", async () => {
+  it("keeps the retired run-until-idle Worker route hidden", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
@@ -3307,14 +3281,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      nextWakeAt: null,
-      status: "idle",
-    });
-    expect(stub.runUntilIdleForTest).toHaveBeenCalledWith({
-      userId: "member_123",
-    });
+    expect(response.status).toBe(404);
   });
 
   it("rejects removed test run-until-idle reason query hints", async () => {
@@ -3336,11 +3303,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "Test run-until-idle reason is no longer supported.",
-    });
-    expect(stub.runUntilIdleForTest).not.toHaveBeenCalled();
+    expect(response.status).toBe(404);
   });
 
   it("rejects non-decimal positive integers on hosted-local test control helpers", () => {
@@ -3382,7 +3345,7 @@ describe("cloudflare worker routes", () => {
     it.each([
       { assistantExecutionBlocked: true, processingMode: "system_mailbox" },
       { conversationWorkPending: true, processingMode: "default" },
-    ] as const)("maps signed runtime ensure-processing $processingMode calls to the Durable Object adapter", async (processingRequest) => {
+    ] as const)("maps signed runtime ensure-processing $processingMode calls to the Postgres coordinator", async (processingRequest) => {
       const stub = createUserRunnerStub({
         ensureRuntimeProcessingForUser: vi.fn(async () => ({
           action: "started" as const,
@@ -3392,6 +3355,7 @@ describe("cloudflare worker routes", () => {
         })),
       });
       const env = createWorkerEnv(stub);
+      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub as WorkerTestUserRunnerStub).ensureRuntimeProcessingForUser(request));
 
       const response = await worker.fetch(
         await signWebCallbackControlRequest(
@@ -3461,7 +3425,7 @@ describe("cloudflare worker routes", () => {
     });
 
     it("runs runtime health-data consent reconciliation synchronously for Web OIDC", async () => {
-      const reconcileRuntimeHealthDataConsentForUser = vi.fn(async () => ({
+      const reconcileRuntimeHealthDataConsentForUser = vi.fn(async (_userId: string) => ({
         activeInvocationPreempted: true,
         consentState: "revoked" as const,
         processingAllowed: false,
@@ -3471,6 +3435,7 @@ describe("cloudflare worker routes", () => {
       }));
       const stub = createUserRunnerStub({ reconcileRuntimeHealthDataConsentForUser });
       const env = createWorkerEnv(stub);
+      vi.spyOn(runtimeUserControl, "reconcilePostgresRuntimeConsent").mockImplementation(async (_source, userId) => reconcileRuntimeHealthDataConsentForUser(userId));
 
       const response = await worker.fetch(
         await signControlRequest(new Request(
@@ -3537,7 +3502,7 @@ describe("cloudflare worker routes", () => {
       expect(reconcileRuntimeHealthDataConsentForUser).not.toHaveBeenCalled();
     });
 
-    it("returns the real Durable Object outcome to web-plane OIDC callers", async () => {
+    it("returns the synchronous Postgres coordinator outcome to web-plane OIDC callers", async () => {
       const infoLog = vi.spyOn(console, "info").mockImplementation(() => {});
       vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
       let nowEpochMs = Date.now();
@@ -3563,6 +3528,7 @@ describe("cloudflare worker routes", () => {
         ensureRuntimeProcessingForUser,
       });
       const env = createWorkerEnv(stub);
+      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub as WorkerTestUserRunnerStub).ensureRuntimeProcessingForUser(request));
       const execution = createWorkerExecutionContextForTest();
 
       let requestSettled = false;
@@ -3657,6 +3623,7 @@ describe("cloudflare worker routes", () => {
         }),
       });
       const env = createWorkerEnv(stub);
+      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub as WorkerTestUserRunnerStub).ensureRuntimeProcessingForUser(request));
       const execution = createWorkerExecutionContextForTest();
 
       const response = await worker.fetch(
@@ -3680,7 +3647,8 @@ describe("cloudflare worker routes", () => {
         code: "runtime_ensure_processing_failed",
         error: "Internal error.",
       });
-      expect(execution.waitUntilPromises).toHaveLength(0);
+      expect(execution.waitUntilPromises).toHaveLength(1);
+      await Promise.all(execution.waitUntilPromises);
       expect(errorLog).toHaveBeenCalledTimes(1);
       const serializedErrorLogs = errorLog.mock.calls
         .map(([payload]) => String(payload))
@@ -3775,6 +3743,7 @@ describe("cloudflare worker routes", () => {
     it("accepts runtime ensure-processing requests without timeout metadata", async () => {
       const stub = createUserRunnerStub();
       const env = createWorkerEnv(stub);
+      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub as WorkerTestUserRunnerStub).ensureRuntimeProcessingForUser(request));
 
       const response = await worker.fetch(
         await signWebCallbackControlRequest(
@@ -4170,9 +4139,9 @@ describe("cloudflare worker routes", () => {
       deleteHostedUserData: vi.fn(async (userId: string) => ({
         deletedAt: "2026-04-29T00:00:00.000Z",
         durableObject: {
-          alarmCleared: true,
-          deleteAllCompleted: true,
-          stateDeleted: true,
+          alarmCleared: false,
+          deleteAllCompleted: false,
+          stateDeleted: false,
         },
         ok: true,
         r2: {
@@ -4185,6 +4154,7 @@ describe("cloudflare worker routes", () => {
       })),
     });
     const env = createWorkerEnv(stub);
+    vi.spyOn(runtimeUserControl, "deletePostgresRunnerUserData").mockImplementation(async (_source, userId) => ({ ...await stub.deleteHostedUserData(userId), ok: true, stateOwner: "postgres", runtimeStateCleared: true, durableObject: { alarmCleared: false, deleteAllCompleted: false, stateDeleted: false } }));
 
     const response = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/account-data/delete", {
@@ -4200,9 +4170,9 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       durableObject: {
-        alarmCleared: true,
-        deleteAllCompleted: true,
-        stateDeleted: true,
+        alarmCleared: false,
+        deleteAllCompleted: false,
+        stateDeleted: false,
       },
       ok: true,
       r2: {
@@ -4275,6 +4245,7 @@ describe("cloudflare worker routes", () => {
   });
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
+    mockCanonicalOutboundStorage();
     installOidcJwksFetch();
     const env = createWorkerEnv();
     const artifactBytes = Buffer.from("artifact-payload\n", "utf8");
@@ -4315,6 +4286,7 @@ describe("cloudflare worker routes", () => {
   });
 
   it("rejects artifact writes when the request hash does not match the payload", async () => {
+    mockCanonicalOutboundStorage();
     installOidcJwksFetch();
     const env = createWorkerEnv();
     const artifactSha256 = "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b";
@@ -4337,6 +4309,7 @@ describe("cloudflare worker routes", () => {
   });
 
   it("keeps hosted artifact objects isolated per user", async () => {
+    mockCanonicalOutboundStorage();
     installOidcJwksFetch();
     const env = createWorkerEnv();
     const artifactBytes = Buffer.from("artifact-payload\n", "utf8");
@@ -4373,6 +4346,7 @@ describe("cloudflare worker routes", () => {
   });
 
   it("stores and reads encrypted hosted media objects through the outbound media.worker handler", async () => {
+    mockCanonicalOutboundStorage();
     installOidcJwksFetch();
     const userRunnerStub = createUserRunnerStub();
     const env = createWorkerEnv(userRunnerStub);
@@ -4406,17 +4380,11 @@ describe("cloudflare worker routes", () => {
       ok: true,
       size: mediaBytes.byteLength,
     });
-    expect(userRunnerStub.recordHostedMediaAsset).toHaveBeenCalledWith({
-      attemptId: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-attempt-id"],
-      byteSize: mediaBytes.byteLength,
-      expiresAt,
-      leaseGeneration:
-        ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-lease-generation"],
-      mediaId,
-      mediaKind: "image",
-      sha256: mediaSha256,
-      userId: "member_123",
-    });
+    expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "member_123", command: { operation: "register",
+        attemptId: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-attempt-id"], generation: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-lease-generation"],
+        descriptor: { byteSize: mediaBytes.byteLength, expiresAt, mediaId, mediaKind: "image", sha256: mediaSha256 } },
+    }));
 
     const readResponse = await callRunnerOutbound(
       new Request(`http://media.worker/media/${mediaId}`, {
@@ -4432,19 +4400,13 @@ describe("cloudflare worker routes", () => {
 
     expect(readResponse.status).toBe(200);
     expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(mediaBytes);
-    expect(userRunnerStub.admitHostedMediaRead).toHaveBeenCalledWith({
-      byteSize: mediaBytes.byteLength,
-      mediaId,
-      mediaKind: "image",
-      sha256: mediaSha256,
-      userId: "member_123",
-    });
+    expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "member_123", command: { operation: "read", descriptor: { byteSize: mediaBytes.byteLength, mediaId, mediaKind: "image", sha256: mediaSha256, expiresAt: null } },
+    }));
     const mediaObjectKey = await hostedMediaObjectKeyForTest(env, "member_123", mediaId);
     expect(env.__bucketStore.keys()).toContain(mediaObjectKey);
-    vi.mocked(userRunnerStub.forgetHostedMediaAsset).mockImplementationOnce(async () => {
-      await env.BUNDLES.delete!(mediaObjectKey);
-      return true;
-    });
+    vi.mocked(runtimeResourceClient.commandHostedRuntimeMedia).mockImplementation(async ({ command }) => ({ applied: true, cutover: "postgres", reason: null,
+      purge: command.operation === "retire" ? { objectKey: mediaObjectKey, mediaId, revision: "1" } : null }));
 
     const deleteResponse = await callRunnerOutbound(
       new Request(`http://media.worker/media/${mediaId}`, {
@@ -4455,17 +4417,15 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(deleteResponse.status).toBe(200);
-    expect(userRunnerStub.forgetHostedMediaAsset).toHaveBeenCalledWith({
-      attemptId: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-attempt-id"],
-      leaseGeneration:
-        ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-lease-generation"],
-      mediaId,
-      userId: "member_123",
-    });
+    expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "member_123", command: { operation: "retire", mediaId, attemptId: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-attempt-id"], generation: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-lease-generation"] },
+    }));
+    expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledWith(expect.objectContaining({ command: { operation: "acknowledge_purge", purge: { objectKey: mediaObjectKey, mediaId, revision: "1" } } }));
     expect(env.__bucketStore.keys()).not.toContain(mediaObjectKey);
   });
 
   it("keeps hosted media objects isolated per user", async () => {
+    mockCanonicalOutboundStorage();
     installOidcJwksFetch();
     const env = createWorkerEnv();
     const mediaBytes = Buffer.from("media-payload\n", "utf8");
@@ -5037,7 +4997,7 @@ function createWorkerEnv(
   const env: WorkerTestEnv = {
     __bucketStore: bucketStore,
     ...createHostedExecutionTestEnv(),
-    BUNDLES: bucketStore.api,
+    BUNDLES: createOutboundMultipartTestBucket(bucketStore.api),
     RUNNER_CONTAINER: createRunnerContainerNamespace(),
     RUNNER_CONTAINER_SMOKE: createRunnerContainerNamespace(),
     ...overrides,
@@ -5048,6 +5008,16 @@ function createWorkerEnv(
     },
   };
 
+  if (overrides.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1") {
+    mockPostgresOwnerCommand(async ({ userId, command }) => {
+      if (command.operation !== "reconcile") throw new Error("Unexpected local control owner operation.");
+      const fence: { attemptId: string; processingMode?: "default" | "system_mailbox" | "inbox_media_retention"; runnerContainerName?: string } | null = await (userRunnerStub as WorkerTestUserRunnerStub).readActiveRuntimeFenceForTest({ userId });
+      const target = await userRunnerStub.readRunnerContainerNameForTest();
+      return { cutover: "postgres", status: "observed", owner: createPostgresTestOwner({ userId,
+        attemptId: fence?.attemptId ?? null, phase: fence ? "active" : "idle", processingMode: fence?.processingMode ?? null,
+        runnerContainerName: fence?.runnerContainerName ?? target ?? userId }) };
+    });
+  }
   return env;
 
   function getOrCreateWrappedUserRunnerStub(userId: string, seedStub: UserRunnerStub): UserRunnerStub {
@@ -5607,3 +5577,11 @@ describe("deployment standby serving proof", () => {
     expect(h.retireStandbySlot).not.toHaveBeenCalled();
   });
 });
+
+function mockCanonicalOutboundStorage() {
+  mockPostgresOwnerCommand(async ({ userId, command }) => {
+    if (command.operation !== "authorize_effect") throw new Error("Unexpected canonical owner command.");
+    return { cutover: "postgres", status: "authorized", owner: createPostgresTestOwner({ userId, attemptId: command.attemptId, generation: command.generation }) };
+  });
+  vi.spyOn(runtimeResourceClient, "commandHostedRuntimeMedia").mockResolvedValue({ applied: true, cutover: "postgres", reason: "active", purge: null });
+}

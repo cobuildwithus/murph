@@ -1,5 +1,9 @@
+import type { HostedExecutionEnvironment } from "../env.js";
+import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.js";
+import { HOSTED_RUNTIME_LOG_PATH } from "@murphai/hosted-execution/routes";
 import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
 import {
+  emitHostedExecutionStructuredLog,
   buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
   type HostedExecutionStructuredLogDetails,
@@ -353,4 +357,57 @@ export function buildRuntimeProcessingSummaryEntry(
       } : {}),
     },
   };
+}
+
+export async function recordRuntimeProcessingSummary(input: {
+  env: HostedExecutionEnvironment;
+  entry: HostedRuntimeLogRequest["entries"][number];
+  orchestrationAttemptId: string;
+  userId: string;
+}): Promise<void> {
+  // The producer is not necessarily Web: even an opaque-looking caller id
+  // can be a member id. Fingerprint the whole value, only on this detached
+  // telemetry path. Never fall back to the original on hashing failure.
+  let orchestrationAttemptFingerprint: string | undefined;
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(
+      `murph.runtime-processing-attempt.v1\0${input.orchestrationAttemptId}`,
+    ));
+    orchestrationAttemptFingerprint = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    // Attempt/generation and command timing still identify this observation.
+  }
+  const entry = {
+    ...input.entry,
+    redactedJson: {
+      ...input.entry.redactedJson,
+      ...(orchestrationAttemptFingerprint ? { orchestrationAttemptFingerprint } : {}),
+    },
+  };
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    ...(input.env.hostedWebAllowHttpHosts
+      ? { allowHttpHosts: input.env.hostedWebAllowHttpHosts }
+      : {}),
+    baseUrl: input.env.hostedWebBaseUrl,
+    body: JSON.stringify({ entries: [entry] } satisfies HostedRuntimeLogRequest),
+    boundUserId: input.userId,
+    callbackSigning: input.env.webCallbackSigning,
+    method: "POST",
+    path: HOSTED_RUNTIME_LOG_PATH,
+    timeoutMs: input.env.webControlTimeoutMs,
+  });
+  // Initiate release, but do not wait for the stream's underlying cancel to
+  // settle. Own both synchronous throws and rejected cancellation promises.
+  void Promise.resolve().then(() => response.body?.cancel()).catch(() => undefined);
+  if (!response.ok) {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: { runtimeLogWriteStatus: response.status },
+      level: "warn",
+      message: "Hosted runner processing summary log write rejected.",
+      phase: "failed",
+      userId: input.userId,
+    });
+  }
 }

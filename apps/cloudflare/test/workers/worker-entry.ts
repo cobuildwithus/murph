@@ -41,7 +41,6 @@ import {
 import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
 import { asWorkerStringEnvironment } from "../../src/worker-contracts.ts";
 import {
-  requireRunnerRuntimeWriteFence,
   requireRunnerRuntimeWriteFenceHeaders,
   writeRunnerRuntimeWriteFenceHeaders,
 } from "../../src/runner-outbound/write-fence.ts";
@@ -481,12 +480,7 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
 
 async function runOpenAiAuthorizationAlertTest(): Promise<Response> {
   const userId = "member-private-openai-alert";
-  const runner = getUserRunnerStub(userId);
-  await runner.bindUser(userId);
-  const lease = await runner.beginWriteFenceForTest({
-    userId,
-    workspaceVersion: "7",
-  });
+  const lease = { attemptId: "synthetic-alert-attempt", generation: "1", workspaceVersion: "7" };
   const headers = new Headers({
     authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
     "content-type": "application/json; charset=utf-8",
@@ -513,7 +507,7 @@ async function runOpenAiAuthorizationAlertTest(): Promise<Response> {
 
   return await handleHostedRunnerOpenAiOutbound(
     providerRequest,
-    readWorkerEnvironmentSource(),
+    { ...readWorkerEnvironmentSource(), RUNNER_CONTAINER: { getByName: () => ({ runtimeUsageSettlementAllowsProviders: async () => true }) } },
     { containerId: "private-runner-container-id" },
     async () => new Response("private-upstream-response-body", {
       headers: {
@@ -588,10 +582,8 @@ async function measureRunnerLeaseLatency(request: Request): Promise<{
 
   for (let index = 0; index < warmupIterations; index += 1) {
     requireRunnerRuntimeWriteFenceHeaders(writeFenceRequest);
-    await requireRunnerRuntimeWriteFence({
-      env: readWorkerEnvironmentSource(),
-      request: writeFenceRequest,
-      userId,
+    await getUserRunnerStub(userId).validateRuntimeWriteFence({
+      attemptId: lease.attemptId, generation: lease.generation, userId,
     });
   }
 
@@ -604,10 +596,8 @@ async function measureRunnerLeaseLatency(request: Request): Promise<{
     const headerElapsed = performance.now() - headerStartedAt;
 
     const liveStartedAt = performance.now();
-    await requireRunnerRuntimeWriteFence({
-      env: readWorkerEnvironmentSource(),
-      request: writeFenceRequest,
-      userId,
+    await getUserRunnerStub(userId).validateRuntimeWriteFence({
+      attemptId: lease.attemptId, generation: lease.generation, userId,
     });
     const liveElapsed = performance.now() - liveStartedAt;
 

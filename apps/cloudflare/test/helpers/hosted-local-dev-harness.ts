@@ -1,3 +1,4 @@
+import { agePostgresRuntimeForTest, startStuckPostgresRuntimeForTest } from "#hosted-web-testing";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -8,6 +9,7 @@ import {
 } from "@murphai/cloudflare-hosted-control/routes";
 import {
   parseHostedRunnerStatusResponse,
+  parseHostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRunnerStatusResponse,
@@ -254,18 +256,8 @@ export async function startHostedLocalDevHarness(input: {
         startedAgoMs: number,
       ): Promise<{ attemptId: string; ok: true; startedAt: string }> => {
         assertHostedLocalTestControlsAvailable("ageActiveRuntimeFenceForTest");
-        return await requestJsonForRuntime<{
-          attemptId: string;
-          ok: true;
-          startedAt: string;
-        }>(
-          `/__test/users/${encodeURIComponent(userId)}`
-            + `/active-runtime-fence/age?startedAgoMs=${encodeURIComponent(String(startedAgoMs))}`,
-          {
-            headers: statusHeaders(userId),
-            method: "POST",
-          },
-        );
+        interventionCount += 1;
+        return agePostgresRuntimeForTest(stack!.runtimeEnv, userId, startedAgoMs);
       },
       assertNoInterventions: (): void => {
         if (interventionCount === 0) {
@@ -325,13 +317,8 @@ export async function startHostedLocalDevHarness(input: {
       requestJson: requestJsonForRuntime,
       runHostedAlarmForTest: async (userId: string): Promise<{ ok: true }> => {
         assertHostedLocalTestControlsAvailable("runHostedAlarmForTest");
-        return await requestJsonForRuntime<{ ok: true }>(
-          `/__test/users/${encodeURIComponent(userId)}/alarm`,
-          {
-            headers: statusHeaders(userId),
-            method: "POST",
-          },
-        );
+        await requestPostgresProcessing(userId);
+        return { ok: true };
       },
       startStuckInvocationForTest: async (
         userId: string,
@@ -345,25 +332,8 @@ export async function startHostedLocalDevHarness(input: {
         ok: true;
       }> => {
         assertHostedLocalTestControlsAvailable("startStuckInvocationForTest");
-        const searchParams = new URLSearchParams();
-        if (typeof stuckInput?.startedAgoMs === "number") {
-          searchParams.set("startedAgoMs", String(stuckInput.startedAgoMs));
-        }
-        if (stuckInput?.sameWorkerVersion === true) {
-          searchParams.set("sameWorkerVersion", "1");
-        }
-        const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : "";
-        return await requestJsonForRuntime<{
-          attemptId: string;
-          nextWakeAt: string | null;
-          ok: true;
-        }>(
-          `/__test/users/${encodeURIComponent(userId)}/stuck-invocation${suffix}`,
-          {
-            headers: statusHeaders(userId),
-            method: "POST",
-          },
-        );
+        interventionCount += 1;
+        return startStuckPostgresRuntimeForTest(stack!.runtimeEnv, userId, stuckInput?.startedAgoMs);
       },
       runtimeEnv: stack.runtimeEnv,
       workerRuntimeEnv: stack.workerRuntimeEnv,
@@ -958,17 +928,33 @@ export async function startHostedLocalDevHarness(input: {
   async function runHostedWorkspaceInvocationForTest(
     userId: string,
   ): Promise<HostedWorkspaceInvocationResult> {
-    return await requestJsonForRuntime<HostedWorkspaceInvocationResult>(
-      `/__test/users/${encodeURIComponent(userId)}/run-until-idle`,
-      {
-        headers: {
-          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-          ...statusHeaders(userId),
+    await requestPostgresProcessing(userId);
+    const deadline = Date.now() + hostedLocalRunUntilIdleTimeoutMs;
+    while (Date.now() < deadline) {
+      const status = await readHostedUserStatus({ requestJson: requestJsonForRuntime, statusHeaders, statusPath, userId });
+      if (!status.inFlight) return { status: status.lastErrorCode ? "failed" : "idle", nextWakeAt: status.workspace?.nextWakeAt ?? null };
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error("Local Postgres runtime did not become idle before the test deadline.");
+  }
+
+  async function requestPostgresProcessing(userId: string): Promise<void> {
+    const deadline = Date.now() + hostedLocalRunUntilIdleTimeoutMs;
+    const body = JSON.stringify({ orchestrationAttemptId: `synthetic-test-${randomUUID()}` });
+    while (Date.now() < deadline) {
+      const response = parseHostedRuntimeEnsureProcessingResponse(await requestJsonForRuntime(
+        `/internal/users/${encodeURIComponent(userId)}/runtime/ensure-processing`, {
+          body,
+          headers: { [HOSTED_EXECUTION_USER_ID_HEADER]: userId, ...statusHeaders(userId), "content-type": "application/json" },
+          method: "POST", signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
         },
-        method: "POST",
-        signal: AbortSignal.timeout(hostedLocalRunUntilIdleTimeoutMs),
-      },
-    );
+      ));
+      if (response.kind === "runtime_processing_accepted") return;
+      await new Promise(resolve => setTimeout(resolve, Math.max(1, Math.min(
+        Date.parse(response.retryAt) - Date.now(), deadline - Date.now(),
+      ))));
+    }
+    throw new Error("Local Postgres runtime did not accept processing before the test deadline.");
   }
 
   function requireTestControls<TArgs extends unknown[], TResult>(

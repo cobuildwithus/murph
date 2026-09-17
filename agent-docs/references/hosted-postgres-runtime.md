@@ -3,12 +3,18 @@
 ## Authority and activation
 
 `HostedRuntimeOwner` in Web's primary Postgres database owns member execution
-admission. The durable `HostedRuntimeCutover` gate selects `legacy`, `draining`,
-`rolling`, or `postgres`. `HOSTED_RUNTIME_POSTGRES_ENABLED` is a deployment
-capability, not a fleet-wide backend selector. With that capability enabled,
-`rolling` routes each member by explicit migration phase; unregistered existing
-members remain legacy. Disabled deployments cannot start migrated members.
+admission. Ordinary Worker processing, callbacks, resources, and user-control
+routes call the canonical Postgres owner directly. They neither consult the
+retired `HOSTED_RUNTIME_POSTGRES_ENABLED` capability nor fall back to a legacy
+object. A database whose migration gate is not yet `postgres` cannot start
+ordinary execution through this Worker release.
 
+The durable `HostedRuntimeCutover` gate retains the historical `legacy`,
+`draining`, and `rolling` campaign phases and the terminal `postgres` state.
+The capability and `UserRunnerDurableObject` remain only for the finite migration
+operator and frozen source inspection until the separately authorized namespace
+retirement. Earlier rolling releases used the capability and explicit per-member
+migration phase; they remain compatible after global activation.
 A rolling campaign closes through the same `activate` operation as the finite
 draining campaign, requested by the operator only under an explicit finalize
 option and never from a targeted canary. Web proves retirement under the
@@ -80,6 +86,20 @@ cleanup enrollment. Duplicate-only pages carry a pending signal so the operator
 continues to later encrypted pages. Late receipts join late source accounting
 without changing the baseline seal. This work is operator census work, not part
 of ordinary foreground processing.
+
+## Local initialization and fault controls
+
+A fresh local schema starts with the `postgres` gate. Initialization preserves an
+existing gate; it rejects a legacy database with instructions to complete its
+migration on the preceding release or explicitly reset that isolated local stack.
+Empty SQL owner tables do not prove a legacy namespace is empty.
+
+Local E2E stale-attempt injection writes the canonical owner only in a guarded,
+loopback `murph_e2e_*` database. It requires an idle Postgres member, preserves
+any retained physical target, and increments its generation. Native fault
+controls resolve the target from that owner. Test nudges use ordinary
+`ensure-processing` admission and wait for acceptance before polling status;
+retired legacy alarm and run-until-idle HTTP controls are unavailable.
 
 ## Claim, launch, completion, and recovery
 
@@ -236,6 +256,12 @@ empty imports/activation reject a different selection; the pointer has no expiry
 unfinished selection uses a single read-only statement without the campaign lock;
 every source effect rechecks it, so stale hints can only fail. Actual selection
 changes take a short exclusive transaction. Baseline work precedes late work.
+
+An exact frozen empty source drains its four finite export sections and activates
+within one command budget. Each import must return an advancing canonical
+receipt; a lost acknowledgement or exhausted budget stops the continuation,
+and the next request resumes that receipt. Nonempty sources retain their
+existing bounded continuation. No source freeze or activation check is skipped.
 
 Ordinary ensure-processing retries drive one bounded migration continuation when
 Postgres reports draining or a legacy attempt returns retry during quiescence.
@@ -432,3 +458,12 @@ The engine names are documented in Cloudflare's
 and [alarm metadata implementation](https://github.com/cloudflare/workerd/blob/main/src/workerd/util/sqlite-metadata.h).
 The local name table belongs to Miniflare's
 [Durable Object wrapper](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/workers/core/do-wrapper.worker.ts).
+
+## Processing diagnostics
+
+The request-local Postgres ensure path emits the same detached
+`runner.processing_finished` summary as the legacy owner, including stage,
+outcome, elapsed time, observed fence and a finite retry reason. A null legacy
+delegation leaves summary ownership with the legacy runner. Telemetry cannot
+delay the control response or change its result; orchestration correlation uses
+the existing domain-separated hash rather than retaining the raw attempt ID.

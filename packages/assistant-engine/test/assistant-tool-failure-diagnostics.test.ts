@@ -725,3 +725,43 @@ describe('finite shell attribution without private payloads', () => {
     }
   })
 })
+
+
+describe('research scout-batch completion diagnostics', () => {
+  it.each([
+    ['research_scout_invalid_batch_payload', 'invalid_input'],
+    ['research_scout_invalid_window', 'invalid_input'],
+    ['research_exa_token_missing', 'unavailable'],
+  ] as const)('retains %s only in private metadata without inventing a stage', (code, category) => {
+    const command = `vault-cli research scout-batch --input @/PRIVATE_PATH --since ${sentinel}`
+    const error = envelope(code)
+    for (const body of [error, { ok: false, error, meta: { command: sentinel, duration: '0ms' } }]) {
+      const output = JSON.stringify(body)
+      const rawEvent = commandEvent(output, command)
+      const untouched = structuredClone(rawEvent)
+      const tracker = createCodexActionRuntimeIssueTracker()
+      const issue = tracker.recordEvent(eventInput(rawEvent))
+      expect(issue?.details).toMatchObject({ vaultCliCommand: 'research scout-batch',
+        vaultCliErrorAttribution: 'recognized', vaultCliErrorCode: code,
+        vaultCliErrorCategory: category, errorCategory: category, exitCode: 1,
+        failureStage: 'execution', failureReason: 'nonzero_exit' })
+      expect(issue?.details).not.toHaveProperty('vaultCliErrorStage')
+      expect(issue?.details).not.toHaveProperty('vaultCliValidationField')
+      expect(rawEvent).toEqual(untouched)
+      expect(tracker.recordEvent(eventInput(rawEvent))).toBeNull()
+      expect(commandIssue(output, command, 0)).toBeNull()
+      expect(JSON.stringify(issue)).not.toContain(sentinel)
+      expect(JSON.stringify(issue)).not.toContain('PRIVATE_PATH')
+    }
+    for (const unknown of [code.toUpperCase(), `${code}_PRIVATE_LABEL`, `prefix_${code}`,
+      'research_scout_invalid_profile', 'research_exa_request_failed']) {
+      expect(cliTimingFailureCode(unknown)).toBe('unknown')
+      expect(classifyToolFailureCode(unknown)).toBe('unknown')
+      const issue = commandIssue(JSON.stringify(envelope(unknown)), command)
+      expect(issue?.details?.vaultCliErrorAttribution).toBe('unknown_code')
+      expect(issue?.details?.vaultCliErrorCategory).toBe('unknown')
+      expect(issue?.details).not.toHaveProperty('vaultCliErrorCode')
+      expect(JSON.stringify(issue)).not.toContain(unknown)
+    }
+  })
+})

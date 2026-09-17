@@ -67,6 +67,7 @@ import {
 import {
   buildRunnerWriteFenceValidationRejectedDetails,
   buildRuntimeProcessingSummaryEntry,
+  recordRuntimeProcessingSummary,
   type RuntimeProcessingDiagnostics,
 } from "./diagnostics.js";
 import {
@@ -432,8 +433,8 @@ export class HostedUserRunner {
       // finish later. Telemetry must not extend admission or change the result.
       const entry = buildRuntimeProcessingSummaryEntry(diagnostics, result, enteredAtEpochMs);
       const telemetry = Promise.resolve().then(() =>
-        this.runtimeInvocation.recordRuntimeProcessingSummary({
-          entry, orchestrationAttemptId: input.orchestrationAttemptId, userId: input.userId,
+        recordRuntimeProcessingSummary({
+          env: this.env, entry, orchestrationAttemptId: input.orchestrationAttemptId, userId: input.userId,
         }),
       ).catch(() => undefined);
       try {

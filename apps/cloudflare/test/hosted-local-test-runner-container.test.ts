@@ -1,3 +1,4 @@
+import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRuntime, settledNativeRuntime } from "./postgres-owner-fixtures.ts";
 import { readFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -196,6 +197,11 @@ function createOutboundEnv(input: {
   openAiApiKey?: string;
   ownsRuntimeWriteFence?: boolean;
 } = {}): RunnerOutboundEnvironmentSource {
+  mockPostgresOwnerCommand(async ({ userId, command }) => {
+    if (command.operation !== "authorize_provider" && command.operation !== "authorize_effect") throw new Error("Unexpected owner operation.");
+    const owns = command.operation === "authorize_provider" ? Boolean(command.runnerContainerName) : input.ownsRuntimeWriteFence ?? false;
+    return { cutover: "postgres", status: owns ? "authorized" : "stale", owner: owns ? createPostgresTestOwner({ userId, attemptId: command.operation === "authorize_effect" ? command.attemptId : "attempt_provider_egress_credential", generation: command.operation === "authorize_effect" ? command.generation : "7", runnerContainerName: command.runnerContainerName ?? "member_123--v-test" }) : null };
+  });
   return {
     ...createHostedExecutionTestEnv(),
     AI: input.AI,
@@ -208,6 +214,7 @@ function createOutboundEnv(input: {
         readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
       }),
       getByName: () => ({
+        ...settledNativeRuntime,
         destroyInstance: async () => {},
         invoke: async () => {
           throw new Error("Runner container must not be invoked by outbound wrapper tests.");
@@ -219,19 +226,7 @@ function createOutboundEnv(input: {
       }),
       idFromString: (id: string) => id,
     },
-    USER_RUNNER: {
-      getByName: () => ({
-        validateRuntimeProviderEgressCredential: async (credentialInput: { userId: string }) => ({
-          attemptId: "attempt_provider_egress_credential",
-          leaseGeneration: "7",
-          owns: true,
-          userId: credentialInput.userId,
-          workspaceVersion: "4",
-        }),
-        validateRuntimeProviderEgressToken: async () => ({ owns: false }),
-        validateRuntimeWriteFence: async () => input.ownsRuntimeWriteFence ?? false,
-      }),
-    },
+    USER_RUNNER: forbiddenLegacyRuntime,
   };
 }
 

@@ -1,7 +1,6 @@
 import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-execution/contracts";
 import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
 import type { HostedWorkspaceInvocationResult } from "@murphai/hosted-execution/runtime-control";
-import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import { hostedRunnerImageMatches, readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
 import { Container, type StopParams } from "@cloudflare/containers";
 import {
@@ -998,7 +997,6 @@ export class RunnerContainer extends Container {
   }
 
   private async recordRuntimeFailureBeforeStop(request: { userId: string; attemptId: string; leaseGeneration: string }, error: unknown): Promise<void> {
-    if (!await usesPostgresRuntimeOwner(this.environment, request.userId)) return;
     const phaseCode = readRunnerContainerErrorDetails(error)?.[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY];
     await commandHostedRuntimeOwner({ source: this.environment, userId: request.userId, timeoutMs: 1_000,
       command: { operation: "record_failure", attemptId: request.attemptId, generation: request.leaseGeneration,
@@ -2251,19 +2249,7 @@ export class RunnerContainer extends Container {
     binding: Extract<HostedStandbySlotBinding, { state: "bound" }>,
   ): Promise<void> {
     try {
-      if (await usesPostgresRuntimeOwner(this.environment, binding.userId)) {
-        await commandHostedRuntimeOwner({ source: this.environment, userId: binding.userId, command: { operation: "target_retired", runnerContainerName: binding.slotName } });
-        return;
-      }
-
-      const namespace = readRunnerContainerMetadataRecordProperty(this.environment.USER_RUNNER);
-      if (typeof namespace.getByName !== "function") return;
-      const runner = readRunnerContainerMetadataRecordProperty(namespace.getByName(binding.userId));
-      if (typeof runner.recordRunnerContainerRetired !== "function") return;
-      await runner.recordRunnerContainerRetired({
-        runnerContainerName: binding.slotName,
-        userId: binding.userId,
-      });
+      await commandHostedRuntimeOwner({ source: this.environment, userId: binding.userId, command: { operation: "target_retired", runnerContainerName: binding.slotName } });
     } catch {
       emitHostedExecutionStructuredLog({
         component: "container",

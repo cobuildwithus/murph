@@ -651,6 +651,15 @@ async function createHostedForegroundMailboxPrefetch(input: {
   });
 }
 
+function recordHostedForegroundMailboxPrefetchElapsed(
+  context: HostedWorkspaceRunnerMailboxImportContext | null,
+  key: "foregroundPrefetchPrepareElapsedMs" | "foregroundPrefetchWaitElapsedMs",
+  startedAtMs: number,
+): void {
+  const wake = context?.latencyMilestones?.phaseBreakdown?.wake;
+  if (wake) wake[key] = Math.max(0, Date.now() - startedAtMs);
+}
+
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
   "assistant.notification.requested:phone-call-result:",
   "assistant.notification.requested:usage-referral-reward:",
@@ -6120,6 +6129,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 assistantAskRequestTargetKind: "joined_group" as const,
               }
             : wakeInitialMailboxImportContext;
+        const prefetchPreparationStartedAtMs = Date.now();
         const initialMailboxPrefetch = input.initialMailboxPrefetch
           ?? await createHostedForegroundMailboxPrefetch({
             lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
@@ -6128,7 +6138,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               `${requestId}:${input.requestIdKind}-foreground-prefetch:${idleWakeOrdinal + 1}`,
             runnerInput: baseRunnerInput,
           });
+        recordHostedForegroundMailboxPrefetchElapsed(
+          initialMailboxImportContext,
+          "foregroundPrefetchPrepareElapsedMs",
+          prefetchPreparationStartedAtMs,
+        );
         if (input.signal) {
+          const prefetchWaitStartedAtMs = Date.now();
           try {
             await raceHostedRuntimeCancellation(
               initialMailboxPrefetch.response,
@@ -6139,6 +6155,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               throw error;
             }
             // The mailbox-import owner performs its existing one-shot refetch.
+          } finally {
+            recordHostedForegroundMailboxPrefetchElapsed(
+              initialMailboxImportContext,
+              "foregroundPrefetchWaitElapsedMs",
+              prefetchWaitStartedAtMs,
+            );
           }
         }
         if (!shouldContinue()) {

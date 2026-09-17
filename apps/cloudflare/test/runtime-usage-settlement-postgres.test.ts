@@ -88,12 +88,12 @@ describe("Postgres usage settlement with native receipts", () => {
     expect(h.container.runtimeUsageSettlementAllowsProviders).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["legacy", "draining", "postgres"] as const)("only explicitly legacy authorization may route to UserRunner (%s)", async cutover => {
+  it.each(["legacy", "draining", "postgres"] as const)("rejects blocked authorization without legacy fallback (%s)", async cutover => {
     const h = harness();
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover, status: "blocked", owner: null });
     const result = await authorizePostgresRuntimeProvider({ env: h.env, userId: h.userId, managed: false,
       command: { operation: "authorize_provider", runnerContainerName: null, providerEgressTokenHash: "f".repeat(64), providerKind: "linq" } });
-    expect(result).toBe(cutover === "legacy" ? "legacy" : null);
+    expect(result).toBeNull();
     expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(1);
     expect(h.container.runtimeUsageSettlementAllowsProviders).not.toHaveBeenCalled();
   });
@@ -131,7 +131,6 @@ describe("Postgres usage settlement with native receipts", () => {
     expect(h.receipt().usageSettlementAllowsProviders(h.identity)).toBe(true);
     expect(fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
     const commands = vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation);
-    expect(commands.filter(operation => operation === "reconcile")).toHaveLength(2);
-    expect(commands).toHaveLength(3);
+    expect(commands).toEqual(["authorize_effect"]);
   });
 });

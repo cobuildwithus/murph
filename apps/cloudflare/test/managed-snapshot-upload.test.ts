@@ -7,9 +7,8 @@ import { completeManagedSnapshotUpload, expectedManagedSnapshotEtag, prepareMana
 import type { R2BucketLike } from "../src/bundle-store.ts";
 import { completeManagedSnapshotForSession, presignManagedSnapshot } from "../src/managed-snapshot-control.ts";
 
-const resource = vi.hoisted(() => ({ command: vi.fn(), postgres: true }));
+const resource = vi.hoisted(() => ({ command: vi.fn() }));
 vi.mock("../src/runtime-resource-client.ts", () => ({ commandHostedRuntimeSnapshot: resource.command }));
-vi.mock("../src/runtime-cutover.ts", async original => ({ ...await original<typeof import("../src/runtime-cutover.ts")>(), usesPostgresRuntimeOwner: async () => resource.postgres }));
 
 const bytes = new TextEncoder().encode("synthetic encrypted snapshot bytes");
 const encryptedSha256 = createHash("sha256").update(bytes).digest("hex");
@@ -42,8 +41,7 @@ function harness() {
 }
 
 describe("managed snapshot uploads", () => {
-  it.each([true, false])("connects presigning and trusted completion to the admitted owner (Postgres: %s)", async postgres => {
-    resource.postgres = postgres;
+  it.each([undefined, "false", "true"])("uses canonical managed uploads regardless of the retired capability (%s)", async capability => {
     const h = harness();
     let stored: HostedRuntimeManagedSnapshotUpload | null = null;
     const commandOwner = vi.fn(async ({ command }: { command: import("@murphai/hosted-execution/runtime-resources").HostedRuntimeManagedSnapshotCommand }) => {
@@ -53,14 +51,11 @@ describe("managed snapshot uploads", () => {
         if (!stored || command.uploadId !== stored.uploadId) throw new Error("Wrong upload settlement.");
         stored = { ...stored, completedAt: "2026-09-15T00:01:00.000Z", verifiedAt: command.verified ? "2026-09-15T00:01:00.000Z" : null };
       } else if (command.operation !== "snapshot_managed_read") throw new Error("Unexpected resource command.");
-      return { cutover: postgres ? "postgres" as const : "legacy" as const, applied: true, session, managedUpload: stored };
+      return { cutover: "postgres" as const, applied: true, session, managedUpload: stored };
     });
-    resource.command.mockReset().mockImplementation(postgres ? commandOwner : async () => { throw new Error("Legacy upload must not access Postgres resources."); });
-    const source = { BUNDLES: h.bucket, USER_RUNNER: { getByName(userId: string) {
-      if (postgres) throw new Error("Postgres upload must not access legacy state.");
-      expect(userId).toBe(session.userId);
-      return { manageHostedWorkspaceSnapshotUpload: commandOwner };
-    } }, HOSTED_R2_PRESIGN_ACCOUNT_ID: "synthetic-account",
+    resource.command.mockReset().mockImplementation(commandOwner);
+    const source = { BUNDLES: h.bucket, HOSTED_RUNTIME_POSTGRES_ENABLED: capability,
+      USER_RUNNER: { getByName() { throw new Error("Canonical upload must not access legacy state."); } }, HOSTED_R2_PRESIGN_ACCOUNT_ID: "synthetic-account",
       HOSTED_R2_PRESIGN_BUCKET_NAME: "synthetic-bucket", HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "synthetic-access", HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "synthetic-secret" };
     const signed = await presignManagedSnapshot({ source, session, encryptedByteSize: bytes.length, encryptedSha256, expiresSeconds: 60 });
     const url = new URL(signed.putUrl);

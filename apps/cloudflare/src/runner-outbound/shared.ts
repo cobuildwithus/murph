@@ -1,4 +1,3 @@
-import { resolveAdmittedLegacyUserRunner } from "../legacy-runtime-admission.ts";
 import type {
   HostedCryptoDomain,
 } from "@murphai/runtime-state";
@@ -9,8 +8,7 @@ import type {
   HostedUserCryptoContext,
 } from "../hosted-crypto/runtime-user-crypto-context.ts";
 import type {
-  WorkerEnvironmentContract,
-  WorkerUserRunnerStubLike,
+  WorkerEnvironmentContract
 } from "../worker-contracts.ts";
 
 export interface RunnerOutboundEnvironmentSource
@@ -80,26 +78,6 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
 
 export function resetRunnerOutboundSharedCachesForTest(): void {
   runnerOutboundCryptoContextPendingLoads.clear();
-}
-
-export async function resolveRunnerOutboundUserRunnerStub(
-  env: RunnerOutboundEnvironmentSource,
-  userId: string,
-): Promise<WorkerUserRunnerStubLike> {
-  return resolveAdmittedLegacyUserRunner(env, userId);
-}
-
-type WorkerUserRunnerStubWithMethod<
-  TKey extends keyof WorkerUserRunnerStubLike,
-> = WorkerUserRunnerStubLike & Required<Pick<WorkerUserRunnerStubLike, TKey>>;
-
-export function requireRunnerOutboundUserStubMethod<TKey extends keyof WorkerUserRunnerStubLike>(
-  stub: WorkerUserRunnerStubLike,
-  key: TKey,
-): asserts stub is WorkerUserRunnerStubWithMethod<TKey> {
-  if (typeof stub[key] !== "function") {
-    throw new TypeError(`User runner stub does not implement ${String(key)}.`);
-  }
 }
 
 function cryptoContextCacheKey(input: {
