@@ -4603,10 +4603,35 @@ describe("hosted system mailbox notification execution context", () => {
           });
           expect(wake).toMatchObject({
             defaultOwned: { at: null, reason: null },
-            next: { at: admittedAt, executionClass: "model_free", reason: "device-sync.reconcile" },
+            next: { at: retryAt, executionClass: null, reason: "device-sync.reconcile" },
           });
           expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(checkpoint);
         }
+        // An early invocation may retire the superseded schedule, but cannot
+        // execute the deferred owner or its dirty hints.
+        await prepareHostedSystemMailboxItemForCheckpoint({
+          allowedRouteActions: ["run-device-sync-wake"], now: () => admittedAt,
+          runtime, runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
+        });
+        expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+        expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+          .toEqual(checkpoint.pending.filter((item) => item.itemId !== "mailbox_synthetic_drain_1"));
+        // Fresh accepted work can admit the retained owner while the older
+        // jobs keep their exact retry deadline and future source metadata.
+        const freshWake = buildHostedExecutionDeviceSyncWake({
+          connectionId, eventId: "device-sync.wake:synthetic-fresh-after-deferral",
+          expectedConnectedAt, occurredAt: admittedAt, provider: "junction",
+          reason: "webhook_hint", userId: "member_123",
+        });
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedDeviceSyncItem({ dedupeKey: freshWake.eventId,
+            id: "mailbox_synthetic_fresh_after_deferral", laneSeq: "5", occurredAt: admittedAt }),
+          vaultRoot: workspace.vaultRoot, wake: freshWake,
+        });
+        await writeHostedMailboxImportState({
+          state: { ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: "5" } },
+          vaultRoot: workspace.vaultRoot,
+        });
       }
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["run-device-sync-wake"], executionContext: null,
@@ -4638,8 +4663,8 @@ describe("hosted system mailbox notification execution context", () => {
         itemId: "mailbox_synthetic_drain_0", deviceSyncContinuationOwner: true,
         nextAttemptAt: expectedRetryAt, wake: retainedWake,
       })]);
-      expect(resolveHostedSystemMailboxProgress({ importedSeq: "4", now: admittedAt, state: restored }))
-        .toEqual({ deviceSyncContinuationSeqs: ["1"], firstPendingClassifierFailures: null, firstPendingSeq: null, handledThroughSeq: "4" });
+      expect(resolveHostedSystemMailboxProgress({ importedSeq: allDeferred ? "5" : "4", now: admittedAt, state: restored }))
+        .toEqual({ deviceSyncContinuationSeqs: ["1"], firstPendingClassifierFailures: null, firstPendingSeq: null, handledThroughSeq: allDeferred ? "5" : "4" });
       expect(await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["run-device-sync-wake"], executionContext: null,
         now: () => admittedAt, retainProcessedItemUntilRecorded: true,
@@ -4930,7 +4955,7 @@ describe("hosted system mailbox notification execution context", () => {
         const wake = await resolveHostedSystemMailboxWakeCandidates({
           allowedRouteActions: ["run-device-sync-wake"], now: () => FIXED_NOW, vaultRoot: workspace.vaultRoot,
         });
-        expect(wake.next.at).toBe(boundary === "other_connection" ? FIXED_NOW : "2026-04-28T00:00:00.000Z");
+        expect(wake.next.at).toBe("2026-04-28T00:00:00.000Z");
         expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(before);
       }
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
@@ -4938,7 +4963,7 @@ describe("hosted system mailbox notification execution context", () => {
         now: () => FIXED_NOW, retainProcessedItemUntilRecorded: true,
         runtime: createRuntime({}), runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
       });
-      if (!deferred || boundary === "other_connection") {
+      if (!deferred) {
         assert.equal(prepared?.status, "processed");
         assert.equal(prepared.itemId, "mailbox_synthetic_boundary_0");
       } else {
@@ -4947,7 +4972,7 @@ describe("hosted system mailbox notification execution context", () => {
         expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(before);
       }
       expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending.map((item) => item.itemId))
-        .toEqual(boundary === "other_connection"
+        .toEqual(boundary === "other_connection" && !deferred
           ? ["mailbox_synthetic_boundary_0", "mailbox_synthetic_boundary_1"]
           : ["mailbox_synthetic_boundary_0", "mailbox_synthetic_boundary_1", "mailbox_synthetic_boundary_2"]);
     } finally {

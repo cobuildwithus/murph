@@ -1,5 +1,6 @@
 import { access, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { buildHostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -10,11 +11,15 @@ import {
 import {
   readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
+  resolveHostedSystemMailboxNextWakeCandidate,
+  type HostedSystemMailboxPendingItem,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
   createHostedRuntimeResolvedConfig,
   createHostedRuntimeWorkspace,
 } from "./hosted-runtime-test-helpers.ts";
+
+import { createEmptyHostedMailboxImportState, writeHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -36,6 +41,48 @@ afterEach(async () => {
 });
 
 describe("empty system-mailbox preparation", () => {
+  it("leaves deferred device work untouched when a premature wake arrives", async () => {
+    const workspace = await createHostedRuntimeWorkspace("deferred-device-mailbox-");
+    tempRoots.push(workspace.workspaceRoot);
+    const now = "2026-04-27T12:00:00.000Z";
+    const retryAt = "2026-04-28T12:00:00.000Z";
+    const wake = buildHostedExecutionDeviceSyncWake({
+      connectionId: "synthetic_connection", eventId: "device-sync.wake:retained",
+      expectedConnectedAt: now, occurredAt: now, provider: "junction",
+      reason: "reconcile_due", userId: "synthetic_member",
+      hint: { jobs: [{ kind: "resource", dedupeKey: "synthetic_job", availableAt: retryAt }] },
+    });
+    const retained: HostedSystemMailboxPendingItem = {
+      itemId: "retained", mailboxDedupeKey: wake.eventId, mailboxLaneSeq: "1",
+      attemptCount: 1, deviceSyncContinuationOwner: true, lastAttemptAt: now,
+      lastErrorCode: null, lastErrorMessage: null, nextAttemptAt: retryAt,
+      occurredAt: now, postCheckpointRecord: null, preferenceCausalSeq: null, requestId: null,
+      routeAction: "run-device-sync-wake", status: "pending", wake,
+    };
+    const { deviceSyncContinuationOwner: _owner, ...base } = retained;
+    const dirty: HostedSystemMailboxPendingItem = {
+      ...base, itemId: "dirty", mailboxDedupeKey: "device-sync.wake:dirty", mailboxLaneSeq: "2",
+      attemptCount: 0, lastAttemptAt: null,
+      wake: { ...wake, eventId: "device-sync.wake:dirty", reason: "webhook_hint",
+        hint: { reason: "webhook_dirty_transition" } },
+    };
+    const state = { pending: [retained, dirty] };
+    await writeHostedMailboxImportState({ vaultRoot: workspace.vaultRoot, state: {
+      ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: "2" },
+    } });
+    await updateHostedSystemMailboxState(workspace.vaultRoot, () => state);
+    for (let pass = 0; pass < 3; pass += 1) {
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"], allowedWakeKinds: ["device-sync.wake"],
+        now: () => now, runtime: createRuntime(), runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
+      })).resolves.toBeNull();
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => now, vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({ at: retryAt, executionClass: null, reason: "device-sync.reconcile" });
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(state);
+    }
+  });
+
   it.each([false, true])(
     "does not write unchanged empty mailbox state (persisted=%s)",
     async (persisted) => {

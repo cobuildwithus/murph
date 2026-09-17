@@ -44,6 +44,10 @@ The current deployment contract remains in `agent-docs/references/hosted-postgre
 
 ## Purpose
 
+Deferred device hints honor their persisted retry time in wake projection and
+mailbox admission. The contract is owned by `agent-docs/RELIABILITY.md`; focused
+proof lives in the assistant-runtime device-hint, mailbox-state, and empty-mailbox tests.
+
 Maximum-census runtime retirement proof is indexed in
 `agent-docs/references/testing-ci-map.md`.
 
