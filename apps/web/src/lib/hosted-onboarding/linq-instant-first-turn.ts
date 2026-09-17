@@ -289,12 +289,6 @@ export async function claimHostedLinqInstantFirstTurn(input: {
   const idempotencyKey = buildHostedLinqInstantFirstTurnIdempotencyKey(
     input.request.eventId,
   );
-  const route = await readHostedThreadRouteByThreadIdentity({
-    channel: "linq",
-    prisma,
-    threadId: input.linqChatId,
-  });
-  if (route) return { kind: "unavailable" };
   const openingTone = input.continuationMemberId
     ? await readHostedLinqOpeningContinuationTone({
         ...input,

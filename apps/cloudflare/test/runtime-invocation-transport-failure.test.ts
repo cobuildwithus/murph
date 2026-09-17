@@ -1101,6 +1101,7 @@ async function createTransportFailureHarness(input: {
   });
 
   const prepared: PreparedRuntimeInvocation = {
+    customInferenceEnvelope: null, platformAiUsageAllowed: true,
     input: {
       orchestrationAttemptId: "orchestration_attempt_1",
       userId: TEST_USER_ID,

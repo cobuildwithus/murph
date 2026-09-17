@@ -362,7 +362,7 @@ describe("hosted Linq instant first turn", () => {
       service: "imessage",
       wakeHandoff: WAKE_HANDOFF,
     })).resolves.toMatchObject({ kind: "accepted" });
-    expect(mocks.hostedThreadRouteFindMany).toHaveBeenCalledTimes(3);
+    expect(mocks.hostedThreadRouteFindMany).toHaveBeenCalledTimes(2);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       chatId: "chat_123",
       message: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal,
@@ -451,9 +451,8 @@ describe("hosted Linq instant first turn", () => {
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])("rejects a group route at continuation admission, including a concurrent conversion %s", async (concurrent) => {
+  it("rejects a group route under the chat lock after continuation preflight", async () => {
     prepareContinuation();
-    if (concurrent) mocks.hostedThreadRouteFindMany.mockResolvedValueOnce([]);
     mocks.hostedThreadRouteFindMany.mockResolvedValue([{
       channel: "linq", containerMemberId: "group_container",
       container: { member: { id: "group_container" }, owner: { id: "group_owner" } },
