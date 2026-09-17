@@ -25,6 +25,7 @@ export const runtimeMigrationRoutes: readonly DeclarativeRoute<WorkerRouteContex
     }
     if (command.operation === "inspect_object") return json(await inspectObject(context, command.objectId));
     if (!supportsPostgresRuntimeOwner(context.env)) throw new Error("Migration requires the Postgres-capable fleet deployment.");
+    if (command.operation === "recover_object") return json(await recoverObject(context, command.objectId));
     const identity = { namespaceId: command.namespaceId, workerVersion: command.workerVersion };
     if (command.operation === "enroll_members") return json(await enrollRuntimeMembers(context.env, identity));
     if (command.operation === "enroll_sources" || command.operation === "list_unenrolled" || command.operation === "select_first_use") throw new Error("Canonical source bindings must be derived by the Worker.");
@@ -59,6 +60,13 @@ async function inspectObject(context: WorkerRouteContext, objectId: string) {
   return { objectId, observation: await stub.inspectPostgresMigration() };
 }
 
+/** Mutating, unlike inspection: the exact dormant source runs the ordinary
+ * schema initialization so the member advance can observe it. */
+async function recoverObject(context: WorkerRouteContext, objectId: string) {
+  const stub = exactLegacyObject(context, objectId);
+  if (!stub.recoverPostgresMigrationSchema) throw new Error("Legacy object does not support schema recovery.");
+  return { objectId, observation: await stub.recoverPostgresMigrationSchema() };
+}
 async function readFleetObject(context: WorkerRouteContext, command: Extract<HostedRuntimeMigrationCommand, { operation: "read_object" }>) {
     const current = await commandHostedRuntimeMigration({ source: context.env, command });
     const object = current.object;

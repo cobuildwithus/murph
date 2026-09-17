@@ -120,6 +120,32 @@ describe("live legacy migration inspection", () => {
     expect(h.mutation).not.toHaveBeenCalled();
   });
 
+  it("recovers a dormant pre-cutover schema through the ordinary initialization and then observes it", async () => {
+    const h = harness();
+    h.sql.exec("UPDATE runner_schema_meta SET value = 19 WHERE key = 'runner_state_schema_version'");
+    h.sql.exec("CREATE TABLE runner_bundle_slots (slot TEXT PRIMARY KEY)");
+    expect(await observeLegacyRuntime(h.state)).toEqual({ kind: "unsupported_schema", schemaVersion: 19 });
+    const object = new UserRunnerDurableObject(h.state, {} as never);
+    expect(await object.recoverPostgresMigrationSchema()).toMatchObject({
+      kind: "observed", schemaVersion: 21, userId: null, freeze: { phase: null, pendingOperations: 0 },
+    });
+    expect(h.sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'runner_%' ORDER BY name").toArray().map(row => row.name))
+      .toEqual(["runner_hosted_media_asset", "runner_meta", "runner_schema_meta"]);
+    expect(h.mutation).not.toHaveBeenCalled();
+  });
+
+  it("leaves supported and newer-than-supported schemas untouched during recovery", async () => {
+    const supported = harness();
+    expect(await new UserRunnerDurableObject(supported.state, {} as never).recoverPostgresMigrationSchema()).toMatchObject({ kind: "observed", schemaVersion: 21 });
+    expect(supported.queries.every(query => query.trim().startsWith("SELECT"))).toBe(true);
+    const newer = harness();
+    newer.sql.exec("UPDATE runner_schema_meta SET value = 22 WHERE key = 'runner_state_schema_version'");
+    newer.queries.length = 0;
+    expect(await new UserRunnerDurableObject(newer.state, {} as never).recoverPostgresMigrationSchema()).toMatchObject({ kind: "unsupported_schema", schemaVersion: 22 });
+    expect(newer.queries.every(query => query.trim().startsWith("SELECT"))).toBe(true);
+    expect(newer.mutation).not.toHaveBeenCalled();
+  });
+
   it("rejects a contradictory resource after the first page even when runner metadata is bound", async () => {
     const h = harness();
     h.sql.exec("INSERT INTO runner_meta (singleton, user_id) VALUES (1, 'synthetic_member')");

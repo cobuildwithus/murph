@@ -103,6 +103,7 @@ export type HostedRuntimeMigrationCommand =
   | ({ operation: "inventory"; after: string; objectIds: string[]; complete: boolean } & HostedRuntimeMigrationIdentity)
   | ({ operation: "read_object"; objectId: string } & HostedRuntimeMigrationIdentity)
   | ({ operation: "inspect_object"; objectId: string } & HostedRuntimeMigrationIdentity)
+  | ({ operation: "recover_object"; objectId: string } & HostedRuntimeMigrationIdentity)
   | ({ operation: "import"; objectId: string; page: LegacyRuntimeExportPage } & HostedRuntimeMigrationIdentity)
   | ({ operation: "activate"; inventoryHash: string; inventoryCount: number } & HostedRuntimeMigrationIdentity);
 
@@ -143,6 +144,7 @@ export function parseHostedRuntimeMigrationCommand(value: unknown): HostedRuntim
     case "advance_empty":
     case "activate_empty":
     case "read_object":
+    case "recover_object":
     case "inspect_object": return { operation: record.operation, ...identity, objectId: migrationDigest(record.objectId) };
     case "import_empty":
     case "import": return { operation: record.operation, ...identity, objectId: migrationDigest(record.objectId), page: parseLegacyRuntimeExportPage(record.page) };

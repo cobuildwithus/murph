@@ -275,6 +275,12 @@ active attempt, proves its completion and stop, exports bounded frozen pages,
 and activates the member. Incoming work stays durably queued. Preparation that
 finds old direct-PUT capabilities or unsupported active code leaves legacy live.
 A committed or ambiguous freeze requires same-token roll-forward recovery.
+A dormant source whose stored schema predates the supported versions is
+recovered through an explicit exact-object `recover_object` command before the
+member advance: it runs the same schema initialization ordinary activation
+performs, under the admission gate, and returns a fresh observation. Supported,
+quiescing, frozen and newer-than-supported sources are never mutated, and plain
+inspection stays observational.
 
 Deletion admitted before local closure must settle before source reservation.
 Deletion after closure retains its canonical cleanup receipt and retries; it
