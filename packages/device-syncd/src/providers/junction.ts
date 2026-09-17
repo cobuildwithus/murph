@@ -4275,6 +4275,13 @@ export function createJunctionDeviceSyncProvider(
     const historicalPullCompleted = isJunctionHistoricalDataEvent(eventType)
       && data !== null
       && isJunctionHistoricalPullCompletedWebhookData(data, externalAccountSelection.userId);
+    // A re-sent pull completion names the same declared range, so its job
+    // identity comes from that range rather than from the fetch window, whose
+    // end is clamped to receipt time and would start a second walk of the
+    // same history instead of joining the one already in flight.
+    const dedupeWindow = historicalPullCompleted
+      ? readJunctionWebhookDeclaredWindow(data, resource) ?? window
+      : window;
     const dataSourceProviderSlug = resolveJunctionWebhookDataSourceProviderSlug({
       data,
       envelopeSourceProviderSlug,
@@ -4291,6 +4298,7 @@ export function createJunctionDeviceSyncProvider(
     });
     const sourceProviderSlug = dataSourceProviderSlug ?? envelopeSourceProviderSlug;
     const jobs = buildJunctionWebhookJobs({
+      dedupeWindow,
       eventType,
       objectId,
       occurredAt,
@@ -12008,6 +12016,7 @@ function readJunctionHistoricalBackfillVersion(
 }
 
 function buildJunctionWebhookJobs(input: {
+  dedupeWindow?: { windowStart: string; windowEnd: string };
   eventType: string;
   objectId: string | null;
   occurredAt: string;
@@ -12018,6 +12027,7 @@ function buildJunctionWebhookJobs(input: {
   window: { windowStart: string; windowEnd: string };
 }): DeviceSyncJobInput[] {
   const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const dedupeWindow = input.dedupeWindow ?? input.window;
   if (isJunctionProviderConnectionEvent(input.eventType)) {
     const backfillWindowStart = subtractDays(input.window.windowEnd, input.summaryBackfillDays);
 
@@ -12079,8 +12089,8 @@ function buildJunctionWebhookJobs(input: {
             sourceProviderSlug,
             input.resource?.category,
             input.resource?.name,
-            input.window.windowStart,
-            input.window.windowEnd,
+            dedupeWindow.windowStart,
+            dedupeWindow.windowEnd,
           ])),
     }));
   }
@@ -12624,12 +12634,10 @@ function extractJunctionWebhookOccurredAt(
   return readJunctionWebhookDataTimestampRange(data, resource?.name)?.firstTimestamp ?? null;
 }
 
-function buildJunctionWebhookWindow(
+function readJunctionWebhookDeclaredWindow(
   data: Record<string, unknown> | null,
-  occurredAt: string,
-  now: string,
   resource: { name: string } | null,
-): { windowStart: string; windowEnd: string } {
+): { windowStart: string; windowEnd: string } | null {
   const bodyTimeseriesResource = isJunctionBodyTimeseriesResource(resource?.name);
   const explicitStart =
     toJunctionWebhookWindowBoundaryTimestampIfValid(data?.window_start, "start")
@@ -12646,10 +12654,22 @@ function buildJunctionWebhookWindow(
       : toJunctionWebhookWindowBoundaryTimestampIfValid(data?.end, "end"))
     ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.to, "end");
 
-  if (explicitStart && explicitEnd) {
+  return explicitStart && explicitEnd
+    ? { windowStart: explicitStart, windowEnd: explicitEnd }
+    : null;
+}
+
+function buildJunctionWebhookWindow(
+  data: Record<string, unknown> | null,
+  occurredAt: string,
+  now: string,
+  resource: { name: string } | null,
+): { windowStart: string; windowEnd: string } {
+  const declaredWindow = readJunctionWebhookDeclaredWindow(data, resource);
+  if (declaredWindow) {
     return {
-      windowStart: explicitStart,
-      windowEnd: minIsoTimestamp(explicitEnd, now),
+      windowStart: declaredWindow.windowStart,
+      windowEnd: minIsoTimestamp(declaredWindow.windowEnd, now),
     };
   }
 
