@@ -247,7 +247,7 @@ describe("member deletion and migration ordering", () => {
 
 
 describe("empty namespace object migration", () => {
-  it("freezes and exports a schema-free object without initializing a runner or stopping a container", async () => {
+  it("freezes, exports and activates a schema-free object in one call without initializing a runner or stopping a container", async () => {
     const h = harness();
     h.sql.exec("DROP TABLE runner_meta"); h.sql.exec("DROP TABLE runner_hosted_media_asset"); h.sql.exec("DROP TABLE runner_schema_meta");
     let section = 0; let completed = false;
@@ -258,10 +258,10 @@ describe("empty namespace object migration", () => {
       if (command.operation !== "import_empty") throw new Error("Unexpected empty migration command.");
       expect(command.page).toMatchObject({ userId: null, generation: "0", records: [], cursor: { section, after: "" } });
       section++; completed = command.page.next === null;
-      return { object: { completedAt: completed ? "synthetic-complete" : null } };
+      return { object: { completedAt: completed ? "synthetic-complete" : null, nextCursor: command.page.next } };
     });
-    for (let i = 0; i < 4; i++) await advanceRuntimeEmptyMigration({ source: h.source, stub: h.object, identity });
     expect(await advanceRuntimeEmptyMigration({ source: h.source, stub: h.object, identity })).toEqual({ done: true, member: { userId: identity.userId, mailboxItemId: "synthetic-wake" } });
+    expect(section).toBe(4);
     expect(h.stop).not.toHaveBeenCalled(); expect(h.drained).not.toHaveBeenCalled(); expect(h.checkpoint).not.toHaveBeenCalled();
     expect(h.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table'").toArray()).toEqual([]);
     expect(h.values.get("runtime-migration-freeze:v1")).toMatchObject({ phase: "frozen", migrationId: `empty-${identity.objectId}` });

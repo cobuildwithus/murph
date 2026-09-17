@@ -9,6 +9,7 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   createHostedExecutionAssistantAskCompletionId,
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
+  HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
@@ -1363,6 +1364,45 @@ export async function appendHostedGroupCurrentSenderFallbackCompletionTx(input: 
     expectedUserId: input.authority.groupRuntimeMemberId,
     mailboxItemId: input.completionId,
   };
+}
+
+// Classify an exact, canonical requested reply for the inactivity policy only.
+// Runtime still validates its complete private proof through the existing live
+// authority endpoint before preflight and again immediately before delivery.
+export async function isHostedGroupCurrentSenderPrivateLinqCompletionTx(input: {
+  answeredMailboxItemIds: readonly string[];
+  boundRuntimeMemberId: string;
+  idempotencyKey: string | null;
+  now?: Date;
+  target: string;
+  targetKind: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (!input.idempotencyKey?.startsWith(
+    HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
+  )) return false;
+  const completionId = input.answeredMailboxItemIds[0];
+  if (!completionId || input.answeredMailboxItemIds.length !== 1) return false;
+  if (createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(completionId)
+    !== input.idempotencyKey) return false;
+  const wake = await readHostedMailboxWakeByItemId({
+    availableAt: input.now ?? new Date(),
+    mailboxItemId: completionId,
+    prisma: input.tx,
+  });
+  if (wake?.kind !== "assistant.notification.requested"
+    || wake.userId !== input.boundRuntimeMemberId
+    || wake.eventId !== completionId) return false;
+  const notification = wake.notification;
+  return notification.privateAssistantAskCompletion !== undefined
+    && notification.deliveryIdempotencyKey === input.idempotencyKey
+    && notification.deliveryDedupeToken === input.idempotencyKey
+    && notification.deliveryDispatchMode === "queue-only"
+    && notification.responsePolicy?.kind === "require_send_exact_text"
+    && notification.route.channel === "linq"
+    && notification.route.threadIsDirect === true
+    && notification.route.delivery.kind === input.targetKind
+    && notification.route.delivery.target === input.target;
 }
 
 export async function assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx(

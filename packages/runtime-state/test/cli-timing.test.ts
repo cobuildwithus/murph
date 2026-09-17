@@ -746,3 +746,86 @@ test("only the three existing knowledge source codes survive producer and wire a
     assert.ok(!JSON.stringify(report).includes("PRIVATE_SENTINEL"));
   }
 });
+
+
+const researchFailureCodes = [
+  "research_scout_invalid_batch_payload", "research_scout_invalid_window", "research_exa_token_missing",
+] as const;
+
+test("research timing admits only three exact source codes without inferring a stage or retaining private data", async () => {
+  const unknown = ["research_scout_invalid_profile", "research_exa_request_failed", "PRIVATE_ERROR_LABEL",
+    ...researchFailureCodes.flatMap((code) => [code.toUpperCase(), `prefix_${code}`, `${code}_suffix`,
+      `${code} `, code.replaceAll("_", "-"), code.replace("research", "rese\u0430rch")])];
+  for (const code of [...researchFailureCodes, ...unknown]) {
+    const expected = researchFailureCodes.find((known) => known === code) ?? "unknown";
+    assert.equal(cliTimingFailureCode(code), expected);
+    const error = Object.assign(new Error("PRIVATE_ERROR_MESSAGE"), { code,
+      context: { token: "PRIVATE_TOKEN", path: "/PRIVATE_PATH", payload: "PRIVATE_PAYLOAD" },
+      cause: { code: "invalid_payload", stage: "validation" }, argv: ["PRIVATE_ARGUMENT"] });
+    let report!: CliTiming;
+    let reports = 0;
+    await assert.rejects(withCliTiming(() => timeCliDispatch("research scout-batch", async () => { throw error; }),
+      (value) => { report = value; reports += 1; }), (caught) => caught === error);
+    assert.equal(reports, 1);
+    assert.equal(report.reportCount, 1);
+    assert.equal(report.commands.length, 1);
+    assert.equal(report.commands[0]!.calls, 1);
+    assert.equal(report.commands[0]!.outcome, "error");
+    assert.deepEqual(report.commands[0]!.failures, [{ code: expected, stage: "unknown", count: 1 }]);
+    assert.deepEqual(normalizeCliTiming(report), report);
+    // Future/malicious optional evidence must not remove accounting or escape.
+    const wire = { ...report, argv: error.argv, commands: [{ ...report.commands[0]!, failures: [
+      { code, stage: "PRIVATE_STAGE", count: 1, message: error.message, ...error.context,
+        validation: { field: "PRIVATE_FIELD", code: "PRIVATE_ISSUE" } },
+    ] }] };
+    assert.deepEqual(normalizeCliTiming(wire), report);
+    assert.ok(!JSON.stringify(report).includes("PRIVATE_"));
+  }
+});
+
+// Actual history-backed reader, not a copied parser or current-reader roundtrip.
+const researchFailureCompatibilityBase = process.env.MURPH_CLI_RESEARCH_FAILURE_COMPAT_BASE;
+test.skipIf(!researchFailureCompatibilityBase)("actual pre-research reader collapses only new evidence and preserves mixed counts", async () => {
+  assert.match(researchFailureCompatibilityBase ?? "", /^[a-f0-9]{7,40}$/u);
+  const source = execFileSync("git", ["show", `${researchFailureCompatibilityBase}:packages/runtime-state/src/cli-timing.ts`],
+    { encoding: "utf8", maxBuffer: 1_000_000 });
+  const old: { normalizeCliTiming: typeof normalizeCliTiming; cliTimingFailureCode: typeof cliTimingFailureCode } = await import(
+    `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString("base64")}`,
+  );
+  for (const code of researchFailureCodes) assert.equal(old.cliTimingFailureCode(code), "unknown");
+  let report!: CliTiming;
+  await withCliTiming(() => timeCliDispatch("batch", async () => {
+    for (const code of [...researchFailureCodes, researchFailureCodes[0]]) {
+      const error = Object.assign(new Error("PRIVATE_ERROR_MESSAGE"), { code });
+      await assert.rejects(withCliTiming(() => timeCliDispatch("research scout-batch", async () => { throw error; })),
+        (caught) => caught === error);
+    }
+    await withCliTiming(() => timeCliDispatch("research scout-batch", async () => {}));
+  }), (value) => { report = value; });
+  assert.deepEqual(report.commands[0]!.failures, researchFailureCodes.map((code, index) => ({
+    code, stage: "unknown", count: index === 0 ? 2 : 1,
+  })));
+  assert.deepEqual(report.commands.map(({ outcome, calls }) => ({ outcome, calls })), [
+    { outcome: "error", calls: 4 }, { outcome: "ok", calls: 1 },
+  ]);
+  assert.equal(report.batchContainers, 1);
+  assert.equal(report.reportCount, 1);
+  assert.equal(report.commands[1]!.failures, undefined);
+  assert.deepEqual(normalizeCliTiming(report), report);
+  const expected = structuredClone(report);
+  expected.commands[0]!.failures = [{ code: "unknown", stage: "unknown", count: 4 }];
+  assert.deepEqual(old.normalizeCliTiming(report), expected);
+  assert.deepEqual(normalizeCliTiming(expected), expected);
+  delete expected.commands[0]!.failures;
+  assert.deepEqual(old.normalizeCliTiming(expected), expected);
+  assert.deepEqual(normalizeCliTiming(expected), expected);
+  // Mixing an old report with no failure evidence adds calls, not invented observations.
+  mergeCliTiming(expected, report);
+  assert.equal(expected.commands[0]!.calls, 8);
+  assert.equal(expected.commands[1]!.calls, 2);
+  assert.deepEqual(expected.commands[0]!.failures, report.commands[0]!.failures);
+  const oldMixed = structuredClone(expected);
+  oldMixed.commands[0]!.failures = [{ code: "unknown", stage: "unknown", count: 4 }];
+  assert.deepEqual(old.normalizeCliTiming(expected), oldMixed);
+  assert.deepEqual(normalizeCliTiming(oldMixed), oldMixed);
+});

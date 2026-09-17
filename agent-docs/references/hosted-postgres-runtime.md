@@ -111,8 +111,14 @@ processing mode, the provider-token hash, encrypted inference settings, and
 managed-AI allowance once. The opaque provider token travels only in the job.
 The workspace checkpoint compare-and-swap version is independent of generation.
 
-Preparation and native readiness overlap. The native slot verifies fresh Web
-authority and persists its invocation receipt before starting execution.
+Input preparation and native readiness overlap. The native slot submits the
+existing `prepare_launch` command immediately before registering its durable
+invocation receipt. That transaction binds invocation facts and verifies fresh
+Web authority together; startup does not make a second `authorize_effect` call.
+The existing readiness response advertises this capability. During mixed
+Worker/controller deployments, callers of older controllers still prepare through
+Web before the controller's authorization call; older callers remain supported.
+Provider effects continue to require their own live authorization.
 Registered/completed receipts survive activation loss. A duplicate registration
 cannot execute the attempt twice. An uncertain launch or stop retains the exact
 target; age can schedule reconciliation but cannot authorize its replacement.
@@ -135,10 +141,23 @@ native stop, without granting or releasing authority.
 
 Ordinary runtime requests bind attempt/generation to their signed Web callback.
 The Worker rejects caller-supplied authority query parameters and derives those
-parameters from authenticated runtime headers. Web validates admission and the
-canonical mutation in the same transaction. No standalone UserRunner preflight
-is added to that callback. Provider effects still require fresh authorization at
-the Worker boundary; no cached positive allowance can outlive revocation.
+parameters from authenticated runtime headers. Web validates exact ownership and
+the canonical mutation in the same transaction. Access, suspension, and health-data
+consent are checked at claim admission, not repeated by ownership or provider
+validation. A policy change blocks new admission; already admitted work may finish
+until completion or the existing retirement/shutdown path ends its ownership.
+This is not an immediate-cancellation guarantee. Deleted members remain blocked;
+their retained owner rows exist only for cleanup.
+
+Provider effects still authenticate their exact runtime identity or credential,
+apply provider operation policy, and enforce managed spending limits. The same
+Web authorization response selects Postgres or explicitly legacy routing; no
+separate backend-discovery request precedes it. Draining, stale, or failed
+Postgres authorization never falls back to legacy. No positive-allowance cache
+or standalone UserRunner callback preflight is added. Deploy Web's combined
+backend-selection/authorization response before its Worker consumer: older Web
+rejects exact-header authorization for legacy members instead of returning their
+backend. Existing Workers remain compatible with the new Web behavior.
 
 Lock order is the cutover gate, member, runtime owner, then workspace/mailbox and
 resource rows. Transactions contain bounded database work only, with five-second
@@ -237,6 +256,12 @@ empty imports/activation reject a different selection; the pointer has no expiry
 unfinished selection uses a single read-only statement without the campaign lock;
 every source effect rechecks it, so stale hints can only fail. Actual selection
 changes take a short exclusive transaction. Baseline work precedes late work.
+
+An exact frozen empty source drains its four finite export sections and activates
+within one command budget. Each import must return an advancing canonical
+receipt; a lost acknowledgement or exhausted budget stops the continuation,
+and the next request resumes that receipt. Nonempty sources retain their
+existing bounded continuation. No source freeze or activation check is skipped.
 
 Ordinary ensure-processing retries drive one bounded migration continuation when
 Postgres reports draining or a legacy attempt returns retry during quiescence.
@@ -433,3 +458,12 @@ The engine names are documented in Cloudflare's
 and [alarm metadata implementation](https://github.com/cloudflare/workerd/blob/main/src/workerd/util/sqlite-metadata.h).
 The local name table belongs to Miniflare's
 [Durable Object wrapper](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/workers/core/do-wrapper.worker.ts).
+
+## Processing diagnostics
+
+The request-local Postgres ensure path emits the same detached
+`runner.processing_finished` summary as the legacy owner, including stage,
+outcome, elapsed time, observed fence and a finite retry reason. A null legacy
+delegation leaves summary ownership with the legacy runner. Telemetry cannot
+delay the control response or change its result; orchestration correlation uses
+the existing domain-separated hash rather than retaining the raw attempt ID.

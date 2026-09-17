@@ -1,3 +1,4 @@
+import { buildRuntimeProcessingSummaryEntry, recordRuntimeProcessingSummary, type RuntimeProcessingDiagnostics } from "../../user-runner/diagnostics.ts";
 import { readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
 import {
   emitHostedExecutionStructuredLog,
@@ -316,7 +317,27 @@ async function runRuntimeEnsureProcessingForUser(input: {
     orchestration: input.orchestration,
     userId: input.userId,
   };
-  return ensurePostgresRuntimeProcessing(input.context.env, command);
+  const diagnostics: RuntimeProcessingDiagnostics = {
+    stage: "admission",
+    details: {
+      runtimeProcessingBackend: "postgres",
+      commandStartedAtEpochMs: input.commandStartedAtEpochMs,
+      runtimeProcessingRequestedMode: input.ensureRequest.processingMode ?? "default",
+      triggeredByWebDirect: input.orchestration.triggeredByWebDirect === true,
+    },
+  };
+  let postgres: HostedRuntimeEnsureProcessingResponse | undefined;
+  try {
+    postgres = await ensurePostgresRuntimeProcessing(input.context.env, command, diagnostics);
+  } finally {
+    // Snapshot before detaching so telemetry cannot extend the command budget.
+    const entry = buildRuntimeProcessingSummaryEntry(diagnostics, postgres, input.commandStartedAtEpochMs);
+    const telemetry = Promise.resolve().then(() => recordRuntimeProcessingSummary({
+      env: input.context.environment, entry, orchestrationAttemptId: command.orchestrationAttemptId, userId: input.userId,
+    })).catch(() => undefined);
+    try { input.context.executionCtx?.waitUntil(telemetry); } catch { /* Rejection is already owned. */ }
+  }
+  return postgres;
 }
 
 export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {

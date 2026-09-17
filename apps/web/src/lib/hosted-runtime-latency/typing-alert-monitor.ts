@@ -109,7 +109,16 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         trace.mailbox_item_id,
         trace.linq_delivery_id,
         trace.webhook_received_at,
+        trace.provider_start_at,
         EXTRACT(EPOCH FROM trace.webhook_received_at AT TIME ZONE 'UTC') * 1000 AS received_ms,
+        EXTRACT(EPOCH FROM GREATEST(trace.accepted_at, trace.webhook_received_at,
+          trace.assistant_input_staged_at) AT TIME ZONE 'UTC') * 1000 AS terminal_not_before_ms,
+        CASE
+          WHEN jsonb_typeof(terminal.value) = 'number'
+            AND terminal.value #>> '{}' ~ '^[0-9]{1,15}$'
+            THEN (terminal.value #>> '{}')::bigint
+          ELSE NULL
+        END AS terminal_non_reply_ms,
         CASE
           WHEN trace.workspace_restore_done_at <= trace.webhook_received_at
             OR trace.phase_breakdown_json #> '{boot,restoreWasCold}' = 'false'::jsonb
@@ -128,6 +137,8 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         WHEN 'linq' THEN trace.phase_breakdown_json #>> '{assistant,linqTypingAcceptedAtEpochMs}'
         WHEN 'telegram' THEN trace.phase_breakdown_json #>> '{assistant,telegramTypingAcceptedAtEpochMs}'
       END AS value) AS typing
+      CROSS JOIN LATERAL (SELECT trace.phase_breakdown_json
+        #> '{assistant,terminalNonReplyCommittedAtEpochMs}' AS value) AS terminal
       WHERE trace.source IN ('linq', 'telegram')
         AND trace.webhook_received_at IS NOT NULL
         AND trace.accepted_at >= ${new Date(input.now.getTime() - 7 * 24 * 60 * 60_000)}
@@ -151,9 +162,16 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         END AS threshold_ms,
         COALESCE(typing_ms, ${input.now.getTime()}::bigint) - received_ms AS elapsed_ms
       FROM observations
-      WHERE typing_ms <= ${input.now.getTime()}::bigint
+      WHERE (typing_ms <= ${input.now.getTime()}::bigint
         OR (typing_ms IS NULL
-          AND received_ms < ${input.now.getTime() - MISSING_TYPING_OBSERVATION_GRACE_MS}::bigint)
+          AND received_ms < ${input.now.getTime() - MISSING_TYPING_OBSERVATION_GRACE_MS}::bigint))
+        -- Pre-provider terminal silence needs no typing. Provider execution,
+        -- actual typing, and invalid/stale evidence retain ordinary thresholds.
+        -- Terminal suppression can also record provider failures. Checkpoint
+        -- publication remains owned by the independent progress monitors.
+        AND (typing_ms IS NOT NULL OR provider_start_at IS NOT NULL OR terminal_non_reply_ms IS NULL
+          OR terminal_non_reply_ms < terminal_not_before_ms
+          OR terminal_non_reply_ms > ${input.now.getTime()}::bigint)
     ), measured AS MATERIALIZED (
       SELECT observation.*, GREATEST(received_ms,
         EXTRACT(EPOCH FROM ${buildLinqConversationActivitySql(input.now)} AT TIME ZONE 'UTC') * 1000

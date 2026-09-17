@@ -327,6 +327,27 @@ delay, and `firstUpstreamElapsedMs` and `firstDownstreamElapsedMs` measure the
 next receive and forward boundaries. `upstreamIdleMs` and `downstreamIdleMs`
 measure connection-wide time since the last data frame on each boundary.
 
+Every existing milestone includes numeric `acceptedPendingBytes` and
+`acceptedPendingMessageCount` from the relay's shared client/provider reservation
+counters, connection-local `acceptedPendingHighWaterBytes` and
+`acceptedPendingHighWaterMessageCount`, and the existing limits as
+`pendingLimitBytes` and `pendingLimitMessageCount`. High-water values advance only on successful
+reservation and survive draining and request reuse. Receive milestones run before
+reservation, so they exclude the arriving frame; send milestones run before
+release, so they include the frame being forwarded. Rejected frames never enter
+these values. A close or failure can still observe outstanding reservations.
+These measure accepted queued/in-flight work, including authorization or usage
+persistence waits, not JavaScript heap, socket buffers, or total isolate memory.
+The two high-water values are independent peaks, not necessarily simultaneous.
+
+The six scalars are additive under `diagnosticVersion: 1`; the unchanged runtime
+log parser accepts their `Bytes`/`Count` metadata names, as do older readers using
+that same policy. Readers with stricter schemas need separate compatibility
+verification. Older records without the fields remain valid; absence is unknown,
+not zero. No extra events or writes are emitted. A lost tail or platform memory
+termination may leave no final/high-water observation; low values in the last
+surviving record cannot rule out a later backlog peak or other memory pressure.
+
 `firstUpstreamMessageKind` contains only a fixed event-type allowlist or
 `other`, `invalid_json`, `too_large`, or `binary`. Only the first frame is
 parsed for this field, with a 65,536-character limit. No raw frames, arbitrary
@@ -1150,6 +1171,19 @@ source does not prove corruption; invalid source/library references do not
 establish why the caller supplied them. No stage is inferred when absent.
 Unfamiliar codes and lookalikes still normalize to `unknown`.
 
+Research scout diagnostics admit exactly `research_scout_invalid_batch_payload`
+and `research_scout_invalid_window` (private category `invalid_input`), plus
+`research_exa_token_missing` (private category `unavailable`, for missing runtime
+configuration). The command/parser and client already own these errors. Invalid
+compact lanes, a reversed window and an empty injected environment are distinct
+synthetic rejection cases; retaining their codes establishes no production
+behavioral cause. Their existing errors supply no stage: timing retains `unknown`
+and shell readback
+omits the stage. Do not add stages to public errors, infer them from codes, change
+model/RPC text or retry guidance, or expand provider-code catalogs. Unknown codes
+and lookalikes remain `unknown`; no arguments, paths, tokens, payloads or error
+messages enter this telemetry. The same consumer-first order below applies.
+
 #### Optional schema-validation detail
 
 For `VALIDATION_ERROR` only, `validation: { field, code, missing? }` is one finite
@@ -1238,9 +1272,9 @@ actual pre-change owners; the older `MURPH_CLI_TIMING_COMPAT_BASE` test remains 
 separate, pre-timing rollout proof.
 
 Additional failure codes on the same `murph.cli-timing.v1` schema, including the
-two memory read codes and three knowledge source codes, and optional validation
-detail also roll out **reader before writer**: first update the
-portable normalizer in downstream Web/hosted usage and engine/profile consumers
+two memory read codes, three knowledge source codes and three research codes,
+and optional validation detail also roll out **reader before writer**: first
+update the portable normalizer in downstream Web/hosted usage and engine/profile consumers
 and the assistant category reader, then update CLI producers. Warm older
 failure-aware readers normalize unfamiliar codes to `unknown`, discard unknown
 validation metadata and coalesce equal code/stage pairs while retaining command
@@ -1251,6 +1285,10 @@ no protocol bump or coordinated pause is needed. The history-backed runtime-stat
 test uses `MURPH_CLI_MEMORY_FAILURE_COMPAT_BASE` to load the actual pre-admission
 portable reader; it must be run with the base named in the active rollout plan,
 not replaced with a copy of the old parser or a current-reader round trip.
+The research equivalent uses `MURPH_CLI_RESEARCH_FAILURE_COMPAT_BASE` with the
+pre-admission base in its active plan. Runtime-state and profile tests load the
+actual old portable and hosted readers, checking coalescing to `unknown`, mixed
+old/new reports, absent evidence and unchanged counts/tokens.
 
 ### Bounded failure-frequency inspection and decision threshold
 
@@ -1677,3 +1715,14 @@ validation must run repository tests/typechecks/builds, the actual complexity
 guard and the built hosted lane on supported Node/pnpm and pinned Codex versions
 before promotion. This telemetry patch does not authorize merging, deployment,
 or bypassing the protected public-main release contract.
+
+### Reply skip reasons
+
+Assistant `input.reply-skipped` events populate the existing `safeDetails` field
+on `assistant.automation_detail` with `reply_skip:<reason>`. The engine maps exact
+static reasons to bounded codes such as `channel_disabled`, `self_authored`,
+`already_handled`, `unattested_reaction`, `empty_input`, `intentional_no_reply`,
+`provider_usage_limit`, and `incomplete_terminal_evidence`. Unknown or dynamic
+reasons yield only `reply_skip:unclassified`; unrestricted event details and
+provider error text are never copied into this diagnostic. These codes describe
+an existing skip or deferral and do not change retry, reply, or alert decisions.

@@ -2089,6 +2089,26 @@ describe("hosted runtime internal web routes", () => {
     expect(payload.hostedAssistantProviderOverride).toBeUndefined();
   });
 
+  it("starts the usage read while workspace and preference reads are still pending", async () => {
+    let releaseReads!: () => void;
+    const pending = new Promise<void>(resolve => { releaseReads = resolve; });
+    mocks.readHostedWorkspace.mockImplementationOnce(async () => {
+      await pending;
+      return buildWorkspaceRecord({ version: "4" });
+    });
+    mocks.readHostedMemberAssistantModelPreference.mockImplementationOnce(async () => {
+      await pending;
+      return null;
+    });
+    const response = workspaceRoute.GET(new Request("https://join.example.test/api/internal/hosted-workspace"));
+    try {
+      await vi.waitFor(() => expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledOnce());
+    } finally {
+      releaseReads();
+    }
+    expect((await response).status).toBe(200);
+  });
+
   it("projects the current platform usage decision for a managed route", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(
       buildWorkspaceRecord({ version: "4" }),
@@ -2190,7 +2210,7 @@ describe("hosted runtime internal web routes", () => {
         code: "HOSTED_CUSTOM_INFERENCE_CONSUMER_UNSUPPORTED",
       },
     });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledOnce();
   });
 
   it("fails closed when a selected Chat route is not enabled", async () => {
@@ -2222,7 +2242,7 @@ describe("hosted runtime internal web routes", () => {
         code: "HOSTED_CUSTOM_CHAT_COMPLETIONS_UNAVAILABLE",
       },
     });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledOnce();
   });
 
   it.each([

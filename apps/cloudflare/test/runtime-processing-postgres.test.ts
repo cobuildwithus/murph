@@ -1,3 +1,4 @@
+import type { RuntimeProcessingDiagnostics } from "../src/user-runner/diagnostics.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeOwnerResponse, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ensurePostgresRuntimeProcessing } from "../src/runtime-processing.ts";
@@ -19,7 +20,7 @@ vi.mock("../src/runtime-invocation-preparation.ts", () => ({
     prepareForFreshStart() {
       return async (token: RunnerWriteFenceToken) => {
         const bound = await this.input.bindInvocation({ token, workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true });
-        return { job: { request: { providerEgressToken: bound.providerEgressToken } }, token: bound, input: {}, workspaceVersion: "0", workspaceCheckpointedAt: null };
+        return { customInferenceEnvelope: null, platformAiUsageAllowed: true, job: { request: { providerEgressToken: bound.providerEgressToken } }, token: bound, input: {}, workspaceVersion: "0", workspaceCheckpointedAt: null };
       };
     }
   },
@@ -44,7 +45,7 @@ function harness() {
     readSupervisedInvocation: vi.fn(async (): Promise<RunnerInvocationReceipt | null> => null),
     readActiveRuntimeUserFence: vi.fn(async () => ({ active: false as const, reason: "no_active_runtime" as const })),
     ensureProcessing: vi.fn(async () => ({ kind: "accepted" as const, action: "woken" as const })),
-    ensureReadyForProcessing: vi.fn(async () => ({ kind: "ready" as const })),
+    ensureReadyForProcessing: vi.fn(async (): Promise<import("../src/runner-container.ts").RunnerContainerEnsureReadyForProcessingResult> => ({ kind: "ready", preparesSupervisedLaunch: true })),
     startSupervisedInvocation: vi.fn(async (_input: HostedExecutionContainerInvokeRequest) => ({ accepted: true as const })),
     bindStandbySlot: vi.fn(async (input) => ({ ...input, bound: true as const })),
     prepareStandbySlot: vi.fn(),
@@ -63,6 +64,33 @@ function harness() {
 describe("Postgres runtime orchestration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it.each([true, false])("starts with container launch preparation capability %s", async (supported) => {
+    const { source, container } = harness();
+    container.ensureReadyForProcessing.mockResolvedValue({ kind: "ready", ...(supported ? { preparesSupervisedLaunch: true } : {}) });
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) =>
+      response(owner({ phase: "starting" }), command.operation === "claim" ? "claimed" : "updated"));
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ action: "started" });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(supported ? ["claim", "accepted"] : ["claim", "prepare_launch", "accepted"]);
+    const payload = container.startSupervisedInvocation.mock.calls[0]?.[0];
+    expect(Boolean(payload?.launch)).toBe(supported);
+  });
+
+  it.each([
+    ["draining", "cutover_blocked"],
+    ["missing-owner", "claim_blocked"],
+    ["uncertain-wake", "wake_unconfirmed"],
+  ] as const)("records the actual bounded retry reason for %s", async (scenario, reason) => {
+    const { source, container } = harness();
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    if (scenario === "draining") vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce({ cutover: "draining", status: "blocked", owner: null });
+    else vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(scenario === "missing-owner" ? null : owner()));
+    if (scenario === "uncertain-wake") container.ensureProcessing.mockRejectedValueOnce(new Error("synthetic transport failure"));
+    await expect(ensurePostgresRuntimeProcessing(source, request, diagnostics)).resolves.toMatchObject({ kind: "retry_later" });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe(reason);
+    if (scenario === "uncertain-wake") expect(diagnostics).toMatchObject({ attemptId: "attempt-a", leaseGeneration: "1", stage: "active_wake" });
   });
 
   it.each(["legacy", "draining"] as const)("keeps an unretired %s database closed without calling a legacy object", async cutover => {
@@ -145,9 +173,11 @@ describe("Postgres runtime orchestration", () => {
     expect(token).toMatch(/^provider-egress-[a-f0-9]{64}$/u);
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token!)));
     const hash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
-    expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({
-      command: expect.objectContaining({ operation: "prepare_launch", providerEgressTokenHash: hash }),
+    expect(container.startSupervisedInvocation).toHaveBeenCalledWith(expect.objectContaining({
+      launch: expect.objectContaining({ providerEgressTokenHash: hash }),
     }));
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(["claim", "release_completed", "claim", "accepted"]);
     expect(JSON.stringify(vi.mocked(commandHostedRuntimeOwner).mock.calls)).not.toContain(token);
   });
 });

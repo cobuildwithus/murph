@@ -137,6 +137,8 @@ interface RuntimeInvocationPreparationInputs {
 }
 
 export interface PreparedRuntimeInvocation {
+  customInferenceEnvelope: string | null;
+  platformAiUsageAllowed: boolean;
   input: RuntimeInvocationInput;
   job: HostedExecutionWorkspaceInvocationJobInput;
   runnerContainerName: string;
@@ -222,6 +224,7 @@ export class RuntimeInvocationPreparation {
   ): Promise<PreparedRuntimeInvocation> {
     const preparationStartedAtMs = Date.now();
     const preparation = await preparationInputs;
+    const inputsReadyAtMs = Date.now();
     if (input.commandBudget) {
       readRuntimeProcessingCommandStepTimeoutMs({
         budget: input.commandBudget,
@@ -255,6 +258,7 @@ export class RuntimeInvocationPreparation {
           target: customInferenceTarget,
         })
       : null;
+    const admissionFinishedAtMs = Date.now();
     const token = await this.input.bindInvocation({
       customInferenceEnvelope,
       platformAiUsageAllowed,
@@ -262,6 +266,7 @@ export class RuntimeInvocationPreparation {
       token: input.token,
       workspaceVersion,
     });
+    const fenceBoundAtMs = Date.now();
     const workspaceRunnerInvocation = await this.prepareWorkspaceRunnerInvocation({
       stores,
       verifiedSlotBinding,
@@ -281,14 +286,25 @@ export class RuntimeInvocationPreparation {
       workspace: workspaceRead.workspace,
       workspaceVersion,
     });
+    const preparedAtMs = Date.now();
 
     return {
+      customInferenceEnvelope,
+      platformAiUsageAllowed: platformAiUsageAllowed !== false,
       input: {
         ...input.input,
         orchestration: {
           ...(input.input.orchestration ?? {}),
           runtimeInvocationPreparationElapsedMs:
-            Math.max(0, Date.now() - preparationStartedAtMs),
+            Math.max(0, preparedAtMs - preparationStartedAtMs),
+          runtimeInvocationInputsWaitElapsedMs:
+            Math.max(0, inputsReadyAtMs - preparationStartedAtMs),
+          runtimeInvocationAdmissionElapsedMs:
+            Math.max(0, admissionFinishedAtMs - inputsReadyAtMs),
+          runtimeInvocationFenceBindElapsedMs:
+            Math.max(0, fenceBoundAtMs - admissionFinishedAtMs),
+          runtimeInvocationJobPrepareElapsedMs:
+            Math.max(0, preparedAtMs - fenceBoundAtMs),
           runtimeStoreEnsureElapsedMs,
           workspaceReadElapsedMs,
         },

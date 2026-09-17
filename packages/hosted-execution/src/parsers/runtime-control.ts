@@ -6868,6 +6868,21 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
         "directEnsureHandlerDurationMs",
         orchestrationLabel,
       ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directWakeStartedAtEpochMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directWakeAttemptCount",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "directWakeRetryWaitMs",
+        orchestrationLabel,
+      ),
       ...requireOptionalDirectEnsureOrchestrationAttemptId(
         orchestration,
         "directEnsureOrchestrationAttemptId",
@@ -7198,6 +7213,26 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
         "runtimeInvocationPreparationElapsedMs",
         orchestrationLabel,
       ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "runtimeInvocationInputsWaitElapsedMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "runtimeInvocationAdmissionElapsedMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "runtimeInvocationFenceBindElapsedMs",
+        orchestrationLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        orchestration,
+        "runtimeInvocationJobPrepareElapsedMs",
+        orchestrationLabel,
+      ),
     };
   }
 
@@ -7330,6 +7365,16 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(
         wake,
         "foregroundImportStartedAtEpochMs",
+        wakeLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        wake,
+        "foregroundPrefetchPrepareElapsedMs",
+        wakeLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        wake,
+        "foregroundPrefetchWaitElapsedMs",
         wakeLabel,
       ),
       ...requireOptionalNonNegativeInteger(

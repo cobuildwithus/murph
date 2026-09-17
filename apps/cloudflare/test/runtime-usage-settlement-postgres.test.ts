@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
+import { createHostedProviderEgressCredential } from "../src/hosted-provider-egress-credential.ts";
+import { handleHostedRunnerOpenAiOutbound, handleHostedRunnerLinqOutbound, HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL } from "../src/runner-egress-intercept.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../src/web-control-plane.ts";
@@ -38,6 +40,63 @@ function harness() {
 
 describe("Postgres usage settlement with native receipts", () => {
   beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(["token", "headers"])("authorizes typing with %s in one Web round trip", async proof => {
+    const h = harness();
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    const headers = new Headers({ authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+      "x-hosted-runner-bound-user-id": h.userId });
+    if (proof === "token") headers.set("x-hosted-provider-egress-token", "synthetic-token");
+    else {
+      headers.set("x-hosted-runtime-attempt-id", h.identity.attemptId);
+      headers.set("x-hosted-runtime-lease-generation", h.identity.generation);
+      headers.set("x-hosted-runtime-workspace-version", "0");
+    }
+    const response = await handleHostedRunnerLinqOutbound(new Request("https://api.linqapp.com/api/partner/v3/chats/synthetic-chat/typing", {
+      method: "POST", headers,
+    }), { ...h.env, LINQ_API_TOKEN: "synthetic-worker-secret" }, { containerId: "synthetic-container", waitUntil() {} });
+    expect(response.status).toBe(204);
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls[0]?.[0].command.operation)
+      .toBe(proof === "token" ? "authorize_provider" : "authorize_effect");
+    expect(upstream).toHaveBeenCalledTimes(1);
+    const forwarded = upstream.mock.calls[0]?.[0];
+    if (!(forwarded instanceof Request)) throw new Error("Expected forwarded provider request");
+    expect(forwarded.headers.get("authorization")).toBe("Bearer synthetic-worker-secret");
+    expect(h.container.runtimeUsageSettlementAllowsProviders).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("authenticates native provider credentials once and preserves the spending latch (denied=%s)", async denied => {
+    const h = harness();
+    const env = { ...h.env, OPENAI_API_KEY: "synthetic-provider-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-provider-signing-secret-0123456789" };
+    const credential = await createHostedProviderEgressCredential({ source: env, userId: h.userId,
+      providerKind: "openai", runnerContainerName: h.owner.runnerContainerName! });
+    if (denied) {
+      h.receipt().beginUsageSettlement(h.identity, "synthetic-denied-report");
+      h.receipt().finishUsageSettlement(h.identity, "synthetic-denied-report", false);
+    }
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ id: "synthetic-response" }));
+    const response = await handleHostedRunnerOpenAiOutbound(new Request("https://api.openai.com/v1/responses", {
+      method: "POST", headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-5", input: "Synthetic request" }),
+    }), env, { containerId: "synthetic-container", waitUntil() {} });
+    expect(response.status).toBe(denied ? 503 : 200);
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(1);
+    expect(upstream).toHaveBeenCalledTimes(denied ? 0 : 1);
+    expect(h.container.runtimeUsageSettlementAllowsProviders).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["legacy", "draining", "postgres"] as const)("rejects blocked authorization without legacy fallback (%s)", async cutover => {
+    const h = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover, status: "blocked", owner: null });
+    const result = await authorizePostgresRuntimeProvider({ env: h.env, userId: h.userId, managed: false,
+      command: { operation: "authorize_provider", runnerContainerName: null, providerEgressTokenHash: "f".repeat(64), providerKind: "linq" } });
+    expect(result).toBeNull();
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(1);
+    expect(h.container.runtimeUsageSettlementAllowsProviders).not.toHaveBeenCalled();
+  });
 
   it.each([{}, { usage: null }, { usage: "invalid" }])("rejects malformed usage envelopes before settlement admission", async body => {
     const h = harness();
@@ -58,7 +117,7 @@ describe("Postgres usage settlement with native receipts", () => {
     });
     await expect(handleRunnerOutboundRequest(h.request(), h.env, h.userId)).rejects.toThrow("synthetic Web outage");
     const provider = await authorizePostgresRuntimeProvider({ env: h.env, userId: h.userId, managed: true, command: { operation: "authorize_effect", ...h.identity, runnerContainerName: h.owner.runnerContainerName, managedAi: false } });
-    expect(provider?.settlementPending).toBe(true);
+    expect(provider).toMatchObject({ settlementPending: true });
     expect(h.receipt().usageSettlementAllowsProviders(h.identity)).toBe(false);
   });
 

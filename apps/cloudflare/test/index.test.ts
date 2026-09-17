@@ -3647,7 +3647,8 @@ describe("cloudflare worker routes", () => {
         code: "runtime_ensure_processing_failed",
         error: "Internal error.",
       });
-      expect(execution.waitUntilPromises).toHaveLength(0);
+      expect(execution.waitUntilPromises).toHaveLength(1);
+      await Promise.all(execution.waitUntilPromises);
       expect(errorLog).toHaveBeenCalledTimes(1);
       const serializedErrorLogs = errorLog.mock.calls
         .map(([payload]) => String(payload))

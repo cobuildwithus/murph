@@ -1,3 +1,4 @@
+import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
 import type { HostedWorkspaceInvocationResult } from "@murphai/hosted-execution/runtime-control";
 import { hostedRunnerImageMatches, readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
 import { Container, type StopParams } from "@cloudflare/containers";
@@ -222,6 +223,8 @@ class RunnerContainerCleanupUnsettledError extends Error {
 }
 
 export interface HostedExecutionContainerInvokeRequest {
+  launch?: Pick<Extract<HostedRuntimeOwnerCommand, { operation: "prepare_launch" }>,
+    "providerEgressTokenHash" | "customInferenceEnvelope" | "platformAiUsageAllowed">;
   job: HostedExecutionRunnerJobInput;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   timeoutMs?: number | null;
@@ -258,6 +261,7 @@ export type RunnerContainerEnsureReadyForProcessingResult =
       action?: "already_warm" | "started";
       coldStartTiming?: RunnerContainerColdStartTiming;
       kind: "ready";
+      preparesSupervisedLaunch?: true;
     }
   | {
       action?: never;
@@ -1012,9 +1016,13 @@ export class RunnerContainer extends Container {
     const identity = { attemptId: request.attemptId, generation: request.leaseGeneration };
     const authority = await commandHostedRuntimeOwner({
       source: this.environment, userId: payload.userId,
-      command: { operation: "authorize_effect", ...identity, runnerContainerName: target.slotName, managedAi: false },
+      command: payload.launch
+        ? { ...payload.launch, operation: "prepare_launch", ...identity,
+            runnerContainerName: target.slotName, workspaceVersion: request.workspaceVersion,
+            processingMode: request.processingMode ?? "default" }
+        : { operation: "authorize_effect", ...identity, runnerContainerName: target.slotName, managedAi: false },
     });
-    if (authority.status !== "authorized"
+    if (authority.status !== (payload.launch ? "updated" : "authorized")
       || authority.owner?.workspaceVersion !== request.workspaceVersion) {
       throw new Error("Hosted runtime launch authority is stale.");
     }
@@ -1354,6 +1362,7 @@ export class RunnerContainer extends Container {
             },
           }),
           kind: "ready" as const,
+          preparesSupervisedLaunch: true as const,
         };
       } finally {
         if (this.currentLogContext === logContext) {
