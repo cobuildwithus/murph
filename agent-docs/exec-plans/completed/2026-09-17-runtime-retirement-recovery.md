@@ -1,6 +1,6 @@
 # Recover retirement of reserved unbound runtime targets
 
-Status: active
+Status: completed
 Created: 2026-09-17
 Updated: 2026-09-17
 
@@ -68,3 +68,15 @@ rerunning from the repository root passed, matching the existing Frog entry
 `20260912202546-changelog-focused-test` without creating duplicate friction.
 Product UX patch replay is Ready at the tested retirement boundary; live
 recovery remains a post-deployment check. PR #3546 is the owned release path.
+
+## Implementation closeout
+
+PR #3546 full-snapshot ReviewGPT passed on
+`59164763127907a20466ac7820ff351a8129236c`, with no qualifying findings.
+The review confirmed synchronous local fencing, preserved bound-target checks,
+and exact retired-binding proof before Postgres release. The parent diff review
+found no additional changes required. Source implementation and focused proof
+are complete; this archived record does not claim CI, merge, deployment, or
+live recovery. Those release gates remain with the same completion owner and
+are reported through PR #3546 and its protected deployment outcome.
+Completed: 2026-09-17
