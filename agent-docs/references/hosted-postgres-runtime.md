@@ -115,10 +115,23 @@ native stop, without granting or releasing authority.
 
 Ordinary runtime requests bind attempt/generation to their signed Web callback.
 The Worker rejects caller-supplied authority query parameters and derives those
-parameters from authenticated runtime headers. Web validates admission and the
-canonical mutation in the same transaction. No standalone UserRunner preflight
-is added to that callback. Provider effects still require fresh authorization at
-the Worker boundary; no cached positive allowance can outlive revocation.
+parameters from authenticated runtime headers. Web validates exact ownership and
+the canonical mutation in the same transaction. Access, suspension, and health-data
+consent are checked at claim admission, not repeated by ownership or provider
+validation. A policy change blocks new admission; already admitted work may finish
+until completion or the existing retirement/shutdown path ends its ownership.
+This is not an immediate-cancellation guarantee. Deleted members remain blocked;
+their retained owner rows exist only for cleanup.
+
+Provider effects still authenticate their exact runtime identity or credential,
+apply provider operation policy, and enforce managed spending limits. The same
+Web authorization response selects Postgres or explicitly legacy routing; no
+separate backend-discovery request precedes it. Draining, stale, or failed
+Postgres authorization never falls back to legacy. No positive-allowance cache
+or standalone UserRunner callback preflight is added. Deploy Web's combined
+backend-selection/authorization response before its Worker consumer: older Web
+rejects exact-header authorization for legacy members instead of returning their
+backend. Existing Workers remain compatible with the new Web behavior.
 
 Lock order is the cutover gate, member, runtime owner, then workspace/mailbox and
 resource rows. Transactions contain bounded database work only, with five-second
