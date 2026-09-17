@@ -3244,7 +3244,7 @@ class AssistantCronLinqHealthPreflightBlockedError extends VaultCliError {
   constructor(blockCode: HostedRuntimeLinqDeliveryBlockCode) {
     super(
       `ASSISTANT_LINQ_EGRESS_${blockCode.toUpperCase()}`,
-      'Scheduled Linq delivery skipped by current line or chat health.',
+      'Scheduled Linq delivery skipped by current outreach or delivery policy.',
     )
   }
 }

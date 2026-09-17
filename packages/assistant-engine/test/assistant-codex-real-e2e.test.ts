@@ -17189,7 +17189,11 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
 })
 
 describeRealCodex('real Codex connected channel greeting e2e', () => {
-  it.each(['email', 'linq'] as const)('greets a new channel contextually after private conversation on %s', async (originalChannel) => {
+  it.each([
+    { originalChannel: 'email', inactiveDays: 0 },
+    { originalChannel: 'linq', inactiveDays: 0 },
+    { originalChannel: 'linq', inactiveDays: 40 },
+  ] as const)('greets a new channel contextually after private conversation on $originalChannel with $inactiveDays inactive days', async ({ originalChannel, inactiveDays }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-connected-channel-e2e-'))
     const permissionHome = await materializeRealCodexHostedPermissionHome(config)
@@ -17228,7 +17232,7 @@ describeRealCodex('real Codex connected channel greeting e2e', () => {
       const originalInput = originalChannel === 'email' ? emailInput : phoneInput
       const nextInput = originalChannel === 'email' ? phoneInput : emailInput
       const original = await sendAssistantNotificationLocal(originalInput)
-      const at = new Date(Date.now() - 60_000).toISOString()
+      const at = new Date(Date.now() - Math.max(60_000, inactiveDays * 86_400_000)).toISOString()
       await appendAssistantTranscriptEntries(workingDirectory, original.session.sessionId, [
         { kind: 'user', createdAt: at, text: 'I am planning an easy weekend walk by the lake. I already know how Murph works.' },
         { kind: 'assistant', createdAt: at, text: 'That sounds like a lovely plan. Keep the route easy and enjoy the lake.' },
@@ -17302,6 +17306,9 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         channel: 'telegram' as const, containerMemberId: 'synthetic-member', threadId: 'synthetic-telegram-destination',
       }
       const resolveScheduledExternalThreadRoute = vi.fn(async () => ({ ...authority, threadIsDirect }))
+      const resolveScheduledLinqRoute = vi.fn(async () => {
+        throw new Error('Dormant Linq outreach must not gate a Telegram occurrence.')
+      })
       const recordUsage = vi.fn<AssistantUsageRecorder['recordUsage']>(async (record) => {
         recordRealCodexProviderUsage({ ...record, providerMetadataJson: null })
       })
@@ -17309,7 +17316,7 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
       const result = await executeClaimedAssistantCronJob({
         deliveryDispatchMode: 'queue-only',
         executionContext: { hosted: {
-          defaultTarget: modelTarget, memberId: 'synthetic-member', resolveScheduledExternalThreadRoute, userEnvKeys: [],
+          defaultTarget: modelTarget, memberId: 'synthetic-member', resolveScheduledExternalThreadRoute, resolveScheduledLinqRoute, userEnvKeys: [],
           usageRecorder: { recordUsage },
         } },
         job: claimed, paths, trigger: 'scheduled', vault: workingDirectory,
@@ -17319,6 +17326,7 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
       expect(result.runErrorCode, result.run.error ?? undefined).toBeNull()
       expect(recordUsage).toHaveBeenCalledOnce()
       expect(readCapabilityRoutingActions(providerEvents)).toEqual([])
+      expect(resolveScheduledLinqRoute).not.toHaveBeenCalled()
       expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledOnce()
       expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledWith({
         channel: 'telegram', signal: expect.any(AbortSignal), target: authority.threadId,

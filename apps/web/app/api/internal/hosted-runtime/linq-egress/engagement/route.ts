@@ -7,6 +7,7 @@ import {
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
+  isHostedLinqProactivityPaused,
   resolveHostedLinqEgressPolicyForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
@@ -103,37 +104,11 @@ export const POST = withJsonError(async (request: Request) => {
       target,
       targetKind,
     });
-    const providerTarget = asserted.resolvedRoute.target;
-    const providerTargetKind = asserted.resolvedRoute.targetKind;
-    if (
-      providerTargetKind !== "participant"
-      && providerTarget
-      && providerTarget !== target
-      && !authorityCheckOnly
-    ) {
-      throw hostedOnboardingError({
-        code: "HOSTED_LINQ_EGRESS_RESOLVED_ROUTE_MISMATCH",
-        httpStatus: 403,
-        message: "Hosted Linq send-time route authority changed before provider entry.",
-        retryable: false,
-      });
-    }
     const finalAuthority = asserted;
-
-    if (
-      expectedResolvedRoute
-      && !resolvedLinqDeliveryRoutesEqual(
-        finalAuthority.resolvedRoute,
-        expectedResolvedRoute,
-      )
-    ) {
-      throw hostedOnboardingError({
-        code: "HOSTED_LINQ_EGRESS_RESOLVED_ROUTE_MISMATCH",
-        httpStatus: 403,
-        message: "Hosted Linq send-time route authority changed before provider entry.",
-        retryable: false,
-      });
-    }
+    assertResolvedLinqDeliveryAuthority({
+      authorityCheckOnly, expectedResolvedRoute,
+      resolvedRoute: finalAuthority.resolvedRoute, target,
+    });
 
     const sourceEpisode = await isHostedSourceDeliveryStallEpisodeCurrentTx({
       deliveryIdempotencyKey: idempotencyKey,
@@ -202,6 +177,24 @@ export const POST = withJsonError(async (request: Request) => {
         idempotencyKey,
         tx,
       });
+
+    if (!assistantAskAuthority && await isHostedLinqProactivityPaused({
+      answeredMailboxItemIds,
+      replyToMessageId,
+      service: health.service,
+      authority: finalAuthority,
+      memberId: userId,
+      now: new Date(),
+      prisma: tx,
+    })) {
+      return {
+        assistantAskFallbackRequired: false,
+        asserted: finalAuthority,
+        deliveryBlockCode: "automation_engagement_paused" as const,
+        deliveryPosture: null,
+        providerDispatchClaimed: null,
+      };
+    }
 
     let providerDispatchClaimed: boolean | null = null;
     if (
@@ -290,6 +283,27 @@ function throwResolvedLinqDeliveryRouteInvalid(): never {
     message: "Hosted Linq expected resolved route is invalid.",
     retryable: false,
   });
+}
+
+function assertResolvedLinqDeliveryAuthority(input: {
+  authorityCheckOnly: boolean;
+  expectedResolvedRoute: HostedExecutionResolvedLinqDeliveryRoute | null;
+  resolvedRoute: HostedExecutionResolvedLinqDeliveryRoute;
+  target: string | null;
+}): void {
+  const providerTargetChanged = !input.authorityCheckOnly
+    && input.resolvedRoute.targetKind !== "participant"
+    && input.resolvedRoute.target !== input.target;
+  const expectedRouteChanged = input.expectedResolvedRoute
+    && !resolvedLinqDeliveryRoutesEqual(input.resolvedRoute, input.expectedResolvedRoute);
+  if (providerTargetChanged || expectedRouteChanged) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_EGRESS_RESOLVED_ROUTE_MISMATCH",
+      httpStatus: 403,
+      message: "Hosted Linq send-time route authority changed before provider entry.",
+      retryable: false,
+    });
+  }
 }
 
 function resolvedLinqDeliveryRoutesEqual(
