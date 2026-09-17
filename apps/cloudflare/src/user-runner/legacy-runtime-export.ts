@@ -101,6 +101,11 @@ export async function requireLegacyRuntimeStorageCoverage(state: DurableObjectSt
   }
 }
 
+function storageKeyFamily(key: string): string {
+  const family = /^[a-z0-9-]{1,40}/u.exec(key)?.[0];
+  return family && family.length < key.length ? `${family}:*` : family ?? "unrecognized";
+}
+
 function classifyLegacyStorageRecord(key: string, value: unknown, requireTerminalUploads: boolean): string | null {
   if (key === "runtime-migration-freeze:v1") return null;
   if (key.startsWith(LEGACY_MANAGED_SNAPSHOT_PREFIX)) {
@@ -110,7 +115,9 @@ function classifyLegacyStorageRecord(key: string, value: unknown, requireTermina
     return upload.userId;
   }
   if (!DRAIN_KEYS.includes(key) && !EXPORT_KV_PREFIXES.some(prefix => key.startsWith(prefix))) {
-    throw new Error("Legacy migration encountered unclassified durable state.");
+    // Name only the key's leading identifier segment so the operator can extend
+    // coverage; identifiers, member data and values never enter the error.
+    throw new Error(`Legacy migration encountered unclassified durable state (${storageKeyFamily(key)}).`);
   }
   if (!value || typeof value !== "object" || !("userId" in value) || typeof value.userId !== "string" || !value.userId) {
     throw new Error("Legacy resource member identity is missing.");
