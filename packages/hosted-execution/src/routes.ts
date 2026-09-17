@@ -171,6 +171,7 @@ export type HostedRuntimeLinqDeliveryPosture =
   typeof HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES[number];
 
 export const HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES = [
+  "automation_engagement_paused",
   "operator_disabled",
   "line_flagged",
   "line_critical",

@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT ZIP omits tracked CI authority outside workflows'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3255'
 ---
 
 ## Expected Behavior

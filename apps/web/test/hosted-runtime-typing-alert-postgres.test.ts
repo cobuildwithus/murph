@@ -105,6 +105,55 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
     });
   });
 
+  it.each(["linq", "telegram"] as const)("excludes completed silent %s inputs without hiding slow typing or unresolved work", async (source) => {
+    await withTables(async (tx) => {
+      const terminalMs = received.getTime() + 12_000;
+      for (const [id, marker] of [
+        ["silent-warm", terminalMs], ["silent-cold", terminalMs],
+        ["silent-unconfirmed", terminalMs], ["missing-marker", null],
+        ["before-receipt", received.getTime() - 1],
+        ["before-acceptance", received.getTime() + 1000],
+        ["future-marker", now.getTime() + 1], ["text-marker", String(terminalMs)],
+        ["object-marker", {}], ["fraction-marker", terminalMs + 0.5],
+        ["oversized-marker", 1e20], ["later-staging", terminalMs],
+        ["later-provider", terminalMs], ["earlier-provider", terminalMs], ["slow-typing", terminalMs],
+        ["slow-ingress-typing", terminalMs], ["other-input", null],
+      ] as const) {
+        await insertTrace(tx, id, {
+          source, cold: id === "silent-unconfirmed" ? null : id === "silent-cold",
+          elapsed: id === "slow-typing" ? 4000 : null,
+          extra: { assistant: {
+            terminalNonReplyCommittedAtEpochMs: marker,
+            ...(id === "slow-typing" ? {
+              [source === "linq" ? "linqTypingAcceptedAtEpochMs" : "telegramTypingAcceptedAtEpochMs"]:
+                received.getTime() + 4000,
+            } : {}),
+          } },
+        });
+      }
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace
+        SET assistant_input_staged_at = ${new Date(terminalMs + 1)} WHERE id = 'later-staging'`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace
+        SET provider_start_at = ${new Date(terminalMs + 1)} WHERE id = 'later-provider'`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace
+        SET provider_start_at = ${new Date(terminalMs - 1)} WHERE id = 'earlier-provider'`;
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace
+        SET ingress_typing_accepted_at = ${new Date(received.getTime() + 4000)} WHERE id = 'slow-ingress-typing'`;
+      const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () =>
+        new Response(JSON.stringify({ id: "synthetic-email" }), { status: 200 }));
+      expect(await runHostedRuntimeTypingAlertMonitor({ env, fetchImpl, now, prisma: tx })).toEqual({
+        queuedCount: 14, scanTruncated: false,
+      });
+      const alerts = await tx.hostedLinqAlert.findMany({ select: { id: true, status: true } });
+      expect(alerts.sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+        "before-acceptance", "before-receipt", "earlier-provider", "fraction-marker", "future-marker", "later-provider",
+        "later-staging", "missing-marker", "object-marker", "other-input", "oversized-marker",
+        "slow-ingress-typing", "slow-typing", "text-marker",
+      ].map((id) => ({ id: `runtime-typing/${id}`, status: "sent" })));
+      expect(fetchImpl).toHaveBeenCalledTimes(14);
+    });
+  });
+
   it("measures post-send silence and preserves active typing and conversation isolation", async () => {
     await withTables(async (tx) => {
       for (const id of ["sent", "missing-sent", "other-chat", "failed-send", "late-send",
@@ -285,7 +334,8 @@ async function withTables(run: (tx: Prisma.TransactionClient) => Promise<void>) 
         mailbox_lane TEXT, mailbox_lane_seq BIGINT, runtime_attempt_id TEXT, reply_runtime_attempt_id TEXT,
         created_at TIMESTAMP(3), updated_at TIMESTAMP(3),
         assistant_input_id TEXT, linq_delivery_id TEXT, accepted_at TIMESTAMP(3), webhook_received_at TIMESTAMP(3),
-        workspace_restore_done_at TIMESTAMP(3), ingress_typing_accepted_at TIMESTAMP(3), phase_breakdown_json JSONB
+        workspace_restore_done_at TIMESTAMP(3), ingress_typing_accepted_at TIMESTAMP(3),
+        assistant_input_staged_at TIMESTAMP(3), provider_start_at TIMESTAMP(3), phase_breakdown_json JSONB
       ) ON COMMIT DROP`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_linq_provider_event (
         message_lookup_key TEXT, linq_chat_lookup_key TEXT, provider_created_at TIMESTAMP(3)

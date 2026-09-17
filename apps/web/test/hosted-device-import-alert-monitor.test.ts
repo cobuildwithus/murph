@@ -94,7 +94,7 @@ describe("bounded import diagnostic observation", () => {
       const pass: DeviceImportObservation = {
         subjectKey: hostedRuntimeLogSubjectKey("synthetic-active"), connectionKey: "a".repeat(64),
         attemptId: `synthetic-attempt-${index}`, at: new Date(+now - minutesAgo * 60_000),
-        eventCode: "device-sync.pass_finished", pending: true, progressed: index === 0,
+        eventCode: "device-sync.pass_finished", pending: true, runnable: null, progressed: index === 0,
         checkpointAccepted: false, restarted: false, cancelled: false,
       };
       return [pass, { ...pass, at: new Date(+pass.at + 1_000),
@@ -119,7 +119,7 @@ describe("bounded import diagnostic observation", () => {
     const pending: DeviceImportObservation = {
       subjectKey: hostedRuntimeLogSubjectKey("synthetic-active"), connectionKey: "a".repeat(64),
       attemptId: "synthetic-attempt", at: new Date(+now - 45 * 60_000),
-      eventCode: "device-sync.pass_finished", pending: true, progressed: false,
+      eventCode: "device-sync.pass_finished", pending: true, runnable: null, progressed: false,
       checkpointAccepted: false, restarted: false, cancelled: false,
     };
     mocks.logQuery.mockResolvedValueOnce({ rows: [pending, { ...pending,
@@ -136,7 +136,7 @@ describe("bounded import diagnostic observation", () => {
     const rows: DeviceImportObservation[] = [20, 10, 1].map(minutesAgo => ({
       subjectKey: hostedRuntimeLogSubjectKey("synthetic-active"), connectionKey: "a".repeat(64),
       attemptId: "synthetic-attempt", at: new Date(+now - minutesAgo * 60_000),
-      eventCode: "device-sync.pass_finished", pending: true, progressed: false,
+      eventCode: "device-sync.pass_finished", pending: true, runnable: null, progressed: false,
       checkpointAccepted: false, restarted: false, cancelled: false,
     }));
     mocks.logQuery.mockResolvedValueOnce({ rows });
