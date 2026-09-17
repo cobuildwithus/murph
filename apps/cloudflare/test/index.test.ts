@@ -2066,6 +2066,76 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it.each([
+    ["canonical-checkpoint-lost-ack", "armCanonicalCheckpointLostAckForTest"],
+    ["snapshot-publication-corruption", "armSnapshotPublicationCorruptionForTest"],
+    ["foreground-priority-ordering?action=arm-canonical", "foregroundPriorityOrderingControlForTest"],
+    ["generated-image-provider-barrier/arm", "armGeneratedImageProviderBarrierForTest"],
+    ["shutdown-checkpoint-publication-barrier?action=arm", "armShutdownCheckpointPublicationBarrierForTest"],
+    ["shutdown-checkpoint-publication-barrier?action=arm-snapshot-start", "armIdleSnapshotStartBarrierForTest"],
+    ["shutdown-checkpoint-publication-barrier?action=status", "readShutdownCheckpointPublicationBarrierForTest"],
+    ["shutdown-checkpoint-publication-barrier?action=release", "releaseShutdownCheckpointPublicationBarrierForTest"],
+    ["foreground-priority-ordering?action=status", "foregroundPriorityOrderingControlForTest"],
+    ["foreground-priority-ordering?action=release", "foregroundPriorityOrderingControlForTest"],
+  ])("controls %s before a runtime target exists", async (route, method) => {
+    const control = vi.fn(async () => ({ ok: true as const }));
+    const base = createRunnerContainerNamespace();
+    const getByName = vi.fn((name: string) => ({
+      ...base.getByName(name),
+      armCanonicalCheckpointLostAckForTest: control,
+      armSnapshotPublicationCorruptionForTest: control,
+      foregroundPriorityOrderingControlForTest: control,
+      armGeneratedImageProviderBarrierForTest: control,
+      releaseGeneratedImageProviderBarrierForTest: control,
+      armCanonicalCheckpointPublicationBarrierForTest: control,
+      armIdleSnapshotStartBarrierForTest: control,
+      armShutdownCheckpointPublicationBarrierForTest: control,
+      beginShutdownCheckpointGracefulStopForTest: control,
+      readShutdownCheckpointPublicationBarrierForTest: control,
+      releaseShutdownCheckpointPublicationBarrierForTest: control,
+    }));
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+      RUNNER_CONTAINER: { getByName },
+    });
+    const ownerCommand = mockPostgresOwnerCommand(async () => ({
+      cutover: "postgres", status: "observed",
+      owner: createPostgresTestOwner({ phase: "idle", runnerContainerName: null }),
+    }));
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        `https://runner.example.test/__test/users/member_123/${route}`,
+        { method: "POST" },
+      ), { boundUserId: "member_123" }), env,
+    );
+    expect(response.status, method).toBe(200);
+    expect(control).toHaveBeenCalledWith(expect.objectContaining({ userId: "member_123" }));
+    expect(getByName).toHaveBeenCalledWith("member_123");
+    expect(ownerCommand).not.toHaveBeenCalled();
+  });
+
+  it("rejects physical shutdown when no runtime target exists", async () => {
+    const getByName = vi.fn();
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1", NODE_ENV: "test",
+      RUNNER_CONTAINER: { getByName },
+    });
+    const ownerCommand = mockPostgresOwnerCommand(async () => ({
+      cutover: "postgres", status: "observed",
+      owner: createPostgresTestOwner({ phase: "idle", runnerContainerName: null }),
+    }));
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/shutdown-checkpoint-publication-barrier?action=shutdown",
+        { method: "POST" },
+      ), { boundUserId: "member_123" }), env,
+    );
+    expect(response.status).toBe(500);
+    expect(ownerCommand).toHaveBeenCalledOnce();
+    expect(getByName).not.toHaveBeenCalled();
+  });
+
   it("controls the user-scoped shutdown checkpoint publication barrier", async () => {
     const baseRunnerContainerNamespace = createRunnerContainerNamespace();
     const armShutdownCheckpointPublicationBarrierForTest =

@@ -1,5 +1,8 @@
 # Murph Agent Docs Index
 
+Hosted-local pre-allocation barrier control recovery is tracked in
+[`2026-09-17-runtime-test-target-routing.md`](exec-plans/active/2026-09-17-runtime-test-target-routing.md).
+
 Hosted proxy diagnostics, timeout ownership preservation, and finite replica
 conflicts are specified in `apps/cloudflare/README.md`; the implementation and
 release record is
