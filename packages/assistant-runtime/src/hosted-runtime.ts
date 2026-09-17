@@ -574,7 +574,6 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
   plan: HostedInitialMailboxImportPlan;
   importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   lanes: readonly HostedMailboxLane[];
-  mailboxFetchSignal?: AbortSignal | null;
   prefetchLanes: readonly HostedMailboxLane[];
   runnerInput: HostedWorkspaceRunnerInput;
   requestId: string;
@@ -589,7 +588,6 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
         limitPerLane: input.runnerInput.limitPerLane,
         requestId: input.requestId,
         runnerInput: input.runnerInput,
-        signal: input.mailboxFetchSignal ?? null,
       });
   const runnerResult = await runHostedWorkspaceUntilIdleOrBudget({
     ...input.runnerInput,
@@ -602,7 +600,6 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
       : null,
     initialMailboxImportContext: input.importItemContext ?? null,
     initialMailboxImportLanes: input.lanes,
-    initialMailboxFetchSignal: input.mailboxFetchSignal ?? null,
     initialMailboxPrefetch: prefetch,
     requestId: input.requestId,
   });
@@ -2556,61 +2553,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       input.request.processingMode === "system_mailbox"
         ? (["system"] as const)
         : initialMailboxImportPlan.lanes;
-    const initialPendingRuntimeWake = consumePendingHostedRuntimeWake(
-      options.runtimeWakeSignal ?? null,
-      options.shutdownSignal ?? null,
-    );
-    const returnSystemMailboxBeforeInitialImport =
-      systemMailboxProcessingMode
-        ? async (
-            requestedProcessingMode: HostedWorkspaceInvocationProcessingMode | null = null,
-          ) => {
-            const projectedWake = await resolveHostedSystemMailboxProcessingModeWake({
-              assistantExecutionBlocked,
-              mailboxImportRetryAt: null,
-              nowMs: Date.now(),
-              operatorHomeRoot: restored.operatorHomeRoot,
-              runtimeEnv: invocationRuntimeEnv,
-              vaultRoot: restored.vaultRoot,
-            });
-            const returnedWake = requestedProcessingMode === "default"
-              ? {
-                  nextWakeAt: new Date(Date.now()).toISOString(),
-                  nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
-                }
-              : selectHostedRuntimeReturnWake(projectedWake, activeWorkspace);
-            const redactedStatus = await withHostedMailboxProgressStatus({
-              redactedStatus: activeWorkspace?.redactedStatus ?? null,
-              vaultRoot: restored.vaultRoot,
-            });
-            const invocationResult = buildHostedRuntimeInvocationResult({
-              immediateRecheckRequested: true,
-              nextWake: returnedWake,
-              redactedStatus,
-              mailboxBudgetExhausted: mailboxBudgetExhausted(),
-            });
-            emitPhaseLog({
-              details: {
-                immediateRecheckRequested: true,
-                invocationStatus: invocationResult.status,
-                nextWakeAtPresent: invocationResult.nextWakeAt !== null,
-              },
-              input,
-              requestId,
-              stage: "runtime.return",
-              status: "done",
-            });
-            return invocationResult;
-          }
-        : null;
-    if (
-      returnSystemMailboxBeforeInitialImport
-      && initialPendingRuntimeWake !== null
-    ) {
-      return await returnSystemMailboxBeforeInitialImport(
-        initialPendingRuntimeWake.requestedProcessingMode ?? null,
-      );
-    }
+    // A system-mailbox invocation leaves a pending wake in the coalescing signal
+    // so the post-import foreground check can promote it in place; consuming
+    // it here would hide the wake from that check.
+    const initialPendingRuntimeWake = systemMailboxProcessingMode
+      ? null
+      : consumePendingHostedRuntimeWake(
+          options.runtimeWakeSignal ?? null,
+          options.shutdownSignal ?? null,
+        );
     const initialMailboxImportContext: HostedWorkspaceRunnerMailboxImportContext = {
       ...createHostedRuntimeWakeInitialImportContext(
         mergeHostedRuntimeWakeLatencySeeds(
@@ -2633,77 +2584,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     // Mailbox import can mutate the restored vault through the inbox sidecar.
     // Keep the container's single-runner ownership until that work settles so
     // an aborted invocation cannot write into a newer restore at the same path.
-    let initialMailboxImportResult: HostedInitialMailboxImportResult;
-    if (returnSystemMailboxBeforeInitialImport === null) {
-      initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
-        hasPendingWake: initialPendingRuntimeWake !== null,
-        prefetch: initialMailboxPrefetch,
-        observePrefetchResponse: observeMailboxResponse,
-        plan: initialMailboxImportPlan,
-        importItemContext: initialMailboxImportContext,
-        lanes: initialMailboxImportLanes,
-        prefetchLanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
-        runnerInput: baseRunnerInput,
-        requestId,
-      });
-    } else {
-      const initialMailboxFetchWakeInterruption =
-        createHostedRuntimeCheckpointWakeInterruption({
-          enabled: true,
-          runtimeWakeSignal: options.runtimeWakeSignal ?? null,
-        });
-      const restoreInitialMailboxFetchWake = (
-        notification: RuntimeWakeNotification | null,
-      ) => {
-        if (!notification || options.shutdownSignal?.aborted === true) {
-          return;
-        }
-        options.runtimeWakeSignal?.notify({
-          ...(notification.orchestration
-            ? { orchestration: notification.orchestration }
-            : {}),
-          notifiedAtEpochMs: notification.notifiedAtEpochMs,
-          ...(notification.requestedProcessingMode
-            ? { requestedProcessingMode: notification.requestedProcessingMode }
-            : {}),
-        });
-        if (
-          notification.latestNotifiedAtEpochMs !== undefined
-          && notification.latestNotifiedAtEpochMs !== notification.notifiedAtEpochMs
-        ) {
-          options.runtimeWakeSignal?.notify(notification.latestNotifiedAtEpochMs);
-        }
-      };
-      try {
-        initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
-          plan: initialMailboxImportPlan,
-          importItemContext: initialMailboxImportContext,
-          lanes: initialMailboxImportLanes,
-          mailboxFetchSignal: initialMailboxFetchWakeInterruption.signal,
-          prefetchLanes: initialMailboxImportLanes,
-          runnerInput: baseRunnerInput,
-          requestId,
-        });
-      } catch (error) {
-        await initialMailboxFetchWakeInterruption.dispose();
-        const notification = initialMailboxFetchWakeInterruption.takeNotification();
-        if (
-          notification
-          && options.shutdownSignal?.aborted !== true
-          && error instanceof HostedRuntimeCheckpointInterruptedByWakeError
-        ) {
-          return await returnSystemMailboxBeforeInitialImport(
-            notification.requestedProcessingMode ?? null,
-          );
-        }
-        restoreInitialMailboxFetchWake(notification);
-        throw error;
-      }
-      await initialMailboxFetchWakeInterruption.dispose();
-      restoreInitialMailboxFetchWake(
-        initialMailboxFetchWakeInterruption.takeNotification(),
-      );
-    }
+    const initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
+      hasPendingWake: initialPendingRuntimeWake !== null,
+      prefetch: initialMailboxPrefetch,
+      observePrefetchResponse: observeMailboxResponse,
+      plan: initialMailboxImportPlan,
+      importItemContext: initialMailboxImportContext,
+      lanes: initialMailboxImportLanes,
+      prefetchLanes: systemMailboxProcessingMode
+        ? initialMailboxImportLanes
+        : HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
+      runnerInput: baseRunnerInput,
+      requestId,
+    });
     const initialMailboxImportDoneAtMonotonicMs =
       readAssistantProviderStartMonotonicTickMs();
     assertRuntimeNotAborted();
