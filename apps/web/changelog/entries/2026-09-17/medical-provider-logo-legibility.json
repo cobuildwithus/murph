@@ -9,6 +9,6 @@
     "summary": "Provider search now shows larger logos on a light background, with room for wide wordmarks.",
     "details": "Logos stay fully visible on phones and larger screens. Providers without a logo still show their initials.",
     "relevanceTags": ["medical-records", "connections"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3526]
   }
 }
