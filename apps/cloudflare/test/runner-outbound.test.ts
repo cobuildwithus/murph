@@ -6,6 +6,7 @@ import { gzipSync } from "node:zlib";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
+import { HostedRuntimeReplicaPutRejectedError } from "../src/runtime-resource-client.ts";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER } from "@murphai/device-syncd/hosted-runtime";
 
 const hostedExecutionMocks = vi.hoisted(() => ({
@@ -10759,6 +10760,27 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(3);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it.each(["HOSTED_RUNTIME_OWNER_STALE", "HOSTED_RUNTIME_RESOURCE_RETIRED"] as const)(
+    "returns replica admission rejection %s without writing or throwing from the proxy", async (code) => {
+      const fixture = await createHostedRuntimeCryptoContextFixture();
+      const runner = createWorkspaceVersionAwareUserRunner();
+      runner.admitHostedBrowserVaultReplicaDirectPut.mockRejectedValue(new HostedRuntimeReplicaPutRejectedError(code));
+      const env = createRunnerOutboundEnv({ ...fixture.env, USER_RUNNER: { getByName: runner.getByName } });
+      const put = vi.spyOn(env.BUNDLES, "put");
+      vi.stubGlobal("fetch", fixture.fetchMock);
+      const response = await handleRunnerOutboundRequest(createBrowserVaultReplicaWriteRequest({
+        replica: createBrowserVaultReplica("c".repeat(64)), workspaceVersion: "5",
+      }), env, "member_123");
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ code, error: "Hosted runtime replica write rejected." });
+      expect(put).not.toHaveBeenCalled();
+      expect(runner.releaseHostedBrowserVaultReplicaDirectPut).not.toHaveBeenCalled();
+      expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+        message: "Hosted runtime replica write rejected.", details: { errorCode: code, status: 409 },
+      }));
+    },
+  );
 
   it("writes browser-vault replicas after live lease validation", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();

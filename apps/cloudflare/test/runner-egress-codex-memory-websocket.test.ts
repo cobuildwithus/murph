@@ -1,4 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
+import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import { HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES } from "../src/runner-egress-codex-memory.ts";
 import type { HostedRunnerDiagnosticJson } from "../src/runner-egress-responses-diagnostics.ts";
@@ -312,6 +313,33 @@ test("records a forwarded request with no upstream messages when a silent socket
   expect(new Set(diagnostics.map((value) => value.websocketConnectionCorrelation)).size).toBe(1);
   expect(JSON.stringify(diagnostics)).not.toContain("PRIVATE_");
   expect(upstream.sent).toEqual(["PRIVATE_REQUEST_FIXTURE"]);
+});
+
+test("preserves response completion and close evidence through structured log sanitization", async () => {
+  const downstream = new FakeSocket();
+  const upstream = new FakeSocket();
+  const records: ReturnType<typeof buildHostedExecutionStructuredLogRecord>[] = [];
+  const controller = startHostedOpenAiResponsesWebSocketRelay({
+    downstream, upstream,
+    reportDiagnostic: (diagnostic) => records.push(buildHostedExecutionStructuredLogRecord({
+      component: "runner", phase: "wake.running", message: "Synthetic relay observation.",
+      details: { ...diagnostic, droppedRecords: 0, runtimeLogScheduled: true },
+    })),
+  });
+  downstream.emitMessage(JSON.stringify({ type: "response.create", input: "PRIVATE_REQUEST" }));
+  await controller.drain();
+  upstream.emitMessage(JSON.stringify({ type: "response.completed", response: {
+    id: "synthetic-response", status: "completed", output: "PRIVATE_RESPONSE",
+  } }));
+  await controller.drain();
+  downstream.emitClose(1000);
+  await controller.drain();
+  expect(records.at(-1)?.details).toMatchObject({
+    websocketMilestone: "closed", closeSide: "client", closeCode: 1000,
+    providerResponseOutcomeKind: "closed", responseTerminalKind: "response.completed",
+    upstreamFrameCount: 1, downstreamFrameCount: 1, runtimeLogScheduled: true, droppedRecords: 0,
+  });
+  expect(JSON.stringify(records)).not.toContain("PRIVATE_");
 });
 
 test("records first upstream latency and last frame age without logging every token", async () => {

@@ -3,6 +3,7 @@ import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution
 import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import { authorizePostgresRuntimeProvider } from "./runtime-provider-authorization.ts";
 import { Buffer } from "node:buffer";
+import { waitUntil } from "cloudflare:workers";
 
 import {
   buildExaResearchScoutBatchLaneRequest,
@@ -2774,9 +2775,11 @@ function createHostedRunnerWebSocketDiagnosticReporter(input: {
   let pendingWrites = 0;
   let droppedRecords = 0;
   return (diagnostic) => {
-    // No diagnostic queue and at most four in-flight writes per connection.
+    // No diagnostic queue: four ordinary writes plus one reserved terminal
+    // write, so a busy connection can still report why it closed.
     // Missing rows remain missing evidence, never evidence of healthy transport.
-    const runtimeLogScheduled = input.userId !== null && pendingWrites < 4;
+    const terminal = diagnostic.websocketMilestone === "closed" || diagnostic.websocketMilestone === "failed";
+    const runtimeLogScheduled = input.userId !== null && pendingWrites < (terminal ? 5 : 4);
     if (!runtimeLogScheduled && input.userId) droppedRecords += 1;
     const details = { ...diagnostic, droppedRecords, runtimeLogScheduled };
     emitHostedExecutionStructuredLog({
@@ -2796,7 +2799,8 @@ function createHostedRunnerWebSocketDiagnosticReporter(input: {
       pendingWrites -= 1;
     });
     try {
-      input.ctx?.waitUntil?.(write);
+      if (input.ctx?.waitUntil) input.ctx.waitUntil(write);
+      else waitUntil(write);
     } catch {
       // Best-effort persistence must not change relay admission or forwarding.
     }

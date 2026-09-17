@@ -3037,7 +3037,7 @@ execution, unattributed provider work, connection-source reads, credential refre
 and canonical imports. Optional historical-pull readiness, proposed follow-up
 count, and earliest follow-up delay explain successful attempts that only
 reschedule history. Delay is measured from the attempt's start, and null means
-no proposed follow-up. These scalar fields fit the existing 32-key summary
+no proposed follow-up. These scalar fields fit the bounded structured-log summary
 budget and do not change job scheduling or imply canonical import progress.
 It omits member/account/job identifiers, payloads,
 cursors, provider responses, health values, and raw errors. The marker declares
