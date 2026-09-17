@@ -3701,13 +3701,19 @@ post-restore conversation and system mailbox snapshot for that first system
 page. A workspace whose system watermark is still zero refreshes the system
 lane once to preserve the first-activation race boundary. A pass whose initial
 import already fetched the system lane also refreshes it before assistant
-execution; `system_mailbox` uses that post-import check as an ordering barrier
-for newly arrived asks. Later system rows behind the conversation-first
+execution; an in-place-promoted `system_mailbox` invocation preserves that
+ordering barrier for newly arrived asks. Later system rows behind the conversation-first
 snapshot remain durable work for their normal wake or a later pass. System-only
 mailbox reads do not query the optional group sponsorship presentation bit.
-When model work is blocked, or system lag is the only work, the existing
-`system_mailbox` mode imports only the system lane and returns before assistant
-execution. It adds no queue, scheduler, cursor, or durable state owner.
+`system_mailbox` starts with a system-lane-only import. When
+`assistantExecutionBlocked` is true it never enters assistant execution.
+Otherwise eligible foreground work uses the existing post-import selection and
+in-place upgrade path, subject to bootstrap, replay-budget, and cancellation
+checks; absent eligible foreground work the invocation returns model-free.
+Wakes that arrive before or during the initial import stay pending for the
+post-import check instead of interrupting the import or releasing the runtime
+owner, and required import/startup checkpoints precede promotion. This adds no
+queue, scheduler, cursor, or durable state owner.
 
 Linq group-avatar mutation is the one private-image provider boundary that
 requires a fetchable URL. After the group tool preflights current chat
