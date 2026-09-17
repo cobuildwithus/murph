@@ -1,6 +1,6 @@
 # One ten-minute hosted runtime quiet window
 
-Status: active
+Status: completed
 Created: 2026-09-17
 Updated: 2026-09-17
 
@@ -101,5 +101,10 @@ package typechecks, complexity diff, owner-doc checks, exact-head CI and ReviewG
 
 ## Remaining completion
 
-Create the PR, bind changelog provenance, close this plan, and run final ReviewGPT
-concurrently with required exact-head CI. No deployment is authorized or performed.
+Implementation and local verification are complete. PR #3536 is open and the
+changelog names that PR. The original session owns final ReviewGPT, required
+exact-head CI, and any necessary remediation. Those remote gates remain pending
+at plan archival; no deployment is authorized or performed.
+
+Changelog archive rendering: ten tests passed. Owner documentation drift passed.
+Completed: 2026-09-17
