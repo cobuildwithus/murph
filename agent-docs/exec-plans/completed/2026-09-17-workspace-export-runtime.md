@@ -54,9 +54,6 @@ Private registered tool descriptions: 58497 -> 59727 bytes. Private instructions
 capture all first-request fields except prompt_cache_key. Exact Terra tokenizer
 is unavailable, so token counts are unavailable rather than estimated.
 
-## Remaining
-Implementation and focused proof are complete. PR #3537 is open as draft; final
-external review and exact-head required CI remain before completion.
 
 ## Live and parent review
 Ready: all three focused `pnpm test:assistant:live -- --test <pattern> --model
@@ -71,3 +68,31 @@ diff. No real member data, delivery providers, or production credentials were us
 The exact source of the reported refusal remains unproven; the narrower demonstrated
 cause is ambiguous archive-source guidance and missing hidden-runtime coverage.
 Production revision and provider delivery are not claimed verified.
+
+## Completion review and base reconciliation
+PR #3537 received a validated final ReviewGPT PASS at 034382a25d83 with no
+qualifying findings. The waited exact-turn capture, completion marker and
+requested/observed gpt-6-pro response model agree. The first browser attempt
+failed before submission; the healthy-lane retry owns the valid result.
+
+Main advanced to 28ea746d789b during review and created two test conflicts.
+The normal merge preserved both complete provider-input measurement blocks;
+route fingerprints were refreshed from the combined existing production prompt.
+Parent verified the reviewed two production instruction replacements are identical,
+with group/maintenance/output-only fingerprints unchanged relative to current main.
+This is a behavior-preserving base reconciliation, not a new substantive review.
+After reconciliation, 243 focused tests, package typecheck, ten changelog rendering
+tests and docs drift pass. Four complete request captures pass: private
+157504 -> 159939 bytes (+2435, +1.55%); group 141587 -> 141587. Exact tokenizer
+counts remain unavailable. Private tools are 58659 -> 59889 bytes and instructions
+83946 -> 85151; group tools 44354 and instructions 62796 are unchanged.
+
+All three focused Terra export journeys pass again after reconciliation. Parent
+reviewed the printed replies and unchanged send/approval/content assertions: Ready.
+
+The final plan-closeout commit carries evidence only. Exact-head required CI
+remains the PR completion gate; merge, production deployment and actual provider
+delivery are outside this local verification. Keep the open PR worktree.
+Status: completed
+Updated: 2026-09-17
+Completed: 2026-09-17
