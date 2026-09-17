@@ -114,7 +114,7 @@ export function ProviderSearchView({ inputRef, ...props }: ProviderSearchViewPro
         </ul>
         {props.searchPending && props.providers.length === 0 ? (
           <div aria-hidden="true" className="flex flex-col gap-6 py-2">
-            {[0, 1, 2].map((index) => <div key={index} className="flex items-center gap-4"><Skeleton className="size-12 rounded-lg" /><div className="flex flex-1 flex-col gap-2"><Skeleton className="h-4 w-2/3" /><Skeleton className="h-3 w-1/3" /></div></div>)}
+            {[0, 1, 2].map((index) => <div key={index} className="flex items-center gap-4"><Skeleton className="h-16 w-24 shrink-0 rounded-lg sm:h-20 sm:w-28" /><div className="flex flex-1 flex-col gap-2"><Skeleton className="h-4 w-2/3" /><Skeleton className="h-3 w-1/3" /></div></div>)}
           </div>
         ) : null}
         {props.hasSearched && !props.searchPending && !props.searchError && props.providers.length === 0 ? (
@@ -154,8 +154,8 @@ function ProviderResult({ provider, disabled, pending, onSelect }: {
           if (next) next.focus();
           else if (event.key === "ArrowUp") event.currentTarget.closest("section")?.querySelector<HTMLInputElement>("input")?.focus();
         }}>
-        <Avatar className="size-12 rounded-lg after:rounded-lg">
-          <AvatarImage src={logos[provider.id]} alt="" loading="lazy" className="rounded-lg object-contain" />
+        <Avatar className="h-16 w-24 items-center justify-center rounded-lg bg-card after:rounded-lg sm:h-20 sm:w-28">
+          <AvatarImage src={logos[provider.id]} alt="" loading="lazy" className="aspect-auto rounded-none object-contain p-2 mix-blend-multiply sm:p-3" />
           <AvatarFallback className="rounded-lg">{provider.brandName.split(/\s+/).slice(0, 2).map((word) => word[0]).join("")}</AvatarFallback>
         </Avatar>
         <span className="flex min-w-0 flex-1 flex-col gap-1">
