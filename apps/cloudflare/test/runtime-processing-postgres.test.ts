@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeOwnerResponse, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ensurePostgresRuntimeProcessing } from "../src/runtime-processing.ts";
 import { commandHostedRuntimeMigration } from "../src/runtime-migration-client.ts";
@@ -63,9 +63,44 @@ function harness() {
 }
 
 describe("Postgres runtime orchestration", () => {
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(commandHostedRuntimeMigration).mockResolvedValue({ gate: { phase: "legacy" } });
+  });
+
+  it("returns a retry at command expiry without retiring or launching the uncertain owner", async () => {
+    vi.useFakeTimers();
+    const { source, container } = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner({ phase: "starting" }), "claimed"))
+      .mockResolvedValue(response(owner({ phase: "starting" }), "updated"));
+    let ready!: (value: { kind: "ready" }) => void;
+    container.ensureReadyForProcessing.mockImplementation(() => new Promise(resolve => { ready = resolve; }));
+    const result = ensurePostgresRuntimeProcessing(source, { ...request, commandTimeoutMs: 2_000 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await result).toMatchObject({ kind: "retry_later" });
+    ready({ kind: "ready" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .not.toContain("release");
+  });
+
+  it("retains an ambiguously accepted launch after its execution transport times out", async () => {
+    const { source, container } = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner({ phase: "starting" }), "claimed"))
+      .mockResolvedValue(response(owner({ phase: "starting" }), "updated"));
+    container.startSupervisedInvocation.mockRejectedValue(new DOMException("Synthetic timeout", "TimeoutError"));
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "retry_later" });
+    expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(["claim", "prepare_launch"]);
+    // The next command observes that exact live owner rather than launching again.
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner()));
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "runtime_processing_accepted", action: "woken" });
+    expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
   });
 
   it("completes a new member's exact empty handoff through processing retries without an operator", async () => {
