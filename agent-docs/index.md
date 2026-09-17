@@ -397,3 +397,6 @@ The separate registration activation and composed import proof remain active in
 
 The channel-scoped inactivity pause and local proof are recorded in
 [`2026-09-17-imessage-proactivity-pause.md`](exec-plans/completed/2026-09-17-imessage-proactivity-pause.md).
+
+The Responses relay queue-pressure observation and implementation proof are recorded in
+[`2026-09-17-websocket-queue-pressure-telemetry.md`](exec-plans/completed/2026-09-17-websocket-queue-pressure-telemetry.md).
