@@ -197,10 +197,10 @@ import {
   verifyHostedWebCallbackSignatureHeaders,
 } from "../src/web-callback-auth.ts";
 import type {
-  WorkerBindUserRunnerStubLike,
-  WorkerUserRunnerStubLike,
-  WorkerUserRunnerNamespaceLike,
-} from "../src/worker-contracts.ts";
+  BoundResourceTestBackend,
+  ResourceTestBackend,
+  ResourceTestBackends,
+} from "./runtime-resource-fixture-contracts.ts";
 import {
   TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK_JSON,
   TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
@@ -604,7 +604,7 @@ describe("handleRunnerOutboundRequest", () => {
     vi.spyOn(runtimeResourceClient, "recordHostedRuntimeOrphan").mockResolvedValue(undefined);
     vi.spyOn(runtimeResourceClient, "commandHostedRuntimeReplicaPut").mockResolvedValue(true);
     vi.spyOn(runtimeResourceClient, "commandHostedRuntimeSnapshot").mockImplementation(async ({ source, userId, command }) => {
-      const namespace = source.runtimeControl as WorkerUserRunnerNamespaceLike<WorkerBindUserRunnerStubLike>;
+      const namespace = source.runtimeControl as ResourceTestBackends<BoundResourceTestBackend>;
       const stub = namespace.getByName(userId);
       const session = "session" in command ? command.session : "expectedSession" in command ? command.expectedSession : null;
       const attemptId = session?.attemptId ?? ("attemptId" in command ? command.attemptId : "");
@@ -634,7 +634,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
     vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner").mockImplementation(async ({ source, userId, command }) => {
       if (command.operation !== "authorize_effect") throw new Error(`Unexpected owner command: ${command.operation}`);
-      const namespace = source.runtimeControl as WorkerUserRunnerNamespaceLike<WorkerBindUserRunnerStubLike>;
+      const namespace = source.runtimeControl as ResourceTestBackends<BoundResourceTestBackend>;
       const stub = namespace.getByName(userId);
       const authorized = await stub.validateRuntimeWriteFence?.({ userId, attemptId: command.attemptId, generation: command.generation });
       return { cutover: "postgres", status: authorized ? "authorized" : "stale", owner: null };
@@ -5056,7 +5056,7 @@ describe("handleRunnerOutboundRequest", () => {
     if (!originalCreate) {
       throw new TypeError("Workspace snapshot session create stub is unavailable.");
     }
-    const timedStub: WorkerUserRunnerStubLike = {
+    const timedStub: ResourceTestBackend = {
       ...runnerStub,
       async createHostedWorkspaceSnapshotUploadSession(
         session: HostedWorkspaceSnapshotUploadSession,
@@ -5179,7 +5179,7 @@ describe("handleRunnerOutboundRequest", () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner();
     const runnerStub = runner.getByName();
-    const failedStub: WorkerUserRunnerStubLike = {
+    const failedStub: ResourceTestBackend = {
       ...runnerStub,
       async createHostedWorkspaceSnapshotUploadSession() {
         throw new Error("workspace snapshot session create failed");
@@ -5245,7 +5245,7 @@ describe("handleRunnerOutboundRequest", () => {
       if (!originalValidateRuntimeWriteFence) {
         throw new TypeError("Workspace snapshot write-fence stub is unavailable.");
       }
-      const timedStub: WorkerUserRunnerStubLike =
+      const timedStub: ResourceTestBackend =
         stage === "write_fence_owner_validation"
           ? {
               ...runnerStub,
@@ -10743,11 +10743,6 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
-
-
-
-
-
   it("rejects browser-vault replica writes when the live invocation lease is stale", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
@@ -11959,7 +11954,7 @@ function createWorkspaceVersionAwareUserRunner(input: {
   let attemptId = input.attemptId ?? "attempt_1";
   let leaseGeneration = input.leaseGeneration ?? "9";
   const userId = input.userId ?? "member_123";
-  let userRunnerStub: WorkerUserRunnerStubLike;
+  let userRunnerStub: ResourceTestBackend;
   const workspaceSnapshotUploadSessions = new Map<string, HostedWorkspaceSnapshotUploadSession>();
   const workspaceSnapshotOrphanCandidates = new Map<string, HostedWorkspaceSnapshotOrphanCandidate>();
   const browserVaultReplicaOrphanCandidates = new Map<
@@ -12378,19 +12373,18 @@ function rootReplicaAdmissionReleased(): boolean {
     .some(([input]) => input.command.operation === "release" && input.command.writeId === root.writeId);
 }
 
-
 type OutboundTestEnvironment = RunnerOutboundEnvironmentSource & {
-  runtimeControl: WorkerUserRunnerNamespaceLike;
+  runtimeControl: ResourceTestBackends;
 };
 type OutboundTestOverrides = Partial<Omit<RunnerOutboundEnvironmentSource, "USER_RUNNER">> & {
-  runtimeControl?: WorkerUserRunnerNamespaceLike;
+  runtimeControl?: ResourceTestBackends;
 };
 
 function createRunnerOutboundEnv(
   overrides: OutboundTestOverrides = {},
 ): OutboundTestEnvironment {
   const values = new Map<string, Uint8Array>();
-  const defaultUserRunnerNamespace: WorkerUserRunnerNamespaceLike<WorkerBindUserRunnerStubLike> = {
+  const defaultUserRunnerNamespace: ResourceTestBackends<BoundResourceTestBackend> = {
     getByName() {
       return {
         async bindUser() {

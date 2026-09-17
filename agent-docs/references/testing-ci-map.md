@@ -1192,9 +1192,9 @@ limits, and local proof distinctions are owned by
   second window after the preceding checkpoint and durable effect. It checks the
   checkpoint times and corrected typed wake. The existing clean-return and
   foreground checkpoint tests retain the real-work floor and interruption proof.
-  `apps/cloudflare/test/user-runner-alarm.test.ts` covers the signed owner-release
-  callback after an exact future Environment recording continuation, with no
-  immediate-recheck edge, alongside stale-fence rejection and callback failure.
+  `apps/cloudflare/test/runtime-processing-postgres.test.ts` and
+  `apps/cloudflare/test/runtime-owner-completion.test.ts` cover current runtime
+  admission, exact completion, and owner-release behavior.
   These focused tests do not establish deployed Temporal timing.
 - The hosted-local active-turn latency scenario proves same-chat late-input folding, forces a 20-second provider-cleanup stall and requires the second reply to preempt it, and checks that a projected wake does not trigger immediate full idle-shutdown work under the 180-second floor.
 - The dedicated `foreground-reply-priority` hosted-local scenario keeps the
@@ -1890,9 +1890,8 @@ its manifest companion must land before this public requirement.
 
 ## Hosted-local activity expiry targeting
 
-The activity-expiry test control reads the selected runner from UserRunner's
-active fence or retained target, then uses the existing namespace router.
+The activity-expiry test control reads the selected runner from the Postgres owner's
+active attempt or retained target, then uses the existing namespace router.
 `apps/cloudflare/test/index.test.ts` covers primary, next-bank, and legacy
-routing; `apps/cloudflare/test/user-runner-alarm.test.ts` covers active and
-settled target projection and cross-user rejection. The retryable-outbox restart
+routing and target projection. The retryable-outbox restart
 E2E retains its canonical checkpoint, real destruction, and exact-send checks.

@@ -6,8 +6,6 @@ import {
 import { readdir, readFile, readlink } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER, parseHostedRuntimeMigrationCheckpointRequest } from "@murphai/hosted-execution/runtime-migration";
-import { requestContainerMigrationCheckpoint } from "./container-migration-checkpoint.ts";
 
 import {
   buildHostedExecutionSafeErrorDetails,
@@ -621,27 +619,6 @@ export async function startHostedContainerEntrypoint(input: {
           pending,
           identityPresent: wakeRequest !== null,
         });
-        return;
-      }
-
-      if (request.method === "GET" && requestUrl.pathname === HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH) {
-        discardUnreadRequestBody(request);
-        response.statusCode = 204;
-        response.setHeader(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL);
-        response.end();
-        return;
-      }
-
-      if (request.method === "POST" && requestUrl.pathname === HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH) {
-        const checkpointRequest = parseHostedRuntimeMigrationCheckpointRequest(JSON.parse(
-          await readHostedContainerInvocationRequestBody(request, HOSTED_CONTAINER_RUNTIME_WAKE_REQUEST_BODY_LIMIT_BYTES),
-        ));
-        const status = requestContainerMigrationCheckpoint({
-          request: checkpointRequest, active: activeWorkspaceInvocationAbort, shutdown: containerShutdownController,
-        });
-        response.statusCode = 204;
-        response.setHeader(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER, status);
-        response.end();
         return;
       }
 

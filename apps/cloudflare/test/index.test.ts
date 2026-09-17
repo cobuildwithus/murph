@@ -42,18 +42,12 @@ import {
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
-import {
-  HostedUserRunner,
-} from "../src/user-runner.ts";
-import type {
-  HostedRunnerStuckInvocationTestResult,
-} from "../src/user-runner/hosted-user-runner-test.ts";
+
 import {
   parseTestPositiveInteger,
   parseTestPositiveIntegerValue,
 } from "../src/worker/route-handlers/test-runner.ts";
 import type {
-  HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.ts";
 import {
@@ -66,10 +60,7 @@ import {
   createHostedStandbySlotName,
   type HostedStandbyRunnerContainerStubLike,
 } from "../src/standby-runner-contract.ts";
-import type {
-  DurableObjectStateLike,
-  DurableObjectStorageLike,
-} from "../src/user-runner/types.ts";
+
 import {
   hostedArtifactObjectKey,
   hostedBrowserVaultReplicaObjectKey,
@@ -78,7 +69,6 @@ import {
 } from "../src/storage-paths.ts";
 import type {
   WorkerRouteContext,
-  UserRunnerDurableObjectStubLike,
   WorkerExecutionContext,
   WorkerEnvironmentSource,
 } from "../src/worker-routes/shared.ts";
@@ -106,13 +96,8 @@ import {
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
-  HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
-  HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
-import type {
-  HostedWorkspaceInvocationResult,
-  HostedWorkspaceState,
-} from "@murphai/hosted-execution/runtime-control";
+
 import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
@@ -121,8 +106,6 @@ import {
   getTestHostedRuntimeRootKey,
 } from "./hosted-runtime-crypto-fixtures";
 import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
-import { createTestSqlStorage } from "./sql-storage.ts";
-import { RunnerSlotBindingStore } from "../src/runner-slot-binding.ts";
 
 const describe = baseDescribe.sequential;
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -2700,7 +2683,7 @@ describe("cloudflare worker routes", () => {
 
   it("reads canonical per-user status while keeping the per-event status route removed", async () => {
     const stub = createUserRunnerStub({
-      runnerStatus: vi.fn(async () => ({
+      runnerStatus: vi.fn(async (_options?: { logLimit?: number }) => ({
         inFlight: false,
         lastInvocationAt: "2026-04-16T10:05:00.000Z",
         mailboxLag: [],
@@ -2710,7 +2693,7 @@ describe("cloudflare worker routes", () => {
         workspace: null,
       })),
     });
-    vi.spyOn(runtimeUserControl, "readPostgresRunnerStatus").mockImplementation(async (_source, _userId, options) => ({ lastErrorCode: null, lastInvocationAt: null, ...await (stub as WorkerTestUserRunnerStub).runnerStatus(options), nextAlarmAt: null }));
+    vi.spyOn(runtimeUserControl, "readPostgresRunnerStatus").mockImplementation(async (_source, _userId, options) => ({ lastErrorCode: null, lastInvocationAt: null, ...await (stub).runnerStatus(options), nextAlarmAt: null }));
 
     const statusResponse = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status?logLimit=999", {
@@ -2744,7 +2727,7 @@ describe("cloudflare worker routes", () => {
 
   it("ignores malformed per-user status log limits instead of partially parsing them", async () => {
     const stub = createUserRunnerStub({
-      runnerStatus: vi.fn(async () => ({
+      runnerStatus: vi.fn(async (_options?: { logLimit?: number }) => ({
         inFlight: false,
         lastInvocationAt: "2026-04-16T10:05:00.000Z",
         mailboxLag: [],
@@ -2754,7 +2737,7 @@ describe("cloudflare worker routes", () => {
         workspace: null,
       })),
     });
-    vi.spyOn(runtimeUserControl, "readPostgresRunnerStatus").mockImplementation(async (_source, _userId, options) => ({ lastErrorCode: null, lastInvocationAt: null, ...await (stub as WorkerTestUserRunnerStub).runnerStatus(options), nextAlarmAt: null }));
+    vi.spyOn(runtimeUserControl, "readPostgresRunnerStatus").mockImplementation(async (_source, _userId, options) => ({ lastErrorCode: null, lastInvocationAt: null, ...await (stub).runnerStatus(options), nextAlarmAt: null }));
 
     const statusResponse = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status?logLimit=10abc", {
@@ -2774,7 +2757,7 @@ describe("cloudflare worker routes", () => {
         throw new Error("Hosted workspace read returned a different user.");
       }),
     });
-    vi.spyOn(runtimeUserControl, "readPostgresRunnerStatus").mockImplementation(async (_source, _userId, options) => ({ lastErrorCode: null, lastInvocationAt: null, ...await (stub as WorkerTestUserRunnerStub).runnerStatus(options), nextAlarmAt: null }));
+    vi.spyOn(runtimeUserControl, "readPostgresRunnerStatus").mockImplementation(async (_source, _userId, options) => ({ lastErrorCode: null, lastInvocationAt: null, ...await (stub).runnerStatus(options), nextAlarmAt: null }));
 
     const statusResponse = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
@@ -3415,7 +3398,7 @@ describe("cloudflare worker routes", () => {
       { conversationWorkPending: true, processingMode: "default" },
     ] as const)("maps signed runtime ensure-processing $processingMode calls to the Postgres coordinator", async (processingRequest) => {
       const stub = createUserRunnerStub({
-        ensureRuntimeProcessingForUser: vi.fn(async () => ({
+        ensureRuntimeProcessingForUser: vi.fn(async (_request: Parameters<typeof runtimeProcessing.ensurePostgresRuntimeProcessing>[1]) => ({
           action: "started" as const,
           kind: "runtime_processing_accepted" as const,
           recommendedRecheckAt: "2026-04-27T00:03:00.000Z",
@@ -3423,7 +3406,7 @@ describe("cloudflare worker routes", () => {
         })),
       });
       const env = createWorkerEnv(stub);
-      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub as WorkerTestUserRunnerStub).ensureRuntimeProcessingForUser(request));
+      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub).ensureRuntimeProcessingForUser(request));
 
       const response = await worker.fetch(
         await signWebCallbackControlRequest(
@@ -3590,13 +3573,13 @@ describe("cloudflare worker routes", () => {
         resolveEnsure = resolve;
       });
       const ensureRuntimeProcessingForUser = vi.fn<
-        UserRunnerDurableObjectStubLike["ensureRuntimeProcessingForUser"]
+        (request: Parameters<typeof runtimeProcessing.ensurePostgresRuntimeProcessing>[1]) => ReturnType<typeof runtimeProcessing.ensurePostgresRuntimeProcessing>
       >(() => ensurePromise);
       const stub = createUserRunnerStub({
         ensureRuntimeProcessingForUser,
       });
       const env = createWorkerEnv(stub);
-      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub as WorkerTestUserRunnerStub).ensureRuntimeProcessingForUser(request));
+      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub).ensureRuntimeProcessingForUser(request));
       const execution = createWorkerExecutionContextForTest();
 
       let requestSettled = false;
@@ -3686,12 +3669,12 @@ describe("cloudflare worker routes", () => {
       const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
       vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
       const stub = createUserRunnerStub({
-        ensureRuntimeProcessingForUser: vi.fn(async () => {
+        ensureRuntimeProcessingForUser: vi.fn(async (_request: Parameters<typeof runtimeProcessing.ensurePostgresRuntimeProcessing>[1]) => {
           throw new Error("direct ensure failed");
         }),
       });
       const env = createWorkerEnv(stub);
-      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub as WorkerTestUserRunnerStub).ensureRuntimeProcessingForUser(request));
+      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub).ensureRuntimeProcessingForUser(request));
       const execution = createWorkerExecutionContextForTest();
 
       const response = await worker.fetch(
@@ -3811,7 +3794,7 @@ describe("cloudflare worker routes", () => {
     it("accepts runtime ensure-processing requests without timeout metadata", async () => {
       const stub = createUserRunnerStub();
       const env = createWorkerEnv(stub);
-      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub as WorkerTestUserRunnerStub).ensureRuntimeProcessingForUser(request));
+      vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing").mockImplementation(async (_source, request) => (stub).ensureRuntimeProcessingForUser(request));
 
       const response = await worker.fetch(
         await signWebCallbackControlRequest(
@@ -3958,196 +3941,6 @@ describe("cloudflare worker routes", () => {
       await expect(response.json()).resolves.toEqual({ error: "Not found" });
       expect(userRunnerGetByName).not.toHaveBeenCalled();
       expect(runnerContainerGetByName).not.toHaveBeenCalled();
-    });
-
-    it("starts runtime processing without an active fence", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-      const runtimeNextWakeAt = "2026-04-27T00:04:00.000Z";
-      const { alarms, invoke, runner, sql } = createRuntimeControlRunnerHarness({
-        invocationResults: [{
-          nextWakeAt: runtimeNextWakeAt,
-          nextWakeReason: "assistant",
-          status: "idle",
-        }],
-      });
-
-      const response = await runner.ensureRuntimeProcessingForUser({
-        orchestration: { triggeredByWebDirect: true },
-        orchestrationAttemptId:
-          "web-ingress-33333333-3333-4333-8333-333333333333",
-        userId: "test-user",
-      });
-
-      expect(response).toEqual({
-        action: "started",
-        kind: "runtime_processing_accepted",
-        recommendedRecheckAt: "2026-04-27T00:01:34.000Z",
-        runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
-      });
-      await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-      expect(invoke).toHaveBeenCalledOnce();
-      expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
-        userId: "test-user",
-        workspaceVersion: "7",
-      });
-      expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
-        runtimeInvocationOrchestrationAttemptId:
-          "web-ingress-33333333-3333-4333-8333-333333333333",
-        triggeredByWebDirect: true,
-      });
-      await vi.waitFor(() =>
-        expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-          active_attempt_id: null,
-          failure_count: 0,
-        })
-      );
-      expect(alarms).toEqual([]);
-    });
-
-    it("sends activation diagnostics for an active fence wake", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-      const activeWakeEnsureProcessing = vi.fn<
-        NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>
-      >(async () => ({
-        action: "woken" as const,
-        kind: "accepted" as const,
-      }));
-      const { ensureProcessing, invoke, runner, sql } = createRuntimeControlRunnerHarness({
-        ensureProcessing: activeWakeEnsureProcessing,
-      });
-      const token = await writeRuntimeControlFenceForTest({
-        runner,
-        sql,
-        userId: "test-user",
-        workspaceVersion: "7",
-      });
-
-      const response = await runner.ensureRuntimeProcessingForUser({
-        orchestration: { triggeredByWebDirect: true },
-        orchestrationAttemptId:
-          "web-ingress-44444444-4444-4444-8444-444444444444",
-        userId: "test-user",
-      });
-
-      expect(response).toEqual({
-        action: "woken",
-        kind: "runtime_processing_accepted",
-        recommendedRecheckAt: "2026-04-27T00:01:34.000Z",
-        runtimeAttemptId: token.attemptId,
-      });
-      expect(ensureProcessing).toHaveBeenCalledWith({
-        activeRuntime: {
-          attemptId: token.attemptId,
-          leaseGeneration: token.generation,
-          orchestration: {
-            activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            activeFenceTargetWasPriorVersion: false,
-            activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            runnerStateReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            runtimeConsentLockAcquiredAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            triggeredByWebDirect: true,
-            userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-          },
-          processingMode: "default",
-          userId: "test-user",
-        },
-        userId: "test-user",
-      });
-      expect(
-        activeWakeEnsureProcessing.mock.calls[0]?.[0].activeRuntime?.orchestration,
-      ).not.toHaveProperty("runtimeInvocationOrchestrationAttemptId");
-      expect(invoke).not.toHaveBeenCalled();
-      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: token.attemptId,
-      });
-    });
-
-    it("returns retry_later for a fresh no-active-child fence instead of pretending it is running", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-      const { ensureProcessing, invoke, runner, sql } = createRuntimeControlRunnerHarness({
-        ensureProcessing: vi.fn(async () => ({
-          kind: "start-required" as const,
-          reason: "no-active-child" as const,
-        })),
-        invocationResults: [{ nextWakeAt: null, status: "idle" }],
-      });
-      const oldToken = await writeRuntimeControlFenceForTest({
-        runner,
-        sql,
-        userId: "test-user",
-        workspaceVersion: "7",
-      });
-
-      const response = await runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
-        userId: "test-user",
-      });
-
-      expect(response).toEqual({
-        kind: "retry_later",
-        retryAt: "2026-04-27T00:00:03.000Z",
-      });
-      expect(ensureProcessing).toHaveBeenCalledOnce();
-      expect(ensureProcessing).toHaveBeenCalledWith({
-        activeRuntime: {
-          attemptId: oldToken.attemptId,
-          leaseGeneration: oldToken.generation,
-          orchestration: {
-            activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            activeFenceTargetWasPriorVersion: false,
-            activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            runnerStateReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            runtimeConsentLockAcquiredAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-            userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
-          },
-          processingMode: "default",
-          userId: "test-user",
-        },
-        userId: "test-user",
-      });
-      expect(invoke).not.toHaveBeenCalled();
-      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: oldToken.attemptId,
-      });
-    });
-
-    it("returns retry_later for unconfirmed active wakes and preserves the fence", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
-      const { invoke, runner, sql } = createRuntimeControlRunnerHarness({
-        ensureProcessing: vi.fn(async () => ({
-          kind: "wake-unconfirmed" as const,
-          reason: "container-rpc-timeout" as const,
-        })),
-      });
-      const token = await writeRuntimeControlFenceForTest({
-        runner,
-        sql,
-        userId: "test-user",
-        workspaceVersion: "7",
-      });
-
-      await expect(runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
-        userId: "test-user",
-      })).resolves.toEqual({
-        kind: "retry_later",
-        retryAt: "2026-04-27T00:00:10.000Z",
-      });
-
-      expect(invoke).not.toHaveBeenCalled();
-      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: token.attemptId,
-      });
     });
 
   });
@@ -4761,248 +4554,6 @@ type WorkerTestEnv = WorkerEnvironmentSource & {
 } & Record<string, unknown>;
 
 type UserRunnerStub = ReturnType<typeof createUserRunnerStub>;
-type RuntimeControlMetaRow = {
-  active_attempt_id: string | null;
-  failure_count: number;
-};
-
-function createRuntimeControlRunnerHarness(input: {
-  afterInvocationResult?: (input: {
-    result: HostedWorkspaceInvocationResult;
-    sql: ReturnType<typeof createTestSqlStorage>;
-  }) => void;
-  deleteAlarmError?: Error;
-  ensureReadyForProcessing?: HostedExecutionContainerStubLike["ensureReadyForProcessing"];
-  ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
-  healthDataAdmission?: {
-    consentState: "granted" | "missing" | "revoked";
-    processingAllowed: boolean;
-  };
-  invocationResults?: Array<Error | HostedWorkspaceInvocationResult>;
-  workspace?: HostedWorkspaceState | null;
-} = {}) {
-  installOidcJwksFetch(async (requestInput) => {
-    const url = new URL(String(requestInput));
-    if (url.pathname === HOSTED_RUNTIME_WORKSPACE_PATH) {
-      return Response.json({
-        fetchedAt: "2026-04-27T00:00:00.000Z",
-        workspace: input.workspace ?? createRuntimeControlWorkspaceState("test-user"),
-      });
-    }
-
-    if (url.pathname === HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH) {
-      return Response.json({
-        consentState: input.healthDataAdmission?.consentState ?? "granted",
-        processingAllowed:
-          input.healthDataAdmission?.processingAllowed ?? true,
-        userId: "test-user",
-      });
-    }
-
-    throw new Error(`Unexpected hosted runtime control fetch: ${String(requestInput)}`);
-  });
-
-  const alarms: string[] = [];
-  const values = new Map<string, unknown>();
-  const sql = createTestSqlStorage();
-  const storage: DurableObjectStorageLike = {
-    delete: vi.fn(async (key: string) => values.delete(key)),
-    deleteAll: vi.fn(async () => values.clear()),
-    deleteAlarm: vi.fn(async () => {
-      if (input.deleteAlarmError) {
-        throw input.deleteAlarmError;
-      }
-      alarms.push("deleted");
-    }),
-    async get<T>(key: string): Promise<T | undefined> {
-      return values.get(key) as T | undefined;
-    },
-    getAlarm: vi.fn(async () => null),
-    async list<T>(options: { prefix?: string } = {}): Promise<Map<string, T>> {
-      const result = new Map<string, T>();
-      for (const [key, value] of values) {
-        if (!options.prefix || key.startsWith(options.prefix)) {
-          result.set(key, value as T);
-        }
-      }
-      return result;
-    },
-    async put<T>(key: string, value: T): Promise<void> {
-      values.set(key, value);
-    },
-    setAlarm: vi.fn(async (scheduledTime: number | Date) => {
-      const date = scheduledTime instanceof Date
-        ? scheduledTime
-        : new Date(scheduledTime);
-      alarms.push(date.toISOString());
-    }),
-    sql,
-  };
-  const waitUntil = vi.fn();
-  const invocationResults = [...(input.invocationResults ?? [])];
-  const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
-    const next = invocationResults.shift() ?? { nextWakeAt: null, status: "idle" };
-    if (next instanceof Error) {
-      throw next;
-    }
-    input.afterInvocationResult?.({
-      result: next,
-      sql,
-    });
-    return next;
-  });
-  const slotStore = new RunnerSlotBindingStore(createTestSqlStorage());
-  const stub: HostedExecutionContainerStubLike = {
-    bindStandbySlot: vi.fn(async (binding) => {
-      slotStore.initialize(binding);
-      const bound = slotStore.bind(binding);
-      return { ...bound, bound: true as const };
-    }),
-    prepareStandbySlot: vi.fn(async () => {
-      throw new Error("Runtime control route tests must not prewarm shared inventory.");
-    }),
-    readStandbySlotBinding: vi.fn(async () => slotStore.read()),
-    readStandbySlotCoordinatorState: vi.fn(async () => {
-      const binding = slotStore.read();
-      return {
-        coordinatorOwned: binding.userId === null,
-        releaseId: binding.releaseId,
-        slotName: binding.slotName,
-        state: binding.state,
-      };
-    }),
-    resolveRetainedStandbySlot: vi.fn(async () => {
-      throw new Error("Runtime control route tests must not reuse an idle target.");
-    }),
-    retireStandbySlot: vi.fn(async () => {
-      throw new Error("Runtime control route tests must not retire a bound target.");
-    }),
-    destroyInstance: vi.fn(async () => undefined),
-    ensureReadyForProcessing: vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
-    >(async (ensureInput) =>
-      await input.ensureReadyForProcessing?.(ensureInput) ?? { kind: "ready" }
-    ),
-    ...(input.ensureProcessing
-      ? {
-          ensureProcessing: vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
-            async (ensureInput) => {
-              if (ensureInput.invoke) {
-                return {
-                  action: ensureInput.activeRuntime ? "restarted" : "started",
-                  kind: "accepted",
-                  result: await invoke(ensureInput.invoke),
-                };
-              }
-
-              const result = await input.ensureProcessing?.(ensureInput);
-              return result ?? {
-                kind: "start-required",
-                reason: "no-active-child",
-              };
-            },
-          ),
-        }
-      : {}),
-    invoke,
-    smokeHealth: vi.fn(async () => ({
-      ok: true,
-      runnerBundle: null,
-      service: "runner",
-      status: 200,
-    })),
-  };
-  const namespace: HostedExecutionContainerNamespaceLike = {
-    getByName: vi.fn(() => stub),
-  };
-  const runner = new HostedUserRunner(
-    {
-      storage,
-      waitUntil(promise) {
-        waitUntil(promise);
-      },
-    } satisfies DurableObjectStateLike,
-    readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "54000",
-      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
-    })),
-    createBucketStore().api,
-    {
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-        "provider-egress-signing-secret",
-      OPENAI_API_KEY: "test-openai-key",
-    },
-    namespace,
-  );
-
-  return {
-    alarms,
-    ensureProcessing: stub.ensureProcessing,
-    invoke,
-    namespace,
-    runner,
-    sql,
-    storage,
-    waitUntil,
-  };
-}
-
-function createRuntimeControlWorkspaceState(userId: string): HostedWorkspaceState {
-  return {
-    createdAt: "2026-04-27T00:00:00.000Z",
-    snapshotRef: null,
-    updatedAt: "2026-04-27T00:00:00.000Z",
-    userId,
-    version: "7",
-  };
-}
-
-function readRunnerMetaForRuntimeControl(
-  sql: ReturnType<typeof createTestSqlStorage>,
-): RuntimeControlMetaRow {
-  return sql.exec<RuntimeControlMetaRow>(
-    `SELECT active_attempt_id, failure_count
-     FROM runner_meta
-     WHERE singleton = 1`,
-  ).one();
-}
-
-async function writeRuntimeControlFenceForTest(input: {
-  runner: HostedUserRunner;
-  sql: ReturnType<typeof createTestSqlStorage>;
-  userId: string;
-  workspaceVersion: string;
-}): Promise<{
-  attemptId: string;
-  generation: string;
-}> {
-  await input.runner.bindUser(input.userId);
-  const attemptId = "attempt_runtime_control_active";
-  const generation = 2;
-  input.sql.exec(
-    `UPDATE runner_meta
-     SET active_attempt_id = ?,
-         active_generation = ?,
-         active_kind = ?,
-         active_reason = ?,
-         active_runner_container_name = ?,
-         active_started_at = ?,
-         active_workspace_version = ?
-     WHERE singleton = 1`,
-    attemptId,
-    generation,
-    "runtime",
-    "nudge",
-    input.userId,
-    "2026-04-27T00:00:00.000Z",
-    input.workspaceVersion,
-  );
-  return {
-    attemptId,
-    generation: String(generation),
-  };
-}
 
 function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTAINER"] {
   return {
@@ -5055,13 +4606,6 @@ function createWorkerEnv(
   overrides: Partial<WorkerEnvironmentSource & Record<string, unknown>> = {},
 ): WorkerTestEnv {
   const bucketStore = createBucketStore();
-  const wrappedUserRunnerStubs = new Map<string, UserRunnerStub>();
-  const defaultUserRunnerNamespace: WorkerEnvironmentSource["USER_RUNNER"] = {
-    getByName(userId: string) {
-      return getOrCreateWrappedUserRunnerStub(userId, userRunnerStub);
-    },
-  };
-  const userRunnerNamespace = overrides.USER_RUNNER ?? defaultUserRunnerNamespace;
   const env: WorkerTestEnv = {
     __bucketStore: bucketStore,
     ...createHostedExecutionTestEnv(),
@@ -5069,17 +4613,12 @@ function createWorkerEnv(
     RUNNER_CONTAINER: createRunnerContainerNamespace(),
     RUNNER_CONTAINER_SMOKE: createRunnerContainerNamespace(),
     ...overrides,
-    USER_RUNNER: {
-      getByName(userId: string) {
-        return userRunnerNamespace.getByName(userId);
-      },
-    },
   };
 
   if (overrides.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1") {
     mockPostgresOwnerCommand(async ({ userId, command }) => {
       if (command.operation !== "reconcile") throw new Error("Unexpected local control owner operation.");
-      const fence: { attemptId: string; processingMode?: "default" | "system_mailbox" | "inbox_media_retention"; runnerContainerName?: string } | null = await (userRunnerStub as WorkerTestUserRunnerStub).readActiveRuntimeFenceForTest({ userId });
+      const fence: { attemptId: string; processingMode?: "default" | "system_mailbox" | "inbox_media_retention"; runnerContainerName?: string } | null = await (userRunnerStub).readActiveRuntimeFenceForTest({ userId });
       const target = await userRunnerStub.readRunnerContainerNameForTest();
       return { cutover: "postgres", status: "observed", owner: createPostgresTestOwner({ userId,
         attemptId: fence?.attemptId ?? null, phase: fence ? "active" : "idle", processingMode: fence?.processingMode ?? null,
@@ -5088,23 +4627,6 @@ function createWorkerEnv(
   }
   return env;
 
-  function getOrCreateWrappedUserRunnerStub(userId: string, seedStub: UserRunnerStub): UserRunnerStub {
-    const existing = wrappedUserRunnerStubs.get(userId);
-
-    if (existing) {
-      return existing;
-    }
-
-    const baseStub = wrappedUserRunnerStubs.size === 0 ? seedStub : createUserRunnerStub();
-    const wrappedStub: UserRunnerStub = {
-      ...baseStub,
-      bindUser: vi.fn(async (boundUserId: string) => {
-        return baseStub.bindUser(boundUserId);
-      }),
-    };
-    wrappedUserRunnerStubs.set(userId, wrappedStub);
-    return wrappedStub;
-  }
 }
 
 function callRunnerOutbound(
@@ -5279,34 +4801,6 @@ async function resolveHostedUserCryptoContextForTest(
   };
 }
 
-type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
-  readRunnerContainerNameForTest(input: { userId: string }): Promise<string | null>;
-  ageActiveRuntimeFenceForTest(input: {
-    startedAgoMs: number;
-    userId: string;
-  }): Promise<{
-    attemptId: string;
-    ok: true;
-    startedAt: string;
-  }>;
-  readActiveRuntimeFenceForTest(input: {
-    userId: string;
-  }): Promise<{
-    attemptId: string;
-    processingMode: "default" | "inbox_media_retention" | "system_mailbox";
-  } | null>;
-  admitHostedMediaRead: NonNullable<UserRunnerDurableObjectStubLike["admitHostedMediaRead"]>;
-  forgetHostedMediaAsset: NonNullable<UserRunnerDurableObjectStubLike["forgetHostedMediaAsset"]>;
-  recordHostedMediaAsset: NonNullable<UserRunnerDurableObjectStubLike["recordHostedMediaAsset"]>;
-  runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
-  runUntilIdleForTest(input: { userId: string }): Promise<HostedWorkspaceInvocationResult>;
-  startStuckInvocationForTest(input: {
-    sameWorkerVersion?: boolean;
-    startedAgoMs?: number;
-    userId: string;
-  }): Promise<HostedRunnerStuckInvocationTestResult>;
-};
-
 function createWorkerExecutionContextForTest(): {
   ctx: WorkerExecutionContext;
   waitUntil: ReturnType<typeof vi.fn>;
@@ -5347,7 +4841,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       },
       userId,
     })),
-    ensureRuntimeProcessingForUser: vi.fn(async () => ({
+    ensureRuntimeProcessingForUser: vi.fn(async (_request: Parameters<typeof runtimeProcessing.ensurePostgresRuntimeProcessing>[1]) => ({
       action: "woken" as const,
       kind: "runtime_processing_accepted" as const,
       recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
@@ -5363,7 +4857,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     })),
     forgetHostedMediaAsset: vi.fn(async () => true),
     recordHostedMediaAsset: vi.fn(async () => true),
-    readActiveRuntimeFenceForTest: vi.fn(async () => null),
+    readActiveRuntimeFenceForTest: vi.fn(async (_input: { userId: string }): Promise<{ attemptId: string; processingMode?: "default" | "system_mailbox" | "inbox_media_retention"; runnerContainerName?: string } | null> => null),
     readRunnerContainerNameForTest: vi.fn(async () => null),
     runUntilIdleForTest: vi.fn(async () => ({
       nextWakeAt: null,
@@ -5375,7 +4869,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       nextWakeAt: null,
       ok: true as const,
     })),
-    runnerStatus: vi.fn(async () => ({
+    runnerStatus: vi.fn(async (_options?: { logLimit?: number }) => ({
       inFlight: false,
       mailboxLag: [],
       nextAlarmAt: null,
@@ -5385,7 +4879,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     })),
     validateRuntimeWriteFence: vi.fn(async () => true),
     ...overrides,
-  } satisfies WorkerTestUserRunnerStub;
+  };
 }
 
 async function createSignedJsonControlRequest(

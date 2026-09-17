@@ -1,4 +1,3 @@
-import * as runtimeMigrationClient from "../src/runtime-migration-client.ts";
 import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
 import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 
@@ -8,14 +7,8 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
-import {
-  HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
-  HOSTED_RUNTIME_STATUS_PATH,
-} from "@murphai/hosted-execution/routes";
+
 import worker from "../src/index.ts";
-import { UserRunnerDurableObject } from "../src/worker/user-runner-durable-object.ts";
-import { HostedUserRunner } from "../src/user-runner.ts";
-import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
 
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.ts";
@@ -45,9 +38,8 @@ describe("cloudflare worker queue backpressure routes", () => {
   });
 
   it("removes the migration operator even for authenticated requests", async () => {
-    const harness = createUserRunnerDurableObject();
+    const harness = createWorkerHarness();
     const get = vi.fn(() => { throw new Error("Retired namespace accessed"); });
-    const control = vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration");
     const env = { ...harness.env, USER_RUNNER: { get, getByName: get } };
     for (const operation of ["status", "inspect_object", "recover_object", "next_object", "quiesce_member", "freeze_member", "activate_member"]) {
       const request = new Request("https://runner.example.test/internal/runtime-migration", {
@@ -56,12 +48,10 @@ describe("cloudflare worker queue backpressure routes", () => {
       expect((await worker.fetch(await signControlRequest(request), env as never)).status).toBe(404);
     }
     expect(get).not.toHaveBeenCalled();
-    expect(control).not.toHaveBeenCalled();
   });
 
   it("keeps the removed dispatch route unavailable without relying on legacy local queue state", async () => {
-    const harness = createUserRunnerDurableObject();
-    await harness.durableObject.bindUser("member_123");
+    const harness = createWorkerHarness();
 
     const overflowResponse = await worker.fetch(
       await createSignedWakeRequest("/internal/dispatch", createWake("evt_overflow")),
@@ -75,7 +65,7 @@ describe("cloudflare worker queue backpressure routes", () => {
   });
 
   it("keeps the removed runner nudge route unavailable", async () => {
-    const harness = createUserRunnerDurableObject({
+    const harness = createWorkerHarness({
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
     });
     const stub = {
@@ -106,205 +96,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
-  it("stamps UserRunner activation facts once and RPC entry per ensure instruction", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-06T12:00:00.000Z"));
-    const ensure = vi.spyOn(
-      HostedUserRunner.prototype,
-      "ensureRuntimeProcessingForUser",
-    ).mockResolvedValue({
-      action: "started",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-08-06T12:01:00.000Z",
-      runtimeAttemptId: "runtime-attempt-test",
-    });
-    const bucket = createBucketStore();
-    const storage = createStorage();
-    const env = {
-      ...createHostedExecutionTestEnv(),
-      RUNNER_CONTAINER: storage.runnerContainerNamespace,
-      RUNNER_CONTAINER_SMOKE: storage.runnerContainerNamespace,
-    };
-    Object.defineProperty(env, "BUNDLES", {
-      enumerable: true,
-      get() {
-        vi.setSystemTime(new Date("2026-08-06T12:00:00.025Z"));
-        return bucket.api;
-      },
-    });
-    const durableObject = new UserRunnerDurableObject(storage.state, env as never);
-
-    vi.setSystemTime(new Date("2026-08-06T12:00:01.000Z"));
-    await durableObject.ensureRuntimeProcessingForUser({
-      orchestration: {
-        cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T11:59:59.900Z"),
-      },
-      orchestrationAttemptId: "rpc-entry-cold-test",
-      userId: "member_123",
-    });
-
-    vi.setSystemTime(new Date("2026-08-06T12:00:02.000Z"));
-    await durableObject.ensureRuntimeProcessingForUser({
-      orchestration: {
-        cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T12:00:01.900Z"),
-      },
-      orchestrationAttemptId: "rpc-entry-warm-test",
-      userId: "member_123",
-    });
-
-    expect(ensure).toHaveBeenNthCalledWith(1, {
-      orchestration: {
-        cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T11:59:59.900Z"),
-        userRunnerConstructorStartedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
-        userRunnerConstructorFinishedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
-        userRunnerFirstEnsureRuntimeProcessingAtEpochMs: Date.parse("2026-08-06T12:00:01.000Z"),
-        userRunnerRpcStartedAtEpochMs: Date.parse("2026-08-06T12:00:01.000Z"),
-      },
-      orchestrationAttemptId: "rpc-entry-cold-test",
-      userId: "member_123",
-    });
-    expect(ensure).toHaveBeenNthCalledWith(2, {
-      orchestration: {
-        cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T12:00:01.900Z"),
-        userRunnerConstructorStartedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
-        userRunnerConstructorFinishedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
-        userRunnerFirstEnsureRuntimeProcessingAtEpochMs: Date.parse("2026-08-06T12:00:01.000Z"),
-        userRunnerRpcStartedAtEpochMs: Date.parse("2026-08-06T12:00:02.000Z"),
-      },
-      orchestrationAttemptId: "rpc-entry-warm-test",
-      userId: "member_123",
-    });
-  });
-
-  it("blocks legacy starts during drain and freezes resource RPCs and alarms", async () => {
-    const harness = createUserRunnerDurableObject();
-    const ensure = vi.spyOn(HostedUserRunner.prototype, "ensureRuntimeProcessingForUser");
-    vi.mocked(runtimeOwnerClient.commandHostedRuntimeOwner).mockResolvedValue({ cutover: "draining", status: "observed", owner: null });
-    expect(await harness.durableObject.ensureRuntimeProcessingForUser({ userId: "member_123", orchestrationAttemptId: "synthetic-drain" }))
-      .toMatchObject({ kind: "retry_later" });
-    expect(ensure).not.toHaveBeenCalled();
-    vi.spyOn(HostedUserRunner.prototype, "stopLegacyRuntimeForMigration").mockResolvedValue();
-    vi.spyOn(HostedUserRunner.prototype, "legacyRuntimeUploadsDrained").mockResolvedValue(true);
-    vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration").mockResolvedValue({ gate: { phase: "draining" } });
-    const alarm = vi.spyOn(HostedUserRunner.prototype, "alarm");
-    expect(await harness.durableObject.freezeForPostgresMigration()).toEqual({ frozen: true });
-    await expect(harness.durableObject.bindUser("member_123")).rejects.toThrow("frozen");
-    await expect(harness.durableObject.alarm()).resolves.toBeUndefined();
-    expect(alarm).not.toHaveBeenCalled();
-  });
-
-  it("forwards managed AI revocation through the UserRunner Durable Object", async () => {
-    const revoke = vi.spyOn(
-      HostedUserRunner.prototype,
-      "revokeActiveRuntimePlatformAiUsage",
-    ).mockResolvedValue(true);
-    const harness = createUserRunnerDurableObject();
-    const input = {
-      attemptId: "attempt_1",
-      generation: "7",
-      userId: "member_123",
-    };
-
-    await expect(
-      harness.durableObject.revokeActiveRuntimePlatformAiUsage(input),
-    ).resolves.toBe(true);
-    expect(revoke).toHaveBeenCalledWith(input);
-  });
-
-  it("keeps an active write fence in flight through the production Durable Object constructor", async () => {
-    const writeDataPoint = vi.fn();
-    const harness = createUserRunnerDurableObject({
-      CF_VERSION_METADATA: {
-        id: "worker_version_current",
-      },
-      HOSTED_RUNTIME_RETRY_ANALYTICS: { writeDataPoint },
-    });
-    const stateStore = new RunnerStateStore(harness.storage.state);
-    await stateStore.bindUser("member_123");
-    await stateStore.beginWriteFence({
-      runnerContainerName: "member_123--v-worker_version_current",
-      userId: "member_123",
-    });
-    installOidcJwksFetch(async (input: RequestInfo | URL) => {
-      const url = new URL(String(input));
-      if (url.origin === "https://web.example.test" && url.pathname === HOSTED_RUNTIME_STATUS_PATH) {
-        return Response.json({
-          mailboxLag: [
-            {
-              importedSeq: "0",
-              lag: "1",
-              lane: "conversation",
-              maxSeq: "1",
-            },
-          ],
-          userId: "member_123",
-          workspace: null,
-        });
-      }
-
-      if (
-        url.origin === "https://web.example.test" &&
-        url.pathname === HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH
-      ) {
-        return Response.json({
-          consentState: "granted",
-          processingAllowed: true,
-          userId: "member_123",
-        });
-      }
-
-      throw new Error(`Unexpected fetch during Cloudflare backpressure test: ${url.origin}${url.pathname}`);
-    });
-
-    await expect(harness.durableObject.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "backpressure-active-fence-test",
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      kind: "retry_later",
-      retryAt: expect.any(String),
-    });
-    const state = await stateStore.readState();
-
-    expect(state.writeFence).toMatchObject({
-      kind: "runtime",
-    });
-    expect(writeDataPoint).toHaveBeenCalledOnce();
-    expect(writeDataPoint).toHaveBeenCalledWith({
-      blobs: ["murph.hosted-runtime-retry.v1", "container_rpc_error"],
-      doubles: [1, 30_000],
-      indexes: ["container_rpc_error"],
-    });
-  });
-
 });
-
-function createUserRunnerDurableObject(
-  overrides: Partial<Record<string, unknown>> = {},
-) {
-  const bucket = createBucketStore();
-  const storage = createStorage();
-  const baseEnv = {
-    ...createHostedExecutionTestEnv(),
-    BUNDLES: bucket.api,
-    RUNNER_CONTAINER: storage.runnerContainerNamespace,
-    RUNNER_CONTAINER_SMOKE: storage.runnerContainerNamespace,
-    ...overrides,
-  };
-  const durableObject = new UserRunnerDurableObject(storage.state, baseEnv as never);
-
-  return {
-    durableObject,
-    env: {
-      ...baseEnv,
-      USER_RUNNER: {
-        getByName() {
-          return durableObject;
-        },
-      },
-    },
-    storage,
-  };
-}
 
 function createBucketStore() {
   const values = new Map<string, string>();
@@ -524,4 +316,9 @@ function createTestVercelOidcToken(
 
 function base64UrlEncode(value: string | Buffer): string {
   return Buffer.from(value).toString("base64url");
+}
+
+function createWorkerHarness(overrides: Record<string, unknown> = {}) {
+  const storage = createStorage();
+  return { env: { ...createHostedExecutionTestEnv(), BUNDLES: createBucketStore().api, RUNNER_CONTAINER: storage.runnerContainerNamespace, RUNNER_CONTAINER_SMOKE: storage.runnerContainerNamespace, ...overrides } };
 }

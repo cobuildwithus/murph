@@ -1,9 +1,3 @@
-import type {
-  HostedWorkspaceInvocationProcessingMode,
-} from "@murphai/hosted-execution/runtime-control";
-
-export type RunnerRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMode;
-
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 
 export interface DurableObjectSqlCursorLike<
@@ -42,26 +36,4 @@ export interface DurableObjectStateLike {
   id?: { toString(): string };
   storage: DurableObjectStorageLike;
   waitUntil(promise: Promise<unknown>): void;
-}
-
-export type RunnerWriteFenceKind = "runtime";
-
-export interface RunnerWriteFenceRecord {
-  attemptId: string;
-  generation: number;
-  kind: RunnerWriteFenceKind;
-  processingMode: RunnerRuntimeProcessingMode;
-  runnerContainerName: string | null;
-  startedAt: string;
-  workspaceVersion: string | null;
-}
-
-export interface RunnerStateRecord {
-  writeFence: RunnerWriteFenceRecord | null;
-  failureCount: number;
-  lastErrorAt: string | null;
-  lastErrorCode: string | null;
-  lastInvocationAt: string | null;
-  pendingRunnerContainerName: string | null;
-  userId: string;
 }
