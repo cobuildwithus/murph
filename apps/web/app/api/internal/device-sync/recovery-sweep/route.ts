@@ -1,3 +1,4 @@
+import { runClinicalDailySyncSweep } from "@/src/lib/clinical-records/daily-sync";
 import {
   HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID,
 } from "@murphai/hosted-execution/routes";
@@ -42,5 +43,13 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  return jsonOk(await runHostedDeviceSyncRecoverySweep());
+  const [devices, clinical] = await Promise.allSettled([
+    runHostedDeviceSyncRecoverySweep(), runClinicalDailySyncSweep(),
+  ]);
+  if (devices.status === "rejected") throw devices.reason;
+  if (clinical.status === "rejected" || clinical.value.failed > 0) {
+    throw hostedOnboardingError({ code: "CLINICAL_RECORD_DAILY_ADMISSION_FAILED", httpStatus: 503,
+      message: "Some daily medical-record checks could not be scheduled." });
+  }
+  return jsonOk(devices.value);
 });

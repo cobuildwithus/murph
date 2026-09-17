@@ -422,13 +422,13 @@ describe("Epic Clinical Records acquisition policy", () => {
       const plan = buildEpicBetaRetrievalPlan({ hospitalApprovedImports: true,
         frozenAt: new Date("2026-07-21T12:00:00.000Z"), pageCount: "100", resourceTypes,
       });
-      expect(plan.slices.filter((slice) => baseline.some((row) => row.slice.queryScopeId === slice.queryScopeId)).map((slice) => ({
+      expect(plan.slices.filter((slice) => baseline.some((row) => row.slice.queryScopeId === slice.queryScopeId && row.slice.queryScopeId !== "care-plans")).map((slice) => ({
         slice,
         url: buildEpicBetaInitialFhirPageUrl({
           fhirBaseUrl: "https://fhir.example.test/FHIR/R4", pageCount: "100", patientId: "patient-1", retrievalSlice: slice,
         }).href,
         scope: buildEpicBetaSmartResourceScope({ resourceType: slice.resourceType, permissionVersion: "v2" }),
-      }))).toEqual(baseline.filter((row) => resourceTypes.some((type) => type === row.slice.resourceType)).map((row) => {
+      }))).toEqual(baseline.filter((row) => row.slice.queryScopeId !== "care-plans" && resourceTypes.some((type) => type === row.slice.resourceType)).map((row) => {
         const url = new URL(row.url);
         for (const parameter of ["period", "date", "issued"]) url.searchParams.delete(parameter);
         const { from: _from, to: _to, ...slice } = row.slice;
@@ -446,3 +446,28 @@ function requireSlice(
   if (!slice) throw new TypeError(`Missing test retrieval slice ${queryScopeId}.`);
   return slice;
 }
+
+
+it("uses overlapping daily windows and restores lifetime acquisition every seventh generation", async () => {
+  const { buildEpicDailyRetrievalPlan } = await import("@/src/lib/clinical-records/epic-policy");
+  const now = new Date("2026-09-17T12:00:00.000Z");
+  const previous = buildEpicBetaRetrievalPlan({ frozenAt: now, pageCount: "100", resourceTypes: ["Patient", "Observation", "DocumentReference"] });
+  const daily = buildEpicDailyRetrievalPlan({ previous, now, generation: 2 });
+  expect(daily.slices.find((slice) => slice.queryScopeId === "patient-demographics")?.coverage).toBe("whole-family");
+  const notes = daily.slices.find((slice) => slice.queryScopeId === "document-references-notes")!;
+  expect(notes).toMatchObject({ coverage: "bounded-window", from: "2026-09-10T12:00:00.000Z", to: "2026-09-18T12:00:00.000Z" });
+  expect(buildEpicDailyRetrievalPlan({ previous: daily, now, generation: 7 }).slices.every((slice) => slice.coverage === "whole-family")).toBe(true);
+});
+
+
+it("includes Epic's required longitudinal care-plan category", () => {
+  const plan = buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-09-17T12:00:00Z"), pageCount: "100", resourceTypes: ["CarePlan"] });
+  const url = buildEpicBetaInitialFhirPageUrl({ fhirBaseUrl: "https://fhir.example.test/FHIR/R4", pageCount: "100", patientId: "patient-1", retrievalSlice: requireSlice(plan, "care-plans") });
+  expect(url.searchParams.get("category")).toBe("38717003");
+  expect(buildEpicBetaRetrievalQueryFingerprintInput({ pageCount: "100", queryScopeId: "care-plans" })).toContain("category=38717003");
+});
+
+it("preserves the request identity of care-plan runs frozen before the category fix", () => {
+  const original = baseline.find((row) => row.slice.queryScopeId === "care-plans")!;
+  expect(buildEpicBetaInitialFhirPageUrl({ fhirBaseUrl: "https://fhir.example.test/FHIR/R4", pageCount: "100", patientId: "patient-1", retrievalSlice: clinicalFhirRetrievalSliceSchema.parse(original.slice) }).href).toBe(original.url);
+});

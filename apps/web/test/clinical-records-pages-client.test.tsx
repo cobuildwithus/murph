@@ -83,6 +83,12 @@ vi.mock("@/src/components/ui/input", () => ({
   },
 }));
 
+vi.mock("@/src/components/ui/checkbox", () => ({
+  Checkbox: ({ checked, onCheckedChange, ...props }: { checked: boolean; onCheckedChange: (checked: boolean) => void }) =>
+    createElement("button", { ...props, type: "button", role: "checkbox", "aria-checked": checked,
+      onClick: () => onCheckedChange(!checked) }),
+}));
+
 vi.mock("@/src/components/ui/spinner", () => ({
   Spinner: () => createElement("span", null, "Loading"),
 }));
@@ -347,6 +353,9 @@ describe("Clinical Records connect page", () => {
     expect(JSON.stringify(mocks.requestHostedOnboardingJson.mock.calls[0])).not.toContain(claim);
     expect(rendered.container.textContent).toContain("Piedmont Healthcare");
 
+    const dailyCheckbox = rendered.container.querySelector('[role="checkbox"]');
+    assert.ok(dailyCheckbox instanceof rendered.window.HTMLElement);
+    await act(async () => { dailyCheckbox.click(); });
     await clickButton(rendered, "Continue to Piedmont Healthcare patient portal");
 
     await vi.waitFor(() => {
@@ -355,6 +364,7 @@ describe("Clinical Records connect page", () => {
         onSuccessfulResponseHeaders: expect.any(Function),
         payload: {
           claim,
+          keepUpdated: true,
           providerDirectoryEntryId: "epic-piedmont",
         },
         url: "/api/clinical-records/connect-intents/start",
@@ -757,7 +767,7 @@ describe("Clinical Records connect page", () => {
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
     await act(async () => { portalButtons()[0]!.click(); });
     expect(mocks.requestHostedOnboardingJson).toHaveBeenLastCalledWith(expect.objectContaining({
-      payload: { claim, providerDirectoryEntryId: "epic-first" },
+      payload: { claim, keepUpdated: false, providerDirectoryEntryId: "epic-first" },
     }));
     expect(rendered.assign).toHaveBeenCalledWith("https://epic.example.test/oauth2/authorize");
   });
@@ -926,14 +936,14 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     expect(rendered.container.querySelector('[role="alert"]')).toBeNull();
-    expect(rendered.container.textContent).toContain("Partly complete");
+    expect(rendered.container.textContent).toContain("Import incomplete");
     expect(rendered.container.textContent).toContain(
-      "Some records were saved. Part of this import could not be completed.",
+      "Your saved records are ready. Some records couldn’t be imported.",
     );
-    expect(rendered.container.textContent).toContain("3 records added.");
-    expect(rendered.container.textContent).toContain("1 retained as source evidence");
+    expect(rendered.container.textContent).toContain("3 records added");
+    expect(rendered.container.textContent).toContain("1 item saved for reference");
     const partialBadge = Array.from(rendered.container.querySelectorAll("span"))
-      .find((span) => span.textContent === "Partly complete");
+      .find((span) => span.textContent === "Import incomplete");
     assert.ok(partialBadge);
     expect(partialBadge.className).not.toContain("bg-primary");
     expect(String(rendered.replaceState.mock.lastCall?.[2])).toBe(
@@ -981,8 +991,8 @@ describe("Clinical Records status page", () => {
     await vi.waitFor(() => {
       expect(rendered.container.textContent).toContain("Results already copied into Murph stay there");
       expect(rendered.container.textContent).toContain(connection.displayName);
-      expect(rendered.container.textContent).toContain("3 records added.");
-      expect(rendered.container.textContent).not.toContain("Partly complete");
+      expect(rendered.container.textContent).toContain("3 records added");
+      expect(rendered.container.textContent).not.toContain("Import incomplete");
     });
     const disconnectNotice = Array.from(rendered.container.querySelectorAll('[role="alert"]'))
       .find((alert) => alert.textContent?.includes("Patient portal disconnected"));
@@ -1040,7 +1050,7 @@ describe("Clinical Records status page", () => {
     });
 
     expect(rendered.container.textContent).toContain(connection.displayName);
-    expect(rendered.container.textContent).toContain("Partly complete");
+    expect(rendered.container.textContent).toContain("Import incomplete");
     expect(rendered.container.textContent).not.toContain("No patient portals connected");
     expect(rendered.container.textContent).not.toContain("Patient portal disconnected");
   });
@@ -1080,7 +1090,7 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     const completeBadge = Array.from(rendered.container.querySelectorAll("span"))
-      .find((span) => span.textContent === "Copy complete");
+      .find((span) => span.textContent === "Imported");
     assert.ok(completeBadge);
     expect(completeBadge.className).toContain("bg-primary");
     expect(rendered.container.querySelector('a[href="/biomarkers"]')?.textContent).toBe("View lab results");
@@ -1103,9 +1113,9 @@ describe("Clinical Records status page", () => {
     assert.ok(nothingAddedBadge);
     expect(nothingAddedBadge.className).not.toContain("bg-primary");
     expect(rendered.container.querySelector('a[href="/biomarkers"]')).toBeNull();
-    expect(rendered.container.textContent).toContain("1 retained as source evidence");
+    expect(rendered.container.textContent).toContain("1 item saved for reference");
     expect(rendered.container.textContent).toContain(
-      "No usable results were available to add.",
+      "No new results were available to add.",
     );
 
     await rendered.rerender(renderWithConnection({
@@ -1123,7 +1133,7 @@ describe("Clinical Records status page", () => {
     assert.ok(emptyPartialBadge);
     expect(emptyPartialBadge.className).not.toContain("bg-primary");
     expect(rendered.container.textContent).toContain(
-      "The import could not finish and no usable results were added.",
+      "The import stopped before any new results were added.",
     );
 
     await rendered.rerender(renderWithConnection({
@@ -1132,8 +1142,8 @@ describe("Clinical Records status page", () => {
       canImport: true,
       latestRun: { ...connection.latestRun!, importedCount: 3, labResultCount: 3, reviewCount: 2 },
     }));
-    expect(rendered.container.textContent).toContain("3 records added.");
-    expect(rendered.container.textContent).toContain("2 retained as source evidence");
+    expect(rendered.container.textContent).toContain("3 records added");
+    expect(rendered.container.textContent).toContain("2 items saved for reference");
     expect(rendered.container.querySelector('a[href="/biomarkers"]')).not.toBeNull();
     expect(Array.from(rendered.container.querySelectorAll("a")).find((link) => link.textContent === "Reconnect")?.getAttribute("href")).toBe("/records/connect?launch=clinical-records");
     const reauthorizationBadge = Array.from(rendered.container.querySelectorAll("span"))
@@ -1153,7 +1163,7 @@ describe("Clinical Records status page", () => {
     assert.ok(failedBadge);
     expect(failedBadge.className).not.toContain("bg-primary");
     expect(rendered.container.textContent).toContain(
-      "Murph could not finish copying records. Anything already saved remains in your private vault.",
+      "The import stopped. Any records already saved are still available.",
     );
   });
 

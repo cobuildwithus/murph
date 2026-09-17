@@ -1,6 +1,6 @@
 # Epic automatic distribution and hospital-approved imports
 
-Last verified: 2026-09-15
+Last verified: 2026-09-17
 
 ## Launch contract
 
@@ -17,6 +17,48 @@ Epic distributes eligible clients to participating customer environments on a
 rolling cycle that can take up to 12 hours. Hospital licensing, Epic version,
 auto-download settings and patient authorization still apply. This is not a
 guarantee of every hospital, every historical record or every document body.
+
+## Optional persistent registration
+
+Daily checks do not change the automatic API allowlist. A member can request
+ongoing access only when a corresponding confidential patient-facing client
+has been provisioned. The server-only `EPIC_SMART_PERSISTENT_CREDENTIALS` secret
+is a JSON object keyed by exact provider directory ID, with `clientId` and
+`clientSecret` string fields. Leave it unset for the existing one-time flow.
+Use distinct explicit entries for sandbox and production; there is no wildcard
+or cross-environment fallback. Do not put its contents in source or local files.
+Provision through the reviewed hosted secret-management path.
+
+Epic's [patient-facing app distribution rules](https://fhir.epic.com/Documentation?docId=patientfacingfhirapps&section=AutomaticClientDistribution)
+permit eligible refresh-token clients but require client credentials for each
+community member. Epic lets the developer provision these in Review & Manage Downloads for an
+eligible automatic app, without a separate hospital download request. This is
+operator setup, not patient re-consent on each check. An API allowlist alone
+does not provision those credentials.
+Configure the persistent app for the same automatic APIs, S256 PKCE and offline
+access; confirm the organization's client credential and patient-granted access
+period before enabling its entry. A production-ready immutable registration may
+need replacement. Code cannot promise indefinite access or eliminate hospital
+configuration. Patients can revoke access, and expired grants require reconnecting.
+
+The [patient authentication tutorial](https://open.epic.com/Tutorial/PatientAuthentication)
+explains MyChart's privacy disclosure screen. Update the app questionnaire only
+after checking the deployed behavior and current privacy policy: Murph has
+in-app account deletion, disconnect keeps imported copies, and service providers
+process data to deliver the service. Do not claim no third-party processing or
+hospital-specific erasure merely to suppress a warning. Link the questionnaire
+to the current privacy policy and deletion instructions. This code change does
+not edit or verify the operator's Epic questionnaire.
+
+Persistent rollout requires the additive clinical daily-sync migration before
+Web, followed by the runtime extraction-cache build. Existing runtimes accept
+the unchanged bounded-window protocol; older runtimes simply repeat extraction.
+Keep persistent credentials unset until Web is fully deployed and focused
+provider authorization/refresh proof succeeds. Once enabled, the Web rollback
+floor is this version: older disconnect/outcome handlers do not clear refresh
+fields. Stop admission and revoke persistent grants before reverting below it.
+Post-deploy verify encrypted refresh presence, due admission, final outcomes,
+and disconnect/consent clearing using content-free operational aggregates.
 
 ## Sources and eligibility checks
 

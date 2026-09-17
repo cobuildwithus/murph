@@ -1,5 +1,7 @@
 import "server-only";
 
+import { renewClinicalAccess, CLEAR_CLINICAL_PERSISTENT_ACCESS, clinicalCredentialsAfterCheck } from "./persistent-access";
+
 import { epicImportQueryEnabled } from "./epic-import-config";
 
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
@@ -106,6 +108,7 @@ interface RunnableClinicalRun {
   connection: {
     accessTokenEncrypted: string | null;
     accessTokenExpiresAt: Date | null;
+    refreshTokenEncrypted: string | null;
     fhirBaseHash: string;
     fhirBaseUrlEncrypted: string;
     id: string;
@@ -286,6 +289,7 @@ export async function fetchClinicalRetrievalPage(input: {
   try {
     const accessToken = await requireCurrentAccessToken({
       memberId: input.memberId,
+      fetchImpl: input.fetchImpl,
       run,
     });
     providerRequestStarted = true;
@@ -361,7 +365,7 @@ export async function fetchClinicalRetrievalDocument(input: {
   if (!claimed.claimed) return unavailable(claimed.errorCode, claimed.retryable);
   let providerRequestStarted = false;
   try {
-    const accessToken = await requireCurrentAccessToken({ memberId: input.memberId, run });
+    const accessToken = await requireCurrentAccessToken({ memberId: input.memberId, fetchImpl: input.fetchImpl, run });
     providerRequestStarted = true;
     const response = await fetchFhirPage({ accessToken, fetchImpl: input.fetchImpl, pageUrl: url,
       accept: "application/fhir+json, application/json, */*;q=0.5" });
@@ -616,9 +620,8 @@ export async function recordClinicalRetrievalOutcome(input: {
     const updatedConnection = await tx.clinicalRecordConnection.updateMany({
       data: {
         ...connectionData,
-        accessTokenEncrypted: null,
-        accessTokenExpiresAt: null,
-        patientIdEncrypted: null,
+        lastCheckedAt: now,
+        ...clinicalCredentialsAfterCheck(Boolean(run.connection.refreshTokenEncrypted), now),
       },
       where: {
         id: run.connectionId,
@@ -731,6 +734,7 @@ async function loadRunnableClinicalRun(input: {
         select: {
           accessTokenEncrypted: true,
           accessTokenExpiresAt: true,
+          refreshTokenEncrypted: true,
           fhirBaseHash: true,
           fhirBaseUrlEncrypted: true,
           id: true,
@@ -907,14 +911,17 @@ function assertFhirPageUrlAllowed(input: {
 }
 
 async function requireCurrentAccessToken(input: {
+  fetchImpl?: typeof fetch;
   memberId: string;
   run: RunnableClinicalRun;
 }): Promise<string> {
   const connection = input.run.connection;
   if (
-    connection.accessTokenExpiresAt !== null
-    && connection.accessTokenExpiresAt.getTime() <= Date.now() + TOKEN_EXPIRY_LEEWAY_MS
+    (connection.accessTokenExpiresAt === null && connection.refreshTokenEncrypted)
+    || (connection.accessTokenExpiresAt !== null
+      && connection.accessTokenExpiresAt.getTime() <= Date.now() + TOKEN_EXPIRY_LEEWAY_MS)
   ) {
+    if (connection.refreshTokenEncrypted) return renewClinicalAccess({ connectionId: connection.id, memberId: input.memberId, generation: input.run.generation, fetchImpl: input.fetchImpl });
     throw reauthRequiredError();
   }
   const accessToken = await openClinicalConnectionSecret({
@@ -1301,6 +1308,7 @@ async function markClinicalConnectionNeedsReauth(input: {
         accessTokenEncrypted: null,
         accessTokenExpiresAt: null,
         lastErrorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+        ...CLEAR_CLINICAL_PERSISTENT_ACCESS,
         patientIdEncrypted: null,
         status: "needs_reauth",
       },

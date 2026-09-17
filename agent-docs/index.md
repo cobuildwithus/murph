@@ -263,8 +263,8 @@ for preserving collection scope are recorded in
 | `agent-docs/product-specs/private-group-consultation.md` | Hosted group consultation. | Hosted group consultation | High | 2026-08-28 |
 | `agent-docs/product-specs/consented-group-disclosure.md` | Hosted group disclosure. | Hosted group disclosure | High | 2026-08-26 |
 | `agent-docs/product-specs/hosted-group-join-confirmation.md` | Hosted group membership behavior. | Hosted group membership behavior | High | 2026-07-23 |
-| `agent-docs/product-specs/clinical-records-intake.md` | Bounded clinical import, provider autocomplete and local branding, document enrichment, saved results and recovery. | Clinical Records intake behavior | High | 2026-09-15 |
-| `agent-docs/references/epic-automatic-distribution.md` | Reviewed Epic automatic-distribution API matrix, hospital-approved import flag and separate client registration. | Epic import registration and rollout | High | 2026-09-15 |
+| `agent-docs/product-specs/clinical-records-intake.md` | Bounded clinical import, optional daily checks, provider search, document enrichment reuse, saved results and privacy controls. | Clinical Records intake behavior | High | 2026-09-15 |
+| `agent-docs/references/epic-automatic-distribution.md` | Epic automatic-distribution API matrix, hospital-approved imports, optional persistent credentials and privacy questionnaire guidance. | Epic import registration and rollout | High | 2026-09-15 |
 | `agent-docs/phone-calls/retell-phone-agent.md` | Retell hosted phone agent prompt, authority, transfer, and call-brief handling rules. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/phone-calls/retell-analysis-fields.md` | Retell post-call analysis field contract and transcript-retention boundary. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/feature-user-story-audit/README.md` | Feature user-story audit overview and artifact inventory. | Point-in-time feature audit | Low | 2026-06-21 |

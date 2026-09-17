@@ -490,9 +490,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         callbackProbe.createPause!.release.resolve();
         expectConnectedRedirect(await bounded(callback, CALLBACK_TIMEOUT_MS, "callback winner"));
         await bounded(withdrawal, CALLBACK_TIMEOUT_MS, "withdrawal contender");
+        await fixture.observer.clinicalRecordConnection.updateMany({ where: { memberId: fixture.memberId }, data: {
+          refreshTokenEncrypted: "synthetic-opaque-refresh", refreshLeaseId: "synthetic-lease", refreshLeaseExpiresAt: new Date(), nextSyncAt: new Date(),
+        } });
         await cleanupWithdrawnHostedHealthDataConsent({ memberId: fixture.memberId, prisma: fixture.deletionBaseClient, request: new Request(`${CALLBACK_ORIGIN}/settings/privacy`) });
         const connection = await fixture.observer.clinicalRecordConnection.findFirst({ where: { memberId: fixture.memberId } });
-        expect(connection).toMatchObject({ accessTokenEncrypted: null, patientIdEncrypted: null, status: "disconnected" });
+        expect(connection).toMatchObject({ accessTokenEncrypted: null, patientIdEncrypted: null, refreshTokenEncrypted: null, refreshLeaseId: null, refreshLeaseExpiresAt: null, nextSyncAt: null, status: "disconnected" });
         const run = await fixture.observer.clinicalRecordRetrievalRun.findFirst({ where: { memberId: fixture.memberId } });
         expect(run).toMatchObject({ status: "canceled", completedAt: expect.any(Date) });
         expect(await fixture.observer.clinicalRecordOauthSession.count({ where: { memberId: fixture.memberId } })).toBe(0);

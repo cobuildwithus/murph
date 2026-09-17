@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 100,
+  "item": {
+    "id": "medical-record-daily-check-controls",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More control over medical-record updates",
+    "summary": "Request daily checks when connecting a supported patient portal, and see when Murph last checked and plans to check again.",
+    "details": "Ongoing access depends on your portal and the access period you approve. Unsupported connections remain one-time imports. Disconnect stops future imports while keeping saved records; account deletion and health-data consent controls are linked from Medical records.",
+    "relevanceTags": [
+      "medical-records",
+      "privacy"
+    ],
+    "sourcePullRequests": []
+  }
+}

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { CLEAR_CLINICAL_PERSISTENT_ACCESS } from "../clinical-records/persistent-access";
+
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
@@ -63,6 +65,7 @@ export async function cleanupWithdrawnHostedHealthDataConsent(input: {
       await tx.clinicalRecordConnection.updateMany({
         where: { memberId: input.memberId },
         data: {
+          ...CLEAR_CLINICAL_PERSISTENT_ACCESS,
           accessTokenEncrypted: null,
           accessTokenExpiresAt: null,
           patientIdEncrypted: null,

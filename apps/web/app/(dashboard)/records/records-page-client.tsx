@@ -150,7 +150,7 @@ export function RecordsPageClient({
       <PageHeader
         eyebrow="Private vault"
         title="Medical records"
-        description="Import records from your patient portal for your private vault and conversations with Murph."
+        description="Bring records from your patient portal into Murph."
       >
         {authenticated ? (
           <Link className={buttonVariants({ size: "lg", className: "mt-5 w-full sm:w-auto" })} href="/records/connect?launch=clinical-records">
@@ -192,7 +192,7 @@ export function RecordsPageClient({
           <EmptyRecordsState />
         ) : (
           <section aria-labelledby="patient-portals-title" className="space-y-4">
-            <h2 id="patient-portals-title" className="font-serif text-2xl font-medium tracking-tight text-foreground">Your sources</h2>
+            <h2 id="patient-portals-title" className="font-serif text-2xl font-medium tracking-tight text-foreground">Your providers</h2>
             <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
               {connections.map((connection) => (
                 <ConnectionRow
@@ -210,6 +210,7 @@ export function RecordsPageClient({
         )}
       </div>
 
+      {authenticated ? <RecordsPrivacyControls /> : null}
       <DisconnectDialog
         connection={disconnectTarget}
         errorMessage={disconnectError}
@@ -223,6 +224,18 @@ export function RecordsPageClient({
         }}
       />
     </div>
+  );
+}
+
+export function RecordsPrivacyControls() {
+  return (
+    <section aria-labelledby="records-privacy-title" className="flex max-w-2xl flex-col gap-3 border-t border-border pt-6">
+      <h2 id="records-privacy-title" className="font-serif text-xl font-medium">Your records, your control</h2>
+      <p className="text-sm leading-6 text-muted-foreground">Disconnect stops future imports. Records already saved in Murph stay there.</p>
+      <p className="text-sm leading-6 text-muted-foreground">Use Data &amp; privacy to withdraw consent or delete your account and saved data. Your hospital’s records stay unchanged.</p>
+      <Link href="/settings#data-privacy" className={buttonVariants({ variant: "outline", className: "w-fit" })}>Data &amp; privacy</Link>
+      <Link href="/privacy" className="w-fit text-sm underline underline-offset-4">How Murph uses your data</Link>
+    </section>
   );
 }
 
@@ -276,6 +289,10 @@ export function ConnectionRow({
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             {presentation.detail}
           </p>
+          {connection.status !== "disconnected" ? <p className="text-sm leading-6 text-muted-foreground">
+            {connection.nextSyncAt ? <>Daily updates on. Next check around <time dateTime={connection.nextSyncAt}>{formatDate(connection.nextSyncAt)}</time>.</> : connection.status === "needs_reauth" ? "Daily updates stopped. Reconnect to continue." : "One-time import."}
+            {connection.lastCheckedAt ? <> Last checked <time dateTime={connection.lastCheckedAt}>{formatDate(connection.lastCheckedAt)}</time>.</> : null}
+          </p> : null}
           {latestRun && !importInProgress ? (
             <ImportCounts
               importedCount={latestRun.importedCount}
@@ -316,11 +333,18 @@ export function ConnectionRow({
 
 function ImportCounts({ importedCount, reviewCount, skippedExistingCount }: { importedCount: number; reviewCount: number; skippedExistingCount: number }) {
   return (
-    <p className="text-sm text-foreground">
-      {importedCount} {importedCount === 1 ? "record" : "records"} added.
-      {skippedExistingCount > 0 ? ` ${skippedExistingCount} already saved.` : ""}
-      {reviewCount > 0 ? ` ${reviewCount} retained as source evidence, without adding usable results.` : ""}
-    </p>
+    <div className="flex flex-col gap-2">
+      <p className="text-sm font-medium text-foreground">{importedCount.toLocaleString()} {importedCount === 1 ? "record" : "records"} added</p>
+      {reviewCount > 0 || skippedExistingCount > 0 ? (
+        <details className="max-w-xl text-sm leading-6 text-muted-foreground">
+          <summary className="w-fit cursor-pointer underline-offset-4 hover:underline">Import details</summary>
+          <div className="mt-2 flex flex-col gap-1">
+            {skippedExistingCount > 0 ? <p>{skippedExistingCount.toLocaleString()} already in Murph.</p> : null}
+            {reviewCount > 0 ? <p>{reviewCount.toLocaleString()} {reviewCount === 1 ? "item" : "items"} saved for reference. These are kept in your vault but aren’t shown as results.</p> : null}
+          </div>
+        </details>
+      ) : null}
+    </div>
   );
 }
 
@@ -425,7 +449,7 @@ function describeConnection(connection: ClinicalRecordConnectionContract): {
   if (connection.status === "error") {
     return {
       badgeVariant: "destructive",
-      detail: "Murph could not finish copying records. Anything already saved remains in your private vault.",
+      detail: "The import stopped. Any records already saved are still available.",
       label: "Could not add records",
     };
   }
@@ -450,16 +474,16 @@ function describeRun(run: ClinicalRecordConnectionContract["latestRun"]): {
       return { badgeVariant: "secondary", detail: "Murph is saving the records into your private vault.", label: "Saving records" };
     case "complete":
       return importedCount > 0
-        ? { badgeVariant: "default", detail: "Your records are saved and ready for conversations with Murph.", label: "Copy complete" }
-        : { badgeVariant: "outline", detail: (run?.skippedExistingCount ?? 0) > 0 ? "These records were already saved." : "No usable results were available to add.", label: "Nothing added" };
+        ? { badgeVariant: "default", detail: "Your records are saved and ready for conversations with Murph.", label: "Imported" }
+        : { badgeVariant: "outline", detail: (run?.skippedExistingCount ?? 0) > 0 ? "These records were already saved." : "No new results were available to add.", label: "Nothing added" };
     case "partial":
       return importedCount > 0
-        ? { badgeVariant: "outline", detail: "Some records were saved. Part of this import could not be completed.", label: "Partly complete" }
-        : { badgeVariant: "outline", detail: "The import could not finish and no usable results were added.", label: "Could not finish" };
+        ? { badgeVariant: "outline", detail: "Your saved records are ready. Some records couldn’t be imported.", label: "Import incomplete" }
+        : { badgeVariant: "outline", detail: "The import stopped before any new results were added.", label: "Could not finish" };
     case "needs_reauth":
       return { badgeVariant: "outline", detail: "Portal access ended before the import finished. Saved records remain in your vault.", label: "Portal access ended" };
     case "failed":
-      return { badgeVariant: "destructive", detail: "Murph could not finish copying records. Anything already saved remains in your private vault.", label: "Could not add records" };
+      return { badgeVariant: "destructive", detail: "The import stopped. Any records already saved are still available.", label: "Could not add records" };
     case "canceled":
       return { badgeVariant: "outline", detail: "Murph stopped copying records.", label: "Stopped" };
     default:

@@ -1339,6 +1339,18 @@ describe("Clinical Records retrieval control plane", () => {
     expect(harness.state.run.status).toBe("needs_reauth");
   });
 
+  it.each(["completed", "partial"] as const)("retains renewable patient access after a %s check", async (status) => {
+    const harness = createHarness(["Patient", "Observation"]);
+    Object.assign(harness.state.run.connection, { refreshTokenEncrypted: "sealed-refresh" });
+    const access = harness.state.run.connection.accessTokenEncrypted;
+    const patient = harness.state.run.connection.patientIdEncrypted;
+    await recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request: {
+      ...outcomeIdentity(), counts: outcomeCounts(), generation: 1, runId: RUN_ID, status,
+    } });
+    expect(harness.state.run.connection).toMatchObject({ accessTokenEncrypted: access,
+      patientIdEncrypted: patient, refreshTokenEncrypted: "sealed-refresh", nextSyncAt: expect.any(Date), lastCheckedAt: expect.any(Date) });
+  });
+
   it("requeues a preempted run and accepts a reordered idempotent completion", async () => {
     const harness = createHarness(["Patient", "Observation"]);
     harness.state.run.status = "retrieving";
