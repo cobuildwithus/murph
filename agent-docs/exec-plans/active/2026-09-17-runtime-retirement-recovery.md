@@ -59,3 +59,12 @@ fresh checkout's Prisma client. The complexity ratchet passed with unchanged
 file debt; existing unrelated wake/readiness/error-classification hotspots remain
 outside this correction. Documentation drift passed. A final direct claim-only
 authority regression and release checks remain pending.
+
+Final focused proof: all 85 standby lifecycle tests pass, including direct
+claim-only rejection. The selected four-file coverage is 179 tests with that
+additional case. Cloudflare and Web typechecks pass; the changelog archive's
+10 rendering tests pass. The documented Web test command discovered no files;
+rerunning from the repository root passed, matching the existing Frog entry
+`20260912202546-changelog-focused-test` without creating duplicate friction.
+Product UX patch replay is Ready at the tested retirement boundary; live
+recovery remains a post-deployment check. PR #3546 is the owned release path.
