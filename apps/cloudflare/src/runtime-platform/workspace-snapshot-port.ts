@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -375,10 +376,15 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         throw new Error("Hosted workspace snapshot source file size does not match encryptedByteSize.");
       }
       const presignStartedAt = Date.now();
+      // Declared at admission so the Worker can verify publication through R2's
+      // ETag instead of reading the stored object back.
+      const encryptedMd5 = await readFileMd5Hex(request.sourceFilePath);
+      assertHostedWorkspaceSnapshotOperationLive(request.signal);
       let presignedPut: SnapshotPresignedPut;
       try {
         presignedPut = await presignWorkspaceSnapshotPut({
           encryptedByteSize: request.encryptedByteSize,
+          encryptedMd5,
           encryptedObjectSha256: request.encryptedObjectSha256,
           fetchImpl: input.fetchImpl,
           headers: await readSessionWriteFenceHeaders(
@@ -1225,8 +1231,17 @@ function parseHostedWorkspaceSnapshotPresignedPutPayload(
   };
 }
 
+async function readFileMd5Hex(filePath: string): Promise<string> {
+  const hash = createHash("md5");
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk as Uint8Array);
+  }
+  return hash.digest("hex");
+}
+
 async function presignWorkspaceSnapshotPut(input: {
   encryptedByteSize: number;
+  encryptedMd5: string;
   encryptedObjectSha256: string;
   fetchImpl: typeof fetch;
   headers?: Headers;
@@ -1244,6 +1259,7 @@ async function presignWorkspaceSnapshotPut(input: {
   const body = {
     supportsManagedUpload: true,
     encryptedByteSize: input.encryptedByteSize,
+    encryptedMd5: input.encryptedMd5,
     encryptedObjectSha256: input.encryptedObjectSha256,
     objectKey: input.objectKey,
     snapshotId: input.snapshotId,

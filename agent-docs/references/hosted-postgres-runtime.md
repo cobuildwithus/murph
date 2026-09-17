@@ -317,8 +317,10 @@ The rolling path cannot switch the global default: complete provider scans do
 not prove an old caller cannot create another object.
 
 Managed checkpoint uploads use an exact, durably admitted multipart upload ID.
-Trusted completion seals the upload and streams the stored encrypted bytes to
-verify size and SHA-256 before canonical publication. Unknown completion/abort
+Trusted completion seals the upload and verifies publication through R2's own
+object ETag (derived from the MD5 the runner declared at admission), size and
+metadata before canonical publication; receipts admitted without an MD5 keep
+the bounded read-back verification. Unknown completion/abort
 outcomes retain the obligation. Old direct-PUT capabilities still need their
 full drain; negotiation of the new path does not revoke them. Schema 21 protects
 managed legacy receipts from older writers. Every serving version must support

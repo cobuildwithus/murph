@@ -1260,9 +1260,9 @@ function managedSnapshotHarness() {
     encryption: { aad: buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId: USER_ID }),
       ivBase64: "AQIDBAUGBwgJCgsM", rootKeyId: "root_1", scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME, wrappedDataKey: "wrapped" },
   };
-  const admit = (uploadId = "synthetic-upload", encryptedSha256 = "a".repeat(64)) => service.manageSnapshotUpload({
+  const admit = (uploadId = "synthetic-upload", encryptedSha256 = "a".repeat(64), encryptedMd5?: string) => service.manageSnapshotUpload({
     userId: USER_ID, command: { operation: "snapshot_managed_admit", expectedSession: session,
-      uploadId, encryptedByteSize: 42, encryptedSha256 },
+      uploadId, encryptedByteSize: 42, encryptedSha256, ...(encryptedMd5 === undefined ? {} : { encryptedMd5 }) },
   });
   const direct = () => service.rememberPresignedPut({ expectedSession: session,
     expiresAt: new Date(Date.now() + 600_000).toISOString(), drainUntil: new Date(Date.now() + 1_200_000).toISOString() });
@@ -1270,6 +1270,18 @@ function managedSnapshotHarness() {
 }
 
 describe("legacy managed checkpoint capability ownership", () => {
+  it("stores a declared MD5 on the legacy receipt and returns it on replay", async () => {
+    const h = managedSnapshotHarness();
+    await h.service.create(h.session);
+    const admitted = await h.admit("synthetic-upload", "a".repeat(64), "c".repeat(32));
+    expect(admitted.applied).toBe(true);
+    expect(admitted.managedUpload).toMatchObject({ encryptedMd5: "c".repeat(32) });
+    const replay = await h.admit("synthetic-upload", "a".repeat(64), "c".repeat(32));
+    expect(replay.managedUpload).toEqual(admitted.managedUpload);
+    expect((await h.service.manageSnapshotUpload({ userId: USER_ID, command: { operation: "snapshot_managed_read",
+      snapshotId: h.session.snapshotId, attemptId: h.session.attemptId, generation: h.session.leaseGeneration } })).managedUpload?.encryptedMd5).toBe("c".repeat(32));
+  });
+
   it.each([true, false])("serializes competing direct and managed admission (managed first: %s)", async managedFirst => {
     const h = managedSnapshotHarness();
     await h.service.create(h.session);

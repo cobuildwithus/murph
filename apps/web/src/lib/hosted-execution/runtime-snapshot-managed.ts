@@ -24,7 +24,8 @@ export async function manageSnapshotUploadTx(input: {
   if (existing) {
     return response(existing.uploadId !== null && managedUploadBelongsToSession(existing, session)
       && existing.encryptedByteSize === BigInt(command.encryptedByteSize)
-      && existing.encryptedSha256 === command.encryptedSha256);
+      && existing.encryptedSha256 === command.encryptedSha256
+      && (command.encryptedMd5 === undefined || existing.encryptedMd5 === null || existing.encryptedMd5 === command.encryptedMd5));
   }
   await requireRuntimeResourcesPublishableTx(tx, session.userId, [{
     kind: "snapshot", resourceId: session.snapshotId, objectKey: session.objectKey, snapshotRef: Prisma.DbNull,
@@ -33,7 +34,8 @@ export async function manageSnapshotUploadTx(input: {
     userId: session.userId, writeId: where.userId_writeId.writeId, kind: "snapshot",
     attemptId: session.attemptId, generation: BigInt(session.leaseGeneration), admittedAt: now,
     objectKey: session.objectKey, uploadId: command.uploadId, encryptedByteSize: BigInt(command.encryptedByteSize),
-    encryptedSha256: command.encryptedSha256, reconcileAfter: new Date(now.getTime() + HOSTED_RUNTIME_ORPHAN_GRACE_MS),
+    encryptedSha256: command.encryptedSha256, encryptedMd5: command.encryptedMd5 ?? null,
+    reconcileAfter: new Date(now.getTime() + HOSTED_RUNTIME_ORPHAN_GRACE_MS),
   } });
   return response(true, row);
 }
@@ -68,6 +70,7 @@ function projectManagedSnapshotUpload(row: HostedRuntimePutDrain | null) {
     userId: row.userId, snapshotId: row.writeId.slice("snapshot:".length), attemptId: row.attemptId,
     generation: row.generation.toString(), uploadId: row.uploadId, objectKey: row.objectKey,
     encryptedByteSize: Number(row.encryptedByteSize), encryptedSha256: row.encryptedSha256,
+    ...(row.encryptedMd5 === null ? {} : { encryptedMd5: row.encryptedMd5 }),
     completedAt: row.completedAt?.toISOString() ?? null, verifiedAt: row.verifiedAt?.toISOString() ?? null,
   });
 }

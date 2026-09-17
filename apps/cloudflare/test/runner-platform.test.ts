@@ -923,6 +923,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await expect(presignRequest.json()).resolves.toEqual({
         supportsManagedUpload: true,
         encryptedByteSize: encryptedBytes.byteLength,
+        encryptedMd5: createHash("md5").update(encryptedBytes).digest("hex"),
         encryptedObjectSha256: "c".repeat(64),
         objectKey,
         snapshotId: "snapshot_runner_platform",
@@ -1524,6 +1525,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(firstBody).toEqual({
         supportsManagedUpload: true,
         encryptedByteSize: encryptedBytes.byteLength,
+        encryptedMd5: createHash("md5").update(encryptedBytes).digest("hex"),
         encryptedObjectSha256: "c".repeat(64),
         objectKey,
         snapshotId: "snapshot_runner_platform",
