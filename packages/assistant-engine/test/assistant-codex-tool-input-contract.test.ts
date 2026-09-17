@@ -413,7 +413,8 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         })
         assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
         assert.equal(stub.requestCountSinceBaseline(), 1)
-        const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        const captured: ReturnType<ScriptedStub['requestSummariesSinceBaseline']>[number]['completeProviderInput'] =
+          stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
         assert.ok(captured)
         const body = readRecord(JSON.parse(captured.json))
         assert.ok(body)
