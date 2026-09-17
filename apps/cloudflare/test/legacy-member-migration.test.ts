@@ -23,8 +23,8 @@ function harness() {
       [...values].sort(([a], [b]) => a.localeCompare(b)).filter(([key]) => key.startsWith(options.prefix ?? "") && key > (options.startAfter ?? ""))
         .slice(0, options.limit).map(([key, value]) => [key, value as T])),
   }, waitUntil: vi.fn() };
-  const supports = vi.fn(async () => true);
-  const checkpoint = vi.fn(async () => "accepted" as const);
+  const supports = vi.fn(async (): Promise<"absent" | "ready" | "unsupported"> => "ready");
+  const checkpoint = vi.fn(async (): Promise<"absent" | "accepted" | "stale" | "unconfirmed"> => "accepted");
   const unused = async (): Promise<never> => { throw new Error("Unexpected runtime operation."); };
   const getByName = vi.fn(() => ({ supportsMigrationCheckpoint: supports, requestMigrationCheckpoint: checkpoint,
     destroyInstance: unused, invoke: unused, smokeHealth: unused }));
@@ -41,11 +41,22 @@ function harness() {
 
 describe("conditional member checkpoint handoff", () => {
   it("leaves an old busy process live until its image supports managed checkpointing", async () => {
-    const h = harness(); h.supports.mockResolvedValue(false);
+    const h = harness(); h.supports.mockResolvedValue("unsupported");
     expect(await h.object.preparePostgresMemberMigration(identity)).toEqual({ quiesced: false, checkpointStatus: null });
     expect(h.values.has("runtime-migration-freeze:v1")).toBe(false);
     expect((await h.object.inspectPostgresMigration()).freeze.phase).toBeNull();
     expect(h.checkpoint).not.toHaveBeenCalled(); expect(h.stop).not.toHaveBeenCalled();
+  });
+
+  it("quiesces a recorded attempt whose process is gone instead of holding the member on readiness", async () => {
+    const h = harness(); h.supports.mockResolvedValue("absent"); h.checkpoint.mockResolvedValue("absent");
+    // The stopped process cannot be executing the recorded attempt, so the
+    // handoff continues to the freeze, which owns the exact-target stop.
+    expect(await h.object.preparePostgresMemberMigration(identity)).toEqual({ quiesced: true, checkpointStatus: "absent" });
+    expect(h.values.get("runtime-migration-freeze:v1")).toMatchObject({ phase: "quiescing" });
+    const unreachable = harness(); unreachable.supports.mockResolvedValue("unsupported");
+    expect(await unreachable.object.preparePostgresMemberMigration(identity)).toEqual({ quiesced: false, checkpointStatus: null });
+    expect(unreachable.values.has("runtime-migration-freeze:v1")).toBe(false);
   });
 
   it("drains old direct URLs before persisting a pause", async () => {
@@ -138,11 +149,11 @@ describe("resumable member handoff continuation", () => {
       return { member: { ...identity, migrationId: phase === "legacy" || phase === "pending" ? null : identity.migrationId, migrationPhase: phase } };
     });
     const advance = () => advanceRuntimeMemberMigration({ source: h.source, stub: h.object, identity });
-    h.supports.mockResolvedValue(false);
+    h.supports.mockResolvedValue("unsupported");
     expect(await advance()).toEqual({ pending: "readiness" });
     expect(operations).not.toContain("freeze_member");
     expect(h.stop).not.toHaveBeenCalled();
-    h.supports.mockResolvedValue(true);
+    h.supports.mockResolvedValue("ready");
     expect(await advance()).toEqual({ pending: "checkpoint", checkpointStatus: "accepted" });
     expect(operations).not.toContain("freeze_member");
     h.sql.exec("UPDATE runner_meta SET active_attempt_id = NULL");

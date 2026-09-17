@@ -39,7 +39,11 @@ export async function isLegacyMemberReady(input: {
   if (!observed.activeAttemptId) return true;
   if (!observed.activeRunnerContainerName) return false;
   const target = exactTarget(input.source, observed.activeRunnerContainerName);
-  return await target?.supportsMigrationCheckpoint?.({ userId: input.userId }) === true;
+  const status = await target?.supportsMigrationCheckpoint?.({ userId: input.userId }) ?? "unsupported";
+  // A recorded attempt whose exact process is gone can never clear itself, and
+  // the freeze's exact-target stop reconciles it. Waiting would hold the member
+  // forever. An unreachable or unsupported running process still waits.
+  return status === "ready" || status === "absent";
 }
 
 export async function requestLegacyMemberCheckpoint(input: {
