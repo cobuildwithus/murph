@@ -31,17 +31,28 @@ export function readRuntimeMigrationOperator(source: Source) {
 function readMigrationOptions(source: Source) {
   const mode = source.MURPH_RUNTIME_MIGRATION_MODE ?? "inventory";
   if (mode !== "inventory" && mode !== "migrate") throw new Error("Runtime migration mode must be inventory or migrate.");
-  const maxSteps = Number(source.MURPH_RUNTIME_MIGRATION_MAX_STEPS ?? "1000");
-  if (!Number.isSafeInteger(maxSteps) || maxSteps < 1 || maxSteps > 1_000) throw new Error("Runtime migration requires a step bound from 1 to 1000.");
-  const maxObjects = Number(source.MURPH_RUNTIME_MIGRATION_MAX_OBJECTS ?? "1");
-  if (!Number.isSafeInteger(maxObjects) || maxObjects < 1 || maxObjects > 1_000) throw new Error("Runtime migration requires an object bound from 1 to 1000.");
+  const maxSteps = readMigrationBound(source, "MURPH_RUNTIME_MIGRATION_MAX_STEPS", "1000", "a step");
+  const maxObjects = readMigrationBound(source, "MURPH_RUNTIME_MIGRATION_MAX_OBJECTS", "1", "an object");
   const finalize = source.MURPH_RUNTIME_MIGRATION_FINALIZE ?? "false";
-  if (finalize !== "false") throw new Error("Rolling migration cannot finalize the namespace.");
+  if (finalize !== "false" && finalize !== "true") throw new Error("Runtime migration finalize must be true or false.");
+  const activate = finalize === "true";
+  if (activate && mode !== "migrate") throw new Error("Namespace retirement requires migrate mode.");
+  return { mode, maxSteps, maxObjects, activate, memberId: readTargetMember(source, { mode, maxObjects, activate }) };
+}
+
+function readMigrationBound(source: Source, name: string, fallback: string, label: string) {
+  const value = Number(source[name] ?? fallback);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 1_000) throw new Error(`Runtime migration requires ${label} bound from 1 to 1000.`);
+  return value;
+}
+
+/** A canary migrates exactly one member and can never retire the namespace. */
+function readTargetMember(source: Source, options: { mode: string; maxObjects: number; activate: boolean }) {
   const memberId = source.MURPH_RUNTIME_MIGRATION_MEMBER_ID?.trim() || undefined;
-  if (memberId !== undefined && (!/^[A-Za-z0-9_-]{1,128}$/u.test(memberId) || maxObjects !== 1 || mode !== "migrate")) {
-    throw new Error("Targeted migration requires a valid member identity, migrate mode and a one-object budget.");
+  if (memberId !== undefined && (!/^[A-Za-z0-9_-]{1,128}$/u.test(memberId) || options.maxObjects !== 1 || options.mode !== "migrate" || options.activate)) {
+    throw new Error("Targeted migration requires a valid member identity, migrate mode, a one-object budget and no retirement.");
   }
-  return { mode, maxSteps, maxObjects, activate: false, memberId };
+  return memberId;
 }
 
 export async function runRuntimeMigrationOperator(source: Source, fetchImpl?: typeof fetch) {

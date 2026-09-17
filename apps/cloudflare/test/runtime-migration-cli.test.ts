@@ -23,6 +23,14 @@ describe("protected hosted migration entrypoint", () => {
     }
   });
 
+  it("retires the namespace only from an explicit fleet-wide migrate run", () => {
+    const retire = { ...source, MURPH_RUNTIME_MIGRATION_MODE: "migrate", MURPH_RUNTIME_MIGRATION_FINALIZE: "true", MURPH_RUNTIME_MIGRATION_MAX_OBJECTS: "1000" };
+    expect(readRuntimeMigrationOperator(retire)).toMatchObject({ mode: "migrate", activate: true, maxObjects: 1000 });
+    expect(readRuntimeMigrationOperator({ ...retire, MURPH_RUNTIME_MIGRATION_FINALIZE: "false" })).toMatchObject({ activate: false });
+    expect(() => readRuntimeMigrationOperator({ ...retire, MURPH_RUNTIME_MIGRATION_MODE: "inventory" })).toThrow("requires migrate mode");
+    expect(() => readRuntimeMigrationOperator({ ...retire, MURPH_RUNTIME_MIGRATION_MAX_OBJECTS: "1", MURPH_RUNTIME_MIGRATION_MEMBER_ID: "synthetic-member" })).toThrow("Targeted migration requires");
+  });
+
   it("signs the exact command with a fresh nonce on each call", async () => {
     const { input } = readRuntimeMigrationOperator(source);
     const request = { method: "POST" as const, path: "/internal/runtime-migration", payload: JSON.stringify({ operation: "status" }) };
