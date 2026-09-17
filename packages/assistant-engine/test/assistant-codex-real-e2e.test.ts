@@ -298,6 +298,9 @@ import {
   buildAssistantSystemPromptLayers,
 } from '../src/assistant/system-prompt.ts'
 import {
+  ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION as REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+} from '../src/assistant/group-reply-reconsideration.ts'
+import {
   buildAssistantCliSurfaceContract,
 } from '../src/assistant/cli-surface-bootstrap.ts'
 import {
@@ -5459,15 +5462,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
   )
 })
 
-const REAL_GROUP_RECONSIDERATION_INSTRUCTION = [
-  'Additional group messages joined this turn.',
-  'Replace the draft with one final result under the group turn rules.',
-  'The unsent draft neither answers a request nor keeps Murph\'s floor; the latest accepted message decides who owns the updated beat.',
-  'If the latest accepted message gives another human the floor, finish without a reply.',
-  'Treat every request answered only in the unsent draft as unanswered; if Murph still owns the beat, include every still-relevant answer in the final result. Response text is not a completed effect.',
-  'Do not repeat completed effects or mention the draft or this instruction.',
-].join(' ')
-
 describeRealCodex('real Codex video-analysis detail e2e', () => {
   it.each([
     {
@@ -6720,7 +6714,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'yields when another human takes the floor during reconsideration',
+    'keeps an earlier direct ask when another human takes the floor during reconsideration',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -6798,8 +6792,257 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           requestedModel: config.model,
           servedModel: config.model,
         })
+        expect(second.finalMessage).toMatch(/\b31\b/u)
+        expect(second.finalMessage).not.toMatch(
+          /draft|held|not sent|previous response|re-?evaluat|review/iu,
+        )
+        expect(finishCalls).toHaveLength(0)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
+    'yields when the earlier direct ask is withdrawn during reconsideration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-reconsideration-withdrawn-e2e-'),
+      )
+
+      try {
+        const commonInput = {
+          allowFinishWithoutReply: true,
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          env: config.env,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Murph, what is 17 plus 14?',
+        })
+        expect(first.finalMessage).toMatch(/\b31\b/u)
+
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+            'Murph, what is 17 plus 14?',
+            'Never mind Murph, @roommate already worked it out for me.',
+          ].join('\n\n'),
+          resumeSessionId: first.sessionId,
+        })
+        process.stdout.write(
+          `[group-reconsideration-e2e] ${JSON.stringify({
+            finalMessage: second.finalMessage,
+            scenario: 'earlier direct ask withdrawn',
+          })}\n`,
+        )
+        const finishCalls = readCapabilityRoutingActions(second.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+          )
+
+        expect(second.sessionId).toBe(first.sessionId)
         expect(second.finalMessage.trim()).toBe('')
         expect(finishCalls).toHaveLength(1)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
+    'renders a requested group trend graph through image generation',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-trend-graph-e2e-'),
+      )
+
+      try {
+        const launchedImageOperationIds: string[] = []
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          configOverrides: ['features.image_generation=false'],
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildGroupPointOfViewDeveloperInstructions({
+            hostedRuntime: true,
+          }),
+          dynamicTools: [MURPH_GENERATE_IMAGE_TOOL, MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
+          groupConversation: true,
+          env: {
+            ...config.env,
+            OPENAI_API_KEY: '',
+          },
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentAssistantInputId: () => `ain_${'7'.repeat(32)}`,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            imageGenerationLauncher: {
+              launch(input) {
+                launchedImageOperationIds.push(input.operationId)
+                return 'started'
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          } satisfies AssistantHostedToolContext,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write' as const,
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        }
+        const result = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'Shared room data already visible to everyone here (nightly sleep, last five nights):',
+            'Participant A: 6h 10m, 6h 25m, 5h 50m, 6h 05m, 5h 40m',
+            'Participant B: 7h 30m, 7h 05m, 7h 20m, 6h 55m, 7h 10m',
+            '',
+            'A participant: "Murph, can you make us a sleep trend graph from those nights?"',
+          ].join('\n'),
+        })
+        const dynamicActions = readCapabilityRoutingActions(result.jsonEvents)
+          .filter((action) => action.kind === 'dynamic')
+        const generationCalls = dynamicActions.filter((action) =>
+          action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+        )
+        const generationPrompt = generationCalls[0]?.argumentsValue?.prompt
+        process.stdout.write(
+          `[group-trend-graph-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            generationPrompt,
+            scenario: 'sleep trend graph requested in a group',
+          })}\n`,
+        )
+
+        expect(generationCalls).toHaveLength(1)
+        expect(launchedImageOperationIds).toHaveLength(1)
+        expect(typeof generationPrompt).toBe('string')
+        expect(generationPrompt).toMatch(/chart|graph|plot/iu)
+        expect(generationPrompt).toMatch(/sleep/iu)
+        expect(generationPrompt).toMatch(/#f5f0e8/iu)
+        expect(generationPrompt).toMatch(/#2d3436/iu)
+        expect(generationPrompt).toMatch(/#7a8c6e/iu)
+        expect(generationPrompt).toMatch(/Fraunces|serif/iu)
+        expect(generationPrompt).toMatch(/DM Sans/iu)
+        expect(generationPrompt).toMatch(/DM Mono|monospace/iu)
+        expect(generationPrompt).toMatch(
+          /(?:no|omit|without|do not|don't|avoid)[^.\n]{0,100}(?:numeric|number|value|data)[^.\n]{0,60}labels|(?:no|omit|without|do not|don't|avoid)[^.\n]{0,100}labels[^.\n]{0,60}(?:point|bar)/iu,
+        )
+        expect(generationPrompt).not.toMatch(/blue|teal|purple|terracotta/iu)
+        expect(
+          (String(generationPrompt).replace(/#[0-9a-f]{6}/giu, '').match(/\d+/gu) ?? []).length,
+        ).toBeGreaterThanOrEqual(8)
+        expect(result.finalMessage).toMatch(/making|creating|working|on it/iu)
+        expect(String(generationPrompt).match(/#[0-9a-f]{6}/giu)?.every(
+          (color) => ['#f5f0e8', '#2d3436', '#7a8c6e', '#d4c4a8'].includes(color.toLowerCase()),
+        )).toBe(true)
+        expect(result.finalMessage).not.toMatch(
+          /can(?:no|')t (?:make|create|generate|draw)|unable to|no way to/iu,
+        )
+
+        // Synthetic pixels stand in for image-provider output; this proves the
+        // real assistant's completion attachment and numeric reply, not rendering.
+        const imageBytes = Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+          'base64',
+        )
+        const media = {
+          alt: 'Sleep trend over five nights', contentType: 'image/png',
+          filename: 'sleep-trend.png', kind: 'vault_image',
+          ref: 'raw/captures/2026/10/sleep-trend/sleep-trend.png',
+          sha256: createHash('sha256').update(imageBytes).digest('hex'),
+          sizeBytes: imageBytes.byteLength, source: 'gpt-image-2',
+        } as const
+        await mkdir(path.dirname(path.join(workingDirectory, media.ref)), { recursive: true })
+        await writeFile(path.join(workingDirectory, media.ref), imageBytes)
+        const completionInputId = `ain_${'8'.repeat(32)}`
+        const originInputId = commonInput.hostedToolContext.currentAssistantInputId()
+        const identity = `image-completion:${'9'.repeat(64)}`
+        const trustedHostedImageCompletion = readTrustedHostedImageCompletion({
+          sourceRef: {
+            dedupeKey: identity, eventId: identity, itemId: identity,
+            kind: 'hosted-mailbox', lane: 'system', laneSeq: identity,
+            payloadSchema: ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
+            payloadSource: 'inline', source: 'hosted-mailbox',
+            wakeSchema: ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
+          },
+          text: renderAssistantHostedImageCompletionSystemText({
+            originAssistantInputId: originInputId, originAssistantInputIdExact: true,
+            result: { media, runtimeIssue: null, savedImageRef: media.ref },
+          }),
+          transcriptText: null,
+        })
+        const completionContext = buildTrustedHostedImageCompletionTurnContext([{
+          inputId: completionInputId, trustedHostedImageCompletion,
+        }])
+        expect(trustedHostedImageCompletion?.status).toBe('ready')
+        expect(completionContext).toBeTruthy()
+        expect(result.sessionId).toBeTruthy()
+        const completion = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          hostedToolContext: {
+            ...commonInput.hostedToolContext,
+            currentAssistantInputId: () => completionInputId,
+            currentHostedImageCompletionEffectScope: () => ({
+              authorizedOriginAssistantInputId: originInputId,
+              completionAssistantInputId: completionInputId,
+              exactMedia: [media],
+            }),
+          },
+          prompt: resolveAssistantProviderPrompt({
+            dynamicTools: commonInput.dynamicTools,
+            prompt: 'The trusted runtime completion is the only current input. Continue its pending image-delivery task.',
+            providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
+            turnContextPrompt: completionContext,
+            workingDirectory,
+          }),
+          resumeSessionId: result.sessionId,
+        })
+        process.stdout.write(`[group-trend-graph-completion-e2e] ${JSON.stringify({
+          finalMessage: completion.finalMessage, mediaCount: completion.responseMedia?.length,
+        })}\n`)
+        const completionCalls = readCapabilityRoutingActions(completion.jsonEvents)
+          .filter((action) => action.kind === 'dynamic')
+        expect(completion.responseMedia).toEqual([media])
+        expect(completionCalls.filter((action) => action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name)).toHaveLength(1)
+        expect(completionCalls.filter((action) => action.tool === MURPH_GENERATE_IMAGE_TOOL.name)).toHaveLength(0)
+        expect(launchedImageOperationIds).toHaveLength(1)
+        expect(completion.finalMessage).toMatch(/\d+(?:[.,]\d+)?\s*(?:h\b|hours?\b|m\b|min(?:utes?)?\b)|\d+:\d+/iu)
+        expect(completion.finalMessage).not.toMatch(/still (?:making|generating)|not ready|unable to/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -17189,7 +17432,11 @@ describeRealCodex('real Codex direct email signup welcome e2e', () => {
 })
 
 describeRealCodex('real Codex connected channel greeting e2e', () => {
-  it.each(['email', 'linq'] as const)('greets a new channel contextually after private conversation on %s', async (originalChannel) => {
+  it.each([
+    { originalChannel: 'email', inactiveDays: 0 },
+    { originalChannel: 'linq', inactiveDays: 0 },
+    { originalChannel: 'linq', inactiveDays: 40 },
+  ] as const)('greets a new channel contextually after private conversation on $originalChannel with $inactiveDays inactive days', async ({ originalChannel, inactiveDays }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-connected-channel-e2e-'))
     const permissionHome = await materializeRealCodexHostedPermissionHome(config)
@@ -17228,7 +17475,7 @@ describeRealCodex('real Codex connected channel greeting e2e', () => {
       const originalInput = originalChannel === 'email' ? emailInput : phoneInput
       const nextInput = originalChannel === 'email' ? phoneInput : emailInput
       const original = await sendAssistantNotificationLocal(originalInput)
-      const at = new Date(Date.now() - 60_000).toISOString()
+      const at = new Date(Date.now() - Math.max(60_000, inactiveDays * 86_400_000)).toISOString()
       await appendAssistantTranscriptEntries(workingDirectory, original.session.sessionId, [
         { kind: 'user', createdAt: at, text: 'I am planning an easy weekend walk by the lake. I already know how Murph works.' },
         { kind: 'assistant', createdAt: at, text: 'That sounds like a lovely plan. Keep the route easy and enjoy the lake.' },
@@ -17302,6 +17549,9 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         channel: 'telegram' as const, containerMemberId: 'synthetic-member', threadId: 'synthetic-telegram-destination',
       }
       const resolveScheduledExternalThreadRoute = vi.fn(async () => ({ ...authority, threadIsDirect }))
+      const resolveScheduledLinqRoute = vi.fn(async () => {
+        throw new Error('Dormant Linq outreach must not gate a Telegram occurrence.')
+      })
       const recordUsage = vi.fn<AssistantUsageRecorder['recordUsage']>(async (record) => {
         recordRealCodexProviderUsage({ ...record, providerMetadataJson: null })
       })
@@ -17309,7 +17559,7 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
       const result = await executeClaimedAssistantCronJob({
         deliveryDispatchMode: 'queue-only',
         executionContext: { hosted: {
-          defaultTarget: modelTarget, memberId: 'synthetic-member', resolveScheduledExternalThreadRoute, userEnvKeys: [],
+          defaultTarget: modelTarget, memberId: 'synthetic-member', resolveScheduledExternalThreadRoute, resolveScheduledLinqRoute, userEnvKeys: [],
           usageRecorder: { recordUsage },
         } },
         job: claimed, paths, trigger: 'scheduled', vault: workingDirectory,
@@ -17319,6 +17569,7 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
       expect(result.runErrorCode, result.run.error ?? undefined).toBeNull()
       expect(recordUsage).toHaveBeenCalledOnce()
       expect(readCapabilityRoutingActions(providerEvents)).toEqual([])
+      expect(resolveScheduledLinqRoute).not.toHaveBeenCalled()
       expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledOnce()
       expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledWith({
         channel: 'telegram', signal: expect.any(AbortSignal), target: authority.threadId,

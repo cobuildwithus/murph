@@ -219,7 +219,39 @@ If the answer is unknown, do not assume the path is safe. Add the missing guard,
 
 ## Murph Hosted Automation Engagement
 
-Murph pauses model-capable automation wakes for Linq members with no inbound day in the last 28 days, using `hosted_linq_daily_state` as the conversation source of truth. Conversational replies are never gated by this pause because fresh conversation mailbox lag bypasses it. An accepted meal capture, Telegram conversation, or email conversation is an explicit member interaction and therefore member-wide qualifying engagement for the same 28-day policy. An established Linq route must not pause scheduled work merely because the member now talks through Telegram or email. The existing mailbox lookup reads only member-bound kind, lane, creation time, and the Telegram/email ingress dedupe prefixes; consumed or content-retired rows still qualify within the window, which fits the 30-day structural retention. The ordinary 9pm meal closeout needs no second opt-in and other due automations may also resume. This engagement evidence does not bypass AI-usage authorization or current route authority. Deterministic system-mailbox work can still run in bounded model-free mode when model work is blocked.
+The 28-day inactivity pause belongs to proactive iMessage delivery, not to
+member-wide runtime admission. Email, Telegram and other channels remain
+runnable under their ordinary access, consent and AI-usage rules. Known SMS and
+RCS service projections bypass this pause too; an unknown Linq service retains
+the conservative iMessage policy. The signed
+Linq egress callback evaluates the pause after resolving exact route authority;
+scheduled Linq work uses that result to skip before model execution. A queued
+Linq send rechecks before provider dispatch and uses the existing nonretryable
+blocked-delivery classification with recipient-inbound metadata. That metadata
+does not automatically replay the failed intent; later eligible scheduled
+occurrences use their ordinary delivery path. It does not hold the system mailbox
+or another channel's scheduled work behind a member-wide blocked wake.
+
+The policy keeps `hosted_linq_daily_state` and the existing 28-day window.
+Accepted meal captures and Telegram/email conversations retain their existing
+qualification as explicit member engagement, including consumed or
+content-retired metadata within structural retention. Exact accepted Linq
+replies bypass the pause; a group reply can prove its exact ingress when the
+daily projection lags. Authorized initial signup participant delivery and
+validated Assistant Ask completion/fallback retain their own authority. The
+reviewed validator returns void on successful validation; only its fallback
+result is truthy. Private Ask replies must match their canonical mailbox
+notification, member, delivery key and resolved destination before bypassing
+inactivity. Their existing live private-authority checks still own exact reply
+content, permissions, expiry, route validation and safe group fallback.
+Engagement never substitutes for route, consent, or AI-usage authorization.
+
+Deploy the runtime reader for `automation_engagement_paused` delivery blocks
+before Web removes the global reconciliation gate. An older Worker ignores the
+unknown block during preflight; Web still withholds its provider-dispatch claim,
+so older runtime send-time claim validation prevents delivery. That skew can
+waste a model turn or retry instead of recording a normal policy skip; it is not
+a supported substitute for consumer-first rollout. No persisted schema changes.
 
 Linq egress should stay small and obvious:
 

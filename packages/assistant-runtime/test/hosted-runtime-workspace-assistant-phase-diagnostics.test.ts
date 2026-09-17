@@ -288,6 +288,31 @@ beforeEach(() => {
 });
 
 describe("hosted workspace assistant diagnostics detail logs", () => {
+  it("preserves reply skip categories through the durable log boundary", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0, deviceSyncSkipped: true, nextWakeAt: null,
+      parserProcessed: 0, postCheckpointRecord: null, progressed: true,
+      redactedLogEntries: [{
+        component: "runtime", level: "info", phase: "wake.running",
+        message: "Hosted assistant automation event: input.reply-skipped.",
+        redacted: {
+          type: "input.reply-skipped", safeDetails: "reply_skip:unattested_reaction",
+        },
+      }],
+    });
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        eventCode: "assistant.automation_detail",
+        redactedJson: expect.objectContaining({
+          type: "input.reply-skipped", safeDetails: "reply_skip:unattested_reaction",
+        }),
+      }),
+    );
+  });
+
   it("revalidates Codex resume-failure diagnostics before durable logging", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({

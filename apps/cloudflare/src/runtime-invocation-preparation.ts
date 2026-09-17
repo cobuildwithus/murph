@@ -137,6 +137,8 @@ interface RuntimeInvocationPreparationInputs {
 }
 
 export interface PreparedRuntimeInvocation {
+  customInferenceEnvelope: string | null;
+  platformAiUsageAllowed: boolean;
   input: RuntimeInvocationInput;
   job: HostedExecutionWorkspaceInvocationJobInput;
   runnerContainerName: string;
@@ -283,6 +285,8 @@ export class RuntimeInvocationPreparation {
     });
 
     return {
+      customInferenceEnvelope,
+      platformAiUsageAllowed: platformAiUsageAllowed !== false,
       input: {
         ...input.input,
         orchestration: {

@@ -170,6 +170,25 @@ const ASSISTANT_PROVIDER_USAGE_LIMIT_SUPPRESSION_REASON =
 const ASSISTANT_NO_REPLY_SUPPRESSION_REASON =
   'assistant finished without a reply'
 
+// Exact static matches only: skip details may also contain private provider errors.
+// Unknown/new reasons stay diagnosable as a category without exporting their text.
+const ASSISTANT_REPLY_SKIP_LOG_REASONS = new Map<string, string>([
+  ['channel not enabled for assistant auto-reply', 'channel_disabled'],
+  ['input is self-authored', 'self_authored'],
+  ['assistant reply already handled', 'already_handled'],
+  ['iMessage auto-reply only runs for direct chats', 'linq_route_ineligible'],
+  ['capture matches a recent assistant delivery', 'assistant_echo'],
+  ['affirmative Linq reaction target is not an attested assistant delivery', 'unattested_reaction'],
+  ['hosted Telegram auto-reply is missing a provider delivery target', 'missing_delivery_target'],
+  ['input has no text or attachment context', 'empty_input'],
+  ['assistant reply terminal evidence is incomplete; will retry this input after evidence is rebuilt.', 'incomplete_terminal_evidence'],
+  ['assistant reply terminal evidence prefix no longer matches pending input; will retry safely.', 'terminal_evidence_changed'],
+  [ASSISTANT_NO_REPLY_SUPPRESSION_REASON, 'intentional_no_reply'],
+  [ASSISTANT_EMPTY_RESPONSE_SUPPRESSION_REASON, 'provider_empty_response'],
+  [ASSISTANT_PROVIDER_USAGE_LIMIT_SUPPRESSION_REASON, 'provider_usage_limit'],
+  [AUTO_REPLY_PROVIDER_STALLED_DETAIL, 'provider_stalled'],
+])
+
 type AssistantAutoReplyReceiptRecord =
   Awaited<ReturnType<typeof listAssistantTurnReceipts>>[number]
 
@@ -1109,7 +1128,9 @@ function emitAssistantAutoReplyOutcomeEvent(input: {
     details: input.outcome.event.details,
     errorCode: input.outcome.event.errorCode,
     failureContext: input.outcome.event.failureContext,
-    safeDetails: input.outcome.event.safeDetails,
+    safeDetails: input.outcome.event.type === 'input.reply-skipped'
+      ? `reply_skip:${ASSISTANT_REPLY_SKIP_LOG_REASONS.get(input.outcome.event.details ?? '') ?? 'unclassified'}`
+      : input.outcome.event.safeDetails,
     safeErrorMessage: input.outcome.event.safeErrorMessage,
   })
 }

@@ -31,10 +31,15 @@ function job(attemptId = "attempt-a", generation = "1"): HostedExecutionWorkspac
   }, runtime: buildHostedRunnerJobRuntimeConfig({ forwardedEnv: {}, runnerSecrets: {} }) };
 }
 
-describe("native supervised invocation", () => {
+describe.each([false, true])("native supervised invocation with launch preparation %s", (prepareAtLaunch) => {
+  function payload(attemptId = "attempt-a", generation = "1") {
+    return { userId, job: job(attemptId, generation), ...(prepareAtLaunch ? {
+      launch: { providerEgressTokenHash: "a".repeat(64), customInferenceEnvelope: null, platformAiUsageAllowed: true },
+    } : {}) };
+  }
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "authorized", owner: {
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: prepareAtLaunch ? "updated" : "authorized", owner: {
       userId, attemptId: "attempt-a", generation: "1", phase: "active", workspaceVersion: "0", processingMode: "default",
       allocationId: "standby-claim-11111111-1111-4111-8111-111111111111", runnerContainerName: target,
       customInferenceEnvelope: null, platformAiUsageAllowed: true, startedAt: null, acceptedAt: null, completedAt: null,
@@ -48,13 +53,18 @@ describe("native supervised invocation", () => {
     const container = create();
     const invoke = vi.spyOn(container, "invoke").mockResolvedValue({ status: "idle", immediateRecheckRequested: true });
     vi.mocked(recordHostedRuntimeOwnerCompletion).mockRejectedValue(new Error("synthetic lost completion acknowledgment"));
-    await expect(container.startSupervisedInvocation({ userId, job: job() })).resolves.toEqual({ accepted: true });
+    await expect(container.startSupervisedInvocation(payload())).resolves.toEqual({ accepted: true });
     await Promise.all(pending);
     expect(invoke).toHaveBeenCalledTimes(1);
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(1);
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({
+      command: expect.objectContaining({ operation: prepareAtLaunch ? "prepare_launch" : "authorize_effect",
+        attemptId: "attempt-a", generation: "1", runnerContainerName: target }),
+    }));
     const recovered = create();
     const replay = vi.spyOn(recovered, "invoke");
     expect(await recovered.readSupervisedInvocation({ userId })).toEqual({ attemptId: "attempt-a", generation: "1", state: "completed", immediateRecheckRequested: true });
-    await recovered.startSupervisedInvocation({ userId, job: job() });
+    await recovered.startSupervisedInvocation(payload());
     expect(replay).not.toHaveBeenCalled();
   });
 
@@ -62,13 +72,27 @@ describe("native supervised invocation", () => {
     const { create, pending } = harness();
     const container = create();
     vi.spyOn(container, "invoke").mockRejectedValue(new Error("synthetic launch transport loss"));
-    await container.startSupervisedInvocation({ userId, job: job() });
+    await container.startSupervisedInvocation(payload());
     await Promise.all(pending);
     const recovered = create();
     const replay = vi.spyOn(recovered, "invoke");
-    await recovered.startSupervisedInvocation({ userId, job: job() });
+    await recovered.startSupervisedInvocation(payload());
     expect(replay).not.toHaveBeenCalled();
-    await expect(recovered.startSupervisedInvocation({ userId, job: job("attempt-b", "2") })).rejects.toThrow("unresolved");
+    await expect(recovered.startSupervisedInvocation(payload("attempt-b", "2"))).rejects.toThrow("unresolved");
+  });
+
+  it("starts concurrent duplicates only once", async () => {
+    const { create, pending } = harness();
+    const container = create();
+    let finish!: (result: { status: "idle" }) => void;
+    const invoke = vi.spyOn(container, "invoke").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    await expect(Promise.all([
+      container.startSupervisedInvocation(payload()),
+      container.startSupervisedInvocation(payload()),
+    ])).resolves.toEqual([{ accepted: true }, { accepted: true }]);
+    expect(invoke).toHaveBeenCalledOnce();
+    finish({ status: "idle" });
+    await Promise.all(pending);
   });
 
   it("releases the retained assignment only after the native invocation settles", async () => {
@@ -76,7 +100,7 @@ describe("native supervised invocation", () => {
     const container = create();
     let finish!: (result: { status: "idle" }) => void;
     vi.spyOn(container, "invoke").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
-    await container.startSupervisedInvocation({ userId, job: job() });
+    await container.startSupervisedInvocation(payload());
     expect(recordHostedRuntimeOwnerCompletion).not.toHaveBeenCalled();
     await container.recordSupervisedRuntimeCompletion({ userId, attemptId: "attempt-a", generation: "1", result: { status: "idle" } });
     expect(recordHostedRuntimeOwnerCompletion).toHaveBeenLastCalledWith(expect.not.objectContaining({ settledRunnerContainerName: expect.anything() }));
@@ -92,7 +116,7 @@ describe("native supervised invocation", () => {
     const container = create();
     const invoke = vi.spyOn(container, "invoke");
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "blocked", owner: null });
-    await expect(container.startSupervisedInvocation({ userId, job: job() })).rejects.toThrow("stale");
+    await expect(container.startSupervisedInvocation(payload())).rejects.toThrow("stale");
     expect(await container.readSupervisedInvocation({ userId })).toBeNull();
     expect(invoke).not.toHaveBeenCalled();
   });

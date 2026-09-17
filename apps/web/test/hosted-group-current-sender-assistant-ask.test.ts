@@ -189,6 +189,7 @@ import {
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
   assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx,
+  isHostedGroupCurrentSenderPrivateLinqCompletionTx,
   createHostedGroupCurrentSenderAssistantAskRequestId,
   createHostedGroupCurrentSenderPrivateDeliveryId,
   createHostedGroupCurrentSenderLegacyAssistantAskRequestId,
@@ -1602,6 +1603,23 @@ describe("hosted current-sender Assistant Ask authority", () => {
     const privateDeliveryId =
       createHostedGroupCurrentSenderPrivateDeliveryId(requestId);
     const requestWake = requireRequestedWake(requestId);
+    const privateProof = {
+      answeredMailboxItemIds: [privateDeliveryId],
+      assistantAskCompletionExpiresAt: requestWake.ask.expiresAt,
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      idempotencyKey: createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(privateDeliveryId),
+      now: new Date(NOW.getTime() + 1_000),
+      responseTextDigest: createHash("sha256").update(answer).digest("hex"),
+      route: DIRECT_ROUTE,
+      tx: asPrismaTransactionClient(fakeTx),
+    };
+    // The real private validator succeeds with void. The canonical completion
+    // remains a requested reply even when personal engagement is stale.
+    await expect(assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx(privateProof))
+      .resolves.toBeUndefined();
+    await expect(isHostedGroupCurrentSenderPrivateLinqCompletionTx({
+      ...privateProof, target: DIRECT_ROUTE.delivery.target, targetKind: "thread",
+    })).resolves.toBe(true);
     directRouteAvailable = false;
 
     await expect(

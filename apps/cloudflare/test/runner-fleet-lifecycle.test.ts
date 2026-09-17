@@ -534,6 +534,7 @@ function allocationHarness(options: {
           assert.equal(binding.userId, input.userId);
           return {
             input, token, runnerContainerName: token.runnerContainerName,
+            customInferenceEnvelope: null, platformAiUsageAllowed: true,
             workspaceCheckpointedAt: null, workspaceVersion: "0",
             job: {
               kind: "workspace-invocation",
