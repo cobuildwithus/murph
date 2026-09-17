@@ -1,5 +1,5 @@
 export { createHostedRuntimeMigrationRehearsalForTest } from "./hosted-runtime-migration-testkit";
-export { initializeEmptyPostgresRuntimeForTest, readPostgresRuntimeIdentityForTest } from "./hosted-runtime-owner-testkit";
+export { initializeEmptyPostgresRuntimeForTest, readPostgresRuntimeIdentityForTest, startStuckPostgresRuntimeForTest, agePostgresRuntimeForTest } from "./hosted-runtime-owner-testkit";
 export {
   HostedBillingBrowserDriver,
   type HostedBillingBrowserActor,

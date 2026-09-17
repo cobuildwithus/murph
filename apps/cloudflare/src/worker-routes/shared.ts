@@ -1,4 +1,3 @@
-import { resolveAdmittedLegacyUserRunner } from "../legacy-runtime-admission.ts";
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
   HostedRunnerStatusResponse,
@@ -118,15 +117,6 @@ export interface WorkerRouteContext {
     runtimeControlAuthStartedAtEpochMs: number;
   };
   url: URL;
-}
-
-export async function resolveUserRunnerStub(
-  env: WorkerEnvironmentSource,
-  userId: string,
-): Promise<UserRunnerDurableObjectStubLike> {
-  const stub = await resolveAdmittedLegacyUserRunner(env, userId);
-  await stub.bindUser(userId);
-  return stub;
 }
 
 export async function resolveHostedExecutionUserCryptoContext(input: {

@@ -1,3 +1,5 @@
+import { HOSTED_RUNTIME_OWNER_PATH } from "@murphai/hosted-execution/runtime-owner";
+import { createPostgresTestOwner } from "../postgres-owner-fixtures.ts";
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
 import { env } from "cloudflare:workers";
@@ -25,6 +27,7 @@ describe("OpenAI authorization alert Worker path", () => {
     resetDatabaseHealthMessageRequests();
     const imageAccessFetch = vi.fn<typeof fetch>(async (request) => {
       const url = new URL(request instanceof Request ? request.url : String(request));
+      if (url.pathname === HOSTED_RUNTIME_OWNER_PATH) return Response.json({ cutover: "postgres", status: "authorized", owner: createPostgresTestOwner({ userId: "member-private-openai-alert", attemptId: "synthetic-alert-attempt", generation: "1", workspaceVersion: "7" }) });
       expect(url.pathname).toBe(HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH);
       return Response.json({ allowed: true, reason: "allowed" });
     });
@@ -37,7 +40,7 @@ describe("OpenAI authorization alert Worker path", () => {
       env as WorkerEnvironmentSource,
     );
 
-    expect(imageAccessFetch).toHaveBeenCalledTimes(1);
+    expect(imageAccessFetch).toHaveBeenCalledTimes(2);
     expect(response.status).toBe(401);
     expect(response.statusText).toBe("Synthetic Unauthorized");
     expect(response.headers.get("content-type")).toBe(

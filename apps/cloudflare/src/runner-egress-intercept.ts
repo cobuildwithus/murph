@@ -1,6 +1,4 @@
-import { resolveAdmittedLegacyUserRunner } from "./legacy-runtime-admission.ts";
 import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
-import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import { authorizePostgresRuntimeProvider } from "./runtime-provider-authorization.ts";
 import { Buffer } from "node:buffer";
 
@@ -38,9 +36,6 @@ import {
 
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
-import {
-  recordHostedRuntimeUsageRecord,
-} from "./runtime-platform/usage-record-port.ts";
 
 import {
   CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH,
@@ -64,10 +59,7 @@ import {
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
 } from "./runner-outbound/shared-web-control-policy.ts";
 import {
-  applyRunnerRuntimeUsageSettlement,
   writeRunnerRuntimeWriteFenceHeaders,
-  requireRunnerRuntimeWriteFence,
-  RunnerRuntimeWriteFenceError,
 } from "./runner-outbound/write-fence.ts";
 import type {
   RunnerOutboundEnvironmentSource,
@@ -80,9 +72,6 @@ import {
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
-export {
-  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-} from "./runner-injected-credential.ts";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
@@ -163,6 +152,9 @@ import {
 import {
   readDeployLiveModelTurnSmokeOpenAiModel,
 } from "./deploy-smoke-live-model.ts";
+export {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "./runner-injected-credential.ts";
 
 type HostedRunnerOutboundHandler = (
   request: Request,
@@ -326,38 +318,15 @@ type HostedProviderEgressValidationMode =
   | "missing_identity"
   | "provider_egress_credential"
   | "provider_egress_token";
-const HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS = [
-  "missing_provider_egress_token",
-  "missing_runner_state",
-  "missing_write_fence",
-  "provider_egress_token_mismatch",
-  "write_fence_mismatch",
-] as const;
-const HOSTED_PROVIDER_EGRESS_CREDENTIAL_REJECT_REASONS = [
-  "missing_runner_state",
-  "missing_write_fence",
-  "provider_egress_not_allowed",
-  "runner_container_mismatch",
-  "write_fence_mismatch",
-] as const;
-type HostedProviderEgressTokenRejectReason =
-  typeof HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS[number];
-type HostedProviderEgressCredentialRejectReason =
-  typeof HOSTED_PROVIDER_EGRESS_CREDENTIAL_REJECT_REASONS[number];
 type HostedProviderEgressRejectReason =
-  | HostedProviderEgressCredentialRejectReason
-  | HostedProviderEgressTokenRejectReason
+  | "write_fence_mismatch"
   | "bound_user_missing"
   | "exact_write_fence_rejected"
   | "provider_egress_credential_invalid"
   | "provider_egress_credential_provider_mismatch"
-  | "provider_egress_credential_rejected"
   | "provider_egress_credential_signature_mismatch"
   | "provider_egress_credential_validation_error"
   | "provider_egress_token_missing"
-  | "provider_egress_token_rejected"
-  | "provider_egress_token_validation_error"
-  | "validation_rpc_missing"
   | "usage_settlement_pending";
 
 interface HostedProviderEgressAuthorization {
@@ -1132,44 +1101,14 @@ async function recordHostedDirectRuntimeUsage(input: {
   record: AssistantUsageRecord;
   writeFence: HostedProviderEgressWriteFenceMetadata;
 }): Promise<HostedRuntimeUsageRecordResponse> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.writeFence.userId))) {
-    const headers = new Headers({ "content-type": "application/json" });
-    if (!input.writeFence.workspaceVersion) throw new Error("Runtime usage workspace identity is missing.");
-    writeRunnerRuntimeWriteFenceHeaders(headers, { attemptId: input.writeFence.attemptId, leaseGeneration: input.writeFence.leaseGeneration, workspaceVersion: input.writeFence.workspaceVersion });
-    const response = await handleRunnerOutboundRequest(new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNNER_WEB_CONTROL_ROUTES.usageRecording.path}`, {
-      method: "POST", headers, body: JSON.stringify({ usage: input.record }),
-    }), input.env, input.writeFence.userId);
-    if (!response.ok) throw new Error(`Runtime usage recording returned HTTP ${response.status}.`);
-    return parseHostedRuntimeUsageRecordResponse(await response.json());
-  }
-  let settlement: HostedRuntimeUsageRecordResponse | null = null;
-  try {
-    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
-    settlement = await recordHostedRuntimeUsageRecord({
-      boundUserId: input.writeFence.userId,
-      fetchImpl: fetch,
-      record: input.record,
-      timeoutMs: environment.webControlTimeoutMs,
-      transport: {
-        callbackSigning: environment.webCallbackSigning,
-        mode: "direct",
-        webControlBaseUrl: environment.hostedWebBaseUrl,
-        workspaceCheckpointBridge: null,
-      },
-    });
-    return settlement;
-  } finally {
-    await applyRunnerRuntimeUsageSettlement({
-      env: input.env,
-      settlement,
-      userId: input.writeFence.userId,
-      writeAuthority: {
-        attemptId: input.writeFence.attemptId,
-        generation: input.writeFence.leaseGeneration,
-        workspaceVersion: input.writeFence.workspaceVersion,
-      },
-    });
-  }
+  const headers = new Headers({ "content-type": "application/json" });
+  if (!input.writeFence.workspaceVersion) throw new Error("Runtime usage workspace identity is missing.");
+  writeRunnerRuntimeWriteFenceHeaders(headers, { attemptId: input.writeFence.attemptId, leaseGeneration: input.writeFence.leaseGeneration, workspaceVersion: input.writeFence.workspaceVersion });
+  const response = await handleRunnerOutboundRequest(new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNNER_WEB_CONTROL_ROUTES.usageRecording.path}`, {
+    method: "POST", headers, body: JSON.stringify({ usage: input.record }),
+  }), input.env, input.writeFence.userId);
+  if (!response.ok) throw new Error(`Runtime usage recording returned HTTP ${response.status}.`);
+  return parseHostedRuntimeUsageRecordResponse(await response.json());
 }
 
 function requireHostedDirectUsageWriteFence(
@@ -3410,43 +3349,23 @@ async function authorizeHostedProviderEgress(input: {
       headers: input.request.headers,
       userId: input.userId,
     });
-    if ((await usesPostgresRuntimeOwner(input.env, input.userId)) && writeFence) {
+    if (writeFence) {
       const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.userId,
         command: { operation: "authorize_effect", attemptId: writeFence.attemptId, generation: writeFence.leaseGeneration, runnerContainerName: null, managedAi: false },
         managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
       });
       return postgresProviderAuthorization(validation, { startedAt, userId: input.userId, mode: "exact_headers", runtimeAuthorityHeadersPresent, providerEgressTokenPresent: false });
     }
-    try {
-      await requireRunnerRuntimeWriteFence({
-        env: input.env,
-        request: input.request,
-        userId: input.userId,
-      });
-      return {
-        authorized: true,
-        durationMs: Date.now() - startedAt,
-        mode: "exact_headers",
-        providerEgressTokenPresent: false,
-        runtimeAuthorityHeadersPresent,
-        userId: input.userId,
-        writeFence,
-      };
-    } catch (error) {
-      if (error instanceof RunnerRuntimeWriteFenceError) {
-        return {
-          authorized: false,
-          durationMs: Date.now() - startedAt,
-          mode: "exact_headers",
-          providerEgressTokenPresent: false,
-          rejectReason: "exact_write_fence_rejected",
-          runtimeAuthorityHeadersPresent,
-          userId: input.userId,
-          writeFence,
-        };
-      }
-      throw error;
-    }
+    return {
+      authorized: false,
+      durationMs: Date.now() - startedAt,
+      mode: "exact_headers",
+      providerEgressTokenPresent: false,
+      rejectReason: "exact_write_fence_rejected",
+      runtimeAuthorityHeadersPresent,
+      userId: input.userId,
+      writeFence: null,
+    };
   }
 
   const providerEgressToken = readHostedProviderEgressToken(input.request);
@@ -3693,65 +3612,11 @@ async function authorizeHostedProviderEgressCredential(input: {
     };
   }
 
-  if ((await usesPostgresRuntimeOwner(input.env, verification.claims.userId))) {
-    const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: verification.claims.userId,
-      command: { operation: "authorize_provider", runnerContainerName: verification.claims.runnerContainerName, providerEgressTokenHash: null, providerKind: input.providerKind },
-      managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
-    });
-    return postgresProviderAuthorization(validation, { startedAt, userId: verification.claims.userId, mode: "provider_egress_credential", runtimeAuthorityHeadersPresent, providerEgressTokenPresent });
-  }
-  const runner = await resolveAdmittedLegacyUserRunner(input.env, verification.claims.userId);
-  if (typeof runner.validateRuntimeProviderEgressCredential !== "function") {
-    return {
-      authorized: false,
-      durationMs: Date.now() - startedAt,
-      mode: "provider_egress_credential",
-      providerEgressTokenPresent,
-      rejectReason: "validation_rpc_missing",
-      runtimeAuthorityHeadersPresent,
-      userId: verification.claims.userId,
-      writeFence: null,
-    };
-  }
-
-  let rawValidation: unknown;
-  try {
-    rawValidation = await runner.validateRuntimeProviderEgressCredential({
-      providerKind: verification.claims.providerKind,
-      runnerContainerName: verification.claims.runnerContainerName,
-      userId: verification.claims.userId,
-    });
-  } catch (error) {
-    const validationErrorName = readHostedExecutionSafeErrorName(error);
-    return {
-      authorized: false,
-      durationMs: Date.now() - startedAt,
-      mode: "provider_egress_credential",
-      providerEgressTokenPresent,
-      rejectReason: "provider_egress_credential_validation_error",
-      runtimeAuthorityHeadersPresent,
-      userId: verification.claims.userId,
-      validationError: error,
-      validationErrorCode: deriveHostedExecutionErrorCode(error),
-      ...(validationErrorName ? { validationErrorName } : {}),
-      writeFence: null,
-    };
-  }
-
-  const validation = normalizeProviderEgressCredentialValidationResult(rawValidation);
-  return {
-    authorized: validation.owns,
-    durationMs: Date.now() - startedAt,
-    mode: "provider_egress_credential",
-    providerEgressTokenPresent,
-    ...(validation.platformAiUsageAllowed === undefined
-      ? {}
-      : { platformAiUsageAllowed: validation.platformAiUsageAllowed }),
-    ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
-    runtimeAuthorityHeadersPresent,
-    userId: verification.claims.userId,
-    writeFence: validation.writeFence,
-  };
+  const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: verification.claims.userId,
+    command: { operation: "authorize_provider", runnerContainerName: verification.claims.runnerContainerName, providerEgressTokenHash: null, providerKind: input.providerKind },
+    managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
+  });
+  return postgresProviderAuthorization(validation, { startedAt, userId: verification.claims.userId, mode: "provider_egress_credential", runtimeAuthorityHeadersPresent, providerEgressTokenPresent });
 }
 
 async function authorizeHostedProviderEgressToken(input: {
@@ -3763,222 +3628,13 @@ async function authorizeHostedProviderEgressToken(input: {
   runtimeAuthorityHeadersPresent: boolean;
   startedAt: number;
 }): Promise<HostedProviderEgressAuthorization> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.activeUserId))) {
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input.providerEgressToken)));
-    const providerEgressTokenHash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
-    const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.activeUserId,
-      command: { operation: "authorize_provider", runnerContainerName: null, providerEgressTokenHash, providerKind: input.providerKind },
-      managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
-    });
-    return postgresProviderAuthorization(validation, { ...input, userId: input.activeUserId, mode: "provider_egress_token" });
-  }
-  const runner = await resolveAdmittedLegacyUserRunner(input.env, input.activeUserId);
-  if (typeof runner.validateRuntimeProviderEgressToken !== "function") {
-    return {
-      authorized: false,
-      durationMs: Date.now() - input.startedAt,
-      mode: "provider_egress_token",
-      providerEgressTokenPresent: input.providerEgressTokenPresent,
-      rejectReason: "validation_rpc_missing",
-      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-      userId: input.activeUserId,
-      writeFence: null,
-    };
-  }
-
-  let rawValidation: unknown;
-  try {
-    rawValidation = await runner.validateRuntimeProviderEgressToken({
-      providerEgressToken: input.providerEgressToken,
-      userId: input.activeUserId,
-    });
-  } catch (error) {
-    const validationErrorName = readHostedExecutionSafeErrorName(error);
-    return {
-      authorized: false,
-      durationMs: Date.now() - input.startedAt,
-      mode: "provider_egress_token",
-      providerEgressTokenPresent: input.providerEgressTokenPresent,
-      rejectReason: "provider_egress_token_validation_error",
-      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-      userId: input.activeUserId,
-      validationErrorCode: deriveHostedExecutionErrorCode(error),
-      ...(validationErrorName ? { validationErrorName } : {}),
-      writeFence: null,
-    };
-  }
-
-  const validation = normalizeProviderEgressTokenValidationResult(rawValidation);
-  return {
-    authorized: validation.owns,
-    ...(validation.customInferenceEnvelope
-      ? { customInferenceEnvelope: validation.customInferenceEnvelope }
-      : {}),
-    durationMs: Date.now() - input.startedAt,
-    mode: "provider_egress_token",
-    providerEgressTokenPresent: input.providerEgressTokenPresent,
-    ...(validation.platformAiUsageAllowed === undefined
-      ? {}
-      : { platformAiUsageAllowed: validation.platformAiUsageAllowed }),
-    ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
-    runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-    userId: input.activeUserId,
-    writeFence: validation.writeFence,
-  };
-}
-
-function normalizeProviderEgressCredentialValidationResult(value: unknown): {
-  owns: boolean;
-  platformAiUsageAllowed?: boolean;
-  rejectReason: HostedProviderEgressRejectReason | null;
-  writeFence: HostedProviderEgressWriteFenceMetadata | null;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_credential_rejected",
-      writeFence: null,
-    };
-  }
-
-  const record = value as Record<string, unknown>;
-  if (record.owns !== true) {
-    return {
-      owns: false,
-      rejectReason: readProviderEgressCredentialRejectReason(record.reason)
-        ?? "provider_egress_credential_rejected",
-      writeFence: null,
-    };
-  }
-  if (
-    typeof record.attemptId !== "string"
-    || typeof record.leaseGeneration !== "string"
-    || typeof record.userId !== "string"
-    || (
-      record.workspaceVersion !== null
-      && record.workspaceVersion !== undefined
-      && typeof record.workspaceVersion !== "string"
-    )
-  ) {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_credential_rejected",
-      writeFence: null,
-    };
-  }
-
-  return {
-    owns: true,
-    ...(typeof record.platformAiUsageAllowed === "boolean"
-      ? { platformAiUsageAllowed: record.platformAiUsageAllowed }
-      : {}),
-    rejectReason: null,
-    writeFence: {
-      attemptId: record.attemptId,
-      leaseGeneration: record.leaseGeneration,
-      userId: record.userId,
-      workspaceVersion: typeof record.workspaceVersion === "string"
-        ? record.workspaceVersion
-        : null,
-    },
-  };
-}
-
-function normalizeProviderEgressTokenValidationResult(value: unknown): {
-  customInferenceEnvelope?: string;
-  owns: boolean;
-  platformAiUsageAllowed?: boolean;
-  rejectReason: HostedProviderEgressRejectReason | null;
-  writeFence: HostedProviderEgressWriteFenceMetadata | null;
-} {
-  if (typeof value === "boolean") {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_token_rejected",
-      writeFence: null,
-    };
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_token_rejected",
-      writeFence: null,
-    };
-  }
-
-  const record = value as Record<string, unknown>;
-  if (record.owns !== true) {
-    return {
-      owns: false,
-      rejectReason: readProviderEgressTokenRejectReason(record.reason)
-        ?? "provider_egress_token_rejected",
-      writeFence: null,
-    };
-  }
-  if (
-    typeof record.attemptId !== "string"
-    || typeof record.leaseGeneration !== "string"
-    || typeof record.userId !== "string"
-    || (
-      record.workspaceVersion !== null
-      && record.workspaceVersion !== undefined
-      && typeof record.workspaceVersion !== "string"
-    )
-  ) {
-    return {
-      owns: false,
-      rejectReason: "provider_egress_token_rejected",
-      writeFence: null,
-    };
-  }
-
-  return {
-    ...(typeof record.customInferenceEnvelope === "string"
-        && record.customInferenceEnvelope.length > 0
-      ? { customInferenceEnvelope: record.customInferenceEnvelope }
-      : {}),
-    owns: true,
-    ...(typeof record.platformAiUsageAllowed === "boolean"
-      ? { platformAiUsageAllowed: record.platformAiUsageAllowed }
-      : {}),
-    rejectReason: null,
-    writeFence: {
-      attemptId: record.attemptId,
-      leaseGeneration: record.leaseGeneration,
-      userId: record.userId,
-      workspaceVersion: typeof record.workspaceVersion === "string"
-        ? record.workspaceVersion
-        : null,
-    },
-  };
-}
-
-function readProviderEgressCredentialRejectReason(
-  value: unknown,
-): HostedProviderEgressCredentialRejectReason | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  for (const reason of HOSTED_PROVIDER_EGRESS_CREDENTIAL_REJECT_REASONS) {
-    if (value === reason) {
-      return reason;
-    }
-  }
-  return null;
-}
-
-function readProviderEgressTokenRejectReason(
-  value: unknown,
-): HostedProviderEgressTokenRejectReason | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  for (const reason of HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS) {
-    if (value === reason) {
-      return reason;
-    }
-  }
-  return null;
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input.providerEgressToken)));
+  const providerEgressTokenHash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
+  const validation = await authorizePostgresRuntimeProvider({ env: input.env, userId: input.activeUserId,
+    command: { operation: "authorize_provider", runnerContainerName: null, providerEgressTokenHash, providerKind: input.providerKind },
+    managed: HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe",
+  });
+  return postgresProviderAuthorization(validation, { ...input, userId: input.activeUserId, mode: "provider_egress_token" });
 }
 
 function unauthorizedProviderEgress(input: {

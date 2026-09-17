@@ -1,3 +1,4 @@
+import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRuntime, settledNativeRuntime } from "./postgres-owner-fixtures.ts";
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
@@ -278,6 +279,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
     );
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (request, init) => {
       const url = new URL(request instanceof Request ? request.url : String(request));
+      if (url.pathname === "/api/internal/hosted-runtime/log") return Response.json({ accepted: true });
       return url.pathname === HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH
         ? imageAccessFetch(request, init)
         : upstreamFetch(request, init);
@@ -361,6 +363,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
       const request = input instanceof Request
         ? input.clone()
         : new Request(input, init);
+      if (new URL(request.url).pathname === "/api/internal/hosted-runtime/log") return Response.json({ accepted: true });
       forwardedRequests.push({
         body: await request.clone().text(),
         headers: new Headers(request.headers),
@@ -649,20 +652,19 @@ function createOpenAiInterceptEnv(input: {
   }) => Promise<WorkerProviderEgressCredentialValidationResult>
     | WorkerProviderEgressCredentialValidationResult;
 }): RunnerOutboundEnvironmentSource {
+  mockPostgresOwnerCommand(async ({ userId, command }) => {
+    if (command.operation !== "authorize_provider" || !command.runnerContainerName) throw new Error("Unexpected owner operation.");
+    const result = await input.validateRuntimeProviderEgressCredential({ userId, providerKind: command.providerKind, runnerContainerName: command.runnerContainerName });
+    return { cutover: "postgres", status: result.owns ? "authorized" : "stale", owner: result.owns ? createPostgresTestOwner({ userId, attemptId: result.attemptId, generation: result.leaseGeneration, workspaceVersion: result.workspaceVersion, runnerContainerName: command.runnerContainerName }) : null };
+  });
   return {
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
       PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
     OPENAI_API_KEY: "openai-worker-secret",
-    USER_RUNNER: {
-      getByName: () => ({
-        validateRuntimeProviderEgressCredential: async (validationInput) =>
-          await input.validateRuntimeProviderEgressCredential(validationInput),
-        validateRuntimeProviderEgressToken: async () => ({ owns: false }),
-        validateRuntimeWriteFence: async () => false,
-      }),
-    },
+    USER_RUNNER: forbiddenLegacyRuntime,
+    RUNNER_CONTAINER: { getByName: () => settledNativeRuntime },
   };
 }
 

@@ -1,4 +1,3 @@
-import { usesPostgresRuntimeOwner } from "../runtime-cutover.ts";
 import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
 import { readRuntimeTargetAdapter } from "../runtime-target-adapter.ts";
 import {
@@ -13,10 +12,6 @@ import {
 } from "../json.ts";
 import type {
   RunnerOutboundEnvironmentSource,
-} from "./shared.ts";
-import {
-  requireRunnerOutboundUserStubMethod,
-  resolveRunnerOutboundUserRunnerStub,
 } from "./shared.ts";
 import {
   requireRunnerRuntimeWriteFenceHeaders,
@@ -52,26 +47,10 @@ export async function handleRunnerRuntimeCompletionRequest(input: {
       : jsonError("Invalid request.", 400);
   }
 
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
-    const state = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: { operation: "reconcile" } });
-    const owner = state.owner;
-    if (state.cutover !== "postgres" || owner?.attemptId !== authority.attemptId || owner.generation !== authority.generation || !owner.runnerContainerName) return json({ completed: false });
-    const container = readRuntimeTargetAdapter(input.env, owner.runnerContainerName);
-    if (!container?.recordSupervisedRuntimeCompletion) throw new Error("Native runtime completion receipt is unavailable.");
-    return json(await container.recordSupervisedRuntimeCompletion({ userId: input.userId, attemptId: authority.attemptId, generation: authority.generation, result }));
-  }
-  const userRunner = await resolveRunnerOutboundUserRunnerStub(
-    input.env,
-    input.userId,
-  );
-  requireRunnerOutboundUserStubMethod(
-    userRunner,
-    "recordRuntimeCompletionFromContainer",
-  );
-  return json(await userRunner.recordRuntimeCompletionFromContainer({
-    attemptId: authority.attemptId,
-    generation: authority.generation,
-    result,
-    userId: input.userId,
-  }));
+  const state = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: { operation: "reconcile" } });
+  const owner = state.owner;
+  if (state.cutover !== "postgres" || owner?.attemptId !== authority.attemptId || owner.generation !== authority.generation || !owner.runnerContainerName) return json({ completed: false });
+  const container = readRuntimeTargetAdapter(input.env, owner.runnerContainerName);
+  if (!container?.recordSupervisedRuntimeCompletion) throw new Error("Native runtime completion receipt is unavailable.");
+  return json(await container.recordSupervisedRuntimeCompletion({ userId: input.userId, attemptId: authority.attemptId, generation: authority.generation, result }));
 }

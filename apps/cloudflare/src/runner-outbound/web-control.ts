@@ -1,4 +1,3 @@
-import { usesPostgresRuntimeOwner } from "../runtime-cutover.ts";
 import { beginHostedRuntimeUsageSettlement } from "../runtime-usage-settlement.ts";
 import { type readHostedExecutionEnvironment } from "../env.ts";
 import {
@@ -26,8 +25,7 @@ import {
   parseHostedVaultShareEffectDeadlineAtEpochMs,
 } from "@murphai/hosted-execution/vault-share";
 import {
-  HOSTED_RUNTIME_USAGE_RECORD_PATH,
-  HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+  HOSTED_RUNTIME_USAGE_RECORD_PATH
 } from "@murphai/hosted-execution/routes";
 import {
   createAssistantUsageReportingUserId,
@@ -39,13 +37,9 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
-  applyRunnerRuntimeUsageSettlement,
-  requireRunnerRuntimeWriteFence,
-  requireRunnerRuntimeWriteFenceHeaders,
-  requireRunnerRuntimeWriteFenceWorkspaceWrite,
-  RunnerRuntimeWriteFenceError,
+  requireRunnerRuntimeWriteFenceHeaders, RunnerRuntimeWriteFenceError,
   type RunnerRuntimeWriteFenceHeaders,
-  writeRunnerRuntimeWriteFenceHeaders,
+  writeRunnerRuntimeWriteFenceHeaders
 } from "./write-fence.ts";
 import {
   addRunnerMailboxCryptoContextRequest,
@@ -154,19 +148,7 @@ export async function handleRunnerWebControlRequest(input: {
   ) && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceHeaders;
   try {
-    writeAuthority = (await usesPostgresRuntimeOwner(input.env, input.userId)) ? requireRunnerRuntimeWriteFenceHeaders(input.request) : await (
-      isBrowserVaultReplicaPublishRequest
-        ? requireRunnerRuntimeWriteFenceWorkspaceWrite({
-          env: input.env,
-          request: input.request,
-          userId: input.userId,
-        })
-        : requireRunnerRuntimeWriteFence({
-          env: input.env,
-          request: input.request,
-          userId: input.userId,
-        })
-    );
+    writeAuthority = requireRunnerRuntimeWriteFenceHeaders(input.request);
   } catch (error) {
     if (error instanceof RunnerRuntimeWriteFenceError) {
       return unauthorized();
@@ -322,57 +304,24 @@ async function forwardWithRuntimeUsageSettlement(input: {
   body: string | undefined; usageRecord: boolean; forward: () => Promise<Response>;
 }): Promise<Response> {
   if (!input.usageRecord) return input.forward();
-  let receipt: Awaited<ReturnType<typeof beginHostedRuntimeUsageSettlement>> | null = null;
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
-    const payload: unknown = JSON.parse(input.body ?? "{}");
-    if (!isHostedRunnerRecord(payload) || typeof payload.usage.usageId !== "string") return jsonError("Usage identity is required.", 400);
-    receipt = await beginHostedRuntimeUsageSettlement({ env: input.env, userId: input.userId,
-      authority: input.writeAuthority, reportId: payload.usage.usageId });
-  }
+  const payload: unknown = JSON.parse(input.body ?? "{}");
+  if (!isHostedRunnerRecord(payload) || typeof payload.usage.usageId !== "string") return jsonError("Usage identity is required.", 400);
+  const receipt = await beginHostedRuntimeUsageSettlement({ env: input.env, userId: input.userId,
+    authority: input.writeAuthority, reportId: payload.usage.usageId });
   let response: Response;
   try {
     response = await input.forward();
   } catch (error) {
-    if (receipt) await receipt.finish(null);
-    else await applyRunnerRuntimeUsageSettlement({ ...input, settlement: null });
+    await receipt.finish(null);
     throw error;
   }
-  if (receipt) {
-    let allowed: boolean | null = null;
-    if (response.ok) {
-      try { allowed = parseHostedRuntimeUsageRecordResponse(await response.clone().json()).platformAiUsageAllowedAfter; }
-      catch { /* Keep the durable pending receipt. */ }
-    }
-    await receipt.finish(allowed);
-  } else {
-    await revokeRuntimePlatformAiUsageUnlessAllowed({ ...input, response });
+  let allowed: boolean | null = null;
+  if (response.ok) {
+    try { allowed = parseHostedRuntimeUsageRecordResponse(await response.clone().json()).platformAiUsageAllowedAfter; }
+    catch { /* Keep the durable pending receipt. */ }
   }
+  await receipt.finish(allowed);
   return response;
-}
-
-async function revokeRuntimePlatformAiUsageUnlessAllowed(input: {
-  env: RunnerOutboundEnvironmentSource;
-  response: Response;
-  userId: string;
-  writeAuthority: RunnerRuntimeWriteFenceHeaders;
-}): Promise<void> {
-  let settlement: ReturnType<typeof parseHostedRuntimeUsageRecordResponse> | null = null;
-  if (input.response.ok) {
-    try {
-      settlement = parseHostedRuntimeUsageRecordResponse(
-        await input.response.clone().json(),
-      );
-    } catch {
-      // Invalid settlement responses fail closed for the active invocation.
-    }
-  }
-
-  await applyRunnerRuntimeUsageSettlement({
-    env: input.env,
-    settlement,
-    userId: input.userId,
-    writeAuthority: input.writeAuthority,
-  });
 }
 
 function requireHostedVaultShareSettlementDeadlineAtEpochMs(

@@ -5,8 +5,6 @@ import type { HostedRuntimeOwnerCommand, HostedRuntimeOwnerSnapshot } from "@mur
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import type { WorkerEnvironmentSource } from "./worker-routes/shared.ts";
-import { supportsPostgresRuntimeOwner } from "./runtime-cutover.ts";
-import { progressRuntimeMigrationForMember } from "./runtime-migration-progress.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
 import { RuntimeInvocationPreparation } from "./runtime-invocation-preparation.ts";
@@ -25,25 +23,15 @@ import {
   type HostedStandbySlotBinding,
 } from "./standby-runner-contract.ts";
 
-type RuntimeProcessingSource = Pick<WorkerEnvironmentSource, "USER_RUNNER" | "BUNDLES" | "RUNNER_CONTAINER" | "NEXT_RUNNER_CONTAINER" | "STANDBY_RUNNER_CONTAINER" | "STANDBY_COORDINATOR"> & Readonly<Record<string, unknown>>;
+type RuntimeProcessingSource = Pick<WorkerEnvironmentSource, "BUNDLES" | "RUNNER_CONTAINER" | "NEXT_RUNNER_CONTAINER" | "STANDBY_RUNNER_CONTAINER" | "STANDBY_COORDINATOR"> & Readonly<Record<string, unknown>>;
 type ProcessingContext = ReturnType<typeof createProcessingContext> & {
   namespace: NonNullable<ReturnType<typeof createHostedRunnerContainerNamespaceRouter>>;
 };
 
-/** Request-local composition. Postgres owns admission; the immutable native
- * target owns execution evidence. Null is the finite legacy cutover bridge. */
-export async function ensurePostgresRuntimeProcessing(source: RuntimeProcessingSource, input: RuntimeProcessingInput): Promise<HostedRuntimeEnsureProcessingResponse | null> {
+/** Postgres owns admission; the immutable native target owns execution evidence. */
+export async function ensurePostgresRuntimeProcessing(source: RuntimeProcessingSource, input: RuntimeProcessingInput): Promise<HostedRuntimeEnsureProcessingResponse> {
   const context = createProcessingContext(source, input);
-  if (!supportsPostgresRuntimeOwner(source)) {
-    const state = await context.command({ operation: "reconcile" });
-    return state.cutover === "legacy" ? null : retryProcessing();
-  }
   let claim = await context.command({ operation: "claim", processingMode: context.mode });
-  if (claim.cutover === "legacy") return null;
-  if (claim.cutover === "draining") {
-    await progressRuntimeMigrationForMember({ source, userId: input.userId, budget: context.budget });
-    return retryProcessing();
-  }
   if (claim.cutover !== "postgres" || !context.namespace || !claim.owner) return retryProcessing();
   const ctx = { ...context, namespace: context.namespace };
   if (claim.status === "existing") {
