@@ -237,6 +237,12 @@ unfinished selection uses a single read-only statement without the campaign lock
 every source effect rechecks it, so stale hints can only fail. Actual selection
 changes take a short exclusive transaction. Baseline work precedes late work.
 
+An exact frozen empty source drains its four finite export sections and activates
+within one command budget. Each import must return an advancing canonical
+receipt; a lost acknowledgement or exhausted budget stops the continuation,
+and the next request resumes that receipt. Nonempty sources retain their
+existing bounded continuation. No source freeze or activation check is skipped.
+
 Ordinary ensure-processing retries drive one bounded migration continuation when
 Postgres reports draining or a legacy attempt returns retry during quiescence.
 The capability flag must be enabled and the campaign closed/sealed. The Worker
@@ -432,3 +438,12 @@ The engine names are documented in Cloudflare's
 and [alarm metadata implementation](https://github.com/cloudflare/workerd/blob/main/src/workerd/util/sqlite-metadata.h).
 The local name table belongs to Miniflare's
 [Durable Object wrapper](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/workers/core/do-wrapper.worker.ts).
+
+## Processing diagnostics
+
+The request-local Postgres ensure path emits the same detached
+`runner.processing_finished` summary as the legacy owner, including stage,
+outcome, elapsed time, observed fence and a finite retry reason. A null legacy
+delegation leaves summary ownership with the legacy runner. Telemetry cannot
+delay the control response or change its result; orchestration correlation uses
+the existing domain-separated hash rather than retaining the raw attempt ID.

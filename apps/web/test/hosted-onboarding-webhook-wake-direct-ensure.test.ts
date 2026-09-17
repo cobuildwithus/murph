@@ -210,6 +210,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       phaseBreakdown: {
         schemaVersion: 1,
         orchestration: {
+          directWakeStartedAtEpochMs: expect.any(Number),
+          directWakeAttemptCount: 1,
+          directWakeRetryWaitMs: 0,
           tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -274,6 +277,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       phaseBreakdown: {
         schemaVersion: 1,
         orchestration: {
+          directWakeStartedAtEpochMs: expect.any(Number),
+          directWakeAttemptCount: 1,
+          directWakeRetryWaitMs: 0,
           tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
           tokenAcquiredAtEpochMs: 1_777_000_000_010,
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -419,6 +425,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
           schemaVersion: 1,
           orchestration: expect.objectContaining({
             directEnsureAction: "woken",
+            directWakeStartedAtEpochMs: Date.parse("2026-07-02T00:00:00.000Z"),
+            directWakeAttemptCount: 2,
+            directWakeRetryWaitMs: 3000,
             directEnsureRequestStartedAtEpochMs: 1_777_000_003_012,
             directEnsureResponseReceivedAtEpochMs: 1_777_000_003_120,
             directEnsureResultKind: "runtime_processing_accepted",

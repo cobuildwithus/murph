@@ -1468,11 +1468,6 @@ export class RuntimeProcessingController {
     });
     const preparationOrchestration =
       preparation.prepared.input.orchestration ?? {};
-    const {
-      runtimeInvocationPreparationElapsedMs,
-      runtimeStoreEnsureElapsedMs,
-      workspaceReadElapsedMs,
-    } = preparationOrchestration;
     const prepared: PreparedRuntimeInvocation = {
       ...preparation.prepared,
       input: {
@@ -1480,15 +1475,7 @@ export class RuntimeProcessingController {
         orchestration: {
           ...preparationOrchestration,
           ...processingInput.orchestration,
-          ...(runtimeInvocationPreparationElapsedMs === undefined ? {} : {
-            runtimeInvocationPreparationElapsedMs,
-          }),
-          ...(runtimeStoreEnsureElapsedMs === undefined ? {} : {
-            runtimeStoreEnsureElapsedMs,
-          }),
-          ...(workspaceReadElapsedMs === undefined ? {} : {
-            workspaceReadElapsedMs,
-          }),
+          ...readRuntimeInvocationPreparationTiming(preparationOrchestration),
         },
       },
     };
@@ -2047,4 +2034,23 @@ function isTrustedWebDirectRuntimeProcessing(
     && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
       input.orchestrationAttemptId,
     );
+}
+
+function readRuntimeInvocationPreparationTiming(
+  orchestration: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]>,
+): NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> {
+  const timing: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> = {};
+  for (const key of [
+    "runtimeInvocationPreparationElapsedMs",
+    "runtimeInvocationInputsWaitElapsedMs",
+    "runtimeInvocationAdmissionElapsedMs",
+    "runtimeInvocationFenceBindElapsedMs",
+    "runtimeInvocationJobPrepareElapsedMs",
+    "runtimeStoreEnsureElapsedMs",
+    "workspaceReadElapsedMs",
+  ] as const) {
+    const value = orchestration[key];
+    if (value !== undefined) timing[key] = value;
+  }
+  return timing;
 }

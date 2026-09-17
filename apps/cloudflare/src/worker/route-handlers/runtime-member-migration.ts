@@ -58,9 +58,20 @@ export async function advanceRuntimeEmptyMigration(input: {
   const send = (command: HostedRuntimeMigrationCommand) => step(() => commandHostedRuntimeMigration({ source, command }));
   if (!stub.freezeEmptyForPostgresMigration || !stub.exportPostgresMigrationPage) throw new Error("Legacy object does not support empty migration.");
   const receipt = await send({ ...identity, operation: "read_object" });
-  const object = importReceipt(receipt.object);
+  let object = importReceipt(receipt.object);
   if (object.completedAt) return send({ ...identity, operation: "activate_empty" });
   if (!(await step(() => stub.freezeEmptyForPostgresMigration!(identity))).frozen) return { pending: "source_changed" as const };
-  const page = await step(() => stub.exportPostgresMigrationPage!(parseLegacyRuntimeExportCursor(object.nextCursor)));
-  return send({ ...identity, operation: "import_empty", page });
+  // Empty sources have four finite export sections. Keep their acknowledged
+  // handoff in one request budget instead of adding a scheduler delay per page.
+  // A lost reply stops here; the next request resumes the canonical receipt.
+  for (let pages = 0; pages < 4; pages++) {
+    const cursor = parseLegacyRuntimeExportCursor(object.nextCursor);
+    const page = await step(() => stub.exportPostgresMigrationPage!(cursor));
+    const imported = await send({ ...identity, operation: "import_empty", page });
+    object = importReceipt(imported.object);
+    if (object.completedAt) return send({ ...identity, operation: "activate_empty" });
+    const next = parseLegacyRuntimeExportCursor(object.nextCursor);
+    if (next.section !== cursor.section + 1 || next.after !== "") throw new Error("Empty migration cursor did not advance to the next section.");
+  }
+  throw new Error("Empty migration exceeded its finite export sections.");
 }

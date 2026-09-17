@@ -54,6 +54,7 @@ import {
   type HostedMailboxPayloadFetchResponse,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeLatencyTraceRequest,
+  type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLogRequest,
   type HostedRuntimeAssistantConfigurationControlRequest,
   type HostedRuntimeAssistantConfigurationSnapshot,
@@ -632,6 +633,11 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
       }),
     ];
     let snapshotAttempt = 0;
+    let clockOffsetMs = 0;
+    const readRealTime = Date.now.bind(Date);
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => readRealTime() + clockOffsetMs);
+    let importedWake: HostedRuntimeLatencyPhaseBreakdown["wake"];
+    const baseMailboxPort = createMailboxPort({ events, fetchRequests, items: mailboxItems });
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -654,7 +660,9 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
                 id: "mailbox_item_entrypoint_snapshot_wake_002",
                 laneSeq: "2",
               }));
-              throw new HostedRuntimeCheckpointInterruptedByWakeError();
+              throw new HostedRuntimeCheckpointInterruptedByWakeError({
+                notification: { notifiedAtEpochMs: Date.now() },
+              });
             }
             return {
               snapshotRef: createSnapshotFixtureRef({
@@ -663,16 +671,27 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
               }),
             };
           },
-          async importItem(item) {
+          async importItem(item, context) {
+            if (item.item.laneSeq === "2") {
+              importedWake = context?.latencyMilestones?.phaseBreakdown?.wake;
+            }
             events.push(`mailbox.importItem:${item.item.id}`);
             return { status: "imported" };
           },
           platform: createPlatform({
-            mailboxPort: createMailboxPort({
-              events,
-              fetchRequests,
-              items: mailboxItems,
-            }),
+            mailboxPort: {
+              ...baseMailboxPort,
+              async fetch(request) {
+                if (request.requestId.includes(":checkpoint-interrupt-foreground-prefetch:")) {
+                  // Advance only the awaited response boundary, without a slow test.
+                  await new Promise<void>((resolve) => setTimeout(() => {
+                    clockOffsetMs += 250;
+                    resolve();
+                  }, 0));
+                }
+                return baseMailboxPort.fetch(request);
+              },
+            },
             workspacePort: {
               async read() {
                 events.push("workspace.read");
@@ -716,7 +735,12 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
       );
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
       assert.equal(result.status, "idle");
+      assert.ok(importedWake);
+      assert.ok((importedWake.foregroundPrefetchWaitElapsedMs ?? -1) >= 250);
+      assert.ok((importedWake.foregroundPrefetchPrepareElapsedMs ?? -1) >= 0);
+      assert.ok((importedWake.foregroundPrefetchPrepareElapsedMs ?? 250) < 250);
     } finally {
+      clock.mockRestore();
       await removeTempRoot(vaultRoot);
     }
   });

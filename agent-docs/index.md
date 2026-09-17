@@ -24,6 +24,11 @@ preflight admission budget are owned by `agent-docs/RELIABILITY.md`; the
 implementation record is
 [`2026-09-15-device-sweep-capacity.md`](exec-plans/completed/2026-09-15-device-sweep-capacity.md).
 
+Empty-source startup batching and Postgres processing summaries are owned by
+`agent-docs/references/hosted-postgres-runtime.md`; warm-wake subdivisions are
+owned by `agent-docs/references/hosted-runtime-protocol.md`. Implementation proof:
+[`2026-09-17-runtime-latency-followup.md`](exec-plans/completed/2026-09-17-runtime-latency-followup.md).
+
 Runtime admission policy and single-request provider backend selection are owned
 by `agent-docs/references/hosted-postgres-runtime.md` and `agent-docs/SECURITY.md`.
 
