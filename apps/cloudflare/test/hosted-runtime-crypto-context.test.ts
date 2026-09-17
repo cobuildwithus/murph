@@ -21,9 +21,7 @@ import {
 } from "../scripts/deploy-automation.js";
 
 import {
-  fetchHostedWorkerRuntimeRoots,
-  fetchHostedWorkerRuntimeRoot,
-  unwrapHostedWorkerRuntimeRoots,
+  unwrapHostedWorkerRuntimeRoot,
 } from "../src/hosted-crypto/runtime-crypto-context.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
@@ -41,7 +39,7 @@ import {
 } from "../src/internal-hosts.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
-test("Cloudflare hosted runtime crypto context verifies signatures and unwraps ingress/runtime roots", async () => {
+test.each(["ingress", "runtime"] as const)("Cloudflare hosted runtime crypto context verifies signatures and unwraps the %s root", async (domain) => {
   const cloudflareRecipient = await generateP256EcdhKeyPair();
   const signer = await generateP256SigningKeyPair();
   const env = {
@@ -72,7 +70,8 @@ test("Cloudflare hosted runtime crypto context verifies signatures and unwraps i
     userId: "user-1",
   });
 
-  const unwrapped = await unwrapHostedWorkerRuntimeRoots({
+  const unwrapped = await unwrapHostedWorkerRuntimeRoot({
+    domain,
     context: {
       envelopes: { ingress, runtime },
       schema: "murph.hosted-runtime-crypto-context.v1",
@@ -81,13 +80,13 @@ test("Cloudflare hosted runtime crypto context verifies signatures and unwraps i
     env,
   });
 
-  assert.deepEqual(unwrapped.ingress.rootKey, ingressRoot);
-  assert.deepEqual(unwrapped.runtime.rootKey, runtimeRoot);
+  assert.deepEqual(unwrapped.rootKey, domain === "ingress" ? ingressRoot : runtimeRoot);
 
   await expect(
-    unwrapHostedWorkerRuntimeRoots({
+    unwrapHostedWorkerRuntimeRoot({
+      domain,
       context: {
-        envelopes: { ingress: { ...ingress, updatedAt: "2026-05-01T00:01:00.000Z" }, runtime },
+        envelopes: { ingress, runtime, [domain]: { ...(domain === "ingress" ? ingress : runtime), updatedAt: "2026-05-01T00:01:00.000Z" } },
         schema: "murph.hosted-runtime-crypto-context.v1",
         userId: "user-1",
       },
@@ -96,7 +95,8 @@ test("Cloudflare hosted runtime crypto context verifies signatures and unwraps i
   ).rejects.toThrow(/authority signature is invalid/u);
 
   await expect(
-    unwrapHostedWorkerRuntimeRoots({
+    unwrapHostedWorkerRuntimeRoot({
+      domain,
       context: {
         envelopes: { ingress, runtime },
         schema: "murph.hosted-runtime-crypto-context.v1",
@@ -107,7 +107,7 @@ test("Cloudflare hosted runtime crypto context verifies signatures and unwraps i
   ).rejects.toThrow(/not available for decrypt/u);
 });
 
-test("rendered production standby keyrings preserve active envelope reads", async () => {
+test.each(["ingress", "runtime"] as const)("rendered production standby keyrings preserve active %s envelope reads", async (domain) => {
   const activeRecipient = await generateP256EcdhKeyPair();
   const standbyRecipient = await generateP256EcdhKeyPair();
   const activeSigner = await generateP256SigningKeyPair();
@@ -188,7 +188,8 @@ test("rendered production standby keyrings preserve active envelope reads", asyn
     userId: "user-1",
   });
 
-  const unwrapped = await unwrapHostedWorkerRuntimeRoots({
+  const unwrapped = await unwrapHostedWorkerRuntimeRoot({
+    domain,
     context: {
       envelopes: { ingress, runtime },
       schema: "murph.hosted-runtime-crypto-context.v1",
@@ -197,11 +198,10 @@ test("rendered production standby keyrings preserve active envelope reads", asyn
     env: environment.hostedCrypto,
   });
 
-  assert.deepEqual(unwrapped.ingress.rootKey, ingressRoot);
-  assert.deepEqual(unwrapped.runtime.rootKey, runtimeRoot);
+  assert.deepEqual(unwrapped.rootKey, domain === "ingress" ? ingressRoot : runtimeRoot);
 });
 
-test("Cloudflare hosted runtime crypto context can verify and decrypt rotated keyring entries", async () => {
+test.each(["ingress", "runtime"] as const)("Cloudflare hosted runtime crypto context can verify and decrypt rotated %s keyring entries", async (domain) => {
   const oldCloudflareRecipient = await generateP256EcdhKeyPair();
   const activeCloudflareRecipient = await generateP256EcdhKeyPair();
   const oldSigner = await generateP256SigningKeyPair();
@@ -249,7 +249,8 @@ test("Cloudflare hosted runtime crypto context can verify and decrypt rotated ke
     userId: "user-1",
   });
 
-  const unwrapped = await unwrapHostedWorkerRuntimeRoots({
+  const unwrapped = await unwrapHostedWorkerRuntimeRoot({
+    domain,
     context: {
       envelopes: { ingress, runtime },
       schema: "murph.hosted-runtime-crypto-context.v1",
@@ -258,11 +259,10 @@ test("Cloudflare hosted runtime crypto context can verify and decrypt rotated ke
     env,
   });
 
-  assert.deepEqual(unwrapped.ingress.rootKey, ingressRoot);
-  assert.deepEqual(unwrapped.runtime.rootKey, runtimeRoot);
+  assert.deepEqual(unwrapped.rootKey, domain === "ingress" ? ingressRoot : runtimeRoot);
 });
 
-test("Cloudflare hosted runtime crypto context requires an authority key version in production", async () => {
+test.each(["ingress", "runtime"] as const)("Cloudflare hosted runtime crypto context requires an authority key version in production for %s", async (domain) => {
   const cloudflareRecipient = await generateP256EcdhKeyPair();
   const signer = await generateP256SigningKeyPair();
   const keyVersionName =
@@ -295,7 +295,8 @@ test("Cloudflare hosted runtime crypto context requires an authority key version
   });
 
   await expect(
-    unwrapHostedWorkerRuntimeRoots({
+    unwrapHostedWorkerRuntimeRoot({
+      domain,
       context: {
         envelopes: { ingress, runtime },
         schema: "murph.hosted-runtime-crypto-context.v1",
@@ -306,7 +307,7 @@ test("Cloudflare hosted runtime crypto context requires an authority key version
   ).rejects.toThrow(/HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION is required in production/u);
 });
 
-test("Cloudflare hosted runtime crypto context normalizes production environment markers", async () => {
+test.each(["ingress", "runtime"] as const)("Cloudflare hosted runtime crypto context normalizes production environment markers for %s", async (domain) => {
   const scenarios = [
     {
       cryptoEnv: "prod",
@@ -369,7 +370,8 @@ test("Cloudflare hosted runtime crypto context normalizes production environment
     });
 
     await expect(
-      unwrapHostedWorkerRuntimeRoots({
+      unwrapHostedWorkerRuntimeRoot({
+        domain,
         context: {
           envelopes: { ingress, runtime },
           schema: "murph.hosted-runtime-crypto-context.v1",
@@ -381,73 +383,6 @@ test("Cloudflare hosted runtime crypto context normalizes production environment
   }
 });
 
-test("Cloudflare hosted runtime crypto context is fetched from signed web control", async () => {
-  const cloudflareRecipient = await generateP256EcdhKeyPair();
-  const signer = await generateP256SigningKeyPair();
-  const callbackSigner = await generateP256SigningKeyPair();
-  const env = {
-    HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
-    HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: signer.publicKeyPem,
-    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cf-key-v1",
-    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: JSON.stringify(
-      cloudflareRecipient.privateJwk,
-    ),
-    HOSTED_CRYPTO_ENV: "test",
-  };
-  const ingressRoot = Uint8Array.from({ length: 32 }, (_, index) => 10 + index);
-  const runtimeRoot = Uint8Array.from({ length: 32 }, (_, index) => 150 + index);
-  const ingress = await createSignedWorkerEnvelope({
-    domain: "ingress",
-    keyVersionName: env.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
-    publicJwk: cloudflareRecipient.publicJwk,
-    rootKey: ingressRoot,
-    signer: signer.privateKey,
-    userId: "user-1",
-  });
-  const runtime = await createSignedWorkerEnvelope({
-    domain: "runtime",
-    keyVersionName: env.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
-    publicJwk: cloudflareRecipient.publicJwk,
-    rootKey: runtimeRoot,
-    signer: signer.privateKey,
-    userId: "user-1",
-  });
-  const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
-    const [url, init] = args;
-    assert.equal(String(url), `https://web.example.test${HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH}`);
-    assert.equal(init?.method, "POST");
-    assert.equal(init?.body, undefined);
-    const headers = new Headers(init?.headers);
-    assert.equal(headers.get("x-hosted-execution-user-id"), "user-1");
-    assert.equal(headers.has("x-hosted-execution-signature"), true);
-    return new Response(JSON.stringify({
-      envelopes: { ingress, runtime },
-      schema: "murph.hosted-runtime-crypto-context.v1",
-      userId: "user-1",
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    });
-  });
-
-  const unwrapped = await fetchHostedWorkerRuntimeRoots({
-    baseUrl: "https://web.example.test",
-    callbackSigning: {
-      keyId: "callback:v1",
-      privateKeyJwkJson: JSON.stringify(callbackSigner.privateJwk),
-    },
-    cryptoEnv: env,
-    fetchImpl: fetchMock,
-    timeoutMs: null,
-    userId: "user-1",
-  });
-
-  assert.deepEqual(unwrapped.ingress.rootKey, ingressRoot);
-  assert.deepEqual(unwrapped.runtime.rootKey, runtimeRoot);
-  expect(fetchMock).toHaveBeenCalledTimes(1);
-});
 
 test("Cloudflare hosted runtime crypto context fetches just the ingress root when asked for mailbox decrypt", async () => {
   const cloudflareRecipient = await generateP256EcdhKeyPair();
@@ -490,21 +425,27 @@ test("Cloudflare hosted runtime crypto context fetches just the ingress root whe
     });
   });
 
-  const unwrapped = await fetchHostedWorkerRuntimeRoot({
-    baseUrl: "https://web.example.test",
-    callbackSigning: {
-      keyId: "callback:v1",
-      privateKeyJwkJson: JSON.stringify(signer.privateJwk),
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  const unwrapped = await requireHostedUserCryptoContextFromEnvironment({
+    environment: {
+      ...readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      hostedWebBaseUrl: "https://web.example.test",
+      webCallbackSigning: {
+        keyId: "callback:v1",
+        privateKeyJwkJson: JSON.stringify(signer.privateJwk),
+      },
+      hostedCrypto: env,
     },
-    cryptoEnv: env,
+    reason: "synthetic ingress decrypt",
     domain: "ingress",
     fetchImpl: fetchMock,
-    timeoutMs: null,
     userId: "user-1",
   });
 
   assert.deepEqual(unwrapped.rootKey, ingressRoot);
   expect(fetchMock).toHaveBeenCalledTimes(1);
+  unwrapped.rootKey.fill(0);
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
 });
 
 test("Cloudflare runtime user crypto context caches verified envelope JSON without reusing plaintext roots", async () => {
@@ -1192,22 +1133,28 @@ test("Cloudflare hosted runtime crypto context can use the local internal web-co
     });
   });
 
-  const unwrapped = await fetchHostedWorkerRuntimeRoot({
-    baseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
-    callbackSigning: {
-      keyId: "callback:v1",
-      privateKeyJwkJson: JSON.stringify(signer.privateJwk),
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
+  const unwrapped = await requireHostedUserCryptoContextFromEnvironment({
+    environment: {
+      ...readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      hostedWebBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
+      hostedWebAllowHttpHosts: [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane],
+      webCallbackSigning: {
+        keyId: "callback:v1",
+        privateKeyJwkJson: JSON.stringify(signer.privateJwk),
+      },
+      hostedCrypto: env,
     },
-    cryptoEnv: env,
+    reason: "synthetic ingress decrypt",
     domain: "ingress",
-    allowHttpHosts: [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane],
     fetchImpl: fetchMock,
-    timeoutMs: null,
     userId: "user-1",
   });
 
   assert.deepEqual(unwrapped.rootKey, ingressRoot);
   expect(fetchMock).toHaveBeenCalledTimes(1);
+  unwrapped.rootKey.fill(0);
+  clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
 });
 
 async function createSignedWorkerEnvelope(input: {
