@@ -1,6 +1,6 @@
 # Upgrade system-mailbox runtimes in place on foreground input
 
-Status: active
+Status: completed
 Created: 2026-09-17
 Updated: 2026-09-17
 
@@ -93,9 +93,22 @@ Updated: 2026-09-17
 
 ## Verification
 
-- Commands to run: focused `vitest run` on the system-preemption, system-mailbox,
-  delegated-foreground-owner, background-wake-convergence, and workspace-runner
-  test files; `pnpm --dir packages/assistant-runtime typecheck`;
-  `pnpm complexity:diff`; `pnpm docs:drift`.
-- Expected outcomes: all pass; the diff is net negative in production source;
-  the four rewritten tests fail on the base commit and pass on the head.
+- `pnpm exec vitest run packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint-system-preemption.test.ts --no-coverage`:
+  37 passed (32 existing plus 5 added).
+- Base-fail proof with the production change stashed: the two rewritten
+  hand-off tests fail on the base source; the two "wake during the first fetch"
+  tests pass on both heads because the deleted interruption only changed the
+  outcome when the fetch honored the abort, so they stay as regression coverage.
+- Related suites (system-mailbox, background-wake-convergence, workspace-runner,
+  startup, foreground-input, interrupted-recording): 301 passed. The
+  delegated-foreground-owner suite has one failure that reproduces identically
+  on the base commit with this change stashed; it is pre-existing and unrelated.
+- `pnpm --dir packages/assistant-runtime typecheck`: passed.
+- `pnpm complexity:diff`: passed; `hosted-runtime.ts` debt 492 to 482, max 233
+  to 223.
+- `pnpm docs:drift`: passed. `git diff --check`: clean.
+- Production source is net negative (+22/-129 in `hosted-runtime.ts`).
+- Implementation note: both local Codex homes were unavailable (one needs an
+  interactive re-login, one is at its usage limit), so the parent implemented
+  the reviewed design directly.
+Completed: 2026-09-17
