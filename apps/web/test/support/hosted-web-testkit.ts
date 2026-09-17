@@ -316,6 +316,7 @@ interface HostedTestPrismaFactoryClient {
   };
   hostedMember: {
     create(args: unknown): Promise<{ id: string }>;
+    deleteMany(args: { where: { id: { in: string[] } } }): Promise<{ count: number }>;
     update(args: unknown): Promise<{ id: string }>;
   };
 }

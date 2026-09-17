@@ -68,7 +68,7 @@ passing a timer never substitutes for safe handoff evidence.
    versions and inactive campaign before canary.
 7. [complete] Canary, full inventory migration including busy members and held
    obligations, and final live outcome verification.
-8. [in progress] Namespace retirement proof: prove complete accounting inside the
+8. [complete] Namespace retirement proof: prove complete accounting inside the
    campaign lock, close the gate to `postgres`, verify existing and new-member
    routing, then soak for legacy traffic.
 9. [in progress] Remove the finite legacy bridge, the deployment capability and the
@@ -957,3 +957,20 @@ The later bounded production runtime-log window contained 19 completed invocatio
 67 assistant passes and 68 checkpoints, with no error-level entries. One warning
 was delivery-related. These aggregates support traffic continuity; they do not
 replace the separate legacy namespace traffic observation or deletion approval.
+
+
+### Normal-runtime final review and census test isolation
+
+ReviewGPT round 1 passed the normal-runtime cleanup candidate with no qualifying
+findings. Mechanical base reconciliation preserves current admission, timeout
+and proxy diagnostics; 345 focused tests and Cloudflare typecheck pass. The
+composed stack passed again with cold reply 5,233 ms, warm typing 336 ms and warm
+reply 1,484 ms. A post-finalization Cloudflare query from 16:20 to 17:06 UTC
+returned zero UserRunner events, completing the traffic observation for task 8.
+
+CI exposed an unrelated database fixture leak: the action-approval suite left
+nine synthetic members behind, which the migration census correctly included.
+Running those two suites sequentially against one fresh isolated database
+reproduced five failures. Exact-ID teardown fixes the producer; all 19 tests now
+pass in the same order and Web typecheck passes. Production census behavior is
+unchanged. Required CI remains the normal-runtime candidate's merge gate.
