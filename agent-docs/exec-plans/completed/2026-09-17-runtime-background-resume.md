@@ -1,6 +1,6 @@
 # Unblock independent clinical enrichment jobs
 
-Status: active
+Status: completed
 Created: 2026-09-17
 Updated: 2026-09-17
 
@@ -26,7 +26,7 @@ Current checkpoint handoff already has newer fixes than the initially investigat
 2. [x] Derive serialization from each existing job identity.
 3. [x] Verify successful application, preserved other-job state, and continued extraction.
 4. [x] Update architecture and public changelog; run focused tests, typechecks, complexity, and parent review.
-5. [ ] Open PR, finalize candidate, and run ReviewGPT concurrently with required CI.
+5. [x] Open draft PR #3554 and prepare the final candidate for ReviewGPT and required CI.
 
 ## Risks and mitigations
 
@@ -35,3 +35,8 @@ Different jobs may become eligible independently; exact mailbox claims, the clin
 ## Verification
 
 Baseline: three queue-selection cases and the real import-to-query regression fail at the expected blocked wake/selection assertion. Corrected-head proof: 31 clinical tests and 52 shared mailbox/checkpoint tests pass. Assistant-runtime and Web typechecks pass. Changelog rendering passes (10 tests). Complexity guard passes with unchanged debt; the unchanged record parser remains at complexity 25 and does not warrant unrelated restructuring. Parent review verified exact-job claim ownership, canonical locking, foreground yielding, and absence of provider-input changes. The documented Web test command used the wrong working directory; existing Frog entries cover it, and running Vitest from repository root passes.
+
+## Candidate handoff
+
+Implementation and local proof are complete. PR #3554 owns the external gates: start exact-head ReviewGPT concurrently with CI after this candidate is pushed and marked Ready. At plan closure those external results are pending; neither merge nor deployment is authorized.
+Completed: 2026-09-17
