@@ -2068,6 +2068,9 @@ function mergeDirtyResourceInto(
   const previous = merged[key] ?? null;
   merged[key] = withDirtyResourceWindowPayload(previous
       ? {
+        ...(previous.providerDedupeKey === undefined
+          ? {}
+          : { providerDedupeKey: previous.providerDedupeKey }),
         ...normalized,
         count: previous.count + normalized.count,
         ...mergeDirtyResourceTiming(previous, normalized),
@@ -2097,6 +2100,9 @@ function normalizeDirtyResource(
       : {}),
     jobKind: truncateDirtyKey(normalizeNullableString(resource.jobKind) ?? "reconcile") ?? "reconcile",
     payload: readDirtyResourcePayload(resource.payload),
+    ...(normalizeNullableString(resource.providerDedupeKey)
+      ? { providerDedupeKey: normalizeNullableString(resource.providerDedupeKey) ?? undefined }
+      : {}),
     resource: truncateDirtyKey(normalizeNullableString(resource.resource)),
     resourceCategory: truncateDirtyKey(normalizeNullableString(resource.resourceCategory)),
     sourceProviderSlug: truncateDirtyKey(normalizeNullableString(resource.sourceProviderSlug)),
@@ -2219,6 +2225,14 @@ function incrementCounter(
   counters[key] = (counters[key] ?? 0) + increment;
 }
 
+function readDirtyResourceProviderDedupeKeyField(
+  record: Record<string, unknown>,
+): Pick<HostedDeviceSyncDirtyResource, "providerDedupeKey"> | Record<string, never> {
+  return typeof record.providerDedupeKey === "string"
+    ? { providerDedupeKey: record.providerDedupeKey }
+    : {};
+}
+
 function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedDeviceSyncDirtyResource> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -2244,6 +2258,7 @@ function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedD
       providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
       jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
       payload: readDirtyResourcePayload(record.payload),
+      ...readDirtyResourceProviderDedupeKeyField(record),
       resource: typeof record.resource === "string" ? record.resource : null,
       resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
       sourceProviderSlug: typeof record.sourceProviderSlug === "string" ? record.sourceProviderSlug : null,
@@ -2296,6 +2311,7 @@ async function readDirtyPayloadResourceJson(input: {
     providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
     jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
     payload: readDirtyResourcePayload(record.payload),
+    ...readDirtyResourceProviderDedupeKeyField(record),
     resource: typeof record.resource === "string" ? record.resource : null,
     resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
     sourceProviderSlug: typeof record.sourceProviderSlug === "string" ? record.sourceProviderSlug : null,
