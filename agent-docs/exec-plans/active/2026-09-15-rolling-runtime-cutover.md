@@ -999,3 +999,22 @@ the deployment bundle. Focused route/config/admission tests, local-harness check
 typechecks, docs drift and complexity also pass. This is still a candidate;
 namespace storage remains intact and irreversible deletion awaits its exact
 approval after review.
+
+
+### Authorized retirement deployment and predeploy diagnostics
+
+The exact irreversible namespace deletion was explicitly authorized. Public
+PR #3543 merged as `a6c88355e5ef` after passing final review and required CI;
+private approval-input PR #156 merged after both reviews and CI. Protected
+retirement run `35261830607` is pinned to that public source. Its first two
+attempts stopped before deployment on the same scheduled-reminder setup error;
+all other gates passed. The namespace remains intact.
+
+The synthetic setup report discarded an existing structured container failure
+behind later teardown output. A test-only harness correction retains at most
+three matching failure records from a bounded 64,000-character Worker tail, through
+the existing failure redaction. Regression proof checks that the underlying
+failure kind survives unrelated output and object references remain redacted.
+No runtime behavior, deployment gate, retry criterion or data authority changes.
+The underlying setup failure is still unproven; obtain that evidence before any
+runtime correction or further retirement attempt.
