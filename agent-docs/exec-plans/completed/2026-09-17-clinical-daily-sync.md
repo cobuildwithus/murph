@@ -1,6 +1,6 @@
 # Daily clinical record sync and provider privacy controls
 
-Status: active
+Status: completed
 Created: 2026-09-17
 Updated: 2026-09-17
 
@@ -67,4 +67,5 @@ real component study fits 1440, 390 and 320 pixel viewports without overflow.
 Epic questionnaire editing, per-organization credential provisioning and a live
 persistent grant remain operator rollout steps, not proven by local tests. Keep
 persistent credentials disabled until the documented hosted rollout is verified.
-PR, final external review and exact-head CI are pending at this candidate.
+Implementation and focused proof are complete. PR #3540 owns final external review, exact-head CI and rollout follow-through; those remain pending at this implementation handoff.
+Completed: 2026-09-17
