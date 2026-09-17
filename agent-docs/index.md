@@ -22,6 +22,9 @@ implementation record is
 
 ## Purpose
 
+Maximum-census runtime retirement proof is indexed in
+`agent-docs/references/testing-ci-map.md`.
+
 Native active-runtime wake transport and single-owner member-binding admission
 are specified in the hosted runtime protocol reference; cold-start readiness
 retains its existing owner.

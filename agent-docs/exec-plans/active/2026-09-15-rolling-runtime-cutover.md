@@ -878,3 +878,15 @@ old creation paths. Census and database checks alone do not establish that proof
 The protected private workflow needs a separately reviewed explicit finalize
 input before the live gate can be closed. Public/private review, exact-head CI,
 deployment, closure evidence, finalization and bridge removal remain outstanding.
+
+
+Final ReviewGPT for public PR #3524 passed on `72744033d69c` with no qualifying
+findings. Captured response SHA-256:
+`2712f11b5cee7d13ca80c28985b485e35976be5aede81b426c7c1e59c86213a1`.
+The subsequent isolated proof addition changes no runtime behavior. It executes
+the actual retirement command over 100,000 synthetic terminal sources, verifies
+one transaction and at most twelve PostgreSQL statements including setup, one
+narrow census read, and zero external calls. It completes within the existing
+five-second transaction deadline; focused test and Web typecheck pass. This
+proof-only addition retains the substantive review under the isolated-test
+exemption. Final-head CI and the remaining operational tasks still apply.
