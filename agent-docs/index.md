@@ -380,3 +380,6 @@ Provider-search delivery is recorded in
 [`2026-09-15-records-connect-polish.md`](exec-plans/completed/2026-09-15-records-connect-polish.md).
 The separate registration activation and composed import proof remain active in
 [`2026-09-16-epic-import-live-verification.md`](exec-plans/active/2026-09-16-epic-import-live-verification.md).
+
+The Responses relay queue-pressure observation and proof are tracked in
+[`2026-09-17-websocket-queue-pressure-telemetry.md`](exec-plans/active/2026-09-17-websocket-queue-pressure-telemetry.md).
