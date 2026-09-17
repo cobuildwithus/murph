@@ -1257,9 +1257,13 @@ and foreground reruns. A consented-member request remains checkpoint-gated;
 every accepted-input completion is admitted without a completion-kind context.
 Request import kicks the existing detached controller; completion import uses
 the existing foreground-causal delivery path, and a member action uses its
-existing provider-free foreground-causal service path. Neither starts or advances the
-at-least-180-second idle snapshot. Any other unrelated system wake in that
-prefix keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
+existing provider-free foreground-causal service path. Foreground-safe import does
+not itself advance the normal quiet checkpoint. Any unrelated system wake in
+that prefix keeps the whole system prefix checkpoint-gated. If the blocked page
+contains an Ask, finishing the conversation import requests the existing checkpoint
+immediately, before decoding that page. This preserves Ask validity without
+admitting the unrelated notification early. Decoded consented-member deferrals
+also request an early checkpoint after foreground completion. A progressed foreground-causal
 pass re-enters the existing bounded pass loop after admitting any newly arrived
 personal input first, so multiple safe items or a safe item imported during the
 preceding pass drain before checkpoint. No progress, retryable failure,

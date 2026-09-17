@@ -2912,10 +2912,12 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
     }
   });
 
-  for (const withConversationWork of [false, true]) {
+  for (const [withConversationWork, withBlockedNotification] of [
+    [false, false], [true, false], [false, true], [true, true],
+  ]) {
     test(`checkpoints a deferred consented-member ask before its ten-minute expiry${
       withConversationWork ? " while conversation work runs" : ""
-    }`, async () => {
+    }${withBlockedNotification ? " beside a checkpoint-gated notification" : ""}`, async () => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
       const events: string[] = [];
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -2989,6 +2991,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
               assert.ok(Date.now() < Date.parse(askItem.expiresAt!));
+              vi.setSystemTime(new Date(Date.now() + 5_000));
               return {
                 snapshotRef: createSnapshotFixtureRef({
                   hash: "d".repeat(64),
@@ -3001,6 +3004,12 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
                 events.push(`conversation.import:${item.item.id}`);
                 return { status: "imported" };
               }
+              if (item.item.kind === "assistant.notification.requested") {
+                events.push("notification.import");
+                assert.ok(events.includes("workspace.checkpoint"), events.join(","));
+                return { status: "imported" };
+              }
+              assert.ok(Date.now() < Date.parse(askItem.expiresAt!));
               const outcome = await bridgeImporter(item, context);
               events.push(
                 `ask.import:${
@@ -3024,6 +3033,15 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
                     }));
                   }
                   mailboxItems.push(askItem);
+                  if (withBlockedNotification) {
+                    mailboxItems.push(createMailboxItem({
+                      id: "notification_synthetic_checkpoint_gated",
+                      dedupeKey: "assistant.notification.requested:group-sponsorship-private:v1:synthetic",
+                      kind: "assistant.notification.requested",
+                      lane: "system",
+                      laneSeq: "2",
+                    }));
+                  }
                   runtimeWakeSignal.notify();
                 }, 0);
                 return {
@@ -3044,11 +3062,13 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
 
         const result = await withRealTimeout(resultPromise, 4_000, () => events.join(","));
 
-        assert.ok(events.includes("ask.import:joined_group:deferred"), events.join(","));
+        if (!withBlockedNotification || withConversationWork) {
+          assert.ok(events.includes("ask.import:joined_group:deferred"), events.join(","));
+        }
         const idleSnapshotIndex = requireEventIndex(events, "snapshot:idle_shutdown");
         if (withConversationWork) {
           assert.ok(events.includes("auto-reply.prepare"), events.join(","));
-          assert.ok(events.includes("auto-reply.delivered"), events.join(","));
+          assert.ok(requireEventIndex(events, "auto-reply.delivered") < idleSnapshotIndex, events.join(","));
         }
         assert.equal(
           events.slice(0, idleSnapshotIndex).includes("ask.import:all:imported"),
@@ -3064,9 +3084,17 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         }
         assert.equal(
           checkpointRequests.filter((request) => request.reason === "idle_shutdown").length,
-          1,
+          withBlockedNotification && !withConversationWork ? 2 : 1,
+          events.join(","),
         );
         assert.ok(result.status === "idle" || result.status === "scheduled");
+        if (withBlockedNotification && !withConversationWork) {
+          assert.ok(
+            requireEventIndex(events, "ask.import:all:imported")
+              > requireEventIndex(events, "workspace.checkpoint"),
+            events.join(","),
+          );
+        }
       } finally {
         vi.useRealTimers();
         await removeTempRoot(vaultRoot);

@@ -694,6 +694,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   containsOnlyDeviceSyncWakes: boolean;
   containsOnlyInitialMemberActivation: boolean;
   canImportForPreCheckpointSystemWork: boolean;
+  hasAssistantAskRequests: boolean;
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
@@ -781,6 +782,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
           )
         )
       ),
+    hasAssistantAskRequests: systemItems.some((item) => item.kind === "assistant.ask.requested"),
     hasSystemWork: response.items.some((item) => item.lane === "system"),
   };
 }
@@ -6073,7 +6075,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         };
         const finishMailboxImportWithoutAssistant = async (
           mailboxImport: HostedMailboxImportCheckpointResult,
+          checkpointBlockedSystemWork: Awaited<ReturnType<
+            typeof inspectHostedPreCheckpointSystemMailboxPrefetch
+          >> | null = null,
         ): Promise<void> => {
+          // A mixed page can hold an expiring Ask before it reaches the decoder.
+          // Release that checkpoint gate without admitting the unsafe page.
+          if (checkpointBlockedSystemWork?.hasAssistantAskRequests) {
+            setIdleCheckpointStartBy(Date.now());
+          }
           await finishHostedMailboxImportPostCheckpointEffects({
             importResult: mailboxImport,
             runnerInput: baseRunnerInput,
@@ -6254,7 +6264,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const shouldImportSystemMailbox = input.systemMailboxAdmission === "all"
           || preCheckpointSystemPrefetch?.canImportForPreCheckpointSystemWork === true;
         if (!shouldImportSystemMailbox) {
-          await finishMailboxImportWithoutAssistant(conversationImport);
+          await finishMailboxImportWithoutAssistant(
+            conversationImport,
+            preCheckpointSystemPrefetch,
+          );
           return false;
         }
 
