@@ -66,5 +66,10 @@ describe("frozen legacy resource export", () => {
     h.kv.delete("legacy-thing:v1:synthetic-suffix");
     h.kv.set("Ünknown", { synthetic: true });
     await expect(requireLegacyRuntimeStorageCoverage(h.state)).rejects.toThrow("unclassified durable state (unrecognized)");
+    h.kv.delete("Ünknown");
+    h.kv.delete("workspace-snapshot-orphan-candidate:a");
+    h.kv.set("runner:state:v1", { synthetic: true });
+    expect([...await requireLegacyRuntimeStorageCoverage(h.state)]).toEqual(["synthetic_member"]);
+    expect((await readLegacyRuntimeMigrationIdentity(h.state)).userId).toBe("synthetic_member");
   });
 });
