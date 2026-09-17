@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import type { HostedRuntimeManagedSnapshotUpload } from "@murphai/hosted-execution/runtime-resources";
+import { parseHostedRuntimeManagedSnapshotUpload, type HostedRuntimeManagedSnapshotUpload } from "@murphai/hosted-execution/runtime-resources";
 import { parseHostedWorkspaceSnapshotUploadSession } from "@murphai/hosted-execution/workspace-snapshot-store";
 import { buildHostedWorkspaceSnapshotV2Aad, HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME } from "@murphai/hosted-execution/workspace-snapshot-v2";
-import { completeManagedSnapshotUpload, prepareManagedSnapshotUpload, verifyManagedSnapshotBytes } from "../src/managed-snapshot-upload.ts";
+import { completeManagedSnapshotUpload, expectedManagedSnapshotEtag, prepareManagedSnapshotUpload, verifyManagedSnapshotBytes, verifyManagedSnapshotEtag } from "../src/managed-snapshot-upload.ts";
 import type { R2BucketLike } from "../src/bundle-store.ts";
 import { completeManagedSnapshotForSession, presignManagedSnapshot } from "../src/managed-snapshot-control.ts";
 
@@ -13,6 +13,7 @@ vi.mock("../src/runtime-cutover.ts", async original => ({ ...await original<type
 
 const bytes = new TextEncoder().encode("synthetic encrypted snapshot bytes");
 const encryptedSha256 = createHash("sha256").update(bytes).digest("hex");
+const encryptedMd5 = createHash("md5").update(bytes).digest("hex");
 const objectKey = "users/synthetic/workspace-snapshots/snapshot-1.snapshot.enc";
 const session = parseHostedWorkspaceSnapshotUploadSession({
   schema: "murph.hosted-workspace-snapshot-upload.v1", userId: "synthetic-member", snapshotId: "snapshot-1",
@@ -97,6 +98,61 @@ describe("managed snapshot uploads", () => {
     } finally {
       delete (globalThis.crypto as { DigestStream?: unknown }).DigestStream;
     }
+  });
+
+  it("verifies a receipt admitted with an MD5 through the object ETag and never reads the body", async () => {
+    const h = harness();
+    const read = vi.fn(async () => { throw new Error("Must not read the body."); });
+    const head = vi.fn(async () => ({ size: bytes.length, customMetadata: { encryptedsha256: encryptedSha256, snapshotid: session.snapshotId },
+      etag: `"${expectedManagedSnapshotEtag(encryptedMd5)}"` }));
+    h.bucket.get = vi.fn(async () => ({ size: bytes.length, arrayBuffer: read, body: new ReadableStream<Uint8Array>() }));
+    h.bucket.head = head;
+    await completeManagedSnapshotUpload({ ...h, receipt: { ...receipt, encryptedMd5 }, etag: "synthetic-etag" });
+    expect(head).toHaveBeenCalledExactlyOnceWith(objectKey);
+    expect(h.bucket.get).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(h.settle).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ encryptedMd5 }), true);
+    // R2 derives a multipart object's ETag from the MD5 digests of its parts.
+    const digest = createHash("md5").update(bytes).digest();
+    expect(expectedManagedSnapshotEtag(encryptedMd5)).toBe(`${createHash("md5").update(digest).digest("hex")}-1`);
+  });
+
+  it("rejects ETag, size, metadata or missing-object mismatches without publication", async () => {
+    const h = harness();
+    const withMd5 = { ...receipt, encryptedMd5 };
+    for (const [label, object] of [
+      ["etag", { size: bytes.length, customMetadata: { encryptedsha256: encryptedSha256 }, etag: `${"0".repeat(32)}-1` }],
+      ["length", { size: bytes.length + 1, customMetadata: { encryptedsha256: encryptedSha256 }, etag: expectedManagedSnapshotEtag(encryptedMd5) }],
+      ["metadata", { size: bytes.length, customMetadata: { encryptedsha256: "b".repeat(64) }, etag: expectedManagedSnapshotEtag(encryptedMd5) }],
+      ["missing", null],
+    ] as const) {
+      h.settle.mockClear();
+      h.bucket.head = vi.fn(async () => object);
+      await expect(completeManagedSnapshotUpload({ ...h, receipt: withMd5, etag: "synthetic-etag" }), label).rejects.toThrow();
+      expect(h.settle, label).toHaveBeenCalledWith(expect.anything(), false);
+      expect(h.settle, label).not.toHaveBeenCalledWith(expect.anything(), true);
+    }
+    await expect(verifyManagedSnapshotEtag({ bucket: {}, receipt: withMd5 })).rejects.toThrow("unavailable");
+    expect(h.bucket.get).not.toHaveBeenCalled();
+  });
+
+  it("keeps the read-back for receipts admitted without an MD5 and binds a declared MD5 at admission", async () => {
+    const h = harness();
+    h.bucket.head = vi.fn(async () => { throw new Error("Must not head a receipt without an MD5."); });
+    await completeManagedSnapshotUpload({ ...h, receipt, etag: "synthetic-etag" });
+    expect(h.bucket.get).toHaveBeenCalledWith(objectKey);
+    expect(h.settle).toHaveBeenCalledExactlyOnceWith(expect.anything(), true);
+    const admit = vi.fn(async (proposed: HostedRuntimeManagedSnapshotUpload) => proposed);
+    const admitted = await prepareManagedSnapshotUpload({ ...h, session, encryptedByteSize: bytes.length, encryptedSha256, encryptedMd5, admit });
+    expect(admitted.encryptedMd5).toBe(encryptedMd5);
+    expect(admit).toHaveBeenCalledWith(expect.objectContaining({ encryptedMd5 }));
+    // An existing receipt admitted before the runner declared MD5s stays authoritative.
+    const legacy = vi.fn(async (proposed: HostedRuntimeManagedSnapshotUpload) => { const { encryptedMd5: _omitted, ...rest } = proposed; return rest; });
+    expect((await prepareManagedSnapshotUpload({ ...h, session, encryptedByteSize: bytes.length, encryptedSha256, encryptedMd5, admit: legacy })).encryptedMd5).toBeUndefined();
+    const changed = vi.fn(async (proposed: HostedRuntimeManagedSnapshotUpload) => ({ ...proposed, encryptedMd5: "f".repeat(32) }));
+    await expect(prepareManagedSnapshotUpload({ ...h, session, encryptedByteSize: bytes.length, encryptedSha256, encryptedMd5, admit: changed })).rejects.toThrow("changed its byte or owner identity");
+    expect(() => parseHostedRuntimeManagedSnapshotUpload({ ...receipt, encryptedMd5: "not-hex" })).toThrow("MD5 is invalid");
+    expect(parseHostedRuntimeManagedSnapshotUpload({ ...receipt, encryptedMd5: undefined }).encryptedMd5).toBeUndefined();
   });
 
   it("bounds a stalled verification stream without recording success", async () => {

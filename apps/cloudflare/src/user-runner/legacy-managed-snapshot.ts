@@ -39,6 +39,7 @@ export async function commandLegacyManagedSnapshot(input: {
   const upload = parseHostedRuntimeManagedSnapshotUpload({
     userId: input.userId, snapshotId, objectKey: session.objectKey, attemptId: session.attemptId, generation: session.leaseGeneration,
     uploadId: command.uploadId, encryptedByteSize: command.encryptedByteSize, encryptedSha256: command.encryptedSha256,
+    ...(command.encryptedMd5 === undefined ? {} : { encryptedMd5: command.encryptedMd5 }),
     completedAt: null, verifiedAt: null,
   });
   await writeLegacyManagedSnapshot(input.state, upload);

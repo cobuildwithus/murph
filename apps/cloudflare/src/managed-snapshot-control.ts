@@ -23,15 +23,16 @@ async function commandSnapshotUpload(input: { source: SnapshotSource; userId: st
 
 export async function presignManagedSnapshot(input: {
   source: SnapshotSource; session: HostedWorkspaceSnapshotUploadSession;
-  encryptedByteSize: number; encryptedSha256: string; expiresSeconds: number;
+  encryptedByteSize: number; encryptedSha256: string; encryptedMd5?: string; expiresSeconds: number;
 }) {
   const receipt = await prepareManagedSnapshotUpload({
     bucket: workspaceSnapshotBucket(input.source), session: input.session,
-    encryptedByteSize: input.encryptedByteSize, encryptedSha256: input.encryptedSha256,
+    encryptedByteSize: input.encryptedByteSize, encryptedSha256: input.encryptedSha256, encryptedMd5: input.encryptedMd5,
     admit: async proposed => {
       const result = await commandSnapshotUpload({ source: input.source, userId: input.session.userId, command: {
         operation: "snapshot_managed_admit", expectedSession: input.session, uploadId: proposed.uploadId,
         encryptedByteSize: proposed.encryptedByteSize, encryptedSha256: proposed.encryptedSha256,
+        ...(proposed.encryptedMd5 === undefined ? {} : { encryptedMd5: proposed.encryptedMd5 }),
       } });
       return result.applied ? result.managedUpload ?? null : null;
     },

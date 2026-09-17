@@ -782,3 +782,28 @@ explicit member canary before expansion. Keep that private operational input out
 of repository artifacts. The private workflow follow-up validates and masks its
 optional target input. Review and exact-head CI remain pending; no production
 mutation has occurred. Local handoff timing is not a production downtime promise.
+
+### Production canary findings and managed completion without read-back
+
+The first production canaries (2026-09-16/17) surfaced four defects, each fixed
+forward on main before the next attempt: the operator's namespace lookup
+required a `total_pages` field the live provider omits; a stale browser-vault
+replica write record held readiness indefinitely; a Worker activation reset the
+member object mid-invocation and the freeze then waited for a completion that
+could never arrive; and a long-lived object carried pre-SQLite `runner:` keys
+that coverage did not classify. Two members are now Postgres-owned with the
+campaign still rolling and no further automatic selection.
+
+Enabling the deployment capability also moved every member's checkpoint onto
+managed multipart completion, whose Worker-side verification streamed the whole
+encrypted object back through the container Durable Object. Fleet checkpoint
+p90 rose from about 8 s to 30 s and large workspaces exceeded the runner's
+commit budget until the budget was raised to 120 s. The buffered read did not
+change the tail, so the read-back is removed: the runner declares the encrypted
+archive's MD5 at admission, the receipt carries it, and completion verifies
+publication through R2's own object ETag (`md5(md5bytes)-1`), size and
+metadata with a single `head()`. Multipart allocation, exact abort, recovery and
+deletion are unchanged, so write-authority closure is preserved. Receipts
+admitted without an MD5 keep the bounded read-back until they age out. The
+composed rehearsal and a fleet checkpoint p90 check remain the deployment gate
+before the remaining members migrate in bounded batches.

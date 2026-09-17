@@ -1603,6 +1603,7 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     body.encryptedObjectSha256,
     "encryptedObjectSha256",
   );
+  const encryptedMd5 = body.encryptedMd5 === undefined ? undefined : requireSnapshotMd5Hex(body.encryptedMd5, "encryptedMd5");
   if (requestedSnapshotId !== input.snapshotId) {
     return jsonError("Hosted workspace snapshot presign snapshotId does not match its route.", 400);
   }
@@ -1682,7 +1683,7 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
 
   if (body.supportsManagedUpload === true && supportsPostgresRuntimeOwner(input.env)) {
     return json(await presignManagedSnapshot({
-      source: input.env, session, encryptedByteSize, encryptedSha256: encryptedObjectSha256,
+      source: input.env, session, encryptedByteSize, encryptedSha256: encryptedObjectSha256, encryptedMd5,
       expiresSeconds: Math.min(HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS, remainingSessionSeconds),
     }));
   }
@@ -3453,6 +3454,13 @@ function requireSnapshotPositiveSafeInteger(value: unknown, label: string): numb
   return value;
 }
 
+function requireSnapshotMd5Hex(value: unknown, label: string): string {
+  const text = requireSnapshotDataKeyString(value, label).toLowerCase();
+  if (!/^[0-9a-f]{32}$/u.test(text)) {
+    throw new TypeError(`Hosted workspace snapshot ${label} must be a lowercase md5 hex digest.`);
+  }
+  return text;
+}
 function requireSnapshotSha256Hex(value: unknown, label: string): string {
   const text = requireSnapshotDataKeyString(value, label).toLowerCase();
   if (!/^[0-9a-f]{64}$/u.test(text)) {

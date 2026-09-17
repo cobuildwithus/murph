@@ -237,6 +237,21 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect((await observer.hostedRuntimePutDrain.findFirstOrThrow({ where: { userId } })).completedAt).toBeNull();
   });
 
+  it("persists a declared MD5 with the managed receipt and keeps replays consistent with it", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const created = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: { operation: "snapshot_create", session: await snapshotSession(runtime) } });
+    const command = { operation: "snapshot_managed_admit" as const, expectedSession: created.session!, uploadId: "synthetic-upload-md5", encryptedByteSize: 4, encryptedSha256: "a".repeat(64), encryptedMd5: "c".repeat(32) };
+    const admitted = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command });
+    expect(admitted.applied).toBe(true);
+    expect(admitted.managedUpload).toMatchObject({ encryptedMd5: "c".repeat(32) });
+    expect((await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command })).managedUpload).toEqual(admitted.managedUpload);
+    expect((await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: { ...command, encryptedMd5: undefined } })).applied).toBe(true);
+    expect((await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: { ...command, encryptedMd5: "d".repeat(32) } })).applied).toBe(false);
+    const read = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: { operation: "snapshot_managed_read", ...runtime, snapshotId: created.session!.snapshotId } });
+    expect(read.managedUpload?.encryptedMd5).toBe("c".repeat(32));
+  });
+
   it("retains managed snapshot obligations after session deletion until exact abort or verified completion", async () => {
     const userId = await member();
     const runtime = identity((await claim(userId)).owner);

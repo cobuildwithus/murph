@@ -14,7 +14,7 @@ type SettleUpload = (upload: UploadReceipt, verified: boolean) => Promise<boolea
  * allocation cannot affect that receipt or another concurrent upload. */
 export async function prepareManagedSnapshotUpload(input: {
   bucket: R2BucketLike; session: HostedWorkspaceSnapshotUploadSession;
-  encryptedByteSize: number; encryptedSha256: string;
+  encryptedByteSize: number; encryptedSha256: string; encryptedMd5?: string;
   admit: (upload: UploadReceipt) => Promise<UploadReceipt | null>; settle: SettleUpload;
 }): Promise<UploadReceipt> {
   if (!input.bucket.createMultipartUpload || !input.bucket.resumeMultipartUpload) throw new Error("Managed snapshot uploads are unavailable.");
@@ -67,7 +67,10 @@ export async function completeManagedSnapshotUpload(input: {
       }
     }
     timing.completeElapsedMs = Date.now() - startedAt;
-    await verifyManagedSnapshotBytes({ bucket: input.bucket, receipt });
+    // A receipt admitted with the runner's MD5 verifies through R2's ETag alone;
+    // receipts without one (older runners) keep the read-back verification.
+    if (receipt.encryptedMd5 === undefined) await verifyManagedSnapshotBytes({ bucket: input.bucket, receipt });
+    else await verifyManagedSnapshotEtag({ bucket: input.bucket, receipt });
     timing.verifyElapsedMs = Date.now() - startedAt - timing.completeElapsedMs;
     if (!await input.settle(receipt, true)) throw new Error("Managed snapshot verification receipt was rejected.");
     timing.settleElapsedMs = Date.now() - startedAt - timing.completeElapsedMs - timing.verifyElapsedMs;
@@ -79,7 +82,8 @@ export async function completeManagedSnapshotUpload(input: {
     // Stage timings make a slow completion attributable without member data.
     emitHostedExecutionStructuredLog({
       component: "runner",
-      details: { ...timing, encryptedByteSize: receipt.encryptedByteSize, operation: "managed_snapshot_completion" },
+      details: { ...timing, encryptedByteSize: receipt.encryptedByteSize, operation: "managed_snapshot_completion",
+        verification: receipt.encryptedMd5 === undefined ? "stream" : "etag" },
       message: "Managed snapshot completion finished.",
       phase: "wake.running",
       userId: receipt.userId,
@@ -163,7 +167,28 @@ function requireSameSnapshotBytes(expected: UploadReceipt, actual: UploadReceipt
   if (actual.userId !== expected.userId || actual.snapshotId !== expected.snapshotId
     || actual.attemptId !== expected.attemptId || actual.generation !== expected.generation
     || actual.objectKey !== expected.objectKey || actual.encryptedByteSize !== expected.encryptedByteSize
-    || actual.encryptedSha256 !== expected.encryptedSha256) throw new Error("Managed snapshot admission changed its byte or owner identity.");
+    || actual.encryptedSha256 !== expected.encryptedSha256
+    || (actual.encryptedMd5 !== undefined && expected.encryptedMd5 !== undefined && actual.encryptedMd5 !== expected.encryptedMd5)) {
+    throw new Error("Managed snapshot admission changed its byte or owner identity.");
+  }
+}
+
+/** R2 derives a completed object's ETag from the MD5 digests it computed for
+ * the stored parts, so head() proves the published bytes without reading them. */
+export async function verifyManagedSnapshotEtag(input: { bucket: Pick<R2BucketLike, "head">; receipt: UploadReceipt }): Promise<void> {
+  const { receipt } = input;
+  if (!input.bucket.head || receipt.encryptedMd5 === undefined) throw new Error("Managed snapshot ETag verification is unavailable.");
+  const object = await input.bucket.head(receipt.objectKey);
+  if (!object) throw new Error("Managed snapshot object is missing.");
+  if (object.size !== receipt.encryptedByteSize) throw new Error("Managed snapshot byte length changed.");
+  if (object.customMetadata?.encryptedsha256 !== receipt.encryptedSha256) throw new Error("Managed snapshot metadata changed.");
+  const etag = (object.etag ?? object.httpEtag ?? "").replace(/^"|"$/gu, "");
+  if (etag !== expectedManagedSnapshotEtag(receipt.encryptedMd5)) throw new Error("Managed snapshot ETag verification failed.");
+}
+
+export function expectedManagedSnapshotEtag(encryptedMd5: string): string {
+  const digest = Uint8Array.from(encryptedMd5.match(/.{2}/gu) ?? [], pair => Number.parseInt(pair, 16));
+  return `${createHash("md5").update(digest).digest("hex")}-1`;
 }
 
 /** R2 reads cannot prolong a member handoff indefinitely. Cancellation is

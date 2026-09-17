@@ -28,11 +28,14 @@ export interface HostedRuntimeManagedSnapshotUpload extends HostedRuntimeOwnerId
   uploadId: string;
   encryptedByteSize: number;
   encryptedSha256: string;
+  /** Hex MD5 of the encrypted bytes, declared by the runner at admission so
+   * completion can verify publication through R2's own ETag without a read-back. */
+  encryptedMd5?: string;
   completedAt: string | null;
   verifiedAt: string | null;
 }
 export type HostedRuntimeManagedSnapshotCommand =
-  | { operation: "snapshot_managed_admit"; expectedSession: HostedWorkspaceSnapshotUploadSession; uploadId: string; encryptedByteSize: number; encryptedSha256: string }
+  | { operation: "snapshot_managed_admit"; expectedSession: HostedWorkspaceSnapshotUploadSession; uploadId: string; encryptedByteSize: number; encryptedSha256: string; encryptedMd5?: string }
   | ({ operation: "snapshot_managed_read"; snapshotId: string } & HostedRuntimeOwnerIdentity)
   | ({ operation: "snapshot_managed_settled"; snapshotId: string; uploadId: string; verified: boolean } & HostedRuntimeOwnerIdentity);
 
@@ -41,7 +44,7 @@ export function parseHostedRuntimeManagedSnapshotUpload(value: unknown): HostedR
   const completedAt = record.completedAt === null ? null : canonicalDate(record.completedAt);
   const verifiedAt = record.verifiedAt === null ? null : canonicalDate(record.verifiedAt);
   if (verifiedAt !== null && completedAt === null) throw new TypeError("Snapshot verification requires a terminal upload.");
-  return { ...parseHostedRuntimeOwnerIdentity(record), ...parseManagedSnapshotBytes(record),
+  return { ...parseHostedRuntimeOwnerIdentity(record), ...parseManagedSnapshotBytes(record), ...parseManagedSnapshotMd5(record),
     userId: requireString(record.userId, "Snapshot member"), snapshotId: snapshotIdentity(record.snapshotId),
     objectKey: boundedUploadString(record.objectKey), uploadId: boundedUploadString(record.uploadId), completedAt, verifiedAt };
 }
@@ -53,6 +56,11 @@ function parseManagedSnapshotBytes(record: Record<string, unknown>): { encrypted
     throw new TypeError("Managed snapshot byte identity is invalid.");
   }
   return { encryptedByteSize: record.encryptedByteSize, encryptedSha256: record.encryptedSha256 };
+}
+function parseManagedSnapshotMd5(record: Record<string, unknown>): { encryptedMd5?: string } {
+  if (record.encryptedMd5 === undefined || record.encryptedMd5 === null) return {};
+  if (typeof record.encryptedMd5 !== "string" || !/^[a-f0-9]{32}$/u.test(record.encryptedMd5)) throw new TypeError("Managed snapshot MD5 is invalid.");
+  return { encryptedMd5: record.encryptedMd5 };
 }
 function boundedUploadString(value: unknown): string {
   const text = requireString(value, "Snapshot upload identity");
@@ -70,7 +78,7 @@ export function parseHostedRuntimeSnapshotCommand(value: unknown): HostedRuntime
   const operation = requireString(record.operation, "Runtime resource operation");
   if (operation === "snapshot_managed_admit") {
     return { operation, expectedSession: parseHostedWorkspaceSnapshotUploadSession(record.expectedSession),
-      uploadId: boundedUploadString(record.uploadId), ...parseManagedSnapshotBytes(record) };
+      uploadId: boundedUploadString(record.uploadId), ...parseManagedSnapshotBytes(record), ...parseManagedSnapshotMd5(record) };
   }
   if (operation === "snapshot_managed_read") return { operation, snapshotId: snapshotIdentity(record.snapshotId), ...parseHostedRuntimeOwnerIdentity(record) };
   if (operation === "snapshot_managed_settled") {

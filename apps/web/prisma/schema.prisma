@@ -1421,6 +1421,7 @@ model HostedRuntimePutDrain {
   uploadId    String?   @map("upload_id")
   encryptedByteSize BigInt? @map("encrypted_byte_size")
   encryptedSha256 String? @map("encrypted_sha256")
+  encryptedMd5 String? @map("encrypted_md5")
   verifiedAt DateTime? @map("verified_at")
   reconcileAfter DateTime? @map("reconcile_after")
   completedAt DateTime? @map("completed_at")

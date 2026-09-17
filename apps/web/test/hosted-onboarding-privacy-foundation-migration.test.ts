@@ -1218,6 +1218,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260916053000_hosted_runtime_late_sources",
       "20260916060000_hosted_runtime_release_compatibility",
       "20260916063000_hosted_runtime_cleanup_enrollment",
+      "20260917033000_managed_snapshot_encrypted_md5",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
