@@ -381,5 +381,5 @@ Provider-search delivery is recorded in
 The separate registration activation and composed import proof remain active in
 [`2026-09-16-epic-import-live-verification.md`](exec-plans/active/2026-09-16-epic-import-live-verification.md).
 
-The Responses relay queue-pressure observation and proof are tracked in
-[`2026-09-17-websocket-queue-pressure-telemetry.md`](exec-plans/active/2026-09-17-websocket-queue-pressure-telemetry.md).
+The Responses relay queue-pressure observation and implementation proof are recorded in
+[`2026-09-17-websocket-queue-pressure-telemetry.md`](exec-plans/completed/2026-09-17-websocket-queue-pressure-telemetry.md).
