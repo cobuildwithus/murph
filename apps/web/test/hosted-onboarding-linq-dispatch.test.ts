@@ -5839,6 +5839,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           })).resolves.toEqual({
             kind: "accepted",
             wakeHandoff: {
+              acceptedLinqDeliveryId: "hld_9198bd7323f52b51126f7632e9da6f47",
               eventId: "evt_null_preflight_duplicate",
               linqChatId: "chat_123",
               mailboxItemId: acceptedMailboxItem.id,
