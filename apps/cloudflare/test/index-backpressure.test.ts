@@ -12,13 +12,13 @@ import {
   HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
   HOSTED_RUNTIME_STATUS_PATH,
 } from "@murphai/hosted-execution/routes";
-import worker, { UserRunnerDurableObject } from "../src/index.ts";
+import worker from "../src/index.ts";
+import { UserRunnerDurableObject } from "../src/worker/user-runner-durable-object.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
 
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.ts";
-import { createHostedWebCallbackSignatureHeaders, readHostedWebCallbackSigningEnvironment } from "../src/web-callback-auth.ts";
 
 const TEST_VERCEL_OIDC_TEAM_SLUG = "murph-team";
 const TEST_VERCEL_OIDC_PROJECT_NAME = "murph-web";
@@ -42,6 +42,21 @@ describe("cloudflare worker queue backpressure routes", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("removes the migration operator even for authenticated requests", async () => {
+    const harness = createUserRunnerDurableObject();
+    const get = vi.fn(() => { throw new Error("Retired namespace accessed"); });
+    const control = vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration");
+    const env = { ...harness.env, USER_RUNNER: { get, getByName: get } };
+    for (const operation of ["status", "inspect_object", "recover_object", "next_object", "quiesce_member", "freeze_member", "activate_member"]) {
+      const request = new Request("https://runner.example.test/internal/runtime-migration", {
+        method: "POST", body: JSON.stringify({ operation }),
+      });
+      expect((await worker.fetch(await signControlRequest(request), env as never)).status).toBe(404);
+    }
+    expect(get).not.toHaveBeenCalled();
+    expect(control).not.toHaveBeenCalled();
   });
 
   it("keeps the removed dispatch route unavailable without relying on legacy local queue state", async () => {
@@ -176,89 +191,6 @@ describe("cloudflare worker queue backpressure routes", () => {
     await expect(harness.durableObject.bindUser("member_123")).rejects.toThrow("frozen");
     await expect(harness.durableObject.alarm()).resolves.toBeUndefined();
     expect(alarm).not.toHaveBeenCalled();
-  });
-
-  it("authenticates exact-object inspection without enabling or freezing migration", async () => {
-    const harness = createUserRunnerDurableObject({
-      CF_VERSION_METADATA: { id: "synthetic-version" },
-      HOSTED_RUNTIME_POSTGRES_ENABLED: "false",
-    });
-    const inspect = vi.spyOn(harness.durableObject, "inspectPostgresMigration");
-    const freeze = vi.spyOn(harness.durableObject, "freezeForPostgresMigration");
-    const control = vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration");
-    const objectId = "a".repeat(64);
-    const get = vi.fn(() => harness.durableObject);
-    const env = { ...harness.env, USER_RUNNER: { get, idFromString: (id: string) => id } };
-    const request = () => new Request("https://runner.example.test/internal/runtime-migration", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ operation: "inspect_object", objectId, namespaceId: "synthetic-namespace", workerVersion: "synthetic-version" }),
-    });
-    const denied = await worker.fetch(request(), env as never);
-    expect(denied.status).toBe(401);
-    expect(get).not.toHaveBeenCalled();
-    const response = await worker.fetch(await signControlRequest(request()), env as never);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ objectId, observation: { kind: "unsupported_schema" } });
-    expect(get).toHaveBeenCalledWith(objectId);
-    expect(inspect).toHaveBeenCalledOnce();
-    expect(freeze).not.toHaveBeenCalled();
-    expect(control).not.toHaveBeenCalled();
-  });
-
-  it("recovers an exact object's dormant schema only on the Postgres-capable deployment", async () => {
-    const objectId = "a".repeat(64);
-    const request = () => new Request("https://runner.example.test/internal/runtime-migration", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ operation: "recover_object", objectId, namespaceId: "synthetic-namespace", workerVersion: "synthetic-version" }),
-    });
-    const disabled = createUserRunnerDurableObject({ CF_VERSION_METADATA: { id: "synthetic-version" }, HOSTED_RUNTIME_POSTGRES_ENABLED: "false" });
-    const disabledRecover = vi.spyOn(disabled.durableObject, "recoverPostgresMigrationSchema");
-    const disabledEnv = { ...disabled.env, USER_RUNNER: { get: () => disabled.durableObject, idFromString: (id: string) => id } };
-    expect((await worker.fetch(await signControlRequest(request()), disabledEnv as never)).status).not.toBe(200);
-    expect(disabledRecover).not.toHaveBeenCalled();
-    const harness = createUserRunnerDurableObject({ CF_VERSION_METADATA: { id: "synthetic-version" }, HOSTED_RUNTIME_POSTGRES_ENABLED: "true" });
-    const recover = vi.spyOn(harness.durableObject, "recoverPostgresMigrationSchema");
-    const control = vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration");
-    const get = vi.fn(() => harness.durableObject);
-    const env = { ...harness.env, USER_RUNNER: { get, idFromString: (id: string) => id } };
-    expect((await worker.fetch(request(), env as never)).status).toBe(401);
-    expect(await harness.durableObject.inspectPostgresMigration()).toMatchObject({ kind: "unsupported_schema" });
-    const response = await worker.fetch(await signControlRequest(request()), env as never);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ objectId, observation: { kind: "observed" } });
-    expect(get).toHaveBeenCalledWith(objectId);
-    expect(recover).toHaveBeenCalledOnce();
-    expect(control).not.toHaveBeenCalled();
-  });
-
-  it.each(["quiesce_member", "freeze_member", "activate_member"])("rejects raw operator transition %s without an exact-object handoff", async operation => {
-    const harness = createUserRunnerDurableObject({ CF_VERSION_METADATA: { id: "synthetic-version" }, HOSTED_RUNTIME_POSTGRES_ENABLED: "true" });
-    const control = vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration");
-    const request = new Request("https://runner.example.test/internal/runtime-migration", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation,
-        objectId: "a".repeat(64), namespaceId: "synthetic-namespace", workerVersion: "synthetic-version",
-        userId: "synthetic-member", migrationId: "synthetic-handoff" }),
-    });
-    const response = await worker.fetch(await signControlRequest(request), harness.env as never);
-    expect(response.ok).toBe(false);
-    expect(control).not.toHaveBeenCalled();
-  });
-
-  it("admits protected hosted migration signatures with exact payload binding and nonce replay rejection", async () => {
-    const harness = createUserRunnerDurableObject({ CF_VERSION_METADATA: { id: "synthetic-version" }, HOSTED_RUNTIME_POSTGRES_ENABLED: "true" });
-    const control = vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration").mockResolvedValue({ objectId: null });
-    const path = "/internal/runtime-migration";
-    const body = JSON.stringify({ operation: "next_object", namespaceId: "synthetic-namespace", workerVersion: "synthetic-version" });
-    const headers = await createHostedWebCallbackSignatureHeaders({ environment: readHostedWebCallbackSigningEnvironment(createHostedExecutionTestEnv()),
-      method: "POST", path, payload: body, userId: null });
-    const request = (payload = body) => new Request(`https://runner.example.test${path}`, { method: "POST", headers, body: payload });
-    expect((await worker.fetch(request(body.replace("next_object", "begin_rolling")), harness.env as never)).status).toBe(401);
-    expect(control).not.toHaveBeenCalled();
-    const accepted = await worker.fetch(request(), harness.env as never);
-    expect(accepted.status).toBe(200);
-    expect(await accepted.json()).toEqual({ objectId: null });
-    expect((await worker.fetch(request(), harness.env as never)).status).toBe(401);
-    expect(control).toHaveBeenCalledOnce();
   });
 
   it("forwards managed AI revocation through the UserRunner Durable Object", async () => {

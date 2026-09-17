@@ -365,7 +365,6 @@ describe("cloudflare worker routes", () => {
       "service-banner",
     ]);
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
-      "runtime-migration",
       "device-webhook-enqueue",
       "temporal-worker-binding-admission",
       "deploy-artifact-smoke",
@@ -401,7 +400,6 @@ describe("cloudflare worker routes", () => {
       "test-temporal-mailbox-signal-fault-consume",
       "test-direct-r2-presigned-put",
       "test-direct-r2-locator-marker",
-      "runtime-migration",
       "device-webhook-enqueue",
       "temporal-worker-binding-admission",
       "deploy-artifact-smoke",

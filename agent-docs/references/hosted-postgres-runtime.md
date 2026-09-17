@@ -11,10 +11,13 @@ ordinary execution through this Worker release.
 
 The durable `HostedRuntimeCutover` gate retains the historical `legacy`,
 `draining`, and `rolling` campaign phases and the terminal `postgres` state.
-The capability and `UserRunnerDurableObject` remain only for the finite migration
-operator and frozen source inspection until the separately authorized namespace
-retirement. Earlier rolling releases used the capability and explicit per-member
-migration phase; they remain compatible after global activation.
+The production and local Worker entrypoints no longer export `UserRunnerDurableObject`
+or mount the finite migration operator. Their configuration removes `USER_RUNNER`
+and the temporary capability, and migration `v10` deletes the class. The retained
+source bridge is imported directly only by historical protocol rehearsal tests;
+it is absent from the deployed Worker bundle. Earlier rolling releases used the
+capability and explicit per-member migration phase. Complete any remaining
+migration with that compatible release before deploying the retirement release.
 A rolling campaign closes through the same `activate` operation as the finite
 draining campaign, requested by the operator only under an explicit finalize
 option and never from a targeted canary. Web proves retirement under the
@@ -433,6 +436,40 @@ and [serving deployment](https://developers.cloudflare.com/api/resources/workers
 APIs. Counts/hashes and operation phases are suitable evidence; raw object or
 member inventories and resource rows remain private.
 
+
+## Physical namespace retirement deployment
+
+Cloudflare [class deletion migrations](https://developers.cloudflare.com/durable-objects/reference/durable-object-class-migrations-legacy/)
+permanently erase every object and its storage. Namespace deletion is separate
+from canonical Postgres activation and requires explicit approval for the exact
+live namespace after complete accounting and the legacy-traffic soak.
+
+The protected deployment workflow accepts `retire_user_runner_namespace` only
+with `deploy_worker=true` and `container_rollout=worker-only`. It forwards this
+approval as `HOSTED_EXECUTION_RETIRE_USER_RUNNER_NAMESPACE` to the deployment CLI,
+never as a Worker binding. The public CLI matches it against the live class
+binding, requires an already finalized Postgres gate for that namespace, and
+rejects a candidate retaining the binding. Ordinary deployments cannot apply
+this pending deletion without that exact approval.
+
+The CLI preserves the serving container images, capacities and namespace
+bindings. After preparing the isolated smoke application, it rechecks canonical
+gate status, Web compatibility and the current serving Worker version, then
+uses `wrangler deploy --containers-rollout none`. Cloudflare does not permit a
+new class migration through `versions upload`. The existing live version check,
+container receipts and post-deploy smoke still apply. Once the class binding is
+absent, a retry uses the normal version flow without attempting deletion again.
+
+Before dispatch, review the exact source and approved namespace, verify the
+closed gate and terminal census, and establish absence of legacy traffic. After
+deploy, verify the new serving version and absence of the namespace, then inspect
+bounded Postgres execution, delivery and checkpoint aggregates. Preserve the
+canonical migration receipts. Deletion has no storage rollback; a source revert
+must never attempt to restore this class or reopen legacy authority.
+
+The following migration protocol sections describe the retained canonical
+receipts and pre-retirement release behavior. They do not authorize invoking a
+removed Worker migration endpoint.
 
 ## Local migration protocol rehearsal
 
