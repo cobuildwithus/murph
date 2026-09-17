@@ -2537,6 +2537,64 @@ test.each([
   expect(decryptMetrics.returnedPlaintexts.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
 });
 
+test.each([
+  { kind: "phone", value: "+12025550123", reject: false },
+  { kind: "email", value: "member@example.test", reject: false },
+  { kind: "phone", value: "+12025550123", reject: true },
+  { kind: "email", value: "member@example.test", reject: true },
+] as const)("OTP reauthentication send scopes real root preparation: $kind, reject=$reject", async ({ kind, value, reject }) => {
+  const { tx, decryptMetrics } = await createHostedWebCryptoTransactionFixture();
+  const store = await import("../src/lib/hosted-crypto/domain-root-store");
+  const cache = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const admission = await import("../src/lib/better-auth/admission");
+  const bound = await import("../src/lib/better-auth/bound-reauthentication");
+  const config = await import("../src/lib/better-auth/config");
+  const sender = await import("../src/lib/better-auth/send-otp");
+  const { sendHostedAuthOtpRequest } = await import("../src/lib/better-auth/otp-request");
+  const { createHostedLinqParticipantContact } = await import("../src/lib/hosted-onboarding/linq-participant-contact");
+  const userId = "member-test-reauthentication";
+  await store.provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control", prisma: tx.prisma, reason: "test.seed", userId,
+  });
+  const contact = createHostedLinqParticipantContact({ kind, value });
+  assert.ok(contact);
+  vi.spyOn(admission, "admitHostedAuthOtpRequest").mockResolvedValue({
+    contact, reauthenticate: true, code: undefined, inviteCode: undefined, timeZone: null,
+  });
+  vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+  vi.spyOn(config, "requireHostedBetterAuthConfig").mockReturnValue({
+    baseURL: "https://www.withmurph.ai", secret: "synthetic-auth-secret",
+  });
+  const rejected = new Error("Synthetic linked-contact rejection");
+  const retainedKeys: Uint8Array[] = [];
+  // Keep the real crypto preparation/cache boundary; substitute only identity
+  // reads and delivery, whose existing suites prove account binding and OTPs.
+  vi.spyOn(bound, "prepareHostedReauthentication").mockImplementation(async () => {
+    const preparedControlRoot = await store.prepareHostedDomainRootForWeb({
+      domain: "control", prepareMissing: false, prisma: tx.prisma, userId,
+      reason: "hosted-auth.bound-reauthentication",
+    });
+    for (const pending of cache.getHostedDomainRootUnwrapCache()!.values()) {
+      retainedKeys.push((await pending).rootKey);
+    }
+    if (reject) throw rejected;
+    return { memberId: userId, preparedControlRoot, commitMember: async () => undefined };
+  });
+  const send = vi.spyOn(sender, "sendHostedAuthOtp").mockResolvedValue();
+  const request = new Request("https://www.withmurph.ai/api/auth/otp/send", { method: "POST" });
+  if (reject) {
+    await expect(sendHostedAuthOtpRequest(request, "browser")).rejects.toBe(rejected);
+    expect(send).not.toHaveBeenCalled();
+  } else {
+    await sendHostedAuthOtpRequest(request, "browser");
+    expect(send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ contact }));
+  }
+  expect(decryptMetrics.calls).toHaveLength(1);
+  expect(retainedKeys.length).toBeGreaterThan(0);
+  expect(retainedKeys.every((key) => key.every((byte) => byte === 0))).toBe(true);
+  expect(cache.getHostedDomainRootUnwrapCache()).toBeUndefined();
+});
+
 test("an empty supplied candidate map does not authorize a missing active root", async () => {
   const { tx, signCalls, decryptMetrics } = await createHostedWebCryptoTransactionFixture();
   const { prepareHostedDomainRootForWeb } = await import("../src/lib/hosted-crypto/domain-root-store");

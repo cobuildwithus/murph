@@ -23,7 +23,10 @@ export async function sendHostedAuthOtpRequest(request: Request, transport: Host
   assertHostedBetterAuthIssuanceEnabled();
   const prisma = getPrisma();
   const { contact, reauthenticate } = await admitHostedAuthOtpRequest({ request, transport, operation: "send", prisma });
-  if (reauthenticate) await prepareHostedReauthentication({ request, prisma, method: contact.kind, value: contact.value });
+  if (reauthenticate) {
+    await runWithFreshHostedDomainRootUnwrapCache(() =>
+      prepareHostedReauthentication({ request, prisma, method: contact.kind, value: contact.value }));
+  }
   await sendHostedAuthOtp({
     ...requireHostedBetterAuthConfig(), prisma, contact, delivery: hostedAuthDelivery(request.signal),
     smsVerification: hostedAuthSmsVerification(request.signal),
