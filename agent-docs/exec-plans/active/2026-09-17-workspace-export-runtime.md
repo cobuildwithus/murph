@@ -23,7 +23,7 @@ and one approval but included the fake credential file.
 This proves missing source-content guidance, not the exact reported refusal or a
 production credential leak. The regression requires safe runtime content, credential
 exclusion, omission disclosure, unchanged originals and one pending send.
-No production data or credentials accessed. ReviewGPT author response pending.
+No production data or credentials accessed. ReviewGPT author response recovered below.
 
 File-send boundary baseline: 33 focused tests passed. Full first-provider input baseline
 captured for identical private/group fixtures; exact Terra tokenizer is unavailable,
@@ -55,8 +55,8 @@ capture all first-request fields except prompt_cache_key. Exact Terra tokenizer
 is unavailable, so token counts are unavailable rather than estimated.
 
 ## Remaining
-Review the three patched Terra journeys, inspect final diff and final external
-review when required, then finish the scoped commit and PR gates.
+Implementation and focused proof are complete. PR #3537 is open as draft; final
+external review and exact-head required CI remain before completion.
 
 ## Live and parent review
 Ready: all three focused `pnpm test:assistant:live -- --test <pattern> --model
