@@ -91,6 +91,11 @@ export async function completeManagedSnapshotUpload(input: {
  * completion and settlement; the runner budget, not this deadline, bounds a
  * single checkpoint attempt. */
 const MANAGED_SNAPSHOT_VERIFY_TIMEOUT_MS = 100_000;
+/** Verification runs inside the busy container Durable Object, where every
+ * streamed chunk costs an event-loop turn. Objects up to this size are read in
+ * one native call and hashed in slices; larger objects keep the streaming path. */
+const MANAGED_SNAPSHOT_BUFFERED_VERIFY_MAX_BYTES = 64 * 1024 * 1024;
+const MANAGED_SNAPSHOT_HASH_SLICE_BYTES = 4 * 1024 * 1024;
 
 type SnapshotHasher = { update(chunk: Uint8Array): Promise<void> | void; digestHex(): Promise<string> };
 
@@ -119,10 +124,23 @@ export async function verifyManagedSnapshotBytes(input: { bucket: Pick<R2BucketL
   void getting.then(object => { if (signal.aborted) void object?.body?.cancel().catch(() => {}); }, () => {});
   const object = await awaitSnapshotRead(getting, signal);
   if (!object?.body) throw new Error("Managed snapshot byte verification requires an object stream.");
+  if (object.size !== input.receipt.encryptedByteSize) {
+    void object.body.cancel().catch(() => {});
+    throw new Error("Managed snapshot byte length changed.");
+  }
+  if (object.size <= MANAGED_SNAPSHOT_BUFFERED_VERIFY_MAX_BYTES) {
+    const bytes = new Uint8Array(await awaitSnapshotRead(object.arrayBuffer(), signal));
+    if (bytes.byteLength !== input.receipt.encryptedByteSize) throw new Error("Managed snapshot exceeds its committed byte length.");
+    const hasher = createSnapshotHasher();
+    for (let offset = 0; offset < bytes.byteLength; offset += MANAGED_SNAPSHOT_HASH_SLICE_BYTES) {
+      await awaitSnapshotRead(Promise.resolve(hasher.update(bytes.subarray(offset, offset + MANAGED_SNAPSHOT_HASH_SLICE_BYTES))), signal);
+    }
+    if (await hasher.digestHex() !== input.receipt.encryptedSha256) throw new Error("Managed snapshot encrypted SHA-256 verification failed.");
+    return;
+  }
   const reader = object.body.getReader();
   let ended = false;
   try {
-    if (object.size !== input.receipt.encryptedByteSize) throw new Error("Managed snapshot byte length changed.");
     const hasher = createSnapshotHasher();
     let count = 0;
     for (;;) {

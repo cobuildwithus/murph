@@ -10,6 +10,10 @@ const EXPORT_KV_PREFIXES = [
   browserVaultReplicaOrphanCandidateStoragePrefix(),
 ] as const;
 const DRAIN_KEYS = ["workspace-snapshot:r2-put-drain:v1", "browser-vault-replica:active-direct-puts:v1"];
+/** Pre-SQLite runner state left on long-lived objects. No current code path
+ * reads it; the SQL tables are the runtime authority, so it is neither exported
+ * nor treated as member identity. */
+const RETIRED_KV_PREFIXES = ["runner:"] as const;
 
 export type { LegacyRuntimeExportCursor, LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
 import type { LegacyRuntimeExportCursor, LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
@@ -107,7 +111,7 @@ function storageKeyFamily(key: string): string {
 }
 
 function classifyLegacyStorageRecord(key: string, value: unknown, requireTerminalUploads: boolean): string | null {
-  if (key === "runtime-migration-freeze:v1") return null;
+  if (key === "runtime-migration-freeze:v1" || RETIRED_KV_PREFIXES.some(prefix => key.startsWith(prefix))) return null;
   if (key.startsWith(LEGACY_MANAGED_SNAPSHOT_PREFIX)) {
     const upload = parseLegacyManagedSnapshot(value);
     if (key !== `${LEGACY_MANAGED_SNAPSHOT_PREFIX}${upload.snapshotId}`) throw new Error("Legacy managed upload key mismatch.");

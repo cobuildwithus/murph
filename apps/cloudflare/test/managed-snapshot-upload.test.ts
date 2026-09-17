@@ -33,7 +33,7 @@ function harness() {
   const bucket: R2BucketLike = {
     put: vi.fn(async () => { throw new Error("Direct PUT is forbidden."); }),
     createMultipartUpload: vi.fn(async () => upload), resumeMultipartUpload: vi.fn(() => upload),
-    get: vi.fn(async () => ({ size: bytes.length, arrayBuffer: async () => new ArrayBuffer(0),
+    get: vi.fn(async () => ({ size: bytes.length, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
       body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(bytes.slice(0, 5)); controller.enqueue(bytes.slice(5)); controller.close(); } }) })),
   };
   const settle = vi.fn(async () => true);
@@ -102,11 +102,25 @@ describe("managed snapshot uploads", () => {
   it("bounds a stalled verification stream without recording success", async () => {
     const h = harness();
     const cancel = vi.fn();
-    h.bucket.get = vi.fn(async () => ({ size: bytes.length, arrayBuffer: async () => new ArrayBuffer(0),
+    const huge = 65 * 1024 * 1024;
+    h.bucket.get = vi.fn(async () => ({ size: huge, arrayBuffer: async () => { throw new Error("Must stream above the buffered cap."); },
       body: new ReadableStream<Uint8Array>({ cancel }) }));
-    await expect(verifyManagedSnapshotBytes({ bucket: h.bucket, receipt, timeoutMs: 10 })).rejects.toMatchObject({ name: "TimeoutError" });
+    await expect(verifyManagedSnapshotBytes({ bucket: h.bucket, receipt: { ...receipt, encryptedByteSize: huge }, timeoutMs: 10 })).rejects.toMatchObject({ name: "TimeoutError" });
     expect(cancel).toHaveBeenCalledOnce();
     expect(h.settle).not.toHaveBeenCalled();
+  });
+
+  it("reads a small object in one call and still rejects a length or digest mismatch", async () => {
+    const h = harness();
+    const read = vi.fn(async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    const cancel = vi.fn();
+    h.bucket.get = vi.fn(async () => ({ size: bytes.length, arrayBuffer: read, body: new ReadableStream<Uint8Array>({ cancel }) }));
+    await verifyManagedSnapshotBytes({ bucket: h.bucket, receipt });
+    expect(read).toHaveBeenCalledOnce();
+    await expect(verifyManagedSnapshotBytes({ bucket: h.bucket, receipt: { ...receipt, encryptedSha256: "c".repeat(64) } })).rejects.toThrow("SHA-256 verification failed");
+    h.bucket.get = vi.fn(async () => ({ size: bytes.length + 1, arrayBuffer: read, body: new ReadableStream<Uint8Array>({ cancel }) }));
+    await expect(verifyManagedSnapshotBytes({ bucket: h.bucket, receipt })).rejects.toThrow("byte length changed");
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it("records admission before granting access to the upload and aborts only unused retry allocations", async () => {
@@ -157,10 +171,11 @@ describe("managed snapshot uploads", () => {
     expect(h.settle).not.toHaveBeenCalledWith(expect.anything(), true);
   });
 
-  it("cancels an oversized stream instead of buffering or trusting HEAD length", async () => {
+  it("cancels an oversized stream above the buffered cap instead of trusting HEAD length", async () => {
     const cancel = vi.fn();
-    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array(bytes.length + 1)); }, cancel });
-    await expect(verifyManagedSnapshotBytes({ receipt, bucket: { get: async () => ({ size: bytes.length, body, arrayBuffer: async () => { throw new Error("Must stream."); } }) } })).rejects.toThrow("exceeds");
+    const huge = 65 * 1024 * 1024;
+    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array(huge + 1)); }, cancel });
+    await expect(verifyManagedSnapshotBytes({ receipt: { ...receipt, encryptedByteSize: huge }, bucket: { get: async () => ({ size: huge, body, arrayBuffer: async () => { throw new Error("Must stream."); } }) } })).rejects.toThrow("exceeds");
     expect(cancel).toHaveBeenCalledOnce();
   });
 });
