@@ -422,8 +422,7 @@ export async function handleTestCanonicalCheckpointLostAckRoute(
     return boundUserResponse;
   }
 
-  const runnerContainerName = await readLocalRuntimeTarget(context, userId);
-  const stub = requireLocalRuntimeTargetAdapter(context, runnerContainerName);
+  const stub = context.env.RUNNER_CONTAINER.getByName(userId);
   if (!hasHostedLocalTestRunnerContainerCanonicalCheckpointLostAckControl(stub)) {
     throw new Error(
       "Hosted runner container canonical checkpoint lost-ack test RPC is unavailable.",
@@ -471,8 +470,7 @@ export async function handleTestForegroundPriorityOrderingRoute(
     );
   }
 
-  const runnerContainerName = await readLocalRuntimeTarget(context, userId);
-  const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
+  const stub = context.env.RUNNER_CONTAINER.getByName(userId);
   if (!hasHostedLocalTestRunnerContainerForegroundPriorityOrderingControl(stub)) {
     throw new Error(
       "Hosted runner container foreground-priority ordering test RPC is unavailable.",
@@ -516,8 +514,7 @@ async function handleTestGeneratedImageProviderBarrierRoute(
     return boundUserResponse;
   }
 
-  const runnerContainerName = await readLocalRuntimeTarget(context, userId);
-  const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
+  const stub = context.env.RUNNER_CONTAINER.getByName(userId);
   if (!hasHostedLocalTestRunnerContainerGeneratedImageProviderBarrierControl(stub)) {
     throw new Error(
       "Hosted runner container generated-image provider barrier test RPC is unavailable.",
@@ -549,8 +546,7 @@ export async function handleTestSnapshotPublicationCorruptionRoute(
     return boundUserResponse;
   }
 
-  const runnerContainerName = await readLocalRuntimeTarget(context, userId);
-  const stub = requireLocalRuntimeTargetAdapter(context, runnerContainerName);
+  const stub = context.env.RUNNER_CONTAINER.getByName(userId);
   if (!hasHostedLocalTestRunnerContainerSnapshotPublicationCorruptionControl(stub)) {
     throw new Error(
       "Hosted runner container snapshot publication corruption test RPC is unavailable.",
@@ -598,15 +594,17 @@ export async function handleTestShutdownCheckpointPublicationBarrierRoute(
     );
   }
 
-  const runnerContainerName = await readLocalRuntimeTarget(context, userId);
   if (action === "shutdown") {
+    const runnerContainerName = await readLocalRuntimeTarget(context, userId);
     return json(await beginActiveHostedLocalTestRunnerGracefulStop({
       context,
       fallbackRunnerContainerName: runnerContainerName,
       userId,
     }));
   }
-  const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
+  // Barrier state is test-isolate memory keyed by member, independent of
+  // allocation. Only shutdown above must address the selected physical target.
+  const stub = context.env.RUNNER_CONTAINER.getByName(userId);
   if (!hasHostedLocalTestRunnerContainerShutdownCheckpointPublicationBarrierControl(stub)) {
     throw new Error(
       "Hosted runner container shutdown checkpoint publication barrier test RPC is unavailable.",

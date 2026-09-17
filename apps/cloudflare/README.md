@@ -22,6 +22,13 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 
 ## Focused tests
 
+Hosted-local barrier and fault-injection controls use the existing member-keyed
+RunnerContainer test RPCs to update test-isolate memory before allocation.
+They do not reconcile the runtime owner or select a physical runner. Shutdown,
+activity expiry, and operation-drop controls still require the selected Postgres
+target. These routes exist only in the hosted-local test entrypoint and retain
+its environment, signature, and bound-member checks.
+
 Run these commands from the repository root. To run one Node workspace test,
 pass its repository-relative filename directly to Vitest:
 
