@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { UserRunnerDurableObject } from "../src/worker/user-runner-durable-object.ts";
 import { observeLegacyRuntime } from "../src/user-runner/legacy-runtime-observation.ts";
-import { ensureRunnerStateSchema } from "../src/user-runner/runner-state-schema.ts";
+import { ensureRunnerStateSchema, RETIRED_RUNNER_STATE_TABLES } from "../src/user-runner/runner-state-schema.ts";
 import type { DurableObjectStateLike } from "../src/user-runner/types.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
 
@@ -123,8 +123,8 @@ describe("live legacy migration inspection", () => {
   it("recovers a dormant pre-cutover schema through the ordinary initialization and then observes it", async () => {
     const h = harness();
     h.sql.exec("UPDATE runner_schema_meta SET value = 19 WHERE key = 'runner_state_schema_version'");
-    h.sql.exec("CREATE TABLE runner_bundle_slots (slot TEXT PRIMARY KEY)");
-    expect(await observeLegacyRuntime(h.state)).toEqual({ kind: "unsupported_schema", schemaVersion: 19 });
+    for (const table of RETIRED_RUNNER_STATE_TABLES) h.sql.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY)`);
+    expect(await observeLegacyRuntime(h.state)).toEqual({ kind: "unsupported_schema", schemaVersion: null });
     const object = new UserRunnerDurableObject(h.state, {} as never);
     expect(await object.recoverPostgresMigrationSchema()).toMatchObject({
       kind: "observed", schemaVersion: 21, userId: null, freeze: { phase: null, pendingOperations: 0 },
@@ -132,6 +132,18 @@ describe("live legacy migration inspection", () => {
     expect(h.sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'runner_%' ORDER BY name").toArray().map(row => row.name))
       .toEqual(["runner_hosted_media_asset", "runner_meta", "runner_schema_meta"]);
     expect(h.mutation).not.toHaveBeenCalled();
+  });
+
+  it("recovers a source already marked current whose retired tables hide its version row", async () => {
+    const h = harness();
+    for (const table of RETIRED_RUNNER_STATE_TABLES) h.sql.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY)`);
+    // The observation reads a bounded, alphabetically ordered table window, so
+    // the retired names displace runner_schema_meta and the version reads null.
+    expect(await observeLegacyRuntime(h.state)).toEqual({ kind: "unsupported_schema", schemaVersion: null });
+    const object = new UserRunnerDurableObject(h.state, {} as never);
+    expect(await object.recoverPostgresMigrationSchema()).toMatchObject({ kind: "observed", schemaVersion: 21 });
+    expect(h.sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").toArray().map(row => row.name))
+      .toEqual(["runner_hosted_media_asset", "runner_meta", "runner_schema_meta"]);
   });
 
   it("leaves supported and newer-than-supported schemas untouched during recovery", async () => {

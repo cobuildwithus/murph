@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   assertRunnerStateSchemaVersionSupported,
+  RETIRED_RUNNER_STATE_TABLES,
   RUNNER_STATE_SCHEMA_VERSION,
 } from "../src/user-runner/runner-state-schema.js";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
@@ -272,7 +273,7 @@ describe("RunnerStateStore schema guard", () => {
 
     expect(() => new RunnerStateStore(state)).not.toThrow();
 
-    expect(sql.queries).toHaveLength(28);
+    expect(sql.queries).toHaveLength(32);
     expect(sql.queries[0]).toBe(ENSURE_RUNNER_SCHEMA_META_SQL);
     expect(sql.queries[1]).toBe(READ_RUNNER_STATE_SCHEMA_VERSION_SQL);
     expect(sql.queries.filter((query) => query === READ_RUNNER_STATE_SCHEMA_VERSION_SQL))
@@ -280,6 +281,9 @@ describe("RunnerStateStore schema guard", () => {
     expect(sql.queries[2]).toMatch(/^CREATE TABLE IF NOT EXISTS runner_meta/u);
     expect(sql.queries.filter((query) => query === READ_RUNNER_META_COLUMNS_SQL))
       .toHaveLength(16);
+    expect(sql.queries.slice(-8, -3)).toEqual(
+      RETIRED_RUNNER_STATE_TABLES.map((table) => `DROP TABLE IF EXISTS ${table}`),
+    );
     expect(sql.queries.at(-4)).toBe("DROP TABLE IF EXISTS runner_bundle_slots");
     expect(sql.queries.at(-3)).toBe(normalizeSql(`
       INSERT INTO runner_schema_meta (key, value)
