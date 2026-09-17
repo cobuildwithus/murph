@@ -22,7 +22,11 @@ export function workspaceSnapshotBucket(source: Readonly<Record<string, unknown>
     if (!response.ok) { await response.body?.cancel(); throw new Error(`Local snapshot ${method} failed with HTTP ${response.status}.`); }
     const customMetadata: Record<string, string> = {};
     response.headers.forEach((value, name) => { if (name.startsWith("x-amz-meta-")) customMetadata[name.slice(11)] = value; });
+    // Preserve the store's ETag so managed completion can verify a published
+    // multipart object the same way it does through the production binding.
+    const httpEtag = response.headers.get("etag");
     return { key, size: Number(response.headers.get("content-length")), customMetadata,
+      ...(httpEtag ? { etag: httpEtag.replace(/^"|"$/gu, ""), httpEtag } : {}),
       ...(response.body ? { body: response.body } : {}), arrayBuffer: () => response.arrayBuffer() };
   };
   const multipart = (key: string, uploadId: string): RuntimeMultipartUpload => ({

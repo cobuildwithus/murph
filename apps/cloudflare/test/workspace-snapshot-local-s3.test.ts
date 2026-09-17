@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { workspaceSnapshotBucket } from "../src/workspace-snapshot-local-s3.ts";
+import { completeManagedSnapshotUpload, expectedManagedSnapshotEtag } from "../src/managed-snapshot-upload.ts";
 import { createHostedR2PresignedSnapshotPartUrl, readHostedR2PresignEnvironment } from "../src/r2-presigned-url.ts";
 
 const key = "users/synthetic/workspace-snapshots/synthetic.snapshot.enc";
@@ -53,6 +55,29 @@ describe("local snapshot storage boundary", () => {
     expect(BUNDLES.delete).not.toHaveBeenCalled();
     await bucket.get("users/synthetic/media/image");
     expect(BUNDLES.get).toHaveBeenCalledWith("users/synthetic/media/image");
+  });
+
+  it("verifies a managed receipt through the store's ETag without reading the object back", async () => {
+    const bytes = new TextEncoder().encode("abc");
+    const encryptedMd5 = createHash("md5").update(bytes).digest("hex");
+    const encryptedSha256 = createHash("sha256").update(bytes).digest("hex");
+    const receipt = { userId: "synthetic", snapshotId: "synthetic", objectKey: key, uploadId: "synthetic-upload", attemptId: "synthetic-attempt",
+      generation: "1", encryptedByteSize: 3, encryptedSha256, encryptedMd5, completedAt: null, verifiedAt: null };
+    const headResponse = (etag: string) => new Response(null, { headers: { "content-length": "3", "x-amz-meta-encryptedsha256": encryptedSha256, etag: `"${etag}"` } });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response("<CompleteMultipartUploadResult/>"))
+      .mockResolvedValueOnce(headResponse(expectedManagedSnapshotEtag(encryptedMd5)))
+      .mockResolvedValueOnce(new Response("<CompleteMultipartUploadResult/>"))
+      .mockResolvedValueOnce(headResponse(`${"0".repeat(32)}-1`))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetcher);
+    const bucket = workspaceSnapshotBucket({ ...env, BUNDLES: fixture() });
+    const settle = vi.fn(async () => true);
+    await completeManagedSnapshotUpload({ bucket, receipt, etag: "part", settle });
+    expect(settle).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ encryptedMd5 }), true);
+    await expect(completeManagedSnapshotUpload({ bucket, receipt, etag: "part", settle })).rejects.toThrow("ETag verification failed");
+    expect(settle).toHaveBeenLastCalledWith(expect.anything(), false);
+    expect(fetcher.mock.calls.map(([, options]) => options.method)).toEqual(["POST", "HEAD", "POST", "HEAD", "DELETE"]);
   });
 
   it("retains uncertain aborts and rejects completion errors inside HTTP 200", async () => {
