@@ -10,10 +10,12 @@ const EXPORT_KV_PREFIXES = [
   browserVaultReplicaOrphanCandidateStoragePrefix(),
 ] as const;
 const DRAIN_KEYS = ["workspace-snapshot:r2-put-drain:v1", "browser-vault-replica:active-direct-puts:v1"];
-/** Pre-SQLite runner state left on long-lived objects. No current code path
- * reads it; the SQL tables are the runtime authority, so it is neither exported
- * nor treated as member identity. */
-const RETIRED_KV_PREFIXES = ["runner:"] as const;
+/** Durable state from components that no supported code path can read: the
+ * pre-SQLite runner state, whose authority is now the SQL tables, and the
+ * gateway projection cache and local gateway runtime, both removed. It is
+ * neither exported nor treated as member identity. Families are named exactly
+ * as the coverage error reports them, so an operator can extend this list. */
+const RETIRED_KV_FAMILIES: readonly string[] = ["gateway:*", "runner:*"];
 
 export type { LegacyRuntimeExportCursor, LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
 import type { LegacyRuntimeExportCursor, LegacyRuntimeExportPage } from "@murphai/hosted-execution/runtime-migration";
@@ -90,19 +92,29 @@ async function readResourcePage(state: DurableObjectStateLike, prefix: string, a
 export async function requireLegacyRuntimeStorageCoverage(state: DurableObjectStateLike, requireTerminalUploads = false): Promise<Set<string>> {
   if (!state.storage.list) throw new Error("Legacy migration requires bounded storage listing.");
   const members = new Set<string>();
+  // Report every unclassified family the source holds, not just the first, so
+  // one operator run enumerates the whole remaining gap.
+  const unclassified = new Set<string>();
   let after = "";
   for (;;) {
     const page = await state.storage.list<unknown>({ limit: PAGE_SIZE, ...(after ? { startAfter: after } : {}) });
     for (const [key, value] of page) {
-      const userId = classifyLegacyStorageRecord(key, value, requireTerminalUploads);
+      const userId = classifyLegacyStorageRecord(key, value, requireTerminalUploads, unclassified);
       if (userId !== null) members.add(userId);
       if (members.size > 1) throw new Error("Legacy runtime contains conflicting member identities.");
     }
-    if (page.size < PAGE_SIZE) return members;
+    if (page.size < PAGE_SIZE) return requireClassifiedCoverage(members, unclassified);
     const next = [...page.keys()].at(-1)!;
     if (next <= after) throw new Error("Legacy storage listing did not advance.");
     after = next;
   }
+}
+
+function requireClassifiedCoverage(members: Set<string>, unclassified: Set<string>): Set<string> {
+  // Name only each key's leading identifier segment so the operator can extend
+  // coverage; identifiers, member data and values never enter the error.
+  if (unclassified.size) throw new Error(`Legacy migration encountered unclassified durable state (${[...unclassified].sort().join(", ")}).`);
+  return members;
 }
 
 function storageKeyFamily(key: string): string {
@@ -110,8 +122,8 @@ function storageKeyFamily(key: string): string {
   return family && family.length < key.length ? `${family}:*` : family ?? "unrecognized";
 }
 
-function classifyLegacyStorageRecord(key: string, value: unknown, requireTerminalUploads: boolean): string | null {
-  if (key === "runtime-migration-freeze:v1" || RETIRED_KV_PREFIXES.some(prefix => key.startsWith(prefix))) return null;
+function classifyLegacyStorageRecord(key: string, value: unknown, requireTerminalUploads: boolean, unclassified: Set<string>): string | null {
+  if (key === "runtime-migration-freeze:v1" || RETIRED_KV_FAMILIES.includes(storageKeyFamily(key))) return null;
   if (key.startsWith(LEGACY_MANAGED_SNAPSHOT_PREFIX)) {
     const upload = parseLegacyManagedSnapshot(value);
     if (key !== `${LEGACY_MANAGED_SNAPSHOT_PREFIX}${upload.snapshotId}`) throw new Error("Legacy managed upload key mismatch.");
@@ -119,9 +131,8 @@ function classifyLegacyStorageRecord(key: string, value: unknown, requireTermina
     return upload.userId;
   }
   if (!DRAIN_KEYS.includes(key) && !EXPORT_KV_PREFIXES.some(prefix => key.startsWith(prefix))) {
-    // Name only the key's leading identifier segment so the operator can extend
-    // coverage; identifiers, member data and values never enter the error.
-    throw new Error(`Legacy migration encountered unclassified durable state (${storageKeyFamily(key)}).`);
+    unclassified.add(storageKeyFamily(key));
+    return null;
   }
   if (!value || typeof value !== "object" || !("userId" in value) || typeof value.userId !== "string" || !value.userId) {
     throw new Error("Legacy resource member identity is missing.");

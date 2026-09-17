@@ -275,6 +275,11 @@ active attempt, proves its completion and stop, exports bounded frozen pages,
 and activates the member. Incoming work stays durably queued. Preparation that
 finds old direct-PUT capabilities or unsupported active code leaves legacy live.
 A committed or ambiguous freeze requires same-token roll-forward recovery.
+Durable key families that no supported code path can read are named in the
+export's retired list and skipped: the pre-SQLite runner state and the removed
+gateway components. Coverage reports every unclassified family a source holds
+in one error, so a single operator run enumerates the whole remaining gap.
+
 Activation appends its maintenance wake only for a member that can hold an
 encrypted mailbox. A member row whose hosted crypto domain roots are not all
 active has no ingress envelope to encrypt a wake into and no inbound delivery
