@@ -1,13 +1,15 @@
 import "server-only";
 
-import { readEpicImportConfiguration } from "./epic-import-config";
+import { prepareClinicalPersistentAccess } from "./persistent-access";
+
+import { readEpicImportConfiguration, readEpicPersistentCredentials } from "./epic-import-config";
 
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
 
 import { createHash, randomBytes } from "node:crypto";
 
 import { hashClinicalFhirPatientId } from "@murphai/clinical-records";
-import { CLINICAL_RECORD_MAX_IMPORTS_PER_SOURCE, CLINICAL_RECORD_MAX_SOURCES } from "./client-contracts";
+import { CLINICAL_RECORD_MAX_SOURCES } from "./client-contracts";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import type { Prisma } from "@prisma/client";
 
@@ -62,6 +64,7 @@ const CLINICAL_CONNECTION_ID_PREFIX = "crc_";
 const CLINICAL_RETRIEVAL_RUN_ID_PREFIX = "crr_";
 
 export async function startClinicalRecordConnection(input: {
+  keepUpdated?: boolean;
   claim: string;
   fetchImpl?: typeof fetch;
   providerDirectoryEntryId: string;
@@ -77,7 +80,9 @@ export async function startClinicalRecordConnection(input: {
     providerDirectoryEntryId: provider.id,
   });
   const configuration = readEpicImportConfiguration(provider);
-  const { clientId } = configuration;
+  const persistent = input.keepUpdated && !configuration.hospitalApprovedImports
+    ? readEpicPersistentCredentials(provider.id) : null;
+  const clientId = persistent?.clientId ?? configuration.clientId;
   const intent = await claimClinicalRecordConnectIntentForStart({
     claim: input.claim,
     memberId: auth.member.id,
@@ -86,6 +91,7 @@ export async function startClinicalRecordConnection(input: {
 
   try {
     const smart = await discoverSmartConfiguration({
+      requestOfflineAccess: Boolean(persistent),
       fetchImpl: input.fetchImpl,
       fhirBaseUrl: provider.fhirBaseUrl,
       requestedBaseScopes: provider.requestedBaseScopes,
@@ -176,7 +182,9 @@ export async function finishClinicalRecordAuthorization(input: {
     throw providerConfigurationChangedError();
   }
   const configuration = readEpicImportConfiguration(provider);
-  if (configuration.clientId !== session.clientId) throw providerConfigurationChangedError();
+  const persistent = configuration.hospitalApprovedImports ? null : readEpicPersistentCredentials(provider.id);
+  const clientSecret = persistent?.clientId === session.clientId ? persistent.clientSecret : undefined;
+  if (configuration.clientId !== session.clientId && !clientSecret) throw providerConfigurationChangedError();
   const requestedScopes = parseStoredStringArray(session.requestedScopesJson, "requested SMART scopes");
   const verifier = await openClinicalOauthVerifier({
     encrypted: session.codeVerifierEncrypted,
@@ -184,6 +192,7 @@ export async function finishClinicalRecordAuthorization(input: {
     stateHash: session.stateHash,
   });
   const token = await exchangeSmartAuthorizationCode({
+    clientSecret,
     clientId: session.clientId,
     code: normalizeAuthorizationCode(input.code),
     fetchImpl: input.fetchImpl,
@@ -209,6 +218,8 @@ export async function finishClinicalRecordAuthorization(input: {
     requestedScopes,
     resourceTypes,
     hospitalApprovedImports: configuration.hospitalApprovedImports,
+    clientId: session.clientId,
+    tokenEndpoint: session.tokenEndpoint,
     authorizationStartedAt: session.createdAt,
     token,
   }));
@@ -274,6 +285,8 @@ async function consumeClinicalOauthSession(input: {
 }
 
 async function persistClinicalConnection(input: {
+  clientId: string;
+  tokenEndpoint: string;
   hospitalApprovedImports: boolean;
   authorizationStartedAt: Date;
   connectIntentClaimHash: string;
@@ -348,7 +361,9 @@ async function persistClinicalConnection(input: {
   if (!patientIdEncrypted || !patientBindingEncrypted || !accessTokenEncrypted) {
     throw new TypeError("Clinical Records connection encryption returned an empty required value.");
   }
+  const persistentAccess = await prepareClinicalPersistentAccess({ ...input, connectionId, tokenVersion });
   const connectionData = {
+    ...persistentAccess,
     accessTokenEncrypted,
     accessTokenExpiresAt: input.token.expiresInSeconds
       ? new Date(input.now.getTime() + input.token.expiresInSeconds * 1_000)
@@ -502,13 +517,7 @@ async function assertClinicalRecordConnectionAvailable(
     const run = existing.retrievalRuns[0];
     if (!run?.completedAt || (run.status === "needs_reauth" && run.outcomeCountsJson === null))
       throw connectionAlreadyExistsError();
-    if (existing.retrievalGeneration >= CLINICAL_RECORD_MAX_IMPORTS_PER_SOURCE)
-      throw clinicalRecordsError({
-        code: "CLINICAL_RECORD_IMPORT_LIMIT_REACHED",
-        httpStatus: 409,
-        message:
-          "This source has reached its retained import limit. Saved records remain available.",
-      });
+
   }
   return existing;
 }

@@ -300,11 +300,11 @@ vault-usecases atomically records each accepted page and the next unfinished
 cursor in one private, portable `.runtime/operations/clinical-records/**`
 checkpoint before yielding, and removes it after terminal import or rejection.
 The checkpoint is non-canonical; full snapshot validation still happens before
-any final raw page or manifest is persisted. The beta requests no
-`offline_access` scope, expects no refresh token, and starts its one-shot
-retrieval immediately after authorization. On the normal path, an expired
-one-shot access token transitions to authorization-required instead of creating
-a background refresh lifecycle.
+any final raw page or manifest is persisted. One-time imports remain the default.
+Explicit daily-check consent requests `offline_access` only for a configured
+confidential client at a portal advertising offline permission. Unavailable or
+withheld persistent grants remain one-time imports. Expired one-time access
+requires reconnecting; persistent access uses the rotating-token lease below.
 Unqualified single laboratory reference ranges are retained when their numeric
 boundaries use units compatible with the result, or when they provide a bounded
 text range. Multiple, qualified, inverted, malformed, or unit-incompatible
@@ -370,22 +370,66 @@ that every document or clinical fact was recovered.
 
 ### Bounded repeat import
 
-The existing member/provider unique source admits at most eight immutable
-retrieval snapshots and a member has at most twenty sources. Each page batch has
-its own bounded manifest and raw evidence; prior batches remain immutable and
-available to prove continuation. Generations consume that allowance even when a
-run fails. No raw evidence is pruned, so canonical raw references remain valid.
-This bounds snapshots without a garbage collector, new service or state owner.
+A member has at most twenty sources and one unfinished retrieval per source.
+Completed generations no longer impose a lifetime import limit. Each page batch
+has its existing bounded manifest and raw evidence; prior batches remain
+immutable and available to prove continuation. No raw evidence is pruned, so
+canonical references remain valid. Total retained history grows with completed
+checks; this is not a constant-storage design.
 Repeated unchanged facts use existing canonical idempotency; newer comparable
 corrections use existing revision handling. A fresh authorization increments
 both generation and credential epoch under the member lock. Old callbacks,
 patient/source changes and stale outcomes cannot replace that generation.
 
-HTTP 401 or a token at or within the retrieval expiry leeway transitions the
-current credential version and run to authorization-required. HTTP 403 marks
+HTTP 401 transitions the current credential version and run to authorization-required.
+An expiring token first attempts renewal when persistent authorization exists. HTTP 403 marks
 only that family unavailable.
 429/5xx and transport failures are retryable; malformed pages, escaped
 pagination fail closed. Configured bounds preserve already-completed valid slices.
+
+Longitudinal care-plan searches include Epic's required `category=38717003`.
+The query fingerprint versions this correction; already-frozen runs retain their
+original request identity, and a fresh import uses the corrected category.
+See [Epic's CarePlan specification](https://fhir.epic.com/Specifications?api=1065).
+
+## Daily checks with persistent access
+
+The existing signed device-sync recovery sweep admits at most twenty due
+clinical sources sequentially. It performs no FHIR egress. Admission checks AI
+access, warms mailbox crypto outside the transaction, then locks the member and
+rechecks suspension, health-data consent, the latest completed run and the due
+time. It creates the next generation and the existing durable mailbox wake in
+one transaction; mailbox recovery owns failed signals. Due rows that cannot be
+admitted back off one day to avoid monopolizing the bounded selection.
+
+Checks start no sooner than 24 hours after the previous check. Native date
+filters already supported by the policy use a seven-day overlapping window,
+ending one day ahead. Queries without those filters keep whole-family coverage.
+Every seventh generation restores whole-family searches to find backdated
+corrections. This is clinical-date polling, not an authoritative modification
+feed: historical changes can wait for a full check and unsupported provider
+results remain partial. Existing request, byte, pagination and attachment limits
+still apply. No FHIR subscription or new cron owner is added.
+
+Refresh payloads contain client ID, pinned token endpoint, scopes and refresh
+token, encrypted under the connection/member/token-version identity. A 60-second
+lease serializes rotation. Token exchange and crypto happen outside DB locks;
+persistence rechecks consent, member status, generation, credential epoch and
+lease ownership. Explicit 429/5xx responses can retry; an ambiguous exchange or
+abandoned lease requires reconnecting instead of replaying a possibly consumed
+token. A changed patient or narrowed grant also fails closed. Disconnect and
+consent withdrawal clear refresh material, leases and the next-check timestamp.
+
+Identical document bytes/page reuse versioned extraction proposals in private
+runtime state. Source integrity, current parent eligibility, overlap decisions,
+canonical writes and readback still execute for each import. Cache contents do
+not assert that records were already applied. Document downloads and raw source
+retention still occur; this is a reduction in model work, not a zero-cost check.
+
+The records page reports the last and next check, offers explicit daily-check
+opt-in during connection, and links to account data/privacy controls. Disconnect
+retains imported evidence. Deleting one hospital's complete historical evidence
+is not implemented; account deletion remains the existing full-erasure workflow.
 
 ## Privacy lifecycle
 
@@ -444,8 +488,8 @@ old frozen plans, without deleting saved records or rewriting their identities.
 Resource families without a canonical mapper remain patient-bound raw evidence
 with an explicit review decision. Binary and Media remain supporting reads,
 not primary searches. A partial grant without Binary access preserves primary
-records and reports linked bodies unavailable. Do not request refresh tokens
-or `offline_access`.
+records and reports linked bodies unavailable. Persistent access follows the
+separate opt-in contract below; hospital-approved broad imports remain one-time.
 
 The following describes full-catalog capabilities; only variants classified as
 default in the registration matrix run without the hospital-approved flag.
@@ -517,6 +561,6 @@ client id fails closed before redirect.
   services, and automatic nationwide provider discovery.
 - Email scanning for portal/provider inference.
 - Cerner/Oracle and provider-specific adapters beyond Epic SMART.
-- Background scheduled refresh and provider-directory network refresh jobs.
+- Provider-directory network refresh jobs and provider-specific data erasure.
 - Claims-based matching or promises that the result is a complete legal
   medical record.

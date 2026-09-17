@@ -327,6 +327,11 @@ model ClinicalRecordConnection {
   patientIdEncrypted       String?                          @map("patient_id_encrypted")
   accessTokenEncrypted     String?                          @map("access_token_encrypted")
   accessTokenExpiresAt     DateTime?                        @map("access_token_expires_at")
+  refreshTokenEncrypted    String?                          @map("persistent_token_encrypted")
+  refreshLeaseId           String?                          @map("refresh_lease_id")
+  refreshLeaseExpiresAt    DateTime?                        @map("refresh_lease_expires_at")
+  nextSyncAt               DateTime?                        @map("next_sync_at")
+  lastCheckedAt            DateTime?                        @map("last_checked_at")
   requestedScopesJson      Json                             @map("requested_scopes_json")
   tokenVersion             Int                              @default(1) @map("token_version")
   retrievalGeneration      Int                              @default(0) @map("retrieval_generation")
@@ -343,6 +348,7 @@ model ClinicalRecordConnection {
   @@unique([memberId, providerDirectoryEntryId])
   @@index([memberId, status, updatedAt])
   @@index([fhirBaseHash])
+  @@index([status, nextSyncAt])
   @@map("clinical_record_connection")
 }
 

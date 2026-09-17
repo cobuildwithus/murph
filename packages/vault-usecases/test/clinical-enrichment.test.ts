@@ -85,6 +85,18 @@ describe("clinical document enrichment durable application", () => {
     expect(rows[0]?.attributes).toMatchObject({ source: "import", rawRefs: [input.rawRef], externalRef: { ...parentExternalRef, facet: expect.stringMatching(/^document-extraction-[a-f0-9]{64}$/u) }, evidence: [{ rawRef: input.rawRef, page: 1 }] });
   });
 
+  it("reuses byte-identical extraction across documents while checking and applying each parent", async () => {
+    const input = await fixture(true);
+    await prepare(input);
+    await applyClinicalEnrichmentProposals(input);
+    // A separate parent carries identical bytes. Reuse the accepted proposals,
+    // then run the ordinary parent/canonical checks without another model call.
+    expect(await readNextClinicalEnrichment(input)).toEqual({ status: "apply", jobId: input.jobId });
+    const result = await applyClinicalEnrichmentProposals(input);
+    expect(result.counts.existing).toBeGreaterThan(0);
+    expect(await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 })).toHaveLength(1);
+  });
+
   it("replays immutable accepted proposals after canonical commit without duplicating or overwriting", async () => {
     const input = await fixture();
     await prepare(input);
@@ -248,7 +260,7 @@ describe("clinical document enrichment durable application", () => {
     expect(await readClinicalEnrichmentStatus(input)).toMatchObject({ status: "complete" });
     expect(await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 })).toHaveLength(1);
 
-    expect(await readNextClinicalEnrichment({ vaultRoot: input.vaultRoot })).toMatchObject({ status: "extract", jobId: next.jobId });
+    expect(await readNextClinicalEnrichment({ vaultRoot: input.vaultRoot })).toMatchObject({ status: "apply", jobId: next.jobId });
   });
 
   it("finds existing structured facts across the UTC and vault-date boundary", async () => {

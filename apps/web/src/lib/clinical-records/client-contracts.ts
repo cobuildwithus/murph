@@ -1,4 +1,3 @@
-export const CLINICAL_RECORD_MAX_IMPORTS_PER_SOURCE = 8;
 export const CLINICAL_RECORD_MAX_SOURCES = 20;
 
 export const CLINICAL_RECORD_CONNECTION_STATUSES = [
@@ -71,6 +70,8 @@ export interface ClinicalRecordLatestRunContract {
 export interface ClinicalRecordConnectionContract {
   canImport?: boolean;
   importsRemaining?: number;
+  lastCheckedAt?: string | null;
+  nextSyncAt?: string | null;
   connectedAt: string;
   connectionId: string;
   displayName: string;
@@ -94,6 +95,7 @@ export interface ClinicalRecordConnectStartResponseContract {
 }
 
 export interface ClinicalRecordConnectStartRequestContract {
+  keepUpdated?: boolean;
   claim: string;
   providerDirectoryEntryId: string;
 }
@@ -157,11 +159,13 @@ export function parseClinicalRecordConnectStartResponse(
 export function parseClinicalRecordConnectStartRequest(
   value: unknown,
 ): ClinicalRecordConnectStartRequestContract {
-  const record = requireExactRecord(value, ["claim", "providerDirectoryEntryId"]);
+  const record = requireExactRecord(value, ["claim", "providerDirectoryEntryId"], ["keepUpdated"]);
+  if (record.keepUpdated !== undefined && typeof record.keepUpdated !== "boolean") throw invalidContract();
   const claim = requireString(record.claim, 40);
   if (!/^cr_[A-Za-z0-9_-]{32}$/u.test(claim)) throw invalidContract();
   return {
     claim,
+    ...(record.keepUpdated !== undefined ? { keepUpdated: record.keepUpdated } : {}),
     providerDirectoryEntryId: requireIdentifier(record.providerDirectoryEntryId),
   };
 }
@@ -220,7 +224,7 @@ function parseConnection(value: unknown): ClinicalRecordConnectionContract {
     "providerDirectoryEntryId",
     "sourceSystem",
     "status",
-  ], ["canImport", "importsRemaining"]);
+  ], ["canImport", "importsRemaining", "lastCheckedAt", "nextSyncAt"]);
   if (record.sourceSystem !== "epic-fhir") throw invalidContract();
   return {
     ...(record.canImport !== undefined ? { canImport: parseBoolean(record.canImport) } : {}),
@@ -230,6 +234,8 @@ function parseConnection(value: unknown): ClinicalRecordConnectionContract {
     displayName: requireString(record.displayName, 160),
     lastErrorCode: optionalErrorCode(record.lastErrorCode),
     lastSyncCompletedAt: optionalIsoTimestamp(record.lastSyncCompletedAt),
+    ...(record.lastCheckedAt === undefined ? {} : { lastCheckedAt: optionalIsoTimestamp(record.lastCheckedAt) }),
+    ...(record.nextSyncAt === undefined ? {} : { nextSyncAt: optionalIsoTimestamp(record.nextSyncAt) }),
     latestRun: record.latestRun === null ? null : parseLatestRun(record.latestRun),
     providerDirectoryEntryId: requireIdentifier(record.providerDirectoryEntryId),
     sourceSystem: "epic-fhir",

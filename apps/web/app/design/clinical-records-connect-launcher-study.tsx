@@ -8,7 +8,7 @@ import {
 
 import { ProviderSearchView, type ProviderSearchViewProps } from "@/app/(dashboard)/records/connect/provider-search-view";
 
-import { ConnectionRow, DisconnectDialog } from "@/app/(dashboard)/records/records-page-client";
+import { ConnectionRow, DisconnectDialog, RecordsPrivacyControls } from "@/app/(dashboard)/records/records-page-client";
 import type { ClinicalRecordConnectionContract } from "@/src/lib/clinical-records/client-contracts";
 
 const savedSource: ClinicalRecordConnectionContract = {
@@ -21,7 +21,8 @@ const savedSource: ClinicalRecordConnectionContract = {
   sourceSystem: "epic-fhir",
   status: "active",
   canImport: true,
-  importsRemaining: 7,
+  lastCheckedAt: "2026-09-17T12:00:00.000Z",
+  nextSyncAt: "2026-09-18T12:00:00.000Z",
   latestRun: {
     completedAt: "2026-09-04T12:05:00.000Z",
     importedCount: 3,
@@ -34,6 +35,7 @@ const savedSource: ClinicalRecordConnectionContract = {
 };
 
 const searchPreview: ProviderSearchViewProps = {
+  keepUpdated: true, onKeepUpdatedChange: () => {},
   query: "Clinic", providers: [
     { id: "epic-320", brandName: "Cleveland Clinic", facilities: [{ city: "Cleveland", state: "OH", name: null, postalCode: null }], sourceSystem: "epic-fhir" },
     { id: "epic-958", brandName: "Mayo Clinic", facilities: [{ city: "Rochester", state: "MN", name: null, postalCode: null }], sourceSystem: "epic-fhir" },
@@ -71,12 +73,16 @@ export function ClinicalRecordsConnectLauncherStudy() {
           <ConnectionRow connection={savedSource} disabled={false} onDisconnect={() => setDisconnectOpen(true)} />
         </ul>
       </StudyState>
+      <StudyState label="Incomplete import">
+        <ul><ConnectionRow connection={{ ...savedSource, latestRun: { ...savedSource.latestRun!, status: "partial", reviewCount: 2, skippedExistingCount: 1 } }} disabled={false} onDisconnect={() => {}} /></ul>
+      </StudyState>
       <StudyState label="Partial results after access ends">
         <ul>
           <ConnectionRow
             connection={{
               ...savedSource,
               status: "needs_reauth",
+              nextSyncAt: null,
               latestRun: { ...savedSource.latestRun!, status: "needs_reauth", reviewCount: 2 },
             }}
             disabled={false}
@@ -110,6 +116,7 @@ export function ClinicalRecordsConnectLauncherStudy() {
           />
         </ul>
       </StudyState>
+      <StudyState label="Record privacy controls"><RecordsPrivacyControls /></StudyState>
       <StudyState label="Authenticated launcher loading">
         <RecordsConnectLauncherState state="loading" />
       </StudyState>

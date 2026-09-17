@@ -6,6 +6,8 @@ import { useId, type RefCallback } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/src/components/ui/avatar";
 import { Button } from "@/src/components/ui/button";
+import { Checkbox } from "@/src/components/ui/checkbox";
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/src/components/ui/field";
 import { Input } from "@/src/components/ui/input";
 import { Skeleton } from "@/src/components/ui/skeleton";
 import { Spinner } from "@/src/components/ui/spinner";
@@ -13,6 +15,8 @@ import type { ClinicalProviderSearchResultContract } from "@/src/lib/clinical-re
 import providerLogos from "@/src/lib/clinical-records/provider-logos.json";
 
 export interface ProviderSearchViewProps {
+  keepUpdated?: boolean;
+  onKeepUpdatedChange?: (checked: boolean) => void;
   query: string;
   providers: readonly ClinicalProviderSearchResultContract[];
   hasSearched: boolean;
@@ -124,6 +128,15 @@ export function ProviderSearchView({ inputRef, ...props }: ProviderSearchViewPro
           </div>
         ) : null}
       </div>
+      {props.onKeepUpdatedChange ? (
+        <Field orientation="horizontal">
+          <Checkbox id={`${inputId}-daily`} checked={props.keepUpdated ?? false} onCheckedChange={props.onKeepUpdatedChange} disabled={locked} />
+          <FieldContent>
+            <FieldLabel htmlFor={`${inputId}-daily`}>Check for new records daily</FieldLabel>
+            <FieldDescription>Where your portal supports ongoing access. You choose the access period at your portal and can disconnect in Murph anytime. Otherwise, this is a one-time import.</FieldDescription>
+          </FieldContent>
+        </Field>
+      ) : null}
       <p className="flex items-start gap-2 border-t border-border pt-5 text-xs leading-5 text-muted-foreground">
         <LockKeyholeIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
         You’ll sign in on your provider’s website and choose what to share with Murph.

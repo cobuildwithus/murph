@@ -7,6 +7,7 @@ import {
 const mocks = vi.hoisted(() => ({
   requireHostedCloudflareCallbackRequest: vi.fn(),
   runHostedDeviceSyncRecoverySweep: vi.fn(),
+  runClinicalDailySyncSweep: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -17,6 +18,8 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 vi.mock("@/src/lib/device-sync/recovery-sweeper", () => ({
   runHostedDeviceSyncRecoverySweep: mocks.runHostedDeviceSyncRecoverySweep,
 }));
+
+vi.mock("@/src/lib/clinical-records/daily-sync", () => ({ runClinicalDailySyncSweep: mocks.runClinicalDailySyncSweep }));
 
 type HostedDeviceSyncRecoverySweepRoute =
   typeof import("../app/api/internal/device-sync/recovery-sweep/route");
@@ -30,6 +33,7 @@ describe("hosted device-sync scheduled wake sweep route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.runClinicalDailySyncSweep.mockResolvedValue({ checked: 0, queued: 0, failed: 0 });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(
       HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID,
     );
@@ -74,6 +78,7 @@ describe("hosted device-sync scheduled wake sweep route", () => {
       },
     );
     expect(mocks.runHostedDeviceSyncRecoverySweep).toHaveBeenCalledTimes(1);
+    expect(mocks.runClinicalDailySyncSweep).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       dueReconcileSweeper: {
         dueConnections: 1,

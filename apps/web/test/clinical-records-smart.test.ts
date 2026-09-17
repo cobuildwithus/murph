@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   discoverSmartConfiguration,
   exchangeSmartAuthorizationCode,
+  refreshSmartAccessToken,
   readGrantedSmartResourceTypes,
   selectSmartRequestedScopes,
 } from "@/src/lib/clinical-records/smart";
@@ -244,3 +245,40 @@ function oversizedJsonResponse(chunkSizes: number[], declaredLength: string | nu
   });
   return { response, wasCanceled: () => canceled };
 }
+
+
+describe("persistent SMART access", () => {
+  it("requests offline access only for explicit consent and a capable portal", () => {
+    const input = { capabilities: ["permission-v2", "context-standalone-patient", "permission-offline"], requestedBaseScopes: baseScopes, resourceTypes };
+    expect(selectSmartRequestedScopes(input).scopes).not.toContain("offline_access");
+    expect(selectSmartRequestedScopes({ ...input, requestOfflineAccess: true }).scopes).toContain("offline_access");
+    expect(selectSmartRequestedScopes({ ...input, requestOfflineAccess: true, capabilities: input.capabilities.slice(0, 2) }).scopes).not.toContain("offline_access");
+  });
+
+  it("rotates refresh tokens with confidential Basic authentication and retains omitted scope", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      access_token: "new-access", refresh_token: "rotated-refresh", expires_in: 300, token_type: "Bearer",
+    }));
+    const result = await refreshSmartAccessToken({ clientId: "client:one", clientSecret: "secret space", refreshToken: "old-refresh",
+      tokenEndpoint: "https://portal.example.test/token", grantedScopes: ["offline_access", "patient/Patient.r", "patient/Observation.s"], fetchImpl });
+    expect(result).toMatchObject({ accessToken: "new-access", refreshToken: "rotated-refresh", grantedScopes: ["offline_access", "patient/Patient.r", "patient/Observation.s"] });
+    const init = fetchImpl.mock.calls[0]![1]!;
+    expect(new Headers(init.headers).get("Authorization")).toBe(`Basic ${Buffer.from("client%3Aone:secret+space").toString("base64")}`);
+    expect(String(init.body)).toBe("grant_type=refresh_token&refresh_token=old-refresh");
+    expect(init.redirect).toBe("manual");
+  });
+
+  it.each([400, 401, 429, 503])("classifies a refresh HTTP %s without exposing its body", async (status) => {
+    await expect(refreshSmartAccessToken({ clientId: "client", clientSecret: "secret", refreshToken: "refresh",
+      tokenEndpoint: "https://portal.example.test/token", grantedScopes: ["patient/Patient.r", "patient/Observation.s"],
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response("private provider response", { status })) }))
+      .rejects.toMatchObject({ retryable: status === 429 || status === 503 });
+  });
+
+  it("requires reconnecting when renewal narrows the patient grant", async () => {
+    await expect(refreshSmartAccessToken({ clientId: "client", clientSecret: "secret", refreshToken: "refresh",
+      tokenEndpoint: "https://portal.example.test/token", grantedScopes: ["patient/Patient.r", "patient/Observation.s", "patient/DocumentReference.s"],
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ access_token: "new", expires_in: 300,
+        token_type: "Bearer", scope: "patient/Patient.r patient/Observation.s" })) })).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_GRANT_CHANGED" });
+  });
+});

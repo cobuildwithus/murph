@@ -171,7 +171,8 @@ describe("clinical enrichment import-to-query flow", () => {
         expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: old.jobId })).toMatchObject({ status: "blocked" });
       }
       const restored = await importSource(vaultRoot, { resourceType, status: activeStatus, revision: restoredRevision, omitClinicalDate });
-      await prepare(restored);
+      // Identical bytes reuse proposals, but the restored parent owns publication.
+      expect(await readNextClinicalEnrichment({ vaultRoot, jobId: restored.jobId })).toMatchObject({ status: "apply" });
       await applyClinicalEnrichmentProposals({ vaultRoot, jobId: restored.jobId });
       expect((await listMetricPoints(vaultRoot, { limit: 10 })).map((point) => point.value)).toEqual([90]);
       expect(digest(await readFile(path.join(vaultRoot, old.rawRef)))).toBe(old.sha256);

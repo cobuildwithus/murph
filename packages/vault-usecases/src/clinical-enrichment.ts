@@ -160,7 +160,7 @@ async function prepareCurrentClinicalDocument(
   vaultRoot: string,
   job: Job,
   attachment: Extract<ClinicalDocumentAttachment, { status: "downloaded" }>,
-): Promise<Extract<ClinicalEnrichmentWork, { status: "extract" }> | null> {
+): Promise<ClinicalEnrichmentWork | null> {
   job.source = sourceSchema.parse({ rawRef: path.posix.join(path.posix.dirname(job.root.manifestPath), attachment.relativePath), sha256: attachment.sha256, mediaType: attachment.mediaType, byteLength: attachment.byteLength });
   let attested;
   try { attested = await attestSource(vaultRoot, job); }
@@ -173,6 +173,15 @@ async function prepareCurrentClinicalDocument(
     holdCurrentDocument(job, attested.parent.reason ?? "Clinical document parent is not eligible.");
     await saveJob(vaultRoot, job);
     return null;
+  }
+  const cached = await readOptional(extractionCachePath(vaultRoot, job.source.sha256, job.source.mediaType, job.page));
+  const proposal = jobSchema.shape.prepared.safeParse(cached);
+  if (proposal.success && proposal.data && proposal.data.page === job.page) {
+    job.prepared = proposal.data;
+    job.totalPages = proposal.data.totalPages;
+    job.status = "prepared";
+    await saveJob(vaultRoot, job);
+    return { status: "apply", jobId: job.jobId };
   }
   await saveJob(vaultRoot, job);
   return { status: "extract", jobId: job.jobId, source: { rawRef: job.source.rawRef, sha256: job.source.sha256, mediaType: job.source.mediaType }, documentPath: attested.documentPath, page: job.page };
@@ -196,7 +205,16 @@ export async function persistClinicalEnrichmentProposals(input: { vaultRoot: str
     job.prepared = { page: input.page, totalPages: input.totalPages, outputs };
     job.status = "prepared";
     await saveJob(input.vaultRoot, job);
+    const cachePath = extractionCachePath(input.vaultRoot, input.sourceSha256, job.source.mediaType, input.page);
+    await mkdir(path.dirname(cachePath), { recursive: true, mode: 0o700 });
+    await writeJsonFileAtomic(cachePath, job.prepared, { mode: 0o600 });
   });
+}
+
+// Version the cache when extraction semantics change. It is private, disposable
+// runtime state; current parent evidence and canonical authority are still checked.
+function extractionCachePath(vaultRoot: string, sha256: string, mediaType: string, page: number): string {
+  return path.join(rootPath(vaultRoot), "extraction-v1", hash(`${digestSchema.parse(sha256)}:${mediaType}`), `${page}.json`);
 }
 
 function stable(value: unknown): string {

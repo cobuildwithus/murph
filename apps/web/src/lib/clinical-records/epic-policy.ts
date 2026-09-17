@@ -35,7 +35,7 @@ export interface EpicQuery {
   fingerprintTemplate: string;
   fixedSearchParameters: readonly Readonly<{ name: string; value: string }>[];
   registrationApiKeys: readonly string[];
-  // Used only to resume plans frozen before lifetime acquisition.
+  // Provider-native clinical-date filter; also used for overlapping daily checks.
   legacyWindowParameter?: string;
 }
 
@@ -159,8 +159,8 @@ const QUERIES: readonly EpicQuery[] = [
     queryScopeId: "care-plans",
     resourceType: "CarePlan",
     operation: "search",
-    fingerprintTemplate: "epic-fhir-r4:CarePlan:search:patient:_count={pageCount}:v1",
-    fixedSearchParameters: [],
+    fingerprintTemplate: "epic-fhir-r4:CarePlan:search:patient:category=38717003:_count={pageCount}:v2",
+    fixedSearchParameters: [{ name: "category", value: "38717003" }],
     registrationApiKeys: ["care-plan-search-longitudinal"],
   },
   {
@@ -521,6 +521,24 @@ export function buildEpicBetaRetrievalPlan(input: {
   });
 }
 
+/** Recent clinical dates reduce daily work; every seventh check includes older corrections. */
+export function buildEpicDailyRetrievalPlan(input: {
+  previous: ClinicalFhirRetrievalPlan; now: Date; generation: number;
+}): ClinicalFhirRetrievalPlan {
+  const from = new Date(input.now.getTime() - 7 * 86_400_000).toISOString();
+  const to = new Date(input.now.getTime() + 86_400_000).toISOString();
+  return clinicalFhirRetrievalPlanSchema.parse({
+    schemaVersion: input.previous.schemaVersion,
+    slices: input.previous.slices.map((slice) => {
+      const query = requireActiveQueryForScope(slice.queryScopeId);
+      const identity = { resourceType: slice.resourceType, queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint };
+      return query.legacyWindowParameter && input.generation % 7 !== 0
+        ? { ...identity, coverage: "bounded-window", sliceId: `daily-${input.now.toISOString().slice(0, 10)}`, from, to }
+        : { ...identity, coverage: "whole-family", sliceId: "whole" };
+    }),
+  });
+}
+
 export function buildEpicBetaSmartResourceScope(input: {
   permissionVersion: SmartPermissionVersion;
   resourceType: string;
@@ -597,9 +615,12 @@ export function buildEpicBetaInitialFhirPageUrl(input: {
       queryScopeId: query.queryScopeId,
     }),
   );
+  // Frozen pre-fix runs keep their original request identity during deployment.
+  const legacyCarePlan = query.queryScopeId === "care-plans" && input.retrievalSlice.queryFingerprint
+    === sha256Hex(`epic-fhir-r4:CarePlan:search:patient:_count=${input.pageCount}:v1`);
   if (
     query.resourceType !== input.retrievalSlice.resourceType ||
-    expectedQueryFingerprint !== input.retrievalSlice.queryFingerprint
+    (!legacyCarePlan && expectedQueryFingerprint !== input.retrievalSlice.queryFingerprint)
   ) {
     throw new TypeError("Epic beta retrieval identity does not match its active query scope.");
   }
@@ -617,7 +638,7 @@ export function buildEpicBetaInitialFhirPageUrl(input: {
   }
   const url = new URL(`${base}/${template.resourceType}`);
   url.searchParams.set("patient", input.patientId);
-  for (const parameter of template.fixedSearchParameters) {
+  for (const parameter of legacyCarePlan ? [] : template.fixedSearchParameters) {
     url.searchParams.set(parameter.name, parameter.value);
   }
   if (input.retrievalSlice.coverage === "bounded-window" && windowParameter) {
