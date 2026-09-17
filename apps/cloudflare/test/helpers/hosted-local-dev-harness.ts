@@ -377,6 +377,11 @@ export async function startHostedLocalDevHarness(input: {
             throw new Error(formatFailure([
               `Hosted runner reported terminal error for ${userId}.`,
               `last status: ${JSON.stringify(sanitizeHostedStatusForFailureLog(status))}`,
+              `container failure logs: ${(stack?.stdoutTail(64_000) ?? "")
+                .split("\n")
+                .filter((line) => line.includes("Hosted execution container failed."))
+                .slice(-3)
+                .join("\n")}`,
             ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
           }
 

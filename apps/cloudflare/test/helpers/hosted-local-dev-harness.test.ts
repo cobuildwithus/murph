@@ -215,6 +215,14 @@ it("removes disposable hosted web smoke artifacts outside the E2E prod profile",
 
 it("fails fast when hosted completion reaches a terminal runner error", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const containerFailure = JSON.stringify({
+    message: "Hosted execution container failed.",
+    details: { runnerFailureKind: "runner_transport_failure", objectKey: "hidden-worker-object-key" },
+  });
+  startHostedLocalDevStack.mockResolvedValueOnce({
+    ...createHostedLocalDevStack(),
+    stdoutTail: () => `${containerFailure}\n${"unrelated teardown output\n".repeat(200)}`,
+  });
   const status = {
     inFlight: false,
     lastErrorCode: "configuration_error",
@@ -292,6 +300,8 @@ it("fails fast when hosted completion reaches a terminal runner error", async ()
       failureMessage = error instanceof Error ? error.message : String(error);
     }
 
+    expect(failureMessage).toContain("runner_transport_failure");
+    expect(failureMessage).not.toContain("hidden-worker-object-key");
     expect(failureMessage).toContain("snapshotRefPresent");
     expect(failureMessage).toContain("browserVaultReplicaRefPresent");
     expect(failureMessage).toContain("recentLogsPresent");
