@@ -1012,7 +1012,7 @@ all other gates passed. The namespace remains intact.
 
 The synthetic setup report discarded an existing structured container failure
 behind later teardown output. A test-only harness correction retains at most
-three matching failure records from a bounded 64,000-character tail, through
+three matching failure records from a bounded 64,000-character Worker tail, through
 the existing failure redaction. Regression proof checks that the underlying
 failure kind survives unrelated output and object references remain redacted.
 No runtime behavior, deployment gate, retry criterion or data authority changes.

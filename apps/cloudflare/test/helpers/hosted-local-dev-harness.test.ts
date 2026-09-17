@@ -1,3 +1,4 @@
+import { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -9,7 +10,7 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
 
-import type { HostedLocalDevConfig } from "@murphai/hosted-local-harness/dev-hosted-local/types";
+import type { BufferedNamedChildProcess, HostedLocalDevConfig } from "@murphai/hosted-local-harness/dev-hosted-local/types";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
 } from "../hosted-execution-fixtures.ts";
@@ -59,7 +60,7 @@ const createHostedLocalDevStack = (ready: Promise<void> = Promise.resolve()) => 
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
   },
   processes: {
-    cloudflare: null,
+    cloudflare: null as BufferedNamedChildProcess | null,
     healthCommons: null,
     linqTunnel: null,
     minio: null,
@@ -219,9 +220,18 @@ it("fails fast when hosted completion reaches a terminal runner error", async ()
     message: "Hosted execution container failed.",
     details: { runnerFailureKind: "runner_transport_failure", objectKey: "hidden-worker-object-key" },
   });
+  const stack = createHostedLocalDevStack();
   startHostedLocalDevStack.mockResolvedValueOnce({
-    ...createHostedLocalDevStack(),
-    stdoutTail: () => `${containerFailure}\n${"unrelated teardown output\n".repeat(200)}`,
+    ...stack,
+    processes: {
+      ...stack.processes,
+      cloudflare: {
+        child: new ChildProcess(), name: "cloudflare",
+        stdoutTail: () => containerFailure, stdoutText: () => containerFailure,
+        stderrTail: () => "", stderrText: () => "",
+      },
+    },
+    stdoutTail: () => "unrelated teardown output\n".repeat(3_000),
   });
   const status = {
     inFlight: false,
