@@ -56,6 +56,15 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'Local runs stay synchronous with the same slot rule',
     )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'when someone asks for a graph, chart, plot, or trend visualization and no dedicated chart or card tool fits, render it with this tool instead of declining',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'every series label and plotted value in the prompt',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'restate the key values in the reply text',
+    )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'a known preference supports voice',
     )

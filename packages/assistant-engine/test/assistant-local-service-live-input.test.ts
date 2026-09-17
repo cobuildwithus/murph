@@ -58,6 +58,7 @@ import {
   waitForRpcMethod,
 } from './assistant-codex-runtime.harness.ts'
 import { executeCodexAssistantTurnAttempt } from '../src/assistant/codex-runtime.ts'
+import { ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION } from '../src/assistant/group-reply-reconsideration.ts'
 
 test('sendAssistantMessageLocal live-steers same-conversation input without provider replay', async () => {
   const progressDeliveryDependencies = {
@@ -3878,18 +3879,17 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     ).toMatchObject({
       prompt: 'Initial group message\n\nActually, plans changed.',
       turnContext: expect.stringContaining(
-        'The unsent draft neither answers a request nor keeps Murph\'s floor; the latest accepted message decides who owns the updated beat.',
+        ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION,
       ),
     })
-    expect(
-      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
-    ).toContain(
-      'If the latest accepted message gives another human the floor, finish without a reply.',
+    expect(ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION).toContain(
+      'a later human-to-human aside does not cancel it',
     )
-    expect(
-      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
-    ).toContain(
-      'Treat every request answered only in the unsent draft as unanswered; if Murph still owns the beat, include every still-relevant answer in the final result.',
+    expect(ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION).toContain(
+      'Finish without a reply only when no accepted message still merits a text reply',
+    )
+    expect(ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION).not.toContain(
+      'the latest accepted message decides',
     )
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,

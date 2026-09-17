@@ -363,6 +363,75 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     },
   )
 
+  it.skipIf(process.env.MURPH_MEASURE_GRAPH_IMAGE_INPUT !== '1').each(['direct', 'group'] as const)(
+    'graph image guidance: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const headTools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: true, progressUpdatesAvailable: false,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-10-01',
+        currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      // The base has the same prompt layers/tools; its only authored differences
+      // are the requested-graph sentences on generate_image and this group-image line.
+      const graphGuidanceStart = ' Requested graphs: when someone asks for a graph'
+      const currentGroupImageLine = 'No decorative/unshared-data group images.'
+      const baseGroupImageLine = 'No decorative/private-health group images.'
+      const headInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      assert.ok(headInstructions.includes(currentGroupImageLine))
+      const headImageTool = headTools.find((tool) => tool.name === 'generate_image')
+      assert.ok(headImageTool)
+      assert.ok(headImageTool.description.includes(graphGuidanceStart))
+      const baseTools = headTools.map((tool) => tool.name === 'generate_image'
+        ? { ...tool, description: tool.description.slice(0, tool.description.indexOf(graphGuidanceStart)) }
+        : tool)
+      const measurements = []
+      for (const phase of ['base', 'head'] as const) {
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        const tools = phase === 'base' ? baseTools : headTools
+        const developerInstructions = phase === 'base' ? headInstructions.replace(currentGroupImageLine, baseGroupImageLine) : headInstructions
+        const prompt = [layers.dynamicTurnContextPrompt, 'Can you make us a sleep trend graph for the last week?'].join('\n\n')
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          dynamicTools: tools, developerInstructions, prompt, groupConversation: scope === 'group',
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(stub.requestCountSinceBaseline(), 1)
+        const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(captured)
+        const body = readRecord(JSON.parse(captured.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        assert.equal(captured.json.includes('Requested graphs:'), phase === 'head')
+        measurements.push({ phase, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+          registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+          instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, prompt].join('\n\n')),
+          exclusions: [...new Set([...captured.excludedTransportFields, 'prompt_cache_key'])],
+        })
+      }
+      process.stdout.write('[graph-image-input-proof] ' + JSON.stringify({ scope, measurements,
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured; scripted usage is not tokenization.',
+        baseline: '4daaf3601f78; exact generate_image description and group-image line ablation; same tools and synthetic history',
+      }) + '\n')
+    },
+  )
+
   it.skipIf(process.env.MURPH_MEASURE_MEAL_INPUT !== '1').each(['direct', 'group'] as const)(
     'meal recovery: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {
       stub ??= await startScriptedResponsesStub()

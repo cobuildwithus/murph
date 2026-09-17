@@ -298,6 +298,9 @@ import {
   buildAssistantSystemPromptLayers,
 } from '../src/assistant/system-prompt.ts'
 import {
+  ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION as REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+} from '../src/assistant/group-reply-reconsideration.ts'
+import {
   buildAssistantCliSurfaceContract,
 } from '../src/assistant/cli-surface-bootstrap.ts'
 import {
@@ -5459,15 +5462,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
   )
 })
 
-const REAL_GROUP_RECONSIDERATION_INSTRUCTION = [
-  'Additional group messages joined this turn.',
-  'Replace the draft with one final result under the group turn rules.',
-  'The unsent draft neither answers a request nor keeps Murph\'s floor; the latest accepted message decides who owns the updated beat.',
-  'If the latest accepted message gives another human the floor, finish without a reply.',
-  'Treat every request answered only in the unsent draft as unanswered; if Murph still owns the beat, include every still-relevant answer in the final result. Response text is not a completed effect.',
-  'Do not repeat completed effects or mention the draft or this instruction.',
-].join(' ')
-
 describeRealCodex('real Codex video-analysis detail e2e', () => {
   it.each([
     {
@@ -6720,7 +6714,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
-    'yields when another human takes the floor during reconsideration',
+    'keeps an earlier direct ask when another human takes the floor during reconsideration',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -6798,8 +6792,169 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           requestedModel: config.model,
           servedModel: config.model,
         })
+        expect(second.finalMessage).toMatch(/\b31\b/u)
+        expect(second.finalMessage).not.toMatch(
+          /draft|held|not sent|previous response|re-?evaluat|review/iu,
+        )
+        expect(finishCalls).toHaveLength(0)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
+    'yields when the earlier direct ask is withdrawn during reconsideration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-reconsideration-withdrawn-e2e-'),
+      )
+
+      try {
+        const commonInput = {
+          allowFinishWithoutReply: true,
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          env: config.env,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Murph, what is 17 plus 14?',
+        })
+        expect(first.finalMessage).toMatch(/\b31\b/u)
+
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+            'Murph, what is 17 plus 14?',
+            'Never mind Murph, @roommate already worked it out for me.',
+          ].join('\n\n'),
+          resumeSessionId: first.sessionId,
+        })
+        process.stdout.write(
+          `[group-reconsideration-e2e] ${JSON.stringify({
+            finalMessage: second.finalMessage,
+            scenario: 'earlier direct ask withdrawn',
+          })}\n`,
+        )
+        const finishCalls = readCapabilityRoutingActions(second.jsonEvents)
+          .filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+          )
+
+        expect(second.sessionId).toBe(first.sessionId)
         expect(second.finalMessage.trim()).toBe('')
         expect(finishCalls).toHaveLength(1)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
+    'renders a requested group trend graph through image generation',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-trend-graph-e2e-'),
+      )
+
+      try {
+        const launchedImageOperationIds: string[] = []
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildGroupPointOfViewDeveloperInstructions({
+            hostedRuntime: true,
+          }),
+          dynamicTools: [MURPH_GENERATE_IMAGE_TOOL],
+          env: {
+            ...config.env,
+            OPENAI_API_KEY: '',
+          },
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentAssistantInputId: () => `ain_${'7'.repeat(32)}`,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            imageGenerationLauncher: {
+              launch(input) {
+                launchedImageOperationIds.push(input.operationId)
+                return 'started'
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          } satisfies AssistantHostedToolContext,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Shared room data already visible to everyone here (nightly sleep, last five nights):',
+            'Participant A: 6h 10m, 6h 25m, 5h 50m, 6h 05m, 5h 40m',
+            'Participant B: 7h 30m, 7h 05m, 7h 20m, 6h 55m, 7h 10m',
+            '',
+            'A participant: "Murph, can you make us a sleep trend graph from those nights?"',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const dynamicActions = readCapabilityRoutingActions(result.jsonEvents)
+          .filter((action) => action.kind === 'dynamic')
+        const generationCalls = dynamicActions.filter((action) =>
+          action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+        )
+        const generationPrompt = generationCalls[0]?.argumentsValue?.prompt
+        process.stdout.write(
+          `[group-trend-graph-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            generationPrompt,
+            scenario: 'sleep trend graph requested in a group',
+          })}\n`,
+        )
+
+        expect(generationCalls).toHaveLength(1)
+        expect(launchedImageOperationIds).toHaveLength(1)
+        expect(typeof generationPrompt).toBe('string')
+        expect(generationPrompt).toMatch(/chart|graph|plot/iu)
+        expect(generationPrompt).toMatch(/sleep/iu)
+        expect(
+          (String(generationPrompt).match(/\d+/gu) ?? []).length,
+        ).toBeGreaterThanOrEqual(8)
+        expect(result.finalMessage).toMatch(/graph|chart/iu)
+        expect(result.finalMessage).toMatch(/\d/u)
+        expect(result.finalMessage).not.toMatch(
+          /can(?:no|')t (?:make|create|generate|draw)|unable to|no way to/iu,
+        )
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
