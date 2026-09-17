@@ -58,6 +58,7 @@ describe("frozen legacy resource export", () => {
     expect((await readLegacyRuntimeMigrationIdentity(h.state)).userId).toBe("synthetic_member");
     h.kv.set("workspace-snapshot-orphan-candidate:a", { userId: "synthetic_other" });
     await expect(readLegacyRuntimeMigrationIdentity(h.state)).rejects.toThrow("conflicting");
+    h.kv.delete("workspace-snapshot-orphan-candidate:a");
     h.kv.set("future-unknown-resource", { synthetic: true });
     await expect(requireLegacyRuntimeStorageCoverage(h.state)).rejects.toThrow("unclassified durable state (future-unknown-resource)");
     h.kv.delete("future-unknown-resource");
@@ -67,9 +68,19 @@ describe("frozen legacy resource export", () => {
     h.kv.set("Ünknown", { synthetic: true });
     await expect(requireLegacyRuntimeStorageCoverage(h.state)).rejects.toThrow("unclassified durable state (unrecognized)");
     h.kv.delete("Ünknown");
-    h.kv.delete("workspace-snapshot-orphan-candidate:a");
     h.kv.set("runner:state:v1", { synthetic: true });
+    h.kv.set("gateway:projection:v1", { synthetic: true });
     expect([...await requireLegacyRuntimeStorageCoverage(h.state)]).toEqual(["synthetic_member"]);
     expect((await readLegacyRuntimeMigrationIdentity(h.state)).userId).toBe("synthetic_member");
+  });
+
+  it("reports every unclassified family from one scan so coverage can be extended at once", async () => {
+    const h = harness();
+    h.kv.set("workspace-snapshot:r2-put-drain:v1", { userId: "synthetic_member" });
+    h.kv.set("second-unknown:a", { synthetic: true });
+    h.kv.set("first-unknown:b", { synthetic: true });
+    h.kv.set("gateway:projection:v1", { synthetic: true });
+    await expect(requireLegacyRuntimeStorageCoverage(h.state))
+      .rejects.toThrow("unclassified durable state (first-unknown:*, second-unknown:*)");
   });
 });
