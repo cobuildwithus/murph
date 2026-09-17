@@ -116,8 +116,17 @@ type Commander = ReturnType<typeof workerCommander>;
 async function advanceSelectedObject(send: Commander, identity: CampaignIdentity, objectId: string) {
   const inspected = await send({ operation: "inspect_object", ...identity, objectId });
   if (inspected.objectId !== objectId) throw new Error("Migration inspection returned a different source.");
-  const observed = record(inspected.observation);
-  if (observed.kind !== "observed") throw new Error("Legacy source schema requires recovery before migration.");
+  let observed = record(inspected.observation);
+  if (observed.kind === "unsupported_schema") {
+    // Dormant sources predate the supported schema. Recovery is the same
+    // initialization ordinary activation performs, requested for this exact source.
+    const recovered = await send({ operation: "recover_object", ...identity, objectId });
+    if (recovered.objectId !== objectId) throw new Error("Migration recovery returned a different source.");
+    observed = record(recovered.observation);
+  }
+  if (observed.kind !== "observed") {
+    throw new Error(`Legacy source schema requires recovery before migration (${String(observed.kind)}, schema version ${String(observed.schemaVersion)}).`);
+  }
   if (observed.userId === null) return send({ operation: "advance_empty", ...identity, objectId });
   if (typeof observed.userId !== "string" || !observed.userId) throw new Error("Legacy source member identity is invalid.");
   const userId = observed.userId;

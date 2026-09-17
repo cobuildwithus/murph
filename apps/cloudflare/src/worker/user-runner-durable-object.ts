@@ -5,6 +5,7 @@ import type { HostedRuntimeMemberMigrationIdentity, HostedRuntimeObjectMigration
 import { isLegacyMemberReady, observeMember, requestLegacyMemberCheckpoint, requireLegacyMemberMigrationPhase } from "../user-runner/legacy-member-migration.ts";
 import { commandHostedRuntimeMigration } from "../runtime-migration-client.ts";
 import { observeLegacyRuntime } from "../user-runner/legacy-runtime-observation.ts";
+import { ensureRunnerStateSchema, RUNNER_STATE_SCHEMA_VERSION } from "../user-runner/runner-state-schema.ts";
 import { requireLegacyRuntimeStorageCoverage, readLegacyRuntimeMigrationIdentity, readLegacyRuntimeExportPage, type LegacyRuntimeExportCursor } from "../user-runner/legacy-runtime-export.ts";
 import { LegacyRuntimeFreeze, LegacyRuntimeFrozenError } from "../user-runner/legacy-runtime-freeze.ts";
 import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
@@ -102,6 +103,18 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   async inspectPostgresMigration() {
     const observation = await observeLegacyRuntime(this.migrationState);
     return { ...observation, freeze: await this.migrationFreeze.observe() };
+  }
+  /** Explicit operator recovery of a dormant source whose stored schema predates
+   * the supported versions: the same initialization ordinary activation runs,
+   * under the admission gate, followed by a fresh observation. Supported and
+   * newer-than-supported schemas are left untouched; inspection stays observational. */
+  async recoverPostgresMigrationSchema() {
+    await this.migrationFreeze.runAdmission(async () => {
+      const observed = await observeLegacyRuntime(this.migrationState);
+      const sql = this.migrationState.storage.sql;
+      if (observed.kind === "unsupported_schema" && sql && (observed.schemaVersion ?? 0) <= RUNNER_STATE_SCHEMA_VERSION) ensureRunnerStateSchema(sql);
+    });
+    return this.inspectPostgresMigration();
   }
 
   async bindUser(userId: string): Promise<{ userId: string }> {

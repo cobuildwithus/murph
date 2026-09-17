@@ -6,10 +6,11 @@ const first = "a".repeat(64);
 const second = "b".repeat(64);
 const intentOnly = "c".repeat(64);
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
-function harness(options: { drift?: boolean; split?: boolean; held?: boolean; intent?: boolean; loseAdvance?: boolean; loseSeal?: boolean; pending?: string[]; canonical?: boolean; loseEnrollment?: boolean; cleanupPages?: number; observation?: Record<string, unknown> } = {}) {
+function harness(options: { drift?: boolean; split?: boolean; held?: boolean; intent?: boolean; loseAdvance?: boolean; loseSeal?: boolean; pending?: string[]; canonical?: boolean; loseEnrollment?: boolean; cleanupPages?: number; observation?: Record<string, unknown>; unsupported?: boolean; recoverable?: boolean } = {}) {
   const sent: Array<Record<string, unknown>> = [];
   const known = new Set<string>(options.intent ? [intentOnly] : []);
   const late = new Set<string>();
+  const recovered = new Set<string>();
   let selected: string | null = null;
   const imported = new Set<string>();
   const activated = new Set<string>();
@@ -65,7 +66,9 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
           selected = [...known].sort((a, b) => Number(late.has(a)) - Number(late.has(b)) || a.localeCompare(b)).find(id => !activated.has(id)) ?? null;
         }
         return Response.json({ objectId: selected });
-      } else if (command.operation === "inspect_object") {
+      } else if (command.operation === "inspect_object" || command.operation === "recover_object") {
+        if (command.operation === "recover_object") { expect(command.objectId).toBe(selected); if (options.recoverable) recovered.add(command.objectId); }
+        if (options.unsupported && !recovered.has(command.objectId)) return Response.json({ objectId: command.objectId, observation: { kind: "unsupported_schema", schemaVersion: 19 } });
         return Response.json({ objectId: command.objectId, observation: { kind: "observed", userId: command.objectId === first ? "synthetic-member" : null, ...options.observation } });
       } else if (command.operation === "advance_member" || command.operation === "advance_empty") {
         expect(command.objectId).toBe(selected);
@@ -95,6 +98,23 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
 
 describe("rolling runtime migration operator", () => {
   afterEach(() => vi.useRealTimers());
+  it("recovers dormant pre-cutover schemas through one explicit exact-object command before advancing", async () => {
+    const h = harness({ unsupported: true, recoverable: true });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "members_migrated" });
+    expect(h.sent.filter(c => c.operation === "recover_object").map(c => c.objectId)).toEqual([first, second]);
+    const operations = h.sent.map(c => String(c.operation));
+    expect(operations.indexOf("recover_object")).toBeGreaterThan(operations.indexOf("inspect_object"));
+    expect(operations.indexOf("recover_object")).toBeLessThan(operations.indexOf("advance_member"));
+    expect(h.activated.size).toBe(2);
+  });
+
+  it("stops before any advance when recovery leaves the selected source unsupported", async () => {
+    const h = harness({ unsupported: true });
+    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: false })).rejects.toThrow("requires recovery before migration (unsupported_schema, schema version 19)");
+    expect(h.sent.filter(c => c.operation === "recover_object")).toHaveLength(1);
+    expect(h.sent.some(c => String(c.operation).startsWith("advance_"))).toBe(false);
+  });
+
   it("requires a converged release and lists objects without stored data", async () => {
     const h = harness();
     expect((await inventoryHostedLegacyRuntime(h.input)).objectIds).toEqual([first, second]);

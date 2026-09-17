@@ -205,6 +205,32 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(control).not.toHaveBeenCalled();
   });
 
+  it("recovers an exact object's dormant schema only on the Postgres-capable deployment", async () => {
+    const objectId = "a".repeat(64);
+    const request = () => new Request("https://runner.example.test/internal/runtime-migration", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ operation: "recover_object", objectId, namespaceId: "synthetic-namespace", workerVersion: "synthetic-version" }),
+    });
+    const disabled = createUserRunnerDurableObject({ CF_VERSION_METADATA: { id: "synthetic-version" }, HOSTED_RUNTIME_POSTGRES_ENABLED: "false" });
+    const disabledRecover = vi.spyOn(disabled.durableObject, "recoverPostgresMigrationSchema");
+    const disabledEnv = { ...disabled.env, USER_RUNNER: { get: () => disabled.durableObject, idFromString: (id: string) => id } };
+    expect((await worker.fetch(await signControlRequest(request()), disabledEnv as never)).status).not.toBe(200);
+    expect(disabledRecover).not.toHaveBeenCalled();
+    const harness = createUserRunnerDurableObject({ CF_VERSION_METADATA: { id: "synthetic-version" }, HOSTED_RUNTIME_POSTGRES_ENABLED: "true" });
+    const recover = vi.spyOn(harness.durableObject, "recoverPostgresMigrationSchema");
+    const control = vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration");
+    const get = vi.fn(() => harness.durableObject);
+    const env = { ...harness.env, USER_RUNNER: { get, idFromString: (id: string) => id } };
+    expect((await worker.fetch(request(), env as never)).status).toBe(401);
+    expect(await harness.durableObject.inspectPostgresMigration()).toMatchObject({ kind: "unsupported_schema" });
+    const response = await worker.fetch(await signControlRequest(request()), env as never);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ objectId, observation: { kind: "observed" } });
+    expect(get).toHaveBeenCalledWith(objectId);
+    expect(recover).toHaveBeenCalledOnce();
+    expect(control).not.toHaveBeenCalled();
+  });
+
   it.each(["quiesce_member", "freeze_member", "activate_member"])("rejects raw operator transition %s without an exact-object handoff", async operation => {
     const harness = createUserRunnerDurableObject({ CF_VERSION_METADATA: { id: "synthetic-version" }, HOSTED_RUNTIME_POSTGRES_ENABLED: "true" });
     const control = vi.spyOn(runtimeMigrationClient, "commandHostedRuntimeMigration");

@@ -807,3 +807,16 @@ deletion are unchanged, so write-authority closure is preserved. Receipts
 admitted without an MD5 keep the bounded read-back until they age out. The
 composed rehearsal and a fleet checkpoint p90 check remain the deployment gate
 before the remaining members migrate in bounded batches.
+
+## Dormant schema recovery for the fleet campaign
+
+The first fleet batch stopped on its first baseline object: every legacy
+source not activated since the schema-21 release still stores an older
+schema, inspection reports it as unsupported without mutation, and the
+operator had no way past it, which also held the durable selection for
+automatic first-use handoffs. The operator now requests an explicit
+exact-object `recover_object` before the member advance. The Worker runs the
+ordinary schema initialization on that source under the admission gate and
+returns a fresh observation; supported, quiescing, frozen and
+newer-than-supported sources are untouched. A source that stays unsupported
+after recovery still stops the run with its kind and version.
