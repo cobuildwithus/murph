@@ -869,7 +869,11 @@ export class RunnerContainer extends Container {
       if (binding.userId !== null && binding.userId !== userId) {
         throw new Error("Hosted runner retirement target belongs to another member.");
       }
-      claimId ??= binding.claimId ?? undefined;
+      // A selected allocation can outlive a bind RPC that never committed.
+      // Retire an unbound target without inventing a persisted claim; bound
+      // targets still validate the caller's claim below. No await may separate
+      // this read from the retirement fence.
+      claimId = binding.claimId === null ? undefined : claimId ?? binding.claimId;
     }
     // Fence new member admissions synchronously, before the stop joins the
     // lifecycle queue. A failed/unknown native stop leaves this durable row retiring.
