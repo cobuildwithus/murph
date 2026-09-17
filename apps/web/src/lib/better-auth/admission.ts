@@ -35,8 +35,9 @@ export async function admitHostedAuthOtpRequest(input: {
   const send = input.operation === "send";
   for (const [key, max, window] of [
     [`${input.operation}:ip:${ip}`, send ? 20 : 100, 600],
+    // A rejected short-window retry must not spend the longer contact budget.
+    ...(send ? [[`send:cooldown:${contact.kind}:${contact.value}`, 2, 60] as const] : []),
     [`${input.operation}:contact:${contact.kind}:${contact.value}`, send ? 5 : 20, 600],
-    ...(send ? [[`send:cooldown:${contact.kind}:${contact.value}`, 1, 60] as const] : []),
   ] as const) {
     if (!(await limits.consume(key, { max, window })).allowed) {
       throw hostedOnboardingError({ code: "AUTH_RATE_LIMITED", httpStatus: 429, message: "Too many sign-in attempts. Wait a moment and try again.", retryable: true });
