@@ -6884,8 +6884,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 
       try {
         const launchedImageOperationIds: string[] = []
-        const result = await executeRealCodexAppServerTurn({
-          approvalPolicy: 'never',
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          configOverrides: ['features.image_generation=false'],
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
@@ -6894,7 +6895,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           developerInstructions: buildGroupPointOfViewDeveloperInstructions({
             hostedRuntime: true,
           }),
-          dynamicTools: [MURPH_GENERATE_IMAGE_TOOL],
+          dynamicTools: [MURPH_GENERATE_IMAGE_TOOL, MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
+          groupConversation: true,
           env: {
             ...config.env,
             OPENAI_API_KEY: '',
@@ -6917,6 +6919,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           } satisfies AssistantHostedToolContext,
           model: config.model,
           modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write' as const,
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        }
+        const result = await executeRealCodexAppServerTurn({
+          ...commonInput,
           prompt: [
             'Shared room data already visible to everyone here (nightly sleep, last five nights):',
             'Participant A: 6h 10m, 6h 25m, 5h 50m, 6h 05m, 5h 40m',
@@ -6924,9 +6933,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             '',
             'A participant: "Murph, can you make us a sleep trend graph from those nights?"',
           ].join('\n'),
-          reasoningEffort: 'low',
-          sandbox: 'workspace-write',
-          workingDirectory,
         })
         const dynamicActions = readCapabilityRoutingActions(result.jsonEvents)
           .filter((action) => action.kind === 'dynamic')
@@ -6947,14 +6953,93 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(typeof generationPrompt).toBe('string')
         expect(generationPrompt).toMatch(/chart|graph|plot/iu)
         expect(generationPrompt).toMatch(/sleep/iu)
+        expect(generationPrompt).toMatch(/#f5f0e8/iu)
+        expect(generationPrompt).toMatch(/#2d3436/iu)
+        expect(generationPrompt).toMatch(/#7a8c6e/iu)
+        expect(generationPrompt).toMatch(/Fraunces|serif/iu)
+        expect(generationPrompt).toMatch(/DM Sans/iu)
+        expect(generationPrompt).toMatch(/DM Mono|monospace/iu)
+        expect(generationPrompt).not.toMatch(/blue|teal|purple|terracotta/iu)
         expect(
-          (String(generationPrompt).match(/\d+/gu) ?? []).length,
+          (String(generationPrompt).replace(/#[0-9a-f]{6}/giu, '').match(/\d+/gu) ?? []).length,
         ).toBeGreaterThanOrEqual(8)
-        expect(result.finalMessage).toMatch(/graph|chart/iu)
-        expect(result.finalMessage).toMatch(/\d/u)
+        expect(result.finalMessage).toMatch(/making|creating|working|on it/iu)
+        expect(String(generationPrompt).match(/#[0-9a-f]{6}/giu)?.every(
+          (color) => ['#f5f0e8', '#2d3436', '#7a8c6e', '#d4c4a8'].includes(color.toLowerCase()),
+        )).toBe(true)
         expect(result.finalMessage).not.toMatch(
           /can(?:no|')t (?:make|create|generate|draw)|unable to|no way to/iu,
         )
+
+        // Synthetic pixels stand in for image-provider output; this proves the
+        // real assistant's completion attachment and numeric reply, not rendering.
+        const imageBytes = Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+          'base64',
+        )
+        const media = {
+          alt: 'Sleep trend over five nights', contentType: 'image/png',
+          filename: 'sleep-trend.png', kind: 'vault_image',
+          ref: 'raw/captures/2026/10/sleep-trend/sleep-trend.png',
+          sha256: createHash('sha256').update(imageBytes).digest('hex'),
+          sizeBytes: imageBytes.byteLength, source: 'gpt-image-2',
+        } as const
+        await mkdir(path.dirname(path.join(workingDirectory, media.ref)), { recursive: true })
+        await writeFile(path.join(workingDirectory, media.ref), imageBytes)
+        const completionInputId = `ain_${'8'.repeat(32)}`
+        const originInputId = commonInput.hostedToolContext.currentAssistantInputId()
+        const identity = `image-completion:${'9'.repeat(64)}`
+        const trustedHostedImageCompletion = readTrustedHostedImageCompletion({
+          sourceRef: {
+            dedupeKey: identity, eventId: identity, itemId: identity,
+            kind: 'hosted-mailbox', lane: 'system', laneSeq: identity,
+            payloadSchema: ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
+            payloadSource: 'inline', source: 'hosted-mailbox',
+            wakeSchema: ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
+          },
+          text: renderAssistantHostedImageCompletionSystemText({
+            originAssistantInputId: originInputId, originAssistantInputIdExact: true,
+            result: { media, runtimeIssue: null, savedImageRef: media.ref },
+          }),
+          transcriptText: null,
+        })
+        const completionContext = buildTrustedHostedImageCompletionTurnContext([{
+          inputId: completionInputId, trustedHostedImageCompletion,
+        }])
+        expect(trustedHostedImageCompletion?.status).toBe('ready')
+        expect(completionContext).toBeTruthy()
+        expect(result.sessionId).toBeTruthy()
+        const completion = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          hostedToolContext: {
+            ...commonInput.hostedToolContext,
+            currentAssistantInputId: () => completionInputId,
+            currentHostedImageCompletionEffectScope: () => ({
+              authorizedOriginAssistantInputId: originInputId,
+              completionAssistantInputId: completionInputId,
+              exactMedia: [media],
+            }),
+          },
+          prompt: resolveAssistantProviderPrompt({
+            dynamicTools: commonInput.dynamicTools,
+            prompt: 'The trusted runtime completion is the only current input. Continue its pending image-delivery task.',
+            providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
+            turnContextPrompt: completionContext,
+            workingDirectory,
+          }),
+          resumeSessionId: result.sessionId,
+        })
+        process.stdout.write(`[group-trend-graph-completion-e2e] ${JSON.stringify({
+          finalMessage: completion.finalMessage, mediaCount: completion.responseMedia?.length,
+        })}\n`)
+        const completionCalls = readCapabilityRoutingActions(completion.jsonEvents)
+          .filter((action) => action.kind === 'dynamic')
+        expect(completion.responseMedia).toEqual([media])
+        expect(completionCalls.filter((action) => action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name)).toHaveLength(1)
+        expect(completionCalls.filter((action) => action.tool === MURPH_GENERATE_IMAGE_TOOL.name)).toHaveLength(0)
+        expect(launchedImageOperationIds).toHaveLength(1)
+        expect(completion.finalMessage).toMatch(/\d+(?:[.,]\d+)?\s*(?:h\b|hours?\b|m\b|min(?:utes?)?\b)|\d+:\d+/iu)
+        expect(completion.finalMessage).not.toMatch(/still (?:making|generating)|not ready|unable to/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

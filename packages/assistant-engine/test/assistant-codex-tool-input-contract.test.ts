@@ -385,7 +385,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
       })
       // The base has the same prompt layers/tools; its only authored differences
-      // are the requested-graph sentences on generate_image and this group-image line.
+      // are the image-tool descriptions and messaging presentation guidance.
       const graphGuidanceStart = ' Requested graphs, charts, and trend lines:'
       const currentGroupImageLine = 'No decorative group images.'
       const baseGroupImageLine = 'No decorative/private-health group images.'
@@ -394,9 +394,15 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const headImageTool = headTools.find((tool) => tool.name === 'generate_image')
       assert.ok(headImageTool)
       assert.ok(headImageTool.description.includes(graphGuidanceStart))
-      const baseTools = headTools.map((tool) => tool.name === 'generate_image'
-        ? { ...tool, description: tool.description.slice(0, tool.description.indexOf(graphGuidanceStart)) }
-        : tool)
+      const baseTools = headTools.map((tool) => {
+        if (tool.name === 'generate_image') {
+          return { ...tool, description: tool.description.slice(0, tool.description.indexOf(graphGuidanceStart)) }
+        }
+        if (tool.name === 'attach_response_media') {
+          return { ...tool, description: tool.description.replace(' For charts, include the key source numbers in the final reply text.', '') }
+        }
+        return tool
+      })
       const measurements = []
       for (const phase of ['base', 'head'] as const) {
         await stopWarmCodexAppServer()
@@ -404,7 +410,10 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         stub.captureProviderRequestDiagnostics({ completeInput: true })
         stub.queue({ text: CONTRACT_CAPTURE_DONE })
         const tools = phase === 'base' ? baseTools : headTools
-        const developerInstructions = phase === 'base' ? headInstructions.replace(currentGroupImageLine, baseGroupImageLine) : headInstructions
+        const developerInstructions = phase === 'base'
+          ? headInstructions.replace(currentGroupImageLine, baseGroupImageLine)
+            .replace('safety, and fallback.', 'safety, and fallback; do not repeat visuals.')
+          : headInstructions
         const prompt = [layers.dynamicTurnContextPrompt, 'Can you make us a sleep trend graph for the last week?'].join('\n\n')
         const result = await executeCodexAppServerTurn({
           ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -428,7 +437,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       }
       process.stdout.write('[graph-image-input-proof] ' + JSON.stringify({ scope, measurements,
         tokens: null, tokenLimitation: 'No exact Terra tokenizer configured; scripted usage is not tokenization.',
-        baseline: '4daaf3601f78; exact generate_image description and group-image line ablation; same tools and synthetic history',
+        baseline: '4daaf3601f78; exact image-tool description and media-guidance ablation; same tools and synthetic history',
       }) + '\n')
     },
   )

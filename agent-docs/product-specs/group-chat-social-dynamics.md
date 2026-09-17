@@ -197,6 +197,13 @@ consecutive replies. Explicitly requested tool-owned media or effects may still
 accompany the text, and scheduled editions keep their existing one-message
 contract.
 
+A requested graph can use image generation when no chart or card fits. Its
+prompt carries the plotted values and defaults to the palette, typography,
+and flat chart styling in `DESIGN.md`. The launch reply acknowledges that the
+image is being made; the trusted completion attaches it once and includes key
+source numbers in text. Image eligibility, data access, and plan limits retain
+their existing owners.
+
 This reuses the current active-turn admission, accepted-input journal, provider
 continuation, transcript, and outbox paths. It adds no database state, queue,
 scheduler, webhook debounce, delivery policy, or new tool.

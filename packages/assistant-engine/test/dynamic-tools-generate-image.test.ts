@@ -59,9 +59,23 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'Requested graphs, charts, and trend lines: render them with this tool when no chart or card tool fits',
     )
-    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      'state the key numbers in the reply text',
+    expect(MURPH_ATTACH_RESPONSE_MEDIA_TOOL.description).toContain(
+      'For charts, include the key source numbers in the final reply text',
     )
+    for (const chartStyle of [
+      'Default chart prompts to Murph',
+      'cream paper (#f5f0e8)',
+      'slate text (#2d3436)',
+      'solid sage data lines (#7a8c6e)',
+      'dashed sand reference lines (#d4c4a8)',
+      'Use only these colors for chart marks: sage and slate for separate data series',
+      'Fraunces-style serif titles and numbers',
+      'DM Sans body text',
+      'DM Mono labels',
+      'flat and legible without gradients or decorative shadows',
+    ]) {
+      expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(chartStyle)
+    }
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'a known preference supports voice',
     )

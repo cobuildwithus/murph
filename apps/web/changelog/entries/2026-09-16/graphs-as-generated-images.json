@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Ask for a graph and get a picture",
     "summary": "Ask Murph for a graph, chart, or trend line, such as how everyone's sleep has moved over the past week, and it draws one as an image and sends it to the chat.",
-    "details": "The graph uses only data already shared in that conversation, and Murph repeats the key numbers in text because a drawn chart is a picture rather than an exact readout. Image generation follows the usual plan limits.",
+    "details": "Charts default to Murph’s cream, slate, and sage palette with clear labels. Murph repeats the key numbers in text because a drawn chart is a picture rather than an exact readout. Image generation follows the usual plan limits.",
     "relevanceTags": [
       "images",
       "sleep",
