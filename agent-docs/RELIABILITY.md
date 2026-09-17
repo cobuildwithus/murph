@@ -2437,7 +2437,12 @@ to apply after cutover.
   starts and stopped, aborted, expired or failed provider handles supply no new
   evidence. Linq's existing provider cooldown is unchanged. Signup's
   early Web typing hint is also retained, so neither produces a missing-typing
-  false positive. Callback arrival order cannot replace an earlier acceptance.
+  false positive. Provider-accepted Web instant replies carry their existing
+  delivery identity into the post-response trace writer, including completed
+  webhook replays. The ordinary accepted-delivery link resolves that exact
+  synthetic conversation item without inventing a runtime attempt or placing
+  telemetry on the reply path. Sends without provider acceptance gain no accepted link.
+  Callback arrival order cannot replace an earlier acceptance.
   No acceptance observation after 30 seconds is eligible as missing evidence;
   the existing five-minute alert cron provides fallback evaluation, while staged
   and accepted-typing callbacks evaluate their exact inputs after responding.

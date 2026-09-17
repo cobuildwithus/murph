@@ -25,6 +25,7 @@ export type HostedWebhookPlan<TResult, TSideEffect = never> = {
 };
 
 export type HostedWebhookWakeHandoff = {
+  acceptedLinqDeliveryId?: string;
   eventId: string;
   linqChatId?: string | null;
   mailboxItemId: string;

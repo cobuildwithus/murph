@@ -6,6 +6,7 @@ import {
   buildHostedRuntimeTypingAlertQuery,
   runHostedRuntimeTypingAlertMonitor,
 } from "@/src/lib/hosted-runtime-latency/typing-alert-monitor";
+import { linkHostedIngressLatencyTracesToAcceptedLinqDelivery } from "@/src/lib/hosted-runtime-latency/store";
 import { deleteExpiredTypingAlerts } from "@/src/lib/hosted-retention/cleanup";
 import { sendRecoverableHostedLinqAlertsBestEffort } from "@/src/lib/hosted-onboarding/linq-alert-email";
 
@@ -64,6 +65,43 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
         now, userId: "synthetic-member", assistantInputIds: ["input-warm-slow"],
       }));
       expect(scoped.map((row) => row.id)).toEqual(["runtime-typing/warm-slow"]);
+    });
+  });
+
+  it("resolves synthetic instant replies through the production delivery link and leaves failed sends alertable", async () => {
+    await withTables(async (tx) => {
+      for (const id of ["instant-accepted", "instant-failed", "instant-ordinary"]) {
+        await insertTrace(tx, id, { elapsed: null });
+      }
+      await insertDelivery(tx, "delivery-instant", "chat-instant", 2500);
+      await insertDelivery(tx, "delivery-failed", "chat-failed", null);
+      const readAlerts = () => tx.$queryRaw<Array<{ id: string }>>(buildHostedRuntimeTypingAlertQuery({ now }));
+      expect((await readAlerts()).map((row) => row.id)).toContain("runtime-typing/instant-accepted");
+      // Synthetic outbound contexts have no source-message routing key or typing
+      // observation. Only their exact provider-accepted delivery answers them.
+      for (const [id, deliveryId] of [["instant-accepted", "delivery-instant"], ["instant-failed", "delivery-failed"]] as const) {
+        await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
+          authenticatedUserId: "synthetic-member",
+          answeredMailboxItemIds: [`mailbox-${id}`],
+          linqDeliveryId: deliveryId,
+          prisma: tx,
+          replyRuntimeAttemptId: null,
+        })).resolves.toEqual({ matchedCount: 1, recorded: true });
+      }
+      expect((await readAlerts()).map((row) => row.id).sort()).toEqual([
+        "runtime-typing/instant-failed", "runtime-typing/instant-ordinary",
+      ]);
+      await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
+        authenticatedUserId: "synthetic-member",
+        answeredMailboxItemIds: ["mailbox-instant-accepted"],
+        linqDeliveryId: "delivery-competing",
+        prisma: tx,
+        replyRuntimeAttemptId: null,
+      })).resolves.toEqual({ matchedCount: 0, recorded: false });
+      expect(await tx.$queryRaw`SELECT reply_runtime_attempt_id, linq_delivery_id
+        FROM hosted_ingress_latency_trace WHERE id = 'instant-accepted'`).toEqual([
+        { reply_runtime_attempt_id: null, linq_delivery_id: "delivery-instant" },
+      ]);
     });
   });
 
@@ -238,10 +276,14 @@ async function withTables(run: (tx: Prisma.TransactionClient) => Promise<void>) 
   try {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`CREATE TEMP TABLE hosted_mailbox_item (
-        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source_message_lookup_key TEXT, ai_usage_denied_at TIMESTAMP(3)
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source_message_lookup_key TEXT, ai_usage_denied_at TIMESTAMP(3),
+        lane TEXT NOT NULL DEFAULT 'conversation', lane_seq BIGINT NOT NULL DEFAULT 1,
+        kind TEXT NOT NULL DEFAULT 'conversation.message', created_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP
       ) ON COMMIT DROP`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_ingress_latency_trace (
-        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source TEXT NOT NULL, mailbox_item_id TEXT,
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source TEXT NOT NULL, mailbox_item_id TEXT UNIQUE,
+        mailbox_lane TEXT, mailbox_lane_seq BIGINT, runtime_attempt_id TEXT, reply_runtime_attempt_id TEXT,
+        created_at TIMESTAMP(3), updated_at TIMESTAMP(3),
         assistant_input_id TEXT, linq_delivery_id TEXT, accepted_at TIMESTAMP(3), webhook_received_at TIMESTAMP(3),
         workspace_restore_done_at TIMESTAMP(3), ingress_typing_accepted_at TIMESTAMP(3), phase_breakdown_json JSONB
       ) ON COMMIT DROP`;

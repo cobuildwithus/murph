@@ -96,7 +96,8 @@ vi.mock("@/src/lib/hosted-execution/usage", () => ({
   recordHostedAiUsageRecords: mocks.recordHostedAiUsageRecords,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
+vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async (importOriginal) => ({
+  buildHostedLinqDeliveryId: (await importOriginal<typeof import("@/src/lib/hosted-onboarding/linq-delivery-store")>()).buildHostedLinqDeliveryId,
   claimHostedLinqDeliveryProviderDispatchTx:
     mocks.claimHostedLinqDeliveryProviderDispatchTx,
   hasConflictingHostedLinqInstantFirstTurnForChatTx:
@@ -789,6 +790,7 @@ describe("hosted Linq instant first turn", () => {
       kind: "accepted",
       wakeHandoff: {
         ...WAKE_HANDOFF,
+        acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
         wakeMailboxCheckpoint: {
           lane: "conversation",
@@ -796,6 +798,26 @@ describe("hosted Linq instant first turn", () => {
         },
       },
     });
+  });
+
+  it("retains the accepted delivery link on completed webhook replay without resending", async () => {
+    const result = await completeHostedLinqInstantFirstTurn({
+      generation: { kind: "completed" },
+      inboundMessageId: "inbound_message_123",
+      participantContact: { kind: "phone", lookupKey: "phone_lookup_123", value: "+15551234567" },
+      prisma: createPrisma(),
+      recipientPhoneNumber: "+15550000000",
+      service: "iMessage",
+      wakeHandoff: WAKE_HANDOFF,
+    });
+    expect(result).toMatchObject({
+      kind: "accepted",
+      wakeHandoff: {
+        acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
+        mailboxItemId: "mailbox_outbound",
+      },
+    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("makes unsafe model output unavailable", async () => {
@@ -866,6 +888,7 @@ describe("hosted Linq instant first turn", () => {
       kind: "accepted",
       wakeHandoff: {
         ...WAKE_HANDOFF,
+        acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
         wakeMailboxCheckpoint: {
           lane: "conversation",
@@ -1026,6 +1049,7 @@ describe("hosted Linq instant first turn", () => {
       kind: "accepted",
       wakeHandoff: {
         ...WAKE_HANDOFF,
+        acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
         wakeMailboxCheckpoint: {
           lane: "conversation",
