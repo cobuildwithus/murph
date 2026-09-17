@@ -9,6 +9,21 @@ capability, not a fleet-wide backend selector. With that capability enabled,
 `rolling` routes each member by explicit migration phase; unregistered existing
 members remain legacy. Disabled deployments cannot start migrated members.
 
+A rolling campaign closes through the same `activate` operation as the finite
+draining campaign, requested by the operator only under an explicit finalize
+option and never from a targeted canary. Web proves retirement under the
+exclusive campaign lock: the operator's final provider census equals the
+registered sources (baseline plus late) by count and hash, the sealed baseline
+is intact, every source holds a terminal disposition, every source-bound and
+every owner-row identity is `postgres`, every member holds an owner row, and no
+deleted-account cleanup is still enrolling identities. Active Postgres members
+are permitted; legacy or pending authority is not. The gate then reads
+`postgres` and cannot reopen: new members route to Postgres without a
+trigger-enrolled owner, the first runtime claim creates their owner row, and
+later compatible releases read the closed gate idempotently. Physical deletion
+of the legacy namespace and removal of the finite bridge remain separate deploy
+steps after a legacy-traffic soak.
+
 Migration phase is separate from execution phase: `legacy -> quiescing ->
 freezing -> importing -> postgres`. Importing an owner row alone never activates
 execution. Quiescing keeps admitted callbacks available for checkpointing while

@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-09-15
-Updated: 2026-09-16
+Updated: 2026-09-17
 
 ## Goal and invariants
 
@@ -62,12 +62,18 @@ passing a timer never substitutes for safe handoff evidence.
 3. [complete] Implement hosted resumable operator, source discovery and creation
    barrier, new-member routing and full campaign closure.
 4. [complete] Focused race/crash tests, typechecks and composed rehearsal.
-5. [in progress] Candidate/privacy/complexity review, owner docs, changelog decision,
+5. [complete] Candidate/privacy/complexity review, owner docs, changelog decision,
    PR, green exact-head CI and final ReviewGPT.
-6. [pending] Merge and compatible Web/schema/Worker deployment; verify serving
+6. [complete] Merge and compatible Web/schema/Worker deployment; verify serving
    versions and inactive campaign before canary.
-7. [pending] Canary, full inventory migration including busy members and held
+7. [complete] Canary, full inventory migration including busy members and held
    obligations, and final live outcome verification.
+8. [in progress] Namespace retirement proof: prove complete accounting inside the
+   campaign lock, close the gate to `postgres`, verify existing and new-member
+   routing, then soak for legacy traffic.
+9. [pending] Remove the finite legacy bridge, the deployment capability and the
+   legacy namespace after the soak, with explicit authorization for the
+   irreversible namespace deletion.
 
 ## Verification
 
@@ -820,3 +826,35 @@ ordinary schema initialization on that source under the admission gate and
 returns a fresh observation; supported, quiescing, frozen and
 newer-than-supported sources are untouched. A source that stays unsupported
 after recovery still stops the run with its kind and version.
+
+## Fleet migration complete and namespace retirement proof
+
+The fleet campaign finished on 2026-09-17: every owner row reads `postgres`,
+every registered source (baseline plus the late sources that appeared after the
+seal) holds a terminal disposition, and a live inbound reply on a migrated
+member was verified. Six production blockers were fixed forward between the
+first canary and completion, each a dormant object carrying state the current
+code did not classify or a handoff waiting on a process that no longer existed;
+each fix landed with its own review and Worker-only rollout before the operator
+resumed. Aggregate counts only are recorded here; no member or source identity
+belongs in repository artifacts.
+
+The campaign gate deliberately stayed `rolling` because retirement required a
+separate proof. That proof reuses the existing `activate` operation instead of a
+new command or table. The operator sends it only when an explicit finalize
+option is set on a fleet-wide run (never for a targeted canary), and only after
+its own final accounting: live provider census covered by the registered
+sources, no canonical identity awaiting enrollment, no unfinished selection and
+a positive unmaterialized settlement. Web then re-proves retirement under the
+exclusive campaign lock: registered census equals the operator's census by count
+and hash, sealed baseline intact, every source terminal, every source-bound and
+owner-row identity `postgres`, every member with an owner row, and no pending
+cleanup enrollment. Active Postgres members are allowed; legacy or pending
+authority fails closed. The gate moves to `postgres` with its activation time
+and cleared selection, a repeated command re-verifies without mutation, and the
+identity check accepts later compatible releases so a re-run reads the closed
+gate instead of failing. Real-Postgres proof covers the late-source, incomplete
+disposition, non-Postgres owner, concurrent repeat, compatible-release and
+new-member routing cases; operator proof covers held members, late provider
+objects and the closed-gate re-run. Physical namespace deletion and bridge
+removal remain the next task and need explicit authorization.
