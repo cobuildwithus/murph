@@ -890,3 +890,10 @@ narrow census read, and zero external calls. It completes within the existing
 five-second transaction deadline; focused test and Web typecheck pass. This
 proof-only addition retains the substantive review under the isolated-test
 exemption. Final-head CI and the remaining operational tasks still apply.
+
+- Final-head CI exposed a pre-existing runtime-log test teardown race: pg-pool
+  finishes its bookkeeping before socket disconnects, and forced database deletion
+  can emit unhandled PostgreSQL 57P01. A synthetic 20-round reproduction failed
+  once with FORCE and zero times with ordinary DROP DATABASE. Removed FORCE; all
+  12 actual runtime-log PostgreSQL tests and Web typecheck pass. This isolated
+  test correction leaves the reviewed runtime candidate unchanged.

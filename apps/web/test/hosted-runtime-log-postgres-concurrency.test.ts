@@ -284,7 +284,8 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
       );
     }
     await pool?.end();
-    await admin?.query(`DROP DATABASE IF EXISTS "${testDatabaseName}" WITH (FORCE)`);
+    // pg-pool can resolve end() before its clients finish disconnecting.
+    await admin?.query(`DROP DATABASE IF EXISTS "${testDatabaseName}"`);
     await admin?.end();
   }, 30_000);
 
