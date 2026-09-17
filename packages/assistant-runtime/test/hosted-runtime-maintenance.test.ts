@@ -4381,7 +4381,7 @@ describe("runHostedDeviceSyncPass", () => {
       wakeReason: "webhook_hint",
     });
     assert.ok(entry.redactedJson);
-    // Exercise the shared 32-key sanitizer with the fully populated diagnostic.
+    // Exercise the shared bounded sanitizer with the fully populated diagnostic.
     expect(Object.keys(entry.redactedJson).length).toBeGreaterThan(32);
     const sharedDetails = sanitizeHostedExecutionStructuredLogDetails(entry.redactedJson);
     expect(sharedDetails?.junctionEcgBindingReason).toBe(expectedReason);

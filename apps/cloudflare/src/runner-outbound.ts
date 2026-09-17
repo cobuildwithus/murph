@@ -1,6 +1,6 @@
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
 import { presignManagedSnapshot, completeManagedSnapshotForSession } from "./managed-snapshot-control.ts";
-import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, commandHostedRuntimeReplicaPut } from "./runtime-resource-client.ts";
+import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, commandHostedRuntimeReplicaPut, HostedRuntimeReplicaPutRejectedError } from "./runtime-resource-client.ts";
 import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
 import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
 import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
@@ -3401,6 +3401,14 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
         userId: input.userId,
       }),
     });
+  } catch (error) {
+    if (!(error instanceof HostedRuntimeReplicaPutRejectedError)) throw error;
+    emitHostedExecutionStructuredLog({
+      component: "runner", phase: "wake.running", level: "warn",
+      message: "Hosted runtime replica write rejected.",
+      details: { errorCode: error.code, status: error.status },
+    });
+    return json({ code: error.code, error: "Hosted runtime replica write rejected." }, error.status);
   } finally {
     if (activePutWriteId) {
       await releaseBrowserVaultReplicaDirectPut({

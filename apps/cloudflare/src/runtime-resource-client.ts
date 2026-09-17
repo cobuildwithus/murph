@@ -4,6 +4,13 @@ import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import { readHostedWebControlPlaneResponseText } from "./runtime-platform/web-control-transport.ts";
 
+export class HostedRuntimeReplicaPutRejectedError extends Error {
+  readonly status = 409;
+  constructor(readonly code: "HOSTED_RUNTIME_OWNER_STALE" | "HOSTED_RUNTIME_RESOURCE_RETIRED") {
+    super(`Hosted runtime replica PUT rejected: ${code}.`);
+  }
+}
+
 export async function commandHostedRuntimeSnapshot(input: {
   source: Readonly<Record<string, unknown>>; userId: string; command: HostedRuntimeSnapshotCommand;
 }) {
@@ -68,7 +75,22 @@ export async function commandHostedRuntimeReplicaPut(input: {
     callbackSigning: env.webCallbackSigning, boundUserId: input.userId,
     method: "POST", path: HOSTED_RUNTIME_REPLICA_PUT_PATH, body: JSON.stringify(input.command), timeoutMs: env.webControlTimeoutMs,
   });
-  if (!response.ok) throw new Error(`Hosted runtime replica PUT command returned HTTP ${response.status}.`);
+  if (!response.ok) {
+    let code: unknown;
+    if (response.status === 409) {
+      try {
+        const body = JSON.parse(await readHostedWebControlPlaneResponseText({
+          response, description: "Hosted runtime replica PUT rejection", maxBytes: 1024,
+          signal: null, timeoutMs: env.webControlTimeoutMs,
+        }));
+        code = body?.error?.code;
+      } catch { /* Unknown responses remain failures, without copying their body. */ }
+    }
+    if (code === "HOSTED_RUNTIME_OWNER_STALE" || code === "HOSTED_RUNTIME_RESOURCE_RETIRED") {
+      throw new HostedRuntimeReplicaPutRejectedError(code);
+    }
+    throw new Error(`Hosted runtime replica PUT command returned HTTP ${response.status}.`);
+  }
   const result = JSON.parse(await readHostedWebControlPlaneResponseText({ response, description: "Hosted runtime replica PUT", maxBytes: 1024, signal: null, timeoutMs: env.webControlTimeoutMs }));
   if (typeof result?.applied !== "boolean") throw new TypeError("Hosted runtime replica PUT result is invalid.");
   return result.applied;

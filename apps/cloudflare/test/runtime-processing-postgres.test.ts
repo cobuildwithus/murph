@@ -1,5 +1,5 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeProcessingDiagnostics } from "../src/user-runner/diagnostics.ts";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeOwnerResponse, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ensurePostgresRuntimeProcessing } from "../src/runtime-processing.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
@@ -62,8 +62,48 @@ function harness() {
 }
 
 describe("Postgres runtime orchestration", () => {
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("returns a retry at command expiry without retiring or launching the uncertain owner", async () => {
+    vi.useFakeTimers();
+    const { source, container } = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner({ phase: "starting" }), "claimed"))
+      .mockResolvedValue(response(owner({ phase: "starting" }), "updated"));
+    let ready!: (value: { kind: "ready" }) => void;
+    container.ensureReadyForProcessing.mockImplementation(() => new Promise(resolve => { ready = resolve; }));
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    const result = ensurePostgresRuntimeProcessing(source, { ...request, commandTimeoutMs: 2_000 }, diagnostics);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await result).toMatchObject({ kind: "retry_later" });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe("command_budget_exhausted");
+    ready({ kind: "ready" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .not.toContain("release");
+  });
+
+  it.each([true, false])("retains an ambiguously accepted launch after execution timeout (launch preparation: %s)", async (supported) => {
+    const { source, container } = harness();
+    container.ensureReadyForProcessing.mockResolvedValue({ kind: "ready", ...(supported ? { preparesSupervisedLaunch: true } : {}) });
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner({ phase: "starting" }), "claimed"))
+      .mockResolvedValue(response(owner({ phase: "starting" }), "updated"));
+    container.startSupervisedInvocation.mockRejectedValue(new DOMException("Synthetic timeout", "TimeoutError"));
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    expect(await ensurePostgresRuntimeProcessing(source, request, diagnostics)).toMatchObject({ kind: "retry_later" });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe("container_rpc_timeout");
+    expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(supported ? ["claim"] : ["claim", "prepare_launch"]);
+    // The next command observes that exact live owner rather than launching again.
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner()));
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "runtime_processing_accepted", action: "woken" });
+    expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
   });
 
   it.each([true, false])("starts with container launch preparation capability %s", async (supported) => {

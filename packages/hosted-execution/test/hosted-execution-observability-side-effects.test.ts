@@ -829,6 +829,21 @@ describe("hosted execution observability", () => {
     expect(infoSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves larger diagnostic records while bounding and redacting their tail", () => {
+    const fields = Object.fromEntries(Array.from({ length: 60 }, (_, index) => [`field${index}`, index]));
+    const sanitized = sanitizeHostedExecutionStructuredLogDetails({
+      ...fields, closeCode: 1000, authorization: "Bearer synthetic-secret", userId: "member_123",
+      responseTerminalKind: "response.completed", overflow: "excluded",
+    });
+    expect(sanitized).toMatchObject({
+      field59: 59, closeCode: 1000, authorization: "[redacted]", userIdPresent: true,
+      responseTerminalKind: "response.completed",
+    });
+    expect(sanitized).not.toHaveProperty("overflow");
+    expect(Object.keys(sanitized ?? {})).toHaveLength(64);
+    expect(JSON.stringify(sanitized)).not.toMatch(/synthetic-secret|member_123/);
+  });
+
   it("sanitizes nested structured log details and safe error metadata", () => {
     const nested = Array.from({ length: 40 }, (_, index) => `value-${index}`);
     const sanitized = sanitizeHostedExecutionStructuredLogDetails({

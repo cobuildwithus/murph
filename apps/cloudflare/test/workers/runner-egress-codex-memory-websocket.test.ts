@@ -196,6 +196,30 @@ test("bounds pending diagnostic writes without delaying forwarding when persiste
     const closed = nextClose(client);
     provider.close(1000, "Synthetic close.");
     await closed;
+    await vi.waitFor(() => expect(diagnostics.some(entry => entry.redactedJson.websocketMilestone === "closed")).toBe(true));
+  }
+});
+
+test("reserves a terminal diagnostic when ordinary writes are still pending at close", async () => {
+  const logGate = deferred<number>();
+  const { client, provider, diagnostics } = await openImageGateSocket(false, logGate.promise);
+  try {
+    const sent = nextMessage(provider);
+    client.send(JSON.stringify({ type: "response.create", input: "Synthetic request." }));
+    await sent;
+    const received = nextMessage(client);
+    provider.send(JSON.stringify({ type: "response.created" }));
+    await received;
+    await vi.waitFor(() => expect(diagnostics).toHaveLength(4));
+    const closed = nextClose(client);
+    provider.close(1000, "Synthetic close.");
+    await closed;
+    await vi.waitFor(() => expect(diagnostics).toHaveLength(5));
+    expect(diagnostics.at(-1)?.redactedJson).toMatchObject({
+      websocketMilestone: "closed", closeSide: "provider", closeCode: 1000, runtimeLogScheduled: true,
+    });
+  } finally {
+    logGate.resolve(200);
   }
 });
 
