@@ -865,6 +865,31 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTrace()?.linqDeliveryId).toBe("delivery_latency_1");
   });
 
+  it("links a Web instant reply without inventing a runtime attempt and retains the link through later ingress writes", async () => {
+    const prisma = createLatencyWritePrisma({
+      deliveryLinkMatches: [true],
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T18:36:52.229Z")),
+    });
+    await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
+      answeredMailboxItemIds: ["mailbox_latency_1"],
+      authenticatedUserId: "member_latency_1",
+      linqDeliveryId: "delivery_latency_1",
+      prisma,
+      replyRuntimeAttemptId: null,
+    })).resolves.toEqual({ matchedCount: 1, recorded: true });
+    await recordHostedIngressAcceptedFromMailboxItem({
+      mailboxItemId: "mailbox_latency_1",
+      prisma,
+      source: "linq",
+      webhookReceivedAt: instant("2026-06-02T18:36:50.000Z"),
+    });
+    expect(prisma.readTrace()).toMatchObject({
+      linqDeliveryId: "delivery_latency_1",
+      replyRuntimeAttemptId: null,
+      runtimeAttemptId: null,
+    });
+  });
+
   it("links delivery after a restart without replacing the generation attempt", async () => {
     const prisma = createLatencyWritePrisma({
       deliveryLinkMatches: [true],
@@ -2987,7 +3012,7 @@ function createLatencyWritePrisma(input: {
         const traceId = query.values[2];
         const mailboxItemId = query.values[3];
         if (
-          typeof replyRuntimeAttemptId !== "string"
+          (replyRuntimeAttemptId !== null && typeof replyRuntimeAttemptId !== "string")
           || typeof linqDeliveryId !== "string"
           || typeof traceId !== "string"
           || typeof mailboxItemId !== "string"

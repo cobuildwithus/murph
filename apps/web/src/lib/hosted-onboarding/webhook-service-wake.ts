@@ -9,6 +9,7 @@ import type {
 
 import { handoffHostedMailboxWake } from "../hosted-orchestration/mailbox-wake";
 import {
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
   recordHostedIngressAcceptedFromMailboxItem,
   recordHostedIngressDirectEnsureTiming,
   recordHostedIngressTemporalSignalAccepted,
@@ -51,6 +52,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     return null;
   }
   const {
+    acceptedLinqDeliveryId,
     eventId,
     mailboxItemId,
     source,
@@ -104,6 +106,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     temporalSignalAcceptedAt = new Date();
   } catch (error) {
     scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
+      acceptedLinqDeliveryId,
       webhookReceivedAt: input.webhookReceivedAt,
       ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
       mailboxItemId,
@@ -120,6 +123,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   }
 
   scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
+    acceptedLinqDeliveryId,
     webhookReceivedAt: input.webhookReceivedAt,
     ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
     mailboxItemId,
@@ -200,6 +204,7 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
 }
 
 function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
+  acceptedLinqDeliveryId?: string;
   webhookReceivedAt?: Date;
   ingressTypingAcceptedAt?: Promise<Date | null>;
   mailboxItemId: string;
@@ -213,6 +218,21 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
     return;
   }
   const task = async () => {
+    if (source === "linq" && input.acceptedLinqDeliveryId && input.userId) {
+      try {
+        await linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
+          authenticatedUserId: input.userId,
+          answeredMailboxItemIds: [input.mailboxItemId],
+          linqDeliveryId: input.acceptedLinqDeliveryId,
+          replyRuntimeAttemptId: null,
+        });
+      } catch (error) {
+        console.warn("Hosted instant reply latency delivery link failed.", {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          source,
+        });
+      }
+    }
     const ingressTypingAcceptedAt = await input.ingressTypingAcceptedAt ?? undefined;
     if (input.temporalSignalAcceptedAt) {
       await recordHostedWebhookIngressLatencyTemporalSignalBestEffort({

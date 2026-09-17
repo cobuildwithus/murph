@@ -37,6 +37,7 @@ import { recordHostedAiUsageRecords } from "../hosted-execution/usage";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
+  buildHostedLinqDeliveryId,
   claimHostedLinqDeliveryProviderDispatchTx,
   hasConflictingHostedLinqInstantFirstTurnForChatTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
@@ -1015,6 +1016,11 @@ async function readCompletedHostedLinqInstantFirstTurn(input: {
     kind: "accepted",
     wakeHandoff: {
       ...input.wakeHandoff,
+      acceptedLinqDeliveryId: buildHostedLinqDeliveryId(
+        requireHostedLinqInstantFirstTurnIdempotencyLookupKey(
+          buildHostedLinqInstantFirstTurnIdempotencyKey(input.wakeHandoff.eventId),
+        ),
+      ),
       mailboxItemId: item.id,
       wakeMailboxCheckpoint: {
         lane: item.lane,

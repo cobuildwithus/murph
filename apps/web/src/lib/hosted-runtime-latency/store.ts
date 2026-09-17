@@ -1233,8 +1233,8 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
   authenticatedUserId: string;
   answeredMailboxItemIds: readonly string[];
   linqDeliveryId: string;
-  prisma?: HostedIngressLatencyPrismaClient;
-  replyRuntimeAttemptId: string;
+  prisma?: Pick<HostedIngressLatencyPrismaClient, "$queryRaw">;
+  replyRuntimeAttemptId: string | null;
 }): Promise<HostedIngressLatencyDeliveryLinkResult> {
   const authenticatedUserId = requireSafeLatencyIdentifier(
     input.authenticatedUserId,
@@ -1244,10 +1244,12 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
     input.linqDeliveryId,
     "Hosted ingress latency Linq delivery id",
   );
-  const replyRuntimeAttemptId = requireSafeLatencyIdentifier(
-    input.replyRuntimeAttemptId,
-    "Hosted ingress latency reply runtime attempt id",
-  );
+  const replyRuntimeAttemptId = input.replyRuntimeAttemptId === null
+    ? null
+    : requireSafeLatencyIdentifier(
+        input.replyRuntimeAttemptId,
+        "Hosted ingress latency reply runtime attempt id",
+      );
   const answeredMailboxItemIds = [
     ...new Set(input.answeredMailboxItemIds.map((mailboxItemId) =>
       requireSafeLatencyIdentifier(
