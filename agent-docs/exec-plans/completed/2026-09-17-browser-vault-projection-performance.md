@@ -1,6 +1,6 @@
 # Reduce Browser Vault projection work
 
-Status: active
+Status: completed
 Created: 2026-09-17
 Updated: 2026-09-17
 
@@ -59,6 +59,14 @@ Updated: 2026-09-17
 ## Verification progress
 
 - Query: seven focused files, 60 tests PASS, including repair scoping/fallback, wearable candidates, suppression, and Browser Vault projection behavior.
-- Query typecheck PASS; final formatting-only test cleanup will receive a final focused rerun.
+- Query typecheck PASS after final cleanup; changed test file final rerun PASS (10 tests).
 - Complexity PASS: unchanged debt 11, maximum 30. Existing unrelated collection and sample-conversion hotspots remain unchanged.
 - Product UX walkthrough: Ready. Normal/sparse histories retain results; dense unrelated metrics no longer multiply repair work. Runtime deadlines and foreground cancellation owners are unchanged.
+- Changelog generation and focused production archive render test PASS (10 tests). Used repository-root Vitest discovery as documented by the existing changelog-command friction entry.
+- Documentation drift, gardening, workspace boundaries and diff whitespace checks PASS.
+
+## Delivery
+
+- Implementation, direct reproduction, output equivalence, focused verification and parent candidate review are complete.
+- PR #3535 owns the final ReviewGPT and exact-head CI gates; those remain pending at this implementation closeout. Production deployment and post-deploy timing verification have not occurred.
+Completed: 2026-09-17
