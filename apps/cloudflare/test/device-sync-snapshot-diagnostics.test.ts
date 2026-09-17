@@ -86,7 +86,7 @@ function expectFailureMetadata(details: Record<string, unknown>, attempts = 1) {
   expect(entries).toHaveLength(attempts);
   for (const entry of entries) {
     expect(entry).toMatchObject({ level: "warn", details });
-    // Exercise the real retained-log sanitizer and its existing 32-key cap too.
+    // Exercise the real retained-log sanitizer and its bounded field capacity too.
     expect(buildHostedExecutionStructuredLogRecord(entry).details).toMatchObject(details);
     expect(entry).not.toHaveProperty("error");
     expect(entry.details).not.toHaveProperty("errorMessage");

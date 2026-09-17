@@ -77,9 +77,11 @@ describe("Postgres runtime orchestration", () => {
       .mockResolvedValue(response(owner({ phase: "starting" }), "updated"));
     let ready!: (value: { kind: "ready" }) => void;
     container.ensureReadyForProcessing.mockImplementation(() => new Promise(resolve => { ready = resolve; }));
-    const result = ensurePostgresRuntimeProcessing(source, { ...request, commandTimeoutMs: 2_000 });
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    const result = ensurePostgresRuntimeProcessing(source, { ...request, commandTimeoutMs: 2_000 }, diagnostics);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(await result).toMatchObject({ kind: "retry_later" });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe("command_budget_exhausted");
     ready({ kind: "ready" });
     await vi.advanceTimersByTimeAsync(0);
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
@@ -94,7 +96,9 @@ describe("Postgres runtime orchestration", () => {
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner({ phase: "starting" }), "claimed"))
       .mockResolvedValue(response(owner({ phase: "starting" }), "updated"));
     container.startSupervisedInvocation.mockRejectedValue(new DOMException("Synthetic timeout", "TimeoutError"));
-    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "retry_later" });
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    expect(await ensurePostgresRuntimeProcessing(source, request, diagnostics)).toMatchObject({ kind: "retry_later" });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe("container_rpc_timeout");
     expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))

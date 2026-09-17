@@ -1254,7 +1254,7 @@ describe("executeHostedMailboxEvent", () => {
       phase: "wake.running",
       time: "2026-04-08T00:00:00.000Z",
     });
-    expect(Object.keys(structuredRecord.details ?? {})).toHaveLength(32);
+    expect(Object.keys(structuredRecord.details ?? {})).toEqual(Object.keys(entry?.redacted ?? {}));
     expect(structuredRecord.details).toEqual(expect.objectContaining({
       codexActionProgressUpdateCallCount: 1,
       codexActionProgressUpdateFirstCallElapsedMs: 2_400,
