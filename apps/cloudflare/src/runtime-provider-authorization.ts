@@ -1,12 +1,15 @@
 import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
 import type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
+import { supportsPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import { readRuntimeTargetAdapter } from "./runtime-target-adapter.ts";
 
 export async function authorizePostgresRuntimeProvider(input: {
   env: RunnerOutboundEnvironmentSource; userId: string; command: Extract<HostedRuntimeOwnerCommand, { operation: "authorize_provider" | "authorize_effect" }>; managed: boolean;
 }) {
+  if (!supportsPostgresRuntimeOwner(input.env)) return "legacy" as const;
   const response = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: input.command });
+  if (response.cutover === "legacy") return "legacy" as const;
   const owner = response.owner;
   if (response.cutover !== "postgres" || response.status !== "authorized" || !owner?.attemptId || !owner.runnerContainerName || owner.workspaceVersion === null) return null;
   let settlementPending = false;

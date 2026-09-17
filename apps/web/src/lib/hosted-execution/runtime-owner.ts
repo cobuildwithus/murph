@@ -142,7 +142,10 @@ export async function recordHostedRuntimeAccepted(input: {
   return result.count === 1;
 }
 
-/** Called within the canonical publication transaction, never as its preflight. */
+/** Called within the canonical publication transaction, never as its preflight.
+ * Access and consent belong to claim admission; admitted work retains its exact
+ * ownership until completion or retirement, even when account policy changes.
+ */
 export async function requireHostedRuntimeOwnerTx(
   tx: OwnerTransaction,
   identity: HostedRuntimeIdentity,
@@ -173,10 +176,11 @@ async function requireOwnerAfterCutoverLockTx(
   await lockHostedMemberRow(tx, identity.userId);
   await lockHostedRuntimeOwnerRowTx(tx, identity.userId);
   const owner = await tx.hostedRuntimeOwner.findUnique({ where: { userId: identity.userId } });
-  if (!owner || owner.attemptId !== identity.attemptId
+  // Cleanup retains the owner row after account deletion; it is no longer authority.
+  const member = await tx.hostedMember.findUnique({ where: { id: identity.userId }, select: { id: true } });
+  if (!member || !owner || owner.attemptId !== identity.attemptId
     || owner.generation.toString() !== identity.generation
-    || (owner.phase !== "starting" && owner.phase !== "active")
-    || !await runtimeAdmissionAllowedTx(tx, identity.userId, owner.processingMode)) {
+    || (owner.phase !== "starting" && owner.phase !== "active")) {
     throw staleRuntimeError();
   }
   return owner;
@@ -311,9 +315,9 @@ export async function authorizeHostedRuntimeProvider(input: {
     await lockHostedMemberRow(tx, input.userId);
     await lockHostedRuntimeOwnerRowTx(tx, input.userId);
     const current = await tx.hostedRuntimeOwner.findUnique({ where: { userId: input.userId } });
-    if (!current || !current.attemptId || !current.runnerContainerName || current.workspaceVersion === null
-      || (current.phase !== "starting" && current.phase !== "active")
-      || !await runtimeAdmissionAllowedTx(tx, input.userId, current.processingMode)) return null;
+    const member = await tx.hostedMember.findUnique({ where: { id: input.userId }, select: { id: true } });
+    if (!member || !current || !current.attemptId || !current.runnerContainerName || current.workspaceVersion === null
+      || (current.phase !== "starting" && current.phase !== "active")) return null;
     if (input.runnerContainerName !== null) {
       if (current.runnerContainerName !== input.runnerContainerName || !["exa", "mapbox", "murph_data_api", "openai", "venice", "workers_ai_transcribe"].includes(input.providerKind)) return null;
     } else if (!input.providerEgressTokenHash || current.providerEgressTokenHash !== input.providerEgressTokenHash) return null;

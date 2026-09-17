@@ -1,4 +1,4 @@
-import { listRuntimeMigrationCandidates } from "./runtime-migration-cleanup";
+import { hasPendingRuntimeCleanupEnrollment, listRuntimeMigrationCandidates } from "./runtime-migration-cleanup";
 import { enrollRuntimeSourcesTx, runtimeSourcesAlreadyEnrolled } from "./runtime-migration-enrollment";
 import { closeLegacyCreationTx, discoverRuntimeObjectsTx, listRuntimeInventoryTx, nextRuntimeObjectTx, selectMemberRuntimeObjectTx, selectFirstUseRuntimeObjectTx, readSelectedRuntimeObject, requireSelectedRuntimeObject, requireRollingInventoryPageTx } from "./runtime-migration-inventory";
 import { activateEmptyRuntime, settleUnmaterializedRuntime } from "./runtime-migration-unmaterialized";
@@ -12,6 +12,8 @@ import { recordRuntimeOrphansTx } from "./runtime-orphans";
 
 const INITIAL_CURSOR = { section: 0, after: "" };
 const INITIAL_INVENTORY_HASH = digest("");
+/** Same bound as the operator's provider census. */
+const MAX_REGISTERED_SOURCES = 100_000;
 type MigrationCommand = Exclude<HostedRuntimeMigrationCommand, { operation: "status" | "inspect_object" | "advance_member" | "advance_empty" | "enroll_members" | "list_unenrolled" }>;
 
 /** Trusted finite campaign. Campaign transitions take the exclusive gate;
@@ -94,7 +96,13 @@ async function beginTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover,
   } });
 }
 function requireIdentity(gate: HostedRuntimeCutover, command: HostedRuntimeMigrationIdentity) {
-  if (gate.namespaceId !== command.namespaceId || !(gate.phase === "rolling" ? matchesHostedRuntimeMigrationRelease(gate, command) : gate.workerVersion === command.workerVersion)) throw new Error("Migration namespace or serving Worker version changed.");
+  // A rolling campaign, including one already retired, accepts every compatible
+  // release; the finite draining campaign stays bound to its exact Worker version.
+  const release = gate.phase === "rolling" || isRetiredRollingCampaign(gate) ? matchesHostedRuntimeMigrationRelease(gate, command) : gate.workerVersion === command.workerVersion;
+  if (gate.namespaceId !== command.namespaceId || !release) throw new Error("Migration namespace or serving Worker version changed.");
+}
+function isRetiredRollingCampaign(gate: HostedRuntimeCutover) {
+  return gate.phase === "postgres" && gate.namespaceProbeId !== null;
 }
 async function inventoryTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover, command: Extract<MigrationCommand, { operation: "inventory" }>) {
   if ((gate.phase !== "draining" && gate.phase !== "rolling") || gate.inventorySealedAt || command.after !== gate.inventoryAfter
@@ -146,13 +154,55 @@ async function importHighWaterTx(tx: Prisma.TransactionClient, userId: string, g
     update: { generation: existing && existing.generation > generation ? existing.generation : generation } });
 }
 async function activateTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover, command: Extract<MigrationCommand, { operation: "activate" }>) {
+  if (gate.phase === "rolling" || isRetiredRollingCampaign(gate)) return retireRollingNamespaceTx(tx, gate, command);
   if (!gate.inventorySealedAt || command.inventoryHash !== gate.inventoryHash || command.inventoryCount !== gate.inventoryCount) throw new Error("Final namespace inventory does not match the sealed inventory.");
   if (gate.phase === "postgres") return gate;
-  if (gate.phase === "rolling") throw new Error("Rolling migration completes individual members; namespace retirement requires separate proof.");
   if (gate.phase !== "draining") throw new Error("Postgres activation requires a draining campaign.");
   if (await tx.hostedRuntimeLegacyImport.findFirst({ where: { completedAt: null }, select: { objectId: true } })) throw new Error("Legacy resource import is incomplete.");
   if (await tx.hostedRuntimeOwner.findFirst({ where: { OR: [ { phase: { not: "idle" } }, { runnerContainerName: { not: null } }, { attemptId: { not: null } } ] }, select: { userId: true } })) throw new Error("Runtime targets remain active during migration.");
   return tx.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "postgres", activatedAt: new Date() } });
+}
+
+/** Rolling retirement proof, taken under the exclusive campaign lock. The
+ * operator's final provider census must equal the registered sources (baseline
+ * plus late) by count and hash, the sealed baseline must be intact, every source
+ * must hold a terminal disposition, every runtime identity must be Postgres-owned,
+ * every member must hold an owner row and no deleted-account cleanup may still be
+ * enrolling identities. Active Postgres members are permitted; legacy or pending
+ * authority is not. Repeating the command after retirement re-verifies the
+ * census and changes nothing.
+ */
+async function retireRollingNamespaceTx(tx: Prisma.TransactionClient, gate: HostedRuntimeCutover, command: Extract<MigrationCommand, { operation: "activate" }>) {
+  if (!gate.inventorySealedAt || !gate.creationClosedAt) throw new Error("Namespace retirement requires a closed, sealed rolling census.");
+  if (command.inventoryCount > MAX_REGISTERED_SOURCES) throw new Error("Namespace retirement census exceeds its bound.");
+  const sources = await tx.hostedRuntimeLegacyImport.findMany({ orderBy: { objectId: "asc" }, take: command.inventoryCount + 1,
+    select: { objectId: true, inventoryClass: true, completedAt: true } });
+  if (sources.length !== command.inventoryCount || command.inventoryHash !== inventoryDigest(sources.map(source => source.objectId))) {
+    throw new Error("Final namespace census does not match the registered legacy sources.");
+  }
+  const baseline = sources.filter(source => source.inventoryClass === "baseline").map(source => source.objectId);
+  if (baseline.length !== gate.inventoryCount || inventoryDigest(baseline) !== gate.inventoryHash) throw new Error("Registered legacy sources no longer match the sealed inventory.");
+  if (sources.some(source => !source.completedAt)) throw new Error("Namespace retirement requires every source disposition.");
+  const [unbound] = await tx.$queryRaw<Array<{ count: bigint }>>`
+    SELECT COUNT(*)::bigint AS count FROM hosted_runtime_legacy_import AS source
+    LEFT JOIN hosted_runtime_owner AS owner ON owner.user_id = COALESCE(source.user_id, source.admitted_user_id)
+    WHERE COALESCE(source.user_id, source.admitted_user_id) IS NOT NULL AND owner.migration_phase IS DISTINCT FROM 'postgres'
+  `;
+  if (unbound?.count !== 0n || await tx.hostedRuntimeOwner.findFirst({ where: { migrationPhase: { not: "postgres" } }, select: { userId: true } })) {
+    throw new Error("Namespace retirement requires every runtime identity on Postgres authority.");
+  }
+  // Post-cutover signups need no legacy enrollment; their owner is created on
+  // first claim. Only the transition requires complete canonical enrollment.
+  if (gate.phase === "postgres") return gate;
+  const [ownerless] = await tx.$queryRaw<Array<{ count: bigint }>>`
+    SELECT COUNT(*)::bigint AS count FROM hosted_member AS member
+    WHERE NOT EXISTS (SELECT 1 FROM hosted_runtime_owner AS owner WHERE owner.user_id = member.id)
+  `;
+  if (ownerless?.count !== 0n || await hasPendingRuntimeCleanupEnrollment(tx)) throw new Error("Namespace retirement has unenrolled canonical identities.");
+  return tx.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "postgres", activatedAt: new Date(), selectedObjectId: null } });
+}
+function inventoryDigest(objectIds: string[]) {
+  return objectIds.reduce((hash, id) => digest(`${hash}\n${id}`), INITIAL_INVENTORY_HASH);
 }
 
 async function validatePage(page: LegacyRuntimeExportPage): Promise<LegacyMigrationResources> {

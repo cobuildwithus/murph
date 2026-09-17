@@ -34,8 +34,9 @@ async function readServingIdentity(input: RuntimeMigrationOperator) {
 
 /** Hosted rolling driver. Each invocation is bounded and resumes from canonical
  * receipts. A held or uncertain handoff never advances the ordered selection;
- * all other members keep their existing backend. Members activate independently;
- * namespace retirement requires a separate proof and is not supported here.
+ * all other members keep their existing backend. Members activate independently.
+ * With `activate`, a run that proves complete accounting also asks Web to retire
+ * the campaign gate; Web re-proves the census before leaving rolling.
  */
 type RollingOperator = RuntimeMigrationOperator & {
   activate: boolean; maxSteps?: number; maxObjects?: number; waitForPending?: boolean; maxDurationMs?: number;
@@ -97,7 +98,7 @@ function migrationActivated(result: Record<string, unknown>) {
 }
 
 function readRollingLimits(input: RollingOperator) {
-  if (input.activate) throw new Error("Rolling migration cannot finalize the namespace.");
+  if (input.activate && input.memberId !== undefined) throw new TypeError("Targeted migration cannot retire the namespace.");
   const maxSteps = input.maxSteps ?? 25;
   const maxObjects = input.maxObjects ?? 1_000;
   const maxDurationMs = input.maxDurationMs ?? 600_000;
@@ -217,7 +218,7 @@ async function sealRegisteredSources(send: Commander, identity: CampaignIdentity
   }
   throw new Error("Migration inventory seal was not acknowledged.");
 }
-async function finishRollingMigration(input: RuntimeMigrationOperator, send: Commander,
+async function finishRollingMigration(input: RollingOperator, send: Commander,
   identity: CampaignIdentity, gate: Record<string, unknown>, steps: number) {
   const finalInventory = await inventoryHostedLegacyRuntime(input);
   const registered = await readRegisteredSources(send, identity);
@@ -238,7 +239,13 @@ async function finishRollingMigration(input: RuntimeMigrationOperator, send: Com
   if ((await send({ operation: "settle_unmaterialized", ...identity })).done !== true) {
     return { phase: "rolling", steps, pending: "member_activation" };
   }
-  return { phase: "members_migrated", steps };
+  if (!input.activate) return { phase: "members_migrated", steps };
+  // The registered census now covers every provider object. Web proves the
+  // same census, dispositions and Postgres ownership before closing the gate.
+  const retired = record((await send({ operation: "activate", ...identity,
+    inventoryHash: inventoryHash(registered.all), inventoryCount: registered.all.length })).gate);
+  if (retired.phase !== "postgres") throw new Error("Namespace retirement was not acknowledged.");
+  return { phase: "postgres", steps };
 }
 function requireProviderCoverage(inventory: { namespaceId: string; objectIds: string[] }, identity: CampaignIdentity, registered: string[]) {
   const known = new Set(registered);

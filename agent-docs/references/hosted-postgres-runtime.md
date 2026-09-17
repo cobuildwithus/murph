@@ -9,6 +9,23 @@ capability, not a fleet-wide backend selector. With that capability enabled,
 `rolling` routes each member by explicit migration phase; unregistered existing
 members remain legacy. Disabled deployments cannot start migrated members.
 
+A rolling campaign closes through the same `activate` operation as the finite
+draining campaign, requested by the operator only under an explicit finalize
+option and never from a targeted canary. Web proves retirement under the
+exclusive campaign lock: the operator's final provider census equals the
+registered sources (baseline plus late) by count and hash, the sealed baseline
+is intact, every source holds a terminal disposition, every source-bound and
+every owner-row identity is `postgres`, every member holds an owner row, and no
+deleted-account cleanup is still enrolling identities. Active Postgres members
+are permitted; legacy or pending authority is not. The gate then reads
+`postgres` and cannot reopen: new members route to Postgres without a
+trigger-enrolled owner, the first runtime claim creates their owner row, and
+later compatible releases read the closed gate idempotently. Repeated activation
+revalidates source accounting without requiring post-cutover signups to enroll
+in the retired campaign. Physical deletion
+of the legacy namespace and removal of the finite bridge remain separate deploy
+steps after a legacy-traffic soak.
+
 Migration phase is separate from execution phase: `legacy -> quiescing ->
 freezing -> importing -> postgres`. Importing an owner row alone never activates
 execution. Quiescing keeps admitted callbacks available for checkpointing while
@@ -98,10 +115,23 @@ native stop, without granting or releasing authority.
 
 Ordinary runtime requests bind attempt/generation to their signed Web callback.
 The Worker rejects caller-supplied authority query parameters and derives those
-parameters from authenticated runtime headers. Web validates admission and the
-canonical mutation in the same transaction. No standalone UserRunner preflight
-is added to that callback. Provider effects still require fresh authorization at
-the Worker boundary; no cached positive allowance can outlive revocation.
+parameters from authenticated runtime headers. Web validates exact ownership and
+the canonical mutation in the same transaction. Access, suspension, and health-data
+consent are checked at claim admission, not repeated by ownership or provider
+validation. A policy change blocks new admission; already admitted work may finish
+until completion or the existing retirement/shutdown path ends its ownership.
+This is not an immediate-cancellation guarantee. Deleted members remain blocked;
+their retained owner rows exist only for cleanup.
+
+Provider effects still authenticate their exact runtime identity or credential,
+apply provider operation policy, and enforce managed spending limits. The same
+Web authorization response selects Postgres or explicitly legacy routing; no
+separate backend-discovery request precedes it. Draining, stale, or failed
+Postgres authorization never falls back to legacy. No positive-allowance cache
+or standalone UserRunner callback preflight is added. Deploy Web's combined
+backend-selection/authorization response before its Worker consumer: older Web
+rejects exact-header authorization for legacy members instead of returning their
+backend. Existing Workers remain compatible with the new Web behavior.
 
 Lock order is the cutover gate, member, runtime owner, then workspace/mailbox and
 resource rows. Transactions contain bounded database work only, with five-second
@@ -262,9 +292,10 @@ budget, refuses to replace another unfinished selection, and returns without
 expanding the cohort if that member already activated. A pending or
 failed result after quiescence requires same-source roll-forward recovery; the
 work window is not a guarantee of member-pause duration. The hosted entrypoint
-and canonical rolling campaign reject namespace finalization. Successful member
-handoffs activate independently; completing them leaves the gate rolling with
-explicit Postgres owners and the guarded namespace retained. Each control request has a fresh
+defaults to member-only migration. Explicit `MURPH_RUNTIME_MIGRATION_FINALIZE=true`
+requires fleet-wide migrate mode and requests the retirement proof above after
+complete source accounting. Successful member handoffs otherwise leave the gate
+rolling with explicit Postgres owners and the guarded namespace retained. Each control request has a fresh
 signature over its method, path and exact body; the existing OIDC path remains
 supported. No production credentials or raw inventories belong in local output.
 
@@ -339,8 +370,12 @@ source until its expected member is Postgres; concurrent and lost-response
 retries return the same wake. Physical-only empty objects need no member owner.
 `settle_unmaterialized` is retained as a completion audit only: it checks source
 receipts and remaining owners without changing authority or creating wakes.
-The rolling path cannot switch the global default: complete provider scans do
-not prove an old caller cannot create another object.
+Complete provider scans do not prove an old caller cannot create another object.
+Before requesting the explicit global transition, operators must establish
+serving-version convergence, absence of legacy execution traffic and closure of
+old creation paths. The database proof alone does not establish that external
+boundary. Retain the guarded namespace and frozen receipts until the separate
+physical-retirement gate is satisfied.
 
 Managed checkpoint uploads use an exact, durably admitted multipart upload ID.
 Trusted completion seals the upload and verifies publication through R2's own
