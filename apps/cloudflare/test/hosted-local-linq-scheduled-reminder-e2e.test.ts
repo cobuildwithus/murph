@@ -898,8 +898,8 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
-        String(scheduledReminderTiming.idleCheckpointDelayMs),
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:
+        String(Math.max(1_000, scheduledReminderTiming.idleCheckpointDelayMs)),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,

@@ -53,7 +53,7 @@ describe("hosted local hot admission benchmark", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: memberPhone,
         LINQ_API_BASE_URL: linq.runnerBaseUrl,
         LINQ_API_TOKEN: "linq-local-test-token",

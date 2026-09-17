@@ -4267,11 +4267,16 @@ the existing 60-second Browser refresh budget and a successor invocation;
 fresh conversations and the exact due-assistant durability barrier retain
 priority ahead of that offer.
 
-In production, the configured idle checkpoint delay is at least 180 seconds,
-and every dirty foreground pass that progresses work restarts that hard lower
-bound. A no-progress phase that requests only a runtime-projection checkpoint
+The runtime quiet window derives from `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS`,
+with a shared ten-minute default. There is no independent checkpoint setting.
+Newly accepted foreground-priority work restarts the window; ordinary maintenance
+and no-progress probes do not. A consented-member Ask observed as deferred by
+its admission gate advances the existing checkpoint deadline after foreground
+work, preserving checkpoint-before-service ordering without spending its entire
+ten-minute validity on idle batching. Ask authority and expiry remain unchanged.
+A no-progress phase that requests only a runtime-projection checkpoint
 preserves any active quiet window. If the preceding checkpoint has completed,
-that metadata correction does not start a second 180-second window; it still
+that metadata correction does not start a second quiet window; it still
 publishes the corrected typed wake through the ordinary checkpoint owner. The
 exact assistant wake projected directly by the current foreground assistant
 phase may run once per dirty checkpoint generation before that boundary against

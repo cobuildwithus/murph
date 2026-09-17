@@ -19,6 +19,7 @@ import {
 import type {
   HostedAssistantDeliveryOutcome,
 } from "./models.ts";
+import { resolveHostedRuntimeIdleCheckpointDelayMs } from "./checkpoint-publication.ts";
 import { deleteHostedLinqMessages } from "./message-cleanup.ts";
 import {
   requireHostedProviderFetchDependencies,
@@ -30,7 +31,6 @@ const HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA =
   "murph.hosted-provider-cleanup-recovery.v1";
 const HOSTED_PROVIDER_CLEANUP_RECOVERY_FILE_NAME =
   "hosted-provider-cleanup-recovery.json";
-const HOSTED_PROVIDER_CLEANUP_DEFAULT_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const HOSTED_PROVIDER_CLEANUP_AFTER_IDLE_BUFFER_MS = 1_000;
 const HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS = 5 * 60_000;
 const HOSTED_PROVIDER_CLEANUP_REQUEST_BUDGET_MS = 1_000;
@@ -445,7 +445,7 @@ export function resolveHostedProviderCleanupFirstDeferredWakeAt(input: {
     : Date.now();
   return new Date(
     nowMs
-      + resolveHostedProviderCleanupIdleCheckpointDelayMs(input.idleCheckpointDelayMs)
+      + resolveHostedRuntimeIdleCheckpointDelayMs(input.idleCheckpointDelayMs)
       + HOSTED_PROVIDER_CLEANUP_AFTER_IDLE_BUFFER_MS,
   ).toISOString();
 }
@@ -619,16 +619,6 @@ function isHostedProviderCleanupCheckpointDue(
   const wakeAt = checkpoint.nextWakeAt ?? null;
   const wakeMs = Date.parse(wakeAt ?? "");
   return !Number.isFinite(wakeMs) || wakeMs <= nowMs;
-}
-
-function resolveHostedProviderCleanupIdleCheckpointDelayMs(
-  value: number | null | undefined,
-): number {
-  if (value !== null && value !== undefined && Number.isFinite(value) && value > 0) {
-    return Math.trunc(value);
-  }
-
-  return HOSTED_PROVIDER_CLEANUP_DEFAULT_IDLE_CHECKPOINT_DELAY_MS;
 }
 
 async function assertHostedProviderCleanupLiveNow(input: {

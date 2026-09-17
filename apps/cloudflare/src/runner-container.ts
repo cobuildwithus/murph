@@ -1,3 +1,4 @@
+import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-execution/contracts";
 import type { HostedWorkspaceInvocationResult } from "@murphai/hosted-execution/runtime-control";
 import { usesPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import { hostedRunnerImageMatches, readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment, type HostedRunnerBank } from "./hosted-runner-release.ts";
@@ -123,7 +124,6 @@ const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
   "Invalid request.",
   "Request body too large.",
 ]);
-const DEFAULT_RUNNER_IDLE_TTL_MS = 600_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const MIN_RUNNER_LIFECYCLE_REEVALUATION_MS = 1_000;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
@@ -5194,7 +5194,7 @@ function readRunnerContainerIdleTtlMs(source: RunnerContainerEnvironmentSource):
   const raw = source.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS;
 
   if (raw === undefined || raw === null || raw === "") {
-    return DEFAULT_RUNNER_IDLE_TTL_MS;
+    return HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS;
   }
 
   if (typeof raw !== "string") {

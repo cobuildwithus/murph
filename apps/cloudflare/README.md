@@ -499,12 +499,10 @@ monitor.
 Defaulted worker vars:
 
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
-- `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=180000` for the runtime-owned idle
-  window before a dirty invocation checkpoints and returns; production rejects
-  lower values so routine checkpoints cannot bypass the three-minute quiet floor
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=600000` (also the code default) for
-  conversation warmth from the latest accepted inbound user message's original
-  server receipt, never from invocation completion
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=600000` (also the shared code default)
+  for the runtime quiet window and conversation warmth. Container warmth ends
+  ten minutes after the latest accepted inbound message's original server receipt,
+  never ten minutes after invocation completion. Active work remains protected.
 - `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS=60000` (also the code
   default) for recovery checks while work or uncertain health prevents cleanup
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
@@ -760,12 +758,14 @@ one-second guard. Cleanup is not subtracted before readiness; if it cannot fit
 after a failure, the guard preserves the fence. Deploy Web's backward-compatible
 bounded client first, then this Worker result boundary. Successful workspace
 invocations keep the same Durable Object write fence while the runtime waits
-through `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS`. Coalesced foreground input
+through the quiet window derived from `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS`.
+Coalesced foreground input
 may preempt that wait. While dirty, the exact assistant wake projected by the
 current foreground phase may run once when due before the floor without
 publishing a snapshot; inherited or committed wakes and durability barriers
 remain checkpoint-first. If state remains dirty, the direct invocation
-checkpoints with reason `idle_shutdown` at the floor or during shutdown before
+checkpoints with reason `idle_shutdown` at the deadline, when an observed
+consented-member Ask is deferred by admission, or during shutdown before
 returning success. A restored due wake in a clean workspace runs ordinarily.
 Before a direct user-action provider turn, a session absent from the restored
 published snapshot receives that same full `idle_shutdown` checkpoint while the

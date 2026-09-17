@@ -2942,6 +2942,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           ensureIdleCheckpointTimerAfterDirtyWork();
         }
       }
+      if (passResult.latestMailboxImport.importResult.blocked.some(
+        (item) => item.reasonCode === "assistant_ask.target_not_admitted",
+      )) {
+        // Consented-member Asks expire after ten minutes. Once foreground work
+        // has finished, release their existing checkpoint gate without spending
+        // another quiet window or weakening Ask authority.
+        setIdleCheckpointStartBy(Date.now());
+      }
     };
     if (runtimeStateDirty) {
       ensureIdleCheckpointTimerAfterDirtyWork();

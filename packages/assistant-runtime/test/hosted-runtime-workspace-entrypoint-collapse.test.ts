@@ -74,13 +74,14 @@ import {
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 
-describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 1: fresh conversation wake runs before idle shutdown checkpointing", async () => {
+describe("hosted workspace runtime entrypoint", () => {
+  test.each([4, 9])("keeps the same invocation for a follow-up at minute %i with the default quiet window", async (followupMinute) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 180_000;
+    const idleCheckpointDelayMs = 600_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     let assistantPhaseCalls = 0;
@@ -95,7 +96,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_fresh_conversation_preempts",
-              idleCheckpointDelayMs,
+              idleCheckpointDelayMs: null,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -169,12 +170,15 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       await waitForFakeTimerScheduled(() => events.join(","));
       assert.equal(checkpointRequests.length, 0);
 
+      await vi.advanceTimersByTimeAsync(followupMinute * 60_000);
+      assert.equal(checkpointRequests.length, 0);
+
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_collapse_fresh_conversation",
         laneSeq: "1",
-        occurredAt: "2026-04-27T00:00:01.000Z",
+        occurredAt: new Date().toISOString(),
       }));
-      runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+      runtimeWakeSignal.notify(Date.now());
 
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
       assert.equal(checkpointRequests.length, 0);
@@ -195,6 +199,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       ]), [
         ["idle_shutdown", null, null],
       ]);
+      assert.equal(events.filter((event) => event === "workspace.read").length, 1);
+      assert.equal(assistantPhaseCalls, 2);
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
     } finally {

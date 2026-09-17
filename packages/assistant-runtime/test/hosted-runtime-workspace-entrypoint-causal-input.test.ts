@@ -2913,7 +2913,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
   });
 
   for (const withConversationWork of [false, true]) {
-    test(`keeps a consented-member ask behind the dirty idle checkpoint${
+    test(`checkpoints a deferred consented-member ask before its ten-minute expiry${
       withConversationWork ? " while conversation work runs" : ""
     }`, async () => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
@@ -2938,6 +2938,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       });
       let assistantPhaseCalls = 0;
 
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(TEST_NOW));
       try {
         await initializeVault({ createdAt: TEST_NOW, vaultRoot });
         const platform = createPlatform({
@@ -2945,6 +2947,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             async request(request) {
               if (request.action === "prepare") {
                 events.push("ask.prepare");
+                assert.ok(Date.now() < Date.parse(askItem.expiresAt!));
                 return {
                   action: "prepare",
                   status: "terminal",
@@ -2976,7 +2979,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               attemptId: `attempt_synthetic_consented_checkpoint_${
                 withConversationWork ? "conversation" : "system"
               }`,
-              idleCheckpointDelayMs: 200,
+              idleCheckpointDelayMs: 600_000,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -2985,6 +2988,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           {
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
+              assert.ok(Date.now() < Date.parse(askItem.expiresAt!));
               return {
                 snapshotRef: createSnapshotFixtureRef({
                   hash: "d".repeat(64),
@@ -3011,6 +3015,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               assistantPhaseCalls += 1;
               if (assistantPhaseCalls === 1) {
                 setTimeout(() => {
+                  vi.setSystemTime(new Date(Date.parse(TEST_NOW) + 1_000));
                   if (withConversationWork) {
                     mailboxItems.push(createMailboxItem({
                       id: "mailbox_item_entrypoint_consented_checkpoint_conversation",
@@ -3052,12 +3057,18 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         );
         const askPrepareIndex = events.indexOf("ask.prepare");
         assert.ok(askPrepareIndex === -1 || idleSnapshotIndex < askPrepareIndex, events.join(","));
+        if (askPrepareIndex === -1) {
+          assert.equal(result.status, "scheduled");
+          assert.ok(result.nextWakeAt !== null && result.nextWakeAt !== undefined);
+          assert.ok(Date.parse(result.nextWakeAt) < Date.parse(askItem.expiresAt!));
+        }
         assert.equal(
           checkpointRequests.filter((request) => request.reason === "idle_shutdown").length,
           1,
         );
         assert.ok(result.status === "idle" || result.status === "scheduled");
       } finally {
+        vi.useRealTimers();
         await removeTempRoot(vaultRoot);
       }
     });
