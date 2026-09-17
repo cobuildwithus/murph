@@ -1052,7 +1052,11 @@ Each imported page batch containing downloaded documents admits a vault-owned
 enrichment job and local `clinical-records.enrichment-requested` mailbox pointer
 before advancing the retrieval checkpoint. The job scans only its own immutable
 manifest, never predecessor batches. Its pending pointer supplies the next wake
-through the existing `default_owned` execution path, including cold resume.
+through the existing `default_owned` execution path, including cold resume. Mailbox
+serialization is scoped to the enrichment job: a pending extraction or retained
+receipt for one job cannot block another job's prepared application. The
+extractor and mailbox may have different durable queue orders; exact-job claims
+and the existing canonical writer still own exclusion and mutation safety.
 
 A detached controller extracts one document page at a time, with at most three
 confined read-only model leaves for labs, measurements and history and a shared

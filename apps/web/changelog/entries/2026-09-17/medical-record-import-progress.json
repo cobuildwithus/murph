@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 100,
+  "item": {
+    "id": "medical-record-import-progress",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Steadier medical-record imports",
+    "summary": "Ready results from one medical-record import can now be saved while another import is still processing.",
+    "details": "A delayed document no longer holds up ready results from a separate import. Each import keeps its own retry and recovery state.",
+    "relevanceTags": [
+      "medical-records"
+    ],
+    "sourcePullRequests": [
+      3554
+    ]
+  }
+}
