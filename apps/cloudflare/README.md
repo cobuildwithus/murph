@@ -566,7 +566,10 @@ objects. The relay keeps at most four ordinary diagnostic writes and one
 reserved terminal write in flight. It uses request-scoped `waitUntil` when the
 Containers outbound context does not supply it; persistence remains best-effort
 and never delays forwarding or changes accounting. Missing log rows remain
-missing evidence, not successful transport.
+missing evidence, not successful transport. Upstream and client frame inspection
+share a six-megacharacter bound; larger frames remain uninspected and are
+forwarded under the existing relay admission rules. First-frame classification
+reuses the response observation parser.
 
 Postgres processing logs the failed operation, elapsed time, remaining command
 budget and timeout classification. Command-budget and execution transport

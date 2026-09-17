@@ -14,25 +14,6 @@ export interface HostedWebSocketQueueDiagnostics {
   pendingLimitMessageCount: number;
 }
 
-const MESSAGE_KINDS = new Set([
-  "response.created", "response.in_progress", "response.completed", "response.failed",
-  "response.output_item.added", "response.output_text.delta", "error",
-  "codex.response.metadata",
-]);
-
-function readMessageKind(data: ArrayBuffer | string): string {
-  if (typeof data !== "string") return "binary";
-  if (data.length > 65_536) return "too_large";
-  try {
-    const value: unknown = JSON.parse(data);
-    if (value && typeof value === "object" && "type" in value
-      && typeof value.type === "string" && MESSAGE_KINDS.has(value.type)) return value.type;
-    return "other";
-  } catch {
-    return "invalid_json";
-  }
-}
-
 /** Content-free observations of the existing relay, never a recovery owner. */
 export function createHostedWebSocketDiagnostics(
   report: ((diagnostic: HostedRunnerDiagnosticJson) => void) | undefined,
@@ -115,7 +96,7 @@ export function createHostedWebSocketDiagnostics(
       const observation = responses.received(data, lastUpstreamAt);
       if (receivedAt === null) {
         receivedAt = lastUpstreamAt;
-        firstUpstreamMessageKind = readMessageKind(data);
+        firstUpstreamMessageKind = observation.messageKind;
         emit("upstream_received", { ...observation.details, responseMilestone: observation.milestone });
       } else if (observation.milestone) {
         emit("response_received", { ...observation.details, responseMilestone: observation.milestone });

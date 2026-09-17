@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto";
 import type { HostedRunnerDiagnosticJson } from "./runner-egress-responses-diagnostics.ts";
 
+// Match the existing request-inspection budget. Responses may echo large
+// tool schemas in acknowledgement and terminal frames; inspect once per frame.
+const MAX_INSPECTION_CHARS = 6 * 1024 * 1024;
+const MESSAGE_KINDS = new Set([
+  "response.created", "response.in_progress", "response.completed", "response.failed",
+  "response.output_item.added", "response.output_text.delta", "error",
+  "codex.response.metadata",
+]);
+
 const PROGRESS_KINDS = new Set([
   "response.output_item.added", "response.output_item.done",
   "response.content_part.added", "response.output_text.delta",
@@ -16,9 +25,9 @@ function record(value: unknown): Record<string, unknown> | null {
     ? value as Record<string, unknown> : null;
 }
 
-function parseFrame(data: ArrayBuffer | string, maxChars: number) {
-  if (typeof data !== "string" || data.length > maxChars) return null;
-  try { return record(JSON.parse(data)); } catch { return null; }
+function parseFrame(data: ArrayBuffer | string): unknown {
+  if (typeof data !== "string" || data.length > MAX_INSPECTION_CHARS) return undefined;
+  try { return JSON.parse(data); } catch { return undefined; }
 }
 
 function responseId(value: unknown): string | null {
@@ -99,8 +108,7 @@ export function createHostedWebSocketResponseDiagnostics() {
   return {
     snapshot,
     sent(data: ArrayBuffer | string, ordinal: number, now: number) {
-      // The existing request diagnostics use the same 6 MiB inspection bound.
-      const frame = parseFrame(data, 6 * 1024 * 1024);
+      const frame = record(parseFrame(data));
       const metadata = record(frame?.client_metadata);
       const turnId = metadata?.turn_id;
       const known = frame?.type === "response.create";
@@ -121,7 +129,12 @@ export function createHostedWebSocketResponseDiagnostics() {
       associationLost ||= !known;
     },
     received(data: ArrayBuffer | string, now: number) {
-      const frame = parseFrame(data, 65_536);
+      const parsed = parseFrame(data);
+      const frame = record(parsed);
+      const messageKind = typeof data !== "string" ? "binary"
+        : data.length > MAX_INSPECTION_CHARS ? "too_large"
+        : parsed === undefined ? "invalid_json"
+        : typeof frame?.type === "string" && MESSAGE_KINDS.has(frame.type) ? frame.type : "other";
       if (active && active.terminalAt === null) {
         active.maxFrameGapMs = Math.max(active.maxFrameGapMs, now - active.lastFrameAt);
         active.lastFrameAt = now;
@@ -133,7 +146,7 @@ export function createHostedWebSocketResponseDiagnostics() {
         if (observed === "ambiguous") associationLost = true;
         else milestone = observed;
       }
-      return { details: snapshot(now), milestone, receivedAt: now };
+      return { details: snapshot(now), messageKind, milestone, receivedAt: now };
     },
   };
 }

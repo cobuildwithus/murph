@@ -56,3 +56,12 @@ The initial candidate expands sanitized details to 64 keys, keeps four ordinary 
 Focused proof passed: 381 Cloudflare Node tests across five affected owners, 30 hosted-execution observability tests, 11 real Workers socket tests, both affected typechecks, and complexity review. Workers tests also emit internal disconnect diagnostics in intentionally disrupted socket scenarios; a passing suite does not establish the production vendor-error cause. The existing fresh-checkout Prisma-generation prerequisite was satisfied. Production diagnosis and release remain pending.
 
 The first external review passed. Subsequent base integrations preserve accepted socket queue telemetry and runtime wake diagnostics. Timeout retries now populate the existing command-budget or container-timeout reason in the shared request-local context. CI identified one cross-package assertion of the obsolete 32-field truncation; it now proves complete sanitized field retention. Focused integration proof passed: 206 assistant-runtime tests, 96 Cloudflare tests, both affected typechecks, and complexity review. A second review and exact-head CI precede deployment.
+
+
+## Deployed follow-up
+
+The initial fix passed both external review rounds, exact-head CI, hosted deployment smoke and convergence checks. Fresh observation confirmed a timed-out acknowledgement preserved its invocation owner and later completed. Opaque proxy errors still require careful correlation; their presence alone does not establish failed delivery. Idle-expiry health timeouts already preserve the container and schedule reevaluation.
+
+The deployed diagnostics exposed another reproducible observation defect: the 64 KiB upstream inspection limit misses valid large acknowledgement and terminal frames. Missing a prewarm terminal also makes later socket reuse appear ambiguous. A synthetic large-frame relay test fails on the deployed code. Align upstream inspection with the existing bounded 6 MiB request inspection budget and reuse that parse for first-frame classification, removing the duplicate JSON parser. No provider payload is retained in diagnostics; forwarding and accounting remain unchanged. Run the composed relay tests, typecheck, complexity review, external review and CI before the follow-up release.
+
+Follow-up focused proof passed: 42 relay tests, 11 real Workers tests, Cloudflare typecheck and complexity review with no hotspots. External review, CI and follow-up deployment remain pending.
