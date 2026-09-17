@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import { parseHostedRuntimeManagedSnapshotUpload, type HostedRuntimeManagedSnapshotUpload } from "@murphai/hosted-execution/runtime-resources";
 import { HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE, type HostedWorkspaceSnapshotUploadSession } from "@murphai/hosted-execution/workspace-snapshot-store";
 import { HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA } from "@murphai/hosted-execution/workspace-snapshot-v2";
@@ -53,6 +54,8 @@ export async function completeManagedSnapshotUpload(input: {
   if (!input.bucket.resumeMultipartUpload) throw new Error("Managed snapshot uploads are unavailable.");
   if (!input.etag || input.etag.length > 1024 || /[\r\n]/u.test(input.etag)) throw new TypeError("Managed snapshot part ETag is invalid.");
   const upload = input.bucket.resumeMultipartUpload(receipt.objectKey, receipt.uploadId);
+  const timing = { completeElapsedMs: 0, verifyElapsedMs: 0, settleElapsedMs: 0, outcome: "failed" };
+  const startedAt = Date.now();
   try {
     if (receipt.completedAt === null) {
       try {
@@ -63,16 +66,55 @@ export async function completeManagedSnapshotUpload(input: {
         await abortRuntimeMultipartUpload(upload);
       }
     }
+    timing.completeElapsedMs = Date.now() - startedAt;
     await verifyManagedSnapshotBytes({ bucket: input.bucket, receipt });
+    timing.verifyElapsedMs = Date.now() - startedAt - timing.completeElapsedMs;
     if (!await input.settle(receipt, true)) throw new Error("Managed snapshot verification receipt was rejected.");
+    timing.settleElapsedMs = Date.now() - startedAt - timing.completeElapsedMs - timing.verifyElapsedMs;
+    timing.outcome = "verified";
   } catch (error) {
     try { await abortRuntimeMultipartUpload(upload); await input.settle(receipt, false); } catch { /* retain the durable obligation */ }
     throw error;
+  } finally {
+    // Stage timings make a slow completion attributable without member data.
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: { ...timing, encryptedByteSize: receipt.encryptedByteSize, operation: "managed_snapshot_completion" },
+      message: "Managed snapshot completion finished.",
+      phase: "wake.running",
+      userId: receipt.userId,
+    });
   }
 }
 
+/** Fits inside the runner's 120-second commit budget with room for multipart
+ * completion and settlement; the runner budget, not this deadline, bounds a
+ * single checkpoint attempt. */
+const MANAGED_SNAPSHOT_VERIFY_TIMEOUT_MS = 100_000;
+
+type SnapshotHasher = { update(chunk: Uint8Array): Promise<void> | void; digestHex(): Promise<string> };
+
+/** Workers expose a native streaming digest; Node tests fall back to node:crypto. */
+function createSnapshotHasher(): SnapshotHasher {
+  const DigestStream = (globalThis.crypto as { DigestStream?: new (algorithm: string) => WritableStream<Uint8Array> & { digest: Promise<ArrayBuffer> } }).DigestStream;
+  if (DigestStream) {
+    const stream = new DigestStream("SHA-256");
+    const writer = stream.getWriter();
+    return {
+      update: chunk => writer.write(chunk),
+      digestHex: async () => { await writer.close(); return bytesToHex(new Uint8Array(await stream.digest)); },
+    };
+  }
+  const hash = createHash("sha256");
+  return { update: chunk => { hash.update(chunk); }, digestHex: async () => hash.digest("hex") };
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export async function verifyManagedSnapshotBytes(input: { bucket: Pick<R2BucketLike, "get">; receipt: UploadReceipt; timeoutMs?: number }): Promise<void> {
-  const signal = AbortSignal.timeout(input.timeoutMs ?? 60_000);
+  const signal = AbortSignal.timeout(input.timeoutMs ?? MANAGED_SNAPSHOT_VERIFY_TIMEOUT_MS);
   const getting = input.bucket.get(input.receipt.objectKey);
   void getting.then(object => { if (signal.aborted) void object?.body?.cancel().catch(() => {}); }, () => {});
   const object = await awaitSnapshotRead(getting, signal);
@@ -81,16 +123,16 @@ export async function verifyManagedSnapshotBytes(input: { bucket: Pick<R2BucketL
   let ended = false;
   try {
     if (object.size !== input.receipt.encryptedByteSize) throw new Error("Managed snapshot byte length changed.");
-    const hash = createHash("sha256");
+    const hasher = createSnapshotHasher();
     let count = 0;
     for (;;) {
       const part = await awaitSnapshotRead(reader.read(), signal);
       if (part.done) { ended = true; break; }
       count += part.value.byteLength;
       if (count > input.receipt.encryptedByteSize) throw new Error("Managed snapshot exceeds its committed byte length.");
-      hash.update(part.value);
+      await awaitSnapshotRead(Promise.resolve(hasher.update(part.value)), signal);
     }
-    if (count !== input.receipt.encryptedByteSize || hash.digest("hex") !== input.receipt.encryptedSha256) {
+    if (count !== input.receipt.encryptedByteSize || await hasher.digestHex() !== input.receipt.encryptedSha256) {
       throw new Error("Managed snapshot encrypted SHA-256 verification failed.");
     }
   } finally {
