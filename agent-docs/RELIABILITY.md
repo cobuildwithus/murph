@@ -2550,7 +2550,19 @@ to apply after cutover.
   Retained device imports have three independent aggregate incidents on the
   same cron: no saved continuation progress for 15 minutes; four starts or outer
   cancellations within 20 minutes with fewer than two saved progress passes;
-  and a lower-priority notice after an hour of continuously observed backlog.
+  and a lower-priority notice after an hour of continuously observed runnable
+  backlog. The runner derives runnable counts from the existing queue and returned
+  continuation availability; running jobs and missing/invalid availability remain
+  runnable. Only a completed/yielded pass with a complete queue sample and zero
+  runnable jobs in both sources can prove deferral. The notice applies the same
+  matching-checkpoint and continuity rules to this runnable signal. Stall and
+  cycling detection retain all pending retry obligations, including scheduled
+  jobs, so an overdue wake still exposes a stalled import. Failed, missing,
+  malformed, truncated, or legacy runnable evidence falls back to the existing
+  pending signal. This additive reader deploys before the runner; remove its
+  legacy fallback only after old producers and the two-hour observation window
+  drain. Clearing the notice means no continuously observed runnable backlog,
+  not proof that every retained import finished.
   Routine wake RPCs are not starts. Each pass carries a versioned SHA-256
   `deviceSyncConnectionKey` binding its member and hosted connection. Pending
   queues, progress and recovery are evaluated per connection, then affected
@@ -2576,8 +2588,9 @@ to apply after cutover.
   grace for stall detection only while the latest connection pass lacks its
   own accepted checkpoint. An unchanged checkpoint does not count as import
   progress; once accepted, the canonical wake controls stall eligibility.
-  Cycling and backlog detection admit pending observations within that same
-  15-minute continuity window independently of the wake, so eligibility cannot
+  Cycling detection uses pending observations and backlog detection uses runnable
+  observations within the same 15-minute continuity window independently of the
+  wake, so eligibility cannot
   lapse before the evidence itself resets and a continuing incident reminds
   instead of re-alerting after the next pass. The backlog notice also requires
   an observation inside that window when the wake is overdue; stale pending

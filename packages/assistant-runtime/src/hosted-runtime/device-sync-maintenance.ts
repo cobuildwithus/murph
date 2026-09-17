@@ -143,6 +143,7 @@ type HostedDeviceSyncQueueSnapshot = {
   oldestJobAgeMs: number | null;
   queuedJobCount: number;
   runningJobCount: number;
+  runnableJobCount: number;
 };
 
 type HostedDeviceSyncPassQueueSnapshots = {
@@ -1057,9 +1058,14 @@ function buildHostedDeviceSyncQueueSnapshot(
   let oldestCreatedAtMs: number | null = null;
   let queuedJobCount = 0;
   let runningJobCount = 0;
+  let runnableJobCount = 0;
 
   for (const job of sampledJobs) {
     const jobKind = toHostedDeviceSyncQueueJobKindLogCode(job.kind);
+    // Missing or invalid availability cannot prove that work is deferred.
+    if (job.status === "running" || !(Date.parse(job.availableAt) > nowMs)) {
+      runnableJobCount += 1;
+    }
     jobKindCounts.set(jobKind, (jobKindCounts.get(jobKind) ?? 0) + 1);
     maxJobAttempts = Math.max(maxJobAttempts ?? 0, job.attempts);
     const createdAtMs = Date.parse(job.createdAt);
@@ -1085,6 +1091,7 @@ function buildHostedDeviceSyncQueueSnapshot(
       : Math.max(0, nowMs - oldestCreatedAtMs),
     queuedJobCount,
     runningJobCount,
+    runnableJobCount,
   };
 }
 
@@ -1538,7 +1545,7 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
         ...(input.lifecycle === "finished"
           ? {
               ...summarizeJunctionMeasurementResourceOutcomes(input.jobTimingDiagnostics),
-              ...buildHostedDeviceSyncPassProgressDiagnostics(input.input.wake, input.result),
+              ...buildHostedDeviceSyncPassProgressDiagnostics(input.input.wake, input.result, queueSnapshotAfter),
               pendingJobCountAfter: queueSnapshotAfter?.jobCount ?? null,
               pendingJobCountAfterTruncated:
                 queueSnapshotAfter?.jobCountTruncated ?? null,
@@ -1619,6 +1626,7 @@ function summarizeJunctionMeasurementResourceOutcomes(
 function buildHostedDeviceSyncPassProgressDiagnostics(
   wake: HostedRuntimeEvent,
   result: HostedMaintenanceMetrics | null,
+  queueSnapshotAfter: HostedDeviceSyncQueueSnapshot | null,
 ): Record<string, string | number | boolean | null> {
   const record = result?.postCheckpointRecord;
   const retainedWake = record?.kind === "device-sync.dirty-processed-batch"
@@ -1626,6 +1634,7 @@ function buildHostedDeviceSyncPassProgressDiagnostics(
     : null;
   const incoming = wake.kind === "device-sync.wake" ? wake.hint?.jobs ?? [] : [];
   const outgoing = retainedWake?.hint?.jobs ?? [];
+  const nowMs = Date.now();
   const fingerprint = (jobs: typeof incoming) => createHash("sha256")
     .update(JSON.stringify(["device-sync-continuation-progress-v1", wake.userId]))
     .update(JSON.stringify(jobs.map((job) => JSON.stringify([
@@ -1646,7 +1655,11 @@ function buildHostedDeviceSyncPassProgressDiagnostics(
         .digest("hex")
       : null,
     incomingRetainedJobCount: incoming.length,
+    pendingRunnableJobCountAfter: queueSnapshotAfter?.runnableJobCount ?? null,
     outgoingRetainedJobCount: outgoing.length,
+    outgoingRetainedRunnableJobCount: outgoing.filter(
+      (job) => !(Date.parse(job.availableAt ?? "") > nowMs),
+    ).length,
     incomingRetainedProgressFingerprint: fingerprint(incoming),
     outgoingRetainedProgressFingerprint: fingerprint(outgoing),
     retainedMailboxOwnerPresent: record?.kind === "device-sync.dirty-processed-batch"

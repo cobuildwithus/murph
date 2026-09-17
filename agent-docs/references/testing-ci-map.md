@@ -29,6 +29,15 @@ tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 
 ## Current Repo Checks
 
+`apps/web/test/hosted-runtime-retirement-cardinality-postgres.test.ts` runs the
+actual retirement command against 100,000 synthetic terminal sources in an
+isolated loopback `murph_test_*` database. With
+`MURPH_TEST_POSTGRES_CONCURRENCY=1`, it proves one transaction, at most twelve
+PostgreSQL statements including setup, one narrow census read, no external calls,
+and completion within the production five-second transaction deadline. Existing
+member migration/cutover suites cover live authority revalidation and concurrent
+or post-signup repeats. Run these database suites with file parallelism disabled.
+
 Morning Journal and upcoming-context proof lives in
 `packages/assistant-engine/test/assistant-upcoming-context.test.ts`,
 `managed-automations.test.ts`, and `assistant-codex-turn-planning.test.ts`.
