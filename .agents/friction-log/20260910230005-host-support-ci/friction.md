@@ -1,6 +1,7 @@
 ---
 title: 'Host Support CI contract still expects CLI-only runtime preparation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3250'
 ---
 
 ## Expected Behavior

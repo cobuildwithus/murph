@@ -1,6 +1,7 @@
 ---
 title: 'Hosted reminder admission observer excludes its accepted runtime owner'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3274'
 ---
 
 ## Expected Behavior

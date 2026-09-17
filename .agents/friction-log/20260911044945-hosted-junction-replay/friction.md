@@ -1,6 +1,7 @@
 ---
 title: 'Hosted Junction replay treats mailbox handoff as complete device work'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3276'
 ---
 
 ## Expected Behavior
