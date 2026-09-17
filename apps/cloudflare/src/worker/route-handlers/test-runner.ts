@@ -1,6 +1,5 @@
-import type {
-  HostedWorkspaceInvocationResult,
-} from "@murphai/hosted-execution/runtime-control";
+import { commandHostedRuntimeOwner } from "../../runtime-owner-client.ts";
+import { readRuntimeTargetAdapter } from "../../runtime-target-adapter.ts";
 
 import {
   json,
@@ -11,18 +10,10 @@ import type {
   HostedLocalForegroundPriorityOrderingControlInput,
 } from "../../hosted-local-test/foreground-priority-ordering.ts";
 import {
-  resolveHostedExecutionRunnerContainerName,
-} from "../../runner-container.ts";
-import {
   createHostedRunnerContainerNamespaceRouter,
 } from "../../standby-runner-contract.ts";
 import type {
-  HostedRunnerActiveFenceTestResult,
-  HostedRunnerStuckInvocationTestResult,
-} from "../../user-runner/hosted-user-runner-test.ts";
-import type {
-  UserRunnerDurableObjectStubLike,
-  WorkerRouteContext,
+  WorkerRouteContext
 } from "../../worker-routes/shared.ts";
 import {
   requireHostedExecutionBoundUserResponse,
@@ -40,26 +31,6 @@ import {
 import {
   matchHostedLocalTestUserRoute,
 } from "../route-utils/test-routes.ts";
-
-interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubLike {
-  readRunnerContainerNameForTest(input: { userId: string }): Promise<string | null>;
-  ageActiveRuntimeFenceForTest(input: {
-    startedAgoMs: number;
-    userId: string;
-  }): Promise<{ attemptId: string; ok: true; startedAt: string }>;
-  readActiveRuntimeFenceForTest(input: {
-    userId: string;
-  }): Promise<HostedRunnerActiveFenceTestResult | null>;
-  runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
-  runUntilIdleForTest(input: {
-    userId: string;
-  }): Promise<HostedWorkspaceInvocationResult>;
-  startStuckInvocationForTest(input: {
-    sameWorkerVersion?: boolean;
-    startedAgoMs?: number;
-    userId: string;
-  }): Promise<HostedRunnerStuckInvocationTestResult>;
-}
 
 interface HostedLocalTestRunnerContainerStubLike {
   armGeneratedImageProviderBarrierForTest?(
@@ -183,11 +154,6 @@ async function beginActiveHostedLocalTestRunnerGracefulStop(input: {
   fallbackRunnerContainerName: string;
   userId: string;
 }): Promise<{ ok: true }> {
-  const userRunner = input.context.env.USER_RUNNER.getByName(input.userId) as
-    HostedLocalTestUserRunnerStubLike;
-  const activeFence = await userRunner.readActiveRuntimeFenceForTest({
-    userId: input.userId,
-  });
   const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
     exactUser: input.context.env.RUNNER_CONTAINER,
     next: input.context.env.NEXT_RUNNER_CONTAINER,
@@ -197,7 +163,7 @@ async function beginActiveHostedLocalTestRunnerGracefulStop(input: {
     throw new Error("Hosted runner container binding is unavailable.");
   }
   const activeStub = runnerContainerNamespace.getByName(
-    activeFence?.runnerContainerName ?? input.fallbackRunnerContainerName,
+    input.fallbackRunnerContainerName,
   );
   if (!hasHostedLocalTestRunnerContainerGracefulStopControl(activeStub)) {
     throw new Error(
@@ -231,32 +197,6 @@ function hasHostedLocalTestRunnerContainerActivityControl(
 }
 
 export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
-  {
-    authorization: "vercel-oidc",
-    beforeMethod(context) {
-      return requireHostedWorkerTestEnvironment(context);
-    },
-    async handle(context, params) {
-      return handleTestRunUntilIdleRoute(context, params.userId);
-    },
-    match: matchHostedLocalTestUserRoute("/__test/users/", "/run-until-idle"),
-    methods: ["POST"],
-    name: "test-run-until-idle",
-    wrongMethodResponse: "not-found",
-  },
-  {
-    authorization: "vercel-oidc",
-    beforeMethod(context) {
-      return requireHostedWorkerTestEnvironment(context);
-    },
-    async handle(context, params) {
-      return handleTestRunAlarmRoute(context, params.userId);
-    },
-    match: matchHostedLocalTestUserRoute("/__test/users/", "/alarm"),
-    methods: ["POST"],
-    name: "test-run-alarm",
-    wrongMethodResponse: "not-found",
-  },
   {
     authorization: "vercel-oidc",
     beforeMethod(context) {
@@ -400,35 +340,6 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     name: "test-read-active-runtime-fence",
     wrongMethodResponse: "not-found",
   },
-  {
-    authorization: "vercel-oidc",
-    beforeMethod(context) {
-      return requireHostedWorkerTestEnvironment(context);
-    },
-    async handle(context, params) {
-      return handleTestAgeActiveRuntimeFenceRoute(context, params.userId);
-    },
-    match: matchHostedLocalTestUserRoute(
-      "/__test/users/",
-      "/active-runtime-fence/age",
-    ),
-    methods: ["POST"],
-    name: "test-age-active-runtime-fence",
-    wrongMethodResponse: "not-found",
-  },
-  {
-    authorization: "vercel-oidc",
-    beforeMethod(context) {
-      return requireHostedWorkerTestEnvironment(context);
-    },
-    async handle(context, params) {
-      return handleTestStartStuckInvocationRoute(context, params.userId);
-    },
-    match: matchHostedLocalTestUserRoute("/__test/users/", "/stuck-invocation"),
-    methods: ["POST"],
-    name: "test-start-stuck-invocation",
-    wrongMethodResponse: "not-found",
-  },
 ];
 
 export async function handleTestReadActiveRuntimeFenceRoute(
@@ -451,95 +362,9 @@ export async function handleTestReadActiveRuntimeFenceRoute(
     return boundUserResponse;
   }
 
-  const stub = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
-  return json(await stub.readActiveRuntimeFenceForTest({ userId }));
-}
-
-export async function handleTestAgeActiveRuntimeFenceRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  if (!isHostedWorkerTestEnvironment(context.env)) {
-    return notFound();
-  }
-
-  const userId = decodeRouteParam(encodedUserId);
-  const boundUserResponse = requireHostedExecutionBoundUserResponse(
-    context.request,
-    userId,
-    "Hosted execution bound user does not match the test runner user.",
-    "test-runner-bound-user-mismatch",
-    "test-age-active-runtime-fence",
-  );
-  if (boundUserResponse) {
-    return boundUserResponse;
-  }
-
-  const startedAgoMs = parseTestPositiveInteger(
-    context.url.searchParams.get("startedAgoMs"),
-  );
-  if (startedAgoMs === null || startedAgoMs === "invalid") {
-    return json({ error: "Unsupported test active fence age." }, 400);
-  }
-  const stub = context.env.USER_RUNNER.getByName(userId) as
-    HostedLocalTestUserRunnerStubLike;
-  return json(await stub.ageActiveRuntimeFenceForTest({
-    startedAgoMs,
-    userId,
-  }));
-}
-
-export async function handleTestRunUntilIdleRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  if (!isHostedWorkerTestEnvironment(context.env)) {
-    return notFound();
-  }
-
-  const userId = decodeRouteParam(encodedUserId);
-  const boundUserResponse = requireHostedExecutionBoundUserResponse(
-    context.request,
-    userId,
-    "Hosted execution bound user does not match the test runner user.",
-    "test-runner-bound-user-mismatch",
-    "test-run-until-idle",
-  );
-  if (boundUserResponse) {
-    return boundUserResponse;
-  }
-  if (context.url.searchParams.has("reason")) {
-    return json({ error: "Test run-until-idle reason is no longer supported." }, 400);
-  }
-
-  const stub = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
-  return json(await stub.runUntilIdleForTest({
-    userId,
-  }));
-}
-
-export async function handleTestRunAlarmRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  if (!isHostedWorkerTestEnvironment(context.env)) {
-    return notFound();
-  }
-
-  const userId = decodeRouteParam(encodedUserId);
-  const boundUserResponse = requireHostedExecutionBoundUserResponse(
-    context.request,
-    userId,
-    "Hosted execution bound user does not match the test runner user.",
-    "test-runner-bound-user-mismatch",
-    "test-run-alarm",
-  );
-  if (boundUserResponse) {
-    return boundUserResponse;
-  }
-
-  const stub = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
-  return json(await stub.runAlarmForTest({ userId }));
+  const { owner, cutover } = await commandHostedRuntimeOwner({ source: context.env, userId, command: { operation: "reconcile" } });
+  if (cutover !== "postgres") throw new Error("Local runtime test control requires Postgres ownership.");
+  return json(owner?.attemptId ? { attemptId: owner.attemptId, processingMode: owner.processingMode, runnerContainerName: owner.runnerContainerName } : null);
 }
 
 export async function handleTestContainerActivityExpiredRoute(
@@ -562,9 +387,7 @@ export async function handleTestContainerActivityExpiredRoute(
     return boundUserResponse;
   }
 
-  const userRunner = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
-  const runnerContainerName = await userRunner.readRunnerContainerNameForTest({ userId })
-    ?? resolveHostedExecutionRunnerContainerName({ source: context.env, userId });
+  const runnerContainerName = await readLocalRuntimeTarget(context, userId);
   const namespace = createHostedRunnerContainerNamespaceRouter({
     exactUser: context.env.RUNNER_CONTAINER,
     next: context.env.NEXT_RUNNER_CONTAINER,
@@ -599,13 +422,8 @@ export async function handleTestCanonicalCheckpointLostAckRoute(
     return boundUserResponse;
   }
 
-  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
-    source: context.env,
-    userId,
-  });
-  const stub = context.env.RUNNER_CONTAINER.getByName(
-    runnerContainerName,
-  );
+  const runnerContainerName = await readLocalRuntimeTarget(context, userId);
+  const stub = requireLocalRuntimeTargetAdapter(context, runnerContainerName);
   if (!hasHostedLocalTestRunnerContainerCanonicalCheckpointLostAckControl(stub)) {
     throw new Error(
       "Hosted runner container canonical checkpoint lost-ack test RPC is unavailable.",
@@ -653,10 +471,7 @@ export async function handleTestForegroundPriorityOrderingRoute(
     );
   }
 
-  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
-    source: context.env,
-    userId,
-  });
+  const runnerContainerName = await readLocalRuntimeTarget(context, userId);
   const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
   if (!hasHostedLocalTestRunnerContainerForegroundPriorityOrderingControl(stub)) {
     throw new Error(
@@ -701,10 +516,7 @@ async function handleTestGeneratedImageProviderBarrierRoute(
     return boundUserResponse;
   }
 
-  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
-    source: context.env,
-    userId,
-  });
+  const runnerContainerName = await readLocalRuntimeTarget(context, userId);
   const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
   if (!hasHostedLocalTestRunnerContainerGeneratedImageProviderBarrierControl(stub)) {
     throw new Error(
@@ -737,13 +549,8 @@ export async function handleTestSnapshotPublicationCorruptionRoute(
     return boundUserResponse;
   }
 
-  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
-    source: context.env,
-    userId,
-  });
-  const stub = context.env.RUNNER_CONTAINER.getByName(
-    runnerContainerName,
-  );
+  const runnerContainerName = await readLocalRuntimeTarget(context, userId);
+  const stub = requireLocalRuntimeTargetAdapter(context, runnerContainerName);
   if (!hasHostedLocalTestRunnerContainerSnapshotPublicationCorruptionControl(stub)) {
     throw new Error(
       "Hosted runner container snapshot publication corruption test RPC is unavailable.",
@@ -791,10 +598,7 @@ export async function handleTestShutdownCheckpointPublicationBarrierRoute(
     );
   }
 
-  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
-    source: context.env,
-    userId,
-  });
+  const runnerContainerName = await readLocalRuntimeTarget(context, userId);
   if (action === "shutdown") {
     return json(await beginActiveHostedLocalTestRunnerGracefulStop({
       context,
@@ -843,13 +647,8 @@ export async function handleTestContainerActiveOperationDropRoute(
     return boundUserResponse;
   }
 
-  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
-    source: context.env,
-    userId,
-  });
-  const stub = context.env.RUNNER_CONTAINER.getByName(
-    runnerContainerName,
-  );
+  const runnerContainerName = await readLocalRuntimeTarget(context, userId);
+  const stub = requireLocalRuntimeTargetAdapter(context, runnerContainerName);
   if (!hasHostedLocalTestRunnerContainerActiveOperationControl(stub)) {
     throw new Error("Hosted runner container test active-operation drop RPC is unavailable.");
   }
@@ -857,42 +656,6 @@ export async function handleTestContainerActiveOperationDropRoute(
     ...(context.url.searchParams.get("loseCompletedInvocationResult") === "1"
       ? { loseCompletedInvocationResult: true }
       : {}),
-    userId,
-  }));
-}
-
-export async function handleTestStartStuckInvocationRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  if (!isHostedWorkerTestEnvironment(context.env)) {
-    return notFound();
-  }
-
-  const userId = decodeRouteParam(encodedUserId);
-  const boundUserResponse = requireHostedExecutionBoundUserResponse(
-    context.request,
-    userId,
-    "Hosted execution bound user does not match the test runner user.",
-    "test-runner-bound-user-mismatch",
-    "test-start-stuck-invocation",
-  );
-  if (boundUserResponse) {
-    return boundUserResponse;
-  }
-
-  const stub = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
-  const startedAgoMs = parseTestPositiveInteger(
-    context.url.searchParams.get("startedAgoMs"),
-  );
-  if (startedAgoMs === "invalid") {
-    return json({ error: "Unsupported test stuck invocation age." }, 400);
-  }
-  return json(await stub.startStuckInvocationForTest({
-    ...(context.url.searchParams.get("sameWorkerVersion") === "1"
-      ? { sameWorkerVersion: true }
-      : {}),
-    ...(startedAgoMs === null ? {} : { startedAgoMs }),
     userId,
   }));
 }
@@ -923,4 +686,16 @@ function parseTestPositiveIntegerString(value: string): number | "invalid" {
   }
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : "invalid";
+}
+
+async function readLocalRuntimeTarget(context: WorkerRouteContext, userId: string): Promise<string> {
+  const state = await commandHostedRuntimeOwner({ source: context.env, userId, command: { operation: "reconcile" } });
+  if (state.cutover !== "postgres" || !state.owner?.runnerContainerName) throw new Error("Local runtime test control requires a selected Postgres target.");
+  return state.owner.runnerContainerName;
+}
+
+function requireLocalRuntimeTargetAdapter(context: WorkerRouteContext, target: string) {
+  const adapter = readRuntimeTargetAdapter(context.env, target);
+  if (!adapter) throw new Error("Local runtime test target binding is unavailable.");
+  return adapter;
 }

@@ -7,7 +7,6 @@ import { appendHostedExecutionWakeForTest, createHostedRuntimeMigrationRehearsal
 import { buildHostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
 import { HOSTED_RUNTIME_NAMESPACE_PROBE_NAME, type HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
 import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
-import { handleUserDataDeleteRoute } from "../src/worker/route-handlers/user-data-delete.ts";
 import { UserRunnerDurableObject } from "../src/worker/user-runner-durable-object.ts";
 import { advanceRuntimeMemberMigration } from "../src/worker/route-handlers/runtime-member-migration.ts";
 import { progressRuntimeMigrationForMember } from "../src/runtime-migration-progress.ts";
@@ -153,15 +152,12 @@ describe.skipIf(!enabled)("composed SQLite source to Postgres member handoff", (
     expect(await web.backend(ids[2]!)).toBe("postgres");
     expect(await web.prisma.hostedMailboxItem.count({ where: { userId: ids[2]! } })).toBe(1);
     expect(await web.prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).toMatchObject({ inventoryHash: sealed.inventoryHash, inventoryCount: sealed.inventoryCount });
-    // Deletion removes the processing wake owner, so its existing cleanup HTTP
-    // retries must finish pending first use without an operator or new scheduler.
+    // The finite migration helper still accounts for deleted-member sources.
+    // Normal deletion is Postgres-only in this release, so drive the retained
+    // migration protocol directly in this historical handoff rehearsal.
     await web.seed(ids[3]!); await web.prisma.hostedMember.delete({ where: { id: ids[3]! } });
     const deleted = legacySource(3, false); deleted.sql.exec("DELETE FROM runner_meta");
-    const response = await handleUserDataDeleteRoute({ env: source,
-      request: new Request("https://worker.example.test/internal/users/synthetic/data", { method: "DELETE", body: "{}" }),
-    } as never, ids[3]!);
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ code: "runtime_migration_pending" });
+    await progressRuntimeMigrationForMember({ source, userId: ids[3]!, budget: { deadlineAtMs: Date.now() + 10_000 } });
     expect(await web.backend(ids[1]!)).toBe("legacy");
     expect(await web.backend(ids[3]!)).toBe("postgres");
     expect(await web.prisma.hostedMailboxItem.count({ where: { userId: ids[3]! } })).toBe(0);

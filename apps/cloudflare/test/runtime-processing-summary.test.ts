@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ensurePostgresRuntimeProcessing } from "../src/runtime-processing.ts";
-import { resolveAdmittedLegacyUserRunner } from "../src/legacy-runtime-admission.ts";
 import { recordRuntimeProcessingSummary } from "../src/user-runner/diagnostics.ts";
 import { handleRuntimeEnsureProcessingRoute } from "../src/worker/route-handlers/runtime-control.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -9,7 +8,6 @@ import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 
 vi.mock("../src/runtime-processing.ts", () => ({ ensurePostgresRuntimeProcessing: vi.fn() }));
-vi.mock("../src/legacy-runtime-admission.ts", () => ({ resolveAdmittedLegacyUserRunner: vi.fn() }));
 vi.mock("../src/user-runner/diagnostics.ts", async (importOriginal) => ({
   ...await importOriginal<typeof import("../src/user-runner/diagnostics.ts")>(),
   recordRuntimeProcessingSummary: vi.fn(async () => undefined),
@@ -17,22 +15,16 @@ vi.mock("../src/user-runner/diagnostics.ts", async (importOriginal) => ({
 
 function harness() {
   const unused = async (): Promise<never> => { throw new Error("Unexpected runtime operation."); };
-  const legacy = { bindUser: unused, deleteHostedUserData: unused, publishHostedPrivateMedia: unused,
-    runnerStatus: unused, ensureRuntimeProcessingForUser: vi.fn(async () => ({
-      kind: "runtime_processing_accepted" as const, action: "woken" as const,
-      runtimeAttemptId: "runtime-legacy", recommendedRecheckAt: new Date(Date.now() + 300_000).toISOString(),
-    })) };
   const containers = { getByName: () => ({ destroyInstance: unused, invoke: unused, smokeHealth: unused }) };
   const env = { ...createHostedExecutionTestEnv(), BUNDLES: new MemoryEncryptedR2Bucket(),
-    USER_RUNNER: { getByName: () => legacy }, RUNNER_CONTAINER: containers, RUNNER_CONTAINER_SMOKE: containers };
+    USER_RUNNER: { getByName: () => { throw new Error("Legacy runtime must not be accessed."); } }, RUNNER_CONTAINER: containers, RUNNER_CONTAINER_SMOKE: containers };
   const pending: Promise<unknown>[] = [];
   const request = new Request("https://worker.example.test/internal/runtime", {
     method: "POST", body: JSON.stringify({ orchestrationAttemptId: "summary-request" }),
   });
   const context: WorkerRouteContext = { env, environment: readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
     request, url: new URL(request.url), executionCtx: { waitUntil: work => { pending.push(work); } } };
-  vi.mocked(resolveAdmittedLegacyUserRunner).mockResolvedValue(legacy);
-  return { context, pending, legacy };
+  return { context, pending };
 }
 
 describe("Postgres processing summaries", () => {
@@ -76,12 +68,5 @@ describe("Postgres processing summaries", () => {
     }));
   });
 
-  it("leaves the legacy owner's summary as the only writer", async () => {
-    const { context, pending, legacy } = harness();
-    vi.mocked(ensurePostgresRuntimeProcessing).mockResolvedValueOnce(null);
-    expect(await (await handleRuntimeEnsureProcessingRoute(context, "member-a")).json()).toMatchObject({ kind: "runtime_processing_accepted" });
-    expect(legacy.ensureRuntimeProcessingForUser).toHaveBeenCalledOnce();
-    expect(recordRuntimeProcessingSummary).not.toHaveBeenCalled();
-    expect(pending).toEqual([]);
-  });
+
 });

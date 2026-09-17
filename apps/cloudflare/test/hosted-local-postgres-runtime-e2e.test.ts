@@ -1,6 +1,5 @@
 import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { HostedRuntimeMigrationCommand } from "@murphai/hosted-execution/runtime-migration";
 import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { initializeEmptyPostgresRuntimeForTest, readPostgresRuntimeIdentityForTest } from "#hosted-web-testing";
@@ -19,7 +18,7 @@ const secondReplyText = "Warm runtime reply.";
 let scenario: HostedLocalFullStackScenario | null = null;
 let linqStub: HostedLocalLinqStub | null = null;
 
-describe.each(["empty Postgres", "rolling migration"])("%s: cold reply and warm typing", mode => {
+describe("Postgres runtime: cold reply and warm typing", () => {
   afterAll(async () => {
     try { await scenario?.stop(); } finally { await linqStub?.stop(); }
     scenario = null; linqStub = null;
@@ -47,7 +46,7 @@ describe.each(["empty Postgres", "rolling migration"])("%s: cold reply and warm 
       scenarioLabel: "Postgres runtime cold and warm reply",
       streamLogs: process.env.MURPH_E2E_STREAM_DEV_LOGS === "1",
     });
-    if (mode === "empty Postgres") await initializeEmptyPostgresRuntimeForTest(scenario.runtimeEnv);
+    await initializeEmptyPostgresRuntimeForTest(scenario.runtimeEnv);
   }, 300_000);
 
   it("processes consecutive foreground nudges through a warm runner", async () => {
@@ -67,22 +66,6 @@ describe.each(["empty Postgres", "rolling migration"])("%s: cold reply and warm 
       memberChannels: { email: false, linq: true, telegram: false },
     }), userId);
     await requireScenario().waitForHostedCompletion(userId);
-    if (mode === "rolling migration") {
-      await requireScenario().bindActiveHostedLinqHomeChat({ chatId, memberId: userId, recipientPhone: memberPhone });
-      const beforeHandoff = "legacy reply before migration";
-      const beforeReply = "Legacy runtime is ready to migrate.";
-      requireScenario().queueAssistantResponses([beforeReply], { matchInputContains: beforeHandoff });
-      const baseline = requireLinqStub().countObservedSends(replyPath);
-      const response = await postSignedLinqWebhook(buildHostedLinqInboundEvent(userId, chatId, {
-        eventId: `evt_before_handoff_${runId}`, messageId: `msg_before_handoff_${runId}`, text: beforeHandoff,
-      }));
-      expect(response.status).toBe(202);
-      const reply = await requireLinqStub().waitForAdditionalSend({ baselineCount: baseline,
-        expectedPath: replyPath, scenario: requireScenario(), userId });
-      expect(requireLinqStub().readObservedMessageText(reply)).toBe(beforeReply);
-      await requireScenario().waitForHostedCompletion(userId);
-      await migrateLocalMember();
-    }
     // Background activation does not mint a conversation retention window.
     await expect.poll(async () => (await readPostgresRuntimeIdentityForTest(requireScenario().runtimeEnv, userId))?.target,
       { timeout: 90_000 }).toBeNull();
@@ -209,41 +192,4 @@ function requireLinqStub(): HostedLocalLinqStub {
     throw new Error("Hosted local Linq stub was not started.");
   }
   return linqStub;
-}
-
-/** Only the local provider census is replaced: real signed HTTP, Worker/DO,
- * native checkpoint, Web import and canonical ownership run unchanged. */
-async function migrateLocalMember(): Promise<void> {
-  const active = requireScenario();
-  const health = await fetch(`${active.harness.workerBaseUrl}/health`).then(response => response.json()) as { workerVersionId?: string };
-  if (!health.workerVersionId) throw new Error("Local Worker did not report its version.");
-  const campaign = { namespaceId: "synthetic_local_namespace", workerVersion: health.workerVersionId };
-  const send = (command: HostedRuntimeMigrationCommand) => active.harness.requestJson<Record<string, unknown>>(
-    "/internal/runtime-migration", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify(command), signal: AbortSignal.timeout(30_000) });
-  await send({ operation: "begin_rolling", ...campaign });
-  await send({ operation: "enroll_members", ...campaign });
-  const inventory = await send({ operation: "list_inventory", ...campaign, after: "" });
-  const objects = inventory.objects as Array<{ objectId: string }>;
-  expect(objects).toHaveLength(1);
-  const objectId = objects[0]!.objectId;
-  await send({ operation: "discover", ...campaign, objectIds: [objectId], complete: true });
-  await send({ operation: "close_legacy_creation", ...campaign });
-  await send({ operation: "inventory", ...campaign, objectIds: [objectId], after: "", complete: true });
-  expect(await send({ operation: "next_object", ...campaign })).toEqual({ objectId });
-  expect(await send({ operation: "inspect_object", ...campaign, objectId })).toMatchObject({
-    observation: { kind: "observed", userId },
-  });
-  const startedAt = Date.now();
-  const deadline = startedAt + 120_000;
-  for (let steps = 0; steps < 100 && Date.now() < deadline; steps++) {
-    await send({ operation: "advance_member", ...campaign, objectId, userId, migrationId: "synthetic_local_handoff" });
-    const owner = await send({ operation: "read_member", ...campaign, objectId, userId, migrationId: "synthetic_local_handoff" });
-    if ((owner.member as { migrationPhase?: string })?.migrationPhase === "postgres") {
-      process.stdout.write(`${JSON.stringify({ event: "local_member_handoff", elapsedMs: Date.now() - startedAt, steps: steps + 1 })}\n`);
-      return;
-    }
-    await sleep(100);
-  }
-  throw new Error("Local member handoff did not complete within its rehearsal budget.");
 }

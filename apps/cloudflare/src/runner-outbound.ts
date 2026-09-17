@@ -1,7 +1,6 @@
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
 import { presignManagedSnapshot, completeManagedSnapshotForSession } from "./managed-snapshot-control.ts";
 import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, commandHostedRuntimeReplicaPut, HostedRuntimeReplicaPutRejectedError } from "./runtime-resource-client.ts";
-import { usesPostgresRuntimeOwner, supportsPostgresRuntimeOwner } from "./runtime-cutover.ts";
 import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
 import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
 import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
@@ -105,10 +104,7 @@ import {
   readHostedRunnerInternalOperation,
 } from "./runner-outbound/diagnostics.ts";
 import {
-  resolveRunnerOutboundUserCryptoContext,
-  requireRunnerOutboundUserStubMethod,
-  resolveRunnerOutboundUserRunnerStub,
-  type RunnerOutboundEnvironmentSource,
+  resolveRunnerOutboundUserCryptoContext, type RunnerOutboundEnvironmentSource
 } from "./runner-outbound/shared.ts";
 import {
   encodeHostedWorkspaceSnapshotSha256Base64,
@@ -553,7 +549,7 @@ async function handleRunnerMediaRequest(input: {
       userId: input.userId,
     });
     const mediaStore = createHostedMediaStore({
-      bucket: (await usesPostgresRuntimeOwner(input.env, input.userId)) && descriptor ? createRuntimeMediaWriteBucket({
+      bucket: descriptor ? createRuntimeMediaWriteBucket({
         source: input.env, userId: input.userId, attemptId: writeAuthority.attemptId,
         generation: writeAuthority.generation, media: { descriptor },
       }) : input.bucket,
@@ -849,21 +845,10 @@ async function admitHostedMediaRead(input: {
   env: RunnerOutboundEnvironmentSource;
   userId: string;
 }) {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
-    const result = await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
-      operation: "read", descriptor: { ...input.descriptor, expiresAt: input.descriptor.expiresAt ?? null },
-    } });
-    return { ok: result.applied, reason: result.reason ?? "expired" };
-  }
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(stub, "admitHostedMediaRead");
-  return await stub.admitHostedMediaRead({
-    byteSize: input.descriptor.byteSize,
-    mediaId: input.descriptor.mediaId,
-    mediaKind: input.descriptor.mediaKind,
-    sha256: input.descriptor.sha256,
-    userId: input.userId,
-  });
+  const result = await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
+    operation: "read", descriptor: { ...input.descriptor, expiresAt: input.descriptor.expiresAt ?? null },
+  } });
+  return { ok: result.applied, reason: result.reason ?? "expired" };
 }
 
 async function recordHostedMediaAsset(input: {
@@ -872,22 +857,10 @@ async function recordHostedMediaAsset(input: {
   userId: string;
   writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<boolean> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) return (await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
+  return (await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
     operation: "register", attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation,
     descriptor: { ...input.descriptor, expiresAt: input.descriptor.expiresAt ?? null },
   } })).applied;
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(stub, "recordHostedMediaAsset");
-  return await stub.recordHostedMediaAsset({
-    attemptId: input.writeAuthority.attemptId,
-    byteSize: input.descriptor.byteSize,
-    expiresAt: input.descriptor.expiresAt,
-    leaseGeneration: input.writeAuthority.generation,
-    mediaId: input.descriptor.mediaId,
-    mediaKind: input.descriptor.mediaKind,
-    sha256: input.descriptor.sha256,
-    userId: input.userId,
-  });
 }
 
 async function forgetHostedMediaAsset(input: {
@@ -896,17 +869,9 @@ async function forgetHostedMediaAsset(input: {
   userId: string;
   writeAuthority: RunnerRuntimeWriteFenceHeaders;
 }): Promise<boolean> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) return (await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
+  return (await executeRunnerMediaCommand({ source: input.env, userId: input.userId, command: {
     operation: "retire", attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation, mediaId: input.mediaId,
   } })).applied;
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(stub, "forgetHostedMediaAsset");
-  return await stub.forgetHostedMediaAsset({
-    attemptId: input.writeAuthority.attemptId,
-    leaseGeneration: input.writeAuthority.generation,
-    mediaId: input.mediaId,
-    userId: input.userId,
-  });
 }
 
 // A short request-local recovery window, not a timeout for an in-flight binding PUT.
@@ -1626,10 +1591,8 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     !Number.isFinite(sessionExpiresAtMs)
     || sessionExpiresAtMs <= nowMs
   ) {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: null,
-      deleteObject: false,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
       snapshotId: input.snapshotId,
       userId: input.userId,
@@ -1638,10 +1601,8 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
   }
   const remainingSessionSeconds = Math.floor((sessionExpiresAtMs - nowMs) / 1000);
   if (remainingSessionSeconds < HOSTED_WORKSPACE_SNAPSHOT_PRESIGN_MIN_REMAINING_SECONDS) {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: null,
-      deleteObject: false,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
       snapshotId: input.snapshotId,
       userId: input.userId,
@@ -1653,10 +1614,8 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     || session.leaseGeneration !== writeFence.generation
     || session.workspaceVersion !== writeFence.workspaceVersion
   ) {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: null,
-      deleteObject: false,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
       snapshotId: input.snapshotId,
       userId: input.userId,
@@ -1670,10 +1629,8 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     || session.encryption.aad.objectKey !== requestedObjectKey
     || session.encryption.aad.snapshotId !== input.snapshotId
   ) {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: null,
-      deleteObject: false,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
       snapshotId: input.snapshotId,
       userId: input.userId,
@@ -1681,7 +1638,7 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     return jsonError("Hosted workspace snapshot presign target is outside the bound user namespace.", 403);
   }
 
-  if (body.supportsManagedUpload === true && supportsPostgresRuntimeOwner(input.env)) {
+  if (body.supportsManagedUpload === true) {
     return json(await presignManagedSnapshot({
       source: input.env, session, encryptedByteSize, encryptedSha256: encryptedObjectSha256, encryptedMd5,
       expiresSeconds: Math.min(HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS, remainingSessionSeconds),
@@ -2249,12 +2206,9 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
-  await retireWorkspaceSnapshotUploadSession({
-    session: session,
-    bucket: input.bucket,
-    deleteObject: true,
+  await deleteWorkspaceSnapshotUploadSession({
+    session,
     env: input.env,
-    objectKey: session.objectKey,
     snapshotId: input.snapshotId,
     userId: input.userId,
   });
@@ -2366,24 +2320,18 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     "Hosted workspace snapshot complete snapshotRef",
   );
   if (snapshotRef.archive.encryptedByteSize >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot exceeds the single-part size limit.", 413);
   }
   if (snapshotRef.archive.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
@@ -2401,12 +2349,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError(snapshotObjectStore.configurationError, 503);
   }
   if (!snapshotObjectStore.head) {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
@@ -2417,10 +2362,8 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
   if (!object) {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: input.bucket,
-      deleteObject: false,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
       snapshotId: input.snapshotId,
       userId: input.userId,
@@ -2428,36 +2371,27 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return notFound();
   }
   if (!Number.isSafeInteger(object.size)) {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot object size is unavailable.", 503);
   }
   if (object.size !== snapshotRef.archive.encryptedByteSize) {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot object size does not match its ref.", 409);
   }
   if (!workspaceSnapshotMetadataMatchesRef(object, snapshotRef, managedSha256)) {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
@@ -2468,12 +2402,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     snapshotRef,
   });
   if (checkpointRequest.reason !== "idle_shutdown") {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
@@ -2487,12 +2418,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     || checkpointRequest.leaseGeneration !== writeFence.generation
     || checkpointRequest.expectedWorkspaceVersion !== writeFence.workspaceVersion
   ) {
-    await retireWorkspaceSnapshotUploadSession({
-    session: session,
-      bucket: input.bucket,
-      deleteObject: true,
+    await deleteWorkspaceSnapshotUploadSession({
+      session,
       env: input.env,
-      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
@@ -2937,12 +2865,9 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
-  await retireWorkspaceSnapshotUploadSession({
+  await deleteWorkspaceSnapshotUploadSession({
     session: input.session,
-    bucket: input.bucket,
-    deleteObject: false,
     env: input.env,
-    objectKey: currentSnapshotRef.objectKey,
     snapshotId: currentSnapshotRef.snapshotId,
     userId: input.userId,
   }).catch(() => undefined);
@@ -2964,18 +2889,9 @@ async function rememberReplacedWorkspaceSnapshotCleanupInUploadSession(input: {
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
 }): Promise<boolean> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+  return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
     operation: "snapshot_record_replaced", expectedSession: input.session, replacedSnapshotRef: input.replacedSnapshotRef,
   } })).applied;
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "rememberHostedWorkspaceSnapshotReplacedRef",
-  );
-  return await stub.rememberHostedWorkspaceSnapshotReplacedRef({
-    expectedSession: input.session,
-    replacedSnapshotRef: input.replacedSnapshotRef,
-  });
 }
 
 async function rememberWorkspaceSnapshotPresignedPut(input: {
@@ -2985,22 +2901,10 @@ async function rememberWorkspaceSnapshotPresignedPut(input: {
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
-    const result = await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
-      operation: "snapshot_admit_put", expectedSession: input.session, expiresAt: input.expiresAt, drainUntil: input.drainUntil,
-    } });
-    return result.applied ? result.session : null;
-  }
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "rememberHostedWorkspaceSnapshotPresignedPut",
-  );
-  return await stub.rememberHostedWorkspaceSnapshotPresignedPut({
-    drainUntil: input.drainUntil,
-    expectedSession: input.session,
-    expiresAt: input.expiresAt,
-  });
+  const result = await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+    operation: "snapshot_admit_put", expectedSession: input.session, expiresAt: input.expiresAt, drainUntil: input.drainUntil,
+  } });
+  return result.applied ? result.session : null;
 }
 
 async function deleteReplacedLegacyWorkspaceSnapshotBundles(input: {
@@ -3040,17 +2944,9 @@ async function recordWorkspaceSnapshotOrphanCandidate(
   env: RunnerOutboundEnvironmentSource,
   candidate: HostedWorkspaceSnapshotOrphanCandidate,
 ): Promise<boolean> {
-  if ((await usesPostgresRuntimeOwner(env, candidate.userId))) {
-    await recordHostedRuntimeOrphan({ source: env, userId: candidate.userId, resource: candidate.kind === "legacy_workspace_snapshot"
-      ? { kind: "legacy_snapshot", snapshotRef: candidate.snapshotRef }
-      : { kind: "snapshot", objectKey: candidate.objectKey } });
-    return true;
-  }
-  const stub = await resolveRunnerOutboundUserRunnerStub(env, candidate.userId);
-  if (typeof stub.recordHostedWorkspaceSnapshotOrphanCandidate !== "function") {
-    return false;
-  }
-  await stub.recordHostedWorkspaceSnapshotOrphanCandidate(candidate);
+  await recordHostedRuntimeOrphan({ source: env, userId: candidate.userId, resource: candidate.kind === "legacy_workspace_snapshot"
+    ? { kind: "legacy_snapshot", snapshotRef: candidate.snapshotRef }
+    : { kind: "snapshot", objectKey: candidate.objectKey } });
   return true;
 }
 
@@ -3058,16 +2954,8 @@ async function recordBrowserVaultReplicaOrphanCandidate(
   env: RunnerOutboundEnvironmentSource,
   candidate: HostedBrowserVaultReplicaOrphanCandidate,
 ): Promise<void> {
-  if ((await usesPostgresRuntimeOwner(env, candidate.userId))) {
-    await recordHostedRuntimeOrphan({ source: env, userId: candidate.userId, resource: { kind: "replica", objectKey: candidate.objectKey } });
-    return;
-  }
-  const stub = await resolveRunnerOutboundUserRunnerStub(env, candidate.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "recordHostedBrowserVaultReplicaOrphanCandidate",
-  );
-  await stub.recordHostedBrowserVaultReplicaOrphanCandidate(candidate);
+  await recordHostedRuntimeOrphan({ source: env, userId: candidate.userId, resource: { kind: "replica", objectKey: candidate.objectKey } });
+  return;
 }
 
 function collectLegacyWorkspaceSnapshotBundleRefs(
@@ -3145,45 +3033,6 @@ function hostedWorkspaceSnapshotV2RefsMatch(
     && left.encryption.aad.userId === right.encryption.aad.userId
     && left.encryption.aad.snapshotId === right.encryption.aad.snapshotId
     && left.encryption.aad.objectKey === right.encryption.aad.objectKey;
-}
-
-async function retireWorkspaceSnapshotUploadSession(input: {
-  session: HostedWorkspaceSnapshotUploadSession;
-  bucket: WorkspaceSnapshotR2BucketLike | null;
-  deleteObject: boolean;
-  env: RunnerOutboundEnvironmentSource;
-  objectKey?: string;
-  snapshotId: string;
-  userId: string;
-}): Promise<void> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
-    // Canonical protection, capability drains, and irreversible retirement now
-    // belong to the Web retention transaction. Never delete ciphertext here.
-    await deleteWorkspaceSnapshotUploadSession(input);
-    return;
-  }
-  // The legacy owner aborts any managed upload under its deletion lock before
-  // releasing this session. Only then may physical cleanup remove its bytes.
-  await deleteWorkspaceSnapshotUploadSession(input);
-  if (input.deleteObject && input.objectKey) {
-    const deleted = await deleteWorkspaceSnapshotObjectBestEffort({
-      bucket: input.bucket,
-      env: input.env,
-      objectKey: input.objectKey,
-    });
-    if (!deleted) {
-      const retained = await recordWorkspaceSnapshotOrphanCandidate(input.env, {
-        createdAt: new Date().toISOString(),
-        objectKey: input.objectKey,
-        schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-        snapshotId: input.snapshotId,
-        userId: input.userId,
-      }).catch(() => false);
-      if (!retained) {
-        throw new Error("Hosted workspace snapshot object cleanup could not be retained.");
-      }
-    }
-  }
 }
 
 async function deleteWorkspaceSnapshotObjectBestEffort(input: {
@@ -3510,10 +3359,10 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   });
   let admittedRootObjectKey: string | null = null;
   const replicaStore = createHostedBrowserVaultReplicaStore({
-    bucket: (await usesPostgresRuntimeOwner(input.env, input.userId)) ? createRuntimeReplicaWriteBucket({ source: input.env,
+    bucket: createRuntimeReplicaWriteBucket({ source: input.env,
       userId: input.userId, attemptId: writeAuthority.attemptId, generation: writeAuthority.generation,
       readRootObjectKey: () => admittedRootObjectKey,
-    }) : input.bucket,
+    }),
     keysById: crypto.keysById,
     resolveRootKeyById: crypto.resolveKeyById,
     rootKey: crypto.rootKey,
@@ -3534,10 +3383,8 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
       replicaRef: await replicaStore.writeBrowserVaultReplica({
         beforeWrite: async (plannedReplicaRef) => {
           const writeId = globalThis.crypto.randomUUID();
-          const admittedAtMs = Date.now();
           const putAdmitted = await admitBrowserVaultReplicaDirectPut({
             objectKey: plannedReplicaRef.objectKey,
-            admittedAt: new Date(admittedAtMs).toISOString(),
             attemptId: writeAuthority.attemptId,
             env: input.env,
             leaseGeneration: writeAuthority.generation,
@@ -3549,12 +3396,6 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
           }
           activePutWriteId = writeId;
           admittedRootObjectKey = plannedReplicaRef.objectKey;
-          if (!(await usesPostgresRuntimeOwner(input.env, input.userId))) await recordBrowserVaultReplicaOrphanCandidate(input.env, {
-            createdAt: new Date().toISOString(),
-            objectKey: plannedReplicaRef.objectKey,
-            schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
-            userId: input.userId,
-          });
         },
         replica: body.replica,
         userId: input.userId,
@@ -3581,28 +3422,15 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
 
 async function admitBrowserVaultReplicaDirectPut(input: {
   objectKey: string;
-  admittedAt: string;
   attemptId: string;
   env: RunnerOutboundEnvironmentSource;
   leaseGeneration: string;
   userId: string;
   writeId: string;
 }): Promise<boolean> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) return commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: {
+  return commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: {
     operation: "admit", attemptId: input.attemptId, generation: input.leaseGeneration, writeId: input.writeId, objectKey: input.objectKey,
   } });
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "admitHostedBrowserVaultReplicaDirectPut",
-  );
-  return await stub.admitHostedBrowserVaultReplicaDirectPut({
-    admittedAt: input.admittedAt,
-    attemptId: input.attemptId,
-    leaseGeneration: input.leaseGeneration,
-    userId: input.userId,
-    writeId: input.writeId,
-  });
 }
 
 async function releaseBrowserVaultReplicaDirectPut(input: {
@@ -3610,19 +3438,8 @@ async function releaseBrowserVaultReplicaDirectPut(input: {
   userId: string;
   writeId: string;
 }): Promise<void> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
-    await commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: { operation: "release", writeId: input.writeId } });
-    return;
-  }
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "releaseHostedBrowserVaultReplicaDirectPut",
-  );
-  await stub.releaseHostedBrowserVaultReplicaDirectPut({
-    userId: input.userId,
-    writeId: input.writeId,
-  });
+  await commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: { operation: "release", writeId: input.writeId } });
+  return;
 }
 
 async function writeRequestOwnsRuntimeWriteFence(input: {
@@ -3652,7 +3469,7 @@ async function requireWorkspaceSnapshotWriteFence(input: {
   request: Request;
   userId: string;
 }) {
-  if (input.deferToResourceCommand && (await usesPostgresRuntimeOwner(input.env, input.userId))) {
+  if (input.deferToResourceCommand) {
     const headers = readRunnerRuntimeWriteFenceHeaders(input.request);
     return headers?.workspaceVersion && /^[0-9]+$/u.test(headers.workspaceVersion)
       ? { ...headers, workspaceVersion: headers.workspaceVersion } : null;
@@ -3688,16 +3505,8 @@ async function createWorkspaceSnapshotUploadSession(input: {
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
-    const result = await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: { operation: "snapshot_create", session: input.session } });
-    return result.applied ? result.session : null;
-  }
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "createHostedWorkspaceSnapshotUploadSession",
-  );
-  return await stub.createHostedWorkspaceSnapshotUploadSession(input.session);
+  const result = await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: { operation: "snapshot_create", session: input.session } });
+  return result.applied ? result.session : null;
 }
 
 async function heartbeatWorkspaceSnapshotUploadSession(input: {
@@ -3707,20 +3516,9 @@ async function heartbeatWorkspaceSnapshotUploadSession(input: {
   snapshotId: string;
   userId: string;
 }): Promise<boolean> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+  return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
     operation: "snapshot_heartbeat", snapshotId: input.snapshotId, attemptId: input.attemptId, generation: input.leaseGeneration,
   } })).applied;
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "heartbeatHostedWorkspaceSnapshotUploadSession",
-  );
-  return await stub.heartbeatHostedWorkspaceSnapshotUploadSession({
-    attemptId: input.attemptId,
-    leaseGeneration: input.leaseGeneration,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
 }
 
 async function completeWorkspaceSnapshotUploadSessionHandoff(input: {
@@ -3730,20 +3528,9 @@ async function completeWorkspaceSnapshotUploadSessionHandoff(input: {
   snapshotId: string;
   userId: string;
 }): Promise<boolean> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+  return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
     operation: "snapshot_complete", snapshotId: input.snapshotId, attemptId: input.attemptId, generation: input.leaseGeneration,
   } })).applied;
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "completeHostedWorkspaceSnapshotUploadSession",
-  );
-  return await stub.completeHostedWorkspaceSnapshotUploadSession({
-    attemptId: input.attemptId,
-    leaseGeneration: input.leaseGeneration,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
 }
 
 async function completeWorkspaceSnapshotUploadSessionHandoffBestEffort(input: {
@@ -3784,44 +3571,23 @@ async function readWorkspaceSnapshotUploadSession(input: {
   snapshotId: string;
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
-    const result = await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
-      operation: "snapshot_read", snapshotId: input.snapshotId, attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation,
-    } });
-    return result.applied ? result.session : null;
-  }
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "readHostedWorkspaceSnapshotUploadSession",
-  );
-  return await stub.readHostedWorkspaceSnapshotUploadSession({
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
+  const result = await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+    operation: "snapshot_read", snapshotId: input.snapshotId, attemptId: input.writeAuthority.attemptId, generation: input.writeAuthority.generation,
+  } });
+  return result.applied ? result.session : null;
 }
 
+// Web retention owns canonical protection, capability drains, and ciphertext retirement.
 async function deleteWorkspaceSnapshotUploadSession(input: {
   session: HostedWorkspaceSnapshotUploadSession;
   env: RunnerOutboundEnvironmentSource;
   snapshotId: string;
   userId: string;
 }): Promise<void> {
-  if ((await usesPostgresRuntimeOwner(input.env, input.userId))) {
-    await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
-      operation: "snapshot_delete", snapshotId: input.snapshotId, attemptId: input.session.attemptId, generation: input.session.leaseGeneration,
-    } });
-    return;
-  }
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "deleteHostedWorkspaceSnapshotUploadSession",
-  );
-  await stub.deleteHostedWorkspaceSnapshotUploadSession({
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
+  await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
+    operation: "snapshot_delete", snapshotId: input.snapshotId, attemptId: input.session.attemptId, generation: input.session.leaseGeneration,
+  } });
+  return;
 }
 
 function createHostedWorkspaceSnapshotId(): string {

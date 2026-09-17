@@ -1,5 +1,5 @@
 export { createHostedRuntimeMigrationRehearsalForTest } from "./hosted-runtime-migration-testkit";
-export { initializeEmptyPostgresRuntimeForTest, readPostgresRuntimeIdentityForTest } from "./hosted-runtime-owner-testkit";
+export { initializeEmptyPostgresRuntimeForTest, readPostgresRuntimeIdentityForTest, startStuckPostgresRuntimeForTest, agePostgresRuntimeForTest } from "./hosted-runtime-owner-testkit";
 export {
   HostedBillingBrowserDriver,
   type HostedBillingBrowserActor,
@@ -316,6 +316,7 @@ interface HostedTestPrismaFactoryClient {
   };
   hostedMember: {
     create(args: unknown): Promise<{ id: string }>;
+    deleteMany(args: { where: { id: { in: string[] } } }): Promise<{ count: number }>;
     update(args: unknown): Promise<{ id: string }>;
   };
 }

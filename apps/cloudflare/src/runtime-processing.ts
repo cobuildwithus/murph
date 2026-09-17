@@ -7,8 +7,6 @@ import type { HostedRuntimeOwnerCommand, HostedRuntimeOwnerSnapshot } from "@mur
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import type { WorkerEnvironmentSource } from "./worker-routes/shared.ts";
-import { supportsPostgresRuntimeOwner } from "./runtime-cutover.ts";
-import { progressRuntimeMigrationForMember } from "./runtime-migration-progress.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
 import { RuntimeInvocationPreparation } from "./runtime-invocation-preparation.ts";
@@ -27,14 +25,13 @@ import {
   type HostedStandbySlotBinding,
 } from "./standby-runner-contract.ts";
 
-type RuntimeProcessingSource = Pick<WorkerEnvironmentSource, "USER_RUNNER" | "BUNDLES" | "RUNNER_CONTAINER" | "NEXT_RUNNER_CONTAINER" | "STANDBY_RUNNER_CONTAINER" | "STANDBY_COORDINATOR"> & Readonly<Record<string, unknown>>;
+type RuntimeProcessingSource = Pick<WorkerEnvironmentSource, "BUNDLES" | "RUNNER_CONTAINER" | "NEXT_RUNNER_CONTAINER" | "STANDBY_RUNNER_CONTAINER" | "STANDBY_COORDINATOR"> & Readonly<Record<string, unknown>>;
 type ProcessingContext = ReturnType<typeof createProcessingContext> & {
   namespace: NonNullable<ReturnType<typeof createHostedRunnerContainerNamespaceRouter>>;
 };
 
-/** Request-local composition. Postgres owns admission; the immutable native
- * target owns execution evidence. Null is the finite legacy cutover bridge. */
-export async function ensurePostgresRuntimeProcessing(source: RuntimeProcessingSource, input: RuntimeProcessingInput, diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} }): Promise<HostedRuntimeEnsureProcessingResponse | null> {
+/** Postgres owns admission; the immutable native target owns execution evidence. */
+export async function ensurePostgresRuntimeProcessing(source: RuntimeProcessingSource, input: RuntimeProcessingInput, diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} }): Promise<HostedRuntimeEnsureProcessingResponse> {
   const context = createProcessingContext(source, input, diagnostics);
   try {
     return await ensureRuntimeProcessing(context);
@@ -51,18 +48,9 @@ function isProcessingTimeout(error: unknown): boolean {
     || (error instanceof Error && error.name === "TimeoutError");
 }
 
-async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessingContext>): Promise<HostedRuntimeEnsureProcessingResponse | null> {
-  const { source, input, diagnostics } = context;
-  if (!supportsPostgresRuntimeOwner(source)) {
-    const state = await context.command({ operation: "reconcile" });
-    return state.cutover === "legacy" ? null : retryProcessing(context, "postgres_capability_unavailable");
-  }
+async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessingContext>): Promise<HostedRuntimeEnsureProcessingResponse> {
+  const { diagnostics } = context;
   let claim = await context.command({ operation: "claim", processingMode: context.mode });
-  if (claim.cutover === "legacy") return null;
-  if (claim.cutover === "draining") {
-    await context.step("migration", () => progressRuntimeMigrationForMember({ source, userId: input.userId, budget: context.budget }));
-    return retryProcessing(context, "migration_pending");
-  }
   if (claim.cutover !== "postgres") return retryProcessing(context, "cutover_blocked");
   if (!context.namespace) return retryProcessing(context, "missing_container_binding");
   if (!claim.owner) return retryProcessing(context, "claim_blocked");
@@ -106,7 +94,7 @@ function createProcessingContext(source: RuntimeProcessingSource, input: Runtime
 }
 
 function retryProcessing(ctx: { diagnostics: RuntimeProcessingDiagnostics }, reason:
-  | "postgres_capability_unavailable" | "migration_pending" | "cutover_blocked" | "missing_container_binding"
+  | "cutover_blocked" | "missing_container_binding"
   | "claim_blocked" | "retirement_pending" | "completion_unconfirmed" | "starting_fence_preserved"
   | "processing_mode_conflict" | "wake_unconfirmed" | "target_unavailable" | "container_not_ready"
   | "command_budget_exhausted" | "container_rpc_timeout"

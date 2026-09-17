@@ -1,3 +1,5 @@
+import { HOSTED_RUNTIME_OWNER_PATH } from "@murphai/hosted-execution/runtime-owner";
+import { createPostgresTestOwner, forbiddenLegacyRuntime, settledNativeRuntime } from "../postgres-owner-fixtures.ts";
 import { afterEach, expect, test, vi } from "vitest";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 
@@ -49,6 +51,7 @@ async function openImageGateSocket(nativeMemory = false, logStatus?: Promise<num
   vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (target, init) => {
     const outgoing = new Request(target, init);
     const url = new URL(outgoing.url);
+    if (url.pathname === HOSTED_RUNTIME_OWNER_PATH) return Response.json({ cutover: "postgres", status: "authorized", owner: createPostgresTestOwner() });
     if (url.hostname === "api.openai.com") {
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
@@ -66,7 +69,8 @@ async function openImageGateSocket(nativeMemory = false, logStatus?: Promise<num
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     OPENAI_API_KEY: "openai-worker-secret",
-    USER_RUNNER: { getByName: () => ({ validateRuntimeWriteFence: async () => true }) },
+    USER_RUNNER: forbiddenLegacyRuntime,
+    RUNNER_CONTAINER: { getByName: () => settledNativeRuntime },
   };
   const response = await hostedRunnerIntercept(new Request("https://api.openai.com/v1/responses", {
     headers: {
@@ -465,7 +469,9 @@ test("routes marked upgrades through durable native-memory accounting before del
         webSocket: upstreamClient,
       });
     }
-    if (url.endsWith("/api/internal/hosted-execution/usage/record")) {
+    if (new URL(url).pathname === HOSTED_RUNTIME_OWNER_PATH) return Response.json({ cutover: "postgres", status: "authorized", owner: createPostgresTestOwner() });
+    if (new URL(url).pathname === "/api/internal/hosted-runtime/log") return Response.json({ ok: true });
+    if (new URL(url).pathname === "/api/internal/hosted-execution/usage/record") {
       markUsageStarted?.();
       return await pendingUsage;
     }
@@ -477,11 +483,8 @@ test("routes marked upgrades through durable native-memory accounting before del
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     OPENAI_API_KEY: "openai-worker-secret",
-    USER_RUNNER: {
-      getByName: () => ({
-        validateRuntimeWriteFence: async () => true,
-      }),
-    },
+    USER_RUNNER: forbiddenLegacyRuntime,
+    RUNNER_CONTAINER: { getByName: () => settledNativeRuntime },
   };
 
   const response = await hostedRunnerIntercept(
@@ -555,7 +558,7 @@ test("routes marked upgrades through durable native-memory accounting before del
 
   const usageCall = fetchMock.mock.calls.find(([target]) => {
     const url = target instanceof Request ? target.url : String(target);
-    return url.endsWith("/api/internal/hosted-execution/usage/record");
+    return new URL(url).pathname === "/api/internal/hosted-execution/usage/record";
   });
   expect(usageCall).toBeDefined();
   const payload = JSON.parse(String(usageCall?.[1]?.body)) as {

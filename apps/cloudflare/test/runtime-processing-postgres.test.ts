@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeProcessingDiagnostics } from "../src/user-runner/diagnostics.ts";
 import type { HostedRuntimeOwnerResponse, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ensurePostgresRuntimeProcessing } from "../src/runtime-processing.ts";
-import { commandHostedRuntimeMigration } from "../src/runtime-migration-client.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "../src/runtime-owner-completion.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
@@ -13,7 +12,6 @@ import type { HostedStandbySlotBinding } from "../src/standby-runner-contract.ts
 import type { RunnerInvocationReceipt } from "../src/runner-invocation-receipt.ts";
 import type { RuntimeInvocationPreparation } from "../src/runtime-invocation-preparation.ts";
 
-vi.mock("../src/runtime-migration-client.ts", () => ({ commandHostedRuntimeMigration: vi.fn() }));
 vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
 vi.mock("../src/runtime-owner-completion.ts", () => ({ recordHostedRuntimeOwnerCompletion: vi.fn(async () => true) }));
 vi.mock("../src/runtime-invocation-preparation.ts", () => ({
@@ -67,7 +65,6 @@ describe("Postgres runtime orchestration", () => {
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(commandHostedRuntimeMigration).mockResolvedValue({ gate: { phase: "legacy" } });
   });
 
   it("returns a retry at command expiry without retiring or launching the uncertain owner", async () => {
@@ -121,58 +118,13 @@ describe("Postgres runtime orchestration", () => {
     expect(Boolean(payload?.launch)).toBe(supported);
   });
 
-  it("completes a new member's exact empty handoff in one processing request before the next admission", async () => {
-    const { source, container } = harness();
-    const objectId = "a".repeat(64);
-    let section = 0; let activated = false;
-    const legacy = {
-      inspectPostgresMigration: vi.fn(async () => ({ kind: "observed" as const, schemaVersion: null,
-        userId: null, generation: "0", activeAttemptId: null, activeRunnerContainerName: null,
-        workspaceVersion: null, snapshotPutDrainUntil: null, replicaPendingWrites: 0,
-        replicaRecoveryDrainUntil: null, managedSnapshotPendingUploads: 0, observedAt: "2026-09-16T00:00:00.000Z",
-        freeze: { phase: null, pendingOperations: 0 } })),
-      freezeEmptyForPostgresMigration: vi.fn(async () => ({ frozen: true })),
-      exportPostgresMigrationPage: vi.fn(async () => ({ schema: "murph.legacy-runtime-export.v1" as const,
-        userId: null, generation: "0", cursor: { section, after: "" },
-        next: section < 3 ? { section: section + 1, after: "" } : null, records: [], hash: "b".repeat(64) })),
-      bindUser: vi.fn(), deleteHostedUserData: vi.fn(), publishHostedPrivateMedia: vi.fn(),
-      ensureRuntimeProcessingForUser: vi.fn(), runnerStatus: vi.fn(),
-    };
-    const namespace = { idFromName: vi.fn(() => ({ toString: () => objectId })),
-      idFromString: vi.fn(() => ({ toString: () => objectId })), get: vi.fn(() => legacy), getByName: vi.fn(() => legacy) };
-    vi.mocked(commandHostedRuntimeMigration).mockImplementation(async ({ command }) => {
-      if (command.operation === "status") return { gate: { phase: "rolling", namespaceId: "synthetic_namespace",
-        workerVersion: "release_1", namespaceProbeId: objectId, creationClosedAt: "synthetic-closed", inventorySealedAt: "synthetic-sealed" } };
-      if (command.operation === "enroll_sources") return { enrolled: 1 };
-      if (command.operation === "select_first_use") return { objectId };
-      if (command.operation === "read_object") return { object: { completedAt: section === 4 ? "synthetic-complete" : null, nextCursor: { section, after: "" } } };
-      if (command.operation === "import_empty") { section++; return { object: { completedAt: section === 4 ? "synthetic-complete" : null, nextCursor: command.page.next } }; }
-      if (command.operation === "activate_empty") { expect(section).toBe(4); activated = true; return { done: true }; }
-      throw new Error("Unexpected first-use migration command.");
-    });
-    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
-      if (!activated) return { cutover: "draining", status: "blocked", owner: null };
-      return response(owner({ phase: "starting", workspaceVersion: null }), command.operation === "claim" ? "claimed" : "updated");
-    });
-    expect(await ensurePostgresRuntimeProcessing({ ...source, USER_RUNNER: namespace }, request)).toMatchObject({ kind: "retry_later" });
-    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
-    expect(activated).toBe(true);
-    expect(namespace.idFromName).toHaveBeenCalledWith(request.userId);
-    expect(namespace.getByName).not.toHaveBeenCalled();
-    expect(legacy.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
-    expect(await ensurePostgresRuntimeProcessing({ ...source, USER_RUNNER: namespace }, request)).toMatchObject({ kind: "runtime_processing_accepted", action: "started" });
-    expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
-  });
-
   it.each([
-    ["disabled", "postgres_capability_unavailable"],
-    ["draining", "migration_pending"],
+    ["draining", "cutover_blocked"],
     ["missing-owner", "claim_blocked"],
     ["uncertain-wake", "wake_unconfirmed"],
   ] as const)("records the actual bounded retry reason for %s", async (scenario, reason) => {
     const { source, container } = harness();
     const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
-    if (scenario === "disabled") source.HOSTED_RUNTIME_POSTGRES_ENABLED = "false";
     if (scenario === "draining") vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce({ cutover: "draining", status: "blocked", owner: null });
     else vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(scenario === "missing-owner" ? null : owner()));
     if (scenario === "uncertain-wake") container.ensureProcessing.mockRejectedValueOnce(new Error("synthetic transport failure"));
@@ -181,28 +133,28 @@ describe("Postgres runtime orchestration", () => {
     if (scenario === "uncertain-wake") expect(diagnostics).toMatchObject({ attemptId: "attempt-a", leaseGeneration: "1", stage: "active_wake" });
   });
 
-  it("uses the finite legacy bridge and closes admission during draining", async () => {
+  it.each(["legacy", "draining"] as const)("keeps an unretired %s database closed without calling a legacy object", async cutover => {
     const { source, container } = harness();
-    vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce({ cutover: "legacy", status: "blocked", owner: null });
-    expect(await ensurePostgresRuntimeProcessing({ ...source, HOSTED_RUNTIME_POSTGRES_ENABLED: "false" }, request)).toBeNull();
-    vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce({ cutover: "draining", status: "blocked", owner: null });
-    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "retry_later" });
-    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
-  });
-
-  it("keeps legacy processing available when the mixed-capable deployment is enabled", async () => {
-    const { source, container } = harness();
-    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "legacy", status: "blocked", owner: null });
-    expect(await ensurePostgresRuntimeProcessing(source, request)).toBeNull();
+    const legacy = vi.fn(() => { throw new Error("Legacy namespace must not be accessed."); });
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover, status: "blocked", owner: null });
+    expect(await ensurePostgresRuntimeProcessing({ ...source, USER_RUNNER: { getByName: legacy } }, request))
+      .toMatchObject({ kind: "retry_later" });
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ command: { operation: "claim", processingMode: "default" } }));
+    expect(legacy).not.toHaveBeenCalled();
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
   });
 
-  it("does not fall back to legacy for a migrated member on a disabled deployment", async () => {
+  it.each([undefined, "false", "true"])("starts a new Postgres member without the retired deployment flag (%s)", async flag => {
     const { source, container } = harness();
-    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner(), "observed"));
-    expect(await ensurePostgresRuntimeProcessing({ ...source, HOSTED_RUNTIME_POSTGRES_ENABLED: "false" }, request)).toMatchObject({ kind: "retry_later" });
-    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    const legacy = vi.fn(() => { throw new Error("Legacy namespace must not be accessed."); });
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) =>
+      response(owner({ phase: "starting", workspaceVersion: null }), command.operation === "claim" ? "claimed" : "updated"));
+    expect(await ensurePostgresRuntimeProcessing({ ...source, HOSTED_RUNTIME_POSTGRES_ENABLED: flag,
+      USER_RUNNER: { getByName: legacy } }, request))
+      .toMatchObject({ kind: "runtime_processing_accepted", action: "started" });
+    expect(legacy).not.toHaveBeenCalled();
+    expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
   });
 
   it("wakes the exact live owner and forwards foreground promotion in place", async () => {

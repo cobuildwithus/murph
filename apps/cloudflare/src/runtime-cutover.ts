@@ -1,5 +1,3 @@
-import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
-
 /** Deployment capability, never a member's backend selection. Enabling this
  * allows mixed ownership without pausing members still running on legacy.
  */
@@ -15,18 +13,4 @@ export class HostedRuntimeMemberMigratingError extends Error {
     super("This member is completing a runtime handoff.");
     this.name = "HostedRuntimeMemberMigratingError";
   }
-}
-
-/** The destination still validates its own authority. Never retry a stale
- * request against the other backend. The disabled legacy deployment remains
- * fenced by ensure-processing and each migrated object's durable freeze.
- */
-export async function usesPostgresRuntimeOwner(
-  source: Readonly<Record<string, unknown>>,
-  userId: string,
-): Promise<boolean> {
-  if (!supportsPostgresRuntimeOwner(source)) return false;
-  const state = await commandHostedRuntimeOwner({ source, userId, command: { operation: "reconcile" } });
-  if (state.cutover === "draining") throw new HostedRuntimeMemberMigratingError();
-  return state.cutover === "postgres";
 }

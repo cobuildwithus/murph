@@ -1,3 +1,4 @@
+import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
 import {
   HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
   type HostedWorkspaceInvocationResult,
@@ -146,6 +147,7 @@ function expectRunnerContainerStartupFailureObservation(input: {
 describe("RunnerContainer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner").mockResolvedValue({ cutover: "postgres", status: "updated", owner: null });
   });
 
   it.each(["managed-snapshot-v1", "old-protocol", "missing"])("probes checkpoint support without starting or checkpointing a process: %s", async protocol => {

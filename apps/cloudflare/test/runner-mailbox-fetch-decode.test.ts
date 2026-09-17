@@ -4,7 +4,7 @@ import { buildHostedSecureBoxAad, sealHostedSecureBox, serializeHostedSecureBoxE
 import { buildHostedMailboxPayloadScope, buildHostedMailboxPayloadSecureBoxAad, HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA } from "@murphai/hosted-execution/runtime-control";
 import { parseHostedMailboxFetchResponse } from "@murphai/hosted-execution/parsers";
 
-const mocks = vi.hoisted(() => ({ forward: vi.fn(), fence: vi.fn(), crypto: vi.fn(),
+const mocks = vi.hoisted(() => ({ forward: vi.fn(), crypto: vi.fn(),
   suppliedCrypto: vi.fn(), cached: vi.fn() }));
 vi.mock("../src/hosted-crypto/runtime-user-crypto-context.ts", async (original) => ({
   ...await original<typeof import("../src/hosted-crypto/runtime-user-crypto-context.ts")>(),
@@ -15,17 +15,13 @@ vi.mock("../src/web-control-plane.ts", async (original) => ({
   ...await original<typeof import("../src/web-control-plane.ts")>(),
   fetchHostedExecutionWebControlPlaneResponse: mocks.forward,
 }));
-vi.mock("../src/runner-outbound/write-fence.ts", async (original) => ({
-  ...await original<typeof import("../src/runner-outbound/write-fence.ts")>(),
-  requireRunnerRuntimeWriteFence: mocks.fence,
-}));
+
 vi.mock("../src/runner-outbound/shared.ts", async (original) => ({
   ...await original<typeof import("../src/runner-outbound/shared.ts")>(),
   resolveRunnerOutboundUserCryptoContext: mocks.crypto,
 }));
 import { HOSTED_RUNNER_WEB_CONTROL_ROUTES } from "../src/runner-outbound/shared-web-control-policy.ts";
 import { handleRunnerWebControlRequest } from "../src/runner-outbound/web-control.ts";
-import { RunnerRuntimeWriteFenceError } from "../src/runner-outbound/write-fence.ts";
 import { createHostedWebMailboxPort } from "../src/runtime-platform/mailbox-port.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -61,6 +57,11 @@ async function mailboxFixture(index = 1) {
     consumedSeqByLane: [{ lane: "conversation", consumedSeq: "0" }] };
 }
 async function handle(request: Request) {
+  const headers = new Headers(request.headers);
+  headers.set("x-hosted-runtime-attempt-id", "synthetic-attempt");
+  headers.set("x-hosted-runtime-lease-generation", "1");
+  headers.set("x-hosted-runtime-workspace-version", "1");
+  request = new Request(request, { headers });
   const env = {
     ...createHostedExecutionTestEnv(),
     BUNDLES: { get: async () => null, put: async () => undefined },
@@ -77,12 +78,11 @@ function request(optIn = true) {
 describe("Worker mailbox fetch/decode composition", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.fence.mockResolvedValue({ attemptId: "synthetic-attempt", generation: "1", workspaceVersion: "1" });
     mocks.crypto.mockResolvedValue({ resolveKeyById: async (id: string) => id === rootKeyId ? rootKey : null });
     mocks.suppliedCrypto.mockResolvedValue({ resolveKeyById: async (id: string) => id === rootKeyId ? rootKey : null });
     mocks.cached.mockReturnValue(false);
   });
-  it("returns a parsed wake through one container request, one Web fetch and one fence check", async () => {
+  it("returns a parsed wake through one container request, one Web fetch carrying canonical authority", async () => {
     const mailbox = await mailboxFixture();
     mocks.forward.mockImplementation(async () => Response.json(mailbox));
     const fetchImpl = vi.fn<typeof fetch>(async (url, init) => handle(new Request(url, init)));
@@ -93,7 +93,9 @@ describe("Worker mailbox fetch/decode composition", () => {
     expect(fetched.items[0]?.payloadInlineCiphertext).toBe(mailbox.items[0]!.payloadInlineCiphertext);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(mocks.forward).toHaveBeenCalledTimes(1);
-    expect(mocks.fence).toHaveBeenCalledTimes(1);
+    const headers = new Headers(mocks.forward.mock.calls[0]![0].headers);
+    expect(headers.get("x-hosted-runtime-attempt-id")).toBe("synthetic-attempt");
+    expect(headers.get("x-hosted-runtime-lease-generation")).toBe("1");
     // Canonical Web parsing never accepts the ephemeral plaintext field.
     expect(parseHostedMailboxFetchResponse(fetched).items[0]).not.toHaveProperty("decodedWake");
   });
@@ -178,13 +180,12 @@ describe("Worker mailbox fetch/decode composition", () => {
     HOSTED_RUNNER_WEB_CONTROL_ROUTES.vaultShareDeliver,
   ])("rejects GET for POST-only $operation before authority or forwarding", async (route) => {
     expect((await handle(new Request(`http://web-control.worker${route.path}`, { method: "GET" }))).status).toBe(404);
-    expect(mocks.fence).not.toHaveBeenCalled();
     expect(mocks.forward).not.toHaveBeenCalled();
   });
-  it("rejects a stale write fence before Web or crypto work", async () => {
-    mocks.fence.mockRejectedValue(new RunnerRuntimeWriteFenceError());
+  it("returns a canonical stale-fence rejection before crypto work", async () => {
+    mocks.forward.mockResolvedValue(Response.json({ error: "Unauthorized" }, { status: 401 }));
     expect((await handle(request())).status).toBe(401);
-    expect(mocks.forward).not.toHaveBeenCalled();
+    expect(mocks.forward).toHaveBeenCalledOnce();
     expect(mocks.crypto).not.toHaveBeenCalled();
   });
   it("rejects a wrong-user mailbox before decrypting", async () => {

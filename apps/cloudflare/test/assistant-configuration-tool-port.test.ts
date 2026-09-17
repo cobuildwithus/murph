@@ -157,7 +157,7 @@ describe("hosted assistant configuration tool port", () => {
         generation: ACTIVE_WRITE_FENCE.generation,
       },
     },
-  ])("does not forward requests with a $label write fence", async ({ writeFence }) => {
+  ])("returns canonical Web rejection for a $label write fence", async ({ writeFence }) => {
     const validateRuntimeWriteFence = vi.fn(async (input: {
       attemptId: string;
       generation: string;
@@ -170,6 +170,7 @@ describe("hosted assistant configuration tool port", () => {
     const { request, url } = createAssistantConfigurationRequest(
       createWriteFenceHeaders(writeFence),
     );
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(Response.json({ error: "Unauthorized" }, { status: 401 }));
 
     const response = await handleRunnerWebControlRequest({
       env: createWriteFenceEnvironment(validateRuntimeWriteFence),
@@ -182,12 +183,12 @@ describe("hosted assistant configuration tool port", () => {
     });
 
     expect(response.status).toBe(401);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: writeFence.attemptId,
-      generation: writeFence.generation,
-      userId: "member_123",
-    });
-    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledOnce();
+    const forwarded = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]![0];
+    const headers = new Headers(forwarded.headers);
+    expect(headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe(writeFence.attemptId);
+    expect(headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe(writeFence.generation);
   });
 
   it("forwards requests with the matching active write fence", async () => {
@@ -221,11 +222,7 @@ describe("hosted assistant configuration tool port", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: ACTIVE_WRITE_FENCE.attemptId,
-      generation: ACTIVE_WRITE_FENCE.generation,
-      userId: "member_123",
-    });
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
     const [forwarded] = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]!;
     expect(forwarded).toMatchObject({

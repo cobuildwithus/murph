@@ -1,6 +1,3 @@
-import { resolveAdmittedLegacyUserRunner } from "../../legacy-runtime-admission.ts";
-import { progressRuntimeMigrationForMember } from "../../runtime-migration-progress.ts";
-import { HostedRuntimeMemberMigratingError, usesPostgresRuntimeOwner } from "../../runtime-cutover.ts";
 import { deletePostgresRunnerUserData } from "../../runtime-user-control.ts";
 import {
   emitHostedExecutionStructuredLog,
@@ -55,7 +52,6 @@ export async function handleUserDataDeleteRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  const migrationBudget = { deadlineAtMs: Date.now() + 5_000 };
   try {
     await readOptionalJsonObject(context.request, {
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
@@ -76,18 +72,14 @@ export async function handleUserDataDeleteRoute(
     throw error;
   }
 
-  const result = await deleteUserDataOrWaitForMigration(context, userId);
+  const result = await deletePostgresRunnerUserData(context.env, userId);
   if (typeof result === "object" && result !== null && "ok" in result && result.ok === false) {
-    const migrationPending = "reason" in result && result.reason === "runtime_migration_pending";
-    // A deleted pending member has no processing wake left. Its existing
-    // cleanup retry owns bounded continuation; the next request re-reads routing.
-    if (migrationPending) await progressRuntimeMigrationForMember({ source: context.env, userId, budget: migrationBudget });
     const retryAfterSeconds = "retryAfterSeconds" in result
       && typeof result.retryAfterSeconds === "number"
       ? result.retryAfterSeconds
       : 1;
     return new Response(JSON.stringify({
-      code: migrationPending ? "runtime_migration_pending" : "r2_upload_drain_pending",
+      code: "r2_upload_drain_pending",
       retryAfterSeconds,
     }), {
       headers: {
@@ -98,15 +90,4 @@ export async function handleUserDataDeleteRoute(
     });
   }
   return json(result);
-}
-
-async function deleteUserDataOrWaitForMigration(context: WorkerRouteContext, userId: string) {
-  try {
-    return (await usesPostgresRuntimeOwner(context.env, userId))
-      ? await deletePostgresRunnerUserData(context.env, userId)
-      : await (await resolveAdmittedLegacyUserRunner(context.env, userId)).deleteHostedUserData(userId);
-  } catch (error) {
-    if (!(error instanceof HostedRuntimeMemberMigratingError)) throw error;
-    return { ok: false as const, reason: "runtime_migration_pending" as const, retryAfterSeconds: 3, userId };
-  }
 }

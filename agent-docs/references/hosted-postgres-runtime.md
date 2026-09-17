@@ -3,12 +3,18 @@
 ## Authority and activation
 
 `HostedRuntimeOwner` in Web's primary Postgres database owns member execution
-admission. The durable `HostedRuntimeCutover` gate selects `legacy`, `draining`,
-`rolling`, or `postgres`. `HOSTED_RUNTIME_POSTGRES_ENABLED` is a deployment
-capability, not a fleet-wide backend selector. With that capability enabled,
-`rolling` routes each member by explicit migration phase; unregistered existing
-members remain legacy. Disabled deployments cannot start migrated members.
+admission. Ordinary Worker processing, callbacks, resources, and user-control
+routes call the canonical Postgres owner directly. They neither consult the
+retired `HOSTED_RUNTIME_POSTGRES_ENABLED` capability nor fall back to a legacy
+object. A database whose migration gate is not yet `postgres` cannot start
+ordinary execution through this Worker release.
 
+The durable `HostedRuntimeCutover` gate retains the historical `legacy`,
+`draining`, and `rolling` campaign phases and the terminal `postgres` state.
+The capability and `UserRunnerDurableObject` remain only for the finite migration
+operator and frozen source inspection until the separately authorized namespace
+retirement. Earlier rolling releases used the capability and explicit per-member
+migration phase; they remain compatible after global activation.
 A rolling campaign closes through the same `activate` operation as the finite
 draining campaign, requested by the operator only under an explicit finalize
 option and never from a targeted canary. Web proves retirement under the
@@ -80,6 +86,20 @@ cleanup enrollment. Duplicate-only pages carry a pending signal so the operator
 continues to later encrypted pages. Late receipts join late source accounting
 without changing the baseline seal. This work is operator census work, not part
 of ordinary foreground processing.
+
+## Local initialization and fault controls
+
+A fresh local schema starts with the `postgres` gate. Initialization preserves an
+existing gate; it rejects a legacy database with instructions to complete its
+migration on the preceding release or explicitly reset that isolated local stack.
+Empty SQL owner tables do not prove a legacy namespace is empty.
+
+Local E2E stale-attempt injection writes the canonical owner only in a guarded,
+loopback `murph_e2e_*` database. It requires an idle Postgres member, preserves
+any retained physical target, and increments its generation. Native fault
+controls resolve the target from that owner. Test nudges use ordinary
+`ensure-processing` admission and wait for acceptance before polling status;
+retired legacy alarm and run-until-idle HTTP controls are unavailable.
 
 ## Claim, launch, completion, and recovery
 
