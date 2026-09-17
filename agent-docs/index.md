@@ -359,6 +359,9 @@ The completed Home account-check optimization and local proof are recorded in
 The broader dashboard latency work is recorded in
 [`2026-09-15-dashboard-latency.md`](exec-plans/completed/2026-09-15-dashboard-latency.md).
 
+The admission and runtime launch reduction is recorded in
+[`2026-09-17-ingress-admission-simplification.md`](exec-plans/completed/2026-09-17-ingress-admission-simplification.md).
+
 ## Conventions
 
 Local feedback diagnostics are documented in

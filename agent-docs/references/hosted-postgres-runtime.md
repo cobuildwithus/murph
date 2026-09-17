@@ -74,8 +74,14 @@ processing mode, the provider-token hash, encrypted inference settings, and
 managed-AI allowance once. The opaque provider token travels only in the job.
 The workspace checkpoint compare-and-swap version is independent of generation.
 
-Preparation and native readiness overlap. The native slot verifies fresh Web
-authority and persists its invocation receipt before starting execution.
+Input preparation and native readiness overlap. The native slot submits the
+existing `prepare_launch` command immediately before registering its durable
+invocation receipt. That transaction binds invocation facts and verifies fresh
+Web authority together; startup does not make a second `authorize_effect` call.
+The existing readiness response advertises this capability. During mixed
+Worker/controller deployments, callers of older controllers still prepare through
+Web before the controller's authorization call; older callers remain supported.
+Provider effects continue to require their own live authorization.
 Registered/completed receipts survive activation loss. A duplicate registration
 cannot execute the attempt twice. An uncertain launch or stop retains the exact
 target; age can schedule reconciliation but cannot authorize its replacement.
