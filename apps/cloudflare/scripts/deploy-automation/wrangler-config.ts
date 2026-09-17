@@ -131,10 +131,6 @@ export function buildHostedWranglerDeployConfig(
     durable_objects: {
       bindings: [
         {
-          name: "USER_RUNNER",
-          class_name: "UserRunnerDurableObject",
-        },
-        {
           name: "DATABASE_HEALTH_MONITOR",
           class_name: "DatabaseHealthDurableObject",
         },
@@ -209,6 +205,7 @@ export function buildHostedWranglerDeployConfig(
         new_sqlite_classes: ["NextRunnerContainer"],
       },
       { tag: "v9", new_sqlite_classes: ["SmallRunnerContainer"] },
+      { tag: "v10", deleted_classes: ["UserRunnerDurableObject"] },
     ],
     triggers: {
       crons: ["*/5 * * * *"],

@@ -974,3 +974,28 @@ Running those two suites sequentially against one fresh isolated database
 reproduced five failures. Exact-ID teardown fixes the producer; all 19 tests now
 pass in the same order and Web typecheck passes. Production census behavior is
 unchanged. Required CI remains the normal-runtime candidate's merge gate.
+
+
+### Physical namespace retirement candidate
+
+Preparing the separate final deployment: remove the legacy Worker class export,
+binding, migration route and capability configuration; append the class deletion
+migration. Historical source-to-Postgres rehearsal remains available in tests,
+but the bundled Worker contains no legacy class implementation or migration
+operator. The deployment path requires exact live namespace approval, finalized
+Postgres gate evidence and worker-only native retention. It uses atomic Wrangler
+deploy because version upload cannot apply class migrations. No physical deletion
+has been authorized or run. Review, CI and the exact deletion approval remain
+pending; preserve this active plan until post-deploy verification completes.
+
+
+The normal-routing cleanup PR #3541 merged as `07cb60e8582f` after final ReviewGPT
+and all required release checks passed. Protected Worker-only deployment
+`35255763081` is in progress. The namespace retirement candidate independently
+passes its isolated full-stack journey without the capability or legacy binding:
+cold reply 6,891 ms, warm typing 454 ms and warm reply 1,809 ms, with exact native
+target reuse. Wrangler dry-run confirms the class and operator are absent from
+the deployment bundle. Focused route/config/admission tests, local-harness checks,
+typechecks, docs drift and complexity also pass. This is still a candidate;
+namespace storage remains intact and irreversible deletion awaits its exact
+approval after review.

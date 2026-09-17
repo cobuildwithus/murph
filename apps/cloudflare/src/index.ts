@@ -13,5 +13,4 @@ export {
 export {
   StandbyRunnerCoordinatorDurableObject,
 } from "./worker/standby-runner-coordinator-durable-object.ts";
-export { UserRunnerDurableObject } from "./worker/user-runner-durable-object.ts";
 export { default } from "./worker/index.ts";

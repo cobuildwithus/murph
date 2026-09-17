@@ -1401,8 +1401,6 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_EXECUTION_STANDBY_TARGET:3",
       "--var",
       "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS:45000",
-      "--var",
-      "HOSTED_RUNTIME_POSTGRES_ENABLED:true",
     ]);
   });
 
