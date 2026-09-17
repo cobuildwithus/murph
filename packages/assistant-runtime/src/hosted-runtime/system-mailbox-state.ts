@@ -71,7 +71,8 @@ const HOSTED_VAULT_SHARE_PROJECTION_MAILBOX_DEDUPE_KEY_PREFIX =
 type HostedSystemMailboxSerializationKey =
   | HostedSystemMailboxRouteAction
   | "apply-vault-share-projection"
-  | `run-device-sync-wake:${string}`;
+  | `run-device-sync-wake:${string}`
+  | `apply-clinical-enrichment:${string}`;
 
 export type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
@@ -1738,6 +1739,14 @@ function resolveHostedSystemMailboxSerializationKey(
     && item.wake.connectionId
   ) {
     return `${item.routeAction}:${item.wake.connectionId}`;
+  }
+  if (
+    item.routeAction === "apply-clinical-enrichment"
+    && item.wake.kind === "clinical-records.enrichment-requested"
+  ) {
+    // Extraction and mailbox order are independent. A waiting job must not
+    // block the prepared job that the extractor needs applied before advancing.
+    return `${item.routeAction}:${item.wake.jobId}`;
   }
   return item.routeAction;
 }

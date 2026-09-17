@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 import { runOneHostedClinicalEnrichment, type HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
 import { admitHostedClinicalEnrichmentWake, makeHostedClinicalEnrichmentWakeDue } from "../src/hosted-runtime/clinical-enrichment-wake.ts";
 import { executeHostedClinicalEnrichmentWake } from "../src/hosted-runtime/events/clinical-enrichment.ts";
-import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
+import { readHostedSystemMailboxState, updateHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 import { prepareHostedSystemMailboxItemForCheckpoint, type HostedSystemMailboxRuntime } from "../src/hosted-runtime/system-mailbox.ts";
 import { createHostedRuntimeResolvedConfig, createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
 
@@ -75,6 +75,47 @@ async function importSource(vaultRoot: string, parent: { resourceType: "Document
 }
 
 describe("clinical enrichment import-to-query flow", () => {
+  it("applies prepared work when mailbox order differs from the extraction queue", async () => {
+    const workspace = await createHostedRuntimeWorkspace("clinical-enrichment-queue-order-");
+    const { vaultRoot } = workspace;
+    try {
+      await initializeVault({ vaultRoot, timezone: "UTC", createdAt: OCCURRED_AT });
+      const prepared = await importSource(vaultRoot, {
+        resourceType: "DocumentReference", status: "current", revision: "2020-03-12T12:00:00.000Z",
+      });
+      const waiting = await importSource(vaultRoot, {
+        resourceType: "DiagnosticReport", status: "final", revision: "2020-03-13T12:00:00.000Z",
+      });
+      // The queues have independent durable order: application can encounter
+      // an unextracted job before the extractor's prepared head.
+      await updateHostedSystemMailboxState(vaultRoot, state => ({ pending: [...state.pending].reverse() }));
+      expect(await readNextClinicalEnrichment({ vaultRoot })).toMatchObject({ status: "extract", jobId: prepared.jobId });
+      await persistClinicalEnrichmentProposals({
+        vaultRoot, jobId: prepared.jobId, sourceSha256: prepared.sha256, page: 1, totalPages: 1,
+        outputs: { measurements: empty, history: empty, labs: { status: "complete", records: [{ payload: {
+          kind: "test", occurredAt: OCCURRED_AT, title: "Synthetic serum glucose", note: null,
+          testName: "Glucose", specimenType: "serum", resultStatus: "normal",
+          results: [{ analyte: "Glucose", value: 90, unit: "mg/dL" }],
+        } }] } },
+      });
+      expect(await readNextClinicalEnrichment({ vaultRoot })).toEqual({ status: "apply", jobId: prepared.jobId });
+      const attempt = () => prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-clinical-enrichment"], vaultRoot,
+        runtime: runtime(), runtimeEnv: {}, retainProcessedItemUntilRecorded: true,
+      });
+      expect(await attempt()).toMatchObject({ status: "preempted", item: { wake: { jobId: waiting.jobId } } });
+      const waitingItem = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+      // The waiting head has a retry delay. The ready job must still apply now.
+      expect(await attempt()).toMatchObject({ item: { wake: { jobId: prepared.jobId } } });
+      expect((await readHostedSystemMailboxState(vaultRoot)).pending[0]).toEqual(waitingItem);
+      expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: prepared.jobId }))
+        .toMatchObject({ counts: { created: 1, pages: 1 } });
+      expect((await listMetricPoints(vaultRoot, { limit: 10 })).map(point => point.value)).toEqual([90]);
+      expect(await readNextClinicalEnrichment({ vaultRoot })).toEqual({ status: "advance", jobId: prepared.jobId });
+      expect(await readNextClinicalEnrichment({ vaultRoot })).toMatchObject({ jobId: waiting.jobId });
+    } finally { await workspace.cleanup(); }
+  });
+
   it.each([
     { resourceType: "DocumentReference" as const, status: "current", revision: "2020-03-12T12:00:00.123456Z" },
     { resourceType: "DocumentReference" as const, status: "current", revision: "2020-03-12T12:00:00.123456789Z" },
