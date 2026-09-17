@@ -2128,6 +2128,7 @@ describe("RunnerContainer", () => {
     expect(result).toMatchObject({
       action: "started",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
     if (result.kind !== "ready" || !result.coldStartTiming) {
       throw new Error("Expected cold readiness timing.");
@@ -2853,6 +2854,7 @@ describe("RunnerContainer", () => {
       })).resolves.toEqual({
         action: "already_warm",
         kind: "ready",
+        preparesSupervisedLaunch: true,
       });
 
       expect(startAndWaitForPorts).toHaveBeenCalledOnce();
@@ -2991,6 +2993,7 @@ describe("RunnerContainer", () => {
       })).resolves.toEqual({
         action: "already_warm",
         kind: "ready",
+        preparesSupervisedLaunch: true,
       });
 
       expect(startAndWaitForPorts).toHaveBeenCalledOnce();
@@ -3100,6 +3103,7 @@ describe("RunnerContainer", () => {
         })).resolves.toEqual({
           action: "already_warm",
           kind: "ready",
+          preparesSupervisedLaunch: true,
         });
 
         expect(startAndWaitForPorts).not.toHaveBeenCalled();
@@ -3230,6 +3234,7 @@ describe("RunnerContainer", () => {
         })).resolves.toEqual({
           action: "already_warm",
           kind: "ready",
+          preparesSupervisedLaunch: true,
         });
 
         expect(startAndWaitForPorts).toHaveBeenCalledOnce();
@@ -3345,6 +3350,7 @@ describe("RunnerContainer", () => {
         })).resolves.toEqual({
           action: "already_warm",
           kind: "ready",
+          preparesSupervisedLaunch: true,
         });
 
         expect(startAndWaitForPorts).toHaveBeenCalledOnce();
@@ -3427,6 +3433,7 @@ describe("RunnerContainer", () => {
       })).resolves.toEqual({
         action: "already_warm",
         kind: "ready",
+        preparesSupervisedLaunch: true,
       });
 
       expect(destroy).toHaveBeenCalledOnce();
@@ -3767,6 +3774,7 @@ describe("RunnerContainer", () => {
     })).resolves.toEqual({
       action: "already_warm",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
 
     await expect(container.invoke({
@@ -3815,6 +3823,7 @@ describe("RunnerContainer", () => {
     })).resolves.toEqual({
       action: "already_warm",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
 
     const healthCalls = containerFetch.mock.calls.filter(([url]) =>
@@ -3845,6 +3854,7 @@ describe("RunnerContainer", () => {
     })).resolves.toEqual({
       action: "already_warm",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
 
     const healthCalls = containerFetch.mock.calls.filter(([url]) =>
@@ -4099,6 +4109,7 @@ describe("RunnerContainer", () => {
       })).resolves.toEqual({
         action: "already_warm",
         kind: "ready",
+        preparesSupervisedLaunch: true,
       });
 
       expect(destroy).not.toHaveBeenCalled();
@@ -7229,6 +7240,7 @@ describe("RunnerContainer", () => {
     await expect(readiness).resolves.toEqual({
       action: "already_warm",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
     await expect(abortResult).resolves.toBe("accepted");
     expect(destroy).toHaveBeenCalledOnce();
@@ -7705,6 +7717,7 @@ describe("RunnerContainer", () => {
     await expect(lockHolder).resolves.toEqual({
       action: "already_warm",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
     await expect(abortResult).resolves.toBe("accepted");
     await expect(invokeResult).resolves.toMatchObject({
@@ -8480,6 +8493,7 @@ describe("RunnerContainer", () => {
     })).resolves.toEqual({
       action: "already_warm",
       kind: "ready",
+      preparesSupervisedLaunch: true,
     });
     await expect(container.invoke({
       job: {

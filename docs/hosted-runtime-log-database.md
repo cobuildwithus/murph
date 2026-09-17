@@ -327,6 +327,27 @@ delay, and `firstUpstreamElapsedMs` and `firstDownstreamElapsedMs` measure the
 next receive and forward boundaries. `upstreamIdleMs` and `downstreamIdleMs`
 measure connection-wide time since the last data frame on each boundary.
 
+Every existing milestone includes numeric `acceptedPendingBytes` and
+`acceptedPendingMessageCount` from the relay's shared client/provider reservation
+counters, connection-local `acceptedPendingHighWaterBytes` and
+`acceptedPendingHighWaterMessageCount`, and the existing limits as
+`pendingLimitBytes` and `pendingLimitMessageCount`. High-water values advance only on successful
+reservation and survive draining and request reuse. Receive milestones run before
+reservation, so they exclude the arriving frame; send milestones run before
+release, so they include the frame being forwarded. Rejected frames never enter
+these values. A close or failure can still observe outstanding reservations.
+These measure accepted queued/in-flight work, including authorization or usage
+persistence waits, not JavaScript heap, socket buffers, or total isolate memory.
+The two high-water values are independent peaks, not necessarily simultaneous.
+
+The six scalars are additive under `diagnosticVersion: 1`; the unchanged runtime
+log parser accepts their `Bytes`/`Count` metadata names, as do older readers using
+that same policy. Readers with stricter schemas need separate compatibility
+verification. Older records without the fields remain valid; absence is unknown,
+not zero. No extra events or writes are emitted. A lost tail or platform memory
+termination may leave no final/high-water observation; low values in the last
+surviving record cannot rule out a later backlog peak or other memory pressure.
+
 `firstUpstreamMessageKind` contains only a fixed event-type allowlist or
 `other`, `invalid_json`, `too_large`, or `binary`. Only the first frame is
 parsed for this field, with a 65,536-character limit. No raw frames, arbitrary
@@ -1694,3 +1715,14 @@ validation must run repository tests/typechecks/builds, the actual complexity
 guard and the built hosted lane on supported Node/pnpm and pinned Codex versions
 before promotion. This telemetry patch does not authorize merging, deployment,
 or bypassing the protected public-main release contract.
+
+### Reply skip reasons
+
+Assistant `input.reply-skipped` events populate the existing `safeDetails` field
+on `assistant.automation_detail` with `reply_skip:<reason>`. The engine maps exact
+static reasons to bounded codes such as `channel_disabled`, `self_authored`,
+`already_handled`, `unattested_reaction`, `empty_input`, `intentional_no_reply`,
+`provider_usage_limit`, and `incomplete_terminal_evidence`. Unknown or dynamic
+reasons yield only `reply_skip:unclassified`; unrestricted event details and
+provider error text are never copied into this diagnostic. These codes describe
+an existing skip or deferral and do not change retry, reply, or alert decisions.

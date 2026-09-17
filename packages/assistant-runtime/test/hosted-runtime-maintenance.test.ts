@@ -488,6 +488,34 @@ describe("runHostedAssistantAutomation", () => {
     );
   });
 
+  it("retains safe skip categories without copying private event details", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onEvent?.({
+        type: "input.reply-skipped",
+        details: "private synthetic diagnostic: confidential-context",
+        safeDetails: "reply_skip:unclassified",
+      });
+      return { nextWakeAt: null, progressed: true };
+    });
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root", "req_skip_category",
+      { hosted: { memberId: "member_123", userEnvKeys: [] } },
+      {
+        eventId: "evt_skip_category", kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer", userId: "member_123",
+      },
+    );
+    expect(result.redactedLogEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        redacted: expect.objectContaining({
+          type: "input.reply-skipped", safeDetails: "reply_skip:unclassified",
+        }),
+      }),
+    ]));
+    expect(JSON.stringify(result.redactedLogEntries)).not.toContain("confidential-context");
+  });
+
   it("persists reply failure events after the ordinary automation event cap", async () => {
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       for (let index = 0; index < 13; index += 1) {
@@ -6791,6 +6819,45 @@ describe("runHostedAssistantAutomationLane", () => {
 });
 
 describe("runHostedDeviceSyncWakeLane", () => {
+  it.each([
+    { name: "future", availableAt: "2999-01-01T00:00:00Z", status: "queued", expected: 0 },
+    { name: "due", availableAt: "2000-01-01T00:00:00Z", status: "queued", expected: 1 },
+    { name: "missing", availableAt: undefined, status: "queued", expected: 1 },
+    { name: "invalid", availableAt: "invalid", status: "queued", expected: 1 },
+    { name: "running", availableAt: "2999-01-01T00:00:00Z", status: "running", expected: 1 },
+  ])("derives runnable queue and continuation counts for $name jobs", async ({ availableAt, status, expected }) => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const wake = { eventId: "evt_availability", kind: "device-sync.wake" as const,
+      connectionId: "dsc_synthetic", occurredAt: "2026-04-08T00:00:00Z",
+      reason: "reconcile_due" as const, userId: "synthetic-member" };
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      listPendingJobsForAccount: () => [{ availableAt, status, attempts: 0,
+        createdAt: wake.occurredAt, kind: "resource" }],
+    });
+    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue({
+      retryAt: "2999-01-01T00:00:00Z",
+      wake: { ...wake, hint: { jobs: [{ kind: "resource", availableAt }] } },
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      drainWorker: async () => 0, getNextJobWakeAt: () => null,
+      getNextWakeAt: () => null, listAccounts: () => [],
+      listJobFailureDiagnostics: () => [], listJobTimingDiagnostics: () => [],
+      runSchedulerOnce: async () => undefined,
+    });
+    await runHostedDeviceSyncWakeLane({ wake, deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
+      resolvedConfig: { deviceSync: DEVICE_SYNC_CONFIG }, retainFollowUpWakeUntilCheckpoint: true,
+      runtimeLogPlatform: { logPort: { async write(request) {
+        const parsed = parseHostedRuntimeLogRequest(request);
+        logRequests.push(parsed); return { loggedCount: parsed.entries.length };
+      } } }, timeoutMs: null, vaultRoot: "/tmp/vault-root" });
+    await drainHostedRuntimeLogWritesBestEffort();
+    const pass = logRequests.flatMap(request => request.entries)
+      .find(entry => entry.eventCode === "device-sync.pass_finished")?.redactedJson;
+    expect(pass).toMatchObject({ pendingJobCountAfter: 1, outgoingRetainedJobCount: 1,
+      pendingRunnableJobCountAfter: expected,
+      outgoingRetainedRunnableJobCount: status === "running" ? 0 : expected });
+  });
+
   it("runs only the hosted device-sync lane", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const queueJobKinds = [

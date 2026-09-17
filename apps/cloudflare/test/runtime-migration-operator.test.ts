@@ -89,6 +89,14 @@ function harness(options: { drift?: boolean; split?: boolean; held?: boolean; in
       } else if (command.operation === "settle_unmaterialized") {
         expect(activated.size).toBe(known.size);
         return Response.json({ done: true });
+      } else if (command.operation === "activate") {
+        // Web's retirement proof: the operator's census must name every registered source.
+        expect(gate.phase).toBe("rolling");
+        expect(activated.size).toBe(known.size);
+        const ids = [...known].sort();
+        expect(command.inventoryCount).toBe(ids.length);
+        expect(command.inventoryHash).toBe(ids.reduce((hash, id) => digest(`${hash}\n${id}`), digest("")));
+        gate = { ...gate, phase: "postgres", activatedAt: "2026-09-17T00:00:00.000Z", selectedObjectId: null };
       } else throw new Error(`Unexpected synthetic operator command: ${command.operation}`);
       return Response.json({ gate });
     },
@@ -169,11 +177,33 @@ describe("rolling runtime migration operator", () => {
     expect(await migrateHostedLegacyRuntime({ ...h.input, activate: false })).toMatchObject({ phase: "members_migrated" });
   });
 
-  it("rejects a global finalization request before any source or campaign mutation", async () => {
+  it("rejects a targeted retirement request before any source or campaign mutation", async () => {
     const h = harness();
-    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: true })).rejects.toThrow("cannot finalize the namespace");
+    await expect(migrateHostedLegacyRuntime({ ...h.input, activate: true, memberId: "synthetic-member", maxObjects: 1 })).rejects.toThrow("cannot retire the namespace");
     expect(h.sent).toEqual([]);
     expect(h.activated.size).toBe(0);
+  });
+
+  it("retires the namespace only after late sources and every member are accounted for", async () => {
+    const h = harness({ drift: true });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true })).toMatchObject({ phase: "rolling", pending: "late_sources" });
+    expect(h.sent.some(c => c.operation === "activate")).toBe(false);
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true })).toMatchObject({ phase: "postgres" });
+    expect(h.activated.size).toBe(3);
+    const retirements = h.sent.filter(c => c.operation === "activate");
+    expect(retirements).toHaveLength(1);
+    expect(h.sent.at(-1)?.operation).toBe("activate");
+    for (const id of [first, second, "d".repeat(64)]) expect(JSON.stringify(retirements[0])).not.toContain(id);
+    // A retired campaign answers later runs from the closed gate without another census.
+    const after = h.sent.length;
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true })).toEqual({ phase: "postgres", steps: 0 });
+    expect(h.sent.slice(after).map(c => c.operation)).toEqual(["begin_rolling"]);
+  });
+
+  it("does not retire the namespace while a member handoff is held", async () => {
+    const h = harness({ held: true });
+    expect(await migrateHostedLegacyRuntime({ ...h.input, activate: true })).toMatchObject({ phase: "rolling", pending: "readiness" });
+    expect(h.sent.some(c => c.operation === "activate")).toBe(false);
   });
 
   it("finishes one canary through checkpoint, drain, import and activation in the same run", async () => {

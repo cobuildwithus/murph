@@ -51,12 +51,13 @@ export const GET = withJsonError(async (request: Request) => {
       ),
     );
   const prisma = getPrisma();
-  const [workspace, assistantConfiguration] = await Promise.all([
+  const [workspace, assistantConfiguration, usageGate] = await Promise.all([
     readHostedWorkspace({ userId }),
     readHostedAssistantConfigurationFailingClosedForCustomInference({
       memberId: userId,
       prisma,
     }),
+    resolveHostedRuntimeAiUsageGate({ mode: "read_only", prisma, userId }),
   ]);
 
   if (assistantConfiguration?.customInferenceReverificationRequired) {
@@ -112,13 +113,6 @@ export const GET = withJsonError(async (request: Request) => {
       message: "The selected custom inference connection is invalid.",
     });
   }
-  const platformAiUsageAllowed = (
-    await resolveHostedRuntimeAiUsageGate({
-      mode: "read_only",
-      prisma,
-      userId,
-    })
-  ).status === "allowed";
   return jsonOk(parseHostedWorkspaceReadResponse({
     fetchedAt: new Date().toISOString(),
     ...projectHostedAssistantModelAuthority(assistantConfiguration, customInferenceOverride === null),
@@ -145,7 +139,7 @@ export const GET = withJsonError(async (request: Request) => {
             assistantConfiguration.hostedAssistantReasoningEffortOverride,
         }
       : {}),
-    platformAiUsageAllowed,
+    platformAiUsageAllowed: usageGate.status === "allowed",
     workspace: workspace
       ? {
           browserVaultReplicaRef: workspace.browserVaultReplicaRef,

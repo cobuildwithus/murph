@@ -68,6 +68,15 @@ export async function readDeviceImportObservations(input: {
           AND redacted_json->>'pendingJobCountAfter' ~ '^[0-9]{1,9}$'
           THEN (redacted_json->>'pendingJobCountAfter')::int > 0
         ELSE NULL END AS pending,
+      CASE WHEN event_code <> 'device-sync.pass_finished' THEN NULL
+        WHEN redacted_json->>'pendingRunnableJobCountAfter' ~ '^[1-9][0-9]{0,8}$'
+          OR redacted_json->>'outgoingRetainedRunnableJobCount' ~ '^[1-9][0-9]{0,8}$' THEN true
+        WHEN redacted_json->>'outcome' IN ('completed', 'yielded')
+          AND redacted_json->>'queueSnapshotAfterPresent' = 'true'
+          AND redacted_json->>'pendingJobCountAfterTruncated' = 'false'
+          AND redacted_json->>'pendingRunnableJobCountAfter' = '0'
+          AND redacted_json->>'outgoingRetainedRunnableJobCount' = '0' THEN false
+        ELSE NULL END AS runnable,
       COALESCE(event_code = 'device-sync.pass_finished'
         AND redacted_json->>'processedJobs' ~ '^[1-9][0-9]{0,8}$'
         AND (redacted_json->>'deviceSyncImportAppliedCount' ~ '^[1-9][0-9]{0,8}$'
