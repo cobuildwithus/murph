@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 100,
+  "item": {
+    "id": "less-wait-before-typing",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "Less waiting before Murph starts typing",
+    "summary": "Murph skips a redundant round trip before showing its typing indicator and starting provider requests.",
+    "details": "Account access is checked when a run starts. Usage limits and message-delivery protections still apply.",
+    "relevanceTags": [
+      "messaging",
+      "performance"
+    ],
+    "sourcePullRequests": []
+  }
+}

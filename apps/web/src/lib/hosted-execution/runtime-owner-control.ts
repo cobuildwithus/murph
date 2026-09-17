@@ -20,8 +20,15 @@ export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Pro
     const result = await resolveHostedLegacyMaterialization({ ...input.command, prisma: input.prisma, userId: input.userId });
     return parseHostedRuntimeOwnerResponse({ cutover: result.cutover, status: "observed", owner: projectOwner(result.owner) });
   }
+  // Provider authorization also selects the backend. An explicit legacy result
+  // can route to UserRunner; stale or draining authority never falls back.
+  const authorization = input.command.operation === "authorize_provider" || input.command.operation === "authorize_effect";
+  const backend = authorization ? await readHostedRuntimeMemberBackend(input.prisma, input.userId) : null;
+  if (backend !== null && backend !== "postgres") {
+    return parseHostedRuntimeOwnerResponse({ cutover: backend, status: "blocked", owner: null });
+  }
   const result = await executeCommand({ ...input, command: input.command });
-  const cutover = await readHostedRuntimeMemberBackend(input.prisma, input.userId);
+  const cutover = backend ?? await readHostedRuntimeMemberBackend(input.prisma, input.userId);
   return parseHostedRuntimeOwnerResponse({ cutover, status: result.status, owner: projectOwner(result.owner) });
 }
 

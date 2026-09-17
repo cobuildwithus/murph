@@ -22,6 +22,7 @@ import {
   revokeHostedRuntimeAiUsageTx,
   type HostedRuntimeIdentity,
 } from "@/src/lib/hosted-execution/runtime-owner";
+import { executeHostedRuntimeOwnerCommand } from "@/src/lib/hosted-execution/runtime-owner-control";
 import { executeHostedRuntimeReplicaPutCommand } from "@/src/lib/hosted-execution/runtime-replica-puts";
 import { hostedWorkspaceSnapshotObjectKey, hostedBrowserVaultReplicaUserPrefix } from "@murphai/hosted-execution/storage-paths";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
@@ -413,7 +414,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       .toBe(firstOperation === "checkpoint" ? 1n : 0n);
   });
 
-  it("observes canonical consent revocation before claim and publication", async () => {
+  it("checks consent at admission while an admitted owner can finish", async () => {
     const userId = await member();
     await observer.hostedConsentGrant.create({ data: {
       memberId: userId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE, status: "granted",
@@ -424,9 +425,59 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       prisma: second, memberId: userId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE,
     });
     await expect(first.$transaction((tx) => requireHostedRuntimeOwnerTx(tx, owner)))
-      .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+      .resolves.toMatchObject({ attemptId: owner.attemptId });
     expect(await claimHostedRuntime({ prisma: first, userId, processingMode: "default" }))
       .toEqual({ status: "blocked", reason: "admission" });
+  });
+
+  it.each(["consent", "suspension", "billing"] as const)("keeps admitted provider work usable after %s changes and blocks the next run", async policy => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const tokenHash = "c".repeat(64);
+    const runnerContainerName = "synthetic-admitted-slot";
+    await prepareHostedRuntimeLaunch({ prisma: first, identity: runtime, runnerContainerName,
+      workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true, providerEgressTokenHash: tokenHash });
+    if (policy === "consent") {
+      await observer.hostedConsentGrant.create({ data: {
+        memberId: userId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE, status: "granted",
+        documentVersionsJson: {}, source: "runtime_owner_proof", grantedAt: new Date(),
+      } });
+      await revokeHostedConsentScope({ prisma: observer, memberId: userId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE });
+    } else {
+      await observer.hostedMember.update({ where: { id: userId }, data: policy === "suspension"
+        ? { suspendedAt: new Date() } : { billingStatus: "paused" } });
+    }
+    const tokenCommand = { operation: "authorize_provider" as const, runnerContainerName: null,
+      providerEgressTokenHash: tokenHash, providerKind: "linq" };
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: second, userId, command: tokenCommand }))
+      .toMatchObject({ cutover: "postgres", status: "authorized", owner: { attemptId: runtime.attemptId } });
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: second, userId,
+      command: { operation: "authorize_effect", ...runtime, runnerContainerName, managedAi: false } }))
+      .toMatchObject({ status: "authorized", owner: { attemptId: runtime.attemptId } });
+    await retireHostedRuntime({ prisma: first, identity: runtime });
+    expect(await executeHostedRuntimeOwnerCommand({ prisma: second, userId, command: tokenCommand }))
+      .toMatchObject({ status: "blocked", owner: null });
+    await expect(first.$transaction(tx => requireHostedRuntimeOwnerTx(tx, runtime)))
+      .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+    await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: runtime, runnerContainerName });
+    expect(await claimHostedRuntime({ prisma: first, userId, processingMode: "default" }))
+      .toEqual({ status: "blocked", reason: "admission" });
+  });
+
+  it.each(["legacy", "draining"])("returns explicit %s routing without executing provider authorization", async phase => {
+    const userId = await member();
+    await observer.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase } });
+    try {
+      for (const command of [
+        { operation: "authorize_provider" as const, runnerContainerName: null, providerEgressTokenHash: "d".repeat(64), providerKind: "linq" },
+        { operation: "authorize_effect" as const, attemptId: "synthetic-missing", generation: "1", runnerContainerName: null, managedAi: false },
+      ]) {
+        expect(await executeHostedRuntimeOwnerCommand({ prisma: first, userId, command }))
+          .toEqual({ cutover: phase, status: "blocked", owner: null });
+      }
+    } finally {
+      await observer.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "postgres" } });
+    }
   });
 
   it("serializes consent withdrawal with a waiting claim", async () => {
@@ -487,6 +538,8 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     await observer.hostedMember.delete({ where: { id: userId } });
     expect(await observer.hostedRuntimeOwner.findUnique({ where: { userId } }))
       .toMatchObject({ runnerContainerName: "synthetic-deletion-slot" });
+    expect(await authorizeHostedRuntimeProvider({ prisma: first, userId,
+      runnerContainerName: "synthetic-deletion-slot", providerEgressTokenHash: null, providerKind: "openai" })).toBeNull();
     await expect(first.$transaction((tx) => requireHostedRuntimeOwnerTx(tx, owner)))
       .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
   });
@@ -736,7 +789,9 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await recordHostedRuntimeTargetRetired({ prisma: first, userId, runnerContainerName: "synthetic-provider-slot" })).toBe(false);
     expect(await authorize("synthetic-successor-slot")).toMatchObject({ attemptId: successor.attemptId });
     await observer.hostedMember.update({ where: { id: userId }, data: { suspendedAt: new Date() } });
-    expect(await authorize("synthetic-successor-slot")).toBeNull();
+    expect(await authorize("synthetic-successor-slot")).toMatchObject({ attemptId: successor.attemptId });
+    expect(await claimHostedRuntime({ prisma: first, userId, processingMode: "default" }))
+      .toEqual({ status: "blocked", reason: "admission" });
   });
 
   it("blocks claims during draining without consuming a generation", async () => {
