@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-09-15
-Updated: 2026-09-16
+Updated: 2026-09-17
 
 ## Goal and invariants
 
@@ -62,12 +62,18 @@ passing a timer never substitutes for safe handoff evidence.
 3. [complete] Implement hosted resumable operator, source discovery and creation
    barrier, new-member routing and full campaign closure.
 4. [complete] Focused race/crash tests, typechecks and composed rehearsal.
-5. [in progress] Candidate/privacy/complexity review, owner docs, changelog decision,
+5. [complete] Candidate/privacy/complexity review, owner docs, changelog decision,
    PR, green exact-head CI and final ReviewGPT.
-6. [pending] Merge and compatible Web/schema/Worker deployment; verify serving
+6. [complete] Merge and compatible Web/schema/Worker deployment; verify serving
    versions and inactive campaign before canary.
-7. [pending] Canary, full inventory migration including busy members and held
+7. [complete] Canary, full inventory migration including busy members and held
    obligations, and final live outcome verification.
+8. [in progress] Namespace retirement proof: prove complete accounting inside the
+   campaign lock, close the gate to `postgres`, verify existing and new-member
+   routing, then soak for legacy traffic.
+9. [pending] Remove the finite legacy bridge, the deployment capability and the
+   legacy namespace after the soak, with explicit authorization for the
+   irreversible namespace deletion.
 
 ## Verification
 
@@ -820,3 +826,74 @@ ordinary schema initialization on that source under the admission gate and
 returns a fresh observation; supported, quiescing, frozen and
 newer-than-supported sources are untouched. A source that stays unsupported
 after recovery still stops the run with its kind and version.
+
+## Fleet migration complete and namespace retirement proof
+
+The fleet campaign finished on 2026-09-17: every owner row reads `postgres`,
+every registered source (baseline plus the late sources that appeared after the
+seal) holds a terminal disposition, and a live inbound reply on a migrated
+member was verified. Six production blockers were fixed forward between the
+first canary and completion, each a dormant object carrying state the current
+code did not classify or a handoff waiting on a process that no longer existed;
+each fix landed with its own review and Worker-only rollout before the operator
+resumed. Aggregate counts only are recorded here; no member or source identity
+belongs in repository artifacts.
+
+The campaign gate deliberately stayed `rolling` because retirement required a
+separate proof. That proof reuses the existing `activate` operation instead of a
+new command or table. The operator sends it only when an explicit finalize
+option is set on a fleet-wide run (never for a targeted canary), and only after
+its own final accounting: live provider census covered by the registered
+sources, no canonical identity awaiting enrollment, no unfinished selection and
+a positive unmaterialized settlement. Web then re-proves retirement under the
+exclusive campaign lock: registered census equals the operator's census by count
+and hash, sealed baseline intact, every source terminal, every source-bound and
+owner-row identity `postgres`, every member with an owner row, and no pending
+cleanup enrollment. Active Postgres members are allowed; legacy or pending
+authority fails closed. The gate moves to `postgres` with its activation time
+and cleared selection, a repeated command re-verifies without mutation, and the
+identity check accepts later compatible releases so a re-run reads the closed
+gate instead of failing. Real-Postgres proof covers the late-source, incomplete
+disposition, non-Postgres owner, concurrent repeat, compatible-release and
+new-member routing cases; operator proof covers held members, late provider
+objects and the closed-gate re-run. Physical namespace deletion and bridge
+removal remain the next task and need explicit authorization.
+
+
+### Retirement continuation verification
+
+The retirement candidate is on `feat/runtime-namespace-retirement`. Recovery
+of the interrupted implementation found that repeating activation after a new
+Postgres-mode signup incorrectly required a legacy owner enrollment. A synthetic
+Postgres regression failed for both legacy and pending entry phases. The closed
+gate now revalidates source accounting and returns before transition-only member
+and cleanup enrollment checks. All 24 focused migration/cutover tests and Web
+typecheck pass; the existing operator/compatibility proof and Cloudflare typecheck
+remain applicable. Complexity has no changed hotspot above 20. No provider-input
+or foreground reply work was added. This is internal migration tooling and has
+no public changelog entry.
+
+Finalization still requires external serving-version convergence and closure of
+old creation paths. Census and database checks alone do not establish that proof.
+The protected private workflow needs a separately reviewed explicit finalize
+input before the live gate can be closed. Public/private review, exact-head CI,
+deployment, closure evidence, finalization and bridge removal remain outstanding.
+
+
+Final ReviewGPT for public PR #3524 passed on `72744033d69c` with no qualifying
+findings. Captured response SHA-256:
+`2712f11b5cee7d13ca80c28985b485e35976be5aede81b426c7c1e59c86213a1`.
+The subsequent isolated proof addition changes no runtime behavior. It executes
+the actual retirement command over 100,000 synthetic terminal sources, verifies
+one transaction and at most twelve PostgreSQL statements including setup, one
+narrow census read, and zero external calls. It completes within the existing
+five-second transaction deadline; focused test and Web typecheck pass. This
+proof-only addition retains the substantive review under the isolated-test
+exemption. Final-head CI and the remaining operational tasks still apply.
+
+- Final-head CI exposed a pre-existing runtime-log test teardown race: pg-pool
+  finishes its bookkeeping before socket disconnects, and forced database deletion
+  can emit unhandled PostgreSQL 57P01. A synthetic 20-round reproduction failed
+  once with FORCE and zero times with ordinary DROP DATABASE. Removed FORCE; all
+  12 actual runtime-log PostgreSQL tests and Web typecheck pass. This isolated
+  test correction leaves the reviewed runtime candidate unchanged.

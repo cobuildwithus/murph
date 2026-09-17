@@ -7584,10 +7584,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("strictly parses typed Linq health blocks from web-control", async () => {
+  it.each(["chat_opted_out", "automation_engagement_paused"] as const)("parses the typed Linq block %s from web-control", async (deliveryBlockCode) => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
-        deliveryBlockCode: "chat_opted_out",
+        deliveryBlockCode,
         deliveryPosture: "unknown-posture",
         ok: true,
         resolvedRoute: {
@@ -7623,7 +7623,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       target: "chat_blocked",
       targetKind: "thread",
     })).resolves.toEqual({
-      deliveryBlockCode: "chat_opted_out",
+      deliveryBlockCode,
       resolvedRoute: {
         conversationThreadId: null,
         directRecipientPhoneNumber: "+15550001",

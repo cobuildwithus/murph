@@ -6158,12 +6158,13 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
     }
     throw createAssistantDeliveryBlockedError(
       code,
-      "Hosted Linq delivery is blocked by current line or chat health.",
+      "Hosted Linq delivery is blocked by current outreach or delivery policy.",
       {
         blockKind: normalized.deliveryBlockCode,
         resume: normalized.deliveryBlockCode === "operator_disabled"
           ? "manual_ops"
           : normalized.deliveryBlockCode === "chat_critical"
+            || normalized.deliveryBlockCode === "automation_engagement_paused"
             ? "recipient_inbound"
             : "line_health_change",
       },

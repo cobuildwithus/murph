@@ -5,7 +5,7 @@ const now = new Date("2026-08-10T16:00:00Z");
 const minute = 60_000;
 function row(minutesAgo: number, patch: Partial<DeviceImportObservation> = {}): DeviceImportObservation {
   return { subjectKey: "synthetic-subject", connectionKey: "a".repeat(64), attemptId: "attempt-a", at: new Date(+now - minutesAgo * minute),
-    eventCode: "device-sync.pass_finished", pending: true, progressed: false,
+    eventCode: "device-sync.pass_finished", pending: true, runnable: null, progressed: false,
     checkpointAccepted: false, restarted: false, cancelled: false, ...patch };
 }
 function checkpoint(minutesAgo: number, patch: Partial<DeviceImportObservation> = {}) {
@@ -150,6 +150,46 @@ describe("device import progress and efficiency alerts", () => {
   it("does not infer continuous uptime from sparse background checks", () => {
     expect(health([row(70), row(40), row(2)]).backlog.anomalous).toBe(false);
     expect(health([row(70), row(60)], false).backlog.anomalous).toBe(false);
+  });
+
+  it("excludes checkpointed scheduled work without losing overdue-wake stall evidence", () => {
+    const rows = Array.from({ length: 15 }, (_, index) => 70 - index * 5)
+      .flatMap(age => [row(age + 0.1, { runnable: false }), checkpoint(age)]);
+    expect(health(rows, false).backlog.anomalous).toBe(false);
+    expect(health(rows, true).stalled.anomalous).toBe(true);
+    // Old runners retain the conservative behavior during a rolling deploy.
+    expect(health(rows.map(observation => ({ ...observation, runnable: null })), false)
+      .backlog.anomalous).toBe(true);
+  });
+
+  it("starts backlog age when scheduled work becomes runnable", () => {
+    const rows = Array.from({ length: 15 }, (_, index) => 70 - index * 5)
+      .flatMap(age => [row(age + 0.1, { runnable: age <= 55 }), checkpoint(age)]);
+    expect(health(rows).backlog.anomalous).toBe(false);
+    const later = new Date(+now + 5 * minute);
+    expect(summarizeDeviceImportHealth({ now: later, observations: rows, dueSubjects: new Set() })
+      .backlog.oldestBacklogMs).toBe(60.1 * minute);
+  });
+
+  it("requires a matching accepted checkpoint before deferral clears a runnable backlog", () => {
+    const rows = Array.from({ length: 14 }, (_, index) => row(70 - index * 5, { runnable: true }));
+    const deferred = row(1, { runnable: false, attemptId: "deferred" });
+    expect(health([...rows, deferred]).backlog.anomalous).toBe(true);
+    expect(health([...rows, deferred, checkpoint(0.5)]).backlog.anomalous).toBe(true);
+    expect(health([...rows, deferred, checkpoint(0.5, { attemptId: "deferred", checkpointAccepted: false })])
+      .backlog.anomalous).toBe(true);
+    expect(health([...rows, deferred, checkpoint(0.5, { attemptId: "deferred" })])
+      .backlog.anomalous).toBe(false);
+  });
+
+  it("does not let one deferred connection hide another runnable connection", () => {
+    const rows = Array.from({ length: 15 }, (_, index) => {
+      const age = 70 - index * 5;
+      return [row(age, { runnable: true }),
+        row(age, { runnable: false, connectionKey: "b".repeat(64), attemptId: "deferred" }),
+        checkpoint(age, { attemptId: "deferred" })];
+    }).flat();
+    expect(health(rows).backlog.affectedRuntimeCount).toBe(1);
   });
 
   it("keeps a continuing backlog eligible until its evidence gap lapses", () => {

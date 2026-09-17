@@ -12010,7 +12010,7 @@ describe("hosted runtime callbacks", () => {
     expect(recordDeliveryOutcome).not.toHaveBeenCalled();
   });
 
-  it("blocks changed Linq health at provider entry before any provider message request", async () => {
+  it.each(["chat_critical", "automation_engagement_paused"] as const)("blocks %s at provider entry before any provider message request", async (deliveryBlockCode) => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",
       channel: "linq",
@@ -12034,7 +12034,7 @@ describe("hosted runtime callbacks", () => {
     }) => request.authorityCheckOnly
       ? { resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request) }
       : {
-          deliveryBlockCode: "chat_critical" as const,
+          deliveryBlockCode,
           resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request),
         });
     const providerFetch = vi.fn<typeof fetch>();
@@ -12066,7 +12066,12 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     })).rejects.toMatchObject({
-      code: "ASSISTANT_LINQ_EGRESS_CHAT_CRITICAL",
+      code: `ASSISTANT_LINQ_EGRESS_${deliveryBlockCode.toUpperCase()}`,
+      context: {
+        assistantDeliveryFailureClass: "blocked",
+        assistantDeliveryResumeTrigger: "recipient_inbound",
+        blockKind: deliveryBlockCode,
+      },
     });
 
     expect(assertRecentInbound.mock.calls.map(([request]) =>
