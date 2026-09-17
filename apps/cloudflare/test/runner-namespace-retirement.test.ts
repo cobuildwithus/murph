@@ -55,13 +55,13 @@ async function runWranglerUpload() {
         result = { id: versionId, metadata: { created_on: "2026-01-01T00:00:00Z" }, resources: {} };
       } else if (method === "GET" && route.endsWith("/workers/services/synthetic-worker")) {
         result = { default_environment: { environment: "production",
-          script: { tag: "synthetic-tag", tags: [], last_deployed_from: "wrangler", migration_tag: "v9" } } };
+          script: { tag: "synthetic-tag", tags: [], last_deployed_from: "wrangler", migration_tag: "v10" } } };
       } else if (method === "GET" && route.endsWith("/deployments")) {
         result = { deployments: [{ id: "synthetic-deployment", versions: [{ version_id: versionId, percentage: 100 }] }] };
       } else if (method === "GET" && route.endsWith("/workers/scripts")) {
-        result = [{ id: "synthetic-worker", migration_tag: "v9" }];
+        result = [{ id: "synthetic-worker", migration_tag: "v10" }];
       } else if (method === "GET" && route.endsWith("/settings")) {
-        result = { migration_tag: "v9", bindings: [] };
+        result = { migration_tag: "v10", bindings: [] };
       } else if (method === "GET" && route.endsWith(`/versions/${versionId}`)) {
         result = { id: versionId, resources: { bindings: classes.map(class_name => ({
           type: "durable_object_namespace", class_name, namespace_id: `ns-${class_name}`,
@@ -105,8 +105,8 @@ async function runWranglerUpload() {
   }
 }
 
-describe("installed Wrangler retained namespace", () => {
-  it("uploads an ordinary version without deleting the dormant namespace or reconciling containers", async () => {
+describe("installed Wrangler after namespace retirement", () => {
+  it("uploads an ordinary version after deletion without another migration or container reconciliation", async () => {
     const result = await runWranglerUpload();
     expect(result.succeeded).toBe(true);
     expect(result.metadata).toMatchObject({
