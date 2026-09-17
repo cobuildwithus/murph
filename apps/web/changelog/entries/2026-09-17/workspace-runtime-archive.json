@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 100,
+  "item": {
+    "id": "workspace-runtime-archive",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More complete workspace exports",
+    "summary": "When you ask for a workspace backup in a private conversation, Murph can include your non-secret runtime records and conversation history.",
+    "details": "Murph inspects the requested files, explains exclusions, and leaves the originals in place. The existing approval step still comes before the attachment is sent.",
+    "relevanceTags": [
+      "vault",
+      "exports"
+    ],
+    "sourcePullRequests": [
+      2873
+    ]
+  }
+}
