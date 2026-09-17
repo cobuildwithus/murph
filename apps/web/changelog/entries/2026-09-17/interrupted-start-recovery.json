@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 100,
+  "item": {
+    "id": "interrupted-start-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Recovery after an interrupted start",
+    "summary": "Murph can recover when a startup interruption previously left background work repeatedly waiting to restart.",
+    "details": "The recovery still waits for the interrupted run to stop safely before starting a replacement.",
+    "relevanceTags": [
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3546
+    ]
+  }
+}

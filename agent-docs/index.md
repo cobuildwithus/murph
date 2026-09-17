@@ -421,3 +421,6 @@ The channel-scoped inactivity pause and local proof are recorded in
 
 The Responses relay queue-pressure observation and implementation proof are recorded in
 [`2026-09-17-websocket-queue-pressure-telemetry.md`](exec-plans/completed/2026-09-17-websocket-queue-pressure-telemetry.md).
+
+- Recovery implementation: [`runtime retirement recovery`](exec-plans/completed/2026-09-17-runtime-retirement-recovery.md)
+  covers interrupted binding and claimed unbound target retirement.

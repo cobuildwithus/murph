@@ -506,6 +506,67 @@ describe("RunnerContainer slot lifecycle", () => {
     await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({ state: "bound" });
   });
 
+  for (const prepared of [false, true]) {
+    it(`retires a reserved unbound target with its allocation claim (prepared=${prepared})`, async () => {
+      const h = createStandbyContainerHarness();
+      const identity = { releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION, slotName: h.slotName };
+      const owner = { claimId: createHostedStandbyClaimId(), userId: "member_reserved" };
+      if (prepared) await h.container.prepareStandbySlot({ ...identity, timeoutMs: 20_000 });
+
+      await expect(h.container.retireStandbySlot({
+        claimId: owner.claimId, target: { slotName: h.slotName, userId: owner.userId },
+      })).resolves.toEqual({ retired: true });
+      await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({
+        state: "retired", claimId: null, userId: null,
+      });
+      await expect(h.container.bindStandbySlot({ ...identity, ...owner })).rejects.toThrow("cannot be rebound");
+      expect(h.destroy).toHaveBeenCalledOnce();
+    });
+  }
+
+  it("retries claimed unbound retirement after an uncertain stop without admitting a late bind", async () => {
+    const destroy = vi.fn().mockRejectedValueOnce(new Error("platform unavailable")).mockResolvedValue(undefined);
+    const h = createStandbyContainerHarness({ destroy });
+    const owner = { claimId: createHostedStandbyClaimId(), userId: "member_reserved" };
+    const request = { claimId: owner.claimId, target: { slotName: h.slotName, userId: owner.userId } };
+    await expect(h.container.retireStandbySlot(request)).rejects.toThrow("failed to destroy cleanly");
+    await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({
+      state: "retiring", claimId: null, userId: null,
+    });
+    await expect(h.container.bindStandbySlot({
+      ...owner, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION, slotName: h.slotName,
+    })).rejects.toThrow("cannot be rebound");
+    await expect(h.container.retireStandbySlot(request)).resolves.toEqual({ retired: true });
+    expect(destroy).toHaveBeenCalledTimes(2);
+  });
+
+  it("still rejects claim-only retirement of an unbound slot", async () => {
+    const h = createStandbyContainerHarness();
+    await h.container.prepareStandbySlot({
+      releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION, slotName: h.slotName, timeoutMs: 20_000,
+    });
+    await expect(h.container.retireStandbySlot({ claimId: createHostedStandbyClaimId() }))
+      .rejects.toThrow("unbound retirement must not assert a claim");
+    expect(h.destroy).not.toHaveBeenCalled();
+  });
+
+  it("preserves target and bound claim authority for claimed retirement", async () => {
+    const owner = { claimId: createHostedStandbyClaimId(), userId: "member_bound" };
+    const h = createStandbyContainerHarness({ bound: owner });
+    const target = { slotName: h.slotName, userId: owner.userId };
+    await expect(h.container.retireStandbySlot({
+      claimId: createHostedStandbyClaimId(), target,
+    })).rejects.toThrow("claim did not match");
+    await expect(h.container.retireStandbySlot({
+      claimId: owner.claimId, target: { ...target, userId: "member_other" },
+    })).rejects.toThrow("belongs to another member");
+    await expect(h.container.retireStandbySlot({
+      claimId: owner.claimId, target: { ...target, slotName: createHostedRunnerSlotName(RELEASE_ID) },
+    })).rejects.toThrow("does not match the addressed Durable Object");
+    expect(h.destroy).not.toHaveBeenCalled();
+    await expect(h.container.retireStandbySlot({ claimId: owner.claimId, target })).resolves.toEqual({ retired: true });
+  });
+
   it("keeps retryable unbound retirement member-free", async () => {
     const destroy = vi.fn()
       .mockRejectedValueOnce(new Error("platform unavailable"))

@@ -511,3 +511,13 @@ outcome, elapsed time, observed fence and a finite retry reason. A null legacy
 delegation leaves summary ownership with the legacy runner. Telemetry cannot
 delay the control response or change its result; orchestration correlation uses
 the existing domain-separated hash rather than retaining the raw attempt ID.
+
+### Reserved target retirement
+
+A selected target can remain unbound when its bind RPC times out before commit.
+Retirement validates the addressed immutable target and any persisted member,
+then derives the effective claim from the local binding synchronously before
+fencing admissions. A target with no persisted claim retires without one even
+when the Postgres reservation supplies its allocation claim. Bound targets
+still reject a mismatched claim or member. Failed native destruction leaves the
+slot retiring for the existing retry; delayed binds cannot resurrect it.
