@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-17",
+  "order": 100,
+  "item": {
+    "id": "new-account-startup-waits",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting when starting with Murph",
+    "summary": "New accounts avoid repeated waits while Murph prepares to handle their first conversation.",
+    "details": "Setup still completes its required checks before your conversation begins.",
+    "relevanceTags": [
+      "messaging",
+      "performance",
+      "onboarding"
+    ],
+    "sourcePullRequests": []
+  }
+}

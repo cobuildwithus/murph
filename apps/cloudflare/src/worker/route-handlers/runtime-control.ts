@@ -1,3 +1,4 @@
+import { buildRuntimeProcessingSummaryEntry, recordRuntimeProcessingSummary, type RuntimeProcessingDiagnostics } from "../../user-runner/diagnostics.ts";
 import { progressRuntimeMigrationForMember } from "../../runtime-migration-progress.ts";
 import { createRuntimeProcessingCommandBudget } from "../../user-runner/runtime-command-budget.ts";
 import { resolveAdmittedLegacyUserRunner } from "../../legacy-runtime-admission.ts";
@@ -335,7 +336,29 @@ async function runRuntimeEnsureProcessingForUser(input: {
   const progressMigration = () => progressRuntimeMigrationForMember({ source: input.context.env, userId: input.userId,
     budget: createRuntimeProcessingCommandBudget({ commandTimeoutMs: input.commandTimeoutMs,
       startedAtMs: input.commandStartedAtEpochMs, webControlTimeoutMs: input.context.environment.webControlTimeoutMs }) });
-  const postgres = await ensurePostgresRuntimeProcessing(input.context.env, command);
+  const diagnostics: RuntimeProcessingDiagnostics = {
+    stage: "admission",
+    details: {
+      runtimeProcessingBackend: "postgres",
+      commandStartedAtEpochMs: input.commandStartedAtEpochMs,
+      runtimeProcessingRequestedMode: input.ensureRequest.processingMode ?? "default",
+      triggeredByWebDirect: input.orchestration.triggeredByWebDirect === true,
+    },
+  };
+  let postgres: HostedRuntimeEnsureProcessingResponse | null | undefined;
+  try {
+    postgres = await ensurePostgresRuntimeProcessing(input.context.env, command, diagnostics);
+  } finally {
+    // Null delegates to the legacy owner, which records its own summary.
+    // Snapshot before detaching so telemetry cannot extend the command budget.
+    if (postgres !== null) {
+      const entry = buildRuntimeProcessingSummaryEntry(diagnostics, postgres, input.commandStartedAtEpochMs);
+      const telemetry = Promise.resolve().then(() => recordRuntimeProcessingSummary({
+        env: input.context.environment, entry, orchestrationAttemptId: command.orchestrationAttemptId, userId: input.userId,
+      })).catch(() => undefined);
+      try { input.context.executionCtx?.waitUntil(telemetry); } catch { /* Rejection is already owned. */ }
+    }
+  }
   if (postgres) return postgres;
   try {
     const stub = await resolveAdmittedLegacyUserRunner(input.context.env, input.userId);

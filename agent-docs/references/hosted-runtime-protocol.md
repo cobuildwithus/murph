@@ -4665,10 +4665,29 @@ ends at the Cloudflare route/auth stamps, Durable Object activation ends at
 replacement-clear interval, and fresh container allocation/readiness ends at
 `freshStartContainerReadyAtEpochMs`. The outer Temporal-signal-to-runner span is
 not a single Temporal activity duration; the direct wake may win before the
-Temporal activity begins. Replacement traces also carry same-call elapsed
+Temporal activity begins.
+
+Web direct-wake orchestration timing includes optional `directWakeStartedAtEpochMs`,
+`directWakeAttemptCount`, and `directWakeRetryWaitMs`. These describe the whole
+bounded wake, while existing direct-ensure fields describe only the last parsed
+request. A later failed request still clears an earlier parsed result. Consumers
+must accept these optional fields before new Web, Worker, or runtime producers
+emit the expanded strict timing shape. These fields grant no execution authority.
+
+Replacement traces also carry same-call elapsed
 scalars for the active wake and exact fence clear. Fresh-start traces carry
-elapsed scalars for the sequential workspace read, runtime-store ensure, and
-total invocation preparation. Fixed booleans distinguish prior-version targets
+elapsed scalars for the parallel workspace read and runtime-store ensure, and
+total invocation preparation. The two read durations overlap and must not be
+added. Invocation preparation also records four adjacent elapsed subdivisions:
+remaining input-read wait, admission/custom-inference preparation, write-fence
+binding, and runner-job preparation. These local durations retain their own
+values when merged with an older wake's orchestration evidence. Foreground wake
+telemetry separates local mailbox-prefetch preparation from the explicit
+prefetch-response wait used during checkpoint interruption. The latter covers
+the awaited response or rejection before the import owner's existing refetch;
+it is absent on paths that do not await that response before import. Prefetch
+reuse measures only work performed by the current caller. All subdivisions use
+existing in-memory telemetry and add no request or awaited reporting work. Fixed booleans distinguish prior-version targets
 and explicit no-child results. These fields are stamped onto the existing trace
 payload with no additional I/O. Prefer the same-call elapsed scalars when direct
 and Temporal retries may have contributed independently merged epoch

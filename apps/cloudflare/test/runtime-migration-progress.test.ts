@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { LegacyRuntimeExportCursor } from "@murphai/hosted-execution/runtime-migration";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { progressRuntimeMigrationForMember } from "../src/runtime-migration-progress.ts";
 import { commandHostedRuntimeMigration } from "../src/runtime-migration-client.ts";
@@ -20,9 +21,9 @@ function harness() {
     preparePostgresMemberMigration: vi.fn(async () => ({ quiesced: false, checkpointStatus: null })),
     freezeForPostgresMigration: vi.fn(async () => ({ frozen: false })),
     freezeEmptyForPostgresMigration: vi.fn(async () => ({ frozen: true })),
-    exportPostgresMigrationPage: vi.fn(async () => ({ schema: "murph.legacy-runtime-export.v1" as const,
-      userId: null, generation: "0", cursor: { section: 0, after: "" },
-      next: { section: 1, after: "" }, records: [], hash: "c".repeat(64) })),
+    exportPostgresMigrationPage: vi.fn(async (cursor: LegacyRuntimeExportCursor) => ({ schema: "murph.legacy-runtime-export.v1" as const,
+      userId: null, generation: "0", cursor,
+      next: cursor.section < 3 ? { section: cursor.section + 1, after: "" } : null, records: [], hash: "c".repeat(64) })),
     bindUser: unused, deleteHostedUserData: unused, publishHostedPrivateMedia: unused,
     ensureRuntimeProcessingForUser: unused, runnerStatus: unused,
   };
@@ -34,13 +35,18 @@ function harness() {
 }
 describe("bounded automatic migration progress", () => {
   beforeEach(() => {
+    let nextCursor: LegacyRuntimeExportCursor | null = { section: 0, after: "" };
     vi.mocked(commandHostedRuntimeMigration).mockReset().mockImplementation(async ({ command }) => {
       if (command.operation === "status") return { gate };
       if (command.operation === "enroll_sources") return { enrolled: 0 };
       if (command.operation === "select_first_use") return { objectId: selectedObject };
       if (command.operation === "read_member") return { member: { migrationPhase: "legacy" } };
-      if (command.operation === "read_object") return { object: { completedAt: null, nextCursor: { section: 0, after: "" } } };
-      if (command.operation === "import_empty") return { object: { completedAt: null } };
+      if (command.operation === "read_object") return { object: { completedAt: nextCursor === null ? "synthetic-complete" : null, nextCursor } };
+      if (command.operation === "import_empty") {
+        nextCursor = command.page.next;
+        return { object: { completedAt: nextCursor === null ? "synthetic-complete" : null, nextCursor } };
+      }
+      if (command.operation === "activate_empty") return { done: true };
       throw new Error("Unexpected automatic migration command.");
     });
   });
@@ -74,7 +80,7 @@ describe("bounded automatic migration progress", () => {
     await h.run();
     expect(commandHostedRuntimeMigration).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({
       operation: "enroll_sources", namespaceId: gate.namespaceId, workerVersion: "synthetic-compatible-release" }) }));
-    expect(h.stub.exportPostgresMigrationPage).toHaveBeenCalledOnce();
+    expect(h.stub.exportPostgresMigrationPage).toHaveBeenCalledTimes(4);
   });
   it("does not touch a source after losing the enrollment acknowledgement", async () => {
     const h = harness(); vi.mocked(commandHostedRuntimeMigration).mockResolvedValueOnce({ gate }).mockRejectedValueOnce(new Error("synthetic enrollment reply lost"));
@@ -93,6 +99,54 @@ describe("bounded automatic migration progress", () => {
       workerVersion: gate.workerVersion, objectId: selectedObject, userId: "synthetic-selected-member", migrationId });
     expect(h.stub.freezeForPostgresMigration).not.toHaveBeenCalled();
   });
+  it("rejects a nonadvancing canonical empty cursor without another export or activation", async () => {
+    const h = harness();
+    const command = vi.mocked(commandHostedRuntimeMigration).getMockImplementation()!;
+    vi.mocked(commandHostedRuntimeMigration).mockImplementation(async input => input.command.operation === "import_empty"
+      ? { object: { completedAt: null, nextCursor: { section: 0, after: "" } } }
+      : command(input));
+    await expect(h.run()).rejects.toThrow("cursor did not advance");
+    expect(h.stub.exportPostgresMigrationPage).toHaveBeenCalledOnce();
+    expect(vi.mocked(commandHostedRuntimeMigration).mock.calls.some(([input]) => input.command.operation === "activate_empty")).toBe(false);
+  });
+
+  it("resumes a committed empty page after losing its acknowledgement", async () => {
+    const h = harness();
+    const command = vi.mocked(commandHostedRuntimeMigration).getMockImplementation()!;
+    let loseReply = true;
+    vi.mocked(commandHostedRuntimeMigration).mockImplementation(async input => {
+      const result = await command(input);
+      if (input.command.operation === "import_empty" && loseReply) {
+        loseReply = false;
+        throw new Error("synthetic import reply lost");
+      }
+      return result;
+    });
+    await expect(h.run()).rejects.toThrow("import reply lost");
+    expect(h.stub.exportPostgresMigrationPage).toHaveBeenCalledOnce();
+    expect(vi.mocked(commandHostedRuntimeMigration).mock.calls.some(([input]) => input.command.operation === "activate_empty")).toBe(false);
+    await expect(h.run()).resolves.toEqual({ done: true });
+    expect(h.stub.exportPostgresMigrationPage.mock.calls.map(([cursor]) => cursor.section)).toEqual([0, 1, 2, 3]);
+  });
+
+  it("does not continue or activate after an import outlives the shared request deadline", async () => {
+    vi.useFakeTimers(); const h = harness();
+    const command = vi.mocked(commandHostedRuntimeMigration).getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    vi.mocked(commandHostedRuntimeMigration).mockImplementation(async input => {
+      const result = await command(input);
+      if (input.command.operation === "import_empty") await held;
+      return result;
+    });
+    const running = h.run(25);
+    const rejected = expect(running).rejects.toThrow("command budget timed out");
+    await vi.advanceTimersByTimeAsync(26); await rejected;
+    release(); await vi.advanceTimersByTimeAsync(0);
+    expect(h.stub.exportPostgresMigrationPage).toHaveBeenCalledOnce();
+    expect(vi.mocked(commandHostedRuntimeMigration).mock.calls.some(([input]) => input.command.operation === "activate_empty")).toBe(false);
+  });
+
   it("starts no later handoff step after a timed-out freeze eventually acknowledges", async () => {
     vi.useFakeTimers(); const h = harness(); let release!: (value: { frozen: boolean }) => void;
     h.stub.freezeEmptyForPostgresMigration.mockImplementation(() => new Promise(resolve => { release = resolve; }));

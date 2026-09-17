@@ -4,8 +4,8 @@ import {
   type HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
-  CloudflareHostedControlRuntimeEnsureProcessingTiming,
-} from "@murphai/cloudflare-hosted-control/client";
+  HostedDirectRuntimeWakeTiming,
+} from "../hosted-execution/direct-runtime-wake";
 
 import { handoffHostedMailboxWake } from "../hosted-orchestration/mailbox-wake";
 import {
@@ -143,12 +143,15 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
   mailboxItemId: string;
   source: "linq" | "telegram";
-  timing: CloudflareHostedControlRuntimeEnsureProcessingTiming;
+  timing: HostedDirectRuntimeWakeTiming;
   userId: string;
 }): Promise<void> {
   const phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown = {
     schemaVersion: 1,
     orchestration: {
+      directWakeStartedAtEpochMs: timingRecord.timing.directWakeStartedAtEpochMs,
+      directWakeAttemptCount: timingRecord.timing.directWakeAttemptCount,
+      directWakeRetryWaitMs: timingRecord.timing.directWakeRetryWaitMs,
       tokenAcquireStartedAtEpochMs: timingRecord.timing.tokenAcquireStartedAtEpochMs,
       tokenAcquiredAtEpochMs: timingRecord.timing.tokenAcquiredAtEpochMs,
       directEnsureRequestStartedAtEpochMs:

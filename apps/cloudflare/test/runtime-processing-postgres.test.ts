@@ -1,3 +1,4 @@
+import type { RuntimeProcessingDiagnostics } from "../src/user-runner/diagnostics.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeOwnerResponse, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ensurePostgresRuntimeProcessing } from "../src/runtime-processing.ts";
@@ -68,7 +69,7 @@ describe("Postgres runtime orchestration", () => {
     vi.mocked(commandHostedRuntimeMigration).mockResolvedValue({ gate: { phase: "legacy" } });
   });
 
-  it("completes a new member's exact empty handoff through processing retries without an operator", async () => {
+  it("completes a new member's exact empty handoff in one processing request before the next admission", async () => {
     const { source, container } = harness();
     const objectId = "a".repeat(64);
     let section = 0; let activated = false;
@@ -93,7 +94,7 @@ describe("Postgres runtime orchestration", () => {
       if (command.operation === "enroll_sources") return { enrolled: 1 };
       if (command.operation === "select_first_use") return { objectId };
       if (command.operation === "read_object") return { object: { completedAt: section === 4 ? "synthetic-complete" : null, nextCursor: { section, after: "" } } };
-      if (command.operation === "import_empty") { section++; return { object: { completedAt: section === 4 ? "synthetic-complete" : null } }; }
+      if (command.operation === "import_empty") { section++; return { object: { completedAt: section === 4 ? "synthetic-complete" : null, nextCursor: command.page.next } }; }
       if (command.operation === "activate_empty") { expect(section).toBe(4); activated = true; return { done: true }; }
       throw new Error("Unexpected first-use migration command.");
     });
@@ -101,16 +102,31 @@ describe("Postgres runtime orchestration", () => {
       if (!activated) return { cutover: "draining", status: "blocked", owner: null };
       return response(owner({ phase: "starting", workspaceVersion: null }), command.operation === "claim" ? "claimed" : "updated");
     });
-    for (let attempt = 0; attempt < 5; attempt++) {
-      expect(await ensurePostgresRuntimeProcessing({ ...source, USER_RUNNER: namespace }, request)).toMatchObject({ kind: "retry_later" });
-      expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
-    }
+    expect(await ensurePostgresRuntimeProcessing({ ...source, USER_RUNNER: namespace }, request)).toMatchObject({ kind: "retry_later" });
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
     expect(activated).toBe(true);
     expect(namespace.idFromName).toHaveBeenCalledWith(request.userId);
     expect(namespace.getByName).not.toHaveBeenCalled();
     expect(legacy.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     expect(await ensurePostgresRuntimeProcessing({ ...source, USER_RUNNER: namespace }, request)).toMatchObject({ kind: "runtime_processing_accepted", action: "started" });
     expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["disabled", "postgres_capability_unavailable"],
+    ["draining", "migration_pending"],
+    ["missing-owner", "claim_blocked"],
+    ["uncertain-wake", "wake_unconfirmed"],
+  ] as const)("records the actual bounded retry reason for %s", async (scenario, reason) => {
+    const { source, container } = harness();
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    if (scenario === "disabled") source.HOSTED_RUNTIME_POSTGRES_ENABLED = "false";
+    if (scenario === "draining") vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce({ cutover: "draining", status: "blocked", owner: null });
+    else vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(scenario === "missing-owner" ? null : owner()));
+    if (scenario === "uncertain-wake") container.ensureProcessing.mockRejectedValueOnce(new Error("synthetic transport failure"));
+    await expect(ensurePostgresRuntimeProcessing(source, request, diagnostics)).resolves.toMatchObject({ kind: "retry_later" });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe(reason);
+    if (scenario === "uncertain-wake") expect(diagnostics).toMatchObject({ attemptId: "attempt-a", leaseGeneration: "1", stage: "active_wake" });
   });
 
   it("uses the finite legacy bridge and closes admission during draining", async () => {
