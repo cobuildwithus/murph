@@ -74,6 +74,31 @@ describe("managed snapshot uploads", () => {
     expect(h.bucket.get).toHaveBeenCalledWith(objectKey);
   });
 
+  it("hashes through the platform digest stream when the runtime provides one", async () => {
+    const { createHash } = await import("node:crypto");
+    class SyntheticDigestStream extends WritableStream<Uint8Array> {
+      readonly digest: Promise<ArrayBuffer>;
+      constructor(algorithm: string) {
+        expect(algorithm).toBe("SHA-256");
+        const hash = createHash("sha256");
+        let settle!: (value: ArrayBuffer) => void;
+        const digest = new Promise<ArrayBuffer>(resolve => { settle = resolve; });
+        super({ write: chunk => { hash.update(chunk); }, close: () => { settle(hash.digest().buffer as ArrayBuffer); } });
+        this.digest = digest;
+      }
+    }
+    const used = vi.fn();
+    Object.defineProperty(globalThis.crypto, "DigestStream", { configurable: true, value: class extends SyntheticDigestStream { constructor(algorithm: string) { used(); super(algorithm); } } });
+    try {
+      const h = harness();
+      await verifyManagedSnapshotBytes({ bucket: h.bucket, receipt });
+      expect(used).toHaveBeenCalledOnce();
+      await expect(verifyManagedSnapshotBytes({ bucket: h.bucket, receipt: { ...receipt, encryptedSha256: "b".repeat(64) } })).rejects.toThrow("SHA-256 verification failed");
+    } finally {
+      delete (globalThis.crypto as { DigestStream?: unknown }).DigestStream;
+    }
+  });
+
   it("bounds a stalled verification stream without recording success", async () => {
     const h = harness();
     const cancel = vi.fn();
