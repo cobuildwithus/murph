@@ -200,6 +200,10 @@ SpO2/ECG validation telemetry, retained retry ownership, and review evidence
 for preserving collection scope are recorded in
 [`2026-09-16-junction-validation-pr.md`](exec-plans/completed/2026-09-16-junction-validation-pr.md).
 
+The OTP reauthentication cache correction and focused cryptographic regression
+proof are recorded in
+[`2026-09-17-reauth-otp-cache.md`](exec-plans/completed/2026-09-17-reauth-otp-cache.md).
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
