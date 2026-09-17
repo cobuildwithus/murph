@@ -95,7 +95,7 @@ async function deleteHostedUserR2Data(input: {
   };
 }
 
-interface HostedUserR2DataDeletionResult {
+export interface HostedUserR2DataDeletionResult {
   deletedObjectCount: number;
   skippedUserScopedPrefixes: boolean;
   supported: boolean;

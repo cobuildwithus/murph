@@ -56,3 +56,14 @@ Internal removal only. Existing member execution and replies are unchanged.
 - Rehearsal storage is outside this source change; a read-only census found
   retained data. No infrastructure deletion or production deployment is included.
 - Changelog: not applicable; internal removal of already-retired behavior.
+
+## Review and build follow-up
+
+Public final ReviewGPT round 1 passed on the first candidate. CI declaration
+emit found a non-exported R2 cleanup result type; exporting that existing shape
+fixes the build without changing runtime behavior. A Web source-contract test
+still opened the deleted coordinator; its obsolete assertion is removed while
+its live Web log-owner assertions remain. Cloudflare production build, Web
+focused tests (12), Web typecheck, and another 40 focused Postgres/resource tests
+passed. The private full verification also passed, including built-worker proof.
+The corrected public candidate receives another exact-head review with CI.
