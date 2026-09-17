@@ -37,6 +37,11 @@ owned by `agent-docs/references/hosted-runtime-protocol.md`. Implementation proo
 Runtime admission policy and single-request provider backend selection are owned
 by `agent-docs/references/hosted-postgres-runtime.md` and `agent-docs/SECURITY.md`.
 
+The completed rolling Postgres migration and production legacy namespace
+retirement are recorded in
+[`2026-09-15-rolling-runtime-cutover.md`](exec-plans/completed/2026-09-15-rolling-runtime-cutover.md).
+The current deployment contract remains in `agent-docs/references/hosted-postgres-runtime.md`.
+
 ## Purpose
 
 Maximum-census runtime retirement proof is indexed in

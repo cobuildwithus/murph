@@ -1,6 +1,6 @@
 # Rolling hosted runtime migration without a fleet pause
 
-Status: active
+Status: completed
 Created: 2026-09-15
 Updated: 2026-09-17
 
@@ -71,7 +71,7 @@ passing a timer never substitutes for safe handoff evidence.
 8. [complete] Namespace retirement proof: prove complete accounting inside the
    campaign lock, close the gate to `postgres`, verify existing and new-member
    routing, then soak for legacy traffic.
-9. [in progress] Remove the finite legacy bridge, the deployment capability and the
+9. [complete] Remove the finite legacy bridge, the deployment capability and the
    legacy namespace after the soak, with explicit authorization for the
    irreversible namespace deletion.
 
@@ -1018,3 +1018,43 @@ failure kind survives unrelated output and object references remain redacted.
 No runtime behavior, deployment gate, retry criterion or data authority changes.
 The underlying setup failure is still unproven; obtain that evidence before any
 runtime correction or further retirement attempt.
+
+
+### Completed production retirement
+
+The test-only diagnostic PR #3545 merged as `6d9318b56665` after all required
+checks passed. Its focused harness regression (21 tests), Cloudflare typecheck
+and local scheduled-image-reminder checkpoint-race scenario passed. The previous
+CI setup failure did not reproduce; no runtime correction was inferred from it.
+The optional viewport job failed on unrelated CSP and sponsorship interaction
+checks; required release, CLI and billing checks passed.
+
+Protected retirement deployment `35266558770` succeeded against public source
+`6d9318b56665f47ca10792cba653f10e2d6f6b51` and private source
+`887ec27a28837a831b7935940e5ba24b53dafe34`. All predeploy gates passed, including
+all three scheduled-reminder shards. Both deployment smoke phases passed with
+the live-model check enabled. The release receipt preserves all four member
+container applications unchanged; only the isolated deployment-smoke application
+was updated.
+
+Cloudflare reports Worker version `9d7d21f6-5bb8-48d9-b443-88212fb95f87` serving
+100% from 2026-09-17 20:03:09 UTC. Its bindings contain no `USER_RUNNER` or
+`UserRunnerDurableObject`. A complete account namespace inventory decreased from
+13 to 12 and no longer contains the exact approved production namespace. This is
+physical deletion, not merely routing removal. Other workers' namespaces remain
+outside this retirement's scope.
+
+Canonical readback remains `postgres`, sealed, creation-closed and activated:
+892 terminal sources, zero unfinished imports and zero non-Postgres runtime
+owners. In the bounded 20:03:09–20:08:00 UTC post-publication window, telemetry
+recorded 12 completed invocations, 10 assistant passes and 33 finished checkpoints,
+with zero error-level events and zero legacy UserRunner events. Eighteen liveness
+summary warnings remained; the same warning class occurred 37 times in the ten
+minutes before publication. Their cause was not resolved by this task, and the
+short observation window is not a claim of general runtime fault-freedom.
+
+The rolling migration and authorized namespace retirement are complete. Preserve
+canonical migration receipts. No legacy storage rollback exists; future releases
+must not restore legacy authority. Retained historical bridge source supports
+protocol rehearsal only and is absent from the production Worker bundle.
+Completed: 2026-09-17
