@@ -2422,6 +2422,15 @@ to apply after cutover.
   excluded: its wait reflects denied AI admission, including typing observed
   after a later recovery. The same bounded query reads that existing mailbox
   fact without adding per-input queries or suppressing other inputs for the member.
+  An exact trace with no recorded typing acceptance or provider start and a valid
+  `terminalNonReplyCommittedAtEpochMs` is also excluded: intentionally completed
+  silence creates no remaining typing obligation. The marker must be a bounded
+  JSON integer at or after receipt, acceptance, and input staging,
+  and no later than evaluation. Missing, malformed, future, or stale markers
+  preserve ordinary alerts; provider execution and observed slow typing remain
+  alertable even beside a valid terminal marker, which can also record provider
+  failures. This classification never consumes mailbox work or
+  changes the independent reply/progress monitors' checkpoint-publication checks.
   Linq and Telegram acceptance milestones stay asynchronous. The engine's
   existing turn handle retains the original provider acceptance timestamp for
   the initial accepted-input journal and subsequent pre-provider or live-steered
