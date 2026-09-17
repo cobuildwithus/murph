@@ -2024,7 +2024,7 @@ function createWorkspaceRunRequest(
 ): HostedWorkspaceInvocationRequest {
   return {
     attemptId: "attempt_synthetic_workspace_run",
-    idleCheckpointDelayMs: 1,
+    runnerIdleTtlMs: 1,
     leaseGeneration: "1",
     userId: TEST_USER_ID,
     workspaceVersion: "0",

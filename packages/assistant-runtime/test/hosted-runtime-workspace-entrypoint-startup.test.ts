@@ -302,7 +302,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_host_abort_during_checkpoint",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -726,7 +726,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_codex_preinitialization_snapshot_join",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -900,7 +900,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_codex_preinitialization_fallback",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1050,7 +1050,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: `attempt_provider_start_timing_${scenario.outcome}`,
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1149,7 +1149,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_email_first_preinitialization_veto",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1254,7 +1254,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_host_abort_during_foreground_projection",
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1383,7 +1383,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_detached_ask_concurrency",
-            idleCheckpointDelayMs: boundary === "shutdown" ? 120_000 : 1,
+            runnerIdleTtlMs: boundary === "shutdown" ? 120_000 : 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1569,7 +1569,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_detached_ask_concurrency",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1735,7 +1735,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_approved_ask_foreground",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1917,7 +1917,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_detached_share_regrant",
-              idleCheckpointDelayMs: 120_000,
+              runnerIdleTtlMs: 120_000,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -2099,7 +2099,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_detached_share_authority_unavailable",
-              idleCheckpointDelayMs: 120_000,
+              runnerIdleTtlMs: 120_000,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -2276,7 +2276,7 @@ describe("hosted workspace runtime entrypoint", () => {
       return runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({ request: {
           attemptId: `attempt_synthetic_late_ask_${workspaceVersion}`,
-          idleCheckpointDelayMs: restored ? 100 : 1,
+          runnerIdleTtlMs: restored ? 100 : 1,
           leaseGeneration: workspaceVersion, userId: TEST_USER_ID, workspaceVersion,
         } }),
         {

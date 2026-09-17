@@ -63,7 +63,7 @@ test.each([
     providerFetch: providerAvailable ? originalFetch : null,
   };
   const job = createWorkspaceRuntimeJobInput({
-    request: { attemptId: "synthetic_typing_handoff", userId: TEST_USER_ID, workspaceVersion: "0", idleCheckpointDelayMs: 1 },
+    request: { attemptId: "synthetic_typing_handoff", userId: TEST_USER_ID, workspaceVersion: "0", runnerIdleTtlMs: 1 },
   });
   const importer = createHostedWorkspaceBridgeMailboxImporter({
     decodeMailboxPayload: { async decode() { throw new Error("Synthetic import handles no payload."); } },

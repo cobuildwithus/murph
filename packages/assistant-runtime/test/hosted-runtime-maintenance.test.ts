@@ -5127,7 +5127,7 @@ describe("runHostedAssistantAutomationLane", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      idleCheckpointDelayMs: 180_000,
+      runnerIdleTtlMs: 180_000,
       executionContext: {
         hosted: {
           memberId: "member_123",
@@ -6128,7 +6128,7 @@ describe("runHostedAssistantAutomationLane", () => {
           userEnvKeys: [],
         },
       },
-      idleCheckpointDelayMs: 180_000,
+      runnerIdleTtlMs: 180_000,
       requestId: "req_multiple_due_cron",
       runtime: createHostedAutomationRuntime(),
       vaultRoot: "/tmp/vault-root",

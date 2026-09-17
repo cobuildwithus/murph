@@ -703,6 +703,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   containsOnlyDeviceSyncWakes: boolean;
   containsOnlyInitialMemberActivation: boolean;
   canImportForPreCheckpointSystemWork: boolean;
+  hasAssistantAskRequests: boolean;
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
@@ -790,6 +791,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
           )
         )
       ),
+    hasAssistantAskRequests: systemItems.some((item) => item.kind === "assistant.ask.requested"),
     hasSystemWork: response.items.some((item) => item.lane === "system"),
   };
 }
@@ -2870,8 +2872,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ...(options.shutdownSignal ? [options.shutdownSignal] : []),
       ...(hostAbortSignal ? [hostAbortSignal] : []),
     ]);
-    const idleCheckpointDelayMs = resolveHostedRuntimeIdleCheckpointDelayMs(
-      input.request.idleCheckpointDelayMs,
+    const runnerIdleTtlMs = resolveHostedRuntimeIdleCheckpointDelayMs(
+      input.request.runnerIdleTtlMs,
     );
     let result: HostedWorkspaceRunnerResult;
     let committedWorkspace = activeWorkspace;
@@ -2926,7 +2928,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       if (runtimeOwnerHandoffRequested) {
         setIdleCheckpointStartBy(Date.now());
       } else {
-        ensureIdleCheckpointStartBy(Date.now() + idleCheckpointDelayMs);
+        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
       }
     };
     const updateIdleCheckpointTimerAfterWorkspacePass = (
@@ -2938,7 +2940,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           // Reuse admission/acceptance evidence, not generic assistant progress.
           // Batching is deliberately independent of server-receipt warmth.
           setIdleCheckpointStartBy(
-            Date.now() + (runtimeOwnerHandoffRequested ? 0 : idleCheckpointDelayMs),
+            Date.now() + (runtimeOwnerHandoffRequested ? 0 : runnerIdleTtlMs),
           );
         } else if (passResult.assistantPhaseResult?.progressed === false
           && passResult.assistantPhaseResult.runtimeProjectionCheckpointRequested === true) {
@@ -2950,6 +2952,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           // move an existing (including already-spent) window.
           ensureIdleCheckpointTimerAfterDirtyWork();
         }
+      }
+      if (passResult.latestMailboxImport.importResult.blocked.some(
+        (item) => item.reasonCode === "assistant_ask.target_not_admitted",
+      )) {
+        // Consented-member Asks expire after ten minutes. Once foreground work
+        // has finished, release their existing checkpoint gate without spending
+        // another quiet window or weakening Ask authority.
+        setIdleCheckpointStartBy(Date.now());
       }
     };
     if (runtimeStateDirty) {
@@ -2967,7 +2977,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       onCompleted(completion, notify) {
         clinicalEnrichmentController?.kick();
         runtimeStateDirty = true;
-        ensureIdleCheckpointStartBy(Date.now() + idleCheckpointDelayMs);
+        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
         if (completion.afterDurableCheckpoint) {
           pendingDurableCheckpointEffects.push(...(typeof completion.afterDurableCheckpoint === "function"
             ? [completion.afterDurableCheckpoint] : completion.afterDurableCheckpoint));
@@ -2982,7 +2992,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       },
       onFailure(error, notify) {
         runtimeStateDirty = true;
-        ensureIdleCheckpointStartBy(Date.now() + idleCheckpointDelayMs);
+        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
         emitPhaseLog({ error, input, requestId, stage: "runtime", status: "fail" });
         if (notify && (!systemMailboxProcessingMode || hostedCodexRuntime !== null)) options.runtimeWakeSignal?.notify();
       },
@@ -6074,7 +6084,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         };
         const finishMailboxImportWithoutAssistant = async (
           mailboxImport: HostedMailboxImportCheckpointResult,
+          checkpointBlockedSystemWork: Awaited<ReturnType<
+            typeof inspectHostedPreCheckpointSystemMailboxPrefetch
+          >> | null = null,
         ): Promise<void> => {
+          // A mixed page can hold an expiring Ask before it reaches the decoder.
+          // Release that checkpoint gate without admitting the unsafe page.
+          if (checkpointBlockedSystemWork?.hasAssistantAskRequests) {
+            setIdleCheckpointStartBy(Date.now());
+          }
           await finishHostedMailboxImportPostCheckpointEffects({
             importResult: mailboxImport,
             runnerInput: baseRunnerInput,
@@ -6268,7 +6286,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const shouldImportSystemMailbox = input.systemMailboxAdmission === "all"
           || preCheckpointSystemPrefetch?.canImportForPreCheckpointSystemWork === true;
         if (!shouldImportSystemMailbox) {
-          await finishMailboxImportWithoutAssistant(conversationImport);
+          await finishMailboxImportWithoutAssistant(
+            conversationImport,
+            preCheckpointSystemPrefetch,
+          );
           return false;
         }
 
@@ -6653,7 +6674,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
         if (runtimeDirtyAfterForeground) {
           ensureIdleCheckpointStartBy(
-            Date.now() + (runtimeOwnerHandoffRequested ? 0 : idleCheckpointDelayMs),
+            Date.now() + (runtimeOwnerHandoffRequested ? 0 : runnerIdleTtlMs),
           );
         } else if (committedInboxMediaRetentionWakeDue) {
           setIdleCheckpointStartBy(Date.now());
@@ -6724,7 +6745,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && readyDurableCheckpointEffects.length === 0
           && !durableCheckpointFollowUpPending
         ) {
-          workDeadline ??= Date.now() + idleCheckpointDelayMs;
+          workDeadline ??= Date.now() + runnerIdleTtlMs;
         }
         return workDeadline;
       };

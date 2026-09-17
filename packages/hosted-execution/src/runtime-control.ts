@@ -3930,7 +3930,9 @@ export interface HostedWorkspaceInvocationRequest {
   assistantExecutionBlocked?: true;
   attemptId: string;
   budget?: HostedWorkspaceInvocationBudget | null;
-  idleCheckpointDelayMs?: number | null;
+  // Older runtimes ignore this field and retain their pre-Ask-fix default.
+  // Do not also send the retired idleCheckpointDelayMs field.
+  runnerIdleTtlMs?: number | null;
   leaseGeneration: string;
   processingMode?: HostedWorkspaceInvocationProcessingMode | null;
   providerEgressToken?: string | null;

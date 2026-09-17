@@ -27,7 +27,7 @@ function harness() {
 
 function job(attemptId = "attempt-a", generation = "1"): HostedExecutionWorkspaceInvocationJobInput {
   return { kind: "workspace-invocation", request: {
-    attemptId, leaseGeneration: generation, userId, workspaceVersion: "0", workspace: null, idleCheckpointDelayMs: 54_000,
+    attemptId, leaseGeneration: generation, userId, workspaceVersion: "0", workspace: null, runnerIdleTtlMs: 54_000,
   }, runtime: buildHostedRunnerJobRuntimeConfig({ forwardedEnv: {}, runnerSecrets: {} }) };
 }
 

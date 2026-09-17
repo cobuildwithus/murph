@@ -31,6 +31,8 @@ import type {
   HostedExecutionLogLevel,
 } from "./observability.ts";
 
+export const HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS = 10 * 60 * 1_000;
+
 export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hosted-execution-signature";
 export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hosted-execution-timestamp";
 export const HOSTED_EXECUTION_NONCE_HEADER = "x-hosted-execution-nonce";

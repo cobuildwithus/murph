@@ -47,7 +47,13 @@ The live ownership split is:
   coordination, container invocation, encrypted object plumbing, and signed
   callback transport.
   UserRunner holds one foreground runtime write fence for the whole hosted
-  invocation and passes the single `idleCheckpointDelayMs` runtime policy knob.
+  invocation and passes the single `runnerIdleTtlMs` runtime policy.
+  The optional invocation field replaces `idleCheckpointDelayMs`: older runtimes
+  ignore the new field and retain their safe legacy default during staged or
+  interrupted releases. Updated runtimes ignore the retired field and use the
+  ten-minute default when the new field is absent. Do not dual-write the retired
+  field: only runtimes with deferred-Ask deadline handling may adopt the longer
+  window. This supports either deployment order without a compatibility flag.
   The runtime, not the host, keeps dirty state warm through the configured idle
   floor. The exact assistant wake projected directly by the current foreground
   assistant phase may run once before that floor without checkpointing. The
@@ -1251,9 +1257,13 @@ and foreground reruns. A consented-member request remains checkpoint-gated;
 every accepted-input completion is admitted without a completion-kind context.
 Request import kicks the existing detached controller; completion import uses
 the existing foreground-causal delivery path, and a member action uses its
-existing provider-free foreground-causal service path. Neither starts or advances the
-at-least-180-second idle snapshot. Any other unrelated system wake in that
-prefix keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
+existing provider-free foreground-causal service path. Foreground-safe import does
+not itself advance the normal quiet checkpoint. Any unrelated system wake in
+that prefix keeps the whole system prefix checkpoint-gated. If the blocked page
+contains an Ask, finishing the conversation import requests the existing checkpoint
+immediately, before decoding that page. This preserves Ask validity without
+admitting the unrelated notification early. Decoded consented-member deferrals
+also request an early checkpoint after foreground completion. A progressed foreground-causal
 pass re-enters the existing bounded pass loop after admitting any newly arrived
 personal input first, so multiple safe items or a safe item imported during the
 preceding pass drain before checkpoint. No progress, retryable failure,
@@ -4267,11 +4277,16 @@ the existing 60-second Browser refresh budget and a successor invocation;
 fresh conversations and the exact due-assistant durability barrier retain
 priority ahead of that offer.
 
-In production, the configured idle checkpoint delay is at least 180 seconds,
-and every dirty foreground pass that progresses work restarts that hard lower
-bound. A no-progress phase that requests only a runtime-projection checkpoint
+The runtime quiet window derives from `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS`,
+with a shared ten-minute default. There is no independent checkpoint setting.
+Newly accepted foreground-priority work restarts the window; ordinary maintenance
+and no-progress probes do not. A consented-member Ask observed as deferred by
+its admission gate advances the existing checkpoint deadline after foreground
+work, preserving checkpoint-before-service ordering without spending its entire
+ten-minute validity on idle batching. Ask authority and expiry remain unchanged.
+A no-progress phase that requests only a runtime-projection checkpoint
 preserves any active quiet window. If the preceding checkpoint has completed,
-that metadata correction does not start a second 180-second window; it still
+that metadata correction does not start a second quiet window; it still
 publishes the corrected typed wake through the ordinary checkpoint owner. The
 exact assistant wake projected directly by the current foreground assistant
 phase may run once per dirty checkpoint generation before that boundary against

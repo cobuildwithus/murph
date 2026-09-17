@@ -190,7 +190,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_system_mailbox_device_preempt_before",
-            idleCheckpointDelayMs: 0,
+            runnerIdleTtlMs: 0,
             processingMode: "system_mailbox",
             workspaceVersion: "0",
           },
@@ -440,7 +440,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_system_mailbox_device_preempt_fetch",
-            idleCheckpointDelayMs: 0,
+            runnerIdleTtlMs: 0,
             processingMode: "system_mailbox",
             workspaceVersion: "0",
           },
@@ -782,7 +782,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_system_mailbox_fetch_race_upgrade",
-            idleCheckpointDelayMs: 0,
+            runnerIdleTtlMs: 0,
             processingMode: "system_mailbox",
             workspaceVersion: "0",
           },
@@ -895,7 +895,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_system_mailbox_import_race_upgrade",
-            idleCheckpointDelayMs: 0,
+            runnerIdleTtlMs: 0,
             processingMode: "system_mailbox",
             workspaceVersion: "0",
           },
@@ -1325,7 +1325,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       const mailbox = createMailboxPort({ events, items });
       runtimeCompletion = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
-          request: { processingMode: "system_mailbox", workspaceVersion: "0", idleCheckpointDelayMs: 0 },
+          request: { processingMode: "system_mailbox", workspaceVersion: "0", runnerIdleTtlMs: 0 },
           resolvedConfig: createDeviceSyncResolvedConfig(),
         }),
         {
@@ -3974,7 +3974,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4056,7 +4056,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_foreground_stale_assistant_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4148,7 +4148,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_wake",
-            idleCheckpointDelayMs: 5,
+            runnerIdleTtlMs: 5,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4271,7 +4271,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 50;
+    const runnerIdleTtlMs = 50;
     const wakeTimers: ReturnType<typeof setTimeout>[] = [];
     let wakeTimersStarted = false;
     let checkpointExpectationCountAtWakeStart = 0;
@@ -4302,7 +4302,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_no_progress_wakes",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4377,7 +4377,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const staleWakeAt = "2000-04-27T00:05:00.000Z";
-    const idleCheckpointDelayMs = 50;
+    const runnerIdleTtlMs = 50;
     let assistantPhaseCalls = 0;
 
     try {
@@ -4386,7 +4386,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_projected_wake",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4489,7 +4489,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_projected_runtime_wake",
-            idleCheckpointDelayMs: 75,
+            runnerIdleTtlMs: 75,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4625,7 +4625,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
             request: {
               attemptId:
                 `attempt_synthetic_runtime_source_blind_dirty_${scenario.name}_wake`,
-              idleCheckpointDelayMs: 50,
+              runnerIdleTtlMs: 50,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",

@@ -2372,7 +2372,7 @@ function createAllocatingStandbyHarness(input: {
 
 function createHostedExecutionEnvironment() {
   return readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-    HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
+    HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "54000",
     HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
   }));
 }
@@ -2507,7 +2507,7 @@ function createWorkspaceInvocationJob(input: {
     kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
     request: {
       attemptId: input.token.attemptId,
-      idleCheckpointDelayMs: 54_000,
+      runnerIdleTtlMs: 54_000,
       leaseGeneration: input.token.generation,
       userId: input.userId,
       workspace: null,

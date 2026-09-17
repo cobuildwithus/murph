@@ -588,7 +588,7 @@ to apply after cutover.
   handled-through and the progress generation, and therefore cannot hide
   genuinely due default work or claim system progress. A no-progress phase that
   requests only this correction preserves an active checkpoint quiet window and
-  does not start another 180-second window after the preceding checkpoint has
+  does not start another quiet window after the preceding checkpoint has
   completed. Newly accepted foreground-priority input still restarts the
   ordinary floor. Generic progress is not evidence of a new user admission:
   cleanup-only passes and empty internal probes preserve an active window and

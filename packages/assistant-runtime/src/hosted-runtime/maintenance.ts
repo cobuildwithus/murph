@@ -153,7 +153,7 @@ export async function runHostedAssistantAutomationLane(input: {
   >;
   freshAssistantInputIds?: readonly string[] | null;
   readForegroundInputIds?: (() => readonly string[]) | null;
-  idleCheckpointDelayMs?: number | null;
+  runnerIdleTtlMs?: number | null;
   now?: Date | null;
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
@@ -224,7 +224,7 @@ export async function runHostedAssistantAutomationLane(input: {
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           commitTimeoutMs: input.runtime.commitTimeoutMs,
-          idleCheckpointDelayMs: input.idleCheckpointDelayMs ?? null,
+          runnerIdleTtlMs: input.runnerIdleTtlMs ?? null,
           now: input.now ?? null,
           preProviderPhase: input.preProviderPhase ?? null,
           ...(providerStartCriticalPath ? { providerStartCriticalPath } : {}),
@@ -307,7 +307,7 @@ export async function runHostedAssistantAutomation(
     operationScope?: AssistantAutomationOperationScope | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     commitTimeoutMs?: number | null;
-    idleCheckpointDelayMs?: number | null;
+    runnerIdleTtlMs?: number | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
@@ -569,7 +569,7 @@ export async function runHostedAssistantAutomation(
         recordHostedAssistantTerminalNonReplyBestEffort({
           commitTimeoutMs: options?.commitTimeoutMs ?? null,
           event,
-          idleCheckpointDelayMs: options?.idleCheckpointDelayMs ?? null,
+          runnerIdleTtlMs: options?.runnerIdleTtlMs ?? null,
           latencyTracePort: options?.latencyTracePort ?? null,
           runtimeAttemptId: options?.runtimeAttemptId ?? null,
         });
@@ -744,7 +744,7 @@ function recordHostedAssistantTerminalNonReplyBestEffort(input: {
     recordedAt: string;
     source: string;
   };
-  idleCheckpointDelayMs: number | null;
+  runnerIdleTtlMs: number | null;
   latencyTracePort: HostedRuntimePlatform["latencyTracePort"];
   runtimeAttemptId: string | null;
 }): void {
@@ -758,7 +758,7 @@ function recordHostedAssistantTerminalNonReplyBestEffort(input: {
     ? new Date(resolveHostedRuntimeCheckpointPublicationExpectedByMs({
         checkpointStartByMs:
           recordedAtMs
-          + resolveHostedRuntimeIdleCheckpointDelayMs(input.idleCheckpointDelayMs),
+          + resolveHostedRuntimeIdleCheckpointDelayMs(input.runnerIdleTtlMs),
         commitTimeoutMs: input.commitTimeoutMs,
       })).toISOString()
     : null;

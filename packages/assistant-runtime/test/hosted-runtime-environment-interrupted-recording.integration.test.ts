@@ -260,7 +260,7 @@ test.each([
       },
     });
     const runInvocation = (processingMode: "system_mailbox" | "default") => runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
-      request: { attemptId: attemptId + "-" + processingMode, idleCheckpointDelayMs: 1_500, processingMode, workspaceVersion: currentWorkspace.version },
+      request: { attemptId: attemptId + "-" + processingMode, runnerIdleTtlMs: 1_500, processingMode, workspaceVersion: currentWorkspace.version },
       forwardedEnv: { LINQ_API_TOKEN: "synthetic-linq-token" },
       resolvedConfig: {
         channelCapabilities: { emailSendReady: false, telegramBotConfigured: false },

@@ -1813,7 +1813,9 @@ describe("HostedUserRunner execution coordination", () => {
     expect(onStatusRead).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request).not.toHaveProperty("idleCheckpointDelayMs");
     expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+      runnerIdleTtlMs: 54_000,
       userId: TEST_USER_ID,
       workspace: expect.objectContaining({
         userId: TEST_USER_ID,
@@ -9751,7 +9753,7 @@ function createRunnerHarness(input: {
     durable.state,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: input.allowedRunnerSecretKeys,
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "54000",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
     })),

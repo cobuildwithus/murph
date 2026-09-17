@@ -28,7 +28,7 @@ test("metadata-only post-checkpoint reconciliation does not rearm the idle windo
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
   const events: string[] = [];
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-  const idleCheckpointDelayMs = 180_000;
+  const runnerIdleTtlMs = 180_000;
   const dueAssistantWakeAt = TEST_NOW;
   const durableWakeAt = "2026-04-27T00:20:00.000Z";
   const replacementWakeAt = "2026-04-27T00:10:00.000Z";
@@ -56,7 +56,7 @@ test("metadata-only post-checkpoint reconciliation does not rearm the idle windo
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_metadata_only_checkpoint_timing",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -147,20 +147,20 @@ test("metadata-only post-checkpoint reconciliation does not rearm the idle windo
 
     await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
     await waitForFakeTimerScheduled(() => events.join(","));
-    await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+    await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
     await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
     await Promise.race([
       waitForFakeTimerScheduled(() => events.join(",")),
       resultPromise,
     ]);
-    await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+    await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
     await resultPromise;
 
     assert.equal(durableEffect.mock.calls.length, 1);
     assert.deepEqual(checkpointStartedAtMs, [
-      Date.parse(TEST_NOW) + idleCheckpointDelayMs,
-      Date.parse(TEST_NOW) + idleCheckpointDelayMs,
-      Date.parse(TEST_NOW) + idleCheckpointDelayMs,
+      Date.parse(TEST_NOW) + runnerIdleTtlMs,
+      Date.parse(TEST_NOW) + runnerIdleTtlMs,
+      Date.parse(TEST_NOW) + runnerIdleTtlMs,
     ]);
     const finalCheckpoint = checkpointRequests.at(-1);
     assert.deepEqual(
@@ -178,7 +178,7 @@ test("metadata-only reconciliation preserves an active foreground quiet window",
   const events: string[] = [];
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   const checkpointStartedAtMs: number[] = [];
-  const idleCheckpointDelayMs = 180_000;
+  const runnerIdleTtlMs = 180_000;
   const metadataPassDelayMs = 60_000;
   const replacementWakeAt = "2026-04-27T00:20:00.000Z";
   const firstPassObserved = createDeferred<void>();
@@ -192,7 +192,7 @@ test("metadata-only reconciliation preserves an active foreground quiet window",
     await initializeVault({ createdAt: TEST_NOW, vaultRoot });
     const resultPromise = withRealTimeout(
       runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({ request: { idleCheckpointDelayMs } }),
+        createWorkspaceRuntimeJobInput({ request: { runnerIdleTtlMs } }),
         {
           async createCheckpointSnapshot() {
             checkpointStartedAtMs.push(Date.now());
@@ -242,7 +242,7 @@ test("metadata-only reconciliation preserves an active foreground quiet window",
     await withRealTimeout(metadataPassObserved.promise, 15_000, () => events.join(","));
     await waitForFakeTimerScheduled(() => events.join(","));
     assert.equal(checkpointRequests.length, 0);
-    await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - metadataPassDelayMs - 1);
+    await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - metadataPassDelayMs - 1);
     assert.equal(checkpointRequests.length, 0);
     await vi.advanceTimersByTimeAsync(1);
     await Promise.race([resultPromise, waitForFakeTimerScheduled(() => events.join(","))]);
@@ -250,7 +250,7 @@ test("metadata-only reconciliation preserves an active foreground quiet window",
     await resultPromise;
 
     assert.equal(assistantPass, 2);
-    assert.deepEqual(checkpointStartedAtMs, [Date.parse(TEST_NOW) + idleCheckpointDelayMs]);
+    assert.deepEqual(checkpointStartedAtMs, [Date.parse(TEST_NOW) + runnerIdleTtlMs]);
     const finalCheckpoint = checkpointRequests.at(-1);
     assert.deepEqual(
       [finalCheckpoint?.nextWakeAt, finalCheckpoint?.nextWakeReason],

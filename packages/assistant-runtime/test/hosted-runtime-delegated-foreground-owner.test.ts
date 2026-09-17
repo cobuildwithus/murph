@@ -101,7 +101,7 @@ describe("hosted runtime delegated foreground owner", () => {
       const result = await runHostedWorkspaceRuntimeJobInProcess({
         request: {
           attemptId: "attempt_synthetic_delegated_owner",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "1",
           processingMode: "system_mailbox",
           userId: TEST_USER_ID,

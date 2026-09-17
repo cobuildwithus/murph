@@ -120,7 +120,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 12,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -267,7 +267,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 12,
             },
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -423,7 +423,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -535,7 +535,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_foreground_uncapped",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -638,7 +638,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -754,7 +754,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_first_owner_activation",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -895,7 +895,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_foreground_activation",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1042,7 +1042,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1178,7 +1178,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
               budget: {
                 maxMailboxItems: 2,
               },
-              idleCheckpointDelayMs: 1,
+              runnerIdleTtlMs: 1,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: input.workspace.version,
@@ -1379,7 +1379,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1481,7 +1481,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_checkpoint_conversation_wake_prepublication",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1653,7 +1653,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_wake_during_checkpoint",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1820,7 +1820,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_deferred_usage_idle_checkpoint",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1966,7 +1966,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_deferred_usage_previous_invocation",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2110,7 +2110,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_deferred_usage_idle_checkpoint_failure",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2240,7 +2240,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_deferred_usage_host_abort",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2777,7 +2777,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_pending_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",

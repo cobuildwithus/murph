@@ -554,7 +554,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             budget: {
               maxMailboxItems: 10,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -7352,7 +7352,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_pre_barrier_approved_asks",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             processingMode: "system_mailbox",
             workspaceVersion: "0",
           },
@@ -7859,7 +7859,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_exact_assistant_ask_owner",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             processingMode: "system_mailbox",
             workspaceVersion: "0",
           },
@@ -8080,7 +8080,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_foreground_requeue_resume",
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             processingMode: "system_mailbox",
             workspaceVersion: "0",
           },

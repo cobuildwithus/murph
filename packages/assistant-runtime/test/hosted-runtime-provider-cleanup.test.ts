@@ -164,7 +164,7 @@ test("hosted provider cleanup deferred plan persists a re-armed due cleanup wake
 
     const plan = await prepareHostedProviderCleanupPlan({
       deferred: true,
-      idleCheckpointDelayMs: 1_000,
+      runnerIdleTtlMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
       vaultRoot,
     });
@@ -204,7 +204,7 @@ test("hosted provider cleanup deferred plan durably queues terminal cleanup writ
   try {
     const plan = await prepareHostedProviderCleanupPlan({
       deferred: true,
-      idleCheckpointDelayMs: 1_000,
+      runnerIdleTtlMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
       terminalCleanupMessageIds: ["linq_terminal_1", "linq_terminal_1"],
       vaultRoot,
@@ -235,7 +235,7 @@ test("hosted provider cleanup queued this turn survives a foreground preemption 
   try {
     await prepareHostedProviderCleanupPlan({
       deferred: true,
-      idleCheckpointDelayMs: 1_000,
+      runnerIdleTtlMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
       terminalCleanupMessageIds: ["linq_terminal_1"],
       vaultRoot,
@@ -243,7 +243,7 @@ test("hosted provider cleanup queued this turn survives a foreground preemption 
 
     const preemptedPlan = await prepareHostedProviderCleanupPlan({
       deferred: true,
-      idleCheckpointDelayMs: 1_000,
+      runnerIdleTtlMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:09:01.000Z"),
       vaultRoot,
     });
@@ -261,7 +261,7 @@ test("hosted provider cleanup queued this turn survives a foreground preemption 
 
     const duePlan = await prepareHostedProviderCleanupPlan({
       deferred: true,
-      idleCheckpointDelayMs: 1_000,
+      runnerIdleTtlMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:10:00.000Z"),
       vaultRoot,
     });
@@ -285,7 +285,7 @@ test("hosted provider cleanup deferred plan does not bootstrap on vaults without
   try {
     const plan = await prepareHostedProviderCleanupPlan({
       deferred: true,
-      idleCheckpointDelayMs: 1_000,
+      runnerIdleTtlMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
       vaultRoot,
     });
@@ -319,7 +319,7 @@ test("hosted provider cleanup deferred plan stays wakeless after recovery withou
 
     const plan = await prepareHostedProviderCleanupPlan({
       deferred: true,
-      idleCheckpointDelayMs: 1_000,
+      runnerIdleTtlMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
       vaultRoot,
     });
@@ -349,7 +349,7 @@ test("hosted provider cleanup deferred plan bootstraps a recovery wake before th
     ), { recursive: true });
     const plan = await prepareHostedProviderCleanupPlan({
       deferred: true,
-      idleCheckpointDelayMs: 1_000,
+      runnerIdleTtlMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
       vaultRoot,
     });
@@ -370,7 +370,7 @@ test("hosted provider cleanup deferred plan bootstraps a recovery wake before th
 
     const rearmedPlan = await prepareHostedProviderCleanupPlan({
       deferred: true,
-      idleCheckpointDelayMs: 1_000,
+      runnerIdleTtlMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:09:01.000Z"),
       vaultRoot,
     });
@@ -401,7 +401,7 @@ test("hosted provider cleanup plan queues terminal Linq cleanup as checkpoint wo
 
     assert.deepEqual(plan, {
       checkpoint: {
-        nextWakeAt: "2026-07-01T00:12:01.000Z",
+        nextWakeAt: "2026-07-01T00:19:01.000Z",
       },
       deferred: false,
       due: false,
@@ -431,14 +431,14 @@ test("hosted provider cleanup keeps a bounded steady-state file count", async ()
     // Repeated queueing and re-arming overwrites the single owner file.
     await prepareHostedProviderCleanupPlan({
       deferred: true,
-      idleCheckpointDelayMs: 1_000,
+      runnerIdleTtlMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
       terminalCleanupMessageIds: ["linq_terminal_1"],
       vaultRoot,
     });
     await prepareHostedProviderCleanupPlan({
       deferred: true,
-      idleCheckpointDelayMs: 1_000,
+      runnerIdleTtlMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:10:00.000Z"),
       terminalCleanupMessageIds: ["linq_terminal_2"],
       vaultRoot,
@@ -629,7 +629,7 @@ test("hosted provider cleanup deferred plans never run the upgrade recovery scan
   try {
     await prepareHostedProviderCleanupPlan({
       deferred: true,
-      idleCheckpointDelayMs: 1_000,
+      runnerIdleTtlMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
       vaultRoot,
     });
@@ -687,7 +687,7 @@ test("hosted provider cleanup scheduled read surfaces an immediate wake for due 
 test("hosted provider cleanup first defer wake follows the idle checkpoint delay", () => {
   assert.equal(
     resolveHostedProviderCleanupFirstDeferredWakeAt({
-      idleCheckpointDelayMs: 54_000,
+      runnerIdleTtlMs: 54_000,
       nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
     }),
     "2026-07-01T00:09:55.000Z",

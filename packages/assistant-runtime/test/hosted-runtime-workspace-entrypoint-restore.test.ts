@@ -1245,7 +1245,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_foreground_shutdown_handoff_second",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "8",
             userId: TEST_USER_ID,
             workspaceVersion: secondWorkspace.version,

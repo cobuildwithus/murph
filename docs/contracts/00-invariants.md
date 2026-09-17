@@ -241,7 +241,10 @@ it has been explicitly elevated to a cross-cutting invariant.
   fabricate or force conflicting canonical state to make recovery appear clean.
 - Routine hosted workspace snapshot publication is idle-only and interruptible.
   After the latest durably accepted conversation message, routine checkpoint
-  construction has a hard 180-second minimum quiet window. Internal assistant,
+  construction normally waits for the shared runner idle duration (ten minutes
+  by default). An observed consented-member Ask deferred by its admission gate
+  advances the existing checkpoint deadline after foreground work, so waiting
+  does not consume the request's ten-minute validity. Internal assistant,
   maintenance, retention, cleanup, projection, and scheduled wakes must not
   shorten it. Only the exact assistant retry or follow-up wake projected
   directly by the current foreground assistant phase may run as foreground

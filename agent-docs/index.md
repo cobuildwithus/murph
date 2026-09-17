@@ -46,6 +46,10 @@ Native active-runtime wake transport and single-owner member-binding admission
 are specified in the hosted runtime protocol reference; cold-start readiness
 retains its existing owner.
 
+The hosted runtime protocol reference also owns the shared ten-minute idle policy,
+receipt-based expiry, early Ask checkpoint handoff (including mixed system pages),
+and invocation-policy compatibility during staged releases.
+
 Immediate manual meal estimation and ordinary incomplete-meal recovery are
 owned by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/SECURITY.md`. Their focused proof covers canonical import replay,

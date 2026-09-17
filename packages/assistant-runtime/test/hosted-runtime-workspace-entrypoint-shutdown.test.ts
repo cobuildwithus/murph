@@ -148,7 +148,7 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_signal_pre",
             // Far longer than the test timeout: only the shutdown signal can
             // start the idle checkpoint this fast.
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -249,7 +249,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_preserved_due_wake",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -389,7 +389,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_generated_retention_wake_shutdown",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -573,7 +573,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_image_shutdown_handoff_first",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -725,7 +725,7 @@ describe("hosted runtime shutdown signal", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_image_shutdown_handoff_second",
-              idleCheckpointDelayMs: 1,
+              runnerIdleTtlMs: 1,
               leaseGeneration: "8",
               userId: TEST_USER_ID,
               workspaceVersion: secondWorkspace.version,
@@ -823,7 +823,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_pending_runtime_wake",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -953,7 +953,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_stale_runtime_wake",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1132,7 +1132,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_idle_window_trigger",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1281,7 +1281,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_during_post_checkpoint_wake",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1412,7 +1412,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_no_work_conversation",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1526,7 +1526,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_system_import",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1698,7 +1698,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_consumed_replay",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1799,7 +1799,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_consumed_replay_replacement",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "8",
             userId: TEST_USER_ID,
             workspaceVersion: "1",
@@ -1912,7 +1912,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_post_checkpoint_import",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2071,7 +2071,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_pre_checkpoint_import",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2248,7 +2248,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_during_pre_checkpoint_pass",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2370,7 +2370,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_due_assistant_handoff",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2449,7 +2449,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_during_due_assistant_import",
-            idleCheckpointDelayMs: 50,
+            runnerIdleTtlMs: 50,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2546,7 +2546,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_pending_import_wake",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2713,7 +2713,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId,
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2863,7 +2863,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_checkpoint_accepted_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2985,7 +2985,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_durable_effect_handoff",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -3162,7 +3162,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_due_retention_wake",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -3233,7 +3233,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_retention_beats_assistant_wake",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -3314,7 +3314,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_projected_wake_retention",
-            idleCheckpointDelayMs: 75,
+            runnerIdleTtlMs: 75,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -3411,7 +3411,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_signal_mid",
-            idleCheckpointDelayMs: 120_000,
+            runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",

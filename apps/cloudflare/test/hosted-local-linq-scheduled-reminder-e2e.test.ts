@@ -628,12 +628,12 @@ describe("hosted local Linq scheduled reminder timing helpers", () => {
     });
 
     expect(fullTiming).toEqual({
-      idleCheckpointDelayMs: 10_000,
+      runnerIdleTtlMs: 10_000,
       leadMs: 90_000,
       setupLeadText: "about two minutes",
     });
     expect(fastTiming).toEqual({
-      idleCheckpointDelayMs: 1,
+      runnerIdleTtlMs: 1,
       leadMs: 90_000,
       setupLeadText: "about two minutes",
     });
@@ -898,8 +898,8 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
-        String(scheduledReminderTiming.idleCheckpointDelayMs),
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:
+        String(Math.max(1_000, scheduledReminderTiming.runnerIdleTtlMs)),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -1260,12 +1260,12 @@ function resolveScheduledReminderLocalAt(dueAtIso: string): {
 function resolveScheduledReminderTiming(
   env: NodeJS.ProcessEnv = process.env,
 ): {
-  idleCheckpointDelayMs: number;
+  runnerIdleTtlMs: number;
   leadMs: number;
   setupLeadText: string;
 } {
   return {
-    idleCheckpointDelayMs:
+    runnerIdleTtlMs:
       env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? 1 : 10_000,
     leadMs: 90_000,
     setupLeadText: "about two minutes",

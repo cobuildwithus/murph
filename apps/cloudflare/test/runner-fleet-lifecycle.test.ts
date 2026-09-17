@@ -454,10 +454,10 @@ function controllerEnvironment(): HostedExecutionEnvironment {
     hostedCryptoAuthoritySignPublicKeyPem: "test", hostedCryptoAuthorityVerifyKeyringJson: null,
     hostedCryptoCloudflareAutomationKeyId: "test", hostedCryptoCloudflareAutomationPrivateJwk: "{}",
     hostedCryptoCloudflareAutomationPrivateKeyringJson: null, hostedCryptoEnv: "test",
-    hostedWebBaseUrl: "https://example.test", idleCheckpointDelayMs: 180_000,
+    hostedWebBaseUrl: "https://example.test",
     maxEventAttempts: 3, retryDelayMs: 30_000, runnerCommitTimeoutMs: 45_000,
     runnerReadyTimeoutMs: 20_000, runnerIdleTtlMs: 300_000,
-    runnerLifecycleReevaluationMs: 300_000, webControlTimeoutMs: 30_000,
+    webControlTimeoutMs: 30_000,
     hostedCrypto: {
       HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "test", HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "test",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "{}", HOSTED_CRYPTO_ENV: "test",
@@ -539,7 +539,7 @@ function allocationHarness(options: {
             job: {
               kind: "workspace-invocation",
               request: {
-                attemptId: token.attemptId, idleCheckpointDelayMs: 54_000,
+                attemptId: token.attemptId, runnerIdleTtlMs: 54_000,
                 leaseGeneration: token.generation, userId: input.userId,
                 workspace: null, workspaceVersion: token.workspaceVersion ?? "0",
               },

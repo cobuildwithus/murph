@@ -2020,7 +2020,7 @@ export async function runHostedWorkspaceAssistantPhase(
               : {}),
             executionContext,
             freshAssistantInputIds,
-            idleCheckpointDelayMs: input.request.idleCheckpointDelayMs,
+            runnerIdleTtlMs: input.request.runnerIdleTtlMs,
             now: new Date(resolveHostedAssistantPhaseNowMs(input)),
             operationScope: automationOperationScope,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
@@ -2229,7 +2229,7 @@ export async function runHostedWorkspaceAssistantPhase(
         backgroundMaintenanceYielded
         || foregroundAssistantPass
         || input.shouldYieldBackgroundMaintenance?.() === true,
-      idleCheckpointDelayMs: input.request.idleCheckpointDelayMs,
+      runnerIdleTtlMs: input.request.runnerIdleTtlMs,
       initialCheckpoint: initialProviderCleanupCheckpoint,
       nowMs: resolveHostedAssistantPhaseNowMs(input),
       shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
@@ -3504,7 +3504,7 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
     deferred:
       input.backgroundMaintenanceYielded
       || input.input.shouldYieldBackgroundMaintenance?.() === true,
-    idleCheckpointDelayMs: input.input.request.idleCheckpointDelayMs,
+    runnerIdleTtlMs: input.input.request.runnerIdleTtlMs,
     initialCheckpoint: input.initialProviderCleanupCheckpoint,
     nowMs: resolveHostedAssistantPhaseNowMs(input.input),
     shouldYield: input.input.shouldYieldBackgroundMaintenance ?? null,
@@ -5442,7 +5442,7 @@ async function runSystemMailboxMaintenancePhase(
             modelFreeSystemMailboxOwnerDue
             || shouldYieldAfterSystemMailboxPreparation
             || phaseInput.shouldYieldBackgroundMaintenance?.() === true,
-          idleCheckpointDelayMs: phaseInput.request.idleCheckpointDelayMs,
+          runnerIdleTtlMs: phaseInput.request.runnerIdleTtlMs,
           nowMs: resolveHostedAssistantPhaseNowMs(phaseInput),
           shouldYield: phaseInput.shouldYieldBackgroundMaintenance ?? null,
           vaultRoot: phaseInput.restored.vaultRoot,
@@ -6285,7 +6285,7 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
       wake: input.wake,
     });
     const recorded = await recordHostedProviderCleanupAfterDelivery({
-      idleCheckpointDelayMs: input.phaseInput.request.idleCheckpointDelayMs,
+      runnerIdleTtlMs: input.phaseInput.request.runnerIdleTtlMs,
       nowMs: resolveHostedAssistantPhaseNowMs(input.phaseInput),
       outcomes: input.assistantDeliveryOutcomes,
       vaultRoot: input.phaseInput.restored.vaultRoot,
@@ -6294,7 +6294,7 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
     providerCleanupRedactedStatus = buildHostedProviderCleanupRedactedStatus(providerCleanup);
   } else {
     const providerCleanup = await recordHostedProviderCleanupAfterDelivery({
-      idleCheckpointDelayMs: input.phaseInput.request.idleCheckpointDelayMs,
+      runnerIdleTtlMs: input.phaseInput.request.runnerIdleTtlMs,
       nowMs: resolveHostedAssistantPhaseNowMs(input.phaseInput),
       outcomes: input.assistantDeliveryOutcomes,
       vaultRoot: input.phaseInput.restored.vaultRoot,
@@ -6304,7 +6304,7 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
       // into hosted-provider-cleanup.json, the single owner of the wake.
       await prepareHostedProviderCleanupPlan({
         deferred: true,
-        idleCheckpointDelayMs: input.phaseInput.request.idleCheckpointDelayMs,
+        runnerIdleTtlMs: input.phaseInput.request.runnerIdleTtlMs,
         nowMs: resolveHostedAssistantPhaseNowMs(input.phaseInput),
         vaultRoot: input.phaseInput.restored.vaultRoot,
       });
@@ -6464,7 +6464,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   });
   if (backgroundDeliveryDrainYielded) {
     await recordHostedProviderCleanupAfterDelivery({
-      idleCheckpointDelayMs: input.input.request.idleCheckpointDelayMs,
+      runnerIdleTtlMs: input.input.request.runnerIdleTtlMs,
       nowMs: resolveHostedAssistantPhaseNowMs(input.input),
       outcomes,
       vaultRoot: input.input.restored.vaultRoot,

@@ -145,7 +145,7 @@ test.each([false, true])("publishes durable Environment completion before mainte
       },
     });
     runtimeCompletion = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
-      request: { attemptId, idleCheckpointDelayMs: 1_500 },
+      request: { attemptId, runnerIdleTtlMs: 1_500 },
       forwardedEnv: { LINQ_API_TOKEN: "synthetic-linq-token" },
       resolvedConfig: {
         channelCapabilities: { emailSendReady: false, telegramBotConfigured: false },

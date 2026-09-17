@@ -156,7 +156,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_post_checkpoint_consumed_replay",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -242,7 +242,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_foreground_pending",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -358,7 +358,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_forced_checkpoint_foreground_pending",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -645,7 +645,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_snapshot_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -869,7 +869,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
       const runtimeJobInput = createWorkspaceRuntimeJobInput({
         request: {
           attemptId: "attempt_synthetic_snapshot_failure_log_wake",
-          idleCheckpointDelayMs: 1,
+          runnerIdleTtlMs: 1,
           leaseGeneration: "9",
           userId: TEST_USER_ID,
           workspaceVersion: "4",
@@ -1003,13 +1003,13 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
     const mailboxItems = [createMailboxItem({ id: "mailbox_probe_initial", laneSeq: "1" })];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const snapshotTimes: number[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     let snapshotAttempt = 0;
     let phaseObserved = createDeferred<void>();
     const run = (workspaceVersion: string, runVaultRoot = vaultRoot) => runHostedWorkspaceRuntimeJobInProcess(
       createWorkspaceRuntimeJobInput({ request: {
         attemptId: `attempt_synthetic_probe_${workspaceVersion}`,
-        idleCheckpointDelayMs,
+        runnerIdleTtlMs,
         leaseGeneration: workspaceVersion,
         userId: TEST_USER_ID,
         workspaceVersion,
@@ -1071,9 +1071,9 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
       const first = run("4");
       await withRealTimeout(phaseObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const firstResult = await withRealTimeout(first, 15_000, () => events.join(","));
-      assert.deepEqual(snapshotTimes, [start + idleCheckpointDelayMs, start + idleCheckpointDelayMs]);
+      assert.deepEqual(snapshotTimes, [start + runnerIdleTtlMs, start + runnerIdleTtlMs]);
       assert.equal(checkpointRequests.length, 1);
       assert.equal(firstResult.redactedStatus?.hostedMailboxConversationImportedSeq, "1");
       if (withSystemContinuation) {
@@ -1083,7 +1083,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
       // A later real admission belongs to the next invocation, not an empty
       // probe's speculative grace period. Durable mailbox cursors prevent
       // reapplying the first item or the terminal system continuation.
-      vi.setSystemTime(start + idleCheckpointDelayMs + 1);
+      vi.setSystemTime(start + runnerIdleTtlMs + 1);
       mailboxItems.push(createMailboxItem({
         createdAt: new Date(Date.now()).toISOString(), id: "mailbox_probe_later", laneSeq: "2",
       }));
@@ -1091,7 +1091,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
       const second = run("5", path.join(root, "restored"));
       await withRealTimeout(phaseObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const secondResult = await withRealTimeout(second, 15_000, () => events.join(","));
       assert.equal(secondResult.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
       assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), ["4", "5"]);
@@ -1127,7 +1127,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_checkpoint_conversation_hint",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1262,7 +1262,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_snapshot_wake_shutdown",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1368,7 +1368,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_shutdown_foreground_pending_mailbox",
-              idleCheckpointDelayMs: 1,
+              runnerIdleTtlMs: 1,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1486,7 +1486,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
     const vaultRoot = path.join(workspaceRoot, "durable", "vault");
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     const firstCompletionResponseLost = createDeferred<void>();
@@ -1607,7 +1607,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
       const runtimeJobInput = createWorkspaceRuntimeJobInput({
         request: {
           attemptId: "attempt_synthetic_committed_checkpoint_self_wake",
-          idleCheckpointDelayMs,
+          runnerIdleTtlMs,
           leaseGeneration: "9",
           userId: TEST_USER_ID,
           workspaceVersion: "4",
@@ -1732,7 +1732,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
 
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       await withRealTimeout(
         firstCompletionResponseLost.promise,
         15_000,
@@ -1759,7 +1759,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
       const assistantDelayAfterRemoteCommitMs =
         assistantServicedAtMs - firstRemoteCommitAtMs;
       assert.ok(
-        assistantDelayAfterRemoteCommitMs < idleCheckpointDelayMs,
+        assistantDelayAfterRemoteCommitMs < runnerIdleTtlMs,
         "A remotely committed checkpoint response lost to its self-wake "
           + "must not make due assistant work wait for another idle window: "
           + JSON.stringify({
@@ -1790,7 +1790,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_checkpoint_publication_non_assistant",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1885,7 +1885,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_post_checkpoint_mailbox_system_failure",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2010,7 +2010,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_stale_workspace",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2117,7 +2117,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_pending_wake_timer",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2232,7 +2232,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_accumulate_projection",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2324,7 +2324,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_no_progress_hint",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2414,7 +2414,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_checkpoint_wake_no_progress_hint",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2514,7 +2514,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_clear_projection",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2621,7 +2621,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_idle_timer_clear",
-            idleCheckpointDelayMs: 10_000,
+            runnerIdleTtlMs: 10_000,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
