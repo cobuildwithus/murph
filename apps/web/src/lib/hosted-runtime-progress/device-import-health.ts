@@ -23,6 +23,7 @@ export type DeviceImportObservation = {
   at: Date;
   eventCode: string;
   pending: boolean | null;
+  runnable: boolean | null;
   progressed: boolean;
   checkpointAccepted: boolean;
   restarted: boolean;
@@ -67,8 +68,12 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
   const result = { stalled: emptyHealth(), cycling: emptyHealth(), backlog: emptyHealth() };
   const restartTimes = rows.filter(row => row.restarted).map(row => row.at.getTime());
   for (const connectionRows of groupConnectionObservations(rows).values()) {
-    const evidence = summarizeConnection(connectionRows, now, due, restartTimes);
+    const evidence = summarizeConnection(connectionRows, now, due, restartTimes, row => row.pending);
     if (!evidence) continue;
+    // Reuse the same checkpoint and continuity rules without discarding the
+    // scheduled retry obligations used by stall and cycling detection.
+    const backlog = summarizeConnection(connectionRows, now, false, restartTimes,
+      row => row.runnable ?? row.pending);
     const { backlogAge, lastProgress, restarts, cancellations, savedPasses } = evidence;
     const conditions: DeviceImportCondition[] = [];
     if ((due || evidence.latestPassUncheckpointed) && now - lastProgress >= DEVICE_IMPORT_STALL_MS) {
@@ -77,12 +82,13 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
     if (Math.max(restarts, cancellations) >= DEVICE_IMPORT_CYCLE_LIMIT && savedPasses < 2) {
       conditions.push("cycling");
     }
-    if (backlogAge >= DEVICE_IMPORT_BACKLOG_MS && evidence.evidenceCurrent) conditions.push("backlog");
+    if (backlog && backlog.backlogAge >= DEVICE_IMPORT_BACKLOG_MS && backlog.evidenceCurrent) conditions.push("backlog");
     for (const condition of conditions) {
       const health = result[condition];
       health.anomalous = true;
       health.affectedRuntimeCount = 1;
-      health.oldestBacklogMs = Math.max(health.oldestBacklogMs, backlogAge);
+      health.oldestBacklogMs = Math.max(health.oldestBacklogMs,
+        condition === "backlog" ? backlog!.backlogAge : backlogAge);
       health.restartCount = Math.max(health.restartCount, restarts);
       health.cancellationCount += cancellations;
       health.savedProgressPassCount += savedPasses;
@@ -122,6 +128,7 @@ function emptyHealth(): DeviceImportHealth {
 
 function summarizeConnection(
   rows: DeviceImportObservation[], now: number, due: boolean, restartTimes: readonly number[],
+  pendingOf: (row: DeviceImportObservation) => boolean | null,
 ) {
   let pendingSince: number | null = null;
   let lastPendingAt = 0;
@@ -133,7 +140,8 @@ function summarizeConnection(
   const cancellationsAt: number[] = [];
   for (const row of rows) {
     const at = row.at.getTime();
-    if (row.pending === true) {
+    const pending = pendingOf(row);
+    if (pending === true) {
       // A long quiet gap is not evidence of continuous expensive processing.
       if (pendingSince === null || at - lastPendingAt > DEVICE_IMPORT_STALL_MS) {
         pendingSince = at;
@@ -143,7 +151,7 @@ function summarizeConnection(
     }
     if (row.eventCode === "device-sync.pass_finished") {
       latestPassAttemptId = row.attemptId;
-      pendingSnapshots.set(row.attemptId, row.pending);
+      pendingSnapshots.set(row.attemptId, pending);
       if (row.progressed && row.attemptId) {
         const passes = pendingProgress.get(row.attemptId) ?? [];
         passes.push(at);

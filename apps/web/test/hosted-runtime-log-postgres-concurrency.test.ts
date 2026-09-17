@@ -231,6 +231,48 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     expect(await readDeviceImportObservations({ database: db, now, subjects: ["unrelated-subject"] })).toEqual([]);
   });
 
+  it("distinguishes scheduled work through the actual SQL reader and checkpointed evaluator", async () => {
+    const db = requireDatabase(database);
+    const now = new Date("2026-08-10T16:00:00Z");
+    const scheduled = { outcome: "completed", deviceSyncConnectionKey: "d".repeat(64),
+      outgoingRetainedJobCount: 2, incomingRetainedJobCount: 2, pendingJobCountAfter: 2,
+      queueSnapshotAfterPresent: true, pendingJobCountAfterTruncated: false,
+      pendingRunnableJobCountAfter: 0, outgoingRetainedRunnableJobCount: 0 };
+    const cases = [
+      { name: "scheduled", patch: {}, runnable: false, backlog: false },
+      { name: "queue-due", patch: { pendingRunnableJobCountAfter: 1 }, runnable: true, backlog: true },
+      { name: "continuation-due", patch: { outgoingRetainedRunnableJobCount: 1 }, runnable: true, backlog: true },
+      { name: "failed", patch: { outcome: "failed" }, runnable: null, backlog: true },
+      { name: "truncated", patch: { pendingJobCountAfterTruncated: true }, runnable: null, backlog: true },
+      { name: "unobserved", patch: { queueSnapshotAfterPresent: false }, runnable: null, backlog: true },
+      { name: "legacy", patch: { pendingRunnableJobCountAfter: undefined,
+        outgoingRetainedRunnableJobCount: undefined }, runnable: null, backlog: true },
+      { name: "malformed", patch: { outgoingRetainedRunnableJobCount: "invalid" }, runnable: null, backlog: true },
+    ];
+    for (const scenario of cases) {
+      const subject = hostedRuntimeLogSubjectKey(`synthetic-availability-${scenario.name}`);
+      subjectKeys.add(subject);
+      for (let age = 70; age >= 0; age -= 5) {
+        for (const [event, offset, details] of [
+          ["device-sync.pass_finished", 1000, { ...scheduled, ...scenario.patch }],
+          ["checkpoint.snapshot_finished", 0, { webCheckpointAccepted: true }],
+        ] as const) {
+          await db.query(`INSERT INTO hosted_runtime_log (id, subject_key, at, level, component, phase, event_code, attempt_id, redacted_json)
+            VALUES ($1, $2, $3, 'info', 'runtime', 'invoke', $4, $5, $6::jsonb)`,
+          [randomUUID(), subject, new Date(+now - age * 60_000 - offset), event,
+            `synthetic-attempt-${age}`, JSON.stringify(details)]);
+        }
+      }
+      const observations = await readDeviceImportObservations({ database: db, now, subjects: [subject] });
+      expect(observations[0], scenario.name).toMatchObject({ pending: true, runnable: scenario.runnable });
+      const healthyWake = summarizeDeviceImportHealth({ now, observations, dueSubjects: new Set() });
+      expect(healthyWake.backlog.anomalous, scenario.name).toBe(scenario.backlog);
+      expect(healthyWake.stalled.anomalous, scenario.name).toBe(false);
+      expect(summarizeDeviceImportHealth({ now, observations, dueSubjects: new Set([subject]) })
+        .stalled.anomalous, scenario.name).toBe(true);
+    }
+  });
+
   it.each([0, 1])("keeps failed retained work pending through retry checkpoints with %i local jobs", async (pendingJobCount) => {
     // The runtime producer asserts this same metadata on a late reconciliation failure.
     const failedPass = JSON.parse(await readFile(new URL(
