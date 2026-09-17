@@ -28,8 +28,8 @@ const campaign = { namespaceId: "e".repeat(32), workerVersion: "synthetic_releas
 let web: Awaited<ReturnType<typeof createHostedRuntimeMigrationRehearsalForTest>>;
 const sources = new Map<string, UserRunnerDurableObject>();
 const unused = async (): Promise<never> => { throw new Error("Unexpected external runtime effect in the protocol rehearsal."); };
-const supports = vi.fn(async () => true);
-const checkpoint = vi.fn(async () => "accepted" as const);
+const supports = vi.fn(async (): Promise<"absent" | "ready" | "unsupported"> => "ready");
+const checkpoint = vi.fn(async (): Promise<"absent" | "accepted" | "stale" | "unconfirmed"> => "accepted");
 const getContainer = vi.fn(() => ({ supportsMigrationCheckpoint: supports, requestMigrationCheckpoint: checkpoint,
   destroyInstance: unused, invoke: unused, smokeHealth: unused }));
 function objectIdForName(name: string) {
@@ -103,7 +103,7 @@ describe.skipIf(!enabled)("composed SQLite source to Postgres member handoff", (
     await command({ operation: "inventory", ...campaign, objectIds: objects.slice(0, 2), after: "", complete: true });
     expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: objects[0] });
     const advance = (workerVersion = campaign.workerVersion) => advanceRuntimeMemberMigration({ source, stub: requireSource(objects[0]!), identity: { ...identity, workerVersion } });
-    supports.mockResolvedValueOnce(false);
+    supports.mockResolvedValueOnce("unsupported");
     expect(await advance()).toEqual({ pending: "readiness" });
     expect(legacy.values.has("runtime-migration-freeze:v1")).toBe(false);
     expect(await web.callback(ids[1]!)).toBe("legacy");

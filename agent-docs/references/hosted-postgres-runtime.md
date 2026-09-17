@@ -274,6 +274,11 @@ token. It conditionally closes local starts/deletion, checkpoints the exact
 active attempt, proves its completion and stop, exports bounded frozen pages,
 and activates the member. Incoming work stays durably queued. Preparation that
 finds old direct-PUT capabilities or unsupported active code leaves legacy live.
+The checkpoint target reports three states: a running process that can
+checkpoint, a running process that cannot, and an absent one. Only the absent
+case proves the recorded attempt can never complete, so readiness continues on
+it and the freeze's exact-target stop reconciles the attempt; an unreachable or
+incapable running process still holds the member on legacy.
 A committed or ambiguous freeze requires same-token roll-forward recovery.
 Durable key families that no supported code path can read are named in the
 export's retired list and skipped: the pre-SQLite runner state and the removed

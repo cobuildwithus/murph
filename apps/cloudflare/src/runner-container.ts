@@ -303,8 +303,13 @@ interface HostedExecutionContainerRunnerInput {
   userId: string;
 }
 
+/** Whether the exact recorded container can take a migration checkpoint now:
+ * "absent" when its process is not running, so the attempt it recorded can
+ * never complete; "unsupported" when a running process cannot be asked. */
+export type HostedRuntimeMigrationCheckpointTarget = "absent" | "ready" | "unsupported";
+
 export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSlotLifecycle> {
-  supportsMigrationCheckpoint?(input: { userId: string }): Promise<boolean>;
+  supportsMigrationCheckpoint?(input: { userId: string }): Promise<HostedRuntimeMigrationCheckpointTarget>;
   requestMigrationCheckpoint?(input: HostedRuntimeMigrationCheckpointRequest): Promise<HostedRuntimeMigrationCheckpointStatus>;
   abortWorkspaceInvocation?(input: {
     attemptId: string;
@@ -1403,16 +1408,18 @@ export class RunnerContainer extends Container {
     }
   }
 
-  async supportsMigrationCheckpoint(input: { userId: string }): Promise<boolean> {
+  async supportsMigrationCheckpoint(input: { userId: string }): Promise<HostedRuntimeMigrationCheckpointTarget> {
     this.authorizeBoundUser(input.userId);
     const platform = this.ctx.container;
-    if (!platform || platform.running !== true) return false;
+    // A stopped process is reported apart from a running one that cannot
+    // checkpoint: only the first proves the recorded attempt cannot complete.
+    if (!platform || platform.running !== true) return "absent";
     const signal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
     try {
       const response = await platform.getTcpPort(RUNNER_PORT).fetch(`http://container${HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH}`, { method: "GET", signal });
       await drainRunnerContainerMetadataResponseBody(response, { signal });
-      return response.ok && response.headers.get(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER) === HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL;
-    } catch { return false; }
+      return response.ok && response.headers.get(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER) === HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL ? "ready" : "unsupported";
+    } catch { return "unsupported"; }
   }
 
   async requestMigrationCheckpoint(input: HostedRuntimeMigrationCheckpointRequest): Promise<HostedRuntimeMigrationCheckpointStatus> {
