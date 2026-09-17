@@ -284,8 +284,11 @@ complete roots remains an error.
 
 A dormant source whose stored schema predates the supported versions is
 recovered through an explicit exact-object `recover_object` command before the
-member advance: it runs the same schema initialization ordinary activation
-performs, under the admission gate, and returns a fresh observation. Supported,
+member advance: it drops the tables retired before the supported schema pair,
+runs the same schema initialization ordinary activation performs, under the
+admission gate, and returns a fresh observation. Those retired tables also
+displace the version row inside the observation's bounded table window, so a
+source already marked current reports no version until they are gone. Supported,
 quiescing, frozen and newer-than-supported sources are never mutated, and plain
 inspection stays observational.
 

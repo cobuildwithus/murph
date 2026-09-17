@@ -3,6 +3,16 @@ import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./
 // Version 21 requires managed-upload receipts during admission and deletion.
 // Older writers must fail before ignoring those pending physical obligations.
 export const RUNNER_STATE_SCHEMA_VERSION = 21;
+/** Tables created by schema versions older than the supported pair. Nothing
+ * reads them, and the migration's observation refuses any unknown application
+ * table, so a dormant source keeps them until they are dropped explicitly. */
+export const RETIRED_RUNNER_STATE_TABLES: readonly string[] = [
+  "backpressured_events",
+  "consumed_events",
+  "pending_events",
+  "poisoned_events",
+  "runner_bundle_slots",
+];
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -89,7 +99,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
   }
 
   migrateLegacyRunnerState(sql);
-  dropRetiredRunnerStateTable(sql, "runner_bundle_slots");
+  dropRetiredRunnerStateTables(sql);
   markRunnerStateSchemaVersion(sql);
   assertRunnerStateTableColumns(sql, "runner_meta", {
     requiredColumns: [
@@ -215,11 +225,12 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
   }
 }
 
-function dropRetiredRunnerStateTable(
+export function dropRetiredRunnerStateTables(
   sql: DurableObjectSqlStorageLike,
-  tableName: string,
 ): void {
-  sql.exec(`DROP TABLE IF EXISTS ${tableName}`);
+  for (const tableName of RETIRED_RUNNER_STATE_TABLES) {
+    sql.exec(`DROP TABLE IF EXISTS ${tableName}`);
+  }
 }
 
 function ensureRunnerStateTableColumn(

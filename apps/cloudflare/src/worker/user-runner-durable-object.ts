@@ -5,7 +5,7 @@ import type { HostedRuntimeMemberMigrationIdentity, HostedRuntimeObjectMigration
 import { isLegacyMemberReady, observeMember, requestLegacyMemberCheckpoint, requireLegacyMemberMigrationPhase } from "../user-runner/legacy-member-migration.ts";
 import { commandHostedRuntimeMigration } from "../runtime-migration-client.ts";
 import { observeLegacyRuntime } from "../user-runner/legacy-runtime-observation.ts";
-import { ensureRunnerStateSchema, RUNNER_STATE_SCHEMA_VERSION } from "../user-runner/runner-state-schema.ts";
+import { dropRetiredRunnerStateTables, ensureRunnerStateSchema, RUNNER_STATE_SCHEMA_VERSION } from "../user-runner/runner-state-schema.ts";
 import { requireLegacyRuntimeStorageCoverage, readLegacyRuntimeMigrationIdentity, readLegacyRuntimeExportPage, type LegacyRuntimeExportCursor } from "../user-runner/legacy-runtime-export.ts";
 import { LegacyRuntimeFreeze, LegacyRuntimeFrozenError } from "../user-runner/legacy-runtime-freeze.ts";
 import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
@@ -112,7 +112,11 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     await this.migrationFreeze.runAdmission(async () => {
       const observed = await observeLegacyRuntime(this.migrationState);
       const sql = this.migrationState.storage.sql;
-      if (observed.kind === "unsupported_schema" && sql && (observed.schemaVersion ?? 0) <= RUNNER_STATE_SCHEMA_VERSION) ensureRunnerStateSchema(sql);
+      if (observed.kind !== "unsupported_schema" || !sql || (observed.schemaVersion ?? 0) > RUNNER_STATE_SCHEMA_VERSION) return;
+      // Retired tables hide the version row behind the observation's bounded
+      // table scan, so a source already marked current still reports unsupported.
+      dropRetiredRunnerStateTables(sql);
+      ensureRunnerStateSchema(sql);
     });
     return this.inspectPostgresMigration();
   }
