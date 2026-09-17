@@ -1,3 +1,5 @@
+import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
+import type { HostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
 import { SmallRunnerContainer } from "../src/standby-runner-container.js";
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.js";
 import assert from "node:assert/strict";
@@ -49,6 +51,7 @@ const TRANSITION_ENV = {
 };
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -449,11 +452,10 @@ describe("RunnerContainer slot lifecycle", () => {
   });
 
   it("retires a stopped member slot before asynchronously clearing its assignment", async () => {
-    const notification = createDeferred<{ cleared: boolean }>();
-    const recordRunnerContainerRetired = vi.fn(() => notification.promise);
-    const h = createStandbyContainerHarness({ environment: {
-      USER_RUNNER: { getByName: vi.fn(() => ({ recordRunnerContainerRetired })) },
-    } });
+    const notification = createDeferred<HostedRuntimeOwnerResponse>();
+    const recordRunnerContainerRetired = vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner")
+      .mockImplementation(() => notification.promise);
+    const h = createStandbyContainerHarness();
     const input = { claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID,
       region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" };
     await h.container.bindStandbySlot(input);
@@ -465,22 +467,23 @@ describe("RunnerContainer slot lifecycle", () => {
       state: "retired", userId: null, claimId: null,
     });
     expect(recordRunnerContainerRetired).toHaveBeenCalledWith({
-      runnerContainerName: h.slotName, userId: "member_123",
+      source: expect.any(Object), userId: "member_123",
+      command: { operation: "target_retired", runnerContainerName: h.slotName },
     });
     await expect(h.container.bindStandbySlot(input)).rejects.toThrow("cannot be rebound");
-    notification.resolve({ cleared: true });
+    notification.resolve({ cutover: "postgres", status: "updated", owner: null });
     await h.flushWaitUntil();
   });
 
   it("keeps stopped-slot recovery cheap when the retirement notification fails", async () => {
-    const recordRunnerContainerRetired = vi.fn(async () => { throw new Error("unavailable"); });
-    const h = createStandbyContainerHarness({ environment: {
-      USER_RUNNER: { getByName: () => ({ recordRunnerContainerRetired }) },
-    } });
+    const recordRunnerContainerRetired = vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner")
+      .mockRejectedValue(new Error("unavailable"));
+    const h = createStandbyContainerHarness();
     await h.container.bindStandbySlot({ claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID,
       region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" });
     await h.container.onActivityExpired();
     await h.flushWaitUntil();
+    expect(recordRunnerContainerRetired).toHaveBeenCalledOnce();
     const nativeRead = vi.spyOn(h.container, "getState").mockClear().mockRejectedValue(new Error("slow native lookup"));
     await expect(h.container.resolveRetainedStandbySlot({ currentReleaseId: RELEASE_ID,
       region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" }))
@@ -490,10 +493,10 @@ describe("RunnerContainer slot lifecycle", () => {
   });
 
   it("does not publish retirement after an unconfirmed native stop", async () => {
-    const recordRunnerContainerRetired = vi.fn(async () => ({ cleared: true }));
+    const recordRunnerContainerRetired = vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner")
+      .mockResolvedValue({ cutover: "postgres", status: "updated", owner: null });
     const h = createStandbyContainerHarness({
       destroy: async () => { throw new Error("platform unavailable"); },
-      environment: { USER_RUNNER: { getByName: () => ({ recordRunnerContainerRetired }) } },
     });
     await h.container.bindStandbySlot({ claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID,
       region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" });
