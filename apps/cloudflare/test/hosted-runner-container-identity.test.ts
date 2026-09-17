@@ -2506,7 +2506,7 @@ function createWorkspaceInvocationJob(input: {
     kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
     request: {
       attemptId: input.token.attemptId,
-      idleCheckpointDelayMs: 54_000,
+      runnerIdleTtlMs: 54_000,
       leaseGeneration: input.token.generation,
       userId: input.userId,
       workspace: null,

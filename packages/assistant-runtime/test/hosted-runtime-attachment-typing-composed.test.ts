@@ -105,7 +105,7 @@ test.each([
     } },
   };
   const job = createWorkspaceRuntimeJobInput({
-    request: { attemptId: "synthetic_composed_typing", userId: TEST_USER_ID, workspaceVersion: "0", idleCheckpointDelayMs: 1 },
+    request: { attemptId: "synthetic_composed_typing", userId: TEST_USER_ID, workspaceVersion: "0", runnerIdleTtlMs: 1 },
   });
   const runtime = normalizeHostedAssistantRuntimeConfig(job.runtime, platform);
   runtime.forwardedEnv = { ...runtime.forwardedEnv, LINQ_API_TOKEN: "synthetic-token" };

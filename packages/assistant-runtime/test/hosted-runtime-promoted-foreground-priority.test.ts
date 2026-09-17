@@ -85,7 +85,7 @@ test.each(priorityJourneys)(
         request: {
           processingMode: owner === "default" ? "default" : "system_mailbox",
           workspaceVersion: "0",
-          idleCheckpointDelayMs: quietMs,
+          runnerIdleTtlMs: quietMs,
         },
         resolvedConfig: createDeviceSyncResolvedConfig(),
       }), {

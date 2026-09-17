@@ -538,7 +538,7 @@ function allocationHarness(options: {
             job: {
               kind: "workspace-invocation",
               request: {
-                attemptId: token.attemptId, idleCheckpointDelayMs: 54_000,
+                attemptId: token.attemptId, runnerIdleTtlMs: 54_000,
                 leaseGeneration: token.generation, userId: input.userId,
                 workspace: null, workspaceVersion: token.workspaceVersion ?? "0",
               },

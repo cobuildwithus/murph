@@ -699,6 +699,32 @@ describe("hosted runtime control contracts", () => {
     })).toBe("standard");
   });
 
+  it("ignores the retired checkpoint field across Worker/runtime deployment skew", () => {
+    const request = {
+      attemptId: "attempt_skew",
+      leaseGeneration: "1",
+      userId: "member_synthetic",
+      workspaceVersion: "0",
+    };
+    // Old Worker -> new runtime uses the new runtime's safe default. Unknown
+    // optional fields are ignored rather than forwarded into runtime policy.
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...request,
+      idleCheckpointDelayMs: 180_000,
+    })).toEqual(request);
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...request,
+      runnerIdleTtlMs: 600_000,
+      idleCheckpointDelayMs: 180_000,
+    })).toEqual({ ...request, runnerIdleTtlMs: 600_000 });
+    for (const runnerIdleTtlMs of [0, -1, 1.5, "600000"]) {
+      expect(() => parseHostedWorkspaceInvocationRequest({
+        ...request,
+        runnerIdleTtlMs,
+      })).toThrow();
+    }
+  });
+
   it("parses workspace invocation request and status-only result without invocation-drain fields", () => {
     const workspaceInvocationRequest = {
       attemptId: "attempt_1",
@@ -706,7 +732,7 @@ describe("hosted runtime control contracts", () => {
         maxMailboxItems: 25,
         maxRuntimeMs: 30_000,
       },
-      idleCheckpointDelayMs: 180_000,
+      runnerIdleTtlMs: 180_000,
       leaseGeneration: "7",
       providerEgressToken: "provider-egress-token-contract",
       userId: "member_123",

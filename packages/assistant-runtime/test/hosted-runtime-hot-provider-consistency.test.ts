@@ -68,7 +68,7 @@ test.each([
     const job = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
       request: {
         attemptId: 'attempt_synthetic_hot_provider_probe',
-        idleCheckpointDelayMs: 500,
+        runnerIdleTtlMs: 500,
         leaseGeneration: '7',
         userId: TEST_USER_ID,
         workspaceVersion: '0',

@@ -63,7 +63,7 @@ test("drains checkpoint-ready effects before restarting an unfinished clinical p
       createWorkspaceRuntimeJobInput({ request: {
         attemptId: "attempt_synthetic_clinical_checkpoint_effects",
         userId: TEST_USER_ID, leaseGeneration: "7", workspaceVersion: "0",
-        idleCheckpointDelayMs: 1,
+        runnerIdleTtlMs: 1,
       } }),
       {
         vaultRoot, runtimeWakeSignal,

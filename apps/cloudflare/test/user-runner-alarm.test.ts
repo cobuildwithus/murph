@@ -1812,7 +1812,9 @@ describe("HostedUserRunner execution coordination", () => {
     expect(onStatusRead).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request).not.toHaveProperty("idleCheckpointDelayMs");
     expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+      runnerIdleTtlMs: 54_000,
       userId: TEST_USER_ID,
       workspace: expect.objectContaining({
         userId: TEST_USER_ID,

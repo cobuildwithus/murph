@@ -155,7 +155,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 25;
+    const runnerIdleTtlMs = 25;
     const systemFollowUpWakeAt = TEST_NOW;
     const mailboxItems = [
       createMailboxItem({
@@ -179,7 +179,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -424,7 +424,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             budget: {
               maxMailboxItems: 1,
             },
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -624,7 +624,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
               budget: {
                 maxMailboxItems: 1,
               },
-              idleCheckpointDelayMs: 1,
+              runnerIdleTtlMs: 1,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -768,7 +768,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             budget: {
               maxMailboxItems: 4,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -968,7 +968,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             budget: {
               maxMailboxItems: 4,
             },
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1095,7 +1095,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           request: {
             attemptId: "attempt_synthetic_unindexed_reminder",
             budget: { maxMailboxItems: 4 },
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1274,7 +1274,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             request: {
               attemptId: `attempt_foreground_delivery_image_${scenario}`,
               budget: { maxMailboxItems: 10 },
-              idleCheckpointDelayMs: 1,
+              runnerIdleTtlMs: 1,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1807,7 +1807,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           request: {
             attemptId: runtimeAttemptId,
             budget: { maxMailboxItems: 10 },
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2001,7 +2001,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             request: {
               attemptId: "attempt_image_evidence_retry",
               budget: { maxMailboxItems: 10 },
-              idleCheckpointDelayMs: 180_000,
+              runnerIdleTtlMs: 180_000,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -2575,7 +2575,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         request: {
           attemptId,
           budget: { maxMailboxItems: 10 },
-          idleCheckpointDelayMs: 50,
+          runnerIdleTtlMs: 50,
           leaseGeneration,
           userId: TEST_USER_ID,
           workspaceVersion: "0",
@@ -2955,7 +2955,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -3209,7 +3209,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_abort_first",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -3305,7 +3305,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_abort_second",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "10",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -3396,7 +3396,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_projection_retry",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -3588,7 +3588,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_device_pressure",
             budget: { maxMailboxItems: 3 },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -3868,7 +3868,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_hidden_command",
             budget: { maxMailboxItems: 3 },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -3972,7 +3972,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             attemptId:
               "attempt_synthetic_runtime_vault_share_hidden_command_continuation",
             budget: { maxMailboxItems: 8 },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "10",
             userId: TEST_USER_ID,
             workspaceVersion: secondWorkspace.version,
@@ -4083,7 +4083,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_classifier_fallback",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4286,7 +4286,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_checkpoint_classifier_shutdown",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4428,7 +4428,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_checkpoint_fallback_shutdown",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -4579,7 +4579,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_device_shutdown",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",

@@ -210,7 +210,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
           attemptId: "attempt_synthetic_phase_checkpoint_queued_wake_idle_window",
-          idleCheckpointDelayMs: 200,
+          runnerIdleTtlMs: 200,
           leaseGeneration: "7",
           userId: TEST_USER_ID,
           workspaceVersion: "0",
@@ -411,7 +411,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       const resultPromise = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
           attemptId: `attempt_synthetic_external_wake_${slug}`,
-          idleCheckpointDelayMs: 1_000,
+          runnerIdleTtlMs: 1_000,
           leaseGeneration: "7",
           userId: TEST_USER_ID,
           workspaceVersion: "0",
@@ -556,7 +556,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_causal_pending_effects_dirty_wake",
-            idleCheckpointDelayMs: 500,
+            runnerIdleTtlMs: 500,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -734,7 +734,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             createWorkspaceRuntimeJobInput({
               request: {
                 attemptId: `attempt_pre_checkpoint_${actionKind.replaceAll(".", "_")}`,
-                idleCheckpointDelayMs: 200,
+                runnerIdleTtlMs: 200,
                 leaseGeneration: "7",
                 userId: TEST_USER_ID,
                 workspaceVersion: "0",
@@ -1104,7 +1104,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           request: {
             attemptId: "attempt_synthetic_maximum_safe_prefix",
             budget: { maxMailboxItems: 50 },
-            idleCheckpointDelayMs: 1_000,
+            runnerIdleTtlMs: 1_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1363,7 +1363,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               attemptId: `attempt_synthetic_external_completion_${
                 completion.preCheckpointSafe ? "safe" : "gated"
               }`,
-              idleCheckpointDelayMs: 200,
+              runnerIdleTtlMs: 200,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1693,7 +1693,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
                       ? "phone"
                       : "referral"
                 }_${transport.channel}`,
-              idleCheckpointDelayMs:
+              runnerIdleTtlMs:
                 completion.privateCompletion && transport.channel === "linq"
                   ? 180_000
                   : 200,
@@ -2281,7 +2281,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_private_completion_mixed_system_prefix",
-              idleCheckpointDelayMs: 50,
+              runnerIdleTtlMs: 50,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -2378,7 +2378,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_assistant_ask_completion_dirty_wake",
-            idleCheckpointDelayMs: 500,
+            runnerIdleTtlMs: 500,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2648,7 +2648,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_late_imported_approval",
-              idleCheckpointDelayMs: 200,
+              runnerIdleTtlMs: 200,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -2798,7 +2798,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_assistant_ask_dirty_wake",
-            idleCheckpointDelayMs: 500,
+            runnerIdleTtlMs: 500,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2979,7 +2979,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               attemptId: `attempt_synthetic_consented_checkpoint_${
                 withConversationWork ? "conversation" : "system"
               }`,
-              idleCheckpointDelayMs: 600_000,
+              runnerIdleTtlMs: 600_000,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -3090,7 +3090,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_mixed_pending_effects_canonical_dirty_wake",
-            idleCheckpointDelayMs: 200,
+            runnerIdleTtlMs: 200,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",

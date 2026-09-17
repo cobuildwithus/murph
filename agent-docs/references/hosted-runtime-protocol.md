@@ -47,7 +47,13 @@ The live ownership split is:
   coordination, container invocation, encrypted object plumbing, and signed
   callback transport.
   UserRunner holds one foreground runtime write fence for the whole hosted
-  invocation and passes the single `idleCheckpointDelayMs` runtime policy knob.
+  invocation and passes the single `runnerIdleTtlMs` runtime policy.
+  The optional invocation field replaces `idleCheckpointDelayMs`: older runtimes
+  ignore the new field and retain their safe legacy default during staged or
+  interrupted releases. Updated runtimes ignore the retired field and use the
+  ten-minute default when the new field is absent. Do not dual-write the retired
+  field: only runtimes with deferred-Ask deadline handling may adopt the longer
+  window. This supports either deployment order without a compatibility flag.
   The runtime, not the host, keeps dirty state warm through the configured idle
   floor. The exact assistant wake projected directly by the current foreground
   assistant phase may run once before that floor without checkpointing. The

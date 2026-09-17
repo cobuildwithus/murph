@@ -75,13 +75,16 @@ import {
 } from "../src/hosted-runtime.ts";
 
 describe("hosted workspace runtime entrypoint", () => {
-  test.each([4, 9])("keeps the same invocation for a follow-up at minute %i with the default quiet window", async (followupMinute) => {
+  test.each([
+    { followupMinute: 4, timing: { runnerIdleTtlMs: 600_000 }, worker: "current" },
+    { followupMinute: 9, timing: { idleCheckpointDelayMs: 180_000 }, worker: "legacy" },
+  ])("keeps the same invocation at minute $followupMinute with a $worker Worker", async ({ followupMinute, timing }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 600_000;
+    const runnerIdleTtlMs = 600_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     let assistantPhaseCalls = 0;
@@ -93,15 +96,16 @@ describe("hosted workspace runtime entrypoint", () => {
 
       const resultPromise = withRealTimeout(
         runHostedWorkspaceRuntimeJobInProcess(
-          createWorkspaceRuntimeJobInput({
+          parseHostedAssistantWorkspaceRuntimeJobInput(createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_fresh_conversation_preempts",
-              idleCheckpointDelayMs: null,
+              runnerIdleTtlMs: undefined,
+              ...timing,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
             },
-          }),
+          })),
           {
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
@@ -182,7 +186,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
       assert.equal(checkpointRequests.length, 0);
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
 
       assert.ok(
@@ -215,7 +219,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const phaseObserved = [
       createDeferred<void>(),
       createDeferred<void>(),
@@ -334,7 +338,7 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             request: {
               attemptId: "attempt_assistant_target_refresh",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -537,7 +541,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(configurationResponses.length, 0);
       assert.equal(checkpointRequests.length, 0);
 
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
       assert.equal(result.status, "idle");
       assert.equal(checkpointRequests.length, 1);
@@ -579,7 +583,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     const runtimeAbortController = new AbortController();
@@ -597,7 +601,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_due_assistant_waits",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -733,7 +737,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_owner_handoff",
-              idleCheckpointDelayMs: 180_000,
+              runnerIdleTtlMs: 180_000,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -823,7 +827,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const importObserved = createDeferred<void>();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const runtimeAbortController = new AbortController();
     let firstCheckpointStartedAtMs: number | null = null;
     let assistantPhaseCalls = 0;
@@ -840,7 +844,7 @@ describe("hosted workspace runtime entrypoint", () => {
               budget: {
                 maxMailboxItems: 1,
               },
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -906,12 +910,12 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await withRealTimeout(importObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1);
       assert.equal(checkpointRequests.length, 0);
       await vi.advanceTimersByTimeAsync(1);
       const result = await resultPromise;
 
-      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + runnerIdleTtlMs);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_collapse_budget_001",
       ]);
@@ -938,7 +942,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const assistantObserved = createDeferred<void>();
     const durableEffectObserved = createDeferred<void>();
     const durableWakeAt = "2026-04-27T00:02:00.000Z";
@@ -954,7 +958,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_durable_followup_waits",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1011,7 +1015,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs - 1);
       assert.equal(checkpointRequests.length, 0);
       await vi.advanceTimersByTimeAsync(1);
       await withRealTimeout(durableEffectObserved.promise, 15_000, () => events.join(","));
@@ -1020,7 +1024,7 @@ describe("hosted workspace runtime entrypoint", () => {
       }
       const result = await resultPromise;
 
-      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + runnerIdleTtlMs);
       assert.ok(
         requireEventIndex(events, "snapshot:idle_shutdown")
           < requireEventIndex(events, "durable-effect"),
@@ -1049,7 +1053,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_collapse_invariant_shutdown_immediate",
-            idleCheckpointDelayMs: 180_000,
+            runnerIdleTtlMs: 180_000,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1113,7 +1117,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 60_000;
+    const runnerIdleTtlMs = 60_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     let assistantPhaseCalls = 0;
@@ -1128,7 +1132,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_due_assistant_serviced",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1196,7 +1200,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
 
       assert.ok(
@@ -1222,7 +1226,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const assistantObserved = createDeferred<void>();
     let assistantPhaseCalls = 0;
 
@@ -1236,7 +1240,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_device_sync_returned",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1286,7 +1290,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
 
       assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
@@ -1330,7 +1334,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_round4_foreground_drain_loop_terminates",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1447,7 +1451,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 50;
+    const runnerIdleTtlMs = 50;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     const assistantThreeObserved = createDeferred<void>();
@@ -1462,7 +1466,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_round4_committed_due_assistant_hidden_then_serviced",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1568,7 +1572,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "assistant.phase:2:none:none",
       ]);
 
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
       assert.ok(
         requireEventIndex(events, "snapshot:idle_shutdown")
@@ -1627,7 +1631,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
       const mailboxItems: HostedMailboxItem[] = [];
       const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-      const idleCheckpointDelayMs = 50;
+      const runnerIdleTtlMs = 50;
       const staleWakeAt = TEST_NOW;
       const assistantOneObserved = createDeferred<void>();
       const assistantTwoObserved = createDeferred<void>();
@@ -1643,7 +1647,7 @@ describe("hosted workspace runtime entrypoint", () => {
             createWorkspaceRuntimeJobInput({
               request: {
                 attemptId: `attempt_collapse_invariant_stale_${scenario.name}`,
-                idleCheckpointDelayMs,
+                runnerIdleTtlMs,
                 leaseGeneration: "9",
                 userId: TEST_USER_ID,
                 workspaceVersion: "4",
@@ -1723,7 +1727,7 @@ describe("hosted workspace runtime entrypoint", () => {
         await waitForFakeTimerScheduled(() => events.join(","));
         await vi.advanceTimersByTimeAsync(0);
         await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+        await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
         if (vi.getTimerCount() > 0) {
           await vi.runOnlyPendingTimersAsync();
         }
@@ -1762,7 +1766,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 50;
+    const runnerIdleTtlMs = 50;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     const systemFollowUpWakeAt = "2099-04-27T00:10:00.000Z";
@@ -1778,7 +1782,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_collapse_invariant_system_waits_for_checkpoint",
-            idleCheckpointDelayMs,
+            runnerIdleTtlMs,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1866,7 +1870,7 @@ describe("hosted workspace runtime entrypoint", () => {
         events.includes("mailbox.importItem:mailbox_item_collapse_system_after_checkpoint"),
         false,
       );
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       if (vi.getTimerCount() > 0) {
         await vi.runOnlyPendingTimersAsync();
       }
@@ -1908,7 +1912,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 1;
+    const runnerIdleTtlMs = 1;
     const durableWakeAt = "2026-04-27T00:03:00.000Z";
     const assistantObserved = createDeferred<void>();
 
@@ -1922,7 +1926,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_durable_wake_followup",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -1977,7 +1981,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       if (vi.getTimerCount() > 0) {
         await vi.runOnlyPendingTimersAsync();
       }
@@ -2009,7 +2013,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 1;
+    const runnerIdleTtlMs = 1;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     let assistantPhaseCalls = 0;
@@ -2024,7 +2028,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_collapse_invariant_redacted_status_survives",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -2102,7 +2106,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
 
       assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
@@ -2130,7 +2134,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     let assistantPhaseCalls = 0;
@@ -2144,7 +2148,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_runtime_pre_checkpoint_conversation_wake",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -2237,7 +2241,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "assistant.phase:2:none:none",
       ]);
 
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       const result = await resultPromise;
 
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
@@ -2263,7 +2267,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const snapshotTimes: number[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     const assistantThreeObserved = createDeferred<void>();
@@ -2278,7 +2282,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_runtime_same_key_conversation_wake",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: "4",
@@ -2391,7 +2395,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "assistant.phase:2:none:none",
       ]);
 
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
       assert.ok(
         requireEventIndex(events, "snapshot:idle_shutdown")
@@ -2402,8 +2406,8 @@ describe("hosted workspace runtime entrypoint", () => {
       // quiet window. No additional clock advance is allowed here.
       const result = await resultPromise;
       assert.deepEqual(snapshotTimes, [
-        Date.parse(TEST_NOW) + idleCheckpointDelayMs,
-        Date.parse(TEST_NOW) + idleCheckpointDelayMs,
+        Date.parse(TEST_NOW) + runnerIdleTtlMs,
+        Date.parse(TEST_NOW) + runnerIdleTtlMs,
       ]);
       assert.ok(requireEventIndex(events, "provider.cleanup")
         < requireEventIndex(events, `assistant.phase:3:${TEST_NOW}:assistant`));
@@ -2438,7 +2442,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_post_checkpoint_projected_wake",
-            idleCheckpointDelayMs: 75,
+            runnerIdleTtlMs: 75,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2527,7 +2531,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_post_checkpoint_same_projected_wake",
-            idleCheckpointDelayMs: 75,
+            runnerIdleTtlMs: 75,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",

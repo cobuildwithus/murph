@@ -90,7 +90,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_durable_effect_success",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -161,7 +161,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
-        request: { idleCheckpointDelayMs: 1 },
+        request: { runnerIdleTtlMs: 1 },
       }), {
         vaultRoot,
         runtimeWakeSignal,
@@ -249,7 +249,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_durable_effect_external_wake",
-              idleCheckpointDelayMs: 180_000,
+              runnerIdleTtlMs: 180_000,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -365,7 +365,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 1;
+    const runnerIdleTtlMs = 1;
     const dueAssistantWakeAt = TEST_NOW;
     const durableWakeAt = "2026-04-27T00:02:00.000Z";
     const replacementWakeAt = new Date(Date.parse(TEST_NOW) + 1).toISOString();
@@ -393,7 +393,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_round1_durable_wake_survives_reschedule",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -472,7 +472,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
 
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
       await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
       const result = await resultPromise;
@@ -501,7 +501,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const dueAssistantWakeAt = TEST_NOW;
     const durableWakeAt = "2026-04-27T00:02:00.000Z";
     const replacementWakeAt = "2026-04-27T00:10:00.000Z";
@@ -530,7 +530,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_round3_hot_work_durable_reconcile_waits",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -622,15 +622,15 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
 
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
       const result = await resultPromise;
 
       assert.equal(durableEffect.mock.calls.length, 1);
       assert.deepEqual(checkpointStartedAtMs, [
-        Date.parse(TEST_NOW) + idleCheckpointDelayMs,
-        Date.parse(TEST_NOW) + idleCheckpointDelayMs,
-        Date.parse(TEST_NOW) + idleCheckpointDelayMs,
+        Date.parse(TEST_NOW) + runnerIdleTtlMs,
+        Date.parse(TEST_NOW) + runnerIdleTtlMs,
+        Date.parse(TEST_NOW) + runnerIdleTtlMs,
       ]);
       expect([...new Set(latencyTraceRequests
         .map((request) => request.event)
@@ -711,7 +711,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_effects_blocked_due_wake",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -903,7 +903,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_effects_blocked_dirty_wake",
-              idleCheckpointDelayMs: 25,
+              runnerIdleTtlMs: 25,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1072,7 +1072,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_competing_effects_blocked_wake",
-              idleCheckpointDelayMs: 25,
+              runnerIdleTtlMs: 25,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1222,7 +1222,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_checkpoint_gated_dirty_wake",
-              idleCheckpointDelayMs: 25,
+              runnerIdleTtlMs: 25,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1376,7 +1376,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_durable_effect_follow_up_due_wake",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1505,7 +1505,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_follow_up_fresh_due_wake",
-              idleCheckpointDelayMs: 25,
+              runnerIdleTtlMs: 25,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1664,7 +1664,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_follow_up_preempted_replacement_wake",
-              idleCheckpointDelayMs: 25,
+              runnerIdleTtlMs: 25,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1793,7 +1793,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_projected_follow_up_due_wake",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1912,7 +1912,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_checkpoint_blocked_due_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -2036,7 +2036,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_replaced_plain_due_wake",
-              idleCheckpointDelayMs: 25,
+              runnerIdleTtlMs: 25,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",

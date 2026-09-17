@@ -128,7 +128,7 @@ test('an empty settings-only hot wake hands off without another assistant turn o
   try {
     await initializeVault({ createdAt: TEST_NOW, vaultRoot });
     const job = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
-      request: { idleCheckpointDelayMs: 500 },
+      request: { runnerIdleTtlMs: 500 },
     }), {
       async importItem() { throw new Error('Settings-only wake must not import an item.'); },
       async createCheckpointSnapshot() {

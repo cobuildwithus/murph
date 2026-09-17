@@ -8773,15 +8773,15 @@ export function parseHostedWorkspaceInvocationRequest(
             "Hosted workspace invocation request budget",
           ),
         }),
-    ...(record.idleCheckpointDelayMs === undefined
+    ...(record.runnerIdleTtlMs === undefined
       ? {}
       : {
-          idleCheckpointDelayMs:
-            record.idleCheckpointDelayMs === null
+          runnerIdleTtlMs:
+            record.runnerIdleTtlMs === null
               ? null
               : requirePositiveInteger(
-                  record.idleCheckpointDelayMs,
-                  "Hosted workspace invocation request idleCheckpointDelayMs",
+                  record.runnerIdleTtlMs,
+                  "Hosted workspace invocation request runnerIdleTtlMs",
                 ),
         }),
     leaseGeneration: requireNonNegativeBigIntString(

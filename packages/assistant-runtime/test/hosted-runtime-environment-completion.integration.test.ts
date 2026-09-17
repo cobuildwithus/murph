@@ -49,7 +49,7 @@ test.each(["no-active-share", "error"] as const)("settles concurrent Environment
     await writeMailboxImportStateFile(vaultRoot, importState);
     const snapshot = await createVaultSnapshotBundle({ vaultRoot });
     const result = await runHostedWorkspaceRuntimeJobInProcess(
-      createWorkspaceRuntimeJobInput({ request: { idleCheckpointDelayMs: 1 } }),
+      createWorkspaceRuntimeJobInput({ request: { runnerIdleTtlMs: 1 } }),
       {
         vaultRoot,
         runtimeWakeSignal: createCoalescingRuntimeWakeSignal(),

@@ -131,7 +131,7 @@ describe("runtime invocation transport failure fence handling", () => {
     const runtimeFailure = await runHostedWorkspaceRuntimeJobInProcess({
       request: {
         attemptId: "attempt_control_plane_phase",
-        idleCheckpointDelayMs: 1,
+        runnerIdleTtlMs: 1,
         leaseGeneration: "1",
         userId: TEST_USER_ID,
         workspaceVersion: "0",
@@ -1239,7 +1239,7 @@ function createWorkspaceInvocationJob(input: {
     kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
     request: {
       attemptId: input.token.attemptId,
-      idleCheckpointDelayMs: 54_000,
+      runnerIdleTtlMs: 54_000,
       leaseGeneration: input.token.generation,
       userId: input.userId,
       workspace: null,

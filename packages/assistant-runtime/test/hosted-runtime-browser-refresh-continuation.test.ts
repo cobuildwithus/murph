@@ -112,7 +112,7 @@ test.each(["empty-hint", "foreground", "incomplete-prefix", "failed-classificati
       },
     });
     const run = (attempt: number) => runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
-      request: { attemptId: `attempt_browser_refresh_continuation_${attempt}`, idleCheckpointDelayMs: 1, workspaceVersion: currentWorkspace.version },
+      request: { attemptId: `attempt_browser_refresh_continuation_${attempt}`, runnerIdleTtlMs: 1, workspaceVersion: currentWorkspace.version },
     }), {
       platform, vaultRoot, runtimeWakeSignal, signal: controller.signal,
       async createCheckpointSnapshot() {

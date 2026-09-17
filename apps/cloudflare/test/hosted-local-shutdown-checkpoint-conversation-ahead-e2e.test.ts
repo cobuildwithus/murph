@@ -54,8 +54,8 @@ const firstReplyText = "First reply captured before shutdown.";
 const conversationAheadReplyText = "Conversation-ahead input restored exactly once.";
 const linqWebhookSecret = "linq-local-shutdown-conversation-ahead-secret";
 const assistantModel = "gpt-5.6-terra";
-const idleCheckpointDelayMs = 180_000;
-const idleCheckpointWaitTimeoutMs = idleCheckpointDelayMs + 60_000;
+const runnerIdleTtlMs = 180_000;
+const idleCheckpointWaitTimeoutMs = runnerIdleTtlMs + 60_000;
 const shutdownHandoffStartDeadlineMs = 10_000;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -100,7 +100,7 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
-        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(idleCheckpointDelayMs),
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(runnerIdleTtlMs),
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,

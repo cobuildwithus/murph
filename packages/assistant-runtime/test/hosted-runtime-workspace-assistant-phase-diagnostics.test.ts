@@ -252,7 +252,7 @@ beforeEach(() => {
     if (!Number.isFinite(nextWakeMs) || nextWakeMs <= input.nowMs) {
       return input.deferDueOrInvalid
         ? mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            runnerIdleTtlMs: input.runnerIdleTtlMs,
             nowMs: input.nowMs,
           })
         : null;

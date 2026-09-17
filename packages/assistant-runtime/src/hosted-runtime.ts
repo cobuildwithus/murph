@@ -2861,8 +2861,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ...(options.shutdownSignal ? [options.shutdownSignal] : []),
       ...(hostAbortSignal ? [hostAbortSignal] : []),
     ]);
-    const idleCheckpointDelayMs = resolveHostedRuntimeIdleCheckpointDelayMs(
-      input.request.idleCheckpointDelayMs,
+    const runnerIdleTtlMs = resolveHostedRuntimeIdleCheckpointDelayMs(
+      input.request.runnerIdleTtlMs,
     );
     let result: HostedWorkspaceRunnerResult;
     let committedWorkspace = activeWorkspace;
@@ -2917,7 +2917,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       if (runtimeOwnerHandoffRequested) {
         setIdleCheckpointStartBy(Date.now());
       } else {
-        ensureIdleCheckpointStartBy(Date.now() + idleCheckpointDelayMs);
+        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
       }
     };
     const updateIdleCheckpointTimerAfterWorkspacePass = (
@@ -2929,7 +2929,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           // Reuse admission/acceptance evidence, not generic assistant progress.
           // Batching is deliberately independent of server-receipt warmth.
           setIdleCheckpointStartBy(
-            Date.now() + (runtimeOwnerHandoffRequested ? 0 : idleCheckpointDelayMs),
+            Date.now() + (runtimeOwnerHandoffRequested ? 0 : runnerIdleTtlMs),
           );
         } else if (passResult.assistantPhaseResult?.progressed === false
           && passResult.assistantPhaseResult.runtimeProjectionCheckpointRequested === true) {
@@ -2966,7 +2966,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       onCompleted(completion, notify) {
         clinicalEnrichmentController?.kick();
         runtimeStateDirty = true;
-        ensureIdleCheckpointStartBy(Date.now() + idleCheckpointDelayMs);
+        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
         if (completion.afterDurableCheckpoint) {
           pendingDurableCheckpointEffects.push(...(typeof completion.afterDurableCheckpoint === "function"
             ? [completion.afterDurableCheckpoint] : completion.afterDurableCheckpoint));
@@ -2981,7 +2981,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       },
       onFailure(error, notify) {
         runtimeStateDirty = true;
-        ensureIdleCheckpointStartBy(Date.now() + idleCheckpointDelayMs);
+        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
         emitPhaseLog({ error, input, requestId, stage: "runtime", status: "fail" });
         if (notify && (!systemMailboxProcessingMode || hostedCodexRuntime !== null)) options.runtimeWakeSignal?.notify();
       },
@@ -6639,7 +6639,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
         if (runtimeDirtyAfterForeground) {
           ensureIdleCheckpointStartBy(
-            Date.now() + (runtimeOwnerHandoffRequested ? 0 : idleCheckpointDelayMs),
+            Date.now() + (runtimeOwnerHandoffRequested ? 0 : runnerIdleTtlMs),
           );
         } else if (committedInboxMediaRetentionWakeDue) {
           setIdleCheckpointStartBy(Date.now());
@@ -6710,7 +6710,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && readyDurableCheckpointEffects.length === 0
           && !durableCheckpointFollowUpPending
         ) {
-          workDeadline ??= Date.now() + idleCheckpointDelayMs;
+          workDeadline ??= Date.now() + runnerIdleTtlMs;
         }
         return workDeadline;
       };

@@ -519,7 +519,7 @@ export class RuntimeInvocationPreparation {
           ? { assistantExecutionBlocked: true as const }
           : {}),
         attemptId: input.token.attemptId,
-        idleCheckpointDelayMs: this.input.env.runnerIdleTtlMs,
+        runnerIdleTtlMs: this.input.env.runnerIdleTtlMs,
         leaseGeneration: input.token.generation,
         ...(input.processingMode
           ? { processingMode: input.processingMode }
