@@ -59,6 +59,12 @@ describe("frozen legacy resource export", () => {
     h.kv.set("workspace-snapshot-orphan-candidate:a", { userId: "synthetic_other" });
     await expect(readLegacyRuntimeMigrationIdentity(h.state)).rejects.toThrow("conflicting");
     h.kv.set("future-unknown-resource", { synthetic: true });
-    await expect(requireLegacyRuntimeStorageCoverage(h.state)).rejects.toThrow("unclassified");
+    await expect(requireLegacyRuntimeStorageCoverage(h.state)).rejects.toThrow("unclassified durable state (future-unknown-resource)");
+    h.kv.delete("future-unknown-resource");
+    h.kv.set("legacy-thing:v1:synthetic-suffix", { synthetic: true });
+    await expect(requireLegacyRuntimeStorageCoverage(h.state)).rejects.toThrow("unclassified durable state (legacy-thing:*)");
+    h.kv.delete("legacy-thing:v1:synthetic-suffix");
+    h.kv.set("Ünknown", { synthetic: true });
+    await expect(requireLegacyRuntimeStorageCoverage(h.state)).rejects.toThrow("unclassified durable state (unrecognized)");
   });
 });
