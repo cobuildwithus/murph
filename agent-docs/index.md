@@ -424,3 +424,6 @@ The Responses relay queue-pressure observation and implementation proof are reco
 
 - Recovery implementation: [`runtime retirement recovery`](exec-plans/completed/2026-09-17-runtime-retirement-recovery.md)
   covers interrupted binding and claimed unbound target retirement.
+
+- Test diagnostic correction: [`Worker stderr failure capture`](exec-plans/completed/2026-09-17-runtime-failure-stderr.md)
+  records bounded terminal-error evidence from both Worker output streams.

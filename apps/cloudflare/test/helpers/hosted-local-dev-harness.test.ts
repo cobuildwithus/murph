@@ -214,7 +214,7 @@ it("removes disposable hosted web smoke artifacts outside the E2E prod profile",
   }
 });
 
-it("fails fast when hosted completion reaches a terminal runner error", async () => {
+it.each(["stdout", "stderr"] as const)("retains %s diagnostics when hosted completion reaches a terminal runner error", async (stream) => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const containerFailure = JSON.stringify({
     message: "Hosted execution container failed.",
@@ -227,8 +227,10 @@ it("fails fast when hosted completion reaches a terminal runner error", async ()
       ...stack.processes,
       cloudflare: {
         child: new ChildProcess(), name: "cloudflare",
-        stdoutTail: () => containerFailure, stdoutText: () => containerFailure,
-        stderrTail: () => "", stderrText: () => "",
+        stdoutTail: () => stream === "stdout" ? containerFailure : "",
+        stdoutText: () => stream === "stdout" ? containerFailure : "",
+        stderrTail: () => stream === "stderr" ? containerFailure : "",
+        stderrText: () => stream === "stderr" ? containerFailure : "",
       },
     },
     stdoutTail: () => "unrelated teardown output\n".repeat(3_000),

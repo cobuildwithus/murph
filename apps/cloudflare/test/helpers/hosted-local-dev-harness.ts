@@ -377,7 +377,10 @@ export async function startHostedLocalDevHarness(input: {
             throw new Error(formatFailure([
               `Hosted runner reported terminal error for ${userId}.`,
               `last status: ${JSON.stringify(sanitizeHostedStatusForFailureLog(status))}`,
-              `container failure logs: ${(stack?.processes.cloudflare?.stdoutTail(64_000) ?? "")
+              `container failure logs: ${[
+                stack?.processes.cloudflare?.stdoutTail(64_000) ?? "",
+                stack?.processes.cloudflare?.stderrTail(64_000) ?? "",
+              ].join("\n")
                 .split("\n")
                 .filter((line) => line.includes("Hosted execution container failed."))
                 .slice(-3)
