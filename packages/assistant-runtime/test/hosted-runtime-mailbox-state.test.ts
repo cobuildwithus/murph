@@ -1027,7 +1027,7 @@ describe("hosted runtime system mailbox state", () => {
         now: () => now, vaultRoot,
       })).resolves.toEqual({
         defaultOwned: { at: now, reason: "assistant" },
-        next: { at: now, executionClass: "model_free", reason: "device-sync.reconcile" },
+        next: { at: retryAt, executionClass: null, reason: "device-sync.reconcile" },
       });
       // An already-running default pass keeps its ordinary foreground choice.
       await expect(resolveHostedSystemMailboxWakeCandidates({ now: () => now, vaultRoot }))

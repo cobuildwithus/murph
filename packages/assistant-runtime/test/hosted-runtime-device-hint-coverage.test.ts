@@ -60,6 +60,23 @@ function covered(pending: readonly HostedSystemMailboxPendingItem[]) {
 }
 
 describe("retained device hint coverage", () => {
+  it.each([null, NOW, LATER])("honors a covered dirty hint's retry time: %s", (retryAt) => {
+    const retained = owner();
+    const dirty: HostedSystemMailboxPendingItem = { ...hint("dirty", "2"), nextAttemptAt: retryAt };
+    const state = { pending: [retained, dirty] };
+    const before = structuredClone(state);
+    const select = (now: string) => findHostedRunnableSystemMailboxItem({
+      allowedRouteActions: ["run-device-sync-wake"],
+      continuationItemIds: new Set([retained.itemId]),
+      coverage: projectHostedDeviceHintCoverage({ now, pending: state.pending }),
+      eligibleDeviceHintIds: projectHostedEligibleDeviceHintIds({ now, state }),
+      now, state,
+    });
+    expect(select(NOW)?.itemId ?? null).toBe(retryAt === LATER ? null : retained.itemId);
+    expect(select(LATER)?.itemId).toBe(retained.itemId);
+    expect(state).toEqual(before);
+  });
+
   it("admits a manual refresh without waiting for retained history jobs", () => {
     const retained = owner();
     const request = manual();
@@ -69,7 +86,7 @@ describe("retained device hint coverage", () => {
     expect(findHostedRunnableSystemMailboxItem({
       allowedRouteActions: ["run-device-sync-wake"],
       continuationItemIds: new Set([retained.itemId]), coverage,
-      eligibleDeviceHintIds: projectHostedEligibleDeviceHintIds({ state }), now: NOW, state,
+      eligibleDeviceHintIds: projectHostedEligibleDeviceHintIds({ now: NOW, state }), now: NOW, state,
     })?.itemId).toBe(retained.itemId);
     expect([...coverage.get(retained.itemId)!.coveredHintIds]).toEqual([request.itemId]);
     expect(coverage.get(retained.itemId)?.admittedWake?.hint).toEqual({
@@ -89,7 +106,7 @@ describe("retained device hint coverage", () => {
       allowedRouteActions: ["run-device-sync-wake"],
       continuationItemIds: new Set([retained.itemId]),
       coverage,
-      eligibleDeviceHintIds: projectHostedEligibleDeviceHintIds({ state }),
+      eligibleDeviceHintIds: projectHostedEligibleDeviceHintIds({ now: NOW, state }),
       now: NOW,
       state,
     })?.itemId).toBe(retained.itemId);

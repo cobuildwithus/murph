@@ -399,7 +399,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         ),
       };
       const coverage = projectHostedDeviceHintCoverage({ eligibleItemIds, now: startedAt, pending: state.pending });
-      const eligibleDeviceHintIds = projectHostedEligibleDeviceHintIds({ eligibleItemIds, state });
+      const eligibleDeviceHintIds = projectHostedEligibleDeviceHintIds({ eligibleItemIds, now: startedAt, state });
       const pending = findHostedRunnableSystemMailboxItem({
         allowedRouteActions: input.allowedRouteActions ?? null,
         pendingOnly: input.pendingOnly,

@@ -1806,7 +1806,10 @@ to apply after cutover.
   frontier rather than a second scheduling state. Otherwise, the existing
   mailbox retention update atomically defers any unabsorbed legacy webhook to the retained retry,
   including payload-only backoff and a full retained queue that cannot yet admit
-  distinct dirty work.
+  distinct dirty work. Both wake projection and mailbox claim require a covered
+  hint's persisted retry time to be due before it can admit a future retained
+  owner. Fresh hints remain immediately eligible; deferred hints and exact
+  provider retry jobs remain intact until their existing deadline.
   The retained wake's job hints suppress provider scheduling,
   and each local job keeps its own `availableAt`, so these bounded passes neither
   run the later mailbox item out of order nor bypass provider backoff.

@@ -755,10 +755,12 @@ export function projectHostedEligibleDeviceHintIds(input: {
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   eligibleItemIds?: ReadonlySet<string>;
+  now: string;
   state: HostedSystemMailboxState;
 }): ReadonlySet<string> {
   return new Set(input.state.pending.filter((item) =>
-    item.wake.kind === "device-sync.wake"
+    systemMailboxItemIsDue(item, input.now)
+    && item.wake.kind === "device-sync.wake"
     && (item.wake.reason === "webhook_hint" || item.wake.reason === "connected"
       || isHostedManualDeviceReconcileRequest(item.wake))
     && systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions ?? null)

@@ -1921,14 +1921,35 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         );
       };
       const result = await runPass();
+      if (schedule === "deferred") {
+        assert.equal(result.status, "scheduled");
+        assert.equal(result.nextWakeAt, retryAt);
+        assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, 0);
+        assert.equal(fetchDirtyStatesCalls, 0);
+        assert.equal(providerPaths.length, 0);
+        const waiting = (await readHostedSystemMailboxState(vaultRoot)).pending;
+        assert.deepEqual(waiting.map((item) => item.itemId), [deviceItem.id, "mailbox_synthetic_queued_1"]);
+        assert.deepEqual(waiting[0]?.wake.kind === "device-sync.wake" ? waiting[0].wake.hint?.jobs : null, futureJobs);
+        const early = await runPass();
+        assert.equal(early.nextWakeAt, retryAt);
+        assert.equal(fetchDirtyStatesCalls, 0);
+        assert.equal(providerPaths.length, 0);
+        assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, waiting);
+        vi.setSystemTime(new Date(retryAt));
+        await runPass();
+        assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 1);
+        assert.ok(fetchDirtyStatesCalls > 0);
+        assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+        assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
+        return;
+      }
       assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, retainedRetry ? 2 : 1);
       assert.equal(fetchDirtyStatesCalls, 1);
       assert.equal(providerFetch.mock.calls.length, schedule === "connected" ? 4 : retainedRetry ? 3 : 0);
       assert.equal(result.status, retainedRetry ? "scheduled" : "idle");
       if (retainedRetry) {
         assert.ok(result.nextWakeAt);
-        if (schedule === "equal") assert.equal(result.nextWakeAt, TEST_NOW);
-        else assert.ok(Date.parse(result.nextWakeAt) > Date.parse(TEST_NOW));
+        assert.ok(Date.parse(result.nextWakeAt) > Date.parse(TEST_NOW));
         assert.ok(Date.parse(result.nextWakeAt) < Date.parse(retryAt));
         assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 0);
       } else {
@@ -1955,7 +1976,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       }
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        schedule === "superseded" || schedule === "deferred" || schedule === "connected" || schedule === "manual" ? "3" : schedule === "equal" ? "2" : "1",
+        schedule === "superseded" || schedule === "connected" || schedule === "manual" ? "3" : schedule === "equal" ? "2" : "1",
       );
       if (schedule === "manual") {
         assert.equal(pending[0]?.wake.kind === "device-sync.wake" ? pending[0].wake.hint?.reason : null,
@@ -1986,13 +2007,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
         assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
       }
-      if (schedule === "deferred") {
-        const continued = await runPass();
-        assert.equal(continued.nextWakeAt, result.nextWakeAt);
-        assert.equal(providerPaths.length, 3);
-        assert.equal(fetchDirtyStatesCalls, 1);
-        assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, pending);
-      }
       if (schedule === "equal") {
         assert.equal(pending[1]?.wake.kind === "device-sync.wake" ? pending[1].wake.reason : null, "webhook_hint");
         assert.equal(canonicalNextReconcileAt, checkpointedReconcileAt);
@@ -2007,7 +2021,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.deepEqual(continued[0]?.wake.kind === "device-sync.wake" ? continued[0].wake.hint?.jobs : null, futureJobs);
         assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 0);
         assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
-        assert.equal(canonicalNextReconcileAt, checkpointedReconcileAt);
+        assert.equal(canonicalNextReconcileAt, continued[0]?.wake.kind === "device-sync.wake"
+          ? continued[0].wake.hint?.nextReconcileAt : null);
+        assert.ok(Date.parse(canonicalNextReconcileAt) > Date.parse(checkpointedReconcileAt ?? ""));
         assert.ok(Date.parse(drained.nextWakeAt ?? "") > Date.parse(TEST_NOW));
         const drainedFetchCount = fetchDirtyStatesCalls;
         await runPass();
