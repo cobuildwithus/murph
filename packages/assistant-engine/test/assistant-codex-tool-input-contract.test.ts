@@ -399,7 +399,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
           return { ...tool, description: tool.description.slice(0, tool.description.indexOf(graphGuidanceStart)) }
         }
         if (tool.name === 'attach_response_media') {
-          return { ...tool, description: tool.description.replace(' For charts, include the key source numbers in the final reply text.', '') }
+          return { ...tool, description: tool.description.replace(' For charts, the final reply must include one brief numeric takeaway from the source data, such as the start/end values or range; do not list every plotted value.', '') }
         }
         return tool
       })

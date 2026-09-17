@@ -6959,6 +6959,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(generationPrompt).toMatch(/Fraunces|serif/iu)
         expect(generationPrompt).toMatch(/DM Sans/iu)
         expect(generationPrompt).toMatch(/DM Mono|monospace/iu)
+        expect(generationPrompt).toMatch(
+          /(?:no|omit|without|do not|don't|avoid)[^.\n]{0,100}(?:numeric|number|value|data)[^.\n]{0,60}labels|(?:no|omit|without|do not|don't|avoid)[^.\n]{0,100}labels[^.\n]{0,60}(?:point|bar)/iu,
+        )
         expect(generationPrompt).not.toMatch(/blue|teal|purple|terracotta/iu)
         expect(
           (String(generationPrompt).replace(/#[0-9a-f]{6}/giu, '').match(/\d+/gu) ?? []).length,

@@ -60,9 +60,12 @@ describe('murph.generate_image dynamic tool schema', () => {
       'Requested graphs, charts, and trend lines: render them with this tool when no chart or card tool fits',
     )
     expect(MURPH_ATTACH_RESPONSE_MEDIA_TOOL.description).toContain(
-      'For charts, include the key source numbers in the final reply text',
+      'For charts, the final reply must include one brief numeric takeaway from the source data, such as the start/end values or range; do not list every plotted value',
     )
     for (const chartStyle of [
+      'Treat those values as plotting data, not visible labels',
+      'omit numeric labels on individual points and bars unless the user requests them',
+      'sparse, rounded axis ticks and a compact legend',
       'Default chart prompts to Murph',
       'cream paper (#f5f0e8)',
       'slate text (#2d3436)',
