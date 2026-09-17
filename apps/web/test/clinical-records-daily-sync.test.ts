@@ -119,10 +119,15 @@ describe("rotating clinical refresh lease", () => {
     expect(f.row.status).toBe("disconnected"); expect(f.row.accessTokenEncrypted).toBe("");
   });
 
-  it("clears persistent access after an ambiguous transport failure instead of replaying a rotating token", async () => {
+  it("keeps an ambiguous exchange leased for the retrieval owner to terminalize", async () => {
     const f = fixture();
     await expect(renewClinicalAccess({ connectionId: f.row.id, memberId: f.row.memberId, generation: 1, now,
-      fetchImpl: vi.fn<typeof fetch>().mockRejectedValue(new Error("connection reset")) })).rejects.toBeDefined();
-    expect(f.row.status).toBe("needs_reauth"); expect(f.row.refreshTokenEncrypted).toBeNull(); expect(f.row.nextSyncAt).toBeNull();
+      fetchImpl: vi.fn<typeof fetch>().mockRejectedValue(new Error("connection reset")) })).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_REAUTH_REQUIRED" });
+    expect(f.row.status).toBe("active");
+    expect(f.row.refreshLeaseId).toEqual(expect.any(String));
+    const replay = vi.fn<typeof fetch>();
+    await expect(renewClinicalAccess({ connectionId: f.row.id, memberId: f.row.memberId, generation: 1,
+      now: new Date(now.getTime() + 60_001), fetchImpl: replay })).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_REAUTH_REQUIRED" });
+    expect(replay).not.toHaveBeenCalled();
   });
 });

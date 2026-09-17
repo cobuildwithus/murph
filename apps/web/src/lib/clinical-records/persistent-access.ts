@@ -2,7 +2,6 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { hashClinicalFhirPatientId } from "@murphai/clinical-records";
-import { HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE } from "@murphai/hosted-execution/clinical-records";
 import * as z from "@murphai/contracts/zod-runtime";
 
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
@@ -113,20 +112,21 @@ export async function renewClinicalAccess(input: {
       return token.accessToken;
     } catch (error) {
       const retryable = isClinicalRecordsControlPlaneError(error) && error.code === "CLINICAL_RECORD_SMART_REFRESH_TEMPORARILY_UNAVAILABLE";
-      await prisma.clinicalRecordConnection.updateMany({ where: {
-        id: current.id, memberId: input.memberId, tokenVersion: current.tokenVersion,
-        retrievalGeneration: input.generation, refreshLeaseId: leaseId,
-      }, data: retryable ? { refreshLeaseId: null, refreshLeaseExpiresAt: null } : {
-        ...CLEAR_CLINICAL_PERSISTENT_ACCESS, accessTokenEncrypted: null, accessTokenExpiresAt: null,
-        status: "needs_reauth", lastErrorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
-      } });
-      if (retryable) throw error;
+      if (retryable) {
+        await prisma.clinicalRecordConnection.updateMany({ where: {
+          id: current.id, memberId: input.memberId, tokenVersion: current.tokenVersion,
+          retrievalGeneration: input.generation, refreshLeaseId: leaseId,
+        }, data: { refreshLeaseId: null, refreshLeaseExpiresAt: null } });
+        throw error;
+      }
+      // Keep a possibly consumed token leased until retrieval atomically ends
+      // both the connection and run through its generation-fenced reauth owner.
       throw authorizationRequired();
     }
   });
 }
 
 function authorizationRequired() {
-  return clinicalRecordsError({ code: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+  return clinicalRecordsError({ code: "CLINICAL_RECORD_SMART_REAUTH_REQUIRED",
     httpStatus: 401, message: "Reconnect this patient portal to continue updating records." });
 }

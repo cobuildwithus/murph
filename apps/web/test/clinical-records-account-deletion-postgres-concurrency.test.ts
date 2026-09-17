@@ -226,6 +226,7 @@ import { GET as clinicalRecordsCallbackGet } from "../app/api/clinical-records/o
 import {
   buildClinicalRetrievalWakeEventId,
   fetchClinicalRetrievalPage,
+  fetchClinicalRetrievalDocument,
   readClinicalRetrievalRun,
   recordClinicalRetrievalOutcome,
 } from "@/src/lib/clinical-records/retrieval";
@@ -238,6 +239,7 @@ import {
 import { disconnectClinicalRecordConnection, listClinicalRecordConnectionsForMember } from "@/src/lib/clinical-records/connections";
 import { startClinicalRecordConnection } from "@/src/lib/clinical-records/control-plane";
 import { createClinicalRecordConnectIntent } from "@/src/lib/clinical-records/connect-intents";
+import { prepareClinicalPersistentAccess } from "@/src/lib/clinical-records/persistent-access";
 import { createSmartState } from "@/src/lib/clinical-records/smart";
 import {
   provisionHostedCryptoDomainRootsForUser,
@@ -368,6 +370,107 @@ afterEach(() => {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "Clinical Records callback/account-deletion PostgreSQL concurrency",
   () => {
+    it.each([
+      { path: "page", failure: "revoked" },
+      { path: "page", failure: "transport" },
+      { path: "page", failure: "abandoned" },
+      { path: "page", failure: "throttled" },
+      { path: "document", failure: "revoked" },
+      { path: "document", failure: "transport" },
+      { path: "document", failure: "abandoned" },
+      { path: "document", failure: "throttled" },
+    ])("recovers from a $failure refresh through $path retrieval and reconnect", async ({ path, failure }) => {
+      const fixture = await createClinicalFixture();
+      boundary.callbackPrisma = fixture.callbackBaseClient;
+      const provider = readClinicalProviderDirectory().entries.find((entry) => entry.id === fixture.providerDirectoryEntryId)!;
+      const request = new Request(`${CALLBACK_ORIGIN}/api/clinical-records/connect/start`, {
+        method: "POST", headers: { origin: CALLBACK_ORIGIN },
+      });
+      try {
+        await fixture.observer.hostedMember.update({ where: { id: fixture.memberId }, data: { billingStatus: HostedBillingStatus.active } });
+        boundary.token!.grantedScopes.push("patient/DocumentReference.rs", "patient/Binary.r");
+        expectConnectedRedirect(await invokeClinicalRecordsCallback(fixture));
+        const initial = await fixture.observer.clinicalRecordRetrievalRun.findFirstOrThrow({ where: { memberId: fixture.memberId } });
+        const loaded = await readClinicalRetrievalRun({ memberId: fixture.memberId, runId: initial.id, generation: initial.generation });
+        if (loaded.status !== "ready") throw new Error("Expected a runnable clinical fixture");
+        const slice = loaded.run.retrievalSlices.find((item) => item.resourceType === (path === "document" ? "DocumentReference" : "Patient"))!;
+        const pageRequest = {
+          generation: initial.generation, runId: initial.id, retrievalProtocol: "query-slices-v2" as const,
+          queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint,
+          resourceType: slice.resourceType, sliceId: slice.sliceId, cursor: null, requestId: "refresh-proof-page",
+        };
+        const page = await fetchClinicalRetrievalPage({ memberId: fixture.memberId, request: pageRequest,
+          fetchImpl: vi.fn().mockResolvedValue(Response.json(path === "page"
+            ? { resourceType: "Patient", id: boundary.token!.patientId }
+            : { resourceType: "Bundle", entry: [{ resource: { resourceType: "DocumentReference", id: "note-proof", status: "current",
+              subject: { reference: `Patient/${boundary.token!.patientId}` },
+              content: [{ attachment: { url: "Binary/document-proof", contentType: "text/plain", size: 4 } }] } }] })),
+        });
+        if (page.status !== "page") throw new Error("Expected a saved source page");
+        const connection = await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: initial.connectionId } });
+        vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({ [provider.id]: { clientId: CLINICAL_CLIENT_ID, clientSecret: "synthetic-secret" } }));
+        const persistent = await prepareClinicalPersistentAccess({ connectionId: connection.id, memberId: fixture.memberId,
+          tokenVersion: connection.tokenVersion, clientId: CLINICAL_CLIENT_ID, tokenEndpoint: `${provider.fhirBaseUrl}/oauth/token`,
+          requestedScopes: ["offline_access"], now: new Date(), token: { ...boundary.token!, refreshToken: "synthetic-refresh",
+            grantedScopes: [...boundary.token!.grantedScopes, "offline_access"] } });
+        await fixture.observer.clinicalRecordConnection.update({ where: { id: connection.id }, data: {
+          ...persistent, accessTokenExpiresAt: new Date(0),
+          ...(failure === "abandoned" ? { refreshLeaseId: "abandoned-proof", refreshLeaseExpiresAt: new Date(0) } : {}),
+        } });
+        const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () => {
+          if (failure === "transport") throw new TypeError("connection reset");
+          return new Response(null, { status: failure === "throttled" ? 429 : 400 });
+        });
+        const ticket = page.documents?.[0]?.ticket;
+        if (path === "document" && !ticket) throw new Error("Expected an attested document ticket");
+        const result = path === "page"
+          ? await fetchClinicalRetrievalPage({ memberId: fixture.memberId, request: { ...pageRequest, requestId: "refresh-proof-expired" }, fetchImpl })
+          : await fetchClinicalRetrievalDocument({ memberId: fixture.memberId,
+            request: { runId: initial.id, generation: initial.generation, ticket: ticket! }, fetchImpl });
+        expect(fetchImpl).toHaveBeenCalledTimes(failure === "abandoned" ? 0 : 1);
+        const ended = await fixture.observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: initial.id } });
+        const endedConnection = await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connection.id } });
+        if (failure === "throttled") {
+          expect(result).toMatchObject({ status: "unavailable", errorCode: "provider-temporarily-unavailable", retryable: true });
+          expect(ended.completedAt).toBeNull();
+          expect(endedConnection).toMatchObject({ status: "active", refreshLeaseId: null, refreshTokenEncrypted: persistent.refreshTokenEncrypted });
+          return;
+        }
+        expect(result).toMatchObject({ status: "unavailable", errorCode: "authorization-required", retryable: false });
+        expect(ended).toMatchObject({ status: "needs_reauth", completedAt: expect.any(Date) });
+        expect(endedConnection).toMatchObject({ status: "needs_reauth", accessTokenEncrypted: null,
+          refreshTokenEncrypted: null, refreshLeaseId: null, refreshLeaseExpiresAt: null, nextSyncAt: null });
+        const outcome = {
+          generation: initial.generation, runId: initial.id, retrievalProtocol: "query-slices-v2" as const,
+          retrievalSlices: loaded.run.retrievalSlices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
+          status: "partial" as const, errorCode: "authorization-required",
+          counts: { createdCount: 1, executableDecisionCount: 1, fetchedPageCount: 1,
+            fetchedResourceFamilyCount: 1, rawFileCount: 1, retractedCount: 0,
+            reviewDecisionCount: 0, skippedExistingCount: 0, supersededCount: 0 },
+        };
+        await recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome });
+        await recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome });
+        expect((await listClinicalRecordConnectionsForMember(fixture.memberId))[0]).toMatchObject({ canImport: true, status: "needs_reauth" });
+        const intent = await createClinicalRecordConnectIntent({ memberId: fixture.memberId, providerDirectoryEntryId: provider.id, request });
+        const started = await startClinicalRecordConnection({ claim: intent.claim, providerDirectoryEntryId: provider.id, request,
+          fetchImpl: vi.fn().mockResolvedValue(Response.json({
+            authorization_endpoint: `${provider.fhirBaseUrl}/oauth/authorize`, token_endpoint: `${provider.fhirBaseUrl}/oauth/token`,
+            code_challenge_methods_supported: ["S256"], capabilities: ["context-standalone-patient", "permission-patient", "permission-v2"],
+          })),
+        });
+        expectConnectedRedirect(await invokeClinicalRecordsCallback({ ...fixture, state: new URL(started.authorizationUrl).searchParams.get("state")! }));
+        const reconnected = await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connection.id } });
+        expect(reconnected).toMatchObject({ status: "active", retrievalGeneration: 2 });
+        await expect(recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome }))
+          .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
+        expect(await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connection.id } })).toEqual(reconnected);
+        expect(await fixture.observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: initial.id } }))
+          .toMatchObject({ status: "needs_reauth", importedCount: 1, outcomeCountsJson: outcome.counts });
+      } finally {
+        await cleanupClinicalFixture(fixture);
+      }
+    }, TEST_TIMEOUT_MS);
+
     it.each([
       { cleanup: "disconnect", finalized: false },
       { cleanup: "withdrawal", finalized: false },
