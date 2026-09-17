@@ -2409,6 +2409,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     // spans can instead describe a competing Temporal wake.
     directEnsureAuthDurationMs?: number;
     directEnsureHandlerDurationMs?: number;
+    directWakeStartedAtEpochMs?: number;
+    directWakeAttemptCount?: number;
+    directWakeRetryWaitMs?: number;
     directEnsureOrchestrationAttemptId?: string;
     directEnsureResultKind?:
       | "legacy_accepted"
@@ -2495,6 +2498,10 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     workspaceReadElapsedMs?: number;
     runtimeStoreEnsureElapsedMs?: number;
     runtimeInvocationPreparationElapsedMs?: number;
+    runtimeInvocationInputsWaitElapsedMs?: number;
+    runtimeInvocationAdmissionElapsedMs?: number;
+    runtimeInvocationFenceBindElapsedMs?: number;
+    runtimeInvocationJobPrepareElapsedMs?: number;
   };
   // Durable Object dispatch stamps (DO-side Date.now() epoch ms), diagnostics
   // only. invokeReceivedAtEpochMs is stamped when the DO invoke handler starts;
@@ -2535,6 +2542,8 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     runtimeWakeNotifiedAtEpochMs?: number;
     foregroundWaitResolvedAtEpochMs?: number;
     foregroundImportStartedAtEpochMs?: number;
+    foregroundPrefetchPrepareElapsedMs?: number;
+    foregroundPrefetchWaitElapsedMs?: number;
     foregroundWakeOrdinal?: number;
     activeRuntimePassOrdinal?: number;
     activeRuntimePassStartedAtEpochMs?: number;
@@ -2831,6 +2840,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "directEnsureResponseReceivedAtEpochMs",
     "directEnsureAuthDurationMs",
     "directEnsureHandlerDurationMs",
+    "directWakeStartedAtEpochMs",
+    "directWakeAttemptCount",
+    "directWakeRetryWaitMs",
     "directEnsureOrchestrationAttemptId",
     "directEnsureResultKind",
     "directEnsureAction",
@@ -2906,6 +2918,10 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "workspaceReadElapsedMs",
     "runtimeStoreEnsureElapsedMs",
     "runtimeInvocationPreparationElapsedMs",
+    "runtimeInvocationInputsWaitElapsedMs",
+    "runtimeInvocationAdmissionElapsedMs",
+    "runtimeInvocationFenceBindElapsedMs",
+    "runtimeInvocationJobPrepareElapsedMs",
   ],
   dispatch: [
     "invokeReceivedAtEpochMs",
@@ -2933,6 +2949,8 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "runtimeWakeNotifiedAtEpochMs",
     "foregroundWaitResolvedAtEpochMs",
     "foregroundImportStartedAtEpochMs",
+    "foregroundPrefetchPrepareElapsedMs",
+    "foregroundPrefetchWaitElapsedMs",
     "foregroundWakeOrdinal",
     "activeRuntimePassOrdinal",
     "activeRuntimePassStartedAtEpochMs",

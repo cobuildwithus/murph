@@ -148,10 +148,8 @@ describe.skipIf(!enabled)("composed SQLite source to Postgres member handoff", (
     // ordinary baseline member is never selected by these first-use retries.
     await web.seed(ids[2]!);
     const empty = legacySource(2, false); empty.sql.exec("DELETE FROM runner_meta");
-    for (let page = 0; page < 5; page++) {
-      await progressRuntimeMigrationForMember({ source, userId: ids[2]!, budget: { deadlineAtMs: Date.now() + 10_000 } });
-      expect(await web.backend(ids[1]!)).toBe("legacy");
-    }
+    await progressRuntimeMigrationForMember({ source, userId: ids[2]!, budget: { deadlineAtMs: Date.now() + 10_000 } });
+    expect(await web.backend(ids[1]!)).toBe("legacy");
     expect(await web.backend(ids[2]!)).toBe("postgres");
     expect(await web.prisma.hostedMailboxItem.count({ where: { userId: ids[2]! } })).toBe(1);
     expect(await web.prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).toMatchObject({ inventoryHash: sealed.inventoryHash, inventoryCount: sealed.inventoryCount });
@@ -159,14 +157,12 @@ describe.skipIf(!enabled)("composed SQLite source to Postgres member handoff", (
     // retries must finish pending first use without an operator or new scheduler.
     await web.seed(ids[3]!); await web.prisma.hostedMember.delete({ where: { id: ids[3]! } });
     const deleted = legacySource(3, false); deleted.sql.exec("DELETE FROM runner_meta");
-    for (let page = 0; page < 5; page++) {
-      const response = await handleUserDataDeleteRoute({ env: source,
-        request: new Request("https://worker.example.test/internal/users/synthetic/data", { method: "DELETE", body: "{}" }),
-      } as never, ids[3]!);
-      expect(response.status).toBe(503);
-      expect(await response.json()).toMatchObject({ code: "runtime_migration_pending" });
-      expect(await web.backend(ids[1]!)).toBe("legacy");
-    }
+    const response = await handleUserDataDeleteRoute({ env: source,
+      request: new Request("https://worker.example.test/internal/users/synthetic/data", { method: "DELETE", body: "{}" }),
+    } as never, ids[3]!);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "runtime_migration_pending" });
+    expect(await web.backend(ids[1]!)).toBe("legacy");
     expect(await web.backend(ids[3]!)).toBe("postgres");
     expect(await web.prisma.hostedMailboxItem.count({ where: { userId: ids[3]! } })).toBe(0);
     expect(await command({ operation: "next_object", ...campaign })).toEqual({ objectId: objects[1] });

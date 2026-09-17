@@ -4,11 +4,12 @@ import {
   type HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
-  CloudflareHostedControlRuntimeEnsureProcessingTiming,
-} from "@murphai/cloudflare-hosted-control/client";
+  HostedDirectRuntimeWakeTiming,
+} from "../hosted-execution/direct-runtime-wake";
 
 import { handoffHostedMailboxWake } from "../hosted-orchestration/mailbox-wake";
 import {
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
   recordHostedIngressAcceptedFromMailboxItem,
   recordHostedIngressDirectEnsureTiming,
   recordHostedIngressTemporalSignalAccepted,
@@ -51,6 +52,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     return null;
   }
   const {
+    acceptedLinqDeliveryId,
     eventId,
     mailboxItemId,
     source,
@@ -104,6 +106,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     temporalSignalAcceptedAt = new Date();
   } catch (error) {
     scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
+      acceptedLinqDeliveryId,
       webhookReceivedAt: input.webhookReceivedAt,
       ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
       mailboxItemId,
@@ -120,6 +123,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   }
 
   scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
+    acceptedLinqDeliveryId,
     webhookReceivedAt: input.webhookReceivedAt,
     ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
     mailboxItemId,
@@ -143,12 +147,15 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
   mailboxItemId: string;
   source: "linq" | "telegram";
-  timing: CloudflareHostedControlRuntimeEnsureProcessingTiming;
+  timing: HostedDirectRuntimeWakeTiming;
   userId: string;
 }): Promise<void> {
   const phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown = {
     schemaVersion: 1,
     orchestration: {
+      directWakeStartedAtEpochMs: timingRecord.timing.directWakeStartedAtEpochMs,
+      directWakeAttemptCount: timingRecord.timing.directWakeAttemptCount,
+      directWakeRetryWaitMs: timingRecord.timing.directWakeRetryWaitMs,
       tokenAcquireStartedAtEpochMs: timingRecord.timing.tokenAcquireStartedAtEpochMs,
       tokenAcquiredAtEpochMs: timingRecord.timing.tokenAcquiredAtEpochMs,
       directEnsureRequestStartedAtEpochMs:
@@ -197,6 +204,7 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
 }
 
 function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
+  acceptedLinqDeliveryId?: string;
   webhookReceivedAt?: Date;
   ingressTypingAcceptedAt?: Promise<Date | null>;
   mailboxItemId: string;
@@ -210,6 +218,21 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
     return;
   }
   const task = async () => {
+    if (source === "linq" && input.acceptedLinqDeliveryId && input.userId) {
+      try {
+        await linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
+          authenticatedUserId: input.userId,
+          answeredMailboxItemIds: [input.mailboxItemId],
+          linqDeliveryId: input.acceptedLinqDeliveryId,
+          replyRuntimeAttemptId: null,
+        });
+      } catch (error) {
+        console.warn("Hosted instant reply latency delivery link failed.", {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          source,
+        });
+      }
+    }
     const ingressTypingAcceptedAt = await input.ingressTypingAcceptedAt ?? undefined;
     if (input.temporalSignalAcceptedAt) {
       await recordHostedWebhookIngressLatencyTemporalSignalBestEffort({
