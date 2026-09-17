@@ -25,6 +25,7 @@ export const CLI_TIMING_FAILURE_CODES = [
   "unknown", "invalid_option", "invalid_payload", "VALIDATION_ERROR", "VAULT_INVALID_INPUT",
   "exercise_not_found", "exercise_catalog_unavailable", "exercise_catalog_invalid",
   "memory_not_found", "memory_document_invalid",
+  "research_scout_invalid_batch_payload", "research_scout_invalid_window", "research_exa_token_missing",
   "not_found", "conflict", "permission_denied", "invalid_path", "storage_unavailable",
   "knowledge_page_not_found", "knowledge_page_conflict", "knowledge_duplicate_slug", "knowledge_page_invalid",
   "knowledge_source_unreadable", "knowledge_invalid_source_path", "knowledge_invalid_library_slug",

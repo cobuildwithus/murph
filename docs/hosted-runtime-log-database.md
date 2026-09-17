@@ -1150,6 +1150,19 @@ source does not prove corruption; invalid source/library references do not
 establish why the caller supplied them. No stage is inferred when absent.
 Unfamiliar codes and lookalikes still normalize to `unknown`.
 
+Research scout diagnostics admit exactly `research_scout_invalid_batch_payload`
+and `research_scout_invalid_window` (private category `invalid_input`), plus
+`research_exa_token_missing` (private category `unavailable`, for missing runtime
+configuration). The command/parser and client already own these errors. Invalid
+compact lanes, a reversed window and an empty injected environment are distinct
+synthetic rejection cases; retaining their codes establishes no production
+behavioral cause. Their existing errors supply no stage: timing retains `unknown`
+and shell readback
+omits the stage. Do not add stages to public errors, infer them from codes, change
+model/RPC text or retry guidance, or expand provider-code catalogs. Unknown codes
+and lookalikes remain `unknown`; no arguments, paths, tokens, payloads or error
+messages enter this telemetry. The same consumer-first order below applies.
+
 #### Optional schema-validation detail
 
 For `VALIDATION_ERROR` only, `validation: { field, code, missing? }` is one finite
@@ -1238,9 +1251,9 @@ actual pre-change owners; the older `MURPH_CLI_TIMING_COMPAT_BASE` test remains 
 separate, pre-timing rollout proof.
 
 Additional failure codes on the same `murph.cli-timing.v1` schema, including the
-two memory read codes and three knowledge source codes, and optional validation
-detail also roll out **reader before writer**: first update the
-portable normalizer in downstream Web/hosted usage and engine/profile consumers
+two memory read codes, three knowledge source codes and three research codes,
+and optional validation detail also roll out **reader before writer**: first
+update the portable normalizer in downstream Web/hosted usage and engine/profile consumers
 and the assistant category reader, then update CLI producers. Warm older
 failure-aware readers normalize unfamiliar codes to `unknown`, discard unknown
 validation metadata and coalesce equal code/stage pairs while retaining command
@@ -1251,6 +1264,10 @@ no protocol bump or coordinated pause is needed. The history-backed runtime-stat
 test uses `MURPH_CLI_MEMORY_FAILURE_COMPAT_BASE` to load the actual pre-admission
 portable reader; it must be run with the base named in the active rollout plan,
 not replaced with a copy of the old parser or a current-reader round trip.
+The research equivalent uses `MURPH_CLI_RESEARCH_FAILURE_COMPAT_BASE` with the
+pre-admission base in its active plan. Runtime-state and profile tests load the
+actual old portable and hosted readers, checking coalescing to `unknown`, mixed
+old/new reports, absent evidence and unchanged counts/tokens.
 
 ### Bounded failure-frequency inspection and decision threshold
 
