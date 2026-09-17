@@ -488,6 +488,34 @@ describe("runHostedAssistantAutomation", () => {
     );
   });
 
+  it("retains safe skip categories without copying private event details", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onEvent?.({
+        type: "input.reply-skipped",
+        details: "private synthetic diagnostic: confidential-context",
+        safeDetails: "reply_skip:unclassified",
+      });
+      return { nextWakeAt: null, progressed: true };
+    });
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root", "req_skip_category",
+      { hosted: { memberId: "member_123", userEnvKeys: [] } },
+      {
+        eventId: "evt_skip_category", kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer", userId: "member_123",
+      },
+    );
+    expect(result.redactedLogEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        redacted: expect.objectContaining({
+          type: "input.reply-skipped", safeDetails: "reply_skip:unclassified",
+        }),
+      }),
+    ]));
+    expect(JSON.stringify(result.redactedLogEntries)).not.toContain("confidential-context");
+  });
+
   it("persists reply failure events after the ordinary automation event cap", async () => {
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       for (let index = 0; index < 13; index += 1) {

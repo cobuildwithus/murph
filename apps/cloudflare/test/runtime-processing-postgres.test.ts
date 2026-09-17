@@ -21,7 +21,7 @@ vi.mock("../src/runtime-invocation-preparation.ts", () => ({
     prepareForFreshStart() {
       return async (token: RunnerWriteFenceToken) => {
         const bound = await this.input.bindInvocation({ token, workspaceVersion: "0", customInferenceEnvelope: null, platformAiUsageAllowed: true });
-        return { job: { request: { providerEgressToken: bound.providerEgressToken } }, token: bound, input: {}, workspaceVersion: "0", workspaceCheckpointedAt: null };
+        return { customInferenceEnvelope: null, platformAiUsageAllowed: true, job: { request: { providerEgressToken: bound.providerEgressToken } }, token: bound, input: {}, workspaceVersion: "0", workspaceCheckpointedAt: null };
       };
     }
   },
@@ -46,7 +46,7 @@ function harness() {
     readSupervisedInvocation: vi.fn(async (): Promise<RunnerInvocationReceipt | null> => null),
     readActiveRuntimeUserFence: vi.fn(async () => ({ active: false as const, reason: "no_active_runtime" as const })),
     ensureProcessing: vi.fn(async () => ({ kind: "accepted" as const, action: "woken" as const })),
-    ensureReadyForProcessing: vi.fn(async () => ({ kind: "ready" as const })),
+    ensureReadyForProcessing: vi.fn(async (): Promise<import("../src/runner-container.ts").RunnerContainerEnsureReadyForProcessingResult> => ({ kind: "ready", preparesSupervisedLaunch: true })),
     startSupervisedInvocation: vi.fn(async (_input: HostedExecutionContainerInvokeRequest) => ({ accepted: true as const })),
     bindStandbySlot: vi.fn(async (input) => ({ ...input, bound: true as const })),
     prepareStandbySlot: vi.fn(),
@@ -87,8 +87,9 @@ describe("Postgres runtime orchestration", () => {
       .not.toContain("release");
   });
 
-  it("retains an ambiguously accepted launch after its execution transport times out", async () => {
+  it.each([true, false])("retains an ambiguously accepted launch after execution timeout (launch preparation: %s)", async (supported) => {
     const { source, container } = harness();
+    container.ensureReadyForProcessing.mockResolvedValue({ kind: "ready", ...(supported ? { preparesSupervisedLaunch: true } : {}) });
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner({ phase: "starting" }), "claimed"))
       .mockResolvedValue(response(owner({ phase: "starting" }), "updated"));
     container.startSupervisedInvocation.mockRejectedValue(new DOMException("Synthetic timeout", "TimeoutError"));
@@ -96,11 +97,23 @@ describe("Postgres runtime orchestration", () => {
     expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
     expect(container.retireStandbySlot).not.toHaveBeenCalled();
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
-      .toEqual(["claim", "prepare_launch"]);
+      .toEqual(supported ? ["claim"] : ["claim", "prepare_launch"]);
     // The next command observes that exact live owner rather than launching again.
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner()));
     expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "runtime_processing_accepted", action: "woken" });
     expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
+  });
+
+  it.each([true, false])("starts with container launch preparation capability %s", async (supported) => {
+    const { source, container } = harness();
+    container.ensureReadyForProcessing.mockResolvedValue({ kind: "ready", ...(supported ? { preparesSupervisedLaunch: true } : {}) });
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) =>
+      response(owner({ phase: "starting" }), command.operation === "claim" ? "claimed" : "updated"));
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ action: "started" });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(supported ? ["claim", "accepted"] : ["claim", "prepare_launch", "accepted"]);
+    const payload = container.startSupervisedInvocation.mock.calls[0]?.[0];
+    expect(Boolean(payload?.launch)).toBe(supported);
   });
 
   it("completes a new member's exact empty handoff through processing retries without an operator", async () => {
@@ -228,9 +241,11 @@ describe("Postgres runtime orchestration", () => {
     expect(token).toMatch(/^provider-egress-[a-f0-9]{64}$/u);
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token!)));
     const hash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
-    expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({
-      command: expect.objectContaining({ operation: "prepare_launch", providerEgressTokenHash: hash }),
+    expect(container.startSupervisedInvocation).toHaveBeenCalledWith(expect.objectContaining({
+      launch: expect.objectContaining({ providerEgressTokenHash: hash }),
     }));
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(["claim", "release_completed", "claim", "accepted"]);
     expect(JSON.stringify(vi.mocked(commandHostedRuntimeOwner).mock.calls)).not.toContain(token);
   });
 });

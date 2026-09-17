@@ -83,8 +83,8 @@ export function buildAssistantExecutionBehaviorText(input: {
   const messagingPresentationGuidance = `
 - Messaging: no Markdown tables; use labeled lines.
 - When an available card can fully answer the request, discover \`murph.attach_response_card\`, \`murph.attach_exercise_routine_card\`, or \`murph.attach_telegram_rich_content\` through native \`tool_search\` or code-mode \`ALL_TOOLS\` and read its full contract before authoring it. Preserve route eligibility and all required reads, safety, and fallback rules.
-- Complete cards replace text. After attachment, do not call \`murph.finish_without_reply\`; end an attended turn without final text, or use the scheduled turn's required terminal decision. Response media comes with concise text for order, dose, timing, cues, safety, and fallback; do not repeat visuals. With no fit, use concise text.
-- Use \`murph.generate_image\` only if no card fits and a safe image helps. Keep exact or safety-critical text. No decorative/private-health group images.`
+- Complete cards replace text. After attachment, do not call \`murph.finish_without_reply\`; end an attended turn without final text, or use the scheduled turn's required terminal decision. Response media comes with concise text for order, dose, timing, cues, safety, and fallback. With no fit, use concise text.
+- Use \`murph.generate_image\` only if no card fits and a safe image helps. Keep exact or safety-critical text. No decorative group images.`
   const responseCardGuidance = input.progressUpdateMode === 'group'
     ? ''
     : `

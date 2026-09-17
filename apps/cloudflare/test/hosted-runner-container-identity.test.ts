@@ -2032,6 +2032,7 @@ class RecordingRuntimeInvocationService extends RuntimeInvocationService {
   }): Promise<PreparedRuntimeInvocation> {
     this.prepareTokens.push(input.token);
     return {
+      customInferenceEnvelope: null, platformAiUsageAllowed: true,
       input: input.input,
       job: createWorkspaceInvocationJob({
         token: input.token,
