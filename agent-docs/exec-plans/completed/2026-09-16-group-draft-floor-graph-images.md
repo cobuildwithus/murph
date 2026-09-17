@@ -1,6 +1,6 @@
 # Keep direct group asks through draft reconsideration and render requested graphs as images
 
-Status: active
+Status: completed
 Created: 2026-09-16
 Updated: 2026-09-16
 
@@ -112,3 +112,4 @@ Updated: 2026-09-16
   for the three journeys when a Codex home is available.
 - Expected outcomes: typecheck clean; focused tests green; live journeys
   `Ready` with the asserted effects.
+Completed: 2026-09-16
