@@ -1677,3 +1677,14 @@ validation must run repository tests/typechecks/builds, the actual complexity
 guard and the built hosted lane on supported Node/pnpm and pinned Codex versions
 before promotion. This telemetry patch does not authorize merging, deployment,
 or bypassing the protected public-main release contract.
+
+### Reply skip reasons
+
+Assistant `input.reply-skipped` events populate the existing `safeDetails` field
+on `assistant.automation_detail` with `reply_skip:<reason>`. The engine maps exact
+static reasons to bounded codes such as `channel_disabled`, `self_authored`,
+`already_handled`, `unattested_reaction`, `empty_input`, `intentional_no_reply`,
+`provider_usage_limit`, and `incomplete_terminal_evidence`. Unknown or dynamic
+reasons yield only `reply_skip:unclassified`; unrestricted event details and
+provider error text are never copied into this diagnostic. These codes describe
+an existing skip or deferral and do not change retry, reply, or alert decisions.
