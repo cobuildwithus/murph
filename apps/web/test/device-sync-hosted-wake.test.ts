@@ -9049,6 +9049,7 @@ describe("hosted device-sync wakes", () => {
           occurredAt: "2026-03-26T11:59:00.000Z",
           sourceEventType: "session.deleted",
         },
+        providerDedupeKey: "oura-webhook:trace_delete_123",
         resource: null,
         resourceCategory: null,
         sourceProviderSlug: null,

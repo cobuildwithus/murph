@@ -191,6 +191,66 @@ describe("hosted device-sync dirty timing source parsing", () => {
     });
     expect(parsed?.dirtyResources[2]).not.toHaveProperty("timingSourceProviderSlug");
   });
+
+  it("carries the provider dedupe key only when the resource declares one", () => {
+    const buildResource = (providerDedupeKey: string | null | undefined) => ({
+      count: 1,
+      jobKind: "resource",
+      payload: {
+        eventType: "historical.data.steps.created",
+        resource: "steps",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "apple_health_kit",
+        windowEnd: "2026-04-08T00:04:00.000Z",
+        windowStart: "2026-03-09T00:00:00.000Z",
+      },
+      ...(providerDedupeKey === undefined ? {} : { providerDedupeKey }),
+      resource: "steps",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "apple_health_kit",
+      windowEnd: "2026-04-08T00:04:00.000Z",
+      windowStart: "2026-03-09T00:00:00.000Z",
+    });
+
+    const parsed = parseHostedExecutionDeviceSyncDirtyStateResponse({
+      connectionId: "dsc_provider_keys",
+      dirtyRevision: "4",
+      dirtyResources: [
+        buildResource("junction-webhook:history-steps"),
+        buildResource(null),
+        buildResource(undefined),
+      ],
+      eventCount: "3",
+      latestDirtyAt: "2026-04-08T00:04:00.000Z",
+      processedRevision: "0",
+      provider: "junction",
+      resourceCategoryCounts: { timeseries: 3 },
+      sourceProviderCounts: { apple_health_kit: 3 },
+      userId: "member_provider_keys",
+      windowEnd: "2026-04-08T00:04:00.000Z",
+      windowStart: "2026-03-09T00:00:00.000Z",
+    });
+
+    expect(parsed?.dirtyResources[0]).toMatchObject({
+      providerDedupeKey: "junction-webhook:history-steps",
+    });
+    expect(parsed?.dirtyResources[1]).not.toHaveProperty("providerDedupeKey");
+    expect(parsed?.dirtyResources[2]).not.toHaveProperty("providerDedupeKey");
+    expect(() => parseHostedExecutionDeviceSyncDirtyStateResponse({
+      connectionId: "dsc_provider_keys",
+      dirtyRevision: "5",
+      dirtyResources: [{ ...buildResource(undefined), providerDedupeKey: 42 }],
+      eventCount: "1",
+      latestDirtyAt: "2026-04-08T00:04:00.000Z",
+      processedRevision: "0",
+      provider: "junction",
+      resourceCategoryCounts: { timeseries: 1 },
+      sourceProviderCounts: { apple_health_kit: 1 },
+      userId: "member_provider_keys",
+      windowEnd: "2026-04-08T00:04:00.000Z",
+      windowStart: "2026-03-09T00:00:00.000Z",
+    })).toThrow(/providerDedupeKey/u);
+  });
 });
 
 describe("isDeviceSyncCredentialIndependentImportJob", () => {

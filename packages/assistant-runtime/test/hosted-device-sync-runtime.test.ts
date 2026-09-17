@@ -5450,6 +5450,143 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("dirty resources sharing a provider dedupe key coalesce onto one job", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-provider-key-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "provider-key",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_provider_key",
+        externalAccountId: connected.account.externalAccountId,
+      });
+      // Two receipts of the same declared pull range: the fetch windows and
+      // receipt timestamps differ, the provider identity does not.
+      const buildResource = (input: {
+        dirtyPayloadId: string;
+        occurredAt: string;
+        windowEnd: string;
+      }) => ({
+        count: 1,
+        dirtyPayloadId: input.dirtyPayloadId,
+        jobKind: "resource",
+        payload: {
+          eventType: "historical.data.steps.created",
+          occurredAt: input.occurredAt,
+          resource: "steps",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+          windowEnd: input.windowEnd,
+          windowStart: "2026-03-05T00:00:00.000Z",
+        },
+        providerDedupeKey: "junction-webhook:history-steps",
+        resource: "steps",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        windowEnd: input.windowEnd,
+        windowStart: "2026-03-05T00:00:00.000Z",
+      });
+      const dirtyState: HostedExecutionDeviceSyncDirtyStateResponse = {
+        connectionId: "hosted_conn_provider_key",
+        dirtyRevision: "7",
+        dirtyResources: [
+          buildResource({
+            dirtyPayloadId: "dsp_history_first",
+            occurredAt: "2026-04-03T10:00:00.000Z",
+            windowEnd: "2026-04-03T10:00:00.000Z",
+          }),
+          buildResource({
+            dirtyPayloadId: "dsp_history_resent",
+            occurredAt: "2026-04-03T11:00:00.000Z",
+            windowEnd: "2026-04-03T11:00:00.000Z",
+          }),
+        ],
+        eventCount: "2",
+        latestDirtyAt: "2026-04-03T11:00:00.000Z",
+        processedRevision: "0",
+        provider: "demo",
+        resourceCategoryCounts: {
+          timeseries: 2,
+        },
+        sourceProviderCounts: {
+          garmin: 2,
+        },
+        userId: "member_123",
+        windowEnd: "2026-04-03T11:00:00.000Z",
+        windowStart: "2026-03-05T00:00:00.000Z",
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [dirtyState],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_provider_key",
+          eventId: "evt_device_sync_provider_key",
+          hint: {
+            reason: "dirty",
+          },
+          occurredAt: "2026-04-03T11:00:00.000Z",
+          reason: "webhook_hint",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const jobs = readJobsForAccount(service, connected.account.id);
+      assert.equal(jobs.length, 1);
+      assert.equal(
+        jobs[0]?.dedupeKey,
+        "hosted-dirty:demo:resource:provider-key:f32618a08f48b42437a6d79d",
+      );
+      assert.deepEqual(
+        state.pendingDirtyPayloadJobs.map((pending) => [pending.dirtyPayloadId, pending.jobId]),
+        [
+          ["dsp_history_first", jobs[0]?.id],
+          ["dsp_history_resent", jobs[0]?.id],
+        ],
+      );
+      // Admitted payload ids settle with the job, so the immediate ack carries
+      // only the revision.
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        connectionId: "hosted_conn_provider_key",
+        nextWakeAt: null,
+        processedRevision: "7",
+      }]);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("duplicate pending timing entries merge conservatively after local job deduplication", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-deduped-timing-",

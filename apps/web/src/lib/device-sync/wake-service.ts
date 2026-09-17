@@ -3955,11 +3955,15 @@ function buildHostedWebhookDirtyResources(input: {
     const payloadSourceProviderSlug = readHostedDirtyResourceString(
       payload.sourceProviderSlug,
     );
+    // The provider's own job identity rides along so the runtime enqueues a
+    // re-sent webhook onto the job or continuation already carrying that key.
+    const providerDedupeKey = readHostedDirtyResourceString(job.dedupeKey);
     resources.push({
       count: 1,
       ...buildHostedWebhookDirtyResourceTiming(input),
       jobKind: job.kind,
       payload: readHostedDirtyResourcePayload(payload),
+      ...(providerDedupeKey ? { providerDedupeKey } : {}),
       resource: readHostedDirtyResourceString(payload.resource),
       resourceCategory: readHostedDirtyResourceString(payload.resourceCategory),
       // This field participates in resource execution identity and can be

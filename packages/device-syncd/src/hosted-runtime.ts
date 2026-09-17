@@ -590,6 +590,7 @@ export interface HostedExecutionDeviceSyncDirtyResource {
   providerSendToWebhookMs?: number | null;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
+  providerDedupeKey?: string;
   resource: string | null;
   resourceCategory: string | null;
   sourceProviderSlug: string | null;
@@ -1856,6 +1857,14 @@ function parseHostedExecutionDeviceSyncDirtyResource(
       : {}),
     jobKind: requireString(record.jobKind, `${label}.jobKind`),
     payload: readHostedExecutionDeviceSyncDirtyPayload(record.payload, `${label}.payload`),
+    ...(record.providerDedupeKey === undefined || record.providerDedupeKey === null
+      ? {}
+      : {
+          providerDedupeKey: requireString(
+            record.providerDedupeKey,
+            `${label}.providerDedupeKey`,
+          ),
+        }),
     resource: readNullableStringValue(record.resource, `${label}.resource`),
     resourceCategory: readNullableStringValue(record.resourceCategory, `${label}.resourceCategory`),
     sourceProviderSlug: readNullableStringValue(record.sourceProviderSlug, `${label}.sourceProviderSlug`),

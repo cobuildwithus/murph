@@ -1835,9 +1835,35 @@ function hostedDirtyResourceToDeviceSyncJobInput(
   if (!hasManifestPayload && resource.jobKind === "resource" && resource.sourceProviderSlug) {
     payload.sourceProviderSlug = resource.sourceProviderSlug;
   }
-  const dedupeKey = [
+  return {
+    kind: resource.jobKind,
+    payload,
+    priority: 60,
+    dedupeKey: buildHostedDirtyResourceDedupeKey(resource, dirtyState.provider, payload),
+  };
+}
+
+function buildHostedDirtyResourceDedupeKey(
+  resource: HostedExecutionDeviceSyncDirtyResource,
+  provider: string,
+  payload: Record<string, unknown>,
+): string {
+  // A provider-derived key already names the work from stable provider facts,
+  // so re-sent webhooks join the job or continuation that carries it instead
+  // of forking on receipt-time windows and timestamps.
+  const providerDedupeKey = readHostedDirtyPayloadString(resource.providerDedupeKey);
+  if (providerDedupeKey) {
+    return [
+      "hosted-dirty",
+      provider,
+      resource.jobKind,
+      "provider-key",
+      createHash("sha256").update(providerDedupeKey).digest("hex").slice(0, 24),
+    ].join(":");
+  }
+  return [
     "hosted-dirty",
-    dirtyState.provider,
+    provider,
     resource.jobKind,
     resource.sourceProviderSlug ?? "provider",
     resource.resourceCategory ?? "category",
@@ -1846,13 +1872,6 @@ function hostedDirtyResourceToDeviceSyncJobInput(
     payload.windowStart,
     payload.windowEnd,
   ].join(":");
-
-  return {
-    kind: resource.jobKind,
-    payload,
-    priority: 60,
-    dedupeKey,
-  };
 }
 
 function readHostedDirtyPayloadString(value: unknown): string | null {
