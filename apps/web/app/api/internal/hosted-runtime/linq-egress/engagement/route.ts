@@ -1,3 +1,4 @@
+import { HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX } from "@murphai/hosted-execution";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
 import {
   requireHostedCloudflareCallbackRequest,
@@ -5,6 +6,7 @@ import {
 import {
   assertHostedAssistantAskCompletionDeliveryAuthorityTx,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
+import { isHostedGroupCurrentSenderPrivateLinqCompletionTx } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
   isHostedLinqProactivityPaused,
@@ -178,7 +180,19 @@ export const POST = withJsonError(async (request: Request) => {
         tx,
       });
 
-    if (!assistantAskAuthority && await isHostedLinqProactivityPaused({
+    // The reviewed validator returns void on success, so its return value is
+    // not an authorization discriminator. It has already validated this key.
+    const requestedAskReply = idempotencyKey?.startsWith(
+      HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
+    ) || await isHostedGroupCurrentSenderPrivateLinqCompletionTx({
+      answeredMailboxItemIds,
+      boundRuntimeMemberId: userId,
+      idempotencyKey,
+      target: finalAuthority.resolvedRoute.target,
+      targetKind: finalAuthority.resolvedRoute.targetKind,
+      tx,
+    });
+    if (!requestedAskReply && await isHostedLinqProactivityPaused({
       answeredMailboxItemIds,
       replyToMessageId,
       service: health.service,

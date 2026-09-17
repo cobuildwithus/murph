@@ -226,8 +226,10 @@ RCS service projections bypass this pause too; an unknown Linq service retains
 the conservative iMessage policy. The signed
 Linq egress callback evaluates the pause after resolving exact route authority;
 scheduled Linq work uses that result to skip before model execution. A queued
-Linq send rechecks before provider dispatch and uses the existing durable
-recipient-inbound block and recovery path. It does not hold the system mailbox
+Linq send rechecks before provider dispatch and uses the existing nonretryable
+blocked-delivery classification with recipient-inbound metadata. That metadata
+does not automatically replay the failed intent; later eligible scheduled
+occurrences use their ordinary delivery path. It does not hold the system mailbox
 or another channel's scheduled work behind a member-wide blocked wake.
 
 The policy keeps `hosted_linq_daily_state` and the existing 28-day window.
@@ -236,7 +238,12 @@ qualification as explicit member engagement, including consumed or
 content-retired metadata within structural retention. Exact accepted Linq
 replies bypass the pause; a group reply can prove its exact ingress when the
 daily projection lags. Authorized initial signup participant delivery and
-validated Assistant Ask completion/fallback retain their own authority.
+validated Assistant Ask completion/fallback retain their own authority. The
+reviewed validator returns void on successful validation; only its fallback
+result is truthy. Private Ask replies must match their canonical mailbox
+notification, member, delivery key and resolved destination before bypassing
+inactivity. Their existing live private-authority checks still own exact reply
+content, permissions, expiry, route validation and safe group fallback.
 Engagement never substitutes for route, consent, or AI-usage authorization.
 
 Deploy the runtime reader for `automation_engagement_paused` delivery blocks
