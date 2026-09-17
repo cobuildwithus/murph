@@ -1,4 +1,3 @@
-import { runtimeMigrationRoutes } from "./route-handlers/runtime-migration.ts";
 import { runtimeResourcePurgeRoutes } from "./route-handlers/runtime-resource-purge.ts";
 import {
   browserVaultRoutes,
@@ -31,7 +30,6 @@ import {
 } from "./route-handlers/environment-realtime.ts";
 
 export const workerInternalRoutes = [
-  ...runtimeMigrationRoutes,
   ...deviceWebhookEnqueueRoutes,
   ...deploySmokeRoutes,
   ...runtimeProcessingRoutes,

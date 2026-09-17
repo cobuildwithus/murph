@@ -27,7 +27,6 @@ describe("Postgres runtime: cold reply and warm typing", () => {
     linqStub = await startHostedLocalLinqStub();
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
-        HOSTED_RUNTIME_POSTGRES_ENABLED: "true",
         HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "60000",

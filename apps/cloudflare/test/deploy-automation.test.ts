@@ -370,10 +370,6 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.durable_objects.bindings).toEqual([
       {
-        class_name: "UserRunnerDurableObject",
-        name: "USER_RUNNER",
-      },
-      {
         class_name: "DatabaseHealthDurableObject",
         name: "DATABASE_HEALTH_MONITOR",
       },
@@ -447,6 +443,7 @@ describe("hosted deploy automation helpers", () => {
       },
       { new_sqlite_classes: ["NextRunnerContainer"], tag: "v8" },
       { new_sqlite_classes: ["SmallRunnerContainer"], tag: "v9" },
+      { deleted_classes: ["UserRunnerDurableObject"], tag: "v10" },
     ]);
     expect(config).toMatchObject({
       triggers: {
@@ -907,7 +904,6 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "600000",
       HOSTED_EXECUTION_STANDBY_MODE: "off",
-      HOSTED_RUNTIME_POSTGRES_ENABLED: "false",
       HOSTED_EXECUTION_STANDBY_TARGET: "2",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     });

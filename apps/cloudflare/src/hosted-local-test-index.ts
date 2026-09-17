@@ -11,9 +11,6 @@ export {
   HostedLocalTestStandbyRunnerContainer as StandbyRunnerContainer,
 } from "./hosted-local-test/standby-runner-container.ts";
 export {
-  HostedLocalTestUserRunnerDurableObject as UserRunnerDurableObject,
-} from "./worker/hosted-local-test-user-runner-durable-object.ts";
-export {
   DatabaseHealthDurableObject,
 } from "./worker/database-health-durable-object.ts";
 export {
