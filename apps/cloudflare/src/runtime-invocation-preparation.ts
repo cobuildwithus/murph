@@ -79,7 +79,6 @@ import {
   type HostedWorkspaceSnapshotPreparedRestore,
 } from "./workspace-snapshot-restore-preparation.ts";
 
-
 import type {
   RuntimeProcessingCommandBudget,
 } from "./user-runner/runtime-command-budget.js";
@@ -91,13 +90,12 @@ import {
 
 import type {
   RunnerWriteFenceToken,
-} from "./user-runner/runner-state-store.js";
+} from "./runtime-invocation-token.js";
 
 import {
   RunnerStoreCache,
   type RunnerUserStores,
 } from "./user-runner/runner-store-cache.js";
-
 
 const HOSTED_INFERENCE_RUNTIME_TARGET_MAX_BODY_BYTES = 16 * 1024;
 const HOSTED_INFERENCE_RUNTIME_TARGET_PATH = "/api/internal/hosted-inference/resolve";
@@ -728,7 +726,6 @@ export function normalizeHostedRunnerStringEnvValue(value: string | undefined): 
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
 }
-
 
 function resolveInvocationAdmission(workspaceRead: HostedWorkspaceReadResponse, runtimeInput: RuntimeInvocationInput, hasCustomInference: boolean) {
     let platformAiUsageAllowed: boolean | null = null;

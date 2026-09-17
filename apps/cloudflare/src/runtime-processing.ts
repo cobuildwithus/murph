@@ -11,12 +11,14 @@ import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
 import { RuntimeInvocationPreparation } from "./runtime-invocation-preparation.ts";
 import { RunnerStoreCache } from "./user-runner/runner-store-cache.ts";
-import type { RuntimeProcessingInput } from "./user-runner/runtime-processing-controller.ts";
+import type { HostedRuntimeEnsureProcessingRequest } from "@murphai/hosted-execution/orchestration-control";
+import type { HostedRuntimeLatencyPhaseBreakdown } from "@murphai/hosted-execution/runtime-control";
+
 import { createRuntimeProcessingCommandBudget, isRuntimeProcessingCommandBudgetTimeout, readRuntimeProcessingCommandStepTimeoutMs, runRuntimeProcessingCommandStep } from "./user-runner/runtime-command-budget.ts";
 import { computeRuntimeProcessingOwnerRecheckAt } from "./user-runner/runtime-processing-responses.ts";
 import { ensureActiveRuntimeProcessing } from "./user-runner/runtime-container-wake.ts";
 import { readRuntimeFenceLivenessBestEffort } from "./user-runner/runtime-fence-liveness.ts";
-import type { RunnerWriteFenceToken } from "./user-runner/runner-state-store.ts";
+import type { RunnerWriteFenceToken } from "./runtime-invocation-token.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import {
   createHostedRunnerContainerNamespaceRouter, HOSTED_RUNNER_REGION, HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
@@ -24,6 +26,13 @@ import {
   resolveHostedStandbyCoordinatorName, readHostedRunnerTargetIdentity, requireHostedRunnerSlotLifecycle,
   type HostedStandbySlotBinding,
 } from "./standby-runner-contract.ts";
+
+type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
+  commandStartedAtEpochMs?: number;
+  commandTimeoutMs?: number;
+  orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
+  userId: string;
+};
 
 type RuntimeProcessingSource = Pick<WorkerEnvironmentSource, "BUNDLES" | "RUNNER_CONTAINER" | "NEXT_RUNNER_CONTAINER" | "STANDBY_RUNNER_CONTAINER" | "STANDBY_COORDINATOR"> & Readonly<Record<string, unknown>>;
 type ProcessingContext = ReturnType<typeof createProcessingContext> & {

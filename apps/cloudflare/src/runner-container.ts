@@ -76,7 +76,7 @@ import type {
 } from "./worker-contracts.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
-import { HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER, parseHostedRuntimeMigrationCheckpointRequest, type HostedRuntimeMigrationCheckpointRequest, type HostedRuntimeMigrationCheckpointStatus } from "@murphai/hosted-execution/runtime-migration";
+
 import { RunnerInvocationReceiptStore, type RunnerInvocationReceipt } from "./runner-invocation-receipt.ts";
 
 const RUNNER_PORT = 8080;
@@ -306,14 +306,8 @@ interface HostedExecutionContainerRunnerInput {
   userId: string;
 }
 
-/** Whether the exact recorded container can take a migration checkpoint now:
- * "absent" when its process is not running, so the attempt it recorded can
- * never complete; "unsupported" when a running process cannot be asked. */
-export type HostedRuntimeMigrationCheckpointTarget = "absent" | "ready" | "unsupported";
-
 export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSlotLifecycle> {
-  supportsMigrationCheckpoint?(input: { userId: string }): Promise<HostedRuntimeMigrationCheckpointTarget>;
-  requestMigrationCheckpoint?(input: HostedRuntimeMigrationCheckpointRequest): Promise<HostedRuntimeMigrationCheckpointStatus>;
+
   abortWorkspaceInvocation?(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -1416,43 +1410,6 @@ export class RunnerContainer extends Container {
         return { kind: "cleanup_unsettled" };
       }
       throw error;
-    }
-  }
-
-  async supportsMigrationCheckpoint(input: { userId: string }): Promise<HostedRuntimeMigrationCheckpointTarget> {
-    this.authorizeBoundUser(input.userId);
-    const platform = this.ctx.container;
-    // A stopped process is reported apart from a running one that cannot
-    // checkpoint: only the first proves the recorded attempt cannot complete.
-    if (!platform || platform.running !== true) return "absent";
-    const signal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
-    try {
-      const response = await platform.getTcpPort(RUNNER_PORT).fetch(`http://container${HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH}`, { method: "GET", signal });
-      await drainRunnerContainerMetadataResponseBody(response, { signal });
-      return response.ok && response.headers.get(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER) === HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL ? "ready" : "unsupported";
-    } catch { return "unsupported"; }
-  }
-
-  async requestMigrationCheckpoint(input: HostedRuntimeMigrationCheckpointRequest): Promise<HostedRuntimeMigrationCheckpointStatus> {
-    const request = parseHostedRuntimeMigrationCheckpointRequest(input);
-    this.authorizeBoundUser(request.userId);
-    const platform = this.ctx.container;
-    // A stopped process cannot be executing this exact attempt, and no
-    // replacement instance resumes it; only a lost reply stays unconfirmed.
-    if (!platform || platform.running !== true) return "absent";
-    const signal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
-    try {
-      // Do not use containerFetch: the SDK may start a stopped container.
-      const response = await platform.getTcpPort(RUNNER_PORT).fetch(`http://container${HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH}`, {
-        method: "POST", body: JSON.stringify(request),
-        headers: { "content-type": "application/json; charset=utf-8" }, signal,
-      });
-      await drainRunnerContainerMetadataResponseBody(response, { signal });
-      const status = response.headers.get(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER);
-      return response.ok && (status === "accepted" || status === "stale" || status === "absent") ? status : "unconfirmed";
-    } catch {
-      // A lost reply must not be interpreted as checkpoint or stop evidence.
-      return "unconfirmed";
     }
   }
 

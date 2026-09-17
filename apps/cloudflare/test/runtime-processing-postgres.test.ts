@@ -7,7 +7,7 @@ import { recordHostedRuntimeOwnerCompletion } from "../src/runtime-owner-complet
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 import type { HostedExecutionContainerStubLike, HostedExecutionContainerInvokeRequest } from "../src/runner-container.ts";
-import type { RunnerWriteFenceToken } from "../src/user-runner/runner-state-store.ts";
+import type { RunnerWriteFenceToken } from "../src/runtime-invocation-token.ts";
 import type { HostedStandbySlotBinding } from "../src/standby-runner-contract.ts";
 import type { RunnerInvocationReceipt } from "../src/runner-invocation-receipt.ts";
 import type { RuntimeInvocationPreparation } from "../src/runtime-invocation-preparation.ts";

@@ -4,12 +4,13 @@ Last verified: 2026-09-04
 
 ## Runtime authority cutover
 
-[Hosted Postgres runtime ownership](hosted-postgres-runtime.md) owns the new
-execution authority, upload recovery, and finite fleet cutover. The Worker flag
-defaults off. The UserRunner coordination descriptions below apply to the legacy
-gate; after activation, Web/Postgres owns those facts while native containers
-and Temporal retain their execution and scheduling responsibilities. Mailbox,
-workspace, assistant, and delivery contracts below continue to apply.
+[Hosted Postgres runtime ownership](hosted-postgres-runtime.md) owns execution
+authority, upload recovery, and completed fleet cutover. The UserRunner class,
+binding, source bridge, and temporary capability have been retired. Web/Postgres
+owns admission and resources; native containers and Temporal retain execution
+and scheduling responsibilities. The current owner document supersedes older
+coordination details below. Mailbox, workspace, assistant, delivery, and historical
+latency-field contracts continue to apply.
 
 ## Decision
 
@@ -43,11 +44,10 @@ The live ownership split is:
   minimal receipt state in Postgres, and may start a separate Vercel Workflow
   with only the Stripe event id to retry reconciliation. Any appended activation
   work wakes the hosted runtime through the same Temporal signal path.
-- `apps/cloudflare` owns per-user runner coordination, lease/alarm/fence
-  coordination, container invocation, encrypted object plumbing, and signed
-  callback transport.
-  UserRunner holds one foreground runtime write fence for the whole hosted
-  invocation and passes the single `runnerIdleTtlMs` runtime policy.
+- `apps/cloudflare` owns container invocation, encrypted object plumbing, and
+  authenticated transport to the Web/Postgres runtime owner. Postgres holds one
+  foreground write fence for the invocation; the Worker passes the single
+  `runnerIdleTtlMs` runtime policy.
   The optional invocation field replaces `idleCheckpointDelayMs`: older runtimes
   ignore the new field and retain their safe legacy default during staged or
   interrupted releases. Updated runtimes ignore the retired field and use the
@@ -2180,7 +2180,7 @@ without reaching the provider, later provider starts retain the canonical path
 but omit the subdivision so earlier group work and pass-shared history scans are
 not misattributed; the scan-nesting statement applies only to an emitted complete
 subdivision.
-The UserRunner Durable Object records optional constructor-start,
+Historical pre-cutover UserRunner telemetry recorded optional constructor-start,
 constructor-finish, and first-`ensureRuntimeProcessingForUser` epoch-millisecond
 facts in the existing in-memory orchestration phase. Production runner
 construction occurs between the two constructor stamps; recording and

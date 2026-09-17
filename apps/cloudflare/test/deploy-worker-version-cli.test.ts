@@ -3,9 +3,6 @@ import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { syntheticHostedWebProtocolAdmission } from "./helpers/hosted-web-protocol";
 
-const migrationMocks = vi.hoisted(() => ({ command: vi.fn() }));
-vi.mock("../src/runtime-migration-client.ts", () => ({ commandHostedRuntimeMigration: migrationMocks.command }));
-
 const webProtocolMocks = vi.hoisted(() => ({ admit: vi.fn() }));
 vi.mock("../scripts/deploy-web-protocol.ts", () => ({ assertHostedWebProtocolAdmission: webProtocolMocks.admit }));
 
@@ -167,7 +164,6 @@ describe("runDeployWorkerVersionCli", () => {
 
   beforeEach(() => {
     fileMocks.readFile.mockReset().mockResolvedValue("{}");
-    migrationMocks.command.mockReset();
     webProtocolMocks.admit.mockReset().mockResolvedValue(undefined);
     releaseMocks.stageHostedRunnerRelease.mockReset();
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
@@ -383,38 +379,6 @@ describe("runDeployWorkerVersionCli", () => {
     expect(fileMocks.writeFile).toHaveBeenCalledWith("/tmp/generated.jsonc", "{}", "utf8");
   });
 
-  it.each([true, false])("rechecks the approved namespace gate after smoke readiness (still finalized: %s)", async stillFinalized => {
-    const namespaceId = "a".repeat(32);
-    fileMocks.readFile.mockResolvedValue(JSON.stringify({
-      migrations: [{ tag: "v10", deleted_classes: ["UserRunnerDurableObject"] }], durable_objects: { bindings: [] },
-    }));
-    releaseMocks.readWorkerVersion.mockResolvedValue({ resources: { bindings: [
-      { type: "durable_object_namespace", class_name: "UserRunnerDurableObject", namespace_id: namespaceId },
-    ] } });
-    migrationMocks.command.mockResolvedValue({ gate: { namespaceId, phase: "postgres", activatedAt: "synthetic", creationClosedAt: "synthetic", inventorySealedAt: "synthetic" } });
-    const smoke = { name: "synthetic-smoke", className: "DeploySmokeRunnerContainer", applicationId: "smoke-app", namespaceId: "smoke-namespace", specification: {} };
-    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
-      retirements: [], configPath, promotionConfigPath: configPath, activeApplicationName: "serving", workerOnly: true, applications: [smoke],
-    }));
-    if (!stillFinalized) {
-      migrationMocks.command.mockResolvedValueOnce({ gate: { namespaceId, phase: "postgres", activatedAt: "synthetic", creationClosedAt: "synthetic", inventorySealedAt: "synthetic" } })
-        .mockResolvedValueOnce({ gate: { namespaceId, phase: "rolling" } });
-      await expect(syntheticDeployment("worker-only", { HOSTED_EXECUTION_RETIRE_USER_RUNNER_NAMESPACE: namespaceId })).rejects.toThrow("finalized Postgres gate");
-      expect(releaseMocks.assertApplicationReady).toHaveBeenCalledOnce();
-      expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
-      return;
-    }
-    await syntheticDeployment("worker-only", { HOSTED_EXECUTION_RETIRE_USER_RUNNER_NAMESPACE: namespaceId });
-    expect(migrationMocks.command).toHaveBeenCalledTimes(2);
-    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
-    expect(wranglerMocks.runWranglerLoggedCaptured.mock.calls[0]![0].slice(0, 3)).toEqual(["deploy", "--containers-rollout", "none"]);
-    expect(releaseMocks.assertApplicationReady.mock.invocationCallOrder[0]).toBeLessThan(wranglerMocks.runWranglerLoggedCaptured.mock.invocationCallOrder[0]!);
-    expect(releaseMocks.admitApplication).toHaveBeenCalledExactlyOnceWith(smoke);
-    expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
-    expect(wranglerMocks.runWranglerLogged.mock.calls.some(([args]) => args[0] === "versions")).toBe(false);
-    expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledOnce();
-  });
-
   it("passes app-root deploy artifact paths to the deploy entrypoint", async () => {
     const repoRoot = path.join("/tmp", "repo");
     const deployRoot = path.join(repoRoot, "apps", "cloudflare");
@@ -519,7 +483,6 @@ describe("runDeployWorkerVersionCli", () => {
       readRollout,
     });
     receiptMocks.readCloudflareContainerApplicationIdentities.mockResolvedValueOnce(before);
-
 
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],

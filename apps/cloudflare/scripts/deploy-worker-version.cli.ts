@@ -1,4 +1,3 @@
-import { readUserRunnerNamespaceRetirement, assertUserRunnerNamespaceRetirementGate } from "./retire-user-runner-namespace.ts";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,12 +80,6 @@ export async function runDeployWorkerVersionCli(
         const current = await readCurrentDeployment(input.workerName, input.configPath);
         const currentVersionId = requireSingleLiveVersion(current);
         const currentVersion = await releaseProvider.readWorkerVersion(input.workerName, currentVersionId);
-        const retiringNamespace = readUserRunnerNamespaceRetirement({
-          config: JSON.parse(await readFile(input.configPath, "utf8")), currentVersion,
-          expectedNamespace: env.HOSTED_EXECUTION_RETIRE_USER_RUNNER_NAMESPACE,
-          retainServingRunner,
-        });
-        if (retiringNamespace) await assertUserRunnerNamespaceRetirementGate(env, retiringNamespace);
         const { releaseSha } = await readRunnerBundleManifest(runnerBundleDir);
         const preparedConfigPath = await prepareHostedContainerDeployImage({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
@@ -118,7 +111,7 @@ export async function runDeployWorkerVersionCli(
           ]);
           await assertLiveVersion(input.workerName, input.configPath, versionId);
         };
-        let stageVersionId = retiringNamespace ? "" : await uploadVersion(staged.configPath);
+        const stageVersionId = await uploadVersion(staged.configPath);
         await assertLiveVersion(input.workerName, input.configPath, currentVersionId);
         // One-time retirement is drain-proven and happens before increasing the
         // serving ceiling. Never refill the retired application on a retry.
@@ -140,21 +133,7 @@ export async function runDeployWorkerVersionCli(
           await releaseProvider.admitApplication(application);
           await releaseProvider.assertApplicationReady({ ...application, listApplications: containerProvider.listApplications });
         }
-        if (retiringNamespace) {
-          // Namespace migrations cannot use versions upload. Publish atomically
-          // after the same smoke-application readiness and live-version checks.
-          await assertUserRunnerNamespaceRetirementGate(env, retiringNamespace);
-          await assertActivationAllowed(currentVersionId);
-          const output = await runWranglerLoggedCaptured([
-            "deploy", "--containers-rollout", "none", "--config", staged.configPath,
-            "--name", input.workerName, "--message", input.deploymentMessage, "--tag", input.versionTag,
-            ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
-          ]);
-          stageVersionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
-          await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
-        } else {
-          await activateVersion(staged.configPath, stageVersionId, currentVersionId);
-        }
+        await activateVersion(staged.configPath, stageVersionId, currentVersionId);
         if (serving) {
           // This endpoint cannot allocate member slots, even if an older Worker
           // receives the request during edge propagation (it returns 404).

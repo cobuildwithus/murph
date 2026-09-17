@@ -33,7 +33,7 @@ import {
 } from "../src/user-runner/runtime-command-budget.ts";
 import {
   runHostedWorkspaceSnapshotRestorePreparationWithinBudget,
-} from "../src/user-runner/runtime-invocation.ts";
+} from "../src/runtime-invocation-preparation.ts";
 import {
   prepareHostedWorkspaceSnapshotRestore,
   type HostedWorkspaceSnapshotPreparedRestore,
