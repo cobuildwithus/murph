@@ -1,6 +1,6 @@
 # Diagnose and repair hosted proxy and execution failures
 
-Status: active
+Status: completed
 Created: 2026-09-17
 Updated: 2026-09-17
 
@@ -53,9 +53,9 @@ Use focused Cloudflare Node and Workers tests, hosted-execution sanitization tes
 
 The initial candidate expands sanitized details to 64 keys, keeps four ordinary plus one terminal diagnostic write in flight, uses request-scoped background retention, reports processing-step failures, preserves ownership on timeout, and returns recognized replica conflicts without a proxy exception. It adds no provider calls, authority bypass, or deadline extension.
 
-Focused proof passed: 381 Cloudflare Node tests across five affected owners, 30 hosted-execution observability tests, 11 real Workers socket tests, both affected typechecks, and complexity review. Workers tests also emit internal disconnect diagnostics in intentionally disrupted socket scenarios; a passing suite does not establish the production vendor-error cause. The existing fresh-checkout Prisma-generation prerequisite was satisfied. Production diagnosis and release remain pending.
+Focused proof passed: 381 Cloudflare Node tests across five affected owners, 30 hosted-execution observability tests, 11 real Workers socket tests, both affected typechecks, and complexity review. Workers tests also emit internal disconnect diagnostics in intentionally disrupted socket scenarios; a passing suite does not establish the production vendor-error cause. The existing fresh-checkout Prisma-generation prerequisite was satisfied. The initial release subsequently passed production smoke and convergence checks.
 
-The first external review passed. Subsequent base integrations preserve accepted socket queue telemetry and runtime wake diagnostics. Timeout retries now populate the existing command-budget or container-timeout reason in the shared request-local context. CI identified one cross-package assertion of the obsolete 32-field truncation; it now proves complete sanitized field retention. Focused integration proof passed: 206 assistant-runtime tests, 96 Cloudflare tests, both affected typechecks, and complexity review. A second review and exact-head CI precede deployment.
+The first external review passed. Subsequent base integrations preserve accepted socket queue telemetry and runtime wake diagnostics. Timeout retries now populate the existing command-budget or container-timeout reason in the shared request-local context. CI identified one cross-package assertion of the obsolete 32-field truncation; it now proves complete sanitized field retention. Focused integration proof passed: 206 assistant-runtime tests, 96 Cloudflare tests, both affected typechecks, and complexity review. The second full-snapshot review and exact-head CI passed before deployment.
 
 
 ## Deployed follow-up
@@ -64,4 +64,16 @@ The initial fix passed both external review rounds, exact-head CI, hosted deploy
 
 The deployed diagnostics exposed another reproducible observation defect: the 64 KiB upstream inspection limit misses valid large acknowledgement and terminal frames. Missing a prewarm terminal also makes later socket reuse appear ambiguous. A synthetic large-frame relay test fails on the deployed code. Align upstream inspection with the existing bounded 6 MiB request inspection budget and reuse that parse for first-frame classification, removing the duplicate JSON parser. No provider payload is retained in diagnostics; forwarding and accounting remain unchanged. Run the composed relay tests, typecheck, complexity review, external review and CI before the follow-up release.
 
-Follow-up focused proof passed: 42 relay tests, 11 real Workers tests, Cloudflare typecheck and complexity review with no hotspots. External review, CI and follow-up deployment remain pending.
+Follow-up focused proof passed: 42 relay tests, 11 real Workers tests, Cloudflare typecheck and complexity review with no hotspots. Full-snapshot external review and exact-head CI passed before merge. The authorized hosted deployment passed smoke and convergence at full traffic, retaining member images and capacity.
+
+## Outcome and verification limits
+
+- Initial release: PR #3539, reviewed head `d71e53f4f56c6c82ce7af41303413fd25dd3dc07`, merged as `2d0a625d265f40fec756d272bf45329b1b6c62a1`.
+- Large-frame follow-up: PR #3542, reviewed head `bc19548b253fef6b7bd6ce5886548f83425c0c32`, merged as `904b8a566de6b6f5b85a1511775a5022dcb985e9`.
+- Both releases completed the protected hosted deployment workflow. The follow-up required one same-head retry of a scheduled-reminder gate that returned a generic runtime error; all assertions and gates remained enabled. The synthetic artifact omitted the underlying exception, recorded in the task-owned Frog entry. A passing retry does not establish that failure's cause.
+- Bounded production observation verified timeout ownership recovery and persisted socket-close metadata. Correlated opaque proxy errors included completed invocations and successful delivery outcomes; raw error counts alone do not prove failed OpenAI requests or authentication failures.
+- The final follow-up window contained accepted processing and completed invocation records, but no fresh large-frame socket or replica-conflict sample. Large-frame correlation and finite replica reasons are proven by focused tests; live validation of those specific cases remains unobserved in that window.
+- Cloudflare's opaque references do not expose platform-internal causes through the available diagnostic API. The release improves evidence and repairs demonstrated application defects; it does not claim to eliminate every platform transport error.
+
+The application fixes, bounded logger expansion, regression proof, review, deployment and post-deploy comparison are complete. No payload logging, additional execution authority, rollback, or new recovery owner was introduced.
+Completed: 2026-09-17

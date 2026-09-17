@@ -1,5 +1,10 @@
 # Murph Agent Docs Index
 
+Hosted proxy diagnostics, timeout ownership preservation, and finite replica
+conflicts are specified in `apps/cloudflare/README.md`; the implementation and
+release record is
+[`2026-09-17-proxy-diagnostics.md`](exec-plans/completed/2026-09-17-proxy-diagnostics.md).
+
 Completed silent-input typing-alert classification is specified in
 `agent-docs/RELIABILITY.md`; the scoped implementation and verification record is
 [`2026-09-17-typing-terminal-classification.md`](exec-plans/completed/2026-09-17-typing-terminal-classification.md).
