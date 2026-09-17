@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient, HostedRuntimeOwner } from "@prisma/client";
 import { buildHostedExecutionRuntimeControlWake } from "@murphai/hosted-execution";
 import type { HostedRuntimeMemberMigrationCommand, HostedRuntimeMemberMigrationIdentity } from "@murphai/hosted-execution/runtime-migration";
 import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
+import { hasActiveHostedCryptoDomainRootsForUserTx } from "../hosted-crypto/domain-root-store";
 import {
   appendHostedMailboxEnvelopeWithPreparedCryptoTx, runWithPreparedHostedMailboxItemAppendCrypto,
   type PreparedHostedMailboxItemAppendCrypto,
@@ -31,6 +32,10 @@ export async function withRuntimeMigrationActivationWake<T>(input: {
   const owner = await input.prisma.hostedRuntimeOwner.findUnique({ where: { userId: input.userId } });
   const member = await input.prisma.hostedMember.findUnique({ where: { id: input.userId }, select: { id: true } });
   if (owner?.migrationPhase === "postgres" || !member) return input.run(null);
+  // A member without complete active crypto roots has no encrypted mailbox:
+  // inbound delivery already refuses it, so the wake can be neither encrypted
+  // nor consumed. Activation proceeds without one instead of failing closed.
+  if (!await hasActiveHostedCryptoDomainRootsForUserTx({ tx: input.prisma, userId: input.userId })) return input.run(null);
   return runWithPreparedHostedMailboxItemAppendCrypto({ prisma: input.prisma, userId: input.userId, append: input.run });
 }
 
@@ -96,7 +101,12 @@ export async function appendRuntimeMigrationWakeTx(input: {
   const member = await tx.hostedMember.findUnique({ where: { id: userId }, select: { id: true } });
   let mailboxItemId: string | null = null;
   if (member) {
-    if (!input.prepared) throw new Error("Member activation wake preparation is missing.");
+    // Missing preparation is a defect for a member that can hold a mailbox, and
+    // the expected state for one whose crypto roots are incomplete.
+    if (!input.prepared) {
+      if (await hasActiveHostedCryptoDomainRootsForUserTx({ tx, userId })) throw new Error("Member activation wake preparation is missing.");
+      return null;
+    }
     const wake = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({ tx, prepared: input.prepared,
       envelope: buildHostedExecutionRuntimeControlWake({ userId, eventId,
         kind: "runtime.maintenance-requested", occurredAt: "2026-09-15T00:00:00.000Z" }) });

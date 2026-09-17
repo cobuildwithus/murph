@@ -275,6 +275,13 @@ active attempt, proves its completion and stop, exports bounded frozen pages,
 and activates the member. Incoming work stays durably queued. Preparation that
 finds old direct-PUT capabilities or unsupported active code leaves legacy live.
 A committed or ambiguous freeze requires same-token roll-forward recovery.
+Activation appends its maintenance wake only for a member that can hold an
+encrypted mailbox. A member row whose hosted crypto domain roots are not all
+active has no ingress envelope to encrypt a wake into and no inbound delivery
+either, so member and empty-source activation both complete without a wake
+instead of failing the command. Missing preparation for a member that does have
+complete roots remains an error.
+
 A dormant source whose stored schema predates the supported versions is
 recovered through an explicit exact-object `recover_object` command before the
 member advance: it runs the same schema initialization ordinary activation
