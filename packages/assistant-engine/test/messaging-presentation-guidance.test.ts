@@ -32,9 +32,7 @@ describe('assistant messaging presentation guidance', () => {
     expect(prompt).toContain(
       'Keep exact or safety-critical text',
     )
-    expect(prompt).toContain(
-      'No decorative/unshared-data group images',
-    )
+    expect(prompt).toContain('No decorative group images.')
     expect(prompt).not.toContain('private-health group images')
   })
 })

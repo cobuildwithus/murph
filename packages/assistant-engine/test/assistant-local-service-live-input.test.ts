@@ -3883,10 +3883,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       ),
     })
     expect(ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION).toContain(
-      'a later human-to-human aside does not cancel it',
-    )
-    expect(ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION).toContain(
-      'Finish without a reply only when no accepted message still merits a text reply',
+      'stays owed unless a later accepted message withdraws or replaces it',
     )
     expect(ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION).not.toContain(
       'the latest accepted message decides',
@@ -5045,7 +5042,7 @@ test.each([
         'Count the push-ups in the first video\n\n'
         + 'Please also check the second video for a rabbit',
       turnContext: expect.stringContaining(
-        'The unsent draft neither answers a request nor keeps Murph\'s floor',
+        ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION,
       ),
     })
     expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
@@ -5143,7 +5140,7 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
           expect(requestOneInput).toContain('First group request')
           expect(requestOneInput).toContain('Second group request')
           expect(requestOneInput).toContain(
-            'The unsent draft neither answers a request',
+            ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION,
           )
         }
         const providerTurnId = `provider-turn-group-composed-${providerRequestOrdinal}`

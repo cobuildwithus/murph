@@ -386,8 +386,8 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       })
       // The base has the same prompt layers/tools; its only authored differences
       // are the requested-graph sentences on generate_image and this group-image line.
-      const graphGuidanceStart = ' Requested graphs: when someone asks for a graph'
-      const currentGroupImageLine = 'No decorative/unshared-data group images.'
+      const graphGuidanceStart = ' Requested graphs, charts, and trend lines:'
+      const currentGroupImageLine = 'No decorative group images.'
       const baseGroupImageLine = 'No decorative/private-health group images.'
       const headInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
       assert.ok(headInstructions.includes(currentGroupImageLine))
@@ -419,7 +419,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         const body = readRecord(JSON.parse(captured.json))
         assert.ok(body)
         delete body.prompt_cache_key
-        assert.equal(captured.json.includes('Requested graphs:'), phase === 'head')
+        assert.equal(captured.json.includes('Requested graphs, charts, and trend lines:'), phase === 'head')
         measurements.push({ phase, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
           registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
           instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, prompt].join('\n\n')),
