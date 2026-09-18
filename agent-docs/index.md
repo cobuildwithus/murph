@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Healthy retention rechecks, observation-only cleanup health, and incomplete
+provider-stream close classification are owned by `apps/cloudflare/README.md`; implementation
+work is tracked in `exec-plans/completed/2026-09-18-retention-proxy-triage.md`.
+
 The completed plain-grant 90-date group-sharing follow-up is recorded in
 [`2026-09-18-group-history-plain-grants.md`](exec-plans/completed/2026-09-18-group-history-plain-grants.md).
 
