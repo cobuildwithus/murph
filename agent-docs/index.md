@@ -41,6 +41,9 @@ preflight admission budget are owned by `agent-docs/RELIABILITY.md`; the
 implementation record is
 [`2026-09-15-device-sweep-capacity.md`](exec-plans/completed/2026-09-15-device-sweep-capacity.md).
 
+The completed Temporal release fixture corrections and recovery verification are recorded in
+[`2026-09-17-temporal-release-recovery.md`](exec-plans/completed/2026-09-17-temporal-release-recovery.md).
+
 Empty-source startup batching and Postgres processing summaries are owned by
 `agent-docs/references/hosted-postgres-runtime.md`; warm-wake subdivisions are
 owned by `agent-docs/references/hosted-runtime-protocol.md`. Implementation proof:
