@@ -641,6 +641,26 @@ Return only those aggregates. Never return `subject_key` values or raw JSON.
 If natural traffic produces no recurrence, report zero events; do not generate
 production traffic to exercise the telemetry.
 
+### Temporary outbound crypto pending-join diagnostic
+
+Question: do Worker requests canceled as hung during outbound crypto resolution
+join another request's pending load? `runner-outbound/shared.ts` synchronously
+emits `Hosted runner outbound crypto context joined pending load.` through the
+existing structured logger (`component: runner`, `phase: wake.running`) only
+immediately before awaiting a valid existing pending promise. Details contain
+only `domain` (`runtime` or `ingress`) and integer `pendingAgeMs` clamped to
+0..30000, derived from the entry's expiry and existing TTL. Volume is at most
+one event per joining invocation, with no leader or resolved-cache-hit events.
+No keys, identifiers, URLs, envelopes, payloads, raw errors, or key material are
+logged; no network I/O, state, or crypto/cache behavior is added or changed.
+The runtime owner decides removal after one seven-day observation window, or
+earlier after sufficient incident capture. Query natural traffic in that
+window: correlate this exact event with existing artifact crypto-stage logs
+and platform hung outcomes through native Worker request IDs **in memory only**;
+return only aggregate counts by join-event presence, domain, last observed
+crypto stage, and hung outcome. Never persist or export IDs or raw records.
+Correlation is not proof of causation; absence in lossy logs is inconclusive.
+
 ### Foreground checkpoint lease drift diagnostics
 
 The existing `runner.error` / `foreground_mailbox_import_failed` row adds only
