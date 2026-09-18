@@ -2538,8 +2538,19 @@ to apply after cutover.
   item retention/expiry semantics and clean-handling lane high-water to catch
   error-code-independent stalls. Conversation rows with a non-null
   `consumed_at` are terminal and are excluded before both head selection and the
-  lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. A system
-  head ages from its accepted mailbox creation time.
+  lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. An exact
+  conversation head with accepted delivery or committed terminal reply/no-reply
+  evidence may wait through its recorded checkpoint-publication deadline. The
+  completion must be at or after admission (or usage-resume origin) and no later
+  than now; absent, malformed, or expired evidence retains the original age.
+  The existing signed latency callback records successful outbox delivery against
+  at most 64 exact answered mailbox IDs per request, scoped to member, channel,
+  and runtime lease. Email staging now uses the same trace owner as Linq and
+  Telegram. Delivery telemetry is detached, uses the original sent timestamp,
+  and shares the finite three-attempt diagnostic retry budget. Idle deadline
+  updates cover all three channels and preserve stale-lease rejection. These
+  facts never acknowledge mailbox consumption; the checkpoint retains ownership.
+  A system head ages from its accepted mailbox creation time.
   Lane high-water reads select only sequence and update time; they never fetch
   inline or externalized mailbox ciphertext.
   Import and unrelated
@@ -2632,8 +2643,12 @@ to apply after cutover.
   when its canonical device wake is at least 15 minutes overdue; planned idle
   time does not consume that allowance. Recent observations bypass that wake
   grace for stall detection only while the latest connection pass lacks its
-  own accepted checkpoint. An unchanged checkpoint does not count as import
-  progress; once accepted, the canonical wake controls stall eligibility.
+  own accepted checkpoint. Proven unsaved continuation progress receives a
+  15-minute publication allowance from the earliest outstanding productive pass
+  since saved progress. Further passes and restarts cannot refresh that allowance;
+  unrelated connections and unkeyed attempts cannot grant it. An unchanged
+  checkpoint does not count as import progress; once accepted, the canonical wake
+  controls stall eligibility.
   Cycling detection uses pending observations and backlog detection uses runnable
   observations within the same 15-minute continuity window independently of the
   wake, so eligibility cannot

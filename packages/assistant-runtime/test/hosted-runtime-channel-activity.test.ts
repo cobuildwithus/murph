@@ -51,6 +51,9 @@ import {
   recordHostedAssistantMilestonesBestEffort,
 } from "../src/hosted-runtime/assistant-latency-trace.ts";
 import {
+  recordHostedDeliveryCommittedBestEffort,
+} from "../src/hosted-runtime/delivery-latency-trace.ts";
+import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
   createHostedAssistantChannelTypingDependencies,
@@ -235,6 +238,36 @@ test("hosted Linq typing records requests and admitted-input acceptance without 
     milestone: "linq_typing_accepted",
   }) }));
   await handle?.stop();
+});
+
+test("delivered mailbox telemetry is detached, bounded, and retries without moving its completion time", async () => {
+  vi.useFakeTimers();
+  const record = vi.fn()
+    .mockRejectedValueOnce(new Error("Synthetic old callback consumer"))
+    .mockResolvedValueOnce({ matchedCount: 0, recorded: false, unmatchedCount: 64 })
+    .mockResolvedValue({ matchedCount: 64, recorded: true, unmatchedCount: 0 });
+  try {
+    const ids = Array.from({ length: 100 }, (_, index) => `mailbox_${index}`);
+    recordHostedDeliveryCommittedBestEffort({
+      context: { latencyTracePort: { record }, runtimeAttemptId: "attempt_delivery" },
+      intent: {
+        answeredMailboxItemIds: [...ids, ids[0]!],
+        status: "sent", sentAt: "2026-04-26T00:01:00.000Z",
+        delivery: { channel: "email", idempotencyKey: null, messageLength: 0,
+          providerMessageId: "message_email", providerThreadId: null,
+          sentAt: "2026-04-26T00:01:00.000Z", target: "member@example.test", targetKind: "explicit" },
+      },
+    });
+    expect(record).not.toHaveBeenCalled();
+    await vi.runAllTimersAsync();
+    expect(record).toHaveBeenCalledTimes(4);
+    expect(record.mock.calls[0]).toEqual(record.mock.calls[2]);
+    expect(record.mock.calls[2]?.[0].event.mailboxItemIds).toEqual(ids.slice(0, 64));
+    expect(record.mock.calls[3]?.[0].event.mailboxItemIds).toEqual(ids.slice(64));
+    expect(record.mock.calls[3]?.[0].event.at).toBe("2026-04-26T00:01:00.000Z");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("hosted assistant milestones retry when staging has not claimed the runtime attempt yet", async () => {

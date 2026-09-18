@@ -4275,17 +4275,17 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     const wakeTimers: ReturnType<typeof setTimeout>[] = [];
     let wakeTimersStarted = false;
     let checkpointExpectationCountAtWakeStart = 0;
-    const countCheckpointExpectations = () =>
-      latencyTraceRequests.filter((request) =>
-        request.event.type === "runtime_milestone"
-        && request.event.milestone === "checkpoint_publication_expected_by"
-      ).length;
+    const readCheckpointExpectations = () =>
+      latencyTraceRequests.map(({ event }) => event).filter((event) =>
+        event.type === "runtime_milestone"
+        && event.milestone === "checkpoint_publication_expected_by"
+      );
     const startNoProgressWakes = () => {
       if (wakeTimersStarted) {
         return;
       }
       wakeTimersStarted = true;
-      checkpointExpectationCountAtWakeStart = countCheckpointExpectations();
+      checkpointExpectationCountAtWakeStart = readCheckpointExpectations().length;
       for (const delayMs of [2, 8, 14, 20]) {
         wakeTimers.push(setTimeout(() => runtimeWakeSignal.notify(), delayMs));
       }
@@ -4347,11 +4347,14 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         },
       );
 
-      assert.equal(
-        countCheckpointExpectations() - checkpointExpectationCountAtWakeStart,
-        1,
-        "dirty import publishes one deadline and empty wake probes publish none",
+      const checkpointExpectations = readCheckpointExpectations()
+        .slice(checkpointExpectationCountAtWakeStart);
+      assert.deepEqual(
+        checkpointExpectations.map((event) => event.source).sort(),
+        ["email", "linq", "telegram"],
+        "dirty import publishes once per channel and empty wake probes publish none",
       );
+      assert.equal(new Set(checkpointExpectations.map((event) => event.at)).size, 1);
       assert.ok(fetchRequests.length > 1);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_no_progress_wake_001",

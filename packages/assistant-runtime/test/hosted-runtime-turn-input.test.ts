@@ -2275,8 +2275,8 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
 
   it("groups supported trace sources without exposing or suppressing mixed input", async () => {
     const vaultRoot = await createTempVault();
-    const [linq, unsupported, telegram] = await Promise.all(
-      (["linq", "email", "telegram"] as const).map((source) =>
+    const [linq, email, telegram, unsupported] = await Promise.all(
+      (["linq", "email", "telegram", "unsupported"] as const).map((source) =>
         upsertAssistantInputEvent({
           vault: vaultRoot,
           event: createAssistantInputEvent({
@@ -2291,11 +2291,12 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
     );
 
     const acceptedContext = await resolveHostedCurrentInputIdForAcceptedInputs({
-      assistantInputIds: [unsupported.inputId, telegram.inputId, linq.inputId],
+      assistantInputIds: [unsupported.inputId, email.inputId, telegram.inputId, linq.inputId],
       vaultRoot,
     });
 
     expect(acceptedContext.latencyTraceInputGroups).toEqual([
+      { assistantInputIds: [email.inputId], source: "email" },
       { assistantInputIds: [telegram.inputId], source: "telegram" },
       { assistantInputIds: [linq.inputId], source: "linq" },
     ]);
