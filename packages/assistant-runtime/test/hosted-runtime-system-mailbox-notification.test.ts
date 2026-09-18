@@ -4607,15 +4607,15 @@ describe("hosted system mailbox notification execution context", () => {
           });
           expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(checkpoint);
         }
-        // An early invocation may retire the superseded schedule, but cannot
-        // execute the deferred owner or its dirty hints.
+        // An early invocation retires transferred hints without executing the
+        // deferred owner or changing its provider retry.
         await prepareHostedSystemMailboxItemForCheckpoint({
           allowedRouteActions: ["run-device-sync-wake"], now: () => admittedAt,
           runtime, runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
         });
         expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
         expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
-          .toEqual(checkpoint.pending.filter((item) => item.itemId !== "mailbox_synthetic_drain_1"));
+          .toEqual([checkpoint.pending[0]]);
         // Fresh accepted work can admit the retained owner while the older
         // jobs keep their exact retry deadline and future source metadata.
         const freshWake = buildHostedExecutionDeviceSyncWake({
@@ -4838,6 +4838,10 @@ describe("hosted system mailbox notification execution context", () => {
           ? { ...item, deviceSyncContinuationOwner: true, attemptCount: 1, nextAttemptAt: retryAt }
           : item),
       }));
+      await writeHostedMailboxImportState({
+        state: { ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: "2" } },
+        vaultRoot: workspace.vaultRoot,
+      });
       for (let day = 0; day < 3; day += 1) {
         const admittedAt = day === 0 ? cadenceAt : retryAt;
         retryAt = new Date(Date.parse(admittedAt) + 86_400_000).toISOString();
@@ -4967,12 +4971,14 @@ describe("hosted system mailbox notification execution context", () => {
         assert.equal(prepared?.status, "processed");
         assert.equal(prepared.itemId, "mailbox_synthetic_boundary_0");
       } else {
-        assert.equal(prepared, null);
+        expect(prepared?.itemId ?? null).toBe(boundary === "other_connection"
+          ? "mailbox_synthetic_boundary_2" : null);
         expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
-        expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(before);
+        expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+          .toEqual(boundary === "other_connection" ? before.pending.slice(0, 2) : before.pending);
       }
       expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending.map((item) => item.itemId))
-        .toEqual(boundary === "other_connection" && !deferred
+        .toEqual(boundary === "other_connection"
           ? ["mailbox_synthetic_boundary_0", "mailbox_synthetic_boundary_1"]
           : ["mailbox_synthetic_boundary_0", "mailbox_synthetic_boundary_1", "mailbox_synthetic_boundary_2"]);
     } finally {

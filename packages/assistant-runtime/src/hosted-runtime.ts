@@ -239,7 +239,7 @@ import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedSystemMailboxItemAfterCheckpoint,
   retainHostedSystemMailboxItemUntilDeliveryWake,
-  retireHostedCoveredDeviceSchedulesAfterImport,
+  retireHostedCoveredDeviceHintsAfterImport,
   resolveHostedBrowserVaultRefreshAttempt,
   resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxWakeCandidates,
@@ -3318,7 +3318,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             signal: backgroundWorkSignal,
             workspace: checkpointRequestBuilder.latestWorkspace() ?? activeWorkspace,
           });
-          await retireHostedCoveredDeviceSchedulesAfterImport({
+          await retireHostedCoveredDeviceHintsAfterImport({
             now: new Date().toISOString(), vaultRoot: restored.vaultRoot,
           });
           latestMailboxImport = tail.latestMailboxImport;

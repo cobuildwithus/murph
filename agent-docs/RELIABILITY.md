@@ -1822,7 +1822,14 @@ to apply after cutover.
   including payload-only backoff and a full retained queue that cannot yet admit
   distinct dirty work. Both wake projection and mailbox claim require a covered
   hint's persisted retry time to be due before it can admit a future retained
-  owner. Fresh hints remain immediately eligible; deferred hints and exact
+  owner. Fresh hints remain immediately eligible. A pristine plain webhook
+  covered by a validated continuation with the exact same future retry is
+  already transferred: post-checkpoint retention and idle/import retirement
+  remove that redundant hint atomically without executing device work or
+  changing the owner's jobs, deadline, or canonical dirty-state obligation.
+  This also repairs restored snapshots containing deferred duplicates.
+  Different deadlines, fresh/due hints, authority or ordering barriers, and
+  invalid continuation projections remain independent pending work. Exact
   provider retry jobs remain intact until their existing deadline.
   The retained wake's job hints suppress provider scheduling,
   and each local job keeps its own `availableAt`, so these bounded passes neither

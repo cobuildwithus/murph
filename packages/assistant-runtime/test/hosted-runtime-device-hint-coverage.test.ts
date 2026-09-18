@@ -55,11 +55,24 @@ function manual(id = "manual-refresh", seq = "2"): HostedSystemMailboxPendingIte
 
 function covered(pending: readonly HostedSystemMailboxPendingItem[]) {
   return [...projectHostedDeviceHintCoverage({ now: NOW, pending })].map(([id, value]) => ({
-    id, hints: [...value.coveredHintIds], schedules: [...value.coveredScheduleIds],
+    id, hints: [...value.coveredHintIds], retired: [...value.retirableHintIds],
   }));
 }
 
 describe("retained device hint coverage", () => {
+  it.each([null, NOW, LATER, "2026-04-28T11:00:00.000Z", "2026-04-28T13:00:00.000Z", "invalid"])(
+    "retires only a plain webhook deferred to the same future retry (%s)", (retryAt) => {
+      const retained = owner();
+      const dirty = { ...hint("dirty", "2"), nextAttemptAt: retryAt };
+      expect(covered([retained, dirty])).toEqual([
+        { id: "owner", hints: ["dirty"], retired: retryAt === LATER ? ["dirty"] : [] },
+      ]);
+      expect(retained.nextAttemptAt).toBe(LATER);
+      expect([...projectHostedDeviceHintCoverage({ now: LATER, pending: [retained, dirty] })
+        .get(retained.itemId)!.retirableHintIds]).toEqual([]);
+    },
+  );
+
   it.each([null, NOW, LATER])("honors a covered dirty hint's retry time: %s", (retryAt) => {
     const retained = owner();
     const dirty: HostedSystemMailboxPendingItem = { ...hint("dirty", "2"), nextAttemptAt: retryAt };
@@ -164,7 +177,7 @@ describe("retained device hint coverage", () => {
     const pending = [owner(), connected(), connected("another-source", "3"), hint("dirty", "4")];
     const coverage = projectHostedDeviceHintCoverage({ now: NOW, pending }).get("owner");
     expect([...coverage!.coveredHintIds]).toEqual(["source-connected", "another-source", "dirty"]);
-    expect([...coverage!.coveredScheduleIds]).toEqual([]);
+    expect([...coverage!.retirableHintIds]).toEqual([]);
     expect(coverage?.admittedWake?.hint?.jobs?.map((job) => job.dedupeKey))
       .toEqual(["synthetic_retained_job", "synthetic-source-connected", "synthetic-another-source"]);
   });
@@ -173,7 +186,7 @@ describe("retained device hint coverage", () => {
     const pending = [owner(), manual(), connected("new-source", "3"), manual("refresh-again", "4"), hint("dirty", "5")];
     const coverage = projectHostedDeviceHintCoverage({ now: NOW, pending }).get("owner");
     expect([...coverage!.coveredHintIds]).toEqual(["manual-refresh", "new-source", "refresh-again", "dirty"]);
-    expect([...coverage!.coveredScheduleIds]).toEqual([]);
+    expect([...coverage!.retirableHintIds]).toEqual([]);
     expect(coverage?.admittedWake?.hint?.reason).toBe("manual_reconcile_pending");
     expect(coverage?.admittedWake?.hint?.jobs?.map((job) => job.dedupeKey))
       .toEqual(["synthetic_retained_job", "synthetic-new-source"]);
@@ -256,7 +269,7 @@ describe("retained device hint coverage", () => {
       const dirty = hint("dirty", "2");
       dirty.wake.hint = reason === undefined ? {} : { reason };
       expect(covered([owner(), dirty]))
-        .toEqual([{ id: "owner", hints: ["dirty"], schedules: [] }]);
+        .toEqual([{ id: "owner", hints: ["dirty"], retired: [] }]);
     },
   );
 
@@ -267,8 +280,8 @@ describe("retained device hint coverage", () => {
       hint("a-dirty", "5", "connection_a"), schedule("b-schedule", "6", "connection_b"),
       schedule("a-after-dirty", "7", "connection_a"), hint("b-dirty", "8", "connection_b"),
     ])).toEqual([
-      { id: "a", hints: ["a-schedule", "a-dirty", "a-after-dirty"], schedules: ["a-schedule"] },
-      { id: "b", hints: ["b-schedule", "b-dirty"], schedules: ["b-schedule"] },
+      { id: "a", hints: ["a-schedule", "a-dirty", "a-after-dirty"], retired: ["a-schedule"] },
+      { id: "b", hints: ["b-schedule", "b-dirty"], retired: ["b-schedule"] },
     ]);
   });
 
@@ -296,7 +309,7 @@ describe("retained device hint coverage", () => {
     if (boundary === "unknown-reason") candidate.wake.hint = { reason: "synthetic_unknown" };
     if (boundary === "connected") candidate.wake.reason = "connected";
     expect(covered([owner(), schedule("before", "2"), candidate, hint("after", "4")]))
-      .toEqual([{ id: "owner", hints: ["before"], schedules: ["before"] }]);
+      .toEqual([{ id: "owner", hints: ["before"], retired: ["before"] }]);
   });
 
   it.each(["unmarked", "recording", "unbound", "missing-sequence", "dedupe"])(
@@ -314,8 +327,8 @@ describe("retained device hint coverage", () => {
   it("ends the prior owner's coverage at another owner on the same connection", () => {
     expect(covered([owner(), schedule("first", "2"), owner("second", "3"), schedule("last", "4")]))
       .toEqual([
-        { id: "owner", hints: ["first"], schedules: ["first"] },
-        { id: "second", hints: ["last"], schedules: ["last"] },
+        { id: "owner", hints: ["first"], retired: ["first"] },
+        { id: "second", hints: ["last"], retired: ["last"] },
       ]);
   });
 
@@ -326,7 +339,7 @@ describe("retained device hint coverage", () => {
     const pending = [retained, deferred];
     const before = structuredClone(pending);
     const first = covered(pending);
-    expect(first).toEqual([{ id: "owner", hints: ["dirty"], schedules: [] }]);
+    expect(first).toEqual([{ id: "owner", hints: ["dirty"], retired: ["dirty"] }]);
     expect(covered(pending)).toEqual(first);
     expect(pending).toEqual(before);
     expect(pending[0]?.wake).toBe(retainedWake);

@@ -1136,6 +1136,13 @@ limits, and local proof distinctions are owned by
   boundary are observational. Private Murph Cloud owns its dedicated
   `Public Murph Integration` matrix leg and includes that leg in the Temporal
   orchestration aggregator.
+- Deferred webhook transfer is proved by the assistant-runtime device-hint
+  coverage, empty-mailbox preparation, and notification suites. They preserve
+  exact retry deadlines, fresh admission, authority filters, acknowledgement
+  retries, and invalid-owner barriers. The composed
+  `hosted-runtime-workspace-entrypoint-system-mailbox.test.ts` restore scenarios
+  prove durable handling before the retry, zero premature provider work, and
+  one historical resource import when its original deadline arrives.
 - `packages/assistant-runtime/test/hosted-device-sync-runtime.test.ts` exercises
   the complete canonical Junction smoke replay through the real provider,
   importer, SQLite service and post-checkpoint mailbox acknowledgment dispatcher.
