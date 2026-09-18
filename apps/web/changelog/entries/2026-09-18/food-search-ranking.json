@@ -5,13 +5,15 @@
     "id": "food-search-ranking",
     "kind": "improvement",
     "priority": 3,
-    "title": "Less overhead in food search",
-    "summary": "Food searches do less work to prepare each page of results.",
-    "details": "Matching rules, typo recovery, result order, and returned label data stay the same. Delivery numbering applies only to the requested page.",
+    "title": "Food search improvements",
+    "summary": "Food search is more efficient, with the same matches and result order.",
+    "details": "Typo handling and the food information shown with each result stay the same.",
     "relevanceTags": [
       "food",
       "search"
     ],
-    "sourcePullRequests": []
+    "sourcePullRequests": [
+      3564
+    ]
   }
 }
