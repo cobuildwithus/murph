@@ -32,6 +32,17 @@ additional deploy-smoke slot. The unused member application stays at zero.
 The scaffold declares the budget on `RunnerContainer`; staging moves that budget
 to `NextRunnerContainer` when the live release selects that namespace.
 
+### Web-supplied runtime admission
+
+Roll out this request change consumer first. Merge and deploy the Worker reader
+that accepts the optional `admission` on Web OIDC ensure-processing calls, then
+verify that serving Workers accept it before merging the separate Web producer
+PR. Older Web and signed Temporal calls omit the field and remain supported.
+The live Web protocol-admission probe below does not prove this reverse-direction
+contract. For rollback, restore and converge Web without the field before
+restoring an older Worker reader. Warm wakes retain exact native ownership
+checks; cold claims and recovery retain canonical Web mutations.
+
 ### Live Web protocol admission
 
 `deploy-worker-version.cli.ts` admits the **served** `HOSTED_WEB_BASE_URL` before

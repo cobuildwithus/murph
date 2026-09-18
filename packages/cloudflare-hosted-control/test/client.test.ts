@@ -375,6 +375,26 @@ describe("createCloudflareHostedControlClient", () => {
     });
   });
 
+  it("serializes canonical Web admission in the authenticated ensure request", async () => {
+    const admission = {
+      cutover: "postgres" as const, status: "existing" as const,
+      owner: {
+        userId: "test-user", attemptId: "attempt-test", generation: "1", phase: "active" as const,
+        processingMode: "default" as const, allocationId: "allocation-test",
+        runnerContainerName: "runner-test", workspaceVersion: "0",
+        customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        startedAt: "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null,
+        failureCount: 0, lastErrorCode: null,
+      },
+    };
+    const fetchImpl = vi.fn(async () => createJsonResponse({ kind: "retry_later", retryAt: "2026-01-01T00:00:01.000Z" }));
+    const client = createCloudflareHostedControlClient({ baseUrl: "https://runner.example.test", fetchImpl, getBearerToken: async () => "token-test" });
+    await client.ensureRuntimeProcessing({ admission, orchestrationAttemptId: "orchestration-test", userId: "test-user" });
+    expect(fetchImpl).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      body: JSON.stringify({ orchestrationAttemptId: "orchestration-test", admission }),
+    }));
+  });
+
   it("posts runtime health-data consent reconciliation and validates the bound result", async () => {
     const fetchImpl = vi.fn(async () => createJsonResponse({
       activeInvocationPreempted: true,
