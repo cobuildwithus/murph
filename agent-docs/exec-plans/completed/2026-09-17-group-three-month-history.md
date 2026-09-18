@@ -14,7 +14,8 @@ The current vault-share producer limits daily/night scopes to seven dates; share
 - [x] Parent inspects patch, consent transition and complete cross-owner bounds.
 - [x] Focused producer, scope/parser, consent, read and maximum-payload tests; affected typechecks.
 - [x] Product UX proof for new approvals, existing7 approvals, expanded approvals, sparse history, timezone edges, revoke/regrant and existing short-window consumers.
-- [ ] Changelog, candidate review, draft PR, final ReviewGPT and exact-head CI.
+- [x] Changelog, candidate review, draft PR and final ReviewGPT.
+- Final documentation-only closeout commit retains required exact-head CI as the PR handoff gate.
 
 ## State and failure boundaries
 
@@ -46,3 +47,8 @@ Use existing grant and snapshot owners. No historical store, broad provider impo
 - CI surfaced stale seven-day scope/count/schema expectations and an unregistered tooling regression test. Focused corrections preserve the explicit new bounds. A repeat real assistant journey exposed an unnecessary expansion-permission question despite existing authority; deterministic guidance checks and the corrected real journey now pass. Final input bytes are direct 158826 (unchanged), group 151728 (+5328, +3.64%); tokenizer remains unavailable. Final external review is in progress on the first pushed candidate.
 
 - Round 1 external review passed on `2e5e0ebb68fa3676587a54cc49e442122fa52a88`: full source snapshot, attached and accepted, exact response capture, gpt-6-pro selection and backend model attestation match. Review elapsed approximately 12 minutes, above the 180-second minimum. Inspection covered authority, date/source completeness, paging, bounds and legacy consumers with an explicit deployment limitation; accepted as substantive. No findings. Apollo staging failed before submission; Eragon override is retained for the next full sensitive review. The hosted consent preview is Ready and authenticated retrieval confirms both 90-day copy and existing-permission expansion state.
+
+- Round 2 passed on `f9b542114d2677bba465b5c7c4b4fd72346af6ea`, with full sensitive snapshot and all 50 changed-file hashes verified by the reviewer. First/previous ancestry and current context anchor matched the packaged metadata. Exact-turn capture and requested/backend gpt-6-pro evidence matched; elapsed review exceeded ten minutes. No findings. Parent final review found no further changes needed; remaining deployment order is operational, not a local deployment claim. Closing the implementation plan changes only historical documentation and its index; the final authored head still requires CI before handoff.
+Status: completed
+Updated: 2026-09-18
+Completed: 2026-09-18
