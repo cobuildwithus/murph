@@ -146,10 +146,12 @@ import {
 } from "./provider-fetch.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
-  recordHostedDeliveryCommittedBestEffort,
-  type HostedDeliveryTraceContext,
   type HostedAssistantMilestoneTraceContext,
 } from "./assistant-latency-trace.ts";
+import {
+  recordHostedDeliveryCommittedBestEffort,
+  type HostedDeliveryTraceContext,
+} from "./delivery-latency-trace.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 // Bounds due approval reconciliation so a backlog cannot stall delivery with

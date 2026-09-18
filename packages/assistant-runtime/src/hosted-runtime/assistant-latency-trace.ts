@@ -1,19 +1,13 @@
-import {
-  HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
-  readHostedIngressLatencySource,
-  type HostedIngressLatencySource,
-  type HostedRuntimeAssistantMilestone,
-  type HostedRuntimeLatencyTraceRequest,
+import type {
+  HostedIngressLatencySource,
+  HostedRuntimeAssistantMilestone,
+  HostedRuntimeLatencyTraceRequest,
 } from "@murphai/hosted-execution/runtime-control";
 
-import type { AssistantOutboxIntent } from "@murphai/operator-config/assistant-cli-contracts";
-
 import type { HostedRuntimePlatform } from "./platform.ts";
-import {
-  resolveHostedRuntimeCheckpointPublicationExpectedByMs,
-  resolveHostedRuntimeIdleCheckpointDelayMs,
-} from "./checkpoint-publication.ts";
 
+// Keep completion/deadline dependencies in the delivery-only module so shared
+// channel tracing does not add chunks to the runner boot graph.
 const HOSTED_ASSISTANT_MILESTONE_TRACE_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 
 export interface HostedAssistantMilestoneTraceContext {
@@ -75,52 +69,7 @@ export function recordHostedAssistantMilestonesBestEffort(input: {
   });
 }
 
-export interface HostedDeliveryTraceContext {
-  latencyTracePort: HostedRuntimePlatform["latencyTracePort"];
-  runtimeAttemptId: string;
-  runnerIdleTtlMs?: number | null;
-  commitTimeoutMs?: number | null;
-}
-
-export function recordHostedDeliveryCommittedBestEffort(input: {
-  context?: HostedDeliveryTraceContext | null;
-  intent: Pick<AssistantOutboxIntent, "answeredMailboxItemIds" | "delivery" | "status" | "sentAt">;
-}): void {
-  const context = input.context;
-  const port = context?.latencyTracePort;
-  if (!context || !port || input.intent.status !== "sent" || !input.intent.delivery) return;
-  const source = readHostedIngressLatencySource(input.intent.delivery.channel);
-  const sentAt = input.intent.sentAt;
-  if (!source || !sentAt || !Number.isFinite(Date.parse(sentAt))) return;
-  const ids = [...new Set(input.intent.answeredMailboxItemIds)];
-  const checkpointPublicationExpectedBy = new Date(
-    resolveHostedRuntimeCheckpointPublicationExpectedByMs({
-      checkpointStartByMs: Date.parse(sentAt)
-        + resolveHostedRuntimeIdleCheckpointDelayMs(context.runnerIdleTtlMs),
-      commitTimeoutMs: context.commitTimeoutMs ?? null,
-    }),
-  ).toISOString();
-  queueMicrotask(() => {
-    void (async () => {
-      for (let offset = 0; offset < ids.length; offset += HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
-        await recordLatencyTraceWithRetries(port, {
-          event: {
-            type: "delivery_committed",
-            mailboxItemIds: ids.slice(offset, offset + HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS),
-            at: sentAt,
-            checkpointPublicationExpectedBy,
-            runtimeAttemptId: context.runtimeAttemptId,
-            source,
-          },
-        });
-      }
-    })().catch(() => {
-      // Completion telemetry must never change delivery or checkpoint ownership.
-    });
-  });
-}
-
-async function recordLatencyTraceWithRetries(
+export async function recordLatencyTraceWithRetries(
   port: NonNullable<HostedRuntimePlatform["latencyTracePort"]>,
   request: HostedRuntimeLatencyTraceRequest,
 ): Promise<boolean> {

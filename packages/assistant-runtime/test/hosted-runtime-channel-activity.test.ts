@@ -49,8 +49,10 @@ import {
 } from "../src/hosted-runtime/callbacks.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
-  recordHostedDeliveryCommittedBestEffort,
 } from "../src/hosted-runtime/assistant-latency-trace.ts";
+import {
+  recordHostedDeliveryCommittedBestEffort,
+} from "../src/hosted-runtime/delivery-latency-trace.ts";
 import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
