@@ -2,6 +2,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
   createSnapshotFixtureRef,
+  createVaultSnapshotBundle,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -136,6 +137,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         sleepStartAt: "2026-04-26T22:04:00.000Z",
       }]);
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Restore canonical timezone metadata instead of a null/empty workspace.
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
 
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -172,6 +175,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             };
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort: createMailboxPort({
               events,
               fetchRequests,
@@ -244,7 +248,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
                 });
               },
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           runtimeWakeSignal,
