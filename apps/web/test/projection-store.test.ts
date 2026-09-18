@@ -895,9 +895,9 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         }),
       )
     );
-    expect(rows).toHaveLength(2_450);
+    expect(rows).toHaveLength(4_850);
     expect(rows.filter((row) => row.projectionSnapshotCiphertext !== null))
-      .toHaveLength(2_449);
+      .toHaveLength(4_849);
     const findMany = vi.fn().mockResolvedValue(rows);
     const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
     const supportedProjectionScopeKeys = new Set(

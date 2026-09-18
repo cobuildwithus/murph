@@ -9773,7 +9773,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                 projections: [{ dataStatus: 'available', grantStatus: 'granted', grantedAt: '2026-06-01T12:00:00.000Z',
                   projectionScope: scope, projectionScopeKey: key,
                   records: dates.map((date) => ({ recordKey: date, occurredAt: `${date}T00:00:00.000Z`,
-                    data: { date, metricKey: 'steps', value: first ? 4000 : 8000, unit: 'steps' }, source: { label: 'Garmin', source: 'garmin' as const } })),
+                    data: { date, metricKey: 'steps', value: first ? 4000 : 8000, unit: 'count' }, source: { label: 'Garmin', source: 'garmin' as const } })),
                 }],
               }],
             } satisfies AssistantHostedGroupSharedReadResponse

@@ -58,6 +58,8 @@ import {
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+  HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
 } from "@murphai/hosted-execution/vault-share";
@@ -68,7 +70,9 @@ const mocks = vi.hoisted(() => ({
 
 function buildExpectedSupportedProjectionScopePath(path: string): string {
   const params = new URLSearchParams();
+  params.set(HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM, HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE);
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
+    if (projectionScope.historyDays === 90) continue;
     params.append(
       "supportedProjectionScope",
       buildHostedVaultShareProjectionScopeKey(projectionScope),
@@ -93,11 +97,13 @@ function buildExpectedVaultShareActiveKindsPath(
 
 function buildExpectedGroupToolPath(): string {
   const params = new URLSearchParams();
+  params.set(HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM, HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE);
   params.set(
     HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
     HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
   );
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
+    if (projectionScope.historyDays === 90) continue;
     params.append(
       "supportedProjectionScope",
       buildHostedVaultShareProjectionScopeKey(projectionScope),

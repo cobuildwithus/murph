@@ -854,7 +854,7 @@ const GROUP_SHARED_HISTORY_READ_PROPERTIES = {
       fromDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
       throughDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
     },
-    description: 'read_shared only: at most 90 member-local civil dates, one participant and one exact health scope with historyDays:90; no freshness or group_email. Follow dateCoverage.nextFromDate with the same throughDate until exhausted. Every page retains complete source/date observations. This reads available canonical data, never provider backfill. State requested range and actually available dates in trends; do not treat absent dates as zeros or missing permission.' },
+    description: 'read_shared only: at most 90 member-local civil dates, one participant and one exact health scope with historyDays:90; no freshness or group_email. Follow dateCoverage.nextFromDate with the same throughDate until exhausted. Every page retains complete source/date observations. For requested history, try this read: the host checks existing consent. A seven-day result does not prove that 90-day permission is missing; ask for expanded consent only if the history result reports not_granted. This reads available canonical data, never provider backfill. State requested range and actually available dates in trends; do not treat absent dates as zeros or missing permission.' },
 } as const
 
 /**

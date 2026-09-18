@@ -1422,6 +1422,8 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("requires exact participant and date authority for 90-day history", async () => {
+    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("try this read: the host checks existing consent");
+    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("ask for expanded consent only if the history result reports not_granted");
     const args = {
       action: "read_shared", participantId: "participant_history",
       projectionScopes: [{ projectionKind: "steps-days.v0", historyDays: 90 }],
