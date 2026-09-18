@@ -509,6 +509,20 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
+      event: {
+        type: "delivery_committed",
+        source: "email",
+        mailboxItemIds: ["mailbox_email_answered"],
+        at: "2026-04-26T00:01:00.000Z",
+        checkpointPublicationExpectedBy: "2026-04-26T00:30:00.000Z",
+        runtimeAttemptId: "attempt_1",
+      },
+    },
+    name: "hosted email completion latency trace",
+    path: HOSTED_RUNTIME_LATENCY_TRACE_PATH,
+  },
+  {
+    body: {
       attemptId: "hca_abcdefghijklmnop",
       phase: "connected",
     },

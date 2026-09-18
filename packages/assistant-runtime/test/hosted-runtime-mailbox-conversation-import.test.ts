@@ -2814,6 +2814,7 @@ describe("hosted mailbox conversation import adapter", () => {
     const operatorHomeRoot = path.join(parentRoot, "home");
     const vaultRoot = path.join(parentRoot, "vault");
     await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, Buffer.from("{}\n"));
+    const latencyTraceRecord = vi.fn(async () => ({ matchedCount: 1, recorded: true, unmatchedCount: 0 }));
     const item = createResolvedConversationMailboxItem();
     const decodedWake = createConversationWake();
 
@@ -2821,7 +2822,9 @@ describe("hosted mailbox conversation import adapter", () => {
       importHostedConversationMailboxItem({
         decodePayload: createDecodedPayloadDecoder(decodedWake),
         item,
+        runtimeAttemptId: "attempt_email_admission",
         runtime: createRuntime({
+          platform: { latencyTracePort: { record: latencyTraceRecord } },
           resolvedConfig: {
             channelCapabilities: {
               emailSendReady: true,
@@ -2867,6 +2870,13 @@ describe("hosted mailbox conversation import adapter", () => {
       })
     );
 
+    expect(latencyTraceRecord).toHaveBeenCalledWith({ event: expect.objectContaining({
+      source: "email",
+      type: "assistant_input_staged",
+      assistantInputId: "input_email_admission",
+      mailboxItemId: item.item.id,
+      runtimeAttemptId: "attempt_email_admission",
+    }) });
     assert.equal(outcome.status, "imported");
     assert.equal(outcome.assistantInputId !== null, true);
     const state = await readAssistantAutomationState(vaultRoot);

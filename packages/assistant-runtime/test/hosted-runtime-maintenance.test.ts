@@ -5094,7 +5094,7 @@ describe("runHostedDeviceSyncPass", () => {
 });
 
 describe("runHostedAssistantAutomationLane", () => {
-  it("projects committed terminal non-replies into the existing latency trace", async () => {
+  it.each(["linq", "telegram", "email"] as const)("projects committed terminal non-replies into the existing latency trace", async (source) => {
     const latencyTraceRecord = vi.fn(async () => ({
       matchedCount: 2,
       recorded: true,
@@ -5104,7 +5104,7 @@ describe("runHostedAssistantAutomationLane", () => {
       input.onTerminalNonReplyCommitted?.({
         inputIds: ["input_group_1", "input_group_2"],
         recordedAt: "2026-04-08T00:00:02.000Z",
-        source: "linq",
+        source,
       });
       return {
         nextWakeAt: null,
@@ -5154,7 +5154,7 @@ describe("runHostedAssistantAutomationLane", () => {
           checkpointPublicationExpectedBy: "2026-04-08T00:27:47.000Z",
           milestone: "terminal_non_reply_committed",
           runtimeAttemptId: "attempt_terminal_non_reply",
-          source: "linq",
+          source,
           type: "assistant_milestone",
         },
       });

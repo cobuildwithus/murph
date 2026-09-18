@@ -8,6 +8,10 @@ Deferred device webhook transfer and restored duplicate retirement are owned by
 `agent-docs/RELIABILITY.md`; focused mailbox and composed runtime proof are
 indexed in `agent-docs/references/testing-ci-map.md`.
 
+Checkpoint-aware operational stall alerts are specified in `agent-docs/RELIABILITY.md`;
+implementation and verification are tracked in
+[`2026-09-18-checkpoint-aware-stall-alerts.md`](exec-plans/completed/2026-09-18-checkpoint-aware-stall-alerts.md).
+
 Healthy retention rechecks, observation-only cleanup health, and incomplete
 provider-stream close classification are owned by `apps/cloudflare/README.md`; implementation
 work is tracked in `exec-plans/completed/2026-09-18-retention-proxy-triage.md`.

@@ -18825,6 +18825,35 @@ describe("hosted runtime callbacks", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
+  it.each(["sent", "pending", "failed"])("records exact email completion only after a sent delivery: %s", async (status) => {
+    const record = vi.fn(async () => ({ matchedCount: 1, recorded: true, unmatchedCount: 0 }));
+    const sentAt = "2026-04-08T00:01:00.000Z";
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(createDispatchResult({
+      status,
+      delivery: createDelivery({ channel: "email" }),
+      sentAt,
+      answeredMailboxItemIds: ["mailbox_answered"],
+    }));
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [createEffect({ channel: "email", explicitTarget: "member@example.test", bindingDeliveryKind: null, bindingDeliveryTarget: null })],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      deliveryTraceContext: {
+        latencyTracePort: { record }, runtimeAttemptId: "attempt_email_reply", runnerIdleTtlMs: 180_000,
+      },
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    if (status === "sent") {
+      expect(record).toHaveBeenCalledExactlyOnceWith({ event: {
+        type: "delivery_committed", source: "email", runtimeAttemptId: "attempt_email_reply",
+        mailboxItemIds: ["mailbox_answered"], at: sentAt,
+        checkpointPublicationExpectedBy: "2026-04-08T00:28:00.000Z",
+      } });
+    } else {
+      expect(record).not.toHaveBeenCalled();
+    }
+  });
+
   it("persists one privacy-blind outbox child per planned group email recipient", async () => {
     const automationAuthority = {
       automationId: "automation_123",

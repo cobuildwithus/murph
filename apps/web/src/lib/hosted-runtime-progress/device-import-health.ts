@@ -76,7 +76,9 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
       row => row.runnable ?? row.pending);
     const { backlogAge, lastProgress, restarts, cancellations, savedPasses } = evidence;
     const conditions: DeviceImportCondition[] = [];
-    if ((due || evidence.latestPassUncheckpointed) && now - lastProgress >= DEVICE_IMPORT_STALL_MS) {
+    if ((due || evidence.latestPassUncheckpointed)
+      && !evidence.awaitingProgressCheckpoint
+      && now - lastProgress >= DEVICE_IMPORT_STALL_MS) {
       conditions.push("stalled");
     }
     if (Math.max(restarts, cancellations) >= DEVICE_IMPORT_CYCLE_LIMIT && savedPasses < 2) {
@@ -185,12 +187,29 @@ function summarizeConnection(
   const countRecent = (times: number[]) => times.filter(at => at >= recentAfter).length;
   return {
     evidenceCurrent,
+    awaitingProgressCheckpoint: isAwaitingProgressCheckpoint(pendingProgress, lastProgress, now),
     latestPassUncheckpointed: pendingSnapshots.has(latestPassAttemptId),
     backlogAge: now - pendingSince,
     lastProgress: Math.max(pendingSince, lastProgress),
     restarts: countAtOrAfter(restartTimes, recentAfter), cancellations: countRecent(cancellationsAt),
     savedPasses: countRecent(savedAt),
   };
+}
+
+function isAwaitingProgressCheckpoint(
+  pendingProgress: ReadonlyMap<string, readonly number[]>, lastProgress: number, now: number,
+): boolean {
+  // A productive local pass needs time to publish its idle checkpoint. Anchor
+  // that allowance to the first unsaved progress, not the newest pass/restart;
+  // only accepted progress can start a new allowance for this connection.
+  let firstUnsavedProgressAt = Infinity;
+  for (const passes of pendingProgress.values()) {
+    for (const at of passes) {
+      if (at >= lastProgress) firstUnsavedProgressAt = Math.min(firstUnsavedProgressAt, at);
+    }
+  }
+  return Number.isFinite(firstUnsavedProgressAt)
+    && now - firstUnsavedProgressAt < DEVICE_IMPORT_STALL_MS;
 }
 
 function countAtOrAfter(times: readonly number[], cutoff: number) {
