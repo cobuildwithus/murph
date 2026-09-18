@@ -247,6 +247,115 @@ testHostedCliTimingE2e("shared CLI timing: built entry uses hosted permissions a
   }
 });
 
+// The hosted TOML is the transport policy owner. A local Responses stub that
+// destroys any WebSocket upgrade proves the pinned App Server never asks for
+// one, that warm process reuse stays on HTTPS, and that a failed HTTPS stream
+// gets exactly one native replay on a fresh request before the turn fails.
+test("hosted Codex config streams cold and warm turns over HTTPS with one native stream retry", {
+  timeout: 180_000,
+}, async () => {
+  const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
+  const codexCommand = path.join(repositoryRoot, "packages/assistant-engine/node_modules/.bin/codex");
+  const directory = await createTemporaryDirectory();
+  const vaultRoot = path.join(directory, "vault");
+  const codexHome = path.join(directory, "codex-home");
+  await mkdir(vaultRoot, { recursive: true });
+  await mkdir(codexHome, { recursive: true });
+  const requests: string[] = [];
+  const server = await startResponsesStubServer({
+    disconnectRequestIndexes: new Set([3, 5, 6]),
+    requests,
+    requiredAuthorization: "Bearer synthetic-local-provider",
+    responseTexts: ["HTTPS_COLD_OK", "HTTPS_WARM_OK", "UNUSED", "HTTPS_RETRIED_OK"],
+  });
+  let upgradeAttempts = 0;
+  server.on("upgrade", (_request, socket) => {
+    upgradeAttempts += 1;
+    socket.destroy();
+  });
+  try {
+    const config = buildHostedCodexConfigToml({
+      exposeSpawnAgentModelOverrides: false,
+      model: "gpt-5.6-terra",
+      reasoningEffort: "low",
+      provider: {
+        id: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+        name: "Synthetic local provider",
+        baseUrl: `${readServerBaseUrl(server)}/v1`,
+        envKey: "OPENAI_API_KEY",
+        wireApi: "responses",
+        // Declared capability metadata does not reopen the hosted WebSocket path.
+        supportsWebSockets: true,
+      },
+    });
+    assert.match(
+      readProviderConfigSection(config, HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID),
+      /^supports_websockets = false$/mu,
+    );
+    await writeFile(path.join(codexHome, "config.toml"), config, { mode: 0o600 });
+    // Never inherit developer or provider credentials; only the stub key.
+    const env = {
+      HOME: directory, CODEX_HOME: codexHome, TMPDIR: directory,
+      PATH: process.env.PATH,
+      OPENAI_API_KEY: "synthetic-local-provider",
+    };
+    const events: Record<string, unknown>[] = [];
+    // Same process shape as the other pinned-binary cases in this file; the
+    // named hosted permission profile needs the runner sandbox helper, which
+    // the ordinary coverage lane does not provide.
+    const turn = (prompt: string, resumeSessionId?: string) => executeCodexAppServerTurn({
+      abortSignal: AbortSignal.timeout(60_000),
+      approvalPolicy: "never", codexCommand, codexHome, env,
+      dynamicTools: [],
+      processLifetime: "warm",
+      sandbox: "danger-full-access", workingDirectory: vaultRoot,
+      resumeSessionId,
+      prompt,
+      onTraceEvent: ({ rawEvent }) => {
+        if (isJsonObject(rawEvent)) events.push(rawEvent);
+      },
+    });
+    const transportEvents = () => events.filter((event) =>
+      typeof event.codexTransportEventKind === "string");
+
+    const cold = await turn("Reply with the scripted cold answer.");
+    assert.equal(cold.finalMessage, "HTTPS_COLD_OK");
+    assert.ok(cold.sessionId);
+    const warm = await turn("Reply with the scripted warm answer.", cold.sessionId);
+    assert.equal(warm.finalMessage, "HTTPS_WARM_OK");
+    assert.equal(warm.sessionId, cold.sessionId);
+    assert.ok(events.some((event) => event.codexTimingStage === "warm-reused"));
+    assert.equal(requests.length, 2);
+    assert.deepEqual(transportEvents(), []);
+
+    // Request 3 dies after acknowledgement; native Codex replays once on a
+    // fresh HTTPS request (4) and the turn completes with that answer.
+    const retried = await turn("Reply after the scripted stream failure.", cold.sessionId);
+    assert.equal(retried.finalMessage, "HTTPS_RETRIED_OK");
+    assert.equal(retried.sessionId, cold.sessionId);
+    assert.equal(requests.length, 4);
+    const retry = transportEvents().find((event) => event.codexTransportRetryCount === 1);
+    assert.ok(retry, "The native retry must surface as a transport diagnostic.");
+    assert.equal(retry.codexTransportEventKind, "stream-retry");
+    assert.equal(retry.codexTransportRetryMax, 1);
+    assert.equal(retry.codexTransportStreamDisconnected, true);
+    assert.equal(retry.codexTransportWillRetry, true);
+    assert.equal(retry.codexTransportWarmReused, true);
+    assert.equal(retry.codexTransportFallbackActivated, false);
+    assert.notEqual(retry.codexTransportTransport, "websocket");
+
+    // Requests 5 and 6 both die: the single replay budget is spent, there is no
+    // second transport to fall back to, and the turn fails without a request 7.
+    await assert.rejects(turn("Reply after two scripted stream failures.", cold.sessionId));
+    assert.equal(requests.length, 6);
+    assert.equal(upgradeAttempts, 0);
+    assert.equal(transportEvents().some((event) => event.codexTransportFallbackActivated === true), false);
+  } finally {
+    await stopWarmCodexAppServer();
+    await closeHttpServer(server);
+  }
+});
+
 function quoteCliTimingShellLiteral(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
@@ -419,12 +528,12 @@ test("hosted Codex provider transport diagnostics expose only safe config metada
   assert.deepEqual(hostedCodexProviderTransportDiagnostics("hosted-openai"), {
     codexProviderRequestMaxRetries: 4,
     codexProviderStreamIdleTimeoutMs: 30_000,
-    codexProviderStreamMaxRetries: 0,
-    codexProviderTransportMode: "codex-native-provider-transport",
+    codexProviderStreamMaxRetries: 1,
+    codexProviderTransportMode: "codex-native-https",
   });
 });
 
-test("hosted Codex uses one WebSocket attempt before native HTTPS fallback", () => {
+test("hosted Codex streams over HTTPS only with one native stream retry", () => {
   const config = buildHostedCodexConfigToml({
     exposeSpawnAgentModelOverrides: false,
     model: "gpt-5.2",
@@ -439,9 +548,10 @@ test("hosted Codex uses one WebSocket attempt before native HTTPS fallback", () 
     reasoningEffort: "low",
   });
 
-  assert.match(config, /^supports_websockets = true$/mu);
+  assert.match(config, /^supports_websockets = false$/mu);
+  assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.match(config, /^stream_idle_timeout_ms = 30000$/mu);
-  assert.match(config, /^stream_max_retries = 0$/mu);
+  assert.match(config, /^stream_max_retries = 1$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
 });
 
@@ -497,9 +607,9 @@ test("hosted Codex runtime config writes Venice Responses config without secret 
   assert.match(config, /base_url = "https:\/\/api\.venice\.ai\/api\/v1"/u);
   assert.match(config, /env_key = "VENICE_API_KEY"/u);
   assert.match(config, /wire_api = "responses"/u);
-  assert.doesNotMatch(
+  assert.match(
     readProviderConfigSection(config, "venice"),
-    /^supports_websockets = true$/mu,
+    /^supports_websockets = false$/mu,
   );
   assert.doesNotMatch(config, /signed-venice-egress-credential/u);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
@@ -539,10 +649,10 @@ test("hosted Codex runtime config preserves capabilities with custom inference",
   assert.match(config, /^model_context_window = 131072$/mu);
   assert.match(config, /^model_auto_compact_token_limit = 98304$/mu);
   assert.match(config, /^request_max_retries = 1$/mu);
-  assert.match(config, /^stream_max_retries = 0$/mu);
-  assert.doesNotMatch(
+  assert.match(config, /^stream_max_retries = 1$/mu);
+  assert.match(
     readProviderConfigSection(config, "hosted-custom-inference"),
-    /^supports_websockets = true$/mu,
+    /^supports_websockets = false$/mu,
   );
   assert.doesNotMatch(config, /^model_reasoning_effort = /mu);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
@@ -614,11 +724,11 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /base_url = "https:\/\/api\.openai\.com\/v1"/u);
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /wire_api = "responses"/u);
-  assert.match(config, /^supports_websockets = true$/mu);
+  assert.match(config, /^supports_websockets = false$/mu);
   assert.match(config, /^stream_idle_timeout_ms = 30000$/mu);
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
-  assert.match(config, /^stream_max_retries = 0$/mu);
+  assert.match(config, /^stream_max_retries = 1$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
   assert.match(
     config,
@@ -910,10 +1020,10 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /requires_openai_auth = false/u);
-  assert.doesNotMatch(config, /^supports_websockets = true$/mu);
+  assert.match(config, /^supports_websockets = false$/mu);
   assert.match(config, /stream_idle_timeout_ms = 30000/u);
   assert.match(config, /request_max_retries = 4/u);
-  assert.match(config, /stream_max_retries = 0/u);
+  assert.match(config, /stream_max_retries = 1/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
 });
 
@@ -998,11 +1108,11 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.match(config, /\[model_providers\."hosted-chatgpt-openai"\]/u);
   assert.doesNotMatch(config, /base_url/u);
   assert.doesNotMatch(config, /env_key/u);
-  assert.match(config, /^supports_websockets = true$/mu);
+  assert.match(config, /^supports_websockets = false$/mu);
   assert.match(config, /^stream_idle_timeout_ms = 30000$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
-  assert.match(config, /^stream_max_retries = 0$/mu);
+  assert.match(config, /^stream_max_retries = 1$/mu);
   assert.doesNotMatch(config, /chatgpt-access-token/u);
   assert.match(config, /model_reasoning_effort = "low"/u);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
@@ -1183,11 +1293,11 @@ test("hosted Codex runtime config preserves managed ChatGPT auth", async () => {
   assert.match(config, /\[model_providers\."hosted-chatgpt-openai"\]/u);
   assert.doesNotMatch(config, /base_url/u);
   assert.doesNotMatch(config, /env_key/u);
-  assert.match(config, /^supports_websockets = true$/mu);
+  assert.match(config, /^supports_websockets = false$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /^stream_idle_timeout_ms = 30000$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
-  assert.match(config, /^stream_max_retries = 0$/mu);
+  assert.match(config, /^stream_max_retries = 1$/mu);
   assert.doesNotMatch(config, /chatgpt-refresh-token/u);
   assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
   assertHostedCodexAutoCompactTokenLimit(config);
@@ -1353,7 +1463,8 @@ test.each(["openai", "venice", "custom-inference"])(
     assert.equal(operatorProvider, "hosted-openai");
     const section = readProviderConfigSection(config, "hosted-openai");
     assert.match(section, /^stream_idle_timeout_ms = 30000$/mu);
-    assert.match(section, /^stream_max_retries = 0$/mu);
+    assert.match(section, /^stream_max_retries = 1$/mu);
+    assert.match(section, /^supports_websockets = false$/mu);
     const selectedProviderId = prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]!;
     const selectedSection = readProviderConfigSection(config, selectedProviderId);
     const diagnostics = hostedCodexProviderTransportDiagnostics(selectedProviderId);
@@ -2387,10 +2498,11 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       'base_url = "https://api.openai.com/v1"',
       'env_key = "OPENAI_API_KEY"',
       'wire_api = "responses"',
+      "supports_websockets = false",
       "stream_idle_timeout_ms = 30000",
       "requires_openai_auth = false",
       "request_max_retries = 4",
-      "stream_max_retries = 0",
+      "stream_max_retries = 1",
       "",
       "# Read-only, ephemeral consultations initiated by a current group member.",
       `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.filesystem]`,
@@ -2774,6 +2886,7 @@ async function startResponsesStubServer(input: {
   captureWebSocketMemoryMarkers?: boolean;
   compactionOutputKind?: "compaction" | "message";
   compactionRequestIndexes?: ReadonlySet<number>;
+  disconnectRequestIndexes?: ReadonlySet<number>;
   nativeMemoryRequestMarkers?: Array<{
     memgen: string | null;
     turnMetadata: string | null;
@@ -2861,6 +2974,7 @@ async function startResponsesStubServer(input: {
       if (parsedBody?.stream === true) {
         writeResponsesStubStream({
           customToolCall: input.customToolCallForRequest?.(body, requestIndex),
+          disconnectAfterCreated: input.disconnectRequestIndexes?.has(requestIndex) === true,
           outputKind: input.compactionRequestIndexes?.has(requestIndex)
             ? input.compactionOutputKind ?? "compaction"
             : "message",
@@ -3089,6 +3203,7 @@ function enableCodexNativeMemoryForRegression(
 
 function writeResponsesStubStream(input: {
   customToolCall?: { name: string; input: string };
+  disconnectAfterCreated?: boolean;
   outputKind: "compaction" | "message";
   response: ServerResponse;
   responseId: string;
@@ -3143,6 +3258,14 @@ function writeResponsesStubStream(input: {
     },
     type: "response.created",
   });
+  if (input.disconnectAfterCreated) {
+    // Acknowledged, then the stream dies before any output: a retryable
+    // native stream failure with nothing user-visible to replay. Let the
+    // acknowledgement reach the client first so the failure is a stream
+    // failure, not a connection failure retried by the request budget.
+    setTimeout(() => input.response.destroy(), 100);
+    return;
+  }
   if (input.customToolCall) {
     writeResponsesStubSseEvent(input.response, "response.output_item.added", {
       item: { ...outputItem, status: "in_progress" },

@@ -270,10 +270,15 @@ legacy shims. Concrete Codex app-server process lifecycle hooks remain owned by
 that owner before delegating to production workspace restore, so its restore
 cannot validate, replace, clear, or sanitize Codex home while the prior process
 is alive.
-Hosted Codex keeps WebSockets enabled for the first provider attempt and sets
-`stream_max_retries = 0`, so a retryable stream failure activates Codex's native
-HTTPS fallback instead of spending another full stream-idle window on the same
-transport. The stream idle timeout remains 90 seconds, and HTTPS requests retain
+Hosted Codex streams every Responses request over HTTPS
+(`supports_websockets = false`) and sets `stream_max_retries = 1`, so a
+retryable stream failure gets exactly one native replay on a fresh request, the
+same single recovery hosted turns previously received through the
+WebSocket-to-HTTPS fallback. A hosted WebSocket lived inside one Worker egress
+relay invocation that the platform can end while the socket idles between turns
+without closing the container-facing socket; the next turn then reused a dead
+socket and waited the full stream idle window. The OpenAI stream idle timeout
+remains 30 seconds (90 seconds for other providers), and HTTPS requests retain
 their separate request retry budget.
 Host apps may still decide which env profiles are enabled and how
 transport-specific URL rewriting works, but the profile key sets and runtime
