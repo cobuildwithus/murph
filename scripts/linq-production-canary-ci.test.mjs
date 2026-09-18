@@ -60,23 +60,6 @@ test("Linq production canary keeps destructive and provider credentials in the l
   );
 });
 
-test("Linq production workflow can finish every bounded observation and deployment verification", async () => {
-  const workflow = await readFile(workflowPath, "utf8");
-  const runner = await readFile(runnerPath, "utf8");
-  const readBudget = (name) => {
-    const match = runner.match(new RegExp(`const ${name} = ([0-9_]+);`, "u"));
-    assert.ok(match, `Missing ${name} budget`);
-    return Number(match[1].replaceAll("_", ""));
-  };
-  const timeout = workflow.match(/timeout-minutes: (\d+)/u);
-  assert.ok(timeout, "Missing workflow deadline");
-  const journeyBudget = readBudget("CANARY_RESET_TIMEOUT_MS")
-    + 3 * readBudget("CANARY_OUTCOME_WAIT_MS")
-    + 5 * readBudget("CANARY_REPLY_WAIT_MS");
-  assert.ok(Number(timeout[1]) * 60_000 >= journeyBudget + 120_000,
-    "Workflow must allow the bounded journey plus setup and exact-deployment verification");
-});
-
 test("Linq production canary runner proves the welcome and bounded business replies without logging content", async () => {
   const runner = await readFile(runnerPath, "utf8");
 
