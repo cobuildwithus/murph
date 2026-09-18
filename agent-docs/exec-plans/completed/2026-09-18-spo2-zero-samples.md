@@ -17,7 +17,7 @@ Proof: actual normalization, canonical import/readback, replay, recovery, existi
 ## Steps
 - [x] Focused failing proof and ReviewGPT implementation packet.
 - [x] Apply authored patch; run focused owner tests/typecheck; inspect full diff and complexity.
-- [ ] Changelog/owner contract, scoped commit, draft PR, final ReviewGPT and exact-head CI.
+- [x] Changelog/owner contract, scoped commit, draft PR, and final ReviewGPT. Final-head CI is tracked on PR #3566 after plan closeout.
 
 ## Risks and rollout
 No schema or deployment-order change intended. Old runners can retain the existing zero failure until replaced; new runners must not manufacture complete-day authority. No live recovery claim until separately authorized deployment and read-only verification.
@@ -35,3 +35,12 @@ No schema or deployment-order change intended. Old runners can retain the existi
 - Final authored simplification reuses the omission validator and publication owner; no extra state or function versus the first patch. Parent reviewed the full diff, all changed paths, privacy, source/day validation, canonical preservation, and the unchanged retry/coverage owners. Product UX: Ready.
 - Final local proof: 266 Junction importer tests, 3 service completion/retention tests, importer/service/Web typechecks, 10 changelog rendering tests, docs drift, and whitespace checks pass. Complexity passes with debt 75 → 75 and max 33 → 33; all ten above-threshold functions are unchanged.
 - Delivery gates still pending: draft PR, final ReviewGPT, required exact-head CI, plan closeout, and remote-base mergeability. Merge and deployment are excluded.
+
+## Completion evidence
+- PR #3566 contains the scoped fix and release note. ReviewGPT round 1 PASS on `0cb47b4f761f5e10619f472ef43b246457a79f1e`; captured response metadata confirms `gpt-6-pro`. No accepted findings or substantive remediation remain.
+- Parent final review confirms production behavior is confined to the Junction importer and all local proof above passes. The follow-up canonical revival issue remains explicitly disclosed in PR Risks.
+- Refreshed and verified remote base `6d9ba8b5ba5721fe532a5a3a97de8c43dd9bf151`; merge-tree proof was clean.
+- This closeout changes explanatory plan/index docs only; it does not require another substantive review. Required CI must pass on the resulting final commit before handoff. The original session retains completion ownership. No merge, deployment, replay, resync, or production mutation performed.
+Status: completed
+Updated: 2026-09-18
+Completed: 2026-09-18

@@ -448,4 +448,4 @@ The Responses relay queue-pressure observation and implementation proof are reco
   records bounded terminal-error evidence from both Worker output streams.
 
 Zero-valued SpO2 sample handling is tracked in
-[`2026-09-18-spo2-zero-samples.md`](exec-plans/active/2026-09-18-spo2-zero-samples.md).
+[`2026-09-18-spo2-zero-samples.md`](exec-plans/completed/2026-09-18-spo2-zero-samples.md).
