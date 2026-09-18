@@ -14,6 +14,8 @@ export const CLI_TIMING_BUCKET_UPPER_US = [
 export const CLI_TIMING_PHASES = [
   "total", "setup", "dispatch", "post-dispatch", "teardown", "unattributed",
   "query-freshness", "query-manifest", "query-status", "query-rebuild", "query-wait",
+  "query-source-read", "query-wearable-dataset", "query-metric-projection",
+  "query-wearable-summary", "query-search-documents", "query-publication",
 ] as const;
 export type CliTimingPhase = typeof CLI_TIMING_PHASES[number];
 export type CliTimingOutcome = "ok" | "error" | "unknown";
