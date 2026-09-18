@@ -20,7 +20,7 @@ const parentExternalRef = externalRefForFhir({ sourceSystem: "epic-fhir", fhirBa
 
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
-async function fixture(twoDocuments = false, timezone = "UTC") {
+async function fixture(twoDocuments = false, timezone = "UTC", clinicalDate?: string | (string | undefined)[]) {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-enrichment-"));
   roots.push(vaultRoot);
   await initializeVault({ vaultRoot, createdAt: "2026-07-10T12:00:00.000Z", timezone });
@@ -29,9 +29,10 @@ async function fixture(twoDocuments = false, timezone = "UTC") {
   const manifestPath = "raw/clinical/fhir/synthetic-connection/synthetic-batch/manifest.json";
   const rawRef = `${path.posix.dirname(manifestPath)}/attachments/${sha256}.bin`;
   const parentIds = twoDocuments ? ["synthetic-document", "synthetic-second-document"] : ["synthetic-document"];
-  const parentPage = JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: parentIds.map((id) => ({ resource: {
+  const parentPage = JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: parentIds.map((id, index) => ({ resource: {
     resourceType: "DocumentReference", id, status: "current", docStatus: "final",
     meta: { lastUpdated: "2026-07-10T12:00:00.000Z" },
+    date: Array.isArray(clinicalDate) ? clinicalDate[index] : clinicalDate,
     subject: { reference: "Patient/synthetic-patient" },
     content: [{ attachment: { contentType: "application/pdf", url: `Binary/${id}` } }],
   } })) });
@@ -66,6 +67,50 @@ async function prepare(input: Awaited<ReturnType<typeof fixture>>, options: { pa
 }
 
 describe("clinical document enrichment durable application", () => {
+  it("resolves an explicitly source-dated fact against its attested historical parent", async () => {
+    const input = await fixture(false, "America/New_York", occurredAt);
+    await prepare(input, { outputs: { labs: empty, history: empty, measurements: {
+      status: "complete", records: [{ dateBasis: "source", payload: measurement("2026-07-10T00:00:00.000Z") }],
+    } } });
+    const statePath = path.join(input.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${input.jobId}.json`);
+    const frozen = await readFile(statePath, "utf8");
+    await applyClinicalEnrichmentProposals(input);
+    let rows = await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.occurredAt).toBe(occurredAt);
+    await writeFile(statePath, frozen);
+    await applyClinicalEnrichmentProposals(input);
+    rows = await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 });
+    expect(rows).toHaveLength(1);
+  });
+
+  it("retains independently dated historical facts within a source document", async () => {
+    const input = await fixture(false, "UTC", "2026-06-10T12:00:00.000Z");
+    await prepare(input);
+    await applyClinicalEnrichmentProposals(input);
+    const rows = await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 });
+    expect(rows[0]?.occurredAt).toBe(occurredAt);
+  });
+
+  it.each([undefined, "unknown", "source", "document"] as const)("holds unsupported dates with basis %s", async (dateBasis) => {
+    const input = await fixture();
+    await prepare(input, { outputs: { labs: empty, history: empty, measurements: { status: "complete", records: [{ dateBasis, payload: measurement("2026-07-10T00:00:00.000Z") }] } } });
+    const result = await applyClinicalEnrichmentProposals(input);
+    expect(result.counts).toMatchObject({ created: 0, held: 1 });
+    expect(await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 })).toHaveLength(0);
+  });
+
+  it("preserves an evidenced retrieval-day follow-up even when the parent is older", async () => {
+    const input = await fixture(false, "UTC", occurredAt);
+    const at = "2026-07-10T12:00:00.000Z";
+    await prepare(input, { outputs: { labs: empty, history: empty, measurements: { status: "complete", records: [{ dateBasis: "document", dateEvidence: "Follow-up pulse: 2026-07-10T12:00:00Z.", payload: measurement(at) }] } } });
+    await applyClinicalEnrichmentProposals(input);
+    const rows = await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.occurredAt).toBe(at);
+    expect(rows[0]?.tags).toContain("clinical-date-document");
+    expect(rows[0]?.attributes.evidence).toEqual([{ rawRef: input.rawRef, page: 1, excerpt: "Follow-up pulse: 2026-07-10T12:00:00Z." }]);
+  });
   it("freezes accepted output, verifies canonical writes, and resumes the next page without resampling", async () => {
     const input = await fixture();
     await prepare(input, { totalPages: 2 });
@@ -95,6 +140,22 @@ describe("clinical document enrichment durable application", () => {
     const result = await applyClinicalEnrichmentProposals(input);
     expect(result.counts.existing).toBeGreaterThan(0);
     expect(await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 })).toHaveLength(1);
+  });
+
+  it("does not reuse an undated blocked extraction when a second parent supplies a clinical date", async () => {
+    const input = await fixture(true, "UTC", [undefined, occurredAt]);
+    await prepare(input, { outputs: { labs: empty, measurements: {
+      status: "blocked", reason: "The clinical date is unknown.", records: [],
+    }, history: empty } });
+    await applyClinicalEnrichmentProposals(input);
+    expect(await readNextClinicalEnrichment(input)).toMatchObject({ status: "extract", source: { clinicalOccurredAt: occurredAt } });
+    await prepare(input, { outputs: { labs: empty, history: empty, measurements: {
+      status: "complete", records: [{ dateBasis: "source", payload: measurement(occurredAt) }],
+    } } });
+    await applyClinicalEnrichmentProposals(input);
+    const rows = await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.occurredAt).toBe(occurredAt);
   });
 
   it("replays immutable accepted proposals after canonical commit without duplicating or overwriting", async () => {

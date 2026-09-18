@@ -1,6 +1,7 @@
 import { normalizeWearableQueryProviderSlug } from "@murphai/health-metrics";
 import { formatProviderName } from "./wearables/provider-policy.ts";
 import { readJournalTiming, type JournalTiming } from "@murphai/contracts/journal-presentation";
+import { clinicalJournalIsExtraction, clinicalJournalPresentation, clinicalJournalSourceKey, prepareClinicalJournalEvents } from "./journal-clinical.ts";
 import {
   isValidIanaTimeZone,
   toLocalDayKey,
@@ -140,7 +141,7 @@ export function buildJournalView(
   const windowDays = normalizeWindowDays(options.windowDays);
   const fromDate = addDays(asOfDate, -(windowDays - 1));
   const candidates = normalizeJournalCandidates([
-    ...vault.events.flatMap((event) =>
+    ...prepareClinicalJournalEvents(vault.events).flatMap((event) =>
       journalCandidateFromEvent(event, fromDate, asOfDate, options.vocabulary),
     ),
     ...journalCandidatesFromExperiments(
@@ -199,14 +200,14 @@ function journalCandidateFromEvent(
     event.kind === "sleep_session"
       ? readSleepType(event.attributes.sleepType)
       : null;
-  const groupHint =
+  const groupHint = clinicalGroupHint(event, date) ?? (
     event.kind === "experiment_context"
       ? experimentJournalGroupHint(label, date)
       : activityKey
       ? `activity:${date}:${activityKey.toLowerCase()}`
       : observationMetric
       ? `${observationMetric.group}:${date}`
-      : null;
+      : null);
   return [
     {
       activityKey,
@@ -231,13 +232,23 @@ function journalCandidateFromEvent(
       sleepType,
       source: readEventSource(event),
       summary: eventSummary(event),
-      tags: event.tags.slice(),
-      timing: event.kind === "note"
-        ? readJournalTiming(event.tags) ?? (event.occurredAt ? "timed" : "unknown")
-        : event.occurredAt ? "timed" : "all_day",
+      tags: clinicalJournalIsExtraction(event) ? [...event.tags, "journal-clinical-extraction"] : event.tags.slice(),
+      timing: journalEventTiming(event),
       timeZone: readEventTimeZone(event),
     },
   ];
+}
+
+function clinicalGroupHint(event: CanonicalEntity, date: string): string | null {
+  const key = clinicalJournalSourceKey(event);
+  return key && (event.kind === "note" || event.kind === "test") ? `clinical:${key}:${date}` : null;
+}
+
+function journalEventTiming(event: CanonicalEntity): JournalEventTiming {
+  const tagged = event.kind === "note" ? readJournalTiming(event.tags) : null;
+  if (tagged) return tagged;
+  if (!event.occurredAt) return event.kind === "note" ? "unknown" : "all_day";
+  return /^\d{4}-\d{2}-\d{2}$/u.test(event.occurredAt) ? "all_day" : "timed";
 }
 
 function isHiddenJournalEvent(event: CanonicalEntity): boolean {
@@ -730,6 +741,8 @@ function resolveEventDate(event: CanonicalEntity): string | null {
 }
 
 function eventLabel(event: CanonicalEntity): string {
+  const clinical = clinicalJournalPresentation(event);
+  if (clinical) return clinical.title;
   if (event.kind === "activity_session") {
     return humanize(
       resolveAdherenceObservationActivityKind({
@@ -771,6 +784,8 @@ function captureEventLabel(title: string | null): string {
 }
 
 function eventSummary(event: CanonicalEntity): string | null {
+  const clinical = clinicalJournalPresentation(event);
+  if (clinical) return clinical.summary;
   const summary = readString(event.attributes.summary);
   if (event.kind === "experiment_context") {
     return experimentJournalSummary(event, summary);
@@ -831,6 +846,8 @@ function mealSummary(
 }
 
 function journalEventDetailItems(event: CanonicalEntity): string[] {
+  const clinical = clinicalJournalPresentation(event);
+  if (clinical) return clinical.details;
   if (event.kind === "activity_session") {
     return activityDetailItems(event.attributes, eventLabel(event));
   }
@@ -1077,6 +1094,7 @@ function formatDetailNumber(value: number): string {
 }
 
 function readEventSource(event: CanonicalEntity): string | null {
+  if (clinicalJournalSourceKey(event)) return "Hospital records";
   const dataOrigin = readRecord(event.attributes.dataOrigin);
   const externalRef = readRecord(event.attributes.externalRef);
   return (
@@ -1096,6 +1114,7 @@ function selectLeadRecord(
   records: readonly JournalCandidate[],
 ): JournalCandidate {
   return (
+    records.find((record) => record.groupHint?.startsWith("clinical:") && record.kind === "note" && record.tags.includes("journal-clinical-extraction")) ??
     records.find((record) => record.kind === "activity_session") ??
     records.find((record) => record.kind === "sleep_session") ??
     records.find((record) => record.kind === "test") ??
@@ -1208,6 +1227,15 @@ function buildEventPresentation(
   summary: string | null;
   timing: JournalEventTiming;
 } {
+  if (lead.groupHint?.startsWith("clinical:")) {
+    return {
+      details: uniqueStrings(records.flatMap((record) => [
+        ...record.detailItems,
+        ...(record !== lead && record.tags.includes("journal-clinical-extraction") ? [record.summary] : []),
+      ])).filter((detail) => detail !== lead.summary),
+      metrics: emptyJournalEventMetrics(), summary: lead.summary, timing: lead.timing,
+    };
+  }
   const activitySessions = records.filter(
     (record) => record.kind === "activity_session",
   );
