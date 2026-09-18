@@ -107,7 +107,9 @@ the response itself is capped at 4 MiB. At 200 members and three requested
 scopes plus profile names, 800 selected snapshots require at most 200 sequential
 batches plus the initial authority transaction (201 transactions total, one
 pooled connection at a time). There are 202 share queries, one membership query,
-and 201 canonical runtime-access checks; crypto/key work runs only between
+and 201 canonical runtime-access checks (at most two ORM reads each, for at most 605
+total reads, plus a device query only when a device scope replaces a ciphertext
+scope); crypto/key work runs only between
 transactions. An explicit history request selects one participant and fits one
 batch. This increases round trips for wide room reads; no latency improvement
 is claimed. The model-result ceiling is deliberately

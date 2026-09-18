@@ -1002,8 +1002,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
   try {
     const snapshotData = await readHostedGroupSharedSnapshots({ capture, prisma, now, options, runtimeMemberId: input.runtimeMemberId });
     if (!snapshotData) return sharedReadCapacityUnavailable();
-    const { recordsByMemberAndScope, readableGrantIds } = snapshotData;
-    let { dateCoverage } = snapshotData;
+    const { recordsByMemberAndScope, readableGrantIds, dateCoverage } = snapshotData;
 
     const grantsByMember = new Map<
       string,
@@ -1124,67 +1123,67 @@ async function readHostedGroupSharedSnapshots(input: {
   runtimeMemberId: string;
 }) {
   const { capture, prisma, now, options } = input;
-    // Capture only authority/ids in the short transaction. At the expanded
-    // ceiling, fetching every room ciphertext together could allocate GiB.
-    // Recheck the same active generation while loading four ciphertexts at a
-    // time; crypto remains outside transactions and old ids cannot read regrants.
-    const candidates = capture.shares.filter((share) =>
-      share.projectionScopeKey !== HOSTED_GROUP_SHARED_READ_DEVICE_SCOPE_KEY
-    );
-    const readableGrantIds = new Set(capture.shares.filter((share) =>
-      share.projectionScopeKey === HOSTED_GROUP_SHARED_READ_DEVICE_SCOPE_KEY
-    ).map((share) => share.id));
-    const recordsByMemberAndScope = new Map<
-      string, Map<string, HostedRuntimeGroupSharedRecord[] | null>
-    >();
-    let recordsBytes = 0;
-    let dateCoverage: HostedGroupSharedDateCoverage | undefined;
-    for (let offset = 0; offset < candidates.length; offset += 4) {
-      const batch = candidates.slice(offset, offset + 4);
-      const rows = await prisma.$transaction(async (tx) => {
-        if (!await hasHostedRuntimeActiveAccess(input.runtimeMemberId, { prisma: tx })) {
-          throw new Error("Hosted group runtime is inactive.");
-        }
-        return tx.hostedVaultShare.findMany({
-          select: { id: true, projectionSnapshotCiphertext: true },
-          take: 4,
-          where: {
-            destinationMemberId: input.runtimeMemberId,
-            id: { in: batch.map((share) => share.id) },
-            status: "granted",
-            grantor: { AND: [activeHostedMemberAccessWhere(), hostedHealthDataConsentNotRevokedWhere()] },
-          },
-        });
-      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-      const byId = new Map(rows.map((row) => [row.id, row.projectionSnapshotCiphertext]));
-      const shares = batch.filter((share) => byId.has(share.id)).map((share) => ({
-        ...share, ciphertext: byId.get(share.id),
-      }));
-      const snapshots = await decryptHostedVaultShareProjectionSnapshots({
-        entries: shares, prisma, nowMs: now.getTime(),
-        requestedHistoryDays: options.history ? 90 : 7,
-      });
-      for (const [index, share] of shares.entries()) {
-        readableGrantIds.add(share.id);
-        const snapshot = snapshots[index];
-        if (snapshot === undefined) throw new Error("Shared snapshot result is missing.");
-        let records = snapshot?.map(({ data, occurredAt, recordKey, source }) => ({
-          data, occurredAt, recordKey, ...(source ? { source } : {}),
-        })) ?? null;
-        if (options.history && isHostedVaultShareRecentDateProjectionKind(share.projectionScope.projectionKind)) {
-          const page = pageHostedGroupSharedHistory(records ?? [], options.history);
-          dateCoverage = page.dateCoverage;
-          if (records !== null) records = page.records;
-        }
-        recordsBytes += new TextEncoder().encode(JSON.stringify(records)).byteLength;
-        if (recordsBytes > HOSTED_GROUP_SHARED_READ_RESPONSE_MAX_BYTES) {
-          return null;
-        }
-        const memberRecords = recordsByMemberAndScope.get(share.grantorMemberId) ?? new Map();
-        memberRecords.set(share.projectionScopeKey, records);
-        recordsByMemberAndScope.set(share.grantorMemberId, memberRecords);
+  // Capture only authority/ids in the short transaction. At the expanded
+  // ceiling, fetching every room ciphertext together could allocate GiB.
+  // Recheck the same active generation while loading four ciphertexts at a
+  // time; crypto remains outside transactions and old ids cannot read regrants.
+  const candidates = capture.shares.filter((share) =>
+    share.projectionScopeKey !== HOSTED_GROUP_SHARED_READ_DEVICE_SCOPE_KEY
+  );
+  const readableGrantIds = new Set(capture.shares.filter((share) =>
+    share.projectionScopeKey === HOSTED_GROUP_SHARED_READ_DEVICE_SCOPE_KEY
+  ).map((share) => share.id));
+  const recordsByMemberAndScope = new Map<
+    string, Map<string, HostedRuntimeGroupSharedRecord[] | null>
+  >();
+  let recordsBytes = 0;
+  let dateCoverage: HostedGroupSharedDateCoverage | undefined;
+  for (let offset = 0; offset < candidates.length; offset += 4) {
+    const batch = candidates.slice(offset, offset + 4);
+    const rows = await prisma.$transaction(async (tx) => {
+      if (!await hasHostedRuntimeActiveAccess(input.runtimeMemberId, { prisma: tx })) {
+        throw new Error("Hosted group runtime is inactive.");
       }
+      return tx.hostedVaultShare.findMany({
+        select: { id: true, projectionSnapshotCiphertext: true },
+        take: 4,
+        where: {
+          destinationMemberId: input.runtimeMemberId,
+          id: { in: batch.map((share) => share.id) },
+          status: "granted",
+          grantor: { AND: [activeHostedMemberAccessWhere(), hostedHealthDataConsentNotRevokedWhere()] },
+        },
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    const byId = new Map(rows.map((row) => [row.id, row.projectionSnapshotCiphertext]));
+    const shares = batch.filter((share) => byId.has(share.id)).map((share) => ({
+      ...share, ciphertext: byId.get(share.id),
+    }));
+    const snapshots = await decryptHostedVaultShareProjectionSnapshots({
+      entries: shares, prisma, nowMs: now.getTime(),
+      requestedHistoryDays: options.history ? 90 : 7,
+    });
+    for (const [index, share] of shares.entries()) {
+      readableGrantIds.add(share.id);
+      const snapshot = snapshots[index];
+      if (snapshot === undefined) throw new Error("Shared snapshot result is missing.");
+      let records = snapshot?.map(({ data, occurredAt, recordKey, source }) => ({
+        data, occurredAt, recordKey, ...(source ? { source } : {}),
+      })) ?? null;
+      if (options.history && isHostedVaultShareRecentDateProjectionKind(share.projectionScope.projectionKind)) {
+        const page = pageHostedGroupSharedHistory(records ?? [], options.history);
+        dateCoverage = page.dateCoverage;
+        if (records !== null) records = page.records;
+      }
+      recordsBytes += new TextEncoder().encode(JSON.stringify(records)).byteLength;
+      if (recordsBytes > HOSTED_GROUP_SHARED_READ_RESPONSE_MAX_BYTES) {
+        return null;
+      }
+      const memberRecords = recordsByMemberAndScope.get(share.grantorMemberId) ?? new Map();
+      memberRecords.set(share.projectionScopeKey, records);
+      recordsByMemberAndScope.set(share.grantorMemberId, memberRecords);
     }
+  }
 
   return { recordsByMemberAndScope, readableGrantIds, dateCoverage };
 }

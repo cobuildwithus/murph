@@ -8,7 +8,9 @@ for (const width of [390, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     await page.route("**/*", (route) => ["localhost", "127.0.0.1"].includes(new URL(route.request().url()).hostname) ? route.continue() : route.abort());
     await page.goto("/screenshots/groups#group-join", { waitUntil: "load" });
-    await page.locator('[data-design-study="group-join"]').evaluate((element) => element.removeAttribute("inert"));
+    await page.locator('[data-design-study="group-join"]').evaluate((element) => {
+      for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) ancestor.removeAttribute("inert");
+    });
     await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); });
     const upgrade = page.locator('[data-design-state="group-join-history-upgrade"]');
     const choices = upgrade.getByRole("checkbox");
@@ -19,9 +21,9 @@ for (const width of [390, 1280]) {
     const output = process.env.DESIGN_PROOF_OUTPUT_DIR;
     if (output) {
       await mkdir(output, { recursive: true });
-      await upgrade.screenshot({ path: path.join(output, `history-existing-${width}.png`) });
+      await upgrade.screenshot({ path: path.join(output, `history-existing-${width}.png`), style: "nextjs-portal { visibility: hidden; }" });
     }
-    await choices.nth(1).check();
+    await choices.nth(1).locator("..").click();
     await expect(choices.nth(1)).toBeChecked();
     const fresh = page.locator('[data-design-state="group-join-comprehensive-default"]');
     await expect(fresh).toContainText("90 days");
@@ -29,6 +31,6 @@ for (const width of [390, 1280]) {
     for (const surface of [upgrade, fresh]) {
       expect(await surface.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     }
-    if (output) await fresh.screenshot({ path: path.join(output, `history-new-${width}.png`) });
+    if (output) await fresh.screenshot({ path: path.join(output, `history-new-${width}.png`), style: "nextjs-portal { visibility: hidden; }" });
   });
 }

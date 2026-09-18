@@ -12,8 +12,8 @@ The current vault-share producer limits daily/night scopes to seven dates; share
 
 - [x] ReviewGPT authors substantive implementation against guarded source snapshot.
 - [x] Parent inspects patch, consent transition and complete cross-owner bounds.
-- [ ] Focused producer, scope/parser, consent, read and maximum-payload tests; affected typechecks.
-- [ ] Product UX proof for new approvals, existing7 approvals, expanded approvals, sparse history, timezone edges, revoke/regrant and existing short-window consumers.
+- [x] Focused producer, scope/parser, consent, read and maximum-payload tests; affected typechecks.
+- [x] Product UX proof for new approvals, existing7 approvals, expanded approvals, sparse history, timezone edges, revoke/regrant and existing short-window consumers.
 - [ ] Changelog, candidate review, draft PR, final ReviewGPT and exact-head CI.
 
 ## State and failure boundaries
@@ -39,3 +39,6 @@ Use existing grant and snapshot owners. No historical store, broad provider impo
 - Patch attachment recovery reused Frog entry `20260829230530-reviewgpt-patch-attachment`; no duplicate created. The canonical capture was retained and exact generated patch recovered through its download control.
 - Candidate verification: contracts 119, runtime projection 147, Web 362, assistant-tool 117, Cloudflare ports 21 focused tests passed. A 200-member/800-snapshot read proof passed with 201 sequential transactions and exact authority rechecks. Complexity guard passed after extracting the date-window and bounded snapshot owners and removing redundant guards.
 - Real subscription journey passed using production prompts/tools: one roster read and two exact participant/date history pages, two sparse observations, correct comparison and no unsupported steady-trend claim. Reply review Ready. Provider input bytes: direct unchanged 158826; group 146400 to 151086 (+4686, +3.20%); exact tokenizer unavailable.
+
+- All five affected package typechecks passed. Day-89 delivery is retained and day-90 is excluded. Consent browser journeys passed at 390 and 1280 pixels; inspected synthetic screenshots show new defaults and explicit existing-permission expansion without overflow. The test must remove every inert presentation ancestor and click the visible permission label.
+- Draft PR #3565 opened. Preview packaging reused Frog entry `20260913213526-vercel-source-preview` (archive mode); build-root correction under way. Public proof uses only committed source and synthetic UI.

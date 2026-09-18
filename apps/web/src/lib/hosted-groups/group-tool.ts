@@ -32,8 +32,6 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   getHostedVaultShareHistoryDays,
   getHostedVaultShareDailyMetricProjectionSpec,
-  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
-  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
   isHostedVaultShareRecentDateProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 
