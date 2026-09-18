@@ -68,7 +68,11 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
   });
   const ctx = { ...context, namespace: context.namespace };
   if (claim.status === "existing") {
-    const outcome = await reconcileExistingRuntime(ctx, claim.owner);
+    diagnostics.stage = "liveness";
+    // The wake validates the exact live attempt. Read its receipt only for recovery.
+    const wake = await wakeExistingRuntime(ctx, claim.owner);
+    if (wake?.kind === "runtime_processing_accepted") return wake;
+    const outcome = await reconcileExistingRuntime(ctx, claim.owner, wake);
     if (outcome) return outcome;
     claim = await ctx.command({ operation: "claim", processingMode: ctx.mode });
   }
@@ -131,9 +135,8 @@ async function retireRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSn
 }
 
 /** A null result means this exact completed attempt was released. */
-async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
+async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, wake: HostedRuntimeEnsureProcessingResponse | null): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   const identity = requireIdentity(owner);
-  ctx.diagnostics.stage = "liveness";
   if (owner.phase === "retiring" && !owner.completedAt) {
     await retireRuntime(ctx, owner);
     return retryProcessing(ctx, "retirement_pending");
@@ -148,7 +151,6 @@ async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRun
     await retireRuntime(ctx, owner);
     return retryProcessing(ctx, "retirement_pending");
   }
-  const wake = await wakeExistingRuntime(ctx, owner);
   if (wake) return wake;
   // Age decides when to attempt retirement; it never proves stoppedness.
   if (owner.phase === "starting" && owner.startedAt && Date.now() - Date.parse(owner.startedAt) < 30_000) return retryProcessing(ctx, "starting_fence_preserved");
@@ -169,7 +171,8 @@ async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRu
 }
 
 async function wakeExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
-  if (!owner.runnerContainerName || owner.workspaceVersion === null) return null;
+  if (owner.phase === "retiring" || !owner.runnerContainerName || owner.workspaceVersion === null) return null;
+  if (owner.processingMode === "inbox_media_retention" && ctx.mode !== "inbox_media_retention") return null;
   if (ctx.mode === "inbox_media_retention" && owner.processingMode !== ctx.mode) return retryProcessing(ctx, "processing_mode_conflict");
   const identity = requireIdentity(owner);
   ctx.diagnostics.stage = "active_wake";
