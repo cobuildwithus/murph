@@ -1640,17 +1640,16 @@ locally readable.
   delivery marker only; it is not payment, entitlement, or usage-credit
   authority.
 - Assistant runtime state is high-sensitivity local runtime data: directories under `vault/.runtime/operations/assistant/**` must be `0700`, files under that tree must be `0600`, secret-bearing provider headers must never remain inline in persisted session JSON, and operator-facing repair flows should use `assistant doctor --repair` to tighten assistant runtime permissions in place. Inline secret findings indicate stale local session data that should be rebuilt or repaired manually rather than a supported migration lane.
-- A member's explicit private workspace export may include their inspected
-  non-secret runtime records and conversation history. Runtime sensitivity and
-  hosted-snapshot/support-bundle portability rules are not blanket export bans.
-  Exclude credentials, tokens, environment secrets, internal system/developer
-  instructions and configuration, other members' data, and unsafe filesystem
-  entries. Inspect mixed-content files before inclusion; omit unsafe files or
-  produce clearly identified sanitized copies without changing originals. Never
-  expose excluded content through archive names, omission manifests, or replies,
-  and never describe an archive with exclusions as byte-for-byte complete.
-  The archive remains subject to the existing destination-bound file approval;
-  ordinary hidden source refs do not become directly sendable.
+- An authenticated member's explicit private full-workspace export authorizes
+  an as-is archive of every file under their workspace root, including hidden
+  runtime/history, configuration/instruction files and credential-bearing records.
+  Do not apply content redaction, sanitization, sensitivity exclusions or hosted
+  snapshot/support-bundle filters to that owner-requested archive. Preserve
+  original bytes and relative paths; archive symlinks as links without reading
+  targets outside the workspace, and exclude only the newly created archive
+  itself. This grants no access to another workspace or the host filesystem.
+  Use the existing destination-bound file approval; ordinary hidden source refs
+  do not become directly sendable and group/unverified disclosure remains unchanged.
 - Vault-file refs remain normalized and non-hidden except for one flat assistant-owned shape: `.runtime/operations/assistant/generated-deliveries/<filename>`. Initial preparation may accept that exact ref only after the reader-compatible runner has converged, and both initial and retry paths must adopt/revalidate its regular bounded file before revalidating filename, media type, byte size, and SHA-256. Adoption tightens assistant-runtime parents to `0700` and the exact file to `0600`; ordinary vault refs are not chmodded. Prefix siblings, nested paths, hidden filenames, control characters, snapshot-excluded temp/lock names, symlinks, special files, and every other hidden ref fail closed. Never infer ownership or deletion authority from `exports/assistant-deliveries/**` or another generic vault path.
 - Do not clear or abandon provider-native assistant thread continuity merely because a tool returned authenticated private data or because provider history differs slightly from delivered output. Session invalidation is not a privacy boundary. Protect private data through authorization, bounded tool results, output and logging policy, and the normal encrypted snapshot boundary.
 - Assistant runtime is also storage-boundary-sensitive data: it is execution residue, not a product-state staging area. If a datum is user-facing, queryable, or something future product features will build on, give it a canonical vault home or explicit derived materialization instead of persisting it under assistant runtime.

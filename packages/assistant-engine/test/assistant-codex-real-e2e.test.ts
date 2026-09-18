@@ -3515,7 +3515,7 @@ describeRealCodex('real Codex personal archive e2e', () => {
   ])('prepares $name without relocating source files', async ({ includeRuntime, explicitRuntime }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-personal-archive-e2e-'))
-    const originals: Record<string, string> = {
+    const originals: Record<string, string | Buffer> = {
       'notes/reading-list.md': '# Reading list\nA field guide to trees.\n',
       'documents/supply-list.csv': 'item,count\nnotebook,2\n',
       'raw/captures/sketch.txt': 'A synthetic pencil sketch description.\n',
@@ -3527,14 +3527,17 @@ describeRealCodex('real Codex personal archive e2e', () => {
       originals['.runtime/operations/assistant/transcripts/fixture.jsonl'] =
         JSON.stringify({ role: 'user', text: 'Remember that I enjoy field guides.' }) + '\n'
     }
-    const excluded: Record<string, string> = includeRuntime ? {
-      '.runtime/credentials/provider.json': JSON.stringify({ apiKey: 'synthetic-export-exclusion-marker' }),
+    const completeOnly: Record<string, string | Buffer> = includeRuntime ? {
+      '.runtime/credentials/provider.json': JSON.stringify({ apiKey: 'synthetic-export-inclusion-marker' }),
+      '.config/runtime.toml': 'fixture_setting = true\n',
+      'AGENTS.md': '# Synthetic workspace\nNo additional instructions.\n',
+      '.runtime/operations/device-sync/fixture.bin': Buffer.from([0, 255, 17, 128, 0]),
     } : {}
     const requestedRefs: string[] = []
     let approvalRequests = 0
     const sendErrors: string[] = []
     try {
-      for (const [ref, contents] of Object.entries({ ...originals, ...excluded })) {
+      for (const [ref, contents] of Object.entries({ ...originals, ...completeOnly })) {
         await mkdir(path.dirname(path.join(workingDirectory, ref)), { recursive: true })
         await writeFile(path.join(workingDirectory, ref), contents)
       }
@@ -3606,25 +3609,19 @@ describeRealCodex('real Codex personal archive e2e', () => {
       expect(attachment).toMatchObject({ kind: 'vault_file', contentType: 'application/zip' })
       if (attachment?.kind !== 'vault_file') throw new Error('Expected one ZIP attachment')
       const inspected = await execFileAsync('python3', ['-c', [
-        'import json, sys, zipfile',
+        'import base64, json, sys, zipfile',
         'with zipfile.ZipFile(sys.argv[1]) as archive:',
-        ' print(json.dumps({name: archive.read(name).decode() for name in archive.namelist() if not name.endswith("/")}))',
+        ' print(json.dumps({name: base64.b64encode(archive.read(name)).decode() for name in archive.namelist() if not name.endswith("/")}))',
       ].join('\n'), path.join(workingDirectory, attachment.ref)])
       const archiveFiles: Record<string, string> = JSON.parse(inspected.stdout)
-      if (includeRuntime) expect(archiveFiles).toMatchObject(originals)
-      else expect(archiveFiles).toEqual(originals)
-      for (const ref of Object.keys(excluded)) expect(Object.keys(archiveFiles)).not.toContain(ref)
-      expect(inspected.stdout).not.toContain('synthetic-export-exclusion-marker')
-      expect(result.finalMessage).not.toContain('synthetic-export-exclusion-marker')
-      if (includeRuntime) {
-        expect(result.finalMessage).toMatch(/exclud|omitt|left out|except|without.*credential/iu)
-        const notices = Object.entries(archiveFiles)
-          .filter(([ref]) => !Object.hasOwn(originals, ref))
-          .map(([, contents]) => contents).join('\n')
-        expect(notices).toMatch(/exclud|omitt|left out|except/iu)
-      }
-      for (const [ref, contents] of Object.entries({ ...originals, ...excluded })) {
-        expect(await readFile(path.join(workingDirectory, ref), 'utf8')).toBe(contents)
+      const expectedFiles = { ...originals, ...completeOnly }
+      expect(archiveFiles).toEqual(Object.fromEntries(
+        Object.entries(expectedFiles).map(([ref, contents]) => [ref, Buffer.from(contents).toString('base64')]),
+      ))
+      expect(result.finalMessage).not.toMatch(/exclud|omitt|saniti[sz]|redact|left out/iu)
+      expect(result.finalMessage).not.toContain('synthetic-export-inclusion-marker')
+      for (const [ref, contents] of Object.entries(expectedFiles)) {
+        expect(await readFile(path.join(workingDirectory, ref))).toEqual(Buffer.from(contents))
       }
       expect(result.finalMessage).toMatch(/approv/iu)
       expect(result.finalMessage).not.toMatch(/(?:I (?:can|could) help|would you like|shall I)|(?:sent|delivered|attached) (?:it|the (?:zip|file|archive))/iu)

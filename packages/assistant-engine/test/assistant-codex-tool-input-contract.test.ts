@@ -400,7 +400,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         developerInstructions = developerInstructions.replace(archiveLine, '- Export requested vault files. ZIPs may read originals in place. Inspect before refusing.')
         tools = tools.map((tool) => {
           if (tool.name !== 'send_vault_file') return tool
-          const start = tool.description.indexOf(' For an explicit whole-workspace archive request')
+          const start = tool.description.indexOf(' For an explicit full-workspace request')
           const end = tool.description.indexOf(' When a generated ZIP contains derived exports/packs/')
           assert.ok(start > 0 && end > start)
           return { ...tool, description: tool.description.slice(0, start) + tool.description.slice(end) }
