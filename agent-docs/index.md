@@ -1,7 +1,7 @@
 # Murph Agent Docs Index
 
-The current plain-grant 90-date group-sharing follow-up is tracked in
-[`2026-09-18-group-history-plain-grants.md`](exec-plans/active/2026-09-18-group-history-plain-grants.md).
+The completed plain-grant 90-date group-sharing follow-up is recorded in
+[`2026-09-18-group-history-plain-grants.md`](exec-plans/completed/2026-09-18-group-history-plain-grants.md).
 
 Completed query rebuild phase telemetry implementation and parent validation are
 recorded in

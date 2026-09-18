@@ -1,6 +1,6 @@
 # Plain-grant group history follow-up — PR #3565
 
-Status: candidate implemented and locally verified; database, preview, final review and CI gates pending.
+Status: completed
 Base: `13353ccc238be2554ba34735dfb988d394af06f5`.
 
 ## Outcome and scope
@@ -62,7 +62,7 @@ The local preparatory plan was consolidated into this authored plan before commi
 
 Parent focused verification: 210 contract/parser, 147 runtime, 425 Web, 139
 assistant and 217 Cloudflare tests pass. All five affected package typechecks
-pass (final Web render-source check pending). The real assistant followed both
+pass, including the final Web render-source check. The real assistant followed both
 history pages for an already-active metric and accurately explained sparse
 coverage without asking for expansion approval. Browser checks passed at 390px
 and 1280px; existing settings have one selected metric, and per-metric toggling
@@ -70,5 +70,41 @@ still works. Parent inspected the rendered synthetic screens. Complexity guard
 passes with no increased debt; scope-doubling machinery is removed. Restored
 pre-existing explicit-save generation refresh recovery after reviewing its
 original introduction; automatic expansion itself does not regrant anything.
-The first PostgreSQL run used an outdated shared test schema; an isolated test
-database is being prepared through existing migrations before rerunning.
+The first PostgreSQL run used an outdated shared test schema. All three grant
+lifecycle/deadline/cancellation cases passed against an isolated migrated test
+database, which was then removed.
+
+
+## Final verification and review
+
+Product UX and parent review: Ready. New and existing selections disclose the
+same window; existing selected metrics expand through the next eligible normal
+publication without reapproval. Per-metric removal, unshared/revoked metrics,
+immutable offers, pending old snapshots and sparse coverage remain distinct.
+The real assistant used two complete-date pages and explained sparse evidence.
+The READY preview renders both current states through normal project access;
+responsive screenshots are linked in the PR. Preview component sources are
+identical before and after the base merge.
+
+Merged main with one documentation-index conflict, resolved by preserving both
+entries. Inspected all automatically merged owner intersections. Fifty Web
+shared-read/freshness checks and 127 assistant/tool-input checks passed afterward.
+Original-base complete provider input is 158826 -> 159754 bytes for individual
+turns and 146400 -> 150295 for group turns; merged base instructions contribute
+928 and 561 bytes respectively. Before the base merge the PR-only change was
+zero individual bytes and +3334 group bytes. Exact tokenizer unavailable.
+
+Final ReviewGPT round 3 passed on `7f046b5574c6ee19b12494d227fe45e83eafcf74`.
+The first lane rejected a capability-limited attempt before acceptance; the
+fresh full snapshot on Hercules matched all 48 changed blobs and prior-head
+ancestry. Requested and response models both matched gpt-6-pro; capture took
+over nine minutes. Source review covered the automatic policy, publication,
+source/date completeness, authority fences, saved-offer recovery, ordinary and
+email reads, and bounded ciphertext fanout. No findings or remediation remained.
+Earlier rounds had no findings; no retrospective or fourth round is required.
+
+The final commit changes only this plan and its index link. Required exact-head
+CI is still checked before handoff; no production deployment or merge is part
+of this task. Current-base merge-tree proof was clean after the final review.
+Updated: 2026-09-18
+Completed: 2026-09-18
