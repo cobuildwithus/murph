@@ -26,10 +26,8 @@ import {
   readHostedMailboxConsumedSeqForTest,
   readHostedMailboxItemForTest,
   seedHostedWorkspaceInboxMediaRetentionWakeForTest,
-  seedHostedWorkspaceWakeForTest,
   signalHostedMailboxAppendRuntimeForTest,
   signalHostedManualRunRuntimeForTest,
-  signalHostedRetentionRuntimeRecheckForTest,
   updateHostedMemberBillingStatusForTest,
 } from "#hosted-web-testing";
 
@@ -225,15 +223,21 @@ describe("hosted local Temporal orchestration e2e", () => {
     );
   }, 300_000);
 
-  it("retires a stale pointer while running due retention for a paused member", async () => {
+  it("runs due retention and retires a system pointer for an inactive member", async () => {
     const activeScenario = requireScenario();
 
-    await seedEngagementPausedFrontierMember(
+    await seedFrontierMemberWithoutRecentInbound(
       activeScenario,
       pausedRetentionUserId,
       "paused-retention",
     );
     const providerRequestBaseline = activeScenario.assistantProviderRequests.length;
+
+    await updateHostedMemberBillingStatusForTest({
+      billingStatus: "paused",
+      environment: activeScenario.runtimeEnv,
+      memberId: pausedRetentionUserId,
+    });
 
     const retainedEventId =
       `member.preferences.updated:paused-retention:${Date.now()}`;
@@ -249,31 +253,6 @@ describe("hosted local Temporal orchestration e2e", () => {
         },
       }),
     });
-    const retainedSignal = await signalHostedMailboxAppendRuntimeForTest({
-      environment: activeScenario.runtimeEnv,
-      expectedUserId: pausedRetentionUserId,
-      mailboxItemId: retainedAppend.wake.id,
-    });
-    const retainedState = await waitForWorkflowBlockedState({
-      env: activeScenario.runtimeEnv,
-      expectedMailboxPointer: {
-        lane: "system",
-        laneSeq: retainedAppend.wake.seq,
-        mailboxItemId: retainedAppend.wake.id,
-      },
-      workflowId: retainedSignal.workflowId,
-    });
-    expect(retainedState.latestMailboxPointer).toEqual({
-      lane: "system",
-      laneSeq: retainedAppend.wake.seq,
-      mailboxItemId: retainedAppend.wake.id,
-    });
-
-    await updateHostedMemberBillingStatusForTest({
-      billingStatus: "paused",
-      environment: activeScenario.runtimeEnv,
-      memberId: pausedRetentionUserId,
-    });
     await seedHostedWorkspaceInboxMediaRetentionWakeForTest({
       environment: activeScenario.runtimeEnv,
       userId: pausedRetentionUserId,
@@ -281,9 +260,10 @@ describe("hosted local Temporal orchestration e2e", () => {
     });
 
     const retentionSignalStartedAt = new Date();
-    const signal = await signalHostedRetentionRuntimeRecheckForTest({
+    const signal = await signalHostedMailboxAppendRuntimeForTest({
       environment: activeScenario.runtimeEnv,
-      userId: pausedRetentionUserId,
+      expectedUserId: pausedRetentionUserId,
+      mailboxItemId: retainedAppend.wake.id,
     });
     const workflowState = await waitForWorkflowExecutionState({
       env: activeScenario.runtimeEnv,
@@ -330,10 +310,10 @@ describe("hosted local Temporal orchestration e2e", () => {
     );
   }, 300_000);
 
-  it("routes engagement-blocked system frontiers to their declared owners", async () => {
+  it("processes system frontiers without recent iMessage engagement", async () => {
     const activeScenario = requireScenario();
 
-    await seedEngagementPausedFrontierMember(
+    await seedFrontierMemberWithoutRecentInbound(
       activeScenario,
       modelFreeFrontierUserId,
       "model-free-frontier",
@@ -417,7 +397,7 @@ describe("hosted local Temporal orchestration e2e", () => {
       modelFreeProviderBaseline,
     );
 
-    await seedEngagementPausedFrontierMember(
+    await seedFrontierMemberWithoutRecentInbound(
       activeScenario,
       defaultOwnedFrontierUserId,
       "default-owned-frontier",
@@ -438,23 +418,22 @@ describe("hosted local Temporal orchestration e2e", () => {
         },
       }),
     });
+    const defaultOwnedSignalStartedAt = new Date();
     const defaultOwnedSignal = await signalHostedMailboxAppendRuntimeForTest({
       environment: activeScenario.runtimeEnv,
       expectedUserId: defaultOwnedFrontierUserId,
       mailboxItemId: defaultOwnedAppend.wake.id,
     });
-    const defaultOwnedState = await waitForWorkflowBlockedState({
+    const defaultOwnedState = await waitForWorkflowExecutionState({
       env: activeScenario.runtimeEnv,
-      expectedMailboxPointer: {
-        lane: "system",
-        laneSeq: defaultOwnedAppend.wake.seq,
-        mailboxItemId: defaultOwnedAppend.wake.id,
-      },
+      executionNotBefore: defaultOwnedSignalStartedAt,
       workflowId: defaultOwnedSignal.workflowId,
     });
-    expect(defaultOwnedState.lastExecutionAt).toBeNull();
     expect(defaultOwnedState.lastExecutionErrorCode).toBeNull();
-    expect(defaultOwnedState.lastExecutionKind).toBeNull();
+    await waitForSystemMailboxHandledThrough({
+      expectedSeq: defaultOwnedAppend.wake.seq,
+      userId: defaultOwnedFrontierUserId,
+    });
     await expect(readHostedMailboxItemForTest({
       dedupeKey: defaultOwnedEventId,
       environment: activeScenario.runtimeEnv,
@@ -464,19 +443,13 @@ describe("hosted local Temporal orchestration e2e", () => {
       kind: "member.preferences.updated",
       lane: "system",
     });
-    const defaultOwnedStatus = await activeScenario.harness.readUserStatus(
-      defaultOwnedFrontierUserId,
-    );
-    expect(readSystemMailboxHandledThroughSeq(defaultOwnedStatus)).toBeLessThan(
-      BigInt(defaultOwnedAppend.wake.seq),
-    );
     expect(activeScenario.assistantProviderRequests).toHaveLength(
       defaultOwnedProviderBaseline,
     );
   }, 300_000);
 });
 
-async function seedEngagementPausedFrontierMember(
+async function seedFrontierMemberWithoutRecentInbound(
   activeScenario: HostedLocalFullStackScenario,
   userId: string,
   eventLabel: string,
@@ -499,13 +472,6 @@ async function seedEngagementPausedFrontierMember(
     userId,
   );
   await activeScenario.waitForHostedCompletion(userId);
-  await seedHostedWorkspaceWakeForTest({
-    defaultProcessingWake: true,
-    environment: activeScenario.runtimeEnv,
-    userId,
-    wakeAt: new Date(Date.now() - 60_000),
-    wakeReason: "assistant",
-  });
 }
 
 async function waitForSystemMailboxHandledThrough(input: {
@@ -565,57 +531,6 @@ async function waitForWorkflowExecutionState(input: {
   throw new Error(
     [
       "Timed out waiting for Temporal workflow execution state.",
-      latestState ? `last state: ${JSON.stringify(latestState)}` : null,
-      latestError ? `last query error: ${latestError}` : null,
-    ]
-      .filter((line): line is string => Boolean(line))
-      .join("\n"),
-  );
-}
-
-async function waitForWorkflowBlockedState(input: {
-  env: NodeJS.ProcessEnv;
-  expectedMailboxPointer: HostedRuntimeMailboxPointer;
-  workflowId: string;
-}): Promise<ObservedHostedRuntimeWorkflowState> {
-  const deadline = Date.now() + 180_000;
-  let latestState: ObservedHostedRuntimeWorkflowState | null = null;
-  let latestError: string | null = null;
-
-  while (Date.now() < deadline) {
-    try {
-      latestState = readObservedHostedRuntimeWorkflowState(
-        await queryHostedRuntimeWorkflowForTest({
-          environment: input.env,
-          queryName: HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
-          workflowId: input.workflowId,
-        }),
-      );
-      const pointer = latestState.latestMailboxPointer;
-      if (
-        latestState.lastReconciliationBlockedReason
-          === "automation_engagement_paused"
-        && latestState.currentWaitReason === "blocked_retry"
-        && latestState.lastExecutionAt === null
-        && latestState.lastExecutionErrorCode === null
-        && latestState.lastExecutionKind === null
-        && pointer !== null
-        && pointer.lane === input.expectedMailboxPointer.lane
-        && pointer.laneSeq === input.expectedMailboxPointer.laneSeq
-        && pointer.mailboxItemId === input.expectedMailboxPointer.mailboxItemId
-      ) {
-        return latestState;
-      }
-    } catch (error) {
-      latestError = error instanceof Error ? error.message : String(error);
-    }
-
-    await sleep(1_000);
-  }
-
-  throw new Error(
-    [
-      "Timed out waiting for Temporal workflow engagement block.",
       latestState ? `last state: ${JSON.stringify(latestState)}` : null,
       latestError ? `last query error: ${latestError}` : null,
     ]
