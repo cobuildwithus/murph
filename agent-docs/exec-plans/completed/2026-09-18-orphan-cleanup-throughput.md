@@ -1,6 +1,6 @@
 # Keep bounded runtime orphan cleanup ahead of arrivals
 
-Status: active
+Status: completed
 
 ## Outcome and invariant
 Increase service opportunities for the existing bounded runtime resource cleanup so ordinary checkpoint churn cannot indefinitely grow eligible snapshot/replica backlog. Preserve the 65-minute grace, canonical-reference protection, exact upload/drain fences, terminal retirement, revision acknowledgment, per-run bounds, cron authentication, and external work outside transactions.
@@ -22,5 +22,9 @@ Functional scheduling change: prepare a reviewed PR for human merge only. No pro
 - Baseline: 324 tests passed, including 53 real PostgreSQL cases on an isolated migrated loopback test database; Web typecheck passed.
 - New capacity regression failed on the old hourly expression, then passed with the five-minute schedule. The real cleanup owner clears the 200 synthetic eligible records across configured invocations while retaining its 50-row batch ceiling.
 - Changed candidate: 271 cron/guard/account/computer cases plus 54 real PostgreSQL cases passed (325 total). Web typecheck, docs drift, complexity guard and whitespace checks passed. Parent privacy and full-diff review passed.
-- Final pushed-candidate ReviewGPT and exact-head CI remain pending; human merge only.
+- Final ReviewGPT on pushed head `f865a9d8ba2381e1bdddeb6f71db2e1d2fd7de72`: PASS, zero qualifying findings; exact response/model attestation verified. The full snapshot included every composed cleanup owner.
+- Parent final review confirms production cleanup code and all deletion safeguards are unchanged; only the cron expression changes runtime behavior. No accepted findings remain.
+- Implementation and local proof are complete. Required CI on the final plan-closeout head remains the handoff gate; human merge and deployment are outside this task’s authority.
 - Internal resource housekeeping; no assistant journey, member-facing UI change or public changelog item.
+Updated: 2026-09-18
+Completed: 2026-09-18
