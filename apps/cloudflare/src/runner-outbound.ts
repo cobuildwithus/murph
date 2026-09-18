@@ -1,5 +1,5 @@
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
-import { presignManagedSnapshot, completeManagedSnapshotForSession } from "./managed-snapshot-control.ts";
+import { presignManagedSnapshot, completeManagedSnapshotForSession, ManagedSnapshotCompletionRejectedError } from "./managed-snapshot-control.ts";
 import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, commandHostedRuntimeReplicaPut, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
 import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
 import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
@@ -304,6 +304,9 @@ function runnerOutboundFailureResponse(
 ): Response {
   if (error instanceof HostedRuntimeResourceRejectedError) {
     return json({ code: error.code, error: error.message }, error.status);
+  }
+  if (error instanceof ManagedSnapshotCompletionRejectedError) {
+    return jsonError(error.message, 409);
   }
   const safeUrl = safeRunnerOutboundRequestUrl(request.url);
   const errorCode = deriveHostedExecutionErrorCode(error);

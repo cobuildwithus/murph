@@ -17,7 +17,7 @@ afterEach(() => {
 
 describe("hosted local runtime admission window", () => {
   it.each(["started", "replaced"] as const)("counts the exact helper-%s owner once over its full window", async (action) => {
-    const initial = admissionLog("initial-owner", 0, "hosted-local-wake:fixture");
+    const initial = admissionLog("initial-owner", 0);
     const settled = vi.fn();
     const result = countHostedLocalRuntimeAdmissionWindow(windowInput({
       acceptedWake: { action, runtimeAttemptId: "initial-owner" },
@@ -38,17 +38,17 @@ describe("hosted local runtime admission window", () => {
     await expect(result).resolves.toBe(1);
   });
 
-  it.each(["workflow-attempt", "hosted-local-wake:fixture"])(
-    "counts a second fresh owner even when its caller is %s",
-    async (orchestrationAttemptId) => {
-      let stdout = admissionLog("initial-owner", 0, "hosted-local-wake:fixture");
+  it(
+    "counts a second fresh owner after the initial invocation leaves the log tail",
+    async () => {
+      let stdout = admissionLog("initial-owner", 0);
       const result = countHostedLocalRuntimeAdmissionWindow(windowInput({
         readStdout: () => stdout,
       }));
 
       await vi.advanceTimersByTimeAsync(29_000);
       // The bounded stdout tail can drop the initial admission while polling.
-      stdout = admissionLog("replacement-owner", 29_000, orchestrationAttemptId);
+      stdout = admissionLog("replacement-owner", 29_000);
       await vi.advanceTimersByTimeAsync(1_000);
       await expect(result).resolves.toBe(2);
     },
@@ -100,6 +100,17 @@ describe("hosted local runtime admission window", () => {
     await rejection;
   });
 
+  it("ignores container readiness without an actual invocation", async () => {
+    const readyLog = JSON.parse(admissionLog("initial-owner", 0));
+    readyLog.message = "Hosted execution container is ready.";
+    const result = countHostedLocalRuntimeAdmissionWindow(windowInput({
+      readStdout: () => JSON.stringify(readyLog), timeoutMs: 1_000,
+    }));
+    const rejection = expect(result).rejects.toThrow("Timed out observing the first runtime admission window.");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await rejection;
+  });
+
   it("requires the entire observation window before the reminder deadline", async () => {
     await expect(countHostedLocalRuntimeAdmissionWindow(windowInput({
       acceptedWake: { action: "woken", runtimeAttemptId: "initial-owner" },
@@ -130,16 +141,14 @@ function windowInput(
 function admissionLog(
   workspaceAttemptId: string,
   offsetMs: number,
-  orchestrationAttemptId = "workflow-attempt",
 ): string {
   return JSON.stringify({
-    component: "hosted.runner",
+    component: "container",
     details: {
-      orchestrationAttemptId,
-      runtimeProcessingAction: "started",
       workspaceAttemptId,
     },
-    phase: "runtime.starting",
+    message: "Hosted execution container invocation received.",
+    phase: "container.starting",
     time: new Date(nowMs + offsetMs).toISOString(),
     userId: null,
     userIdPresent: true,

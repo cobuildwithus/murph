@@ -9,6 +9,12 @@ import { asWorkerStringEnvironment, type WorkerEnvironmentContract } from "./wor
 
 type SnapshotSource = Readonly<Record<string, unknown>> & Pick<WorkerEnvironmentContract, "BUNDLES">;
 
+export class ManagedSnapshotCompletionRejectedError extends Error {
+  constructor() {
+    super("Hosted workspace snapshot completion does not match its admitted bytes.");
+  }
+}
+
 export async function presignManagedSnapshot(input: {
   source: SnapshotSource; session: HostedWorkspaceSnapshotUploadSession;
   encryptedByteSize: number; encryptedSha256: string; encryptedMd5?: string; expiresSeconds: number;
@@ -49,7 +55,7 @@ export async function completeManagedSnapshotForSession(input: {
     || receipt.userId !== input.session.userId || receipt.snapshotId !== input.session.snapshotId
     || receipt.attemptId !== input.session.attemptId || receipt.generation !== input.session.leaseGeneration
     || receipt.encryptedByteSize !== input.encryptedByteSize || receipt.encryptedSha256 !== input.encryptedSha256) {
-    throw new Error("Managed snapshot completion does not match its admitted bytes.");
+    throw new ManagedSnapshotCompletionRejectedError();
   }
   await completeManagedSnapshotUpload({ bucket: workspaceSnapshotBucket(input.source), receipt, etag,
     settle: (receipt, verified) => settle(input.source, receipt, verified) });

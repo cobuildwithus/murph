@@ -36,7 +36,9 @@ const imageGenerationStartedReplyText =
 const interveningConversationReplyText = "Breathe out slowly for six seconds.";
 const generatedImageReplyText = "Here is the generated setup image.";
 const productionLikeAssistantModel = "gpt-5.6-terra";
-const localRunnerIdleTtlMs = "300000";
+// Completion includes the idle checkpoint; keep it inside the scenario's
+// completion deadline while the explicit image barrier owns detached work.
+const localRunnerIdleTtlMs = "1000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
