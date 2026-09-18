@@ -673,7 +673,7 @@ describe("foods query helpers", () => {
     );
     expect(searchCall?.text).toContain("JOIN foods labels");
     expect(searchCall?.text).toMatch(
-      /selected AS \([\s\S]*?LIMIT \$3[\s\S]*?\)\s*SELECT[\s\S]*?labels\.label[\s\S]*?FROM selected[\s\S]*?JOIN foods labels/u,
+      /selected_page AS \([\s\S]*?LIMIT \$3[\s\S]*?selected AS \([\s\S]*?FROM selected_page\s*\)\s*SELECT[\s\S]*?labels\.label[\s\S]*?FROM selected[\s\S]*?JOIN foods labels/u,
     );
     expect(searchCall?.text).toContain("PARTITION BY canonical_key");
     expect(searchCall?.text).toContain("dedupe_rank = 1");
