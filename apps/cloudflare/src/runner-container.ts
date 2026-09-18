@@ -2986,6 +2986,10 @@ export class RunnerContainer extends Container {
     );
     let coldStartTiming: RunnerContainerEnsureReadyResult["coldStartTiming"];
     const coldStartWaitStartedAtMs = Date.now();
+    const startupAbortSignal = combineRunnerContainerAbortSignals(
+      operationAbortSignal,
+      AbortSignal.timeout(readinessTimeoutMs),
+    );
     const currentStart = this.recordContainerStartIssued(
       coldStartWaitStartedAtMs,
       readyTimeoutMs,
@@ -2993,15 +2997,16 @@ export class RunnerContainer extends Container {
     try {
       await this.startAndWaitForPorts({
         cancellationOptions: {
-          abort: combineRunnerContainerAbortSignals(
-            operationAbortSignal,
-            AbortSignal.timeout(readinessTimeoutMs),
-          ),
+          abort: startupAbortSignal,
           instanceGetTimeoutMS: readinessTimeoutMs,
           portReadyTimeoutMS: readinessTimeoutMs,
           waitInterval: RUNNER_WAIT_INTERVAL_MS,
           portProbeTimeoutMS: RUNNER_PORT_PROBE_TIMEOUT_MS,
         },
+      }).catch((error: unknown) => {
+        // The SDK can replace a cancellation reason with a plain Error.
+        throwIfRunnerContainerOperationAborted(startupAbortSignal);
+        throw error;
       });
       if (options.startupFailureObservation) {
         options.startupFailureObservation.stage = "cold_health_or_finalization";
@@ -4758,13 +4763,16 @@ async function assertRunnerHealthy(
   const abortSignal = signal
     ? combineRunnerContainerAbortSignals(signal, timeoutSignal)
     : timeoutSignal;
-  const response = await container.containerFetch(
-    RUNNER_HEALTH_URL,
-    {
+  let response: Response;
+  try {
+    response = await container.containerFetch(RUNNER_HEALTH_URL, {
       method: "GET",
       signal: abortSignal,
-    },
-  );
+    });
+  } catch (error) {
+    throwIfRunnerContainerOperationAborted(abortSignal);
+    throw error;
+  }
 
   const responseOk = response.ok;
   const payload = await readRunnerContainerMetadataJsonObject(response, {
