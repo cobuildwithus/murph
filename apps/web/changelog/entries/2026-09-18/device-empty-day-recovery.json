@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-18",
+  "order": 100,
+  "item": {
+    "id": "device-empty-day-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Device history recovers after empty days",
+    "summary": "Complete-day device readings can return when your provider supplies valid data after an empty response.",
+    "details": "Restored readings continue their existing history, and repeated imports do not add duplicates.",
+    "relevanceTags": [
+      "devices",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}

@@ -1535,6 +1535,15 @@ test("Junction blood oxygen preserves temporal facts across zero and invalid day
     await importDay([], "2026-04-24T16:00:00.000Z");
     await importDay([0], "2026-04-24T17:00:00.000Z");
     assert.deepEqual(await readEventBytes(), emptyBytes);
+    const restored = await importDay([97, 98, 98, 99], "2026-04-24T18:00:00.000Z");
+    const restoredFacets = await liveFacets(seeded.eventShardPaths);
+    assert.equal(restoredFacets.length, before.length);
+    assert.deepEqual(restoredFacets.map((record) => record.id).sort(), before.map((record) => record.id).sort());
+    assert.equal(restored.events.length, before.length);
+    const restoredBytes = await readEventBytes();
+    await importDay([97, 98, 98, 99], "2026-04-24T18:00:00.000Z");
+    assert.deepEqual(await readEventBytes(), restoredBytes);
+
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
