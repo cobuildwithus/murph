@@ -38,6 +38,12 @@ The original capture metadata remained unchanged, and the recovery target was
 closed after use. The downloader should wait for rehydration using the same
 identity-aware behavior as the exporter.
 
+An exact-metadata download also timed out while a native Save dialog prevented
+the browser download event. Export with unchanged capture metadata verified the
+same response and sole artifact; selecting that artifact and completing the
+native dialog recovered the patch without another model request. Surface this
+dialog as an actionable download state instead of a generic CDP-event timeout.
+
 With the pinned 0.5.147 toolchain, a waited implementation request also remained
 in its waiting loop after a settled response exposed the requested completion
 marker and patch button. The original metadata still had no assistant identity,

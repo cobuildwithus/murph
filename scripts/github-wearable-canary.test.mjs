@@ -65,7 +65,7 @@ test("dispatches one protected-main journey and accepts its exact completed busi
 
 test("missing credentials and untrusted events fail before any provider dispatch", async () => {
   for (const override of [
-    { GITHUB_REF: "refs/heads/topic" }, { GITHUB_REF_PROTECTED: "false" }, { GITHUB_EVENT_NAME: "pull_request" },
+    { GITHUB_REF: "refs/heads/topic" }, { GITHUB_REF_PROTECTED: "false" }, { GITHUB_EVENT_NAME: "pull_request" }, { GITHUB_EVENT_NAME: "push" },
     { WEARABLE_CANARY_PRIVATE_GITHUB_TOKEN: "" }, { GITHUB_RUN_ID: "private/input" },
   ]) {
     const options = harness();
@@ -175,5 +175,6 @@ test("public workflow grants only private dispatch authority and never provider 
   assert.match(workflow, /permission-contents: read/u);
   assert.match(workflow, /cancel-in-progress: false/u);
   assert.match(workflow, /schedule:/u);
+  assert.doesNotMatch(workflow, /\n  push:/u);
   assert.doesNotMatch(workflow, /JUNCTION_API_KEY|GARMIN_PASSWORD|KERNEL_API_KEY|pull_request|actions\/download-artifact|pnpm install|force-cancel/u);
 });

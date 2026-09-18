@@ -86,7 +86,7 @@ describe("hosted local Linq reminder device-sync non-starvation e2e", () => {
         HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:
-          process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? "1" : "10000",
+          process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? "1000" : "10000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           buildLinqRecipientPhoneNumber(userId),
         JUNCTION_API_KEY: "sk_us_synthetic_junction_api_key",

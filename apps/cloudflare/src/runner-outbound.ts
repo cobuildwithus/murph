@@ -63,7 +63,6 @@ import {
 } from "./browser-vault-limits.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import {
-  buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
@@ -191,7 +190,7 @@ export async function handleRunnerOutboundRequest(
       userId,
     });
     if (storageHostResponse) {
-      return storageHostResponse;
+      return await storageHostResponse;
     }
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore) {
@@ -307,26 +306,26 @@ function runnerOutboundFailureResponse(
     return json({ code: error.code, error: error.message }, error.status);
   }
   const safeUrl = safeRunnerOutboundRequestUrl(request.url);
+  const errorCode = deriveHostedExecutionErrorCode(error);
+  const errorName = readHostedExecutionSafeErrorName(error);
   emitHostedExecutionStructuredLog({
     component: "runner",
     details: {
+      errorCode,
+      ...(errorName ? { errorName } : {}),
       hostKind: safeUrl ? readRunnerOutboundHostKind(safeUrl.hostname) : "invalid_url",
       method: readHostedRunnerDiagnosticMethod(request.method),
       operation: safeUrl ? readRunnerOutboundOperation(safeUrl, request.method) : "invalid_url",
       userIdPresent: userId.length > 0,
     },
-    error,
+    level: "error",
     message: "Hosted runner outbound request failed.",
     phase: "wake.running",
   });
 
-  const details = buildHostedExecutionSafeErrorDetails(error);
-  const errorName = readHostedExecutionSafeErrorName(error);
-
   return json({
-    code: deriveHostedExecutionErrorCode(error),
+    code: errorCode,
     error: summarizeHostedExecutionError(error),
-    ...(details ? { details } : {}),
     ...(errorName ? { errorName } : {}),
   }, 500);
 }

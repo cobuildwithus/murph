@@ -3,6 +3,7 @@ import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 import { MURPH_PRODUCT_ORIGIN } from '@murphai/contracts'
+import { ASSISTANT_GROUP_WEARABLE_RECOVERY_INSTRUCTION } from '../src/assistant/group-shared-freshness.js'
 
 import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tool-catalog.js'
@@ -29,6 +30,19 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it('keeps source-specific gaps and uncertain historical coverage in the composed group prompt', () => {
+    const { prompt } = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'linq', conversationScope: 'group',
+      hostedRuntime: true, assistantHostedGroupToolSurface: 'families',
+    })
+    expect(prompt).toContain('including single-participant reports')
+    expect(ASSISTANT_GROUP_WEARABLE_RECOVERY_INSTRUCTION).toContain('only to current sleep summaries, never historical trends or other metrics')
+    expect(prompt).toContain('another wearable or a manual entry does not fill its gap')
+    expect(prompt).toContain('An absent historical date does not prove that the provider never reported it')
+    expect(prompt).toContain('refreshes eligible recent missing dates independently of older requested dates')
+    expect(prompt).not.toContain('`no_recent_reporting` means an older sharing grant has no records in that window')
+  })
+
   it('keeps exact-scope consent recovery and truthful delivery guidance resident', () => {
     const { prompt } = buildAssistantSystemPromptLayers({
       ...baseConversationInput, channel: 'linq', conversationScope: 'group',

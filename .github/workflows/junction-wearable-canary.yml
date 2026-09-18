@@ -1,9 +1,6 @@
 name: Live Junction Garmin Canary
 
 on:
-  push:
-    branches:
-      - main
   schedule:
     - cron: "43 5 * * *"
   workflow_dispatch:

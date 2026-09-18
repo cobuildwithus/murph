@@ -56,6 +56,17 @@ describe('assistant generated delivery files', () => {
     expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
       'Creating a new ZIP from requested vault files is allowed; read the originals in place and stage only the new archive.',
     )
+    for (const boundary of [
+      "member's authenticated private conversation",
+      "archive all files under that member's workspace root as-is",
+      'including dotfiles, runtime/history, configuration/instruction files',
+      'any credential-bearing records present',
+      'without content-based exclusion, redaction, or sanitization',
+      'Archive symlinks as links without following them or reading outside the workspace',
+      "submit only the new ZIP's generated-delivery ref",
+    ]) expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(boundary)
+    expect(MURPH_SEND_VAULT_FILE_TOOL.description).not.toContain('Exclude credentials')
+    expect(MURPH_SEND_VAULT_FILE_TOOL.description).not.toContain('omission notice')
     expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
       'pass those exact included ids in retire_export_pack_ids',
     )

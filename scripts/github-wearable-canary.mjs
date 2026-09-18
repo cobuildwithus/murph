@@ -121,7 +121,7 @@ function readCanaryRequest(env) {
   assertSafeId(requestId, "canary request id", 120);
   if (env.GITHUB_REPOSITORY !== PUBLIC_REPOSITORY || env.GITHUB_REF !== "refs/heads/main"
     || env.GITHUB_REF_PROTECTED !== "true"
-    || !["push", "schedule", "workflow_dispatch"].includes(env.GITHUB_EVENT_NAME)
+    || !["schedule", "workflow_dispatch"].includes(env.GITHUB_EVENT_NAME)
     || !/^\d+$/u.test(env.GITHUB_RUN_ID ?? "") || !/^[1-9]\d*$/u.test(env.GITHUB_RUN_ATTEMPT ?? "")) {
     throw new Error("Wearable canary requires an exact protected-main controller.");
   }

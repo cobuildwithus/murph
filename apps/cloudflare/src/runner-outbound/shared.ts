@@ -1,3 +1,4 @@
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import type {
   HostedCryptoDomain,
 } from "@murphai/runtime-state";
@@ -43,6 +44,19 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
   const nowMs = Date.now();
   const existing = runnerOutboundCryptoContextPendingLoads.get(cacheKey);
   if (existing && existing.expiresAtMs > nowMs) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        domain: input.domain,
+        pendingAgeMs: Math.max(0, Math.min(
+          RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_TTL_MS,
+          nowMs - (existing.expiresAtMs - RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_TTL_MS),
+        )),
+      },
+      level: "info",
+      message: "Hosted runner outbound crypto context joined pending load.",
+      phase: "wake.running",
+    });
     return await existing.promise;
   }
   if (existing) {

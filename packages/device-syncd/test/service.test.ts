@@ -5692,7 +5692,7 @@ test.each(["blood_oxygen", "electrocardiogram_voltage"])(
           if (resource === "blood_oxygen") {
             throw new JunctionSparseCalendarRepairNormalizationError({
               reason: "daily.value_out_of_range", valueKind: "number",
-              valueRange: "zero", unitKind: "percent",
+              valueRange: "negative", unitKind: "percent",
             });
           }
           throw deviceSyncError({
@@ -10519,6 +10519,104 @@ function latestLiveRecords(
     (record.lifecycle as { state?: string } | undefined)?.state !== "deleted"
   );
 }
+
+test("Junction zero oxygen completes retained work through the real importer without replacing history", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-zero-oxygen");
+  const externalAccountId = "junction-zero-oxygen";
+  let now = new Date("2026-08-15T12:00:00.000Z");
+  let values: readonly (number | string)[] = [97, 98, 98, 99];
+  await initializeVault({ vaultRoot, timezone: "UTC" });
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: createImporters(),
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_fake_test_placeholder",
+      clientUserIdSecret: "test-only-hmac-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: [],
+      timeseriesResources: ["blood_oxygen"],
+      fetchImpl: async (input) => {
+        const url = new URL(readUrl(input));
+        if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+          return createJsonResponse({ providers: [{
+            id: "provider-garmin-zero-oxygen", slug: "garmin", name: "Garmin",
+            status: "connected", resource_availability: { blood_oxygen: true },
+          }] });
+        }
+        if (url.pathname === `/v2/timeseries/${externalAccountId}/blood_oxygen/grouped`) {
+          return createJsonResponse({ groups: { garmin: [{
+            source: { provider: "garmin", type: "watch" },
+            data: values.map((value, index) => ({
+              timestamp: new Date(Date.UTC(2026, 7, 12, 7, index)).toISOString(), value,
+            })),
+          }] } });
+        }
+        throw new Error(`Unexpected Junction zero-oxygen request: ${url.pathname}`);
+      },
+    })],
+  });
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction", externalAccountId, displayName: "Junction", scopes: [], status: "active",
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+    });
+    const enqueueDay = (dedupeKey: string) => fixture.store.enqueueJob({
+      accountId: account.id, provider: "junction", kind: "resource", maxAttempts: 1,
+      availableAt: now.toISOString(), dedupeKey,
+      payload: {
+        resource: "blood_oxygen", resourceCategory: "timeseries", temporalAuthorityTimeZone: "UTC",
+        windowStart: "2026-08-12T00:00:00.000Z", windowEnd: "2026-08-13T00:00:00.000Z",
+      },
+    });
+    const seed = enqueueDay("zero-oxygen-seed");
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, seed.id);
+    assert.equal(fixture.store.getJobById(seed.id)?.status, "succeeded");
+    const relativePath = "ledger/events/2026/2026-08.jsonl";
+    const before = await readFile(path.join(vaultRoot, relativePath));
+    const liveFacets = async () => latestLiveRecords(await readJsonlRecords({ vaultRoot, relativePath }))
+      .filter((record) => typeof record.metric === "string" && record.metric.startsWith("spo2-"));
+    assert.ok((await liveFacets()).length > 0);
+
+    values = [-1];
+    const retry = enqueueDay("zero-oxygen-retained");
+    await fixture.service.runWorkerOnce(account.id);
+    const retained = fixture.store.getJobById(retry.id);
+    assert.ok(retained);
+    assert.equal(retained.status, "queued");
+    assert.equal(retained.lastErrorCode, "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION");
+    assert.equal(Date.parse(retained.availableAt) - now.getTime(), 30 * 60_000);
+    now = new Date(retained.availableAt);
+    values = [0];
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, retry.id);
+    assert.equal(fixture.store.getJobById(retry.id)?.status, "succeeded");
+    assert.deepEqual(await readFile(path.join(vaultRoot, relativePath)), before);
+
+    for (const [index, response] of [[0], ["0"], [97, 0, 98], [0.97, "0", 0.98]].entries()) {
+      values = response;
+      const job = enqueueDay(`zero-oxygen-replay-${index}`);
+      assert.equal((await fixture.service.runWorkerOnce(account.id))?.id, job.id);
+      assert.equal(fixture.store.getJobById(job.id)?.status, "succeeded");
+      assert.deepEqual(await readFile(path.join(vaultRoot, relativePath)), before);
+    }
+    values = [88, 88, 98, 98];
+    const corrected = enqueueDay("zero-oxygen-corrected");
+    await fixture.service.runWorkerOnce(account.id);
+    assert.equal(fixture.store.getJobById(corrected.id)?.status, "succeeded");
+    assert.notDeepEqual(await readFile(path.join(vaultRoot, relativePath)), before);
+    assert.ok((await liveFacets()).length > 0);
+  } finally {
+    fixture.close();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
 
 test("Junction ambiguous-timestamp rows fail a complete day closed through the real importer", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-ambiguous-rows");

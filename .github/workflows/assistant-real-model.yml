@@ -1,8 +1,8 @@
 name: Assistant Real Model
 
 on:
-  push:
-    branches: [main]
+  schedule:
+    - cron: "31 7 * * *"
   workflow_dispatch:
 
 permissions:
@@ -24,8 +24,8 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_EVENT_NAME" in
-            push|workflow_dispatch) ;;
-            *) echo "Real-model acceptance requires a main push or manual main run." >&2; exit 1 ;;
+            schedule|workflow_dispatch) ;;
+            *) echo "Real-model acceptance requires a scheduled or manual main run." >&2; exit 1 ;;
           esac
           if [[ "$GITHUB_REF" != refs/heads/main || "$GITHUB_REF_PROTECTED" != true ]]; then
             echo "Real-model acceptance requires protected main." >&2
@@ -37,7 +37,7 @@ jobs:
     needs: admission
     if: >-
       github.ref == 'refs/heads/main' && github.ref_protected &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     environment: assistant-real-model-sandbox
     runs-on: ubuntu-24.04
     timeout-minutes: 45
