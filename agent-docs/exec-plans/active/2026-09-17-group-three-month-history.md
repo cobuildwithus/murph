@@ -1,0 +1,41 @@
+# Extend group sharing to a 90-day default
+
+## Outcome and protected invariants
+
+Group graphs can use 90 member-local civil dates of available canonical health data. Per-member metric consent, source provenance, revocation, current membership, bounded work and producer ordering remain authoritative. Candidate default preserves existing seven-day approvals until explicit expansion; existing approvals require explicit expansion.
+
+## Owners and evidence
+
+The current vault-share producer limits daily/night scopes to seven dates; shared delivery validators admit 56 source/date records and 320 KiB snapshots. Web owns encrypted replacement snapshots and immutable consent offers. `read_shared` freshness checks recover only recent sync work and cannot fetch arbitrary historical data. Graph rendering does not widen authority. Extend these owners rather than adding a historical archive or provider backfill.
+
+## Implementation and proof
+
+- [x] ReviewGPT authors substantive implementation against guarded source snapshot.
+- [x] Parent inspects patch, consent transition and complete cross-owner bounds.
+- [ ] Focused producer, scope/parser, consent, read and maximum-payload tests; affected typechecks.
+- [ ] Product UX proof for new approvals, existing7 approvals, expanded approvals, sparse history, timezone edges, revoke/regrant and existing short-window consumers.
+- [ ] Changelog, candidate review, draft PR, final ReviewGPT and exact-head CI.
+
+## State and failure boundaries
+
+Use existing grant and snapshot owners. No historical store, broad provider import, or extra queue. Old offer replay cannot authorize a changed scope. Declare concrete consumer-first compatibility and rollback floor before publication. Retain missing-versus-zero and partial-coverage meaning; projection window is not deletion TTL.
+
+## Execution log
+
+- Isolated authorized worktree created through the primary checkout helper; the desktop-created research checkout lacked storage-guard registration. No guard state was changed.
+- Source-only research completed without private record access. No inference about in-window data defects.
+- ReviewGPT will author the patch; local owner retains review, verification and PR completion.
+
+- Direct tooling correction necessity: ReviewGPT custom snapshot packaging failed twice before submission because expected exclusion warnings exceed its 1 MiB child buffer. Reused Frog entry `20260915214405-reviewgpt-packaging-exceeds`; extended the existing PR diagnostic-summary behavior to the custom authoring path without changing selected files or privacy guards. This is necessary to use the requested patch author, not a direct feature implementation.
+
+- Baseline provider-input proof passed for direct and group fixtures (two checks): current direct request 158826 UTF-8 bytes, group 146400 bytes. Use current/head measurements from the graph-input fixture at both task base and candidate; its separate graph-guidance ablation is not this task baseline. Exact tokenizer unavailable.
+- Custom packaging regression: both success and exit-17 paths passed with more than 1 MiB of expected stderr, bounded forwarded warnings and preserved complete diagnostics.
+- Review checklist includes the Web delivery 60-day age filter, producer civil-date boundaries, all-source preservation, old/new scope registry and immutable offers, sparse data, weekly consumer date filtering and model result capacity disclosure.
+
+- Baseline `vault-share-projection.test.ts`: 140 tests passed in the isolated worktree before feature application.
+
+- ReviewGPT supplied the substantive 34-file feature patch. Local necessary corrections address reproduced legacy workout date regressions and preserve pre-upgrade snapshot availability instead of introducing a new rollout outage. The original authoring patch remains in ignored evidence. Six history contract tests passed; initial focused runtime checks found seven failures, and Web checks found eight, under triage.
+
+- Patch attachment recovery reused Frog entry `20260829230530-reviewgpt-patch-attachment`; no duplicate created. The canonical capture was retained and exact generated patch recovered through its download control.
+- Candidate verification: contracts 119, runtime projection 147, Web 362, assistant-tool 117, Cloudflare ports 21 focused tests passed. A 200-member/800-snapshot read proof passed with 201 sequential transactions and exact authority rechecks. Complexity guard passed after extracting the date-window and bounded snapshot owners and removing redundant guards.
+- Real subscription journey passed using production prompts/tools: one roster read and two exact participant/date history pages, two sparse observations, correct comparison and no unsupported steady-trend claim. Reply review Ready. Provider input bytes: direct unchanged 158826; group 146400 to 151086 (+4686, +3.20%); exact tokenizer unavailable.

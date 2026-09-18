@@ -1,3 +1,4 @@
+import { parseHostedGroupSharedReadOptions, parseHostedGroupSharedDateCoverage } from "../group-shared-history.ts";
 import { parseHostedGroupSharedFreshnessRequirements } from "../group-shared-freshness.ts";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
@@ -1429,6 +1430,8 @@ function parseHostedRuntimeGroupSharedDataRequest(
       new Set([
         "action",
         "freshness",
+        "participantId",
+        "history",
         "linqSenderHandles",
         "projectionScopes",
         "telegramSenderHandles",
@@ -1443,6 +1446,7 @@ function parseHostedRuntimeGroupSharedDataRequest(
     return {
       action,
       ...senderHandles,
+      ...parseHostedGroupSharedReadOptions(record, projectionScopes),
       projectionScopes,
       ...(record.freshness === undefined ? {} : {
         freshness: parseHostedGroupSharedFreshnessRequirements(record.freshness, projectionScopes),
@@ -2513,7 +2517,7 @@ function parseHostedRuntimeGroupSharedReadResult(
 
   assertAllowedObjectKeys(
     result,
-    new Set(["members", "requestedProjectionScopeKeys", "status", "freshness"]),
+    new Set(["members", "requestedProjectionScopeKeys", "status", "freshness", "dateCoverage"]),
     `Hosted runtime group tool read_shared ${status} response result`,
   );
   const requestedScopes =
@@ -2525,7 +2529,7 @@ function parseHostedRuntimeGroupSharedReadResult(
     "Hosted runtime group tool read_shared response members",
   );
   if (status === "none") {
-    if (result.freshness !== undefined) {
+    if (result.freshness !== undefined || result.dateCoverage !== undefined) {
       throw new TypeError("Shared freshness requires an authorized ok response.");
     }
     if (rawMembers.length !== 0) {
@@ -2586,7 +2590,23 @@ function parseHostedRuntimeGroupSharedReadResult(
     return member;
   });
 
+  const dateCoverage = result.dateCoverage === undefined
+    ? undefined : parseHostedGroupSharedDateCoverage(result.dateCoverage);
+  const expanded = requestedScopes.some(({ projectionScope }) => projectionScope.historyDays === 90);
+  if (expanded !== (dateCoverage !== undefined)
+    || (dateCoverage && (requestedScopes.length !== 1 || members.length > 1 || result.freshness !== undefined))) {
+    throw new TypeError("Shared history coverage requires one expanded scope and at most one participant.");
+  }
+  if (dateCoverage) {
+    const dates = [...new Set(members.flatMap((member) => member.projections.flatMap((projection) =>
+      projection.records.map((record) => record.occurredAt.slice(0, 10))
+    )))].sort();
+    if (JSON.stringify(dates) !== JSON.stringify(dateCoverage.availableDates)) {
+      throw new TypeError("Shared history coverage must describe exactly the returned observations.");
+    }
+  }
   return {
+    ...(dateCoverage ? { dateCoverage } : {}),
     ...(result.freshness === undefined ? {} : {
       freshness: parseHostedGroupSharedFreshnessResult(result.freshness),
     }),

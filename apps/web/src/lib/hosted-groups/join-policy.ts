@@ -2,6 +2,9 @@ import "server-only";
 
 import {
   buildHostedVaultShareProjectionScopeKey,
+  getHostedVaultShareHistoryDays,
+  isHostedVaultShareRecentDateProjectionKind,
+  withHostedVaultShareHistory,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
@@ -258,17 +261,18 @@ export function normalizeHostedVaultShareProjectionScopes(
 /**
  * Comprehensive defaults expose one Deep sleep permission and one REM sleep
  * permission. Their source-aware v1 scopes are the complete contracts. An
- * explicitly supplied list stays exact, including legacy aggregate v0 scopes.
+ * explicitly supplied list retains its metrics and sleep representation; only a
+ * freshly disclosed history scope uses the 90-day default.
  */
 function normalizeHostedGroupAccessOfferDefaultProjectionScopes(
   value: unknown,
 ): HostedVaultShareProjectionScope[] {
   const offered = normalizeHostedVaultShareProjectionScopes(value).map((scope) => {
     if (scope.projectionKind === "deep-sleep-days.v0") {
-      return { projectionKind: "deep-sleep-sources-days.v1" } as const;
+      return { ...scope, projectionKind: "deep-sleep-sources-days.v1" } as const;
     }
     if (scope.projectionKind === "rem-sleep-days.v0") {
-      return { projectionKind: "rem-sleep-sources-days.v1" } as const;
+      return { ...scope, projectionKind: "rem-sleep-sources-days.v1" } as const;
     }
     return scope;
   });
@@ -278,21 +282,43 @@ function normalizeHostedGroupAccessOfferDefaultProjectionScopes(
 export function resolveHostedGroupAccessOfferProjectionScopes(
   value: unknown,
 ): HostedVaultShareProjectionScope[] {
-  return value === undefined || value === null
+  const selected = value === undefined || value === null
     ? normalizeHostedGroupAccessOfferDefaultProjectionScopes(
         HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
       )
     : normalizeHostedVaultShareProjectionScopes(value);
+  return freshHostedGroupHistoryOfferScopes(selected);
+}
+
+/** Fresh consent surfaces only. Never use this when accepting a saved offer. */
+export function freshHostedGroupHistoryOfferScopes(
+  scopes: readonly HostedVaultShareProjectionScope[],
+): HostedVaultShareProjectionScope[] {
+  return normalizeHostedVaultShareProjectionScopes(scopes.map((scope) =>
+    withHostedVaultShareHistory(scope, 90)
+  ));
+}
+
+/** Selecting the expansion supersedes only this metric's old history scope. */
+export function collapseSelectedHostedGroupHistoryScopes(
+  scopes: readonly HostedVaultShareProjectionScope[],
+): HostedVaultShareProjectionScope[] {
+  const selected = normalizeHostedVaultShareProjectionScopes(scopes);
+  const keys = new Set(selected.map(buildHostedVaultShareProjectionScopeKey));
+  return selected.filter((scope) => scope.historyDays === 90
+    || !isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)
+    || !keys.has(buildHostedVaultShareProjectionScopeKey(withHostedVaultShareHistory(scope, 90)))
+  );
 }
 
 export function legacyHostedGroupSleepProjectionScope(
   projectionScope: HostedVaultShareProjectionScope,
 ): HostedVaultShareProjectionScope | null {
   if (projectionScope.projectionKind === "deep-sleep-sources-days.v1") {
-    return { projectionKind: "deep-sleep-days.v0" };
+    return { ...projectionScope, projectionKind: "deep-sleep-days.v0" };
   }
   if (projectionScope.projectionKind === "rem-sleep-sources-days.v1") {
-    return { projectionKind: "rem-sleep-days.v0" };
+    return { ...projectionScope, projectionKind: "rem-sleep-days.v0" };
   }
   return null;
 }
@@ -301,10 +327,10 @@ export function sourceAwareHostedGroupSleepProjectionScope(
   projectionScope: HostedVaultShareProjectionScope,
 ): HostedVaultShareProjectionScope | null {
   if (projectionScope.projectionKind === "deep-sleep-days.v0") {
-    return { projectionKind: "deep-sleep-sources-days.v1" };
+    return { ...projectionScope, projectionKind: "deep-sleep-sources-days.v1" };
   }
   if (projectionScope.projectionKind === "rem-sleep-days.v0") {
-    return { projectionKind: "rem-sleep-sources-days.v1" };
+    return { ...projectionScope, projectionKind: "rem-sleep-sources-days.v1" };
   }
   return null;
 }
@@ -369,16 +395,11 @@ export function projectHostedVaultShareProjectionDisplays(
 function collapseLegacySleepProjectionScopes(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): HostedVaultShareProjectionScope[] {
-  const hasDeepSleepV1 = projectionScopes.some(
-    (scope) => scope.projectionKind === "deep-sleep-sources-days.v1",
-  );
-  const hasRemSleepV1 = projectionScopes.some(
-    (scope) => scope.projectionKind === "rem-sleep-sources-days.v1",
-  );
-  return projectionScopes.filter((scope) =>
-    !(hasDeepSleepV1 && scope.projectionKind === "deep-sleep-days.v0")
-    && !(hasRemSleepV1 && scope.projectionKind === "rem-sleep-days.v0")
-  );
+  const keys = new Set(projectionScopes.map(buildHostedVaultShareProjectionScopeKey));
+  return projectionScopes.filter((scope) => {
+    const sourceAware = sourceAwareHostedGroupSleepProjectionScope(scope);
+    return !sourceAware || !keys.has(buildHostedVaultShareProjectionScopeKey(sourceAware));
+  });
 }
 
 function hostedGroupJoinPolicyFromScopes(
@@ -405,7 +426,7 @@ function normalizeHostedGroupJoinOfferGeneration(value: unknown): string | null 
     : null;
 }
 
-function hostedVaultShareProjectionScopeDisplay(
+function legacyHostedVaultShareProjectionScopeDisplay(
   projectionScope: HostedVaultShareProjectionScope,
 ): { description: string; label: string } {
   if (projectionScope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND) {
@@ -448,4 +469,17 @@ function formatHostedVaultShareActivityKindLabel(activityKind: string): string {
 function capitalizeHostedVaultShareLabel(label: string): string {
   const first = label[0];
   return first ? `${first.toUpperCase()}${label.slice(1)}` : label;
+}
+
+function hostedVaultShareProjectionScopeDisplay(
+  scope: HostedVaultShareProjectionScope,
+): { description: string; label: string } {
+  const display = legacyHostedVaultShareProjectionScopeDisplay(scope);
+  if (!isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)) return display;
+  const days = getHostedVaultShareHistoryDays(scope);
+  if (days === 7) return display;
+  return {
+    label: `${display.label} (${days}-day history)`,
+    description: `${display.description.replace("7 days", `${days} days`)} Includes today and the previous ${days - 1} days. Only available data is shared.`,
+  };
 }

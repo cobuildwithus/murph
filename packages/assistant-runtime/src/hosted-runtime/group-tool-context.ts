@@ -612,6 +612,8 @@ function buildSharedReadContextRequest(
   return {
     action: "read_shared",
     projectionScopes: request.projectionScopes,
+    ...(request.participantId ? { participantId: request.participantId } : {}),
+    ...(request.history ? { history: request.history } : {}),
     ...(!emailIngressPresent && request.freshness !== undefined
       ? { freshness: request.freshness }
       : {}),

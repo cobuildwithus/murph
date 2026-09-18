@@ -85,6 +85,11 @@ const HOSTED_VAULT_SHARE_DAY_MAX_MINUTES = 24 * 60;
 const HOSTED_VAULT_SHARE_DAY_MAX_DISTANCE_METERS = 1_000_000;
 const HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS = 100;
 const HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
+// Existing exact-scope negotiation, encoded without duplicating the registry
+// in every request URL. Omitted support always stays on the legacy history.
+export const HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM = "supportedHistoryDays";
+export const HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE = "90";
+
 export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM =
   "deferredProjectionWork";
 export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION = "v1";
@@ -383,20 +388,28 @@ export type HostedVaultShareProjectionKind =
 export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX = 25;
 
 export interface HostedVaultShareFixedProjectionScope {
+  /** Absent means the original seven-day consent, never the current default. */
+  historyDays?: 90;
   projectionKind: HostedVaultShareFixedProjectionKind;
 }
 
 export interface HostedVaultShareActivityMinutesProjectionScope {
+  /** Absent means the original seven-day consent, never the current default. */
+  historyDays?: 90;
   projectionKind: HostedVaultShareActivityMinutesProjectionKind;
   selector: HostedVaultShareActivityMinutesSelector;
 }
 
 export interface HostedVaultShareActivityDistanceProjectionScope {
+  /** Absent means the original seven-day consent, never the current default. */
+  historyDays?: 90;
   projectionKind: HostedVaultShareActivityDistanceProjectionKind;
   selector: HostedVaultShareActivityDistanceSelector;
 }
 
 export interface HostedVaultShareActivitySessionCountProjectionScope {
+  /** Absent means the original seven-day consent, never the current default. */
+  historyDays?: 90;
   projectionKind: HostedVaultShareActivitySessionCountProjectionKind;
   selector: HostedVaultShareActivitySessionCountSelector;
 }
@@ -410,7 +423,7 @@ export type HostedVaultShareProjectionScope =
 export type HostedVaultShareSelectableProjectionScope =
   HostedVaultShareProjectionScope;
 
-export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES =
+const LEGACY_SELECTABLE_PROJECTION_SCOPES =
   Object.freeze([
     ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS
       .filter((projectionKind) =>
@@ -432,11 +445,20 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES =
     { projectionKind: HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND },
   ] satisfies HostedVaultShareSelectableProjectionScope[]);
 
+export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES = Object.freeze(
+  uniqueHostedVaultShareProjectionScopeList(
+    LEGACY_SELECTABLE_PROJECTION_SCOPES.flatMap((scope) => [
+      scope, withHostedVaultShareHistory(scope, 90),
+    ]),
+  ),
+);
+
 export const HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES =
   Object.freeze(uniqueHostedVaultShareProjectionScopeList([
-    ...HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS.map((projectionKind) => ({
-      projectionKind,
-    })),
+    ...HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS.flatMap((projectionKind) => [
+      { projectionKind },
+      withHostedVaultShareHistory({ projectionKind }, 90),
+    ]),
     ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   ] satisfies HostedVaultShareProjectionScope[]));
 
@@ -747,6 +769,8 @@ export interface HostedVaultShareDeliveryRecord {
 }
 
 export interface HostedVaultShareDeliverRequest {
+  /** Canonical member timezone, encrypted with the snapshot; not a shared profile field. */
+  memberTimeZone?: string;
   /**
    * Opaque digest of the active share generations resolved immediately before
    * the runtime begins reading this scope. Web accepts delivery only while the
@@ -835,15 +859,17 @@ export function getHostedVaultShareDailyMetricProjectionSpec(
 export function getHostedVaultShareProjectionMaxRecords(
   projectionScope: HostedVaultShareProjectionScope,
 ): number {
+  const historyDays = getHostedVaultShareHistoryDays(projectionScope);
+  const sourceDateLimit = historyDays * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES;
   if (isHostedVaultShareActivitySelectorProjectionKind(projectionScope.projectionKind)) {
-    return HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+    return sourceDateLimit;
   }
   if (
     projectionScope.projectionKind === "sleep-times.v0"
     || projectionScope.projectionKind === "workout-days.v0"
     || projectionScope.projectionKind === "heart-rate-zones-days.v0"
   ) {
-    return HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+    return sourceDateLimit;
   }
   const spec = getHostedVaultShareDailyMetricProjectionSpec(
     projectionScope.projectionKind,
@@ -851,9 +877,11 @@ export function getHostedVaultShareProjectionMaxRecords(
   if (
     spec?.source.kind === "metric-series"
   ) {
-    return HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+    return sourceDateLimit;
   }
-  return HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS;
+  return projectionScope.historyDays === 90
+    ? historyDays
+    : HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS;
 }
 
 function parseHostedVaultShareProjectionKind(
@@ -926,14 +954,89 @@ export function buildHostedVaultShareActivitySessionCountProjectionScope(input: 
 export function buildHostedVaultShareProjectionScopeKey(
   scope: HostedVaultShareProjectionScope,
 ): string {
+  const historySuffix = scope.historyDays === 90 ? ".historyDays.90" : "";
   switch (scope.projectionKind) {
     case HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND:
     case HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND:
     case HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND:
-      return `${scope.projectionKind}.activityKind.${scope.selector.activityKind}`;
+      return `${scope.projectionKind}.activityKind.${scope.selector.activityKind}${historySuffix}`;
     default:
-      return scope.projectionKind;
+      return `${scope.projectionKind}${historySuffix}`;
   }
+}
+
+/** Ordered readable authorities for a requested scope. A larger grant may
+ * satisfy a seven-day read; a seven-day grant can never satisfy a 90-day read.
+ * Sleep v1 -> v0 is the existing daily-minute compatibility adapter. */
+export function hostedVaultShareReadAuthorityScopes(
+  requested: HostedVaultShareProjectionScope,
+): HostedVaultShareProjectionScope[] {
+  const histories = getHostedVaultShareHistoryDays(requested) === 90 ? [90] as const : [7, 90] as const;
+  return uniqueHostedVaultShareProjectionScopeList(histories.flatMap((history) => {
+    const scope = withHostedVaultShareHistory(requested, history);
+    const sourceAwareKind = scope.projectionKind === "deep-sleep-days.v0"
+      ? "deep-sleep-sources-days.v1"
+      : scope.projectionKind === "rem-sleep-days.v0"
+        ? "rem-sleep-sources-days.v1" : null;
+    return sourceAwareKind
+      ? [scope, { ...scope, projectionKind: sourceAwareKind } as HostedVaultShareProjectionScope]
+      : [scope];
+  }));
+}
+
+/** History is immutable scope authority, not a model-selected grant default. */
+export function getHostedVaultShareHistoryDays(
+  scope: HostedVaultShareProjectionScope,
+): 7 | 90 {
+  return scope.historyDays === 90 ? 90 : 7;
+}
+
+export function withHostedVaultShareHistory(
+  scope: HostedVaultShareProjectionScope,
+  historyDays: 7 | 90,
+): HostedVaultShareProjectionScope {
+  const { historyDays: _previousHistory, ...base } = scope;
+  return historyDays === 90 && isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)
+    ? { ...base, historyDays: 90 }
+    : base;
+}
+
+/** Civil-date arithmetic, including DST and both sides of the date line. */
+export function hostedVaultShareHistoryDateWindow(input: {
+  historyDays: 7 | 90;
+  nowMs?: number;
+  timeZone: string;
+}): { from: string; through: string } {
+  const timeZone = normalizeIanaTimeZone(input.timeZone);
+  if (!timeZone) throw new TypeError("Vault share member timezone is invalid.");
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit", month: "2-digit", timeZone, year: "numeric",
+  }).formatToParts(new Date(input.nowMs ?? Date.now()));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value;
+  const through = `${part("year")}-${part("month")}-${part("day")}`;
+  const from = new Date(Date.parse(`${through}T12:00:00.000Z`) - (input.historyDays - 1) * 86_400_000)
+    .toISOString().slice(0, 10);
+  return { from, through };
+}
+
+/** Apply the narrower of the grant and the requested read, never widen consent. */
+export function filterHostedVaultShareHistoryRecords(input: {
+  records: readonly HostedVaultShareDeliveryRecord[];
+  scope: HostedVaultShareProjectionScope;
+  timeZone: string;
+  nowMs?: number;
+  requestedHistoryDays?: 7 | 90;
+}): HostedVaultShareDeliveryRecord[] {
+  if (!isHostedVaultShareRecentDateProjectionKind(input.scope.projectionKind)) {
+    return [...input.records];
+  }
+  const grantDays = getHostedVaultShareHistoryDays(input.scope);
+  const historyDays = grantDays === 7 || input.requestedHistoryDays === 7 ? 7 : 90;
+  const { from, through } = hostedVaultShareHistoryDateWindow({ ...input, historyDays });
+  return input.records.filter((record) => {
+    const date = record.occurredAt.slice(0, 10);
+    return date >= from && date <= through;
+  });
 }
 
 export function parseHostedVaultShareProjectionScopeKey(
@@ -966,6 +1069,15 @@ export function parseHostedVaultShareProjectionScope(
     `${label} projectionKind`,
   );
 
+  assertObjectKeys(scope, label, ["projectionKind", "selector", "historyDays"]);
+  if (
+    scope.historyDays !== undefined
+    && (scope.historyDays !== 90 || !isHostedVaultShareRecentDateProjectionKind(projectionKind))
+  ) {
+    throw new TypeError(`${label} historyDays must be 90 for a dated health scope.`);
+  }
+  const history = scope.historyDays === 90 ? { historyDays: 90 as const } : {};
+
   if (projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND) {
     const selector = requireObject(scope.selector, `${label} selector`);
     assertObjectKeys(
@@ -974,6 +1086,7 @@ export function parseHostedVaultShareProjectionScope(
       ["activityKind"],
     );
     return {
+      ...history,
       projectionKind,
       selector: {
         activityKind: parseHostedVaultShareActivitySelectorActivityKind(
@@ -991,6 +1104,7 @@ export function parseHostedVaultShareProjectionScope(
       ["activityKind"],
     );
     return {
+      ...history,
       projectionKind,
       selector: {
         activityKind: parseHostedVaultShareActivityDistanceSelectorActivityKind(
@@ -1008,6 +1122,7 @@ export function parseHostedVaultShareProjectionScope(
       ["activityKind"],
     );
     return {
+      ...history,
       projectionKind,
       selector: {
         activityKind: parseHostedVaultShareActivitySessionCountSelectorActivityKind(
@@ -1022,7 +1137,7 @@ export function parseHostedVaultShareProjectionScope(
     throw new TypeError(`${label} selector is not supported for ${projectionKind}.`);
   }
 
-  return { projectionKind };
+  return { ...history, projectionKind };
 }
 
 function isHostedVaultShareActivitySelectorProjectionKind(
@@ -2305,6 +2420,13 @@ export function parseHostedVaultShareDeliverRequest(
   value: unknown,
 ): HostedVaultShareDeliverRequest {
   const request = requireObject(value, "Vault share deliver request");
+  const memberTimeZone = request.memberTimeZone === undefined
+    ? undefined
+    : normalizeIanaTimeZone(requireString(request.memberTimeZone, "Vault share member timezone"));
+  if (memberTimeZone === null) throw new TypeError("Vault share member timezone is invalid.");
+  if (new TextEncoder().encode(JSON.stringify(request)).byteLength > HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES) {
+    throw new TypeError("Vault share complete projection exceeds the byte limit.");
+  }
   const sourceWorkspaceVersion = requireHostedVaultShareSourceWorkspaceVersion(
     request.sourceWorkspaceVersion,
   );
@@ -2313,6 +2435,9 @@ export function parseHostedVaultShareDeliverRequest(
     "Vault share deliver request",
   );
   const projectionKind = projectionScope.projectionKind;
+  if (projectionScope.historyDays === 90 && !memberTimeZone) {
+    throw new TypeError("A 90-day delivery requires authoritative member timezone context.");
+  }
   if (projectionKind === HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND) {
     throw new TypeError(
       "Vault share deliver request does not accept device-sync-status.v0 because Web reads it live.",
@@ -2343,6 +2468,37 @@ export function parseHostedVaultShareDeliverRequest(
   const parsedRecords = records.map((record) =>
     parseHostedVaultShareDeliveryRecord(record, projectionScope)
   );
+  assertHostedVaultSharePublicSourceCapacity(parsedRecords);
+  if (projectionKind === "workouts.v0") {
+    let calendarClosedThroughDate: string | undefined;
+    for (const record of parsedRecords) {
+      if (!("workouts" in record.data)) {
+        throw new TypeError("Vault share workouts record data is invalid.");
+      }
+      if (
+        calendarClosedThroughDate !== undefined
+        && record.data.calendarClosedThroughDate !== calendarClosedThroughDate
+      ) {
+        throw new TypeError(
+          "Vault share workouts records must use one calendarClosedThroughDate.",
+        );
+      }
+      calendarClosedThroughDate = record.data.calendarClosedThroughDate;
+    }
+  }
+
+  return {
+    ...(memberTimeZone ? { memberTimeZone } : {}),
+    expectedGenerationToken,
+    ...(projectionMode ? { projectionMode } : {}),
+    projectionKind,
+    projectionScope,
+    records: parsedRecords,
+    sourceWorkspaceVersion,
+  };
+}
+
+function assertHostedVaultSharePublicSourceCapacity(parsedRecords: readonly HostedVaultShareDeliveryRecord[]): void {
   const publicSources = new Set<string>();
   for (const record of parsedRecords) {
     if (record.source) {
@@ -2368,32 +2524,6 @@ export function parseHostedVaultShareDeliverRequest(
       `Vault share deliver request must contain at most ${HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES} public sources.`,
     );
   }
-  if (projectionKind === "workouts.v0") {
-    let calendarClosedThroughDate: string | undefined;
-    for (const record of parsedRecords) {
-      if (!("workouts" in record.data)) {
-        throw new TypeError("Vault share workouts record data is invalid.");
-      }
-      if (
-        calendarClosedThroughDate !== undefined
-        && record.data.calendarClosedThroughDate !== calendarClosedThroughDate
-      ) {
-        throw new TypeError(
-          "Vault share workouts records must use one calendarClosedThroughDate.",
-        );
-      }
-      calendarClosedThroughDate = record.data.calendarClosedThroughDate;
-    }
-  }
-
-  return {
-    expectedGenerationToken,
-    ...(projectionMode ? { projectionMode } : {}),
-    projectionKind,
-    projectionScope,
-    records: parsedRecords,
-    sourceWorkspaceVersion,
-  };
 }
 
 function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): string {

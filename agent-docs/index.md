@@ -294,7 +294,7 @@ proof are recorded in
 | `agent-docs/product-specs/group-managed-automations.md` | Implemented member/group managed-owner isolation, execution checks, and retirement behavior. | Managed group automation behavior | High | 2026-07-26 |
 | `agent-docs/product-specs/group-health-newsletter.md` | Group newsletter behavior. | Group newsletter behavior | Medium | 2026-08-22 |
 | `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats plus one-to-five model-interpreted additive components with deterministic point arithmetic and aggregation. | Group challenge scorecards | High | 2026-07-29 |
-| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Group challenge diagnostics, per-source sharing, and nightly sleep coverage. | Group challenge diagnostics | High | 2026-09-15 |
+| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Group diagnostics, consent-bound sharing history, source coverage, and rollout limits. | Group challenge diagnostics | High | 2026-09-18 |
 | `agent-docs/product-specs/challenge-standings-card.md` | Group challenge standings response card. | Group challenge standings response card | High | 2026-08-11 |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to hosted-group memberships. | Hosted group self-awareness | High | 2026-08-29 |
 | `agent-docs/product-specs/private-group-consultation.md` | Hosted group consultation. | Hosted group consultation | High | 2026-08-28 |

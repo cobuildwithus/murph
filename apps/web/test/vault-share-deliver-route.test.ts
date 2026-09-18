@@ -407,7 +407,7 @@ describe("vault-share deliver route", () => {
 
     expect(() => parseHostedVaultShareDeliverRequest(body)).not.toThrow();
     expect(() => parseHostedVaultShareDeliverRequest(nextBoundBody)).toThrow(
-      new RegExp(`at most ${HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS}`, "u"),
+      /at most 56 records/u,
     );
     expect(bodyBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
@@ -1023,6 +1023,21 @@ describe("vault-share deliver route", () => {
       ...deliveryEffectControls(),
       records: [],
       share: ACTIVE_SHARE,
+      sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
+    });
+  });
+
+  it("delivers day 89 of expanded history but excludes day 90", async () => {
+    const projectionScope = { ...SLEEP_SCOPE, historyDays: 90 as const };
+    const share = { ...ACTIVE_SHARE, projectionScope, projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope) };
+    mocks.findActiveHostedVaultShares.mockResolvedValue([share]);
+    const retained = recentRecord(89);
+    const response = await deliverRoute.POST(buildRequest({
+      ...VALID_BODY, projectionScope, memberTimeZone: "UTC", records: [retained, recentRecord(90)],
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledExactlyOnceWith({
+      ...deliveryEffectControls(), memberTimeZone: "UTC", records: [retained], share,
       sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
   });

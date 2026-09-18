@@ -392,7 +392,7 @@ describe("vault-share contracts", () => {
       source: { kind: "meal-nutrition-total", totalKey: "fiberGrams" },
     });
     expect(
-      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((scope) =>
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.filter((scope) => scope.historyDays !== 90).map((scope) =>
         buildHostedVaultShareProjectionScopeKey(scope)
       ),
     ).toEqual([

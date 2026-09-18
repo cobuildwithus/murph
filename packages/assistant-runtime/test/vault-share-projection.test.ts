@@ -422,11 +422,20 @@ async function createActivitySessionVault(
     })}\n`,
     "utf8",
   );
-  await writeFile(
-    join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl"),
-    `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
-    "utf8",
-  );
+  const recordsByMonth = new Map<string, Record<string, unknown>[]>();
+  for (const record of records) {
+    const month = String(record.occurredAt).slice(0, 7);
+    const group = recordsByMonth.get(month) ?? [];
+    group.push(record);
+    recordsByMonth.set(month, group);
+  }
+  for (const [month, group] of recordsByMonth) {
+    await writeFile(
+      join(vaultRoot, "ledger", "events", "2026", `${month}.jsonl`),
+      `${group.map((record) => JSON.stringify(record)).join("\n")}\n`,
+      "utf8",
+    );
+  }
   return vaultRoot;
 }
 
@@ -868,10 +877,10 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(projectableScopes).toHaveLength(98);
+    expect(projectableScopes).toHaveLength(194);
     expect(
       projectableScopes.length * HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
-    ).toBe(2_450);
+    ).toBe(4_850);
     expect(result).toEqual({ outcome: "delivered" });
     expect(deliveredScopeKeys).toEqual(
       projectableScopes.map(buildHostedVaultShareProjectionScopeKey),
@@ -2096,12 +2105,10 @@ describe("selectProjectableDailyMetricDays", () => {
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
 
     try {
-      const selected = await readProjectableDailyMetricDays(
+      await expect(readProjectableDailyMetricDays(
         vaultRoot,
         requireDailyMetricSpec("deep-sleep-sources-days.v1"),
-      );
-
-      expect(selected).toEqual([]);
+      )).rejects.toThrow("sources exceed");
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -3784,11 +3791,11 @@ describe("selectProjectableWorkoutsDays", () => {
       }),
     );
 
-    expect(selectProjectableWorkoutsDays({
+    expect(() => selectProjectableWorkoutsDays({
       nowMs,
       rows,
       vaultTimeZone: "UTC",
-    })).toEqual([]);
+    })).toThrow(/bound/);
   });
 
   it("keeps thirteen workouts per public source and fails on a source's fourteenth", () => {
@@ -3836,7 +3843,7 @@ describe("selectProjectableWorkoutsDays", () => {
       throw new Error("Missing bounded public source fixture.");
     }
 
-    expect(selectProjectableWorkoutsDays({
+    expect(() => selectProjectableWorkoutsDays({
       nowMs,
       rows: [
         ...rows,
@@ -3851,7 +3858,7 @@ describe("selectProjectableWorkoutsDays", () => {
         }),
       ],
       vaultTimeZone: "UTC",
-    })).toEqual([]);
+    })).toThrow(/bound/);
   });
 
   it("reads the complete source-tagged workout capacity across its eight-date source window", async () => {
@@ -3914,7 +3921,9 @@ describe("selectProjectableWorkoutsDays", () => {
     const overBoundVaultRoot = await createActivitySessionVault([
       ...records,
       {
-        ...records[records.length - 1],
+        ...records[records.length - 105],
+        occurredAt: "2026-07-03T13:00:00.000Z",
+        startAt: "2026-07-03T13:00:00.000Z",
         id: "evt_capacity_overflow",
         externalRef: {
           system: "whoop",
@@ -3923,7 +3932,7 @@ describe("selectProjectableWorkoutsDays", () => {
         },
       },
     ]);
-    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs + 23 * 60 * 60 * 1_000);
 
     try {
       const selected = await readProjectableWorkoutsDays(vaultRoot);
@@ -3952,7 +3961,7 @@ describe("selectProjectableWorkoutsDays", () => {
         );
       }
       await expect(readProjectableWorkoutsDays(overBoundVaultRoot))
-        .resolves.toEqual([]);
+        .rejects.toThrow(/bound/);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -4243,7 +4252,7 @@ describe("selectProjectableWorkoutsDays", () => {
       expect(findWorkoutsRecord(exactBound, ACTIVITY_DAY.date)?.data.workouts)
         .toHaveLength(8);
       await expect(readProjectableWorkoutsDays(overBoundVaultRoot))
-        .resolves.toEqual([]);
+        .rejects.toThrow();
     } finally {
       dateNow.mockRestore();
       await rm(exactBoundVaultRoot, { recursive: true, force: true });
@@ -4928,7 +4937,7 @@ describe("selectProjectableActivityMinutesDays", () => {
       await expect(readProjectableActivityMinutesDays(
         overBoundVaultRoot,
         runningSpec,
-      )).resolves.toEqual([]);
+      )).rejects.toThrow();
     } finally {
       dateNow.mockRestore();
       await rm(unrelatedVaultRoot, { recursive: true, force: true });
@@ -4947,15 +4956,15 @@ describe("selectProjectableActivityMinutesDays", () => {
 
     try {
       await expect(readProjectableActivityMinutesDays(vaultRoot, runningSpec))
-        .resolves.toEqual([]);
+        .rejects.toThrow();
       await expect(readProjectableActivityDistanceDays(
         vaultRoot,
         requireActivityDistanceSpec(RUNNING_DISTANCE_SCOPE),
-      )).resolves.toEqual([]);
+      )).rejects.toThrow();
       await expect(readProjectableActivitySessionCountDays(
         vaultRoot,
         requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE),
-      )).resolves.toEqual([]);
+      )).rejects.toThrow();
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -4977,8 +4986,8 @@ describe("selectProjectableActivityMinutesDays", () => {
     expect(activitySessionReader).toContain("listCanonicalEntities");
     expect(activitySessionReader).toContain('family: "event"');
     expect(activitySessionReader).toContain('from: cutoffDate');
-    expect(activitySessionReader).toContain("ACTIVITY_SESSION_SOURCE_ROW_QUERY_LIMIT");
-    expect(activitySessionReader).toContain("entities.length > ACTIVITY_SESSION_SOURCE_ROW_LIMIT");
+    expect(activitySessionReader).toContain("activitySessionSourceRowLimit(historyDays)");
+    expect(activitySessionReader).toContain("entities.length > rowLimit");
     expect(activitySessionReader).toContain(
       "return { complete: false, rows: [] }",
     );
@@ -4993,7 +5002,7 @@ describe("selectProjectableActivityMinutesDays", () => {
     const vaultRoot = await createActivitySessionVault(Array.from(
       {
         length: HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
-          * (HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW + 1)
+          * (HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW + 2)
           + 1,
       },
       (_, index) => ({
@@ -5016,16 +5025,16 @@ describe("selectProjectableActivityMinutesDays", () => {
       await expect(readProjectableActivityMinutesDays(
         vaultRoot,
         runningSpec,
-      )).resolves.toEqual([]);
+      )).rejects.toThrow();
       await expect(readProjectableActivityDistanceDays(
         vaultRoot,
         requireActivityDistanceSpec(RUNNING_DISTANCE_SCOPE),
-      )).resolves.toEqual([]);
+      )).rejects.toThrow();
       await expect(readProjectableActivitySessionCountDays(
         vaultRoot,
         requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE),
-      )).resolves.toEqual([]);
-      await expect(readProjectableWorkoutsDays(vaultRoot)).resolves.toEqual([]);
+      )).rejects.toThrow();
+      await expect(readProjectableWorkoutsDays(vaultRoot)).rejects.toThrow();
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -5693,7 +5702,7 @@ describe("selectProjectableHeartRateZoneDays", () => {
 
     expect(selectProjectableHeartRateZoneDays(points, utcDateKey(nowMs)))
       .toHaveLength(1);
-    expect(selectProjectableHeartRateZoneDays([
+    expect(() => selectProjectableHeartRateZoneDays([
       ...points,
       {
         ...points[0]!,
@@ -5701,7 +5710,7 @@ describe("selectProjectableHeartRateZoneDays", () => {
         pointIds: ["point_zone_over_bound"],
         recordIds: ["evt_zone_over_bound"],
       },
-    ], utcDateKey(nowMs))).toEqual([]);
+    ], utcDateKey(nowMs))).toThrow();
     expect(selectProjectableHeartRateZoneDays([{
       ...points[0]!,
       context: {
@@ -5733,7 +5742,7 @@ describe("selectProjectableHeartRateZoneDays", () => {
       expect(new Set(exactBound.map((record) => record.source?.source)).size)
         .toBe(8);
       await expect(readProjectableHeartRateZoneDays(overBoundVaultRoot))
-        .resolves.toEqual([]);
+        .rejects.toThrow();
     } finally {
       dateNow.mockRestore();
       await rm(exactBoundVaultRoot, { recursive: true, force: true });
@@ -5863,7 +5872,7 @@ describe("selectProjectableSleepNights", () => {
       await expect(readProjectableSleepNights(exactBoundVaultRoot))
         .resolves.toHaveLength(8);
       await expect(readProjectableSleepNights(overBoundVaultRoot))
-        .resolves.toEqual([]);
+        .rejects.toThrow();
     } finally {
       dateNow.mockRestore();
       await rm(exactBoundVaultRoot, { recursive: true, force: true });
@@ -6121,5 +6130,59 @@ describe("readProjectableProfileName", () => {
       records: [],
       sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     });
+  });
+});
+
+
+describe("canonical history capture", () => {
+  it("queries and captures all 90 dates and eight sources only for the expanded grant", async () => {
+    const nowMs = Date.parse("2026-09-17T23:00:00.000Z");
+    const providers = ["coros", "fitbit", "garmin", "oura", "polar", "strava", "suunto", "whoop"];
+    const records = Array.from({ length: 92 }, (_, index) => {
+      const date = new Date(nowMs - (index - 1) * 86_400_000).toISOString().slice(0, 10);
+      return providers.map((provider) => ({
+        schemaVersion: "murph.event.v1",
+        id: `evt_history_${date}_${provider}`,
+        kind: "activity_session",
+        occurredAt: `${date}T10:00:00.000Z`,
+        dayKey: date,
+        recordedAt: `${date}T11:00:00.000Z`,
+        startAt: `${date}T10:00:00.000Z`,
+        timeZone: "UTC",
+        source: "device",
+        externalRef: { system: provider, resourceType: "workout", resourceId: `history-${date}-${provider}` },
+        activityType: "running",
+        durationMinutes: 30,
+      }));
+    }).flat();
+    const vaultRoot = await createActivitySessionVault(records);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+    const legacy = hostedVaultShareProjectionKindToScope("workout-days.v0");
+    const expanded = { ...legacy, historyDays: 90 as const };
+    try {
+      const result = await captureHostedVaultShareProjectionBestEffort({
+        generationTokensByProjectionScopeKey: {
+          [buildHostedVaultShareProjectionScopeKey(legacy)]: GENERATION_TOKEN,
+          [buildHostedVaultShareProjectionScopeKey(expanded)]: GENERATION_TOKEN,
+        },
+        hasDeferredProjectionWork: false,
+        projectionScopes: [legacy, expanded],
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+        vaultRoot,
+      });
+      expect(result.outcome).toBe("captured");
+      if (result.outcome !== "captured") throw new Error("Expected complete canonical capture.");
+      expect(result.capture.snapshots.map((snapshot) => snapshot.records.length)).toEqual([56, 720]);
+      for (const snapshot of result.capture.snapshots) {
+        expect(snapshot.memberTimeZone).toBe(snapshot.projectionScope.historyDays === 90 ? "UTC" : undefined);
+        expect(new Set(snapshot.records.map((record) => record.source?.source))).toEqual(new Set(providers));
+        expect(snapshot.records.some((record) => record.occurredAt.startsWith("2026-09-18"))).toBe(false);
+        expect(snapshot.records.some((record) => record.occurredAt.startsWith("2026-06-19"))).toBe(false);
+      }
+      expect(result.capture.snapshots[1]?.records.some((record) => record.occurredAt.startsWith("2026-06-20"))).toBe(true);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -1,3 +1,7 @@
+import type { HostedGroupSharedReadOptions, HostedGroupSharedDateCoverage } from "./group-shared-history.ts";
+export { parseHostedGroupSharedReadOptions, pageHostedGroupSharedHistory, parseHostedGroupSharedDateCoverage,
+  HOSTED_GROUP_SHARED_READ_RESPONSE_MAX_BYTES, HOSTED_GROUP_SHARED_HISTORY_PAGE_MAX_BYTES,
+  type HostedGroupSharedReadOptions, type HostedGroupSharedDateCoverage } from "./group-shared-history.ts";
 import type {
   HostedExecutionSnapshotRefState,
 } from "./bundles.ts";
@@ -1419,7 +1423,7 @@ export interface HostedRuntimeGroupSharedFreshness {
   refreshStatus: "requested" | "unavailable" | "not_needed";
 }
 
-export interface HostedRuntimeGroupSharedReadRequest {
+export interface HostedRuntimeGroupSharedReadRequest extends HostedGroupSharedReadOptions {
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
   /** Only missing, currently consented wearable dates can request existing sync work. */
   freshness?: readonly HostedRuntimeGroupSharedFreshnessRequirement[];
@@ -1459,6 +1463,7 @@ export interface HostedRuntimeGroupSharedMember {
 
 export type HostedRuntimeGroupSharedReadResult =
   | {
+      dateCoverage?: HostedGroupSharedDateCoverage;
       freshness?: HostedRuntimeGroupSharedFreshness;
       members: readonly HostedRuntimeGroupSharedMember[];
       requestedProjectionScopeKeys: readonly string[];
@@ -1970,7 +1975,7 @@ export const HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH = 160;
 export const HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH = 100_000;
 export const HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH = 500_000;
 export const HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX = 100;
-export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX = 100;
+export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX = 200;
 export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_HEX_LENGTH = 64;
 const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_PATTERN = new RegExp(
   `^[0-9a-f]{${HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_HEX_LENGTH}}$`,

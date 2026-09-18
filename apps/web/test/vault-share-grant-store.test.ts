@@ -324,3 +324,36 @@ describe("grantHostedVaultShareTx", () => {
     });
   });
 });
+
+
+describe("history-bound grant lifecycle", () => {
+  it("creates a separate expanded tuple and rotates that generation on revoke/regrant", async () => {
+    const scope = { ...SLEEP_SCOPE, historyDays: 90 as const };
+    const scopeKey = buildHostedVaultShareProjectionScopeKey(scope);
+    const tx = createPrismaStub({
+      hostedVaultShare: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(async ({ data }) => ({ id: data.id })),
+        update: vi.fn(async () => undefined),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    });
+    const input = { tx, destinationMemberId: "member_referee", grantorMemberId: "member_grantor",
+      projectionScope: scope, now: new Date("2026-09-17T12:00:00Z") };
+    const first = await grantHostedVaultShareTx(input);
+    expect(tx.hostedVaultShare.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      projectionScopeKey: scopeKey, projectionScopeJson: scope, projectionSnapshotCiphertext: null,
+    }) }));
+    await revokeHostedVaultSharesTx({ ...input, projectionScopes: [scope] });
+    expect(tx.hostedVaultShare.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ projectionSnapshotCiphertext: null, status: "revoked" }),
+      where: expect.objectContaining({ projectionScopeKey: { in: [scopeKey] } }),
+    }));
+    tx.hostedVaultShare.findUnique.mockResolvedValue({ id: first.id, status: "revoked", projectionSnapshotCiphertext: null });
+    const next = await grantHostedVaultShareTx(input);
+    expect(next.id).not.toBe(first.id);
+    expect(tx.hostedVaultShare.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      id: next.id, projectionSnapshotCiphertext: null, projectionSourceWorkspaceVersion: null,
+    }) }));
+  });
+});

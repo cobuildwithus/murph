@@ -124,6 +124,27 @@ export function GroupJoinStudy({
       inert
     >
       <GroupJoinVariant
+        caption="An existing seven-day activity approval remains selected. Expanding to 90 days requires selecting its separate option."
+        title="History · existing seven-day approval"
+      >
+        <GroupJoinPageMock alreadyActiveMember designState="group-join-history-upgrade">
+          <GroupJoinAcceptForm
+            activeVaultShareProjectionScopes={[DESIGN_ACTIVITY_SCOPE]}
+            alreadyActiveMember
+            expectedMembershipId="membership_design"
+            groupName={DESIGN_GROUP_NAME}
+            joinCode={DESIGN_JOIN_CODE}
+            permissions={[
+              DESIGN_PERMISSIONS[0]!,
+              ...comprehensivePermissions.filter(({ projectionScope }) => projectionScope.projectionKind === "activity-days.v0"),
+            ]}
+            postJoinContactOption={null}
+            postJoinDestination="/home"
+          />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
         caption="Deep sleep is one exact consent choice that includes source names, each source's recorded time, and every available value across both stored scope versions."
         title="Sleep sources · exact consent"
       >
@@ -196,7 +217,7 @@ export function GroupJoinStudy({
       </GroupJoinVariant>
 
       <GroupJoinVariant
-        caption="A new member sees every available sharing choice selected, including the exact seven-day window for recent activity distance and session counts. They can clear optional sharing in one action and re-enable exact choices before joining. Nothing is shared until they join."
+        caption="A new member sees every available sharing choice selected, including the exact 90-day window for recent activity distance and session counts. They can clear optional sharing in one action and re-enable exact choices before joining. Nothing is shared until they join."
         title="New invitee · comprehensive default"
       >
         <GroupJoinPageMock
@@ -217,7 +238,7 @@ export function GroupJoinStudy({
       </GroupJoinVariant>
 
       <GroupJoinVariant
-        caption="Selector-based activity choices name the same seven-day history window as every other recent-data permission, so approval is informed before sharing starts."
+        caption="Selector-based activity choices name the same 90-day history window as every other recent-data permission, so approval is informed before sharing starts."
         title="Recent activity · exact consent window"
       >
         <GroupJoinPageMock

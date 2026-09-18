@@ -7,14 +7,13 @@ import {
   type HostedRuntimeGroupSharedReadResult,
 } from "@murphai/hosted-execution/runtime-control";
 
-import { buildHostedVaultShareProjectionScopeKey } from "@murphai/hosted-execution/vault-share";
+import { buildHostedVaultShareProjectionScopeKey, hostedVaultShareReadAuthorityScopes } from "@murphai/hosted-execution/vault-share";
 
 import { appendHostedDeviceSyncManualReconcileWake } from "../device-sync/wake-service";
 import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
 import { hostedHealthDataConsentNotRevokedWhere } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { readHostedGroupSharedDataByRuntimeMemberId } from "./group-store";
-import { includeSourceAwareHostedGroupSleepProjectionScopes } from "./join-policy";
 
 const MAX_REFRESH_CONNECTIONS = 32;
 const REFRESH_BUCKET_MS = 5 * 60_000;
@@ -39,7 +38,7 @@ export async function readHostedGroupSharedDataWithFreshness(
     ).map((projection) => projection.projectionScope);
     return projectionScopes.length === 0 ? [] : [{
       grantorMemberId: member.memberId,
-      projectionScopeKey: { in: includeSourceAwareHostedGroupSleepProjectionScopes(projectionScopes)
+      projectionScopeKey: { in: projectionScopes.flatMap(hostedVaultShareReadAuthorityScopes)
         .map(buildHostedVaultShareProjectionScopeKey) },
     }];
   });

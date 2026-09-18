@@ -1,4 +1,4 @@
-import { buildHostedVaultShareProjectionScopeKey } from "@murphai/hosted-execution/vault-share";
+import { buildHostedVaultShareProjectionScopeKey, getHostedVaultShareHistoryDays } from "@murphai/hosted-execution/vault-share";
 
 import type { GroupJoinPermissionDisplay } from "./group-join-client";
 
@@ -58,6 +58,7 @@ export function groupJoinPermissionsForDisplay(
   const macroPermissions = permissions.filter(isMacroPermission);
   const shouldGroupMacros =
     macroPermissions.length >= 2 &&
+    new Set(macroPermissions.map((macro) => getHostedVaultShareHistoryDays(macro.projectionScope))).size === 1 &&
     (macroPermissions.every((macro) =>
       initiallySelectedScopeKeys.has(macro.projectionScopeKey)) ||
       macroPermissions.every((macro) =>
@@ -76,7 +77,7 @@ export function groupJoinPermissionsForDisplay(
       );
       groups.push({
         description:
-          `Shares your last 7 days of daily ${nutrientList} totals from meals in Murph, including meals imported from connected apps.`,
+          `Shares ${getHostedVaultShareHistoryDays(permission.projectionScope)} days of daily ${nutrientList} totals from meals in Murph, including meals imported from connected apps.`,
         key: MACROS_GROUP_KEY,
         label: "Daily macros",
         legacyScopeKeys: [],

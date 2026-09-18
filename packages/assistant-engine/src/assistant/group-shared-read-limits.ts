@@ -6,9 +6,8 @@ import {
   HOSTED_RUNTIME_GROUP_SHARED_READ_PARTICIPANT_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS,
 } from '@murphai/hosted-execution/runtime-control'
-import {
-  HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES,
-} from '@murphai/hosted-execution/vault-share'
+// Retain the pre-history per-scope model budget. Expanded reads are date-paged.
+const GROUP_SHARED_READ_MODEL_PROJECTION_MAX_CODE_UNITS = 320 * 1024
 
 export {
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES as ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
@@ -28,12 +27,12 @@ const GROUP_SHARED_READ_MODEL_MEMBER_IDENTITY_MAX_CODE_UNITS =
       * HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS
   )
 
-// A single member must fit before roster compaction can omit whole members.
-// Compose the complete per-projection transport authority with the maximum
-// three-scope request and the parser-bounded member envelope, including JSON's
-// worst-case escaping. This keeps admission derived from existing contracts.
+// Keep the established model ceiling rather than multiplying it by the new
+// storage ceiling. A single history page (256 KiB) plus its member envelope fits.
+// Oversized ordinary reads omit whole members explicitly; retry one participant
+// and one requested scope instead of dropping dates or sources.
 export const ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS =
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES
-    * HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES
+    * GROUP_SHARED_READ_MODEL_PROJECTION_MAX_CODE_UNITS
   + GROUP_SHARED_READ_MODEL_MEMBER_IDENTITY_MAX_CODE_UNITS
   + GROUP_SHARED_READ_MODEL_FIXED_ENVELOPE_MAX_CODE_UNITS

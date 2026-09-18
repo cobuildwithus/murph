@@ -30,6 +30,7 @@ import type {
 } from "@murphai/hosted-execution/vault-share";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  getHostedVaultShareHistoryDays,
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
@@ -152,6 +153,7 @@ import {
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
   resolveHostedGroupAccessOfferProjectionScopes,
+  freshHostedGroupHistoryOfferScopes,
 } from "./join-policy";
 import { sha256Hex } from "../primitives";
 import {
@@ -665,6 +667,8 @@ export async function handleHostedRuntimeGroupTool(
         result: await readHostedGroupSharedDataWithFreshness({
           linqSenderHandles: input.request.linqSenderHandles ?? [],
           projectionScopes: input.request.projectionScopes,
+          participantId: input.request.participantId,
+          history: input.request.history,
           freshness: input.request.freshness,
           telegramSenderHandles: input.request.telegramSenderHandles ?? [],
           runtimeMemberId: input.memberId,
@@ -1642,23 +1646,27 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     if (ownerAccess.status !== "ok") {
       return { kind: ownerAccess.unavailableReason };
     }
-    const result = newProjectionScopes !== null
-      ? await createHostedGroupJoinLinkForOwnedThreadContainerTx({
-          additiveOnly: true,
+    const priorOffer = newProjectionScopes === null
+      ? await readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx({
           actorMemberId: ownerAccess.ownerMemberId,
           containerMemberId: input.memberId,
-          displayName: input.joinOffer?.displayName ?? null,
-          now,
-          requestedVaultShareProjectionScopes: newProjectionScopes,
           tx,
         })
-      : await readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx({
-          actorMemberId: ownerAccess.ownerMemberId,
-          containerMemberId: input.memberId,
-          tx,
-        });
+      : null;
+    if (newProjectionScopes === null && !priorOffer) {
+      throw new Error("The existing group offer is unavailable.");
+    }
     const projectionScopes = newProjectionScopes
-      ?? result.group.requestedVaultShareProjectionScopes;
+      ?? freshHostedGroupHistoryOfferScopes(priorOffer?.group.requestedVaultShareProjectionScopes ?? []);
+    const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      additiveOnly: true,
+      actorMemberId: ownerAccess.ownerMemberId,
+      containerMemberId: input.memberId,
+      displayName: input.joinOffer?.displayName ?? null,
+      now,
+      requestedVaultShareProjectionScopes: projectionScopes,
+      tx,
+    });
     const offerPost = await prepareHostedGroupJoinOfferPostTx({
       groupId: result.group.id,
       now,
@@ -2047,20 +2055,25 @@ async function handleHostedRuntimeGroupReadChatName(input: {
 function renderHostedGroupJoinOfferScopeSentence(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): string {
+  const historyDays = [...new Set(projectionScopes
+    .filter((scope) => isHostedVaultShareRecentDateProjectionKind(scope.projectionKind))
+    .map(getHostedVaultShareHistoryDays))];
   const displays = projectHostedVaultShareProjectionDisplays(projectionScopes);
-  const useCategories = displays.length > HOSTED_GROUP_JOIN_OFFER_EXACT_SCOPE_MAX;
+  const useCategories = historyDays.length < 2 && displays.length > HOSTED_GROUP_JOIN_OFFER_EXACT_SCOPE_MAX;
   const shareScopeLabels = useCategories
     ? renderHostedGroupJoinOfferScopeCategories(projectionScopes)
       : [
           "Murph profile name",
           ...displays.map((display) =>
-            formatHostedGroupJoinOfferShareScopeLabel(display.label)
+            formatHostedGroupJoinOfferShareScopeLabel(historyDays.length === 1
+              ? display.label.replace(/ \((?:7|90)-day history\)$/u, "")
+              : isHostedVaultShareRecentDateProjectionKind(display.projectionKind)
+                && getHostedVaultShareHistoryDays(display.projectionScope) === 7
+                ? `${display.label} (7-day history)`
+                : display.label)
           ),
         ];
   const sentence = `your ${formatHumanList(shareScopeLabels)}`;
-  if (useCategories) {
-    return sentence;
-  }
   const disclosures: string[] = [];
   if (projectionScopes.some((scope) =>
     isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)
@@ -2079,36 +2092,12 @@ function renderHostedGroupJoinOfferScopeSentence(
       "nutrition totals come from your meals in Murph, including meals imported from connected apps",
     );
   }
-  const recentSleepLabels = [
-    ...(projectionScopes.some((scope) => scope.projectionKind === "sleep-times.v0")
-      ? ["sleep timing"]
-      : []),
-    ...(projectionScopes.some(
-      (scope) => scope.projectionKind === "sleep-duration-days.v0",
-    )
-      ? ["sleep duration"]
-      : []),
-  ];
-  if (recentSleepLabels.length > 0) {
-    disclosures.push(
-      `${formatHumanList(recentSleepLabels)} ${recentSleepLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
-    );
-  }
-  const recentActivityLabels = projectionScopes.flatMap((scope) => {
-    if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND) {
-      const activity = scope.selector.activityKind.replace(/-/gu, " ");
-      return [`${activity} distance and session count`];
-    }
-    if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND) {
-      const activity = scope.selector.activityKind.replace(/-/gu, " ");
-      return [`${activity} session count`];
-    }
-    return [];
-  });
-  if (recentActivityLabels.length > 0) {
-    disclosures.push(
-      `${formatHumanList(recentActivityLabels)} ${recentActivityLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
-    );
+
+  if (historyDays.length > 0) {
+    disclosures.push(historyDays.length === 1
+      ? `health sharing covers ${historyDays[0]} days, including today`
+      : "each health permission keeps its displayed 7-day or 90-day history");
+    disclosures.push("only available data is shared; older provider history is not fetched");
   }
   return disclosures.length > 0
     ? `${sentence} (${disclosures.join("; ")})`

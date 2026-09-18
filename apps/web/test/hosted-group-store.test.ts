@@ -5,6 +5,7 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   hostedVaultShareProjectionKindToScope,
   type HostedVaultShareFixedProjectionKind,
+  type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import {
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
@@ -144,6 +145,7 @@ function buildTx(input?: {
   };
   offerMessageLookupKey?: string;
   offerProjectionKinds?: string[];
+  offerProjectionScopes?: HostedVaultShareProjectionScope[];
   requestedProjectionKinds?: string[];
   revokedOfferAt?: Date | null;
   runtimeMemberId?: string | null;
@@ -211,7 +213,7 @@ function buildTx(input?: {
           return {
             groupId: "group_1",
             messageLookupKey,
-            projectionKindsJson: input?.offerProjectionKinds ?? ["sleep-times.v0"],
+            projectionKindsJson: input?.offerProjectionScopes ?? input?.offerProjectionKinds ?? ["sleep-times.v0"],
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
               id: "group_1",
@@ -232,7 +234,7 @@ function buildTx(input?: {
           return {
             groupId: "group_1",
             messageLookupKey,
-            projectionKindsJson: input?.offerProjectionKinds ?? ["sleep-times.v0"],
+            projectionKindsJson: input?.offerProjectionScopes ?? input?.offerProjectionKinds ?? ["sleep-times.v0"],
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
               id: "group_1",
@@ -347,6 +349,57 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValue([]);
     mocks.revokeHostedVaultSharesTx.mockResolvedValue(0);
+  });
+
+  it("requires an explicit web expansion and revokes only the prior metric history", async () => {
+    const tx = buildTx({ existingMembershipId: "membership_existing" });
+    const expanded = { ...SLEEP_SCOPE, historyDays: 90 as const };
+    mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValue([SLEEP_SCOPE]);
+    const result = await acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: "membership_existing", joinCode: "join_1", memberId: "member_grantor",
+      now: new Date("2026-09-17T12:00:00Z"), selectedVaultShareProjectionScopes: [SLEEP_SCOPE, expanded], tx,
+    });
+    expect(result.grantedVaultShareProjectionScopes).toEqual([PROFILE_SCOPE, expanded]);
+    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledWith(expect.objectContaining({ projectionScopes: [SLEEP_SCOPE] }));
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(expect.objectContaining({ projectionScope: SLEEP_SCOPE }));
+    expect(tx.hostedGroup.update).toHaveBeenCalledWith(expect.objectContaining({ data: {
+      joinPolicyJson: expect.objectContaining({ requestedVaultShareProjectionScopes: expect.arrayContaining([expanded]) }),
+    } }));
+  });
+
+  it("does not upgrade a still-selected legacy web permission", async () => {
+    const tx = buildTx({ existingMembershipId: "membership_existing" });
+    mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValue([SLEEP_SCOPE]);
+    const result = await acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: "membership_existing", joinCode: "join_1", memberId: "member_grantor",
+      now: new Date("2026-09-17T12:00:00Z"), selectedVaultShareProjectionScopes: [SLEEP_SCOPE], tx,
+    });
+    expect(result.grantedVaultShareProjectionScopes).toEqual([PROFILE_SCOPE, SLEEP_SCOPE]);
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+  });
+
+  it("accepts and replays immutable native offers at their saved history only", async () => {
+    for (const scope of [SLEEP_SCOPE, { ...SLEEP_SCOPE, historyDays: 90 as const }]) {
+      const tx = buildTx({ existingMembershipId: "membership_existing", offerProjectionScopes: [scope] });
+      for (let replay = 0; replay < 2; replay++) {
+        mocks.grantHostedVaultShareTx.mockClear();
+        mocks.revokeHostedVaultSharesTx.mockClear();
+        const result = await acceptHostedGroupJoinOfferTx({
+          channel: "linq", memberId: "member_grantor",
+          messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+          threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+          now: new Date("2026-09-17T12:00:00Z"), tx,
+        });
+        expect(result.grantedVaultShareProjectionScopes).toEqual([PROFILE_SCOPE, scope]);
+        expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+        if (scope.historyDays === 90) {
+          expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledWith(expect.objectContaining({ projectionScopes: [SLEEP_SCOPE] }));
+        } else {
+          expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
+        }
+      }
+    }
   });
 
   it("rejects membership when the group runtime is inactive even with no selected permissions", async () => {
@@ -3071,6 +3124,9 @@ describe("readHostedGroupJoinView leave affordance", () => {
       requestedVaultShareProjections: [{
         label: "Deep sleep",
         projectionScope: LEGACY_DEEP_SLEEP_SCOPE,
+      }, {
+        label: "Deep sleep (90-day history)",
+        projectionScope: { ...LEGACY_DEEP_SLEEP_SCOPE, historyDays: 90 },
       }],
     });
     expect(mocks.readActiveHostedVaultShareProjectionScopes).toHaveBeenCalledWith({
@@ -3109,6 +3165,7 @@ describe("readHostedGroupJoinView leave affordance", () => {
       requestedVaultShareProjections: [
         expect.objectContaining({ projectionScope: GROUP_EMAIL_SCOPE }),
         expect.objectContaining({ projectionScope: SLEEP_SCOPE }),
+        expect.objectContaining({ projectionScope: { ...SLEEP_SCOPE, historyDays: 90 } }),
       ],
     });
     expect(mocks.readActiveHostedVaultShareProjectionScopes).toHaveBeenCalledWith({

@@ -2,6 +2,7 @@ import {
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD,
 } from "@murphai/hosted-execution/routes";
 import {
+  filterHostedVaultShareHistoryRecords,
   isHostedVaultShareCurrentStateProjectionKind,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
@@ -37,7 +38,6 @@ import {
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
-const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS = 60;
 const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -138,7 +138,7 @@ export const POST = withJsonError(async (request: Request) => {
   // An all-stale offer replaces the prior snapshot with an encrypted empty snapshot. The
   // response still reflects share configuration only, so staleness cannot probe finer-
   // grained share state or leave old records visible after an empty refresh.
-  const records = filterDeliverableRecords(body.records, body.projectionKind);
+  const records = filterDeliverableRecords(body.records, body.projectionScope, body.memberTimeZone);
   let delivered = false;
   let deliveryFailed = false;
   let scopeFailed = false;
@@ -157,6 +157,7 @@ export const POST = withJsonError(async (request: Request) => {
     try {
       const outcome = await replaceHostedVaultShareProjectionSnapshot({
         deadlineAtEpochMs: effectDeadlineAtEpochMs,
+        memberTimeZone: body.memberTimeZone,
         ...(body.projectionMode ? { projectionMode: body.projectionMode } : {}),
         records,
         share,
@@ -247,31 +248,22 @@ function createHostedVaultShareDeliveryDeferredError(): Error {
   });
 }
 
-/**
- * Bounds each replacement snapshot to records inside a sane recency window. Out-of-window
- * records are silently dropped rather than rejected so one stale record never poisons
- * delivery of the fresh ones. Honest runtimes only ever offer the latest few records.
- *
- * The age bound applies only to time-series kinds whose recordKey space grows with time.
- * Current-state kinds have one parser-enforced fixed recordKey and a content-only delivery
- * revision (see isHostedVaultShareCurrentStateProjectionKind), so occurredAt neither mints
- * dedupe keys nor needs a recency bound — a name set long ago is still the current name at
- * a member's first group join.
- */
+/** The signed runtime supplies canonical date context, never consent authority. */
 function filterDeliverableRecords(
   records: readonly HostedVaultShareDeliveryRecord[],
-  projectionKind: HostedVaultShareProjectionScope["projectionKind"],
+  projectionScope: HostedVaultShareProjectionScope,
+  memberTimeZone?: string,
 ): HostedVaultShareDeliveryRecord[] {
+  if (projectionScope.historyDays === 90 && memberTimeZone) {
+    return filterHostedVaultShareHistoryRecords({ records, scope: projectionScope, timeZone: memberTimeZone });
+  }
+  // Preserve the deployed legacy guard during consumer-first rollout.
   const nowMs = Date.now();
-  const minOccurredAtMs = isHostedVaultShareCurrentStateProjectionKind(projectionKind)
-    ? Number.NEGATIVE_INFINITY
-    : nowMs - HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS * DAY_MS;
-
+  const earliest = isHostedVaultShareCurrentStateProjectionKind(projectionScope.projectionKind)
+    ? Number.NEGATIVE_INFINITY : nowMs - 60 * DAY_MS;
+  const latest = nowMs + HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS * DAY_MS;
   return records.filter((record) => {
-    const occurredAtMs = Date.parse(record.occurredAt);
-
-    return !Number.isNaN(occurredAtMs)
-      && occurredAtMs <= nowMs + HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS * DAY_MS
-      && occurredAtMs >= minOccurredAtMs;
+    const occurredAt = Date.parse(record.occurredAt);
+    return occurredAt >= earliest && occurredAt <= latest;
   });
 }

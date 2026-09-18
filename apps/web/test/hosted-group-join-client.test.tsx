@@ -551,7 +551,7 @@ test("groups the four macro nutrients into one Daily macros card, calories separ
     },
     {
       description:
-        "Shares your last 7 days of daily protein, carbs, fat, and fiber totals from meals in Murph, including meals imported from connected apps.",
+        "Shares 7 days of daily protein, carbs, fat, and fiber totals from meals in Murph, including meals imported from connected apps.",
       key: "group:daily-macros",
       label: "Daily macros",
       legacyScopeKeys: [],
