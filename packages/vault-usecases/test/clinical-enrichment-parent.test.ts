@@ -19,7 +19,7 @@ afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root,
 async function fixture(options: {
   resourceType?: "DocumentReference" | "DiagnosticReport"; status?: string; docStatus?: string; duplicate?: boolean; subject?: string; revision?: unknown;
   /** Reuse an initialized vault so a later batch can supersede an earlier one. */
-  vaultRoot?: string; batch?: string; fetchedAt?: string;
+  vaultRoot?: string; batch?: string; fetchedAt?: string; dateFields?: Record<string, unknown>;
 } = {}) {
   const vaultRoot = options.vaultRoot ?? await mkdtemp(path.join(tmpdir(), "clinical-enrichment-parent-"));
   if (!options.vaultRoot) {
@@ -29,7 +29,7 @@ async function fixture(options: {
   const batch = options.batch ?? "synthetic-batch";
   const resourceType = options.resourceType ?? "DocumentReference";
   const attachment = { contentType: "application/pdf", url: "Binary/synthetic-document" };
-  const parent = { resourceType, id: "synthetic-document", status: options.status ?? "current",
+  const parent = { ...options.dateFields, resourceType, id: "synthetic-document", status: options.status ?? "current",
     ...(options.docStatus ? { docStatus: options.docStatus } : {}),
     meta: { lastUpdated: "revision" in options ? options.revision : "2026-07-10T12:00:00Z" }, subject: { reference: options.subject ?? "Patient/synthetic-patient" },
     ...(resourceType === "DocumentReference" ? { content: [{ attachment }] } : { presentedForm: [attachment] }),
@@ -79,6 +79,17 @@ describe("clinical enrichment attested parent eligibility", () => {
   ])("uses shared parent policy for $resourceType $status $docStatus without requiring a readable canonical note", async (options) => {
     const input = await fixture(options);
     expect(await readClinicalEnrichmentParentEligibility(input)).toMatchObject({ eligible: options.eligible });
+  });
+
+  it.each([
+    { resourceType: "DocumentReference" as const, dateFields: { date: "2025-03-04T12:00:00Z", context: { period: { start: "2024-01-02T12:00:00Z" } } }, expected: "2025-03-04T12:00:00.000Z" },
+    { resourceType: "DiagnosticReport" as const, dateFields: { effectiveDateTime: "2025-03-04T12:00:00Z", issued: "2025-04-05T12:00:00Z" }, expected: "2025-03-04T12:00:00.000Z" },
+    { resourceType: "DiagnosticReport" as const, dateFields: { effectivePeriod: { start: "2025-03-04T12:00:00Z" }, issued: "2025-04-05T12:00:00Z" }, expected: "2025-03-04T12:00:00.000Z" },
+    { resourceType: "DiagnosticReport" as const, dateFields: { effectiveDateTime: "invalid", issued: "2025-04-05T12:00:00Z" }, expected: undefined },
+    { resourceType: "DocumentReference" as const, dateFields: { context: { period: { start: "2024-01-02T12:00:00Z" } } }, expected: undefined },
+  ])("uses the canonical clinical date priority for $resourceType", async ({ resourceType, dateFields, expected }) => {
+    const parent = await readClinicalEnrichmentParentEligibility(await fixture({ resourceType, status: resourceType === "DiagnosticReport" ? "final" : "current", dateFields }));
+    expect(parent.clinicalOccurredAt).toBe(expected);
   });
 
   it.each([
@@ -133,7 +144,7 @@ describe("clinical enrichment attested parent eligibility", () => {
         attachments: [{ relativePath: input.attachment.relativePath, contentBase64: (await readFile(path.join(input.vaultRoot, input.rawRef))).toString("base64") }] });
       return importEventBatch({ vaultRoot: input.vaultRoot, decisions: clinicalPlanToEventImportDecisions(plan), apply: true });
     };
-    const extracted = { payload: { kind: "measurement", occurredAt: "2026-07-10T12:00:00Z", title: "Synthetic heart rate", note: null,
+    const extracted = { dateBasis: "document", dateEvidence: "Measured 2026-07-10T12:00:00Z", payload: { kind: "measurement", occurredAt: "2026-07-10T12:00:00Z", title: "Synthetic heart rate", note: null,
       measurements: [{ metric: "heart-rate", value: 70, unit: "bpm" }] } };
     const enrich = async (input: Fixture) => {
       const { jobId } = await enqueueClinicalEnrichment(input);

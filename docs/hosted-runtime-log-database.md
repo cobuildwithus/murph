@@ -1323,6 +1323,7 @@ on the timing wire. All reads use own data descriptors; getters, prototypes,
 causes, iterators and arbitrary nested paths are not consulted. Only exact full
 static field names are admitted:
 
+- `automation list`: limit, status (only these two options from `packages/cli/src/commands/automation.ts`).
 - `food search-labels`: query, limit.
 - `knowledge upsert`: body, slug, title, pageType, status, clearLibraryLinks,
   relatedSlug, librarySlug, sourcePath.
@@ -1418,6 +1419,18 @@ pre-admission base in its active plan. Runtime-state and profile tests load the
 actual old portable and hosted readers, checking coalescing to `unknown`, mixed
 old/new reports, absent evidence and unchanged counts/tokens.
 
+The `automation list` field extension follows that same consumer-first order.
+Deploy the portable reader in Web/hosted usage, engine/profile and assistant
+completion consumers before CLI producers. Older readers omit its `validation`
+detail but keep `VALIDATION_ERROR`, stage, counts, outcomes and phases; newer
+readers cannot recover detail discarded by older producers or consumers. There
+is no backward recovery or backfill. Run the actual old-reader test with
+`MURPH_CLI_AUTOMATION_VALIDATION_COMPAT_BASE=5189dace0ad608208702a12ece4f95e76b619e59`.
+The shared subprocess fixture checks invalid limit/status and a nearby valid
+list with no provider calls or filesystem changes, plus byte-identical output
+and exits with timing disabled/enabled. No prompt, schema or dynamic-tool change
+is implied by these synthetic probes.
+
 ### Bounded failure-frequency inspection and decision threshold
 
 Run on the **primary usage database** after compatible consumers and producers
@@ -1482,6 +1495,68 @@ private/hostile properties, mixed successes/errors/stages, current usage parsing
 actual old-reader skew, usage-body fitting and Web persisted normalization. These
 are synthetic local tests; no real-model journey or production destination is
 needed for this extension's unchanged output contract.
+
+#### Automation-list validation inspection (including singletons)
+
+For `automation list / VALIDATION_ERROR / validation`, **any newly attributed
+event warrants inspection, including one event in one turn**; the two-turn
+implementation-investigation threshold above does not gate this inspection.
+Attribution is not an automatic behavior or prompt change. Reproduce the exact
+attributed path synthetically and establish its cause before proposing one.
+This extension does not classify connected-app result-size failures, missing
+knowledge reads, other food/knowledge/meal errors, generic shell exits or unknown
+event/automation outcomes.
+
+After consumer/producer convergence, run this read-only query on the primary
+usage database for a fixed natural-traffic window. Bind `:window_start_utc` and
+`:window_end_utc` to UTC timestamps (use consecutive 12-hour windows for a
+comparison). It returns only bounded metadata, keeps absent validation visible,
+and uses turn IDs only internally to avoid summing repeated profile snapshots.
+A 10,000-row cap hit requires a narrower window; counts are observed lower bounds,
+not complete attempt totals. Check missing reports and drop counters separately.
+
+```sql
+WITH rows AS MATERIALIZED (
+  SELECT turn_id, turn_profile_json -> 'cliTiming' AS t
+  FROM hosted_ai_usage
+  WHERE provider = 'codex-cli'
+    AND occurred_at >= :window_start_utc
+    AND occurred_at < :window_end_utc
+  ORDER BY occurred_at DESC
+  LIMIT 10000
+), commands AS (
+  SELECT turn_id, c
+  FROM rows
+  CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
+  WHERE t ->> 'schema' = 'murph.cli-timing.v1'
+    AND c ->> 'command' = 'automation list'
+    AND c ->> 'outcome' = 'error'
+), per_turn AS (
+  SELECT turn_id, f.field, f.issue_code, f.missing,
+         max(f.observations) AS observations
+  FROM commands
+  CROSS JOIN LATERAL (
+    SELECT e -> 'validation' ->> 'field' AS field,
+           e -> 'validation' ->> 'code' AS issue_code,
+           e -> 'validation' ->> 'missing' AS missing,
+           sum((e ->> 'count')::numeric) AS observations
+    FROM jsonb_array_elements(c -> 'failures') e
+    WHERE e ->> 'code' = 'VALIDATION_ERROR'
+      AND e ->> 'stage' = 'validation'
+    GROUP BY e -> 'validation' ->> 'field', e -> 'validation' ->> 'code',
+             e -> 'validation' ->> 'missing'
+  ) f
+  GROUP BY turn_id, f.field, f.issue_code, f.missing
+)
+SELECT field, issue_code, missing, count(*) AS independent_turns,
+       sum(observations) AS observed_failures_lower_bound,
+       (field IN ('limit', 'status')) IS TRUE AS inspect,
+       (SELECT count(*) = 10000 FROM rows) AS input_row_cap_hit
+FROM per_turn
+GROUP BY field, issue_code, missing
+ORDER BY independent_turns DESC, field, issue_code, missing
+LIMIT 50;
+```
 
 ### Bounded latest-72h / prior-72h inspection
 

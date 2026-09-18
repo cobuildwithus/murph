@@ -304,7 +304,7 @@ describe("murph.group dynamic tool", () => {
       ],
       group_data: [
         "action", "audience", "confidence", "date", "displayName", "factIndex", "freshness",
-        "grantId", "message_ref", "metric", "note", "noteType", "permissionText",
+        "grantId", "history", "participantId", "message_ref", "metric", "note", "noteType", "permissionText",
         "privateQuestion", "projectionScopes", "standaloneLink", "title", "unit", "value",
       ],
       group_membership: [
@@ -394,7 +394,7 @@ describe("murph.group dynamic tool", () => {
       Object.keys(
         MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.inputSchema.properties,
       ),
-    ).toEqual(["action", "freshness", "projectionScopes"]);
+    ).toEqual(["participantId", "history", "action", "freshness", "projectionScopes"]);
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description.length)
       .toBeLessThanOrEqual(350);
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description)
@@ -1419,6 +1419,38 @@ describe("murph.group dynamic tool", () => {
     expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
       "unverifiedOwnerContactLabel",
     );
+  });
+
+  it("uses the existing metric scope for bounded participant history, including detached reads", async () => {
+    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("every active metric grant already covers this window");
+    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("not_granted means the metric itself is unshared");
+    expect(JSON.stringify(MURPH_GROUP_SHARED_READ_TOOL.inputSchema)).not.toContain("historyDays");
+    const args = {
+      action: "read_shared", participantId: "participant_history",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      history: { fromDate: "2026-06-21", throughDate: "2026-09-18" },
+    };
+    const request = readMurphDynamicToolRequest(groupToolCall(args));
+    expect(request).toMatchObject({ kind: "group", request: args });
+    for (const invalid of [
+      { ...args, participantId: undefined },
+      { ...args, history: { fromDate: "2026-06-20", throughDate: "2026-09-18" } },
+      { ...args, projectionScopes: [{ projectionKind: "steps-days.v0", historyDays: 90 }] },
+      { ...args, projectionScopes: [...args.projectionScopes, { projectionKind: "activity-days.v0" }] },
+      { ...args, freshness: [{ projectionScopeKey: "steps-days.v0", date: "2026-09-18" }] },
+      { ...args, audience: "group_email" },
+    ]) {
+      expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind).toBe("invalid-group-arguments");
+    }
+    if (!request || request.kind !== "group") throw new Error("Expected history read");
+    const groupSharedReadRequest = vi.fn(async () => ({ status: "ok" as const, members: [], requestedProjectionScopeKeys: ["steps-days.v0"] }));
+    await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, hostedToolContext: createGroupHostedToolContext({ groupSharedReadRequest, groupToolAvailable: false }),
+      nextUsageOrdinal: () => 1, progressDelivery: null, request, vaultRoot: null,
+    });
+    expect(groupSharedReadRequest).toHaveBeenCalledExactlyOnceWith({
+      projectionScopes: args.projectionScopes, participantId: args.participantId, history: args.history,
+    });
   });
 
   it("attaches reporting history to its own projection without inventing device state", async () => {
@@ -6239,7 +6271,7 @@ describe("murph.group email actions", () => {
     });
   });
 
-  it("exposes only email-eligible members and their exact authorized projections", async () => {
+  it("uses ordinary reporting reads for email-eligible members and their exact plain metric grants", async () => {
     const requestedScopes = [
       { projectionKind: "steps-days.v0" as const },
       { projectionKind: "sleep-times.v0" as const },
@@ -6358,7 +6390,7 @@ describe("murph.group email actions", () => {
       action: "prepare_email",
       projectionScopes: requestedScopes,
     });
-    expect(groupSharedReadRequest).toHaveBeenCalledWith({
+    expect(groupSharedReadRequest).toHaveBeenCalledExactlyOnceWith({
       projectionScopes: requestedScopes,
     });
     expect(result.rpcResult.success).toBe(true);

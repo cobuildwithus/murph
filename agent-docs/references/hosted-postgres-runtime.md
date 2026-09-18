@@ -128,6 +128,22 @@ write has a separate receipt. Completion or confirmed abort releases that
 receipt. An unknown completion followed by an unknown abort leaves it pending.
 Stopping a runtime never converts a multipart receipt into a timed drain.
 
+The existing external-retention cron runs at minutes 2, 7, …, 57 of each hour
+(`2-59/5 * * * *`). Its runtime-resource phase retains a 50-orphan selection
+limit and cooperative 25-second budget. Twelve opportunities per hour remove
+the hourly 50-candidate capacity ceiling without increasing work within a run.
+The ideal ceiling is 600 orphan selections per hour; protected candidates,
+provider delays, upload recovery, and preceding cleanup owners reduce actual
+throughput. Check overdue unprotected candidates and created-versus-purged
+counts over matched windows after deployment.
+
+Account deletion and expired-computer cleanup share this cron and keep their
+existing due-time, lease, state-claim and retry guards. The offset avoids other
+retention jobs' nominal start minutes; it does not serialize invocations.
+[Vercel cron concurrency](https://vercel.com/docs/cron-jobs/manage-cron-jobs)
+and the existing exact-target/idempotent deletion contracts still apply.
+Grace periods, reference protection, write fences and per-run bounds are unchanged.
+
 The existing bounded retention sweep reconciles pending uploads after 65 minutes
 by aborting the exact upload ID. That timestamp schedules recovery; it is not
 proof that the write stopped. The Worker accepts only the bound member's flat

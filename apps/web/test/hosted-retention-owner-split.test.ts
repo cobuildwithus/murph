@@ -89,9 +89,20 @@ describe("hosted retention owner split", () => {
     });
   });
 
-  it("keeps external provider cleanup out of every database-only owner", async () => {
-    const prisma = {};
+  it("runs each external cleanup owner once and sequentially outside transactions", async () => {
+    const prisma = { $transaction: vi.fn() };
     const now = new Date("2026-08-30T12:00:00.000Z");
+    mocks.drainHostedAccountDeletionCleanupBatch.mockImplementationOnce(async () => {
+      await Promise.resolve();
+      expect(mocks.cleanupExpiredRuns).not.toHaveBeenCalled();
+      expect(mocks.runHostedRuntimeResourceCleanup).not.toHaveBeenCalled();
+      return { completed: 1, failed: 0, pending: 2, selected: 3 };
+    });
+    mocks.cleanupExpiredRuns.mockImplementationOnce(async () => {
+      await Promise.resolve();
+      expect(mocks.runHostedRuntimeResourceCleanup).not.toHaveBeenCalled();
+      return { expiredRuns: 4 };
+    });
 
     await expect(runHostedExternalRetentionCleanup({
       now,
@@ -112,6 +123,11 @@ describe("hosted retention owner split", () => {
       prisma,
     });
     expect(mocks.cleanupExpiredRuns).toHaveBeenCalledWith({ now });
+    expect(mocks.runHostedRuntimeResourceCleanup).toHaveBeenCalledWith({ now, prisma });
+    expect(mocks.drainHostedAccountDeletionCleanupBatch).toHaveBeenCalledTimes(1);
+    expect(mocks.cleanupExpiredRuns).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedRuntimeResourceCleanup).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.deleteExpiredHostedCallbackRequestNonces).not.toHaveBeenCalled();
     expect(mocks.deleteExpiredHostedBrowserAssertionNonces).not.toHaveBeenCalled();
   });

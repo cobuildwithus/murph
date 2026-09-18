@@ -130,6 +130,8 @@ describe('executeReadOnlyAssistantAsk', () => {
       'read_shared',
     ])
     expect(Object.keys(detachedGroupTool.inputSchema.properties)).toEqual([
+      'participantId',
+      'history',
       'action',
       'projectionScopes',
     ])

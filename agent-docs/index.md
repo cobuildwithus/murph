@@ -4,6 +4,9 @@ Deferred device webhook transfer and restored duplicate retirement are owned by
 `agent-docs/RELIABILITY.md`; focused mailbox and composed runtime proof are
 indexed in `agent-docs/references/testing-ci-map.md`.
 
+The completed plain-grant 90-date group-sharing follow-up is recorded in
+[`2026-09-18-group-history-plain-grants.md`](exec-plans/completed/2026-09-18-group-history-plain-grants.md).
+
 Completed query rebuild phase telemetry implementation and parent validation are
 recorded in
 [`2026-09-17-query-rebuild-phase-telemetry.md`](exec-plans/completed/2026-09-17-query-rebuild-phase-telemetry.md).
@@ -46,6 +49,9 @@ Empty-source startup batching and Postgres processing summaries are owned by
 `agent-docs/references/hosted-postgres-runtime.md`; warm-wake subdivisions are
 owned by `agent-docs/references/hosted-runtime-protocol.md`. Implementation proof:
 [`2026-09-17-runtime-latency-followup.md`](exec-plans/completed/2026-09-17-runtime-latency-followup.md).
+
+Bounded runtime cleanup cadence and shared-owner safety proof are recorded in
+[`2026-09-18-orphan-cleanup-throughput.md`](exec-plans/completed/2026-09-18-orphan-cleanup-throughput.md).
 
 Runtime admission policy and single-request provider backend selection are owned
 by `agent-docs/references/hosted-postgres-runtime.md` and `agent-docs/SECURITY.md`.
@@ -317,7 +323,8 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/product-specs/group-managed-automations.md` | Implemented member/group managed-owner isolation, execution checks, and retirement behavior. | Managed group automation behavior | High | 2026-07-26 |
 | `agent-docs/product-specs/group-health-newsletter.md` | Group newsletter behavior. | Group newsletter behavior | Medium | 2026-08-22 |
 | `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats plus one-to-five model-interpreted additive components with deterministic point arithmetic and aggregation. | Group challenge scorecards | High | 2026-07-29 |
-| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Group challenge diagnostics, per-source sharing, and nightly sleep coverage. | Group challenge diagnostics | High | 2026-09-15 |
+| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Group diagnostics, plain metric permissions with 90-date retention, source coverage, and consumer-first rollout limits. | Group challenge diagnostics | High | 2026-09-18 |
+| `agent-docs/exec-plans/completed/2026-09-17-group-three-month-history.md` | Completed 90-day group-sharing implementation, consent proof, review and rollout constraints. | Historical implementation evidence | Low | 2026-09-18 |
 | `agent-docs/product-specs/challenge-standings-card.md` | Group challenge standings response card. | Group challenge standings response card | High | 2026-08-11 |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to hosted-group memberships. | Hosted group self-awareness | High | 2026-08-29 |
 | `agent-docs/product-specs/private-group-consultation.md` | Hosted group consultation. | Hosted group consultation | High | 2026-08-28 |
@@ -341,7 +348,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-13-source-list-projection-independence.md` | Completed wearable-projection implementation and parent validation evidence; cohort reporting correction, retained global-position diagnosis, and final exact-head completion gates. | Source-health execution plan | Medium | 2026-09-13 |
 | `packages/vault-usecases/bench/README.md` | Synthetic experiment-progress timing through the composed usecase, semantic parity, and baseline comparison limits. | Experiment progress performance | Medium | 2026-09-11 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
-| `agent-docs/references/hosted-postgres-runtime.md` | Postgres execution authority, native completion, uploads, user deletion, local controls, completed cutover, and retained migration history. | Hosted runtime ownership | High | 2026-09-17 |
+| `agent-docs/references/hosted-postgres-runtime.md` | Postgres execution authority, native completion, uploads, bounded cleanup cadence, user deletion, local controls, completed cutover, and retained migration history. | Hosted runtime ownership | High | 2026-09-18 |
 | `agent-docs/references/hosted-runtime-protocol.md` | Hosted operator provider authentication, mailbox/workspace checkpoints, v2-only live restore, derived artifact availability, inert legacy cache manifests, retained legacy object cleanup and canonical receipt recovery, hot admission and bounded history reads, stale delivery-wake recovery, exact ownership, idle restore publication, and accepted-work monitoring, including independent workspace attempts, shared canonical publication, single-pass device-hint coverage, bounded late system-mailbox import after completion recording with covered-schedule retirement and locked stale-schedule rejection, validated continuation scheduling, provider cadence separated from runtime retry deadlines, independent maintenance, bounded retention failure/blocker retries and stage diagnostics, future retry wakes after cold restore, vault-share deadline revalidation, fenced prior-snapshot reuse, background Browser Vault freshness, retired member shell hints with historical latency reads, deadline-bound operator diagnostic execution and status, exact future-continuation owner release, metadata-only checkpoint timing, committed Browser Vault publication before subsequent ordinary due work with timeout continuation delivery, completion ownership across foreground handoff and reuse, observation-only active-fence liveness without cleanup deferral, and bounded consent-aware group wearable freshness requests with source-specific gaps, independent recent-date recovery, conservative historical absence, and shared-history recovery, honest check times and optional schedule recovery. | Hosted execution architecture and bounded device-sync drain budgets | High | 2026-09-12 |
 | `agent-docs/references/hosted-temporal-orchestration.md` | Hosted Temporal orchestration, compatible controller-first bootstrap, acknowledged checkpoint rechecks, digest-bound production-core release admission, and explicit Web admission status delivery. | Hosted Temporal orchestration target | High | 2026-09-11 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
@@ -389,6 +396,7 @@ is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/com
 | `agent-docs/exec-plans/completed/2026-09-17-instant-reply-typing-alert.md` | Accepted Web instant-reply delivery links, replay and post-response proof, and PostgreSQL typing-alert exclusion. | Local implementation evidence | Medium | 2026-09-17 |
 | `agent-docs/exec-plans/completed/2026-09-17-graph-palette.md` | Documented chart palette, attachment-owned numeric captions, and focused model proof for PR #3515. | Chart guidance follow-up | Medium | 2026-09-17 |
 | `agent-docs/exec-plans/completed/2026-09-18-food-search-ranking.md` | PR #3564: implementation and final review complete; 134-test PostgreSQL 17 owner passed; final exact-head CI gate remains on the open PR. | Completed implementation evidence | Medium | 2026-09-18 |
+| `agent-docs/exec-plans/completed/2026-09-18-automation-list-validation-telemetry.md` | Finite automation-list validation attribution, parent native/local proof and old-reader compatibility; final PR records review, CI and deployment outcomes. | Historical implementation evidence | Medium | 2026-09-18 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
 | `agent-docs/exec-plans/completed/2026-09-17-research-scout-failure-telemetry.md` | Three exact research error codes, parent-native verification and old-reader compatibility; rollout tracked separately. | Historical implementation evidence | Medium | 2026-09-17 |
 | `agent-docs/exec-plans/completed/2026-09-15-vercel-memory-headroom.md` | Vercel typecheck OOM recovery verification, native compiler memory comparisons, and compilation-only esbuild memory target. | Build memory investigation and local proof | Medium | 2026-09-15 |
@@ -463,5 +471,11 @@ The Responses relay queue-pressure observation and implementation proof are reco
 - Test diagnostic correction: [`Worker stderr failure capture`](exec-plans/completed/2026-09-17-runtime-failure-stderr.md)
   records bounded terminal-error evidence from both Worker output streams.
 
+Clinical Journal date provenance and native record presentation cleanup:
+[`2026-09-18-clinical-journal-cleanup.md`](exec-plans/completed/2026-09-18-clinical-journal-cleanup.md).
+
 Zero-valued SpO2 sample handling is tracked in
 [`2026-09-18-spo2-zero-samples.md`](exec-plans/completed/2026-09-18-spo2-zero-samples.md).
+
+Authoritative empty-day recovery is recorded in
+[`2026-09-18-canonical-empty-day-recovery.md`](exec-plans/completed/2026-09-18-canonical-empty-day-recovery.md).

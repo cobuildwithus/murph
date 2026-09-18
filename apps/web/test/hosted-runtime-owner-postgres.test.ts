@@ -4,6 +4,7 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: () => ({ purgeRuntimeResource: uploadRecovery.purge }),
 }));
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type { HostedRuntimeOwner, PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -29,7 +30,7 @@ import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import { HOSTED_HEALTH_DATA_CONSENT_SCOPE, revokeHostedConsentScope } from "@/src/lib/legal/consent";
 import { createPrismaClient } from "@/src/lib/prisma";
 import { checkpointHostedRuntimeWorkspace } from "@/src/lib/hosted-workspace/runtime-publication";
-import { claimHostedRuntimeResourceCleanup, acknowledgeHostedRuntimeOrphanPurge } from "@/src/lib/hosted-execution/runtime-resource-cleanup";
+import { claimHostedRuntimeResourceCleanup, acknowledgeHostedRuntimeOrphanPurge, runHostedRuntimeResourceCleanup } from "@/src/lib/hosted-execution/runtime-resource-cleanup";
 import { recordRuntimeOrphansTx, snapshotOrphanCandidates } from "@/src/lib/hosted-execution/runtime-orphans";
 import { executeHostedRuntimeMediaCommand, lockHostedRuntimeMediaTx } from "@/src/lib/hosted-execution/runtime-media";
 import { executeHostedRuntimeSnapshotCommand } from "@/src/lib/hosted-execution/runtime-snapshots";
@@ -89,6 +90,60 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     if (result.status === "blocked") throw new Error(`Unexpected admission rejection: ${result.reason}`);
     return result;
   }
+
+  it("drains 200 eligible snapshot/replica candidates within the configured cron hour", async () => {
+    const config = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8")) as {
+      crons: Array<{ path: string; schedule: string }>;
+    };
+    const crons = config.crons.filter(cron =>
+      cron.path === "/api/internal/hosted-execution/retention/external/cron");
+    expect(crons).toHaveLength(1);
+    const schedule = /^(\d+)-(\d+)\/(\d+) \* \* \* \*$/u.exec(crons[0]!.schedule);
+    if (!schedule) throw new Error("Expected a staggered, every-N-minutes external retention cron.");
+    const [start, end, step] = schedule.slice(1).map(Number);
+    expect([start, end, step]).toEqual([2, 59, 5]);
+
+    const userId = await member();
+    // Keep this fixture's due dates before unrelated rows in the shared proof database.
+    const hour = new Date("2020-01-01T00:00:00.000Z");
+    const createdAt = new Date(hour.getTime() - 65 * 60_000);
+    const replicaPrefix = await hostedBrowserVaultReplicaUserPrefix({ userId });
+    const data = await Promise.all(Array.from({ length: 200 }, async (_, index) => {
+      const snapshotId = `synthetic-cadence-${index}`;
+      const kind = index % 2 === 0 ? "snapshot" : "replica";
+      const objectKey = kind === "snapshot"
+        ? await hostedWorkspaceSnapshotObjectKey({ userId, snapshotId })
+        : `${replicaPrefix}${snapshotId}.enc`;
+      return { userId, kind, resourceId: kind === "snapshot" ? snapshotId : objectKey,
+        objectKey, createdAt, cleanupAt: hour };
+    }));
+    await observer.hostedRuntimeOrphan.createMany({ data });
+    uploadRecovery.purge.mockReset().mockResolvedValue(undefined);
+    try {
+      const deletedPerRun: number[] = [];
+      for (let minute = start!; minute <= end!; minute += step!) {
+        const result = await runHostedRuntimeResourceCleanup({
+          prisma: first, now: new Date(hour.getTime() + minute * 60_000),
+        });
+        expect(result).toMatchObject({ configured: true, failed: 0 });
+        expect(result.deleted).toBeLessThanOrEqual(50);
+        deletedPerRun.push(result.deleted);
+        if (deletedPerRun.length === 1) {
+          // The old hourly invocation can only clear 50 of these 200 candidates.
+          expect(result.deleted).toBe(50);
+          expect(await observer.hostedRuntimeOrphan.count({ where: { userId, purgedAt: null } })).toBe(150);
+        }
+      }
+      expect(deletedPerRun).toHaveLength(12);
+      expect(deletedPerRun.reduce((total, count) => total + count, 0)).toBe(200);
+      expect(deletedPerRun[0]! * deletedPerRun.length).toBe(600);
+      expect(uploadRecovery.purge).toHaveBeenCalledTimes(200);
+      expect(await observer.hostedRuntimeOrphan.count({ where: { userId, purgedAt: null } })).toBe(0);
+    } finally {
+      uploadRecovery.purge.mockReset();
+      await observer.hostedRuntimeOrphan.deleteMany({ where: { userId } });
+    }
+  });
 
   it("recovers uncertain media uploads by exact provider abort before deleted-member cleanup", async () => {
     const userId = await member();

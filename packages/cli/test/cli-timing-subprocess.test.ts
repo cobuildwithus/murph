@@ -18,7 +18,7 @@ const childFile = fileURLToPath(new URL('./fixtures/cli-timing-child.ts', import
 const tsx = import.meta.resolve('tsx')
 const key = '0123456789abcdef0123456789abcdef'
 const sentinels = ['SYNTHETIC_SECRET_TOKEN', 'SYNTHETIC_HEALTH_HISTORY', 'SYNTHETIC_PRIVATE_PATH',
-  'SYNTHETIC_MEMORY_VALUE', 'mem_synthetic_missing', 'bank/memory.md']
+  'SYNTHETIC_MEMORY_VALUE', 'mem_synthetic_missing', 'bank/memory.md', 'synthetic-invalid']
 
 async function tree(directory: string): Promise<unknown> {
   const names = (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))
@@ -112,6 +112,14 @@ const cases: Case[] = [
   { name: 'knowledge append missing heading', argv: ['knowledge', 'append-section', 'synthetic-page', '--body', 'SYNTHETIC_HEALTH_HISTORY'],
     command: 'knowledge append-section', code: 'VALIDATION_ERROR', field: 'heading',
     validation: { field: 'heading', code: 'invalid_type', missing: true } },
+  { name: 'automation invalid limit', argv: ['automation', 'list', '--limit', '201'],
+    command: 'automation list', code: 'VALIDATION_ERROR', field: 'limit',
+    validation: { field: 'limit', code: 'too_big', missing: false } },
+  { name: 'automation invalid status', argv: ['automation', 'list', '--status', 'synthetic-invalid'],
+    command: 'automation list', code: 'VALIDATION_ERROR', field: 'status',
+    validation: { field: 'status', code: 'invalid_value', missing: false } },
+  { name: 'nearby successful automation list', argv: ['automation', 'list', '--limit', '1'],
+    command: 'automation list' },
 ]
 
 for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => {
@@ -125,6 +133,7 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
     if (sample.code) {
       assert.equal(output.code, sample.code)
       assert.equal(typeof output.message, 'string')
+      if (sample.command === 'automation list') assert.equal(output.stage, 'validation')
       if (sample.field) {
         assert.ok(output.fieldErrors.some((error: { path: string }) =>
           error.path === sample.field))
@@ -136,6 +145,10 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
       } else {
         assert.equal(output.message, 'No public exercise catalog item matched "synthetic-no-such-exercise".')
       }
+    } else if (sample.command === 'automation list') {
+      assert.deepEqual(output, { vault: path.join(directory, 'vault'),
+        filters: { status: null, text: null, supportSeriesId: null, cursor: null, limit: 1 },
+        count: 0, totalCount: 0, nextCursor: null, items: [] })
     } else if (sample.requests) {
       assert.deepEqual(output, { source: 'murph-data-api', query: 'synthetic oats', limit: 1,
         includeOffMarket: false, items: [syntheticOats] })
