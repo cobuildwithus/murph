@@ -580,6 +580,14 @@ releasing an uncertain runtime owner. Startup and health-fetch transport failure
 retain their associated AbortSignal reason after cancellation, even when the
 Containers SDK substitutes a plain Error. Non-cancelled failures, fatal health
 validation, and cleanup settlement keep their existing behavior.
+
+Readiness also carries the
+existing health response's active-job count: a busy runner returns the existing
+cleanup-unsettled retry result and cannot seed the short-lived readiness cache.
+This preserves the completion-receipt/shutdown fence without issuing another
+health probe. The existing container-ready event includes a content-free
+`runnerBusy` flag for that distinction.
+
 Snapshot commands and replica admission preserve the finite
 `HOSTED_RUNTIME_OWNER_STALE` and `HOSTED_RUNTIME_RESOURCE_RETIRED` reasons as
 HTTP 409 responses; neither authorizes a write or bypasses upload cleanup.

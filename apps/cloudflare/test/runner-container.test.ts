@@ -2586,6 +2586,30 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it.each(["running", "stopped"] as const)("defers admission while a %s runner is still busy", async (initialStatus) => {
+    let activeJobCount = 1;
+    const containerFetch = vi.fn(async () => new Response(JSON.stringify({
+      ...createRunnerHealthResult(), activeJobCount,
+    }), { headers: { "content-type": "application/json" } }));
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus, containerFetch,
+    });
+    const input = { timeoutMs: 15_000, userId: "member_123" };
+
+    await expect(container.ensureReadyForProcessing(input)).resolves.toEqual({ kind: "cleanup_unsettled" });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Hosted execution container is ready.",
+      details: expect.objectContaining({ runnerBusy: true }),
+    }));
+    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(initialStatus === "stopped" ? 1 : 0);
+    activeJobCount = 0;
+    await expect(container.ensureReadyForProcessing(input)).resolves.toMatchObject({ kind: "ready" });
+    // A busy health observation must not bypass the next real health read.
+    expect(containerFetch).toHaveBeenCalledTimes(2);
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it.each([
     { phase: "ports", expired: true },
     { phase: "health", expired: true },
