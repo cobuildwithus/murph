@@ -139,7 +139,7 @@ it("keeps a nap-only date eligible for freshness recovery until main sleep arriv
   };
   const requirements = [{ projectionScopeKey: TOTAL_SCOPE, date: DATE }];
   expect(getHostedGroupWearableReportingGaps(projection, requirements)).toEqual([
-    { date: DATE, reportingHistory: "recent_reporting" },
+    { date: DATE, source: { source: "oura", label: "Oura" }, reportingHistory: "recent_reporting" },
   ]);
   await appendFile(
     join(root, "ledger/events/2026/2026-07.jsonl"),
