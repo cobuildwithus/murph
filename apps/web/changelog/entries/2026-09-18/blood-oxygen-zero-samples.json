@@ -9,6 +9,6 @@
     "summary": "Unusable zero readings no longer hold up blood-oxygen imports.",
     "details": "Days containing these readings keep your previously saved complete-day history until usable data arrives.",
     "relevanceTags": ["devices", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3566]
   }
 }
