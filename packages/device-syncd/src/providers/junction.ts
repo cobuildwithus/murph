@@ -6115,7 +6115,16 @@ export function createJunctionDeviceSyncProvider(
     windowStart: string;
   }): ProviderJobResult {
     const followUp = buildYieldedJunctionFollowUpJob(input);
+    // Empty provider days still advance coverage. Credit only a strict suffix
+    // of the same finite resource window, never a retry or a reset scan.
+    const advancesCoverage = followUp !== null
+      && input.job.kind === "resource"
+      && typeof input.job.payload.windowStart === "string"
+      && input.windowEnd === input.job.payload.windowEnd
+      && Date.parse(input.windowStart) > Date.parse(input.job.payload.windowStart)
+      && Date.parse(input.windowStart) < Date.parse(input.windowEnd);
     return {
+      ...(advancesCoverage ? { continuationProgress: true as const } : {}),
       ...(followUp
         ? {
             scheduledJobs: [{

@@ -1,5 +1,8 @@
 # Murph Agent Docs Index
 
+Checkpointed historical scan progress, including empty-date coverage, is owned
+by `agent-docs/RELIABILITY.md` and `packages/device-syncd/README.md`.
+
 Deferred device webhook transfer and restored duplicate retirement are owned by
 `agent-docs/RELIABILITY.md`; focused mailbox and composed runtime proof are
 indexed in `agent-docs/references/testing-ci-map.md`.
