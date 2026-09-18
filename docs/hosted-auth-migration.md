@@ -80,6 +80,13 @@ native renewal. Issuance pause and legacy-admission disable have separate tests.
 These local proofs do not qualify actual KMS, provider deliverability, app-store
 upgrades or dormant devices.
 
+OTP send admission allows two attempts per contact in a sixty-second window,
+including one immediate resend. The short-window check precedes the five-attempt
+per-contact ten-minute budget, so rejected rapid resends do not spend that longer
+budget. The independent twenty-request per-IP ten-minute guard still counts
+rejected requests. Verification budgets and provider fraud protection are unchanged.
+These send limits do not define code expiry.
+
 ## SMS verification owner
 
 Use a dedicated [Twilio Verify service](https://www.twilio.com/docs/verify/api/service)

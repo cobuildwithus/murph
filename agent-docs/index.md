@@ -486,6 +486,8 @@ The Responses relay queue-pressure observation and implementation proof are reco
 - Test diagnostic correction: [`Worker stderr failure capture`](exec-plans/completed/2026-09-17-runtime-failure-stderr.md)
   records bounded terminal-error evidence from both Worker output streams.
 
+- OTP resend admission: [`OTP resend recovery`](exec-plans/completed/2026-09-17-otp-resend-recovery.md).
+
 Clinical Journal date provenance and native record presentation cleanup:
 [`2026-09-18-clinical-journal-cleanup.md`](exec-plans/completed/2026-09-18-clinical-journal-cleanup.md).
 
