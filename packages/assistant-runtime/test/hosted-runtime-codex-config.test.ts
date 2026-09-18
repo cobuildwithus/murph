@@ -300,13 +300,15 @@ test("hosted Codex config streams cold and warm turns over HTTPS with one native
       OPENAI_API_KEY: "synthetic-local-provider",
     };
     const events: Record<string, unknown>[] = [];
+    // Same process shape as the other pinned-binary cases in this file; the
+    // named hosted permission profile needs the runner sandbox helper, which
+    // the ordinary coverage lane does not provide.
     const turn = (prompt: string, resumeSessionId?: string) => executeCodexAppServerTurn({
       abortSignal: AbortSignal.timeout(60_000),
       approvalPolicy: "never", codexCommand, codexHome, env,
       dynamicTools: [],
-      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
-      sandbox: undefined,
-      runtimeWorkspaceRoots: [vaultRoot], vaultRoot, workingDirectory: vaultRoot,
+      processLifetime: "warm",
+      sandbox: "danger-full-access", workingDirectory: vaultRoot,
       resumeSessionId,
       prompt,
       onTraceEvent: ({ rawEvent }) => {

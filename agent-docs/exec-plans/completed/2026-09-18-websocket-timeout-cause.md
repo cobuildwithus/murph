@@ -38,9 +38,10 @@ mutation. Private diagnostic rows and correlations stay out of the repository.
   idle cutoff. None recorded a close milestone; no close reaches the container
   because its TCP peer is the platform's outbound proxy, not the Worker.
 - The pinned Codex 0.153.4 client checks only its own stream state before
-  reusing a cached connection and runs no read pump while idle, so the next
-  turn wrote into a dead-but-open socket, hit "idle timeout waiting for
-  websocket" after 30 seconds, then fell back to HTTPS for the session. Four to
+  reusing a cached connection; its idle pump answers control frames and would
+  notice a Close, but none arrives, so the next turn wrote into a dead-but-open
+  socket, hit "idle timeout waiting for websocket" after 30 seconds, then fell
+  back to HTTPS for the session. Four to
   seven member turns a day paid that window; most dead sockets were never
   reused because runtimes idle out first.
 - No Codex knob detects a dead reused socket faster, and no newer Codex release
