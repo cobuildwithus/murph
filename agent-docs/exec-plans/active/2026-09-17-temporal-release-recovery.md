@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-09-17
-Updated: 2026-09-17
+Updated: 2026-09-18
 
 ## Goal
 
@@ -19,7 +19,8 @@ Restore full integration coverage so the reviewed Temporal recovery-sweep respon
 
 - Update stale E2E setup and assertions: minimum runner idle TTL, system work without recent iMessage inbound, and inactive-member retention.
 - Preserve model-free processing, pending-mailbox ownership, retention and non-starvation assertions.
-- No product behavior, production defaults, routing policy, or schedule changes.
+- Preserve snapshot rejection authority while returning a conflict for mismatched managed-upload completion metadata.
+- No production defaults, routing policy, or schedule changes.
 
 ## Constraints
 
@@ -49,7 +50,9 @@ Restore full integration coverage so the reviewed Temporal recovery-sweep respon
 - Passed: four focused runner lifecycle/TTL unit tests; complexity diff and whitespace checks.
 - Passed: 67 Web reconciliation/frontier tests and the production runner bundle build.
 - Local composed E2E proof is unavailable: Docker runner init exits before scenario execution because child-subreaper support is absent. The owned attempt was stopped; full Linux release integration remains mandatory before deployment.
-- Pending: exact-head public CI, final ReviewGPT, private full integration and release admission.
+- Passed: PR #3558 exact-head required public CI and final ReviewGPT; merged.
+- Fresh full integration passes Temporal orchestration but exposes three remaining blockers: managed snapshot identity rejection becomes HTTP 500, the fairness observer requires a retired admission event, and the media fixture's idle period exceeds its completion deadline.
+- Passed: 357 snapshot/outbound and admission-window tests, Cloudflare typecheck, and the complexity guard for the follow-up correction. Final ReviewGPT, exact-head CI, fresh full integration and release admission remain pending.
 - Pending: read-only production routing and recovery-sweep outcomes.
 
 ## Review disposition
@@ -57,6 +60,6 @@ Restore full integration coverage so the reviewed Temporal recovery-sweep respon
 - Final ReviewGPT round 1 found that ordinary mailbox signals require active access, so the paused-member fixture would fail before Temporal admission. Accepted.
 - Correct only isolated test scaffolding: append while active, pause billing, and forward the existing committed-checkpoint input through the test helper. Assert acknowledgement and retain every retention/ownership assertion. Production access and runtime owners are unchanged.
 - The Non-Production Remediation exception applies: only test files and this plan change; no production source, configuration, runtime artifact, external state, or data changes.
-- All 33 signal-owner tests pass, including added paused-member checkpoint cases and existing expected-owner rejection. Final round 2 and exact-head CI remain pending.
+- All 33 signal-owner tests pass, including added paused-member checkpoint cases and existing expected-owner rejection. Round 2's isolated type-boundary finding was corrected and round 3 passed before merge.
 
 - Exact-head CI exposed a cross-app type boundary in the test helper: importing the production signal input type pulled Web internals into the Cloudflare typecheck and widened the local system-only checkpoint seam. Derive the optional input from the existing isolated test interface instead. Cloudflare typecheck passes; before/after helper JavaScript is byte-identical. The in-progress round-2 snapshot remains immutable and its result will be retained.

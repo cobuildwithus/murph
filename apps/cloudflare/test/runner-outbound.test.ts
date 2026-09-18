@@ -10330,6 +10330,52 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each(["missing", "digest_mismatch"])("returns a conflict for %s managed completion authority without publishing", async rejection => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_managed_completion_conflict";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({ snapshotId, userId: "member_123" });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4, encryptedObjectSha256: "a".repeat(64), objectKey, snapshotId, userId: "member_123",
+    });
+    const session = createWorkspaceSnapshotUploadSession(snapshotRef);
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, session);
+    const originalCommand = vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).getMockImplementation();
+    if (!originalCommand) throw new Error("Missing resource command fixture.");
+    vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).mockImplementation(input => {
+      if (input.command.operation !== "snapshot_managed_read") return originalCommand(input);
+      return Promise.resolve({
+        cutover: "postgres", applied: rejection !== "missing", session: null,
+        managedUpload: rejection === "missing" ? null : {
+          userId: session.userId, snapshotId, objectKey, uploadId: "synthetic-upload",
+          attemptId: session.attemptId, generation: session.leaseGeneration,
+          encryptedByteSize: 4, encryptedSha256: "b".repeat(64), completedAt: null, verifiedAt: null,
+        },
+      });
+    });
+    const head = vi.fn();
+    const remove = vi.fn();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(async key => ({ key, size: 4 }), head, remove),
+      runtimeControl: { getByName: runner.getByName },
+    });
+    const request = createWorkspaceSnapshotCompleteRequest({ snapshotId, snapshotRef, workspaceVersion: "4" });
+    const body: unknown = await request.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Invalid completion fixture.");
+    const managedRequest = new Request(request.url, {
+      headers: request.headers, method: request.method,
+      body: JSON.stringify({ ...body, managedPart: { uploadId: "synthetic-upload", etag: "synthetic-etag" } }),
+    });
+    const response = await handleRunnerOutboundRequest(managedRequest, env, "member_123");
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "Hosted workspace snapshot completion does not match its admitted bytes." });
+    expect(head).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toEqual(session);
+  });
+
   it("rejects workspace snapshot completion when R2 HEAD metadata mismatches", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_complete_metadata_mismatch";
