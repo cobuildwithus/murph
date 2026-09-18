@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Deferred device webhook transfer and restored duplicate retirement are owned by
+`agent-docs/RELIABILITY.md`; focused mailbox and composed runtime proof are
+indexed in `agent-docs/references/testing-ci-map.md`.
+
 Completed query rebuild phase telemetry implementation and parent validation are
 recorded in
 [`2026-09-17-query-rebuild-phase-telemetry.md`](exec-plans/completed/2026-09-17-query-rebuild-phase-telemetry.md).
