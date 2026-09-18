@@ -1426,6 +1426,7 @@ describe("murph.group dynamic tool", () => {
     const freshness = [{ projectionScopeKey: "sleep-duration-days.v0", date: "2026-08-04" }];
     const groupSharedReadRequest = vi.fn(async () => ({
       status: "ok" as const, requestedProjectionScopeKeys: ["sleep-duration-days.v0"],
+      freshness: { checkedAt: "2026-08-04T14:20:00.000Z", refreshStatus: "requested" as const },
       members: ["recent", "absent", "new"].map((kind, index) => ({
         displayName: `Reporter ${index}`, participantId: `participant_${index}`, memberId: `member_${index}`, currentTurnHandles: [],
         projections: [{ projectionScope: projectionScopes[0]!, projectionScopeKey: "sleep-duration-days.v0",

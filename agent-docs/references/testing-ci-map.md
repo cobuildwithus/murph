@@ -29,6 +29,14 @@ tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 
 ## Current Repo Checks
 
+Shared wearable freshness proof spans `group-shared-freshness.test.ts` in
+hosted-execution, `hosted-group-shared-freshness.test.ts` in Web, and
+`hosted-runtime-group-freshness.test.ts` in assistant-runtime. These cover
+per-source gaps, mixed historical/current admission, and bounded rereads.
+Assistant group-tool and dynamic-context suites cover the model boundary; the
+focused real-Codex selected-source gap journey checks truthful source selection
+and unchanged schedules through the production tool and prompt builders.
+
 `apps/web/test/hosted-runtime-retirement-cardinality-postgres.test.ts` runs the
 actual retirement command against 100,000 synthetic terminal sources in an
 isolated loopback `murph_test_*` database. With

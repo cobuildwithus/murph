@@ -227,6 +227,7 @@ import type {
   AssistantHostedAutomationToolRequest,
   AssistantHostedDeviceConnectProvider,
   AssistantHostedDeviceToolRequest,
+  AssistantHostedGroupSharedReadRequest,
   AssistantHostedGroupSharedReadResponse,
   AssistantUsageRecorder,
 } from '../src/assistant/execution-context.ts'
@@ -9927,6 +9928,75 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           expect(fixture.requests.filter((request) => request.action !== 'inspect')).toHaveLength(0)
           expect(reply).not.toMatch(/moved|rescheduled|30 minutes later|9:30/iu)
         }
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 360_000,
+  )
+
+  it(
+    'reports selected-source wearable gaps without substituting another source or inventing history',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-source-gaps-e2e-'))
+      const sharedRequests: AssistantHostedGroupSharedReadRequest[] = []
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions('group', 'shared_read', 'linq', true),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL, MURPH_AUTOMATION_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot }, groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false, currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+            automationTool: { request: async (request) => { automationRequests.push(request); throw new Error('No schedule change authorized.'); } },
+            groupSharedReader: { request: async (request) => {
+              sharedRequests.push(request)
+              return {
+                status: 'ok', requestedProjectionScopeKeys: ['steps-days.v0'],
+                freshness: { checkedAt: '2026-08-05T13:04:00.000Z', refreshStatus: 'requested' },
+                members: [{ displayName: 'Cedar', currentTurnHandles: [], memberId: 'member_source_gaps', participantId: 'participant_source_gaps',
+                  projections: [{ projectionScope: { projectionKind: 'steps-days.v0' }, projectionScopeKey: 'steps-days.v0',
+                    grantStatus: 'granted', dataStatus: 'available', grantedAt: '2026-06-01T00:00:00.000Z',
+                    records: [
+                      { date: '2026-08-04', source: 'fitbit', label: 'Fitbit', value: 6800 },
+                      { date: '2026-08-05', source: 'apple-health', label: 'Apple Health', value: 9400 },
+                    ].map(({ date, source, label, value }) => ({ recordKey: `${date}.${source}`, occurredAt: `${date}T00:00:00.000Z`,
+                      source: { source, label }, data: { date, metricKey: 'steps', value, unit: 'steps' },
+                    })),
+                  }],
+                }],
+              } satisfies AssistantHostedGroupSharedReadResponse
+            } },
+            sendVaultFile: async () => { throw new Error('Unavailable in synthetic journey.'); }, vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: [
+            'Scheduled group automation: selected-source-steps. Runs at 09:00 America/New_York.',
+            'Recipe: Report Cedar’s Fitbit steps for July 20, August 4, and August 5, 2026, including missing dates. Use only Fitbit for this series.',
+            'This is a text report. Keep the saved schedule unchanged.',
+          ].join('\n'),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected the scheduled report.')
+        const reply = renderMarkdownMessageText(decision.text).text
+        process.stdout.write(`[source-gaps-e2e] ${JSON.stringify({ reply })}\n`)
+        expect(sharedRequests).toHaveLength(1)
+        expect(sharedRequests[0]?.projectionScopes).toEqual([{ projectionKind: 'steps-days.v0' }])
+        expect(sharedRequests[0]?.freshness?.map(({ date }) => date).sort()).toEqual(['2026-07-20', '2026-08-04', '2026-08-05'])
+        expect(automationRequests).toHaveLength(0)
+        expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(1)
+        expect(reply).toMatch(/Cedar/iu)
+        expect(reply).toMatch(/Fitbit/iu)
+        expect(reply).toMatch(/6,?800|6\.8k/iu)
+        expect(reply).toMatch(/missing|unavailable|no.*(?:data|record)|not.*(?:available|reported|arrived)/iu)
+        expect(reply).not.toMatch(/9,?400|9\.4k|reconnect|disconnected|never reported|zero steps|successfully synced|30 minutes|schedule.*changed/iu)
       } finally {
         await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
       }
