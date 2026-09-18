@@ -106,6 +106,18 @@ describe("Postgres runtime orchestration", () => {
     expect(container.startSupervisedInvocation).toHaveBeenCalledOnce();
   });
 
+  it("defers a busy readiness result without launching or retiring the retained target", async () => {
+    const { source, container } = harness();
+    container.ensureReadyForProcessing.mockResolvedValue({ kind: "cleanup_unsettled" });
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner({ phase: "starting" }), "claimed"));
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    await expect(ensurePostgresRuntimeProcessing(source, request, diagnostics)).resolves.toMatchObject({ kind: "retry_later" });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe("container_not_ready");
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["claim"]);
+  });
+
   it.each([true, false])("starts with container launch preparation capability %s", async (supported) => {
     const { source, container } = harness();
     container.ensureReadyForProcessing.mockResolvedValue({ kind: "ready", ...(supported ? { preparesSupervisedLaunch: true } : {}) });

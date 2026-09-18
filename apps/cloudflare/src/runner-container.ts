@@ -284,6 +284,7 @@ export interface RunnerContainerColdStartTiming {
 
 type RunnerContainerEnsureReadyResult = {
   action: "already_warm" | "started";
+  runnerBusy: boolean;
   coldStartTiming?: Omit<
     RunnerContainerColdStartTiming,
     "lifecycleLockAcquiredAtEpochMs" | "readinessRequestedAtEpochMs"
@@ -1349,6 +1350,9 @@ export class RunnerContainer extends Container {
             return { kind: "cleanup_unsettled" as const };
           }
           throw error;
+        }
+        if (readinessResult.runnerBusy) {
+          return { kind: "cleanup_unsettled" as const };
         }
         return {
           action: readinessResult.action,
@@ -2866,14 +2870,14 @@ export class RunnerContainer extends Container {
             phase: "container.ready",
             userId: input.userId,
           });
-          return { action: "already_warm" };
+          return { action: "already_warm", runnerBusy: false };
         }
       } else {
         this.clearRecentReadinessProof();
       }
       const readinessTimeoutMs = Math.min(readinessBudgetMs, readyTimeoutMs);
       try {
-        await assertRunnerHealthy(
+        const health = await assertRunnerHealthy(
           this,
           readinessTimeoutMs,
           this.environment,
@@ -2889,12 +2893,13 @@ export class RunnerContainer extends Container {
             "Hosted runner container changed while warm readiness was recorded.",
           );
         }
-        this.recordRecentReadinessProof(input.userId, readyStart);
+        this.recordRecentReadinessProof(input.userId, readyStart, health.runnerBusy);
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
             readinessTimeoutMs,
+            runnerBusy: health.runnerBusy,
             startMode: "warm",
             statusBeforeStart: status,
           },
@@ -2902,7 +2907,7 @@ export class RunnerContainer extends Container {
           phase: "container.ready",
           userId: input.userId,
         });
-        return { action: "already_warm" };
+        return { action: "already_warm", runnerBusy: health.runnerBusy };
       } catch (error) {
         if (this.currentContainerStart !== observedStart) {
           throw error;
@@ -2985,6 +2990,7 @@ export class RunnerContainer extends Container {
       readyTimeoutMs,
     );
     let coldStartTiming: RunnerContainerEnsureReadyResult["coldStartTiming"];
+    let runnerBusy = false;
     const coldStartWaitStartedAtMs = Date.now();
     const startupAbortSignal = combineRunnerContainerAbortSignals(
       operationAbortSignal,
@@ -3030,7 +3036,8 @@ export class RunnerContainer extends Container {
           "Hosted runner container changed while cold readiness was recorded.",
         );
       }
-      this.recordRecentReadinessProof(input.userId, readyStart);
+      runnerBusy = healthStartupTiming.runnerBusy;
+      this.recordRecentReadinessProof(input.userId, readyStart, runnerBusy);
       const readyObservedAtEpochMs = Date.now();
 
       coldStartTiming = {
@@ -3117,6 +3124,7 @@ export class RunnerContainer extends Container {
         readinessPollIntervalMs: RUNNER_WAIT_INTERVAL_MS,
         readinessTimeoutMs,
         runnerPort: RUNNER_PORT,
+        runnerBusy,
         startMode: "cold",
         statusBeforeStart: status,
       },
@@ -3127,6 +3135,7 @@ export class RunnerContainer extends Container {
 
     return {
       action: "started",
+      runnerBusy,
       ...(coldStartTiming === undefined ? {} : { coldStartTiming }),
     };
   }
@@ -3735,7 +3744,12 @@ export class RunnerContainer extends Container {
   private recordRecentReadinessProof(
     userId: string,
     currentStart: RunnerContainerCurrentStart,
+    runnerBusy: boolean,
   ): void {
+    if (runnerBusy) {
+      this.clearRecentReadinessProof();
+      return;
+    }
     if (this.currentContainerStart !== currentStart) {
       return;
     }
@@ -4758,7 +4772,7 @@ async function assertRunnerHealthy(
   timeoutMs: number,
   environment: RunnerContainerEnvironmentSource,
   signal?: AbortSignal,
-): Promise<RunnerContainerHealthStartupTiming> {
+): Promise<RunnerContainerHealthMetadata> {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const abortSignal = signal
     ? combineRunnerContainerAbortSignals(signal, timeoutSignal)
@@ -4807,17 +4821,18 @@ async function assertRunnerHealthy(
     });
   }
 
-  return readRunnerContainerHealthStartupTiming(payload);
+  return readRunnerContainerHealthMetadata(payload);
 }
 
-interface RunnerContainerHealthStartupTiming {
+interface RunnerContainerHealthMetadata {
+  runnerBusy: boolean;
   processStartedAtEpochMs?: number;
   serverListeningAtEpochMs?: number;
 }
 
-function readRunnerContainerHealthStartupTiming(
+function readRunnerContainerHealthMetadata(
   payload: Record<string, unknown>,
-): RunnerContainerHealthStartupTiming {
+): RunnerContainerHealthMetadata {
   const processStartedAtEpochMs = readOptionalRunnerContainerEpochMs(
     payload.processStartedAtEpochMs,
   );
@@ -4825,6 +4840,8 @@ function readRunnerContainerHealthStartupTiming(
     payload.serverListeningAtEpochMs,
   );
   return {
+    // The entrypoint retains this count until its completion receipt settles.
+    runnerBusy: typeof payload.activeJobCount === "number" && payload.activeJobCount > 0,
     ...(processStartedAtEpochMs === undefined ? {} : {
       processStartedAtEpochMs,
     }),
