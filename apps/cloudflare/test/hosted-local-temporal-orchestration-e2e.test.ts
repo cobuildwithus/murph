@@ -233,12 +233,6 @@ describe("hosted local Temporal orchestration e2e", () => {
     );
     const providerRequestBaseline = activeScenario.assistantProviderRequests.length;
 
-    await updateHostedMemberBillingStatusForTest({
-      billingStatus: "paused",
-      environment: activeScenario.runtimeEnv,
-      memberId: pausedRetentionUserId,
-    });
-
     const retainedEventId =
       `member.preferences.updated:paused-retention:${Date.now()}`;
     const retainedAppend = await appendHostedExecutionWakeForTest({
@@ -253,6 +247,11 @@ describe("hosted local Temporal orchestration e2e", () => {
         },
       }),
     });
+    await updateHostedMemberBillingStatusForTest({
+      billingStatus: "paused",
+      environment: activeScenario.runtimeEnv,
+      memberId: pausedRetentionUserId,
+    });
     await seedHostedWorkspaceInboxMediaRetentionWakeForTest({
       environment: activeScenario.runtimeEnv,
       userId: pausedRetentionUserId,
@@ -263,8 +262,14 @@ describe("hosted local Temporal orchestration e2e", () => {
     const signal = await signalHostedMailboxAppendRuntimeForTest({
       environment: activeScenario.runtimeEnv,
       expectedUserId: pausedRetentionUserId,
+      knownCheckpoint: {
+        lane: "system",
+        laneSeq: retainedAppend.wake.seq,
+        userId: pausedRetentionUserId,
+      },
       mailboxItemId: retainedAppend.wake.id,
     });
+    expect(signal.signalAccepted).toBe(true);
     const workflowState = await waitForWorkflowExecutionState({
       env: activeScenario.runtimeEnv,
       executionNotBefore: retentionSignalStartedAt,

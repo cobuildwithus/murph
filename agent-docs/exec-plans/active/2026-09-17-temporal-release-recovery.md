@@ -51,3 +51,10 @@ Restore full integration coverage so the reviewed Temporal recovery-sweep respon
 - Local composed E2E proof is unavailable: Docker runner init exits before scenario execution because child-subreaper support is absent. The owned attempt was stopped; full Linux release integration remains mandatory before deployment.
 - Pending: exact-head public CI, final ReviewGPT, private full integration and release admission.
 - Pending: read-only production routing and recovery-sweep outcomes.
+
+## Review disposition
+
+- Final ReviewGPT round 1 found that ordinary mailbox signals require active access, so the paused-member fixture would fail before Temporal admission. Accepted.
+- Correct only isolated test scaffolding: append while active, pause billing, and forward the existing committed-checkpoint input through the test helper. Assert acknowledgement and retain every retention/ownership assertion. Production access and runtime owners are unchanged.
+- The Non-Production Remediation exception applies: only test files and this plan change; no production source, configuration, runtime artifact, external state, or data changes.
+- All 33 signal-owner tests pass, including added paused-member checkpoint cases and existing expected-owner rejection. Final round 2 and exact-head CI remain pending.
