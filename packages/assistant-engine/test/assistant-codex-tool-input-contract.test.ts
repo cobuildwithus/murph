@@ -363,6 +363,73 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     },
   )
 
+  it.skipIf(process.env.MURPH_MEASURE_WORKSPACE_EXPORT_INPUT !== '1').each(['direct', 'group'] as const)(
+    'workspace export: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const baseline = process.env.MURPH_MEASURE_WORKSPACE_EXPORT_BASE === '1'
+      let tools: readonly AssistantProviderDynamicTool[] = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true,
+        automationAvailable: true,
+        vaultFileSendAvailable: scope === 'direct',
+        personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group',
+        groupChallengeResponseCardsAvailable: scope === 'group',
+        responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: false,
+        progressUpdatesAvailable: false,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-09-14',
+        currentInstant: '2026-09-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      let developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      // Exact two authored-text changes relative to 251f3c8f6fc9. Keep the
+      // production base instructions, schemas, tools, and fixture identical.
+      if (baseline && scope === 'direct') {
+        const archiveLine = developerInstructions.split('\n').find((line) => line.startsWith('- Export requested vault files.'))
+        assert.ok(archiveLine)
+        developerInstructions = developerInstructions.replace(archiveLine, '- Export requested vault files. ZIPs may read originals in place. Inspect before refusing.')
+        tools = tools.map((tool) => {
+          if (tool.name !== 'send_vault_file') return tool
+          const start = tool.description.indexOf(' For an explicit full-workspace request')
+          const end = tool.description.indexOf(' When a generated ZIP contains derived exports/packs/')
+          assert.ok(start > 0 && end > start)
+          return { ...tool, description: tool.description.slice(0, start) + tool.description.slice(end) }
+        })
+      }
+      stub.captureProviderRequestDiagnostics({ completeInput: true })
+      stub.queue({ text: CONTRACT_CAPTURE_DONE })
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS, dynamicTools: tools, developerInstructions,
+        groupConversation: scope === 'group',
+        prompt: [layers.dynamicTurnContextPrompt, 'Please prepare a backup of my workspace.'].join('\n\n'),
+        env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+      })
+      const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+      assert.ok(captured)
+      assert.equal(stub.requestCountSinceBaseline(), 1)
+      assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+      assert.equal(tools.some((tool) => tool.name === 'send_vault_file'), scope === 'direct')
+      process.stdout.write('[workspace-export-input-proof] ' + JSON.stringify({
+        scope, phase: baseline ? 'base' : 'head', decodedRequestUtf8Bytes: Buffer.byteLength(captured.json),
+        requestSha256: createHash('sha256').update(captured.json).digest('hex'),
+        registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+        instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, layers.dynamicTurnContextPrompt].join('\n\n')),
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured; scripted usage is not tokenization.',
+        exclusions: captured.excludedTransportFields,
+      }) + '\n')
+    },
+  )
+
   it.skipIf(process.env.MURPH_MEASURE_GRAPH_IMAGE_INPUT !== '1').each(['direct', 'group'] as const)(
     'graph image guidance: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
       stub ??= await startScriptedResponsesStub()

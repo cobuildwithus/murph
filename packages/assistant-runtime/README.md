@@ -69,11 +69,21 @@ Current responsibilities:
 - keep automation occurrence projection explicit and operation-local: responses distinguish resolved timing, healthy in-flight scheduler work, and unavailable projection; only unavailable projection receives one bounded read-only readback and typed content-free diagnostics through the existing nonblocking assistant automation-detail log path, without model mediation, retries, new persistence, or a second scheduler owner
 - enroll every activated member in one finite hosted onboarding follow-up independently of optional welcome delivery: activation persists canonical onboarding start once and carries any available direct route separately from the welcome, immediate route-bearing activation performs the canonical idempotent upsert, and route-less Telegram activation remains silent until ordinary managed reconciliation sees a later direct route; delayed creation preserves the activation-anchored window, transient failures reuse the activation mailbox or existing bounded managed-setup retry ladder, and completed, expired, group, or archived follow-ups stay closed; the exact current seed, PR 1203 one-shot, older recurring fingerprint, or bounded original legacy seed is reconciled without granting execution authority to editable metadata; reconciliation preserves the signup-selected daily minute or derives it from an exact one-shot's stored occurrence, and conversion durably binds that occurrence before exposing the daily schedule; the notification gets one opportunity on each of the next three local days in a stable per-member window from 1:30 PM through 2:29 PM, reserves at least 30 minutes for execution before delivery authority closes at 3:00 PM on the third day, checks canonical onboarding state before provider entry, tool execution, delivery, commit, and queued external transport without mutating it, consumes each daily opportunity after either one reply-oriented continuation or a skip, and emits metadata-only seed, reconciliation, state-source, decision, delivery, and run-outcome diagnostics
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker
+
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime
 - execute `clinical-records.sync-requested` as finite, preemptible background
   work through the injected clinical-records port, keeping provider credentials
   in web and loading the clinical importer only inside that maintenance lane
 - provide shared hosted runtime env sanitization so host apps can build their own launcher policy without forwarding control-plane secrets
+
+The existing `assistant.pass_finished` diagnostic records relative wake offsets
+for the phase's workspace, selected wake, and system mailbox. Non-delivery
+background passes also record the already-computed automation, cron, device-sync,
+outbox, and provider-cleanup candidate offsets. Null means absent or invalid;
+negative means overdue. Candidate fields are omitted on paths that do not compute
+them. Background progress-cause booleans distinguish wake projection changes and
+provider cleanup from actual automation progress. These fields add no reads or
+log events and never control scheduling or expose raw timestamps or payloads.
 
 Hosted runtime is a thin containerized runner over the same local assistant input
 spine used by local automation:

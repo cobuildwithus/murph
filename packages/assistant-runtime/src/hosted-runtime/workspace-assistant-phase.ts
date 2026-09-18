@@ -2412,6 +2412,7 @@ export async function runHostedWorkspaceAssistantPhase(
         input,
         nextWakeAt,
         progressed,
+        progressCauses: { providerCleanupDue, providerCleanupStateQueued, wakeStateProgressed },
         systemMailboxWakeAt,
       });
       const phaseProgressed = progressed || providerCleanupDue;
@@ -2498,7 +2499,15 @@ export async function runHostedWorkspaceAssistantPhase(
       input,
       nextWakeAt,
       progressed,
+      progressCauses: { providerCleanupDue, providerCleanupStateQueued, wakeStateProgressed },
       systemMailboxWakeAt,
+      wakeCandidates: {
+        automation: assistantNextWakeAt,
+        cron: assistantCronWakeAfterPassCandidate,
+        deviceSync: deviceSyncFollowUpWake,
+        outbox: outboxWakeAt,
+        providerCleanup: providerCleanupScheduledWakeAt,
+      },
     });
     const hasPostCommitProviderCleanup = providerCleanupDue
       || deliveryEffects.length > 0
@@ -7661,8 +7670,23 @@ async function writeHostedAssistantPassRuntimeLog(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   nextWakeAt: string | null;
   progressed: boolean;
+  progressCauses?: {
+    providerCleanupDue: boolean;
+    providerCleanupStateQueued: boolean;
+    wakeStateProgressed: boolean;
+  };
   systemMailboxWakeAt: string | null;
+  wakeCandidates?: {
+    automation: string | null;
+    cron: HostedRuntimeWakeCandidate | null;
+    deviceSync: HostedRuntimeWakeCandidate | null;
+    outbox: string | null;
+    providerCleanup: string | null;
+  };
 }): Promise<void> {
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
+  const candidateOffsetMs = (candidate: HostedRuntimeWakeCandidate | null) =>
+    hostedAssistantWakeOffsetMs(candidate?.at ?? null, nowMs);
   await writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields({
@@ -7701,15 +7725,34 @@ async function writeHostedAssistantPassRuntimeLog(input: {
         deviceSyncSkipped: true,
         deviceSyncDirtyAckPending: false,
         nextWakeAtPresent: input.nextWakeAt !== null,
+        nextWakeOffsetMs: hostedAssistantWakeOffsetMs(input.nextWakeAt, nowMs),
+        workspaceWakeOffsetMs: hostedAssistantWakeOffsetMs(
+          input.input.workspace?.nextWakeAt ?? null, nowMs,
+        ),
         parserProcessed: 0,
         progressed: input.progressed,
+        ...input.progressCauses,
         readinessElapsedMs: input.assistantMetrics.readinessElapsedMs ?? null,
         systemWakeAtPresent: input.systemMailboxWakeAt !== null,
+        systemWakeOffsetMs: hostedAssistantWakeOffsetMs(input.systemMailboxWakeAt, nowMs),
+        ...(input.wakeCandidates ? {
+          automationWakeOffsetMs: hostedAssistantWakeOffsetMs(input.wakeCandidates.automation, nowMs),
+          cronWakeOffsetMs: candidateOffsetMs(input.wakeCandidates.cron),
+          deviceSyncWakeOffsetMs: candidateOffsetMs(input.wakeCandidates.deviceSync),
+          outboxWakeOffsetMs: hostedAssistantWakeOffsetMs(input.wakeCandidates.outbox, nowMs),
+          providerCleanupWakeOffsetMs: hostedAssistantWakeOffsetMs(input.wakeCandidates.providerCleanup, nowMs),
+        } : {}),
         totalElapsedMs: input.assistantMetrics.totalElapsedMs ?? null,
       },
     },
     platform: input.input.platform,
   });
+}
+
+function hostedAssistantWakeOffsetMs(wakeAt: string | null, nowMs: number): number | null {
+  if (wakeAt === null) return null;
+  const wakeMs = Date.parse(wakeAt);
+  return Number.isFinite(wakeMs) ? wakeMs - nowMs : null;
 }
 
 async function writeHostedAssistantAutomationDetailRuntimeLogs(input: {

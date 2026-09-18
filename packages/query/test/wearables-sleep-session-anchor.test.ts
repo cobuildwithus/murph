@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { createVaultReadModel } from "../src/model.ts";
+import { collectWearableDataset } from "../src/wearables/candidates.ts";
+import * as sleepAssociation from "../src/wearables/sleep-association.ts";
 import { summarizeWearableDay, summarizeWearableMetricTrend, summarizeWearableSleep } from "../src/wearables.ts";
 
 type ExternalRefInput = {
@@ -1107,3 +1109,80 @@ test("daily sleep summary derives stage totals from the selected sleep window in
   assert.equal(night?.totalSleepMinutes.selection.sourceKind, "sleep-stage-total");
   assert.deepEqual(night?.lightMinutes.selection.recordIds, ["sample_oura_stage_long_light"]);
 });
+
+test("sleep repair skips window association when no zero sleep total exists", () => {
+  const entities = makeSleepRepairWorkFixture(400);
+  const associated = vi.spyOn(sleepAssociation, "sleepMetricAssociatedWithWindow");
+  try {
+    const dataset = collectWearableDataset(createVaultReadModel({
+      entities,
+      vaultRoot: "browser://synthetic-sleep-repair",
+    }), {});
+    assert.equal(dataset.metricCandidates.length, 2);
+    assert.equal(dataset.metricSuppressionEvidence.length, 0);
+    assert.equal(associated.mock.calls.length, 0);
+  } finally {
+    associated.mockRestore();
+  }
+});
+
+test("unrelated positive metrics do not multiply sleep repair association work", () => {
+  const entities = makeSleepRepairWorkFixture(0);
+  const unrelated = Array.from({ length: 500 }, (_, index) => makeJunctionSleepMetric({
+    date: "2026-02-10",
+    entityId: `evt_positive_sleep_${index}`,
+    metric: "sleep-total-minutes",
+    occurredAt: "2026-02-10T07:00:00.000Z",
+    recordedAt: "2026-02-10T08:00:00.000Z",
+    resourceId: `positive-sleep-${index}`,
+    sourceProviderSlug: "apple-health-kit",
+    value: 400,
+  }));
+  const collect = (input: CanonicalEntity[]) => collectWearableDataset(createVaultReadModel({
+    entities: input,
+    vaultRoot: "browser://synthetic-sleep-repair",
+  }), {});
+  const associated = vi.spyOn(sleepAssociation, "sleepMetricAssociatedWithWindow");
+  try {
+    const sparse = collect(entities);
+    const sparseWork = associated.mock.calls.length;
+    assert.ok(sparseWork > 0);
+    assert.equal(sparse.metricSuppressionEvidence.length, 1);
+    associated.mockClear();
+    const dense = collect([...entities, ...unrelated]);
+    assert.deepEqual(dense.metricSuppressionEvidence, sparse.metricSuppressionEvidence);
+    assert.equal(dense.metricCandidates.length, sparse.metricCandidates.length + unrelated.length);
+    assert.equal(associated.mock.calls.length, sparseWork);
+  } finally {
+    associated.mockRestore();
+  }
+});
+
+function makeSleepRepairWorkFixture(totalMinutes: number): CanonicalEntity[] {
+  const date = "2026-02-10";
+  const endAt = "2026-02-10T07:00:00.000Z";
+  const recordedAt = "2026-02-10T08:00:00.000Z";
+  return [
+    makeJunctionSleepSession({
+      date,
+      durationMinutes: 480,
+      endAt,
+      entityId: "evt_repair_work_window",
+      recordedAt,
+      resourceId: "repair-work-window",
+      sourceProviderSlug: "apple-health-kit",
+      startAt: "2026-02-09T23:00:00.000Z",
+    }),
+    ...[{ metric: "sleep-total-minutes", value: totalMinutes }, { metric: "sleep-awake-minutes", value: 20 }]
+      .map(({ metric, value }) => makeJunctionSleepMetric({
+        date,
+        entityId: `evt_repair_work_${metric}`,
+        metric,
+        occurredAt: endAt,
+        recordedAt,
+        resourceId: "repair-work-window",
+        sourceProviderSlug: "apple-health-kit",
+        value,
+      })),
+  ];
+}

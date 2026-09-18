@@ -4152,7 +4152,7 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv();
     const artifactSha256 = "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b";
 
-    await expect(() => callRunnerOutbound(
+    const response = await callRunnerOutbound(
       new Request(`http://artifacts.worker/objects/${artifactSha256}`, {
         body: Buffer.from("wrong-payload\n", "utf8"),
         headers: {
@@ -4162,9 +4162,13 @@ describe("cloudflare worker routes", () => {
         method: "PUT",
       }),
       env,
-    )).rejects.toThrow(
-      `Hosted artifact hash mismatch: expected ${artifactSha256}`,
     );
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      code: "runtime_error",
+      error: "Hosted execution runtime failed.",
+      errorName: "Error",
+    });
 
     expect(env.__bucketStore.keys()).toHaveLength(0);
   });

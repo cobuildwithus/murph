@@ -43,6 +43,39 @@ describe("bounded shared wearable recovery", () => {
     expect(request.mock.calls).toEqual([[{ action: "read_shared", ...input }], [{ action: "read_shared", projectionScopes: [scope] }]]);
     expect(result).toMatchObject({ freshness: { refreshStatus: "requested", checkedAt: "2026-08-04T14:20:15.000Z" }, members: [{ projections: [{ dataStatus: "available" }] }] });
   });
+  it("waits for the missing source even when another source already has the date", async () => {
+    const first = response({ available: true });
+    if (first.action !== "read_shared" || first.result.status !== "ok") throw new Error("Expected shared response");
+    const projection = first.result.members[0]!.projections[0]!;
+    const current = { ...projection.records[0]!, source: { source: "garmin", label: "Garmin" } };
+    const previous = { recordKey: "prior.oura", occurredAt: "2026-08-03T00:00:00.000Z",
+      source: { source: "oura", label: "Oura" }, data: { date: "2026-08-03", metricKey: "total-sleep-minutes", value: 420, unit: "minutes" } };
+    projection.records = [current, previous];
+    const second = structuredClone(first);
+    if (second.action !== "read_shared" || second.result.status !== "ok") throw new Error("Expected shared response");
+    second.result.members[0]!.projections[0]!.records = [...projection.records, { ...current, recordKey: "current.oura", source: previous.source }];
+    const request = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    await createHostedGroupSharedReader({ groupToolPort: { request }, freshnessWaitMs: 300_000 }).request(input);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(delay).toHaveBeenCalledTimes(1);
+  });
+  it("stops waiting once recent dates arrive even when historical gaps remain", async () => {
+    const request = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(response({ available: true }));
+    const result = await createHostedGroupSharedReader({ groupToolPort: { request }, freshnessWaitMs: 300_000 }).request({
+      ...input, freshness: [...freshness, { ...freshness[0]!, date: "2026-07-01" }],
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(delay).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ freshness: { refreshStatus: "requested" } });
+  });
+  it("does not wait for historical-only gaps even with an older Web requested response", async () => {
+    const request = vi.fn().mockResolvedValue(response());
+    await createHostedGroupSharedReader({ groupToolPort: { request }, freshnessWaitMs: 300_000 }).request({
+      ...input, freshness: [{ ...freshness[0]!, date: "2026-07-01" }],
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(delay).not.toHaveBeenCalled();
+  });
   it("stops after five minutes and retains missing data without zero records", async () => {
     const request = vi.fn().mockImplementation(async () => response());
     const result = await createHostedGroupSharedReader({ groupToolPort: { request }, freshnessWaitMs: 900_000 }).request(input);

@@ -103,6 +103,34 @@ describe("shared wearable sync requests", () => {
     expect(await readHostedGroupSharedDataWithFreshness(input)).toMatchObject({ freshness: { refreshStatus: "unavailable" } });
     expect(mocks.read).toHaveBeenCalledTimes(2);
   });
+  it("refreshes a recent gap even when historical and future dates are requested", async () => {
+    const result = await readHostedGroupSharedDataWithFreshness({ ...input,
+      freshness: [freshness[0]!, { ...freshness[0]!, date: "2026-07-01" }, { ...freshness[0]!, date: "2026-08-20" }],
+    });
+    expect(result).toMatchObject({ freshness: { refreshStatus: "requested" } });
+    expect(mocks.wake).toHaveBeenCalledTimes(1);
+  });
+  it("does no sync work when only the historical date is missing", async () => {
+    mocks.read.mockResolvedValue(snapshot({ available: true }));
+    expect(await readHostedGroupSharedDataWithFreshness({ ...input,
+      freshness: [freshness[0]!, { ...freshness[0]!, date: "2026-07-01" }],
+    })).toMatchObject({ freshness: { refreshStatus: "unavailable" } });
+    expect(mocks.grants).not.toHaveBeenCalled();
+    expect(mocks.wake).not.toHaveBeenCalled();
+  });
+  it("requests recovery for a missing wearable even when another source has today's date", async () => {
+    const value = snapshot({ available: true });
+    if (value.status !== "ok") throw new Error("Expected shared snapshot");
+    const projection = value.members[0]!.projections[0]!;
+    projection.records = [
+      { ...projection.records[0]!, source: { source: "garmin", label: "Garmin" } },
+      { recordKey: "prior.oura", occurredAt: "2026-08-03T00:00:00.000Z", source: { source: "oura", label: "Oura" },
+        data: { date: "2026-08-03", metricKey: "total-sleep-minutes", value: 420, unit: "minutes" } },
+    ];
+    mocks.read.mockResolvedValue(value);
+    expect(await readHostedGroupSharedDataWithFreshness(input)).toMatchObject({ freshness: { refreshStatus: "requested" } });
+    expect(mocks.wake).toHaveBeenCalledTimes(1);
+  });
   it("does not refresh arbitrary history or future days", async () => {
     for (const date of ["2026-07-01", "2026-08-20"]) {
       expect(await readHostedGroupSharedDataWithFreshness({ ...input, freshness: [{ ...freshness[0], date }] })).toMatchObject({ freshness: { refreshStatus: "unavailable" } });

@@ -11,6 +11,7 @@ import {
   getQueryProjectionStatus,
   listCanonicalEntitiesRuntime,
   rebuildQueryProjection,
+  searchVaultRuntime,
   summarizeWearableSourceHealthRuntime,
 } from "../src/query-projection.ts";
 import { summarizeWearableSourceHealthFromBundle, type WearableSummaryFilters } from "../src/wearables.ts";
@@ -34,10 +35,15 @@ import * as projector from "../src/projection/wearable-summary-projector.ts";
 import * as codec from "../src/projection/wearable-summary-stored-codec.ts";
 import * as publicJson from "../src/projection/wearable-summary-public-json.ts";
 import * as source from "../src/vault-source.ts";
+import * as candidates from "../src/wearables/candidates.ts";
+import * as schema from "../src/projection/schema.ts";
+import { normalizeCliTiming, type CliTiming, type CliTimingPhase } from "@murphai/runtime-state/cli-timing";
+import { timeCliDispatch, withCliTiming } from "@murphai/runtime-state/node/cli-timing";
 
 const roots: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
@@ -407,7 +413,10 @@ test("failed wearable metadata publication rolls back rows and metadata and rema
     WHEN NEW.key = 'wearable_source_manifest' BEGIN
       SELECT RAISE(ABORT, 'injected wearable publication failure');
     END;`);
-  await assert.rejects(summarizeWearableSourceHealthRuntime(root), /injected wearable publication failure/u);
+  let report!: CliTiming;
+  await assert.rejects(measuredQuery("wearables sources list", () => summarizeWearableSourceHealthRuntime(root), value => { report = value; }), /injected wearable publication failure/u);
+  assertRebuildTiming(report, sourceRebuildPhases, root);
+  assert.equal(existsSync(path.join(root, CANONICAL_WRITE_LOCK_DIRECTORY)), false);
   assert.deepEqual(inspectProjection(root), before);
   assert.equal((await getQueryProjectionStatus(root)).fresh, false);
   executeSql(root, "DROP TRIGGER fail_wearable_metadata");
@@ -427,7 +436,9 @@ test("failed encoding leaves the existing projection unchanged and releases the 
   const before = inspectProjection(root);
   const failure = new Error("injected stored encoding failure");
   const encode = vi.spyOn(codec, "stringifyStoredWearableProjectionSummary").mockImplementation(() => { throw failure; });
-  await assert.rejects(summarizeWearableSourceHealthRuntime(root), error => error === failure);
+  let report!: CliTiming;
+  await assert.rejects(measuredQuery("wearables sources list", () => summarizeWearableSourceHealthRuntime(root), value => { report = value; }), error => error === failure);
+  assertRebuildTiming(report, ["query-source-read", "query-wearable-dataset", "query-wearable-summary"], root);
   assert.deepEqual(inspectProjection(root), before);
   assert.equal(existsSync(path.join(root, CANONICAL_WRITE_LOCK_DIRECTORY)), false);
   encode.mockRestore();
@@ -442,7 +453,10 @@ test("failed global publication preserves the independently current wearable por
   const projected = vi.spyOn(projector, "buildWearableSummaryProjectionFromDataset");
   const failure = new Error("injected global publication failure");
   const insert = vi.spyOn(searchStore, "insertSearchDocuments").mockImplementation(() => { throw failure; });
-  await assert.rejects(listCanonicalEntitiesRuntime(root), error => error === failure);
+  let report!: CliTiming;
+  await assert.rejects(measuredQuery("event list", () => listCanonicalEntitiesRuntime(root), value => { report = value; }), error => error === failure);
+  assertRebuildTiming(report, rebuildPhases.filter(phase => phase !== "query-wearable-summary"), root);
+  assert.equal(existsSync(path.join(root, CANONICAL_WRITE_LOCK_DIRECTORY)), false);
   assert.deepEqual(inspectProjection(root), before);
   assert.equal((await getQueryProjectionStatus(root)).fresh, false);
   assert.deepEqual(await summarizeWearableSourceHealthRuntime(root), expected);
@@ -457,4 +471,232 @@ test("corrupt stored activity evidence fails closed rather than falling back to 
   await summarizeWearableSourceHealthRuntime(root);
   executeSql(root, "UPDATE query_wearable_summaries SET summary_json = '{}' WHERE summary_kind = 'activity'");
   await assert.rejects(summarizeWearableSourceHealthRuntime(root), /activity evidence/iu);
+});
+
+// Exercise the public query APIs on the same synthetic canonical fixture used
+// above, not a test-only reconstruction of the rebuild pipeline.
+const rebuildPhases = [
+  "query-source-read", "query-wearable-dataset", "query-metric-projection",
+  "query-wearable-summary", "query-search-documents", "query-publication",
+] as const;
+const sourceRebuildPhases = rebuildPhases.filter(phase =>
+  phase !== "query-metric-projection" && phase !== "query-search-documents");
+
+async function measuredQuery<T>(command: string, read: () => Promise<T>, publish?: (report: CliTiming) => void): Promise<T> {
+  let result!: T;
+  await withCliTiming(() => timeCliDispatch(command, async () => { result = await read(); }), publish);
+  return result;
+}
+
+function assertRebuildTiming(report: CliTiming, expected: readonly CliTimingPhase[], root: string) {
+  assert.deepEqual(normalizeCliTiming(report), report);
+  assert.equal(report.droppedSpans, 0);
+  assert.equal(report.droppedCalls, 0);
+  assert.equal(report.commands.length, 1);
+  const command = report.commands[0]!;
+  assert.equal(command.calls, 1);
+  assert.deepEqual(command.phases.filter(phase => rebuildPhases.some(name => name === phase.phase))
+    .map(phase => phase.phase), expected);
+  for (const phase of command.phases) {
+    assert.deepEqual(Object.keys(phase).sort(), ["buckets", "count", "maxUs", "phase", "sumUs"]);
+    for (const value of [phase.count, phase.sumUs, phase.maxUs, ...phase.buckets]) {
+      assert.ok(Number.isSafeInteger(value) && value >= 0);
+    }
+    assert.equal(phase.buckets.length, 8);
+    assert.equal(phase.buckets.reduce((sum, value) => sum + value, 0), phase.count);
+    if (expected.includes(phase.phase)) assert.equal(phase.count, 1);
+  }
+  const serialized = JSON.stringify(report);
+  for (const forbidden of [root, "evt_garmin_steps", "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
+    "raw/private-fixture.json", "Synthetic private title", "Synthetic source health",
+    "SYNTHETIC_QUERY_SENTINEL", "PRIVATE_TIMING_FAILURE", "providers", "entityCount", "searchDocumentCount"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+}
+
+async function removeProjection(root: string) {
+  const databasePath = currentQueryProjectionLocation(root).absolutePath;
+  await Promise.all(["", "-wal", "-shm"].map(suffix => rm(databasePath + suffix, { force: true })));
+}
+
+test("full rebuild timing preserves canonical data, search output and freshness", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-17T00:00:00Z"));
+  const { root, shard } = await fixture();
+  const journal = path.join(root, "journal/2026/2026-05-01.md");
+  await mkdir(path.dirname(journal), { recursive: true });
+  await writeFile(journal, "---\ntitle: SYNTHETIC_QUERY_SENTINEL\n---\n\nSYNTHETIC_QUERY_SENTINEL\n");
+  const canonical = await readFile(shard);
+  const expected = await rebuildQueryProjection(root);
+  const expectedSearch = await searchVaultRuntime(root, "SYNTHETIC_QUERY_SENTINEL");
+  assert.ok(expectedSearch.total > 0);
+  const expectedProjection = inspectProjection(root);
+  await removeProjection(root);
+  let report!: CliTiming;
+  const actual = await measuredQuery("query projection rebuild", () => rebuildQueryProjection(root), value => { report = value; });
+  assertRebuildTiming(report, rebuildPhases, root);
+  assert.equal(report.commands[0]!.outcome, "ok");
+  assert.deepEqual(actual, expected);
+  assert.deepEqual(inspectProjection(root), expectedProjection);
+  assert.deepEqual(await searchVaultRuntime(root, "SYNTHETIC_QUERY_SENTINEL"), expectedSearch);
+  const before = await getQueryProjectionStatus(root);
+  assert.equal(before.fresh, true);
+  await measuredQuery("search query", () => searchVaultRuntime(root, "SYNTHETIC_QUERY_SENTINEL"), value => { report = value; });
+  assertRebuildTiming(report, [], root);
+  assert.deepEqual(await getQueryProjectionStatus(root), before);
+  assert.deepEqual(await readFile(shard), canonical);
+});
+
+test("wearable-only timing omits global work and a later full rebuild omits reused summaries", async () => {
+  const { root, shard } = await fixture();
+  const canonical = await readFile(shard);
+  const expected = await summarizeWearableSourceHealthRuntime(root);
+  const expectedProjection = inspectProjection(root);
+  await removeProjection(root);
+  let report!: CliTiming;
+  const actual = await measuredQuery("wearables sources list", () => summarizeWearableSourceHealthRuntime(root), value => { report = value; });
+  assertRebuildTiming(report, sourceRebuildPhases, root);
+  assert.deepEqual(actual, expected);
+  assert.deepEqual(inspectProjection(root), expectedProjection);
+  assert.equal((await getQueryProjectionStatus(root)).fresh, false);
+  assert.deepEqual(inspectProjection(root).globalTables, []);
+  await assertWearablesFresh(root);
+  assert.deepEqual(await measuredQuery("wearables sources list", () => summarizeWearableSourceHealthRuntime(root), value => { report = value; }), expected);
+  assertRebuildTiming(report, [], root);
+  await measuredQuery("query projection rebuild", () => rebuildQueryProjection(root), value => { report = value; });
+  assertRebuildTiming(report, rebuildPhases.filter(phase => phase !== "query-wearable-summary"), root);
+  assert.equal((await getQueryProjectionStatus(root)).fresh, true);
+  assert.deepEqual(inspectProjection(root).wearable, expectedProjection.wearable);
+  assert.deepEqual(await readFile(shard), canonical);
+});
+
+test("rebuild phase boundaries measure actual owners including publication open, inserts and close", async () => {
+  const { root } = await fixture();
+  let tick = 0n;
+  vi.spyOn(process.hrtime, "bigint").mockImplementation(() => tick);
+  const advance = (us: number) => { tick += BigInt(us) * 1_000n; };
+  const read = source.readVaultSourceStrict;
+  vi.spyOn(source, "readVaultSourceStrict").mockImplementation(async (...args) => { advance(11); return read(...args); });
+  const dataset = candidates.collectWearableDataset;
+  vi.spyOn(candidates, "collectWearableDataset").mockImplementation((...args) => { advance(13); return dataset(...args); });
+  const project = metrics.buildMetricProjection;
+  vi.spyOn(metrics, "buildMetricProjection").mockImplementation((...args) => { advance(17); return project(...args); });
+  const targets = metricStore.extractMetricTargetsFromCanonicalEntities;
+  vi.spyOn(metricStore, "extractMetricTargetsFromCanonicalEntities").mockImplementation((...args) => { advance(19); return targets(...args); });
+  const summary = projector.buildWearableSummaryProjectionFromDataset;
+  vi.spyOn(projector, "buildWearableSummaryProjectionFromDataset").mockImplementation((...args) => { advance(23); return summary(...args); });
+  const documents = search.materializeSearchDocuments;
+  vi.spyOn(search, "materializeSearchDocuments").mockImplementation((...args) => { advance(29); return documents(...args); });
+  const summaries = search.materializeSampleSummarySearchDocuments;
+  vi.spyOn(search, "materializeSampleSummarySearchDocuments").mockImplementation((...args) => { advance(31); return summaries(...args); });
+  const open = schema.openQueryProjectionDatabase;
+  vi.spyOn(schema, "openQueryProjectionDatabase").mockImplementation((location, options) => {
+    if (options?.create) advance(37);
+    const database = open(location, options);
+    if (options?.create) {
+      const close = database.close.bind(database);
+      vi.spyOn(database, "close").mockImplementation(() => { advance(43); close(); });
+    }
+    return database;
+  });
+  const insert = entityStore.insertQueryEntities;
+  vi.spyOn(entityStore, "insertQueryEntities").mockImplementation((...args) => { advance(41); return insert(...args); });
+  let report!: CliTiming;
+  await measuredQuery("query projection rebuild", () => rebuildQueryProjection(root), value => { report = value; });
+  assertRebuildTiming(report, rebuildPhases, root);
+  assert.deepEqual(Object.fromEntries(report.commands[0]!.phases.filter(phase =>
+    rebuildPhases.some(name => name === phase.phase)).map(phase => [phase.phase, phase.sumUs])), {
+    "query-source-read": 11, "query-wearable-dataset": 13, "query-metric-projection": 36,
+    "query-wearable-summary": 23, "query-search-documents": 60, "query-publication": 121,
+  });
+});
+
+for (const mode of ["full", "wearable-only"] as const) {
+  for (const boundary of ["source", "open", "close"] as const) {
+    test(`${mode} ${boundary} failure closes timing scopes and releases the canonical lock`, async () => {
+      const { root } = await fixture();
+      const failure = new Error("PRIVATE_TIMING_FAILURE");
+      if (boundary === "source") vi.spyOn(source, "readVaultSourceStrict").mockRejectedValue(failure);
+      else {
+        const open = schema.openQueryProjectionDatabase;
+        vi.spyOn(schema, "openQueryProjectionDatabase").mockImplementation((location, options) => {
+          if (options?.create && boundary === "open") throw failure;
+          const database = open(location, options);
+          if (options?.create && boundary === "close") {
+            const close = database.close.bind(database);
+            vi.spyOn(database, "close").mockImplementation(() => { close(); throw failure; });
+          }
+          return database;
+        });
+      }
+      const run = (): Promise<unknown> => mode === "full"
+        ? rebuildQueryProjection(root) : summarizeWearableSourceHealthRuntime(root);
+      let report!: CliTiming;
+      await assert.rejects(measuredQuery(mode === "full" ? "query projection rebuild" : "wearables sources list",
+        run, value => { report = value; }), error => error === failure);
+      assertRebuildTiming(report, boundary === "source" ? ["query-source-read"] :
+        mode === "full" ? rebuildPhases : sourceRebuildPhases, root);
+      assert.equal(report.commands[0]!.outcome, "error");
+      assert.equal(existsSync(path.join(root, CANONICAL_WRITE_LOCK_DIRECTORY)), false);
+      vi.restoreAllMocks();
+      // Closing failed after the actual close: the already-committed publication
+      // remains committed, just as before instrumentation. Other failures retry.
+      assert.equal(await isWearableProjectionFresh(currentQueryProjectionLocation(root),
+        await source.listCanonicalSourceManifest(root)), boundary === "close");
+      assert.equal((await getQueryProjectionStatus(root)).fresh, mode === "full" && boundary === "close");
+      await run();
+      await assertWearablesFresh(root);
+    });
+  }
+}
+
+// Opt-in local measurement: no endpoint, provider, private vault or new harness.
+// Rotated cold pairs exercise both public operations; timings are observations,
+// not a flaky CI latency threshold or evidence of production speedup.
+test.skipIf(process.env.MURPH_QUERY_REBUILD_PHASE_MEASURE !== "1")("synthetic rebuild phase measurement", async () => {
+  const priorEndpoint = process.env.MURPH_CLI_TIMING_ENDPOINT;
+  delete process.env.MURPH_CLI_TIMING_ENDPOINT;
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-17T00:00:00Z"));
+  try {
+    const { root } = await fixture();
+    for (const mode of ["full", "wearable-only"] as const) {
+      const samples = { disabled: [] as number[], enabled: [] as number[] };
+      const run = (): Promise<unknown> => mode === "full"
+        ? rebuildQueryProjection(root) : summarizeWearableSourceHealthRuntime(root);
+      let expected: unknown;
+      let report!: CliTiming;
+      let maxEnvelopeBytes = 0;
+      for (let round = -1; round < 7; round += 1) {
+        for (const enabled of round % 2 === 0 ? [false, true] : [true, false]) {
+          await removeProjection(root);
+          const started = process.hrtime.bigint();
+          const result = await measuredQuery(mode === "full" ? "query projection rebuild" : "wearables sources list", run,
+            enabled ? value => { report = value; } : undefined);
+          const us = Number((process.hrtime.bigint() - started) / 1_000n);
+          expected ??= result;
+          assert.deepEqual(result, expected);
+          if (round >= 0) samples[enabled ? "enabled" : "disabled"].push(us);
+          if (enabled) {
+            assertRebuildTiming(report, mode === "full" ? rebuildPhases : sourceRebuildPhases, root);
+            maxEnvelopeBytes = Math.max(maxEnvelopeBytes, Buffer.byteLength(JSON.stringify({
+              key: "a".repeat(32), startedUs: Number.MAX_SAFE_INTEGER, endedUs: Number.MAX_SAFE_INTEGER, timing: report,
+            })));
+          }
+        }
+      }
+      const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]!;
+      assert.ok(maxEnvelopeBytes <= 8_192);
+      console.log(JSON.stringify({ measurement: "synthetic-query-rebuild-phases", mode, pairs: 7,
+        disabledSamplesUs: samples.disabled, enabledSamplesUs: samples.enabled,
+        pairedDeltasUs: samples.enabled.map((us, index) => us - samples.disabled[index]!),
+        disabledMedianUs: median(samples.disabled), enabledMedianUs: median(samples.enabled),
+        observedDeltaUs: median(samples.enabled) - median(samples.disabled), maxEnvelopeBytes,
+        phases: report.commands[0]!.phases,
+        method: "Warm process, rotated cold-projection pairs, in-memory sink; bounded spans/bytes, no transport or production speedup claim." }));
+    }
+  } finally {
+    if (priorEndpoint === undefined) delete process.env.MURPH_CLI_TIMING_ENDPOINT;
+    else process.env.MURPH_CLI_TIMING_ENDPOINT = priorEndpoint;
+  }
 });

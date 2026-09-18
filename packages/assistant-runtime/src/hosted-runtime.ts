@@ -5922,6 +5922,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             checkpointPendingBeforePass,
             presentedProjectedAssistantWakeKey,
           );
+          if (!runtimeOwnerHandoffRequested && !backgroundWorkSignal.aborted) {
+            // Continued foreground work keeps this invocation alive after a
+            // checkpoint. Resume its paused clinical continuation as well.
+            clinicalEnrichmentController?.resume();
+          }
           result = await runWorkspaceForegroundPass({
             foregroundCausalOnly:
               singleWakeInput.foregroundCausalOnly === true,

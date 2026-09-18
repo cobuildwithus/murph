@@ -1129,7 +1129,13 @@ describe('assistant execution prompt contract', () => {
 
     expect(prompt).toContain('Vault file sends:')
     expect(prompt).toContain('Export requested vault files.')
-    expect(prompt).toContain('ZIPs may read originals in place. Inspect before refusing.')
+    expect(prompt).toContain('ZIPs may read originals in place')
+    expect(prompt).toContain("archive all files under that member's workspace root as-is")
+    expect(prompt).toContain('any credential-bearing records present')
+    expect(prompt).toContain('without content-based exclusion, redaction, or sanitization')
+    expect(prompt).not.toContain('Exclude credentials, tokens, environment secrets')
+    expect(prompt).not.toContain('include a non-sensitive omission notice')
+    expect(prompt).toContain("submit only the new ZIP's generated-delivery ref")
     expect(prompt).toContain(
       'For a newly generated file requested for sending now',
     )
@@ -2247,7 +2253,9 @@ describe('assistant system prompt cache stability', () => {
     // journeys cover manual estimation, clarification, and nonnumeric tracking.
     // Upcoming Journal context adds 29 characters to the skill routing hint;
     // complete direct/group provider-input measurements cover its composed cost.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(73_283)
+    // Complete private workspace archives replace the former content filtering;
+    // composed input measurement and focused Terra archive inspection cover it.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(74_211)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

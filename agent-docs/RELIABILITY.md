@@ -133,6 +133,11 @@ to apply after cutover.
   one fixed synthetic goal. A read-only observer requires the current checkpoint's
   published replica and no pending conversation input, then checks canonical
   goal and distinct-ID counts. A reply alone cannot satisfy this outcome gate.
+  Each observation allows the shared default runner quiet window plus two
+  minutes for checkpoint publication (currently twelve minutes total).
+  The workflow allows fifty-five minutes for reset, three observations, replies,
+  setup, and deployment checks. Observation never relaxes the twenty-second
+  reply limit or accepts stale/missing canonical evidence.
   Initial and final authority reuse active member access followed by the ordinary
   iMessage runtime access decision. Missing or outdated browser launch grants do
   not invalidate a messaging-only canary, but lost access, suspension, deletion,
@@ -166,7 +171,7 @@ to apply after cutover.
   the closed reason; do not invoke extra canaries, poll the endpoint, retry, wake
   or refresh to collect evidence.
 - Protected native iOS and Android hosted E2E controllers run staggered every
-  six hours and execute each admitted journey even when the same revision
+  twelve hours and execute each admitted journey even when the same revision
   previously passed. Provider behavior can change independently of source.
   Manual recovery requires `refs/heads/main` and the exact current `main` SHA
   before protected environment work. Native source pins are committed with
@@ -176,9 +181,13 @@ to apply after cutover.
   waiter for every pull request or deployment event. The workflows are
   production-only and non-destructive, with no pull-request or
   deployment-status trigger and no arbitrary-branch manual admission. They
-  dispatch the current production alias SHA only when it exactly matches the
-  selected `main` revision. A pending or failed production admission retries at
-  the next slot instead of testing a stale deployment.
+  keep controller admission separate from the deployed revision under test.
+  iOS selects the current production alias, verifies protected-main ancestry and
+  exact deployment, and retains dispatch-time equality. The Web SHA identifies
+  production at dispatch; ordinary promotions during the long native health
+  journey do not invalidate completed business assertions. The canary is not a
+  per-commit acceptance status. Main advancing does not prevent iOS execution. Android still requires the production
+  alias to equal the selected main revision and retries mismatches at the next slot.
 - Protected native Android hosted E2E treats private workflow dispatch as an
   uncertain external effect. A timeout, network failure, ambiguous HTTP
   response, malformed successful response, or missing run id after the request
@@ -1624,9 +1633,14 @@ to apply after cutover.
   no caller timeout is restarted or extended. The R2 binding PUT itself has no
   cancellation option: an already-issued write is awaited, never raced into an
   overlapping retry or detached task.
-  Two failed PUTs rethrow the original failure unchanged for the existing typed
-  transport classification and durable device-sync job backoff. At this lower
-  R2-storage layer, generic fetch or TypeError, unknown/non-service codes
+  Two failed PUTs rethrow the original failure unchanged to the outbound
+  dispatcher. It awaits storage promises inside its existing error boundary,
+  returning HTTP 500 with a bounded code, summary and allowlisted error name;
+  the container retains typed retryability and durable device-sync job backoff.
+  The outer error event keeps finite classification and route metadata, without
+  forwarding exception objects, messages, causes or stacks. Existing artifact
+  stage events retain the original R2 service code and recovery disposition.
+  At this lower R2-storage layer, generic fetch or TypeError, unknown/non-service codes
   (including quota/rate-limit), HTTP/auth, lease, hash, body, encryption and
   client-abort failures do not admit recovery. Exhausted R2 errors and HTTP
   responses do not trigger the container's transport replay or multiply these
@@ -1853,8 +1867,16 @@ to apply after cutover.
   and ECG binding failures retain the existing queued job beyond its initial
   attempt allowance, rechecking after 30 minutes. `validationRetryDelayMs`
   records that policy. Complete-day and ECG binding validation still fail before
-  canonical replacement; no sample is silently dropped, rescaled, or certified
-  as a complete collection. Other jobs can run during the delay. Existing
+  canonical replacement. Numeric-zero blood-oxygen samples, including finite
+  numeric-string aliases, are unusable and skipped; other invalid values and
+  source/day validation still reject. A complete-source-day blood-oxygen response
+  containing any zero publishes neither temporal artifacts/events nor replacement
+  authority for that resource, preserving prior facets without a partial or empty
+  replacement. Sibling resources remain independent, genuinely empty collections
+  retain authoritative-empty semantics, and later valid responses replace normally.
+  Ordinary blood-oxygen aggregates continue to omit zeros. Completing such a job
+  means the response was handled, not that complete temporal coverage was certified.
+  Other jobs can run during the delay. Existing
   disconnect, account-generation, and lease fences remain authoritative; this
   policy does not resurrect terminal history or change other failure codes.
   A persisted matching validation failure also preserves lease-reclaim and

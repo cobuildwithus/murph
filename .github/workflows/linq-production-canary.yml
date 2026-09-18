@@ -2,7 +2,7 @@ name: Linq Production Canary
 
 on:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "17 */6 * * *"
   workflow_dispatch:
     inputs:
       deployed_sha:
@@ -19,11 +19,11 @@ concurrency:
 
 jobs:
   production-canary:
-    name: Exercise hourly production iMessage journey
+    name: Exercise six-hour production iMessage journey
     runs-on: ubuntu-24.04
     environment: production
-    # Reset, three bounded checkpoint observations, replies, and deployment checks.
-    timeout-minutes: 30
+    # Reset (5m), three checkpoint observations (12m each), replies, and setup/checks.
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:

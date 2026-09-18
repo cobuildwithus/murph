@@ -212,6 +212,7 @@ test("maximum admitted aggregate trims whole summaries and saturates existing dr
   const before = JSON.stringify(source);
   const kept = inspect(await send(source), legacy);
   assert.ok(kept.commands.length > 0 && kept.commands.length < 32);
+  assert.ok(kept.commands.every(command => command.phases.length === CLI_TIMING_PHASES.length));
   assert.equal(kept.droppedCalls, Number.MAX_SAFE_INTEGER);
   assert.deepEqual({ ...kept, commands: [], droppedCalls: 0 }, { ...timing, commands: [], droppedCalls: 0 });
   assert.deepEqual(kept.commands, timing.commands.slice(0, kept.commands.length));

@@ -10,7 +10,7 @@ limited to `refs/heads/main` at the exact current `main` SHA; an arbitrary or
 stale branch dispatch fails in the read-only selection job before protected
 environment access.
 
-Every six-hour scheduled admission executes the native journey, even when
+Every twelve-hour scheduled admission executes the native journey, even when
 protected `main` is unchanged. There is no successful-workflow history shortcut:
 provider, authentication, and deployed configuration can change without a source
 commit. The read-only selection job validates manual recovery authority. Fixed,

@@ -4,10 +4,10 @@ import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import { readHostedWebControlPlaneResponseText } from "./runtime-platform/web-control-transport.ts";
 
-export class HostedRuntimeReplicaPutRejectedError extends Error {
+export class HostedRuntimeResourceRejectedError extends Error {
   readonly status = 409;
   constructor(readonly code: "HOSTED_RUNTIME_OWNER_STALE" | "HOSTED_RUNTIME_RESOURCE_RETIRED") {
-    super(`Hosted runtime replica PUT rejected: ${code}.`);
+    super(`Hosted runtime resource rejected: ${code}.`);
   }
 }
 
@@ -20,7 +20,7 @@ export async function commandHostedRuntimeSnapshot(input: {
     callbackSigning: env.webCallbackSigning, boundUserId: input.userId,
     method: "POST", path: HOSTED_RUNTIME_RESOURCES_PATH, body: JSON.stringify(input.command), timeoutMs: env.webControlTimeoutMs,
   });
-  if (!response.ok) throw new Error(`Hosted runtime resource command returned HTTP ${response.status}.`);
+  if (!response.ok) await throwRuntimeResourceRejection(response, env.webControlTimeoutMs, "snapshot");
   const result = parseHostedRuntimeSnapshotResponse(JSON.parse(await readHostedWebControlPlaneResponseText({
     response, description: "Hosted runtime snapshot", maxBytes: 64 * 1024, signal: null, timeoutMs: env.webControlTimeoutMs,
   })));
@@ -75,23 +75,32 @@ export async function commandHostedRuntimeReplicaPut(input: {
     callbackSigning: env.webCallbackSigning, boundUserId: input.userId,
     method: "POST", path: HOSTED_RUNTIME_REPLICA_PUT_PATH, body: JSON.stringify(input.command), timeoutMs: env.webControlTimeoutMs,
   });
-  if (!response.ok) {
-    let code: unknown;
-    if (response.status === 409) {
-      try {
-        const body = JSON.parse(await readHostedWebControlPlaneResponseText({
-          response, description: "Hosted runtime replica PUT rejection", maxBytes: 1024,
-          signal: null, timeoutMs: env.webControlTimeoutMs,
-        }));
-        code = body?.error?.code;
-      } catch { /* Unknown responses remain failures, without copying their body. */ }
-    }
-    if (code === "HOSTED_RUNTIME_OWNER_STALE" || code === "HOSTED_RUNTIME_RESOURCE_RETIRED") {
-      throw new HostedRuntimeReplicaPutRejectedError(code);
-    }
-    throw new Error(`Hosted runtime replica PUT command returned HTTP ${response.status}.`);
-  }
+  if (!response.ok) await throwRuntimeResourceRejection(response, env.webControlTimeoutMs, "replica PUT");
   const result = JSON.parse(await readHostedWebControlPlaneResponseText({ response, description: "Hosted runtime replica PUT", maxBytes: 1024, signal: null, timeoutMs: env.webControlTimeoutMs }));
   if (typeof result?.applied !== "boolean") throw new TypeError("Hosted runtime replica PUT result is invalid.");
   return result.applied;
+}
+
+async function throwRuntimeResourceRejection(
+  response: Response,
+  timeoutMs: number,
+  operation: "snapshot" | "replica PUT",
+): Promise<never> {
+  let code: unknown;
+  if (response.status === 409) {
+    try {
+      const body = JSON.parse(await readHostedWebControlPlaneResponseText({
+        response, description: "Hosted runtime resource rejection", maxBytes: 1024,
+        signal: null, timeoutMs,
+      }));
+      code = body?.error?.code;
+    } catch { /* Unknown responses remain failures, without copying their body. */ }
+  } else {
+    // The caller will not consume a failed response. Release its transport.
+    void response.body?.cancel().catch(() => undefined);
+  }
+  if (code === "HOSTED_RUNTIME_OWNER_STALE" || code === "HOSTED_RUNTIME_RESOURCE_RETIRED") {
+    throw new HostedRuntimeResourceRejectedError(code);
+  }
+  throw new Error(`Hosted runtime ${operation} command returned HTTP ${response.status}.`);
 }

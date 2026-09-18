@@ -62,73 +62,105 @@ export async function rebuildQueryProjectionFromCanonicalSource(
   return await withCanonicalWriteLock(vaultRoot, async () => {
     await resetUnsupportedQueryProjection(location);
     const currentManifest = await listCanonicalSourceManifest(vaultRoot);
-    const snapshot = await readSource(vaultRoot);
+    const snapshot = await timeCliPhase("query-source-read", () => readSource(vaultRoot));
     const projectedEntities = snapshot.entities.filter(isDefaultProjectedQueryEntity);
     const snapshotReadModel = createVaultReadModel({
       metadata: snapshot.metadata,
       vaultRoot,
       entities: snapshot.entities,
     });
-    const wearableDataset = collectWearableDataset(snapshotReadModel, {});
-    const metricProjection = buildMetricProjection(snapshotReadModel, {
-      wearableDataset,
-    });
-    const dailySampleSummaries = metricProjection.dailySampleSummaries;
-    const metricPoints = metricProjection.metricPoints;
-    const metricTargets = extractMetricTargetsFromCanonicalEntities(snapshot.entities);
+    let wearableDataset: ReturnType<typeof collectWearableDataset>;
+    const endDataset = startCliPhase("query-wearable-dataset");
+    try {
+      wearableDataset = collectWearableDataset(snapshotReadModel, {});
+    } finally {
+      endDataset();
+    }
+    let dailySampleSummaries: ReturnType<typeof buildMetricProjection>["dailySampleSummaries"];
+    let metricPoints: ReturnType<typeof buildMetricProjection>["metricPoints"];
+    let metricTargets: ReturnType<typeof extractMetricTargetsFromCanonicalEntities>;
+    const endMetrics = startCliPhase("query-metric-projection");
+    try {
+      const metricProjection = buildMetricProjection(snapshotReadModel, {
+        wearableDataset,
+      });
+      dailySampleSummaries = metricProjection.dailySampleSummaries;
+      metricPoints = metricProjection.metricPoints;
+      metricTargets = extractMetricTargetsFromCanonicalEntities(snapshot.entities);
+    } finally {
+      endMetrics();
+    }
     // A preceding source-only read may have already published this exact
     // canonical generation. Global metrics still have their own derivation.
-    const wearableSummaries = await isWearableProjectionFresh(location, currentManifest)
-      ? null
-      : buildWearableSummaryProjectionFromDataset(wearableDataset);
-    const searchableEntities = projectedEntities.filter(isSearchIndexedQueryEntity);
-    const searchDocuments = [
-      ...materializeSearchDocuments(searchableEntities),
-      ...materializeSummaryDocuments(dailySampleSummaries),
-    ];
-    const database = openQueryProjectionDatabase(location, { create: true, wearableOnly: true });
-
+    let wearableSummaries: ReturnType<typeof buildWearableSummaryProjectionFromDataset> | null = null;
+    if (!(await isWearableProjectionFresh(location, currentManifest))) {
+      const endSummary = startCliPhase("query-wearable-summary");
+      try {
+        wearableSummaries = buildWearableSummaryProjectionFromDataset(wearableDataset);
+      } finally {
+        endSummary();
+      }
+    }
+    let searchDocuments: ReturnType<typeof materializeSearchDocuments>;
+    const endSearch = startCliPhase("query-search-documents");
     try {
-      const builtAt = withImmediateTransaction(database, () => {
-        // Schema promotion is atomic too: failed publication must not leave
-        // empty global tables readable by a mixed-version in-flight reader.
-        ensureQueryProjectionSchema(database);
-        database.exec(`
-          DELETE FROM query_entities;
-          DELETE FROM query_metric_points;
-          DELETE FROM query_metric_targets;
-          DELETE FROM query_source_manifest;
-          DELETE FROM query_search_document;
-        `);
-
-        insertQueryEntities(database, projectedEntities);
-        insertMetricPoints(database, metricPoints);
-        insertMetricTargets(database, metricTargets);
-        if (wearableSummaries !== null) {
-          replaceWearableProjection(database, wearableSummaries, currentManifest);
-        }
-        insertQuerySourceManifest(database, currentManifest);
-        insertSearchDocuments(database, searchDocuments);
-
-        const builtAt = new Date().toISOString();
-        writeMeta(database, "schema_version", QUERY_PROJECTION_SCHEMA_ID);
-        writeMeta(database, "built_at", builtAt);
-        writeMeta(database, "metadata_json", JSON.stringify(snapshot.metadata ?? null));
-        return builtAt;
-      });
-
-      return {
-        dbPath: location.dbPath,
-        exists: true,
-        schemaVersion: QUERY_PROJECTION_SCHEMA_ID,
-        builtAt,
-        entityCount: projectedEntities.length,
-        searchDocumentCount: searchDocuments.length,
-        fresh: true,
-        rebuilt: true,
-      };
+      const searchableEntities = projectedEntities.filter(isSearchIndexedQueryEntity);
+      searchDocuments = [
+        ...materializeSearchDocuments(searchableEntities),
+        ...materializeSummaryDocuments(dailySampleSummaries),
+      ];
     } finally {
-      database.close();
+      endSearch();
+    }
+    // Include opening/schema setup and close, even when either throws.
+    const endPublication = startCliPhase("query-publication");
+    try {
+      const database = openQueryProjectionDatabase(location, { create: true, wearableOnly: true });
+
+      try {
+        const builtAt = withImmediateTransaction(database, () => {
+          // Schema promotion is atomic too: failed publication must not leave
+          // empty global tables readable by a mixed-version in-flight reader.
+          ensureQueryProjectionSchema(database);
+          database.exec(`
+            DELETE FROM query_entities;
+            DELETE FROM query_metric_points;
+            DELETE FROM query_metric_targets;
+            DELETE FROM query_source_manifest;
+            DELETE FROM query_search_document;
+          `);
+
+          insertQueryEntities(database, projectedEntities);
+          insertMetricPoints(database, metricPoints);
+          insertMetricTargets(database, metricTargets);
+          if (wearableSummaries !== null) {
+            replaceWearableProjection(database, wearableSummaries, currentManifest);
+          }
+          insertQuerySourceManifest(database, currentManifest);
+          insertSearchDocuments(database, searchDocuments);
+
+          const builtAt = new Date().toISOString();
+          writeMeta(database, "schema_version", QUERY_PROJECTION_SCHEMA_ID);
+          writeMeta(database, "built_at", builtAt);
+          writeMeta(database, "metadata_json", JSON.stringify(snapshot.metadata ?? null));
+          return builtAt;
+        });
+
+        return {
+          dbPath: location.dbPath,
+          exists: true,
+          schemaVersion: QUERY_PROJECTION_SCHEMA_ID,
+          builtAt,
+          entityCount: projectedEntities.length,
+          searchDocumentCount: searchDocuments.length,
+          fresh: true,
+          rebuilt: true,
+        };
+      } finally {
+        database.close();
+      }
+    } finally {
+      endPublication();
     }
   });
 }
@@ -151,18 +183,35 @@ export async function readFreshWearableSummaryRows(
         await timeCliPhase("query-rebuild", async () => {
           // Keep strict-source failures intact, including empty provider scopes.
           // Do not destroy an old projection before canonical validation succeeds.
-          const snapshot = await readVaultSourceStrict(vaultRoot);
-          const dataset = collectWearableDataset(createVaultReadModel({ ...snapshot, vaultRoot }), {});
-          const rows = buildWearableSummaryProjectionFromDataset(dataset);
-          await resetUnsupportedQueryProjection(location);
-          const database = openQueryProjectionDatabase(location, { create: true, wearableOnly: true });
+          const snapshot = await timeCliPhase("query-source-read", () => readVaultSourceStrict(vaultRoot));
+          let dataset: ReturnType<typeof collectWearableDataset>;
+          const endDataset = startCliPhase("query-wearable-dataset");
           try {
-            withImmediateTransaction(database, () => {
-              replaceWearableProjection(database, rows, manifest);
-              writeMeta(database, "schema_version", QUERY_PROJECTION_SCHEMA_ID);
-            });
+            dataset = collectWearableDataset(createVaultReadModel({ ...snapshot, vaultRoot }), {});
           } finally {
-            database.close();
+            endDataset();
+          }
+          let rows: ReturnType<typeof buildWearableSummaryProjectionFromDataset>;
+          const endSummary = startCliPhase("query-wearable-summary");
+          try {
+            rows = buildWearableSummaryProjectionFromDataset(dataset);
+          } finally {
+            endSummary();
+          }
+          await resetUnsupportedQueryProjection(location);
+          const endPublication = startCliPhase("query-publication");
+          try {
+            const database = openQueryProjectionDatabase(location, { create: true, wearableOnly: true });
+            try {
+              withImmediateTransaction(database, () => {
+                replaceWearableProjection(database, rows, manifest);
+                writeMeta(database, "schema_version", QUERY_PROJECTION_SCHEMA_ID);
+              });
+            } finally {
+              database.close();
+            }
+          } finally {
+            endPublication();
           }
         });
       }

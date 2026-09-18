@@ -1,6 +1,6 @@
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
-import { presignManagedSnapshot, completeManagedSnapshotForSession } from "./managed-snapshot-control.ts";
-import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, commandHostedRuntimeReplicaPut, HostedRuntimeReplicaPutRejectedError } from "./runtime-resource-client.ts";
+import { presignManagedSnapshot, completeManagedSnapshotForSession, ManagedSnapshotCompletionRejectedError } from "./managed-snapshot-control.ts";
+import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, commandHostedRuntimeReplicaPut, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
 import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
 import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
 import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
@@ -63,7 +63,6 @@ import {
 } from "./browser-vault-limits.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import {
-  buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
@@ -191,7 +190,7 @@ export async function handleRunnerOutboundRequest(
       userId,
     });
     if (storageHostResponse) {
-      return storageHostResponse;
+      return await storageHostResponse;
     }
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore) {
@@ -199,7 +198,7 @@ export async function handleRunnerOutboundRequest(
         if (request.method !== "POST") {
           return methodNotAllowed();
         }
-        return handleRunnerWorkspaceSnapshotStartRequest({
+        return await handleRunnerWorkspaceSnapshotStartRequest({
           bucket: env.BUNDLES,
           env,
           environment,
@@ -219,7 +218,7 @@ export async function handleRunnerOutboundRequest(
         if (request.method !== "POST") {
           return methodNotAllowed();
         }
-        return handleRunnerWorkspaceSnapshotCompleteRequest({
+        return await handleRunnerWorkspaceSnapshotCompleteRequest({
           bucket: env.BUNDLES,
           env,
           environment,
@@ -233,7 +232,7 @@ export async function handleRunnerOutboundRequest(
         if (request.method !== "POST") {
           return methodNotAllowed();
         }
-        return handleRunnerWorkspaceSnapshotHeartbeatRequest({
+        return await handleRunnerWorkspaceSnapshotHeartbeatRequest({
           env,
           request,
           snapshotId: match.groups.snapshotId,
@@ -245,7 +244,7 @@ export async function handleRunnerOutboundRequest(
         if (request.method !== "POST") {
           return methodNotAllowed();
         }
-        return handleRunnerWorkspaceSnapshotPresignPutRequest({
+        return await handleRunnerWorkspaceSnapshotPresignPutRequest({
           env,
           request,
           snapshotId: match.groups.snapshotId,
@@ -257,7 +256,7 @@ export async function handleRunnerOutboundRequest(
         if (request.method !== "POST") {
           return methodNotAllowed();
         }
-        return handleRunnerWorkspaceSnapshotPresignGetRequest({
+        return await handleRunnerWorkspaceSnapshotPresignGetRequest({
           env,
           request,
           snapshotId: match.groups.snapshotId,
@@ -269,7 +268,7 @@ export async function handleRunnerOutboundRequest(
         if (request.method !== "POST") {
           return methodNotAllowed();
         }
-        return handleRunnerWorkspaceSnapshotDataKeyRequest({
+        return await handleRunnerWorkspaceSnapshotDataKeyRequest({
           bucket: env.BUNDLES,
           env,
           environment,
@@ -280,7 +279,7 @@ export async function handleRunnerOutboundRequest(
       }
 
       if (!match.groups.suffix && request.method === "DELETE") {
-        return handleRunnerWorkspaceSnapshotAbortRequest({
+        return await handleRunnerWorkspaceSnapshotAbortRequest({
           bucket: env.BUNDLES,
           env,
           request,
@@ -294,30 +293,44 @@ export async function handleRunnerOutboundRequest(
 
     return notFound();
   } catch (error) {
-    const safeUrl = safeRunnerOutboundRequestUrl(request.url);
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        hostKind: safeUrl ? readRunnerOutboundHostKind(safeUrl.hostname) : "invalid_url",
-        method: readHostedRunnerDiagnosticMethod(request.method),
-        operation: safeUrl ? readRunnerOutboundOperation(safeUrl, request.method) : "invalid_url",
-        userIdPresent: userId.length > 0,
-      },
-      error,
-      message: "Hosted runner outbound request failed.",
-      phase: "wake.running",
-    });
-
-    const details = buildHostedExecutionSafeErrorDetails(error);
-    const errorName = readHostedExecutionSafeErrorName(error);
-
-    return json({
-      code: deriveHostedExecutionErrorCode(error),
-      error: summarizeHostedExecutionError(error),
-      ...(details ? { details } : {}),
-      ...(errorName ? { errorName } : {}),
-    }, 500);
+    return runnerOutboundFailureResponse(request, userId, error);
   }
+}
+
+function runnerOutboundFailureResponse(
+  request: Request,
+  userId: string,
+  error: unknown,
+): Response {
+  if (error instanceof HostedRuntimeResourceRejectedError) {
+    return json({ code: error.code, error: error.message }, error.status);
+  }
+  if (error instanceof ManagedSnapshotCompletionRejectedError) {
+    return jsonError(error.message, 409);
+  }
+  const safeUrl = safeRunnerOutboundRequestUrl(request.url);
+  const errorCode = deriveHostedExecutionErrorCode(error);
+  const errorName = readHostedExecutionSafeErrorName(error);
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      errorCode,
+      ...(errorName ? { errorName } : {}),
+      hostKind: safeUrl ? readRunnerOutboundHostKind(safeUrl.hostname) : "invalid_url",
+      method: readHostedRunnerDiagnosticMethod(request.method),
+      operation: safeUrl ? readRunnerOutboundOperation(safeUrl, request.method) : "invalid_url",
+      userIdPresent: userId.length > 0,
+    },
+    level: "error",
+    message: "Hosted runner outbound request failed.",
+    phase: "wake.running",
+  });
+
+  return json({
+    code: errorCode,
+    error: summarizeHostedExecutionError(error),
+    ...(errorName ? { errorName } : {}),
+  }, 500);
 }
 
 async function handleRunnerDedicatedPortRequest(input: {
@@ -3402,7 +3415,7 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
       }),
     });
   } catch (error) {
-    if (!(error instanceof HostedRuntimeReplicaPutRejectedError)) throw error;
+    if (!(error instanceof HostedRuntimeResourceRejectedError)) throw error;
     emitHostedExecutionStructuredLog({
       component: "runner", phase: "wake.running", level: "warn",
       message: "Hosted runtime replica write rejected.",

@@ -4586,6 +4586,7 @@ function groupSharedModelResult(
       status: result.status,
     }
   }
+  const checkedAtMs = result.freshness ? Date.parse(result.freshness.checkedAt) : Date.now()
   return {
     ...(result.freshness ? { freshness: result.freshness } : {}),
     ...(result.dateCoverage ? { dateCoverage: result.dateCoverage } : {}),
@@ -4608,7 +4609,9 @@ function groupSharedModelResult(
             ? { grantedAt: projection.grantedAt }
             : {}),
           records: projection.records,
-          ...(requirements ? { reportingGaps: getHostedGroupWearableReportingGaps(projection, requirements) } : {}),
+          ...(requirements ? {
+            reportingGaps: getHostedGroupWearableReportingGaps(projection, requirements, checkedAtMs),
+          } : {}),
           status: groupSharedProjectionStatus(projection),
         },
       ])),
