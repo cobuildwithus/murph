@@ -1,6 +1,7 @@
 import {
   type HostedMailboxLaneLag,
 } from "../runtime-control.ts";
+import { parseHostedRuntimeOwnerResponse } from "../runtime-owner.ts";
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
@@ -252,6 +253,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
 ): HostedRuntimeEnsureProcessingRequest {
   const record = requireObject(value, "Hosted runtime ensure-processing request");
   assertExactKeys(record, "Hosted runtime ensure-processing request", [
+    "admission",
     "assistantExecutionBlocked",
     "conversationWorkPending",
     "orchestrationAttemptId",
@@ -289,6 +291,9 @@ export function parseHostedRuntimeEnsureProcessingRequest(
   }
 
   return {
+    ...(record.admission === undefined ? {} : {
+      admission: parseRuntimeProcessingAdmission(record.admission, processingMode ?? "default"),
+    }),
     ...(assistantExecutionBlocked === undefined
       ? {}
       : { assistantExecutionBlocked }),
@@ -299,6 +304,17 @@ export function parseHostedRuntimeEnsureProcessingRequest(
     ),
     ...(processingMode === undefined ? {} : { processingMode }),
   };
+}
+
+function parseRuntimeProcessingAdmission(value: unknown, processingMode: string) {
+  const admission = parseHostedRuntimeOwnerResponse(value);
+  if (admission.cutover !== "postgres" || !admission.owner || admission.owner.phase === "idle") {
+    throw new TypeError("Runtime admission requires a non-idle Postgres owner.");
+  }
+  if (admission.status === "existing") return admission;
+  if (admission.status === "claimed" && admission.owner.phase === "starting"
+    && admission.owner.processingMode === processingMode) return admission;
+  throw new TypeError("Runtime admission must be existing or a new claim matching the requested mode.");
 }
 
 export function parseHostedRuntimeEnsureProcessingResponse(

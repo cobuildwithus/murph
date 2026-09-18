@@ -47,6 +47,22 @@ retired legacy alarm and run-until-idle HTTP controls are unavailable.
 
 ## Claim, launch, completion, and recovery
 
+The ensure-processing request accepts an optional canonical Postgres admission
+response (`claimed` or `existing`). Only authenticated Web OIDC callers can
+supply it; the Worker validates its member binding before container work. Web
+can run its existing claim command locally and carry the result to the Worker,
+removing the initial Worker-to-Web callback. Requests without admission still
+claim through Web, including the separately deployed Temporal caller. Completion
+recovery still claims successors through Web; supplied snapshots never replace
+conditional database mutations or native attempt/generation checks.
+
+Deploy the accepting Worker before enabling Web to send admission. Old Web and
+Temporal callers remain supported by the new Worker. New Web is incompatible
+with an older strict Worker parser. Roll back Web and let it converge before
+rolling Worker below this reader floor. Publish reader and producer in separate
+PRs because Web deploys independently on merge. No protocol flag or cached
+admission is needed. Web must obtain a fresh snapshot for each direct retry.
+
 Existing compatible owners are woken immediately after Postgres admission. The
 native wake validates the exact attempt and generation; an accepted wake needs
 no separate invocation receipt read. Unaccepted wakes still reconcile completed

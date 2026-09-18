@@ -3553,6 +3553,34 @@ describe("cloudflare worker routes", () => {
       expect(reconcileRuntimeHealthDataConsentForUser).not.toHaveBeenCalled();
     });
 
+    it.each(["oidc", "signed"] as const)("only accepts supplied Web admission through OIDC (%s)", async (authorization) => {
+      const admission = {
+      cutover: "postgres" as const, status: "existing" as const,
+      owner: {
+        userId: "test-user", attemptId: "attempt-test", generation: "1", phase: "active" as const,
+        processingMode: "default" as const, allocationId: "allocation-test",
+        runnerContainerName: "runner-test", workspaceVersion: "0",
+        customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        startedAt: "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null,
+        failureCount: 0, lastErrorCode: null,
+      },
+    };
+      const env = createWorkerEnv(createUserRunnerStub());
+      const ensure = vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing")
+        .mockResolvedValue({ kind: "retry_later", retryAt: "2026-01-01T00:00:01.000Z" });
+      const request = new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ admission, orchestrationAttemptId: "orchestration-test" }),
+      });
+      const authorized = authorization === "oidc"
+        ? await signControlRequest(request)
+        : await signWebCallbackControlRequest(request, env);
+      const result = await worker.fetch(authorized, env);
+      expect(result.status).toBe(authorization === "oidc" ? 200 : 400);
+      if (authorization === "oidc") expect(ensure).toHaveBeenCalledWith(env, expect.objectContaining({ admission, userId: "test-user" }), expect.anything());
+      else expect(ensure).not.toHaveBeenCalled();
+    });
+
     it("returns the synchronous Postgres coordinator outcome to web-plane OIDC callers", async () => {
       const infoLog = vi.spyOn(console, "info").mockImplementation(() => {});
       vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
