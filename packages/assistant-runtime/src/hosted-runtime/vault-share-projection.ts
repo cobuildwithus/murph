@@ -19,7 +19,8 @@ import {
 } from "@murphai/contracts";
 import {
   buildHostedVaultShareProjectionScopeKey,
-  getHostedVaultShareHistoryDays,
+  HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS,
+  isHostedVaultShareRecentDateProjectionKind,
   parseHostedVaultShareDeliverRequest,
   getHostedVaultShareProjectionMaxRecords,
   HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES,
@@ -91,22 +92,21 @@ const HEART_RATE_ZONE_MINUTES_METRIC_KEYS = Array.from(
   (_, zone) => `heart-rate-zone-${zone}-minutes`,
 );
 
-// Scope-less helper callers retain their legacy window. Production capture
-// always supplies the history bound from the exact active grant.
-export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = 7;
+// All dated metric grants publish the same member-local retention window.
+// Short reporting windows are selected by the shared-read owner, not here.
+export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS;
 
-export const HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS = 6;
+export const HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS = HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1;
 
-export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = 7;
+export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS;
 
-export const HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS = 6;
+export const HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS = HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1;
 
 // Canonical source dates can straddle either side of an event-local date.
 // At 90 dates plus two boundary dates, the complete 104-workout/day shape and
 // one overflow probe total 9,569 rows, below the query owner's 10,000-row cap.
-function activitySessionSourceRowLimit(historyDays: 7 | 90): number {
-  return HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY * (historyDays + 2);
-}
+const ACTIVITY_SESSION_SOURCE_ROW_LIMIT =
+  HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY * (HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS + 2);
 
 const HOSTED_VAULT_SHARE_WORKOUT_CALENDAR_TIME_ZONE = "Etc/GMT+12";
 
@@ -329,7 +329,7 @@ export async function captureHostedVaultShareProjectionBestEffort(input: {
       if (!generationToken) {
         return { outcome: "error" };
       }
-      const dated = projectionScope.historyDays === 90;
+      const dated = isHostedVaultShareRecentDateProjectionKind(projectionScope.projectionKind);
       if (dated && !memberTimeZone) return { outcome: "error" };
       const records = await readRecords({ context, vaultRoot: input.vaultRoot });
       assertCompleteProjectionRecords(records, getHostedVaultShareProjectionMaxRecords(projectionScope));
@@ -442,51 +442,50 @@ function resolveProjectableRecordReader(
   projectionScope: HostedVaultShareProjectionScope,
 ): ProjectableRecordReader | null {
   const projectionKind = projectionScope.projectionKind;
-  const historyDays = getHostedVaultShareHistoryDays(projectionScope);
   switch (projectionKind) {
     case HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND:
       return null;
     case "group-email.v0":
       return null;
     case "heart-rate-zones-days.v0":
-      return ({ vaultRoot }) => readProjectableHeartRateZoneDays(vaultRoot, historyDays);
+      return ({ vaultRoot }) => readProjectableHeartRateZoneDays(vaultRoot);
     case "profile-name.v0":
       return ({ vaultRoot }) => readProjectableProfileName(vaultRoot);
     case "time-zone.v0":
       return ({ vaultRoot }) => readProjectableTimeZone(vaultRoot);
     case "sleep-times.v0":
-      return ({ vaultRoot }) => readProjectableSleepNights(vaultRoot, historyDays);
+      return ({ vaultRoot }) => readProjectableSleepNights(vaultRoot);
     case "workout-days.v0":
-      return ({ vaultRoot }) => readProjectableWorkoutDays(vaultRoot, historyDays);
+      return ({ vaultRoot }) => readProjectableWorkoutDays(vaultRoot);
     case "workouts.v0":
       return ({ context, vaultRoot }) =>
-        readProjectableWorkoutsDays(vaultRoot, context, historyDays);
+        readProjectableWorkoutsDays(vaultRoot, context);
     default: {
       const activityMinutesSpec =
         getHostedVaultShareActivityMinutesProjectionSpec(projectionScope);
       if (activityMinutesSpec) {
         return ({ context, vaultRoot }) =>
-          readProjectableActivityMinutesDays(vaultRoot, activityMinutesSpec, context, historyDays);
+          readProjectableActivityMinutesDays(vaultRoot, activityMinutesSpec, context);
       }
       const activityDistanceSpec =
         getHostedVaultShareActivityDistanceProjectionSpec(projectionScope);
       if (activityDistanceSpec) {
         return ({ context, vaultRoot }) =>
-          readProjectableActivityDistanceDays(vaultRoot, activityDistanceSpec, context, historyDays);
+          readProjectableActivityDistanceDays(vaultRoot, activityDistanceSpec, context);
       }
       const activitySessionCountSpec =
         getHostedVaultShareActivitySessionCountProjectionSpec(projectionScope);
       if (activitySessionCountSpec) {
         return ({ context, vaultRoot }) =>
-          readProjectableActivitySessionCountDays(vaultRoot, activitySessionCountSpec, context, historyDays);
+          readProjectableActivitySessionCountDays(vaultRoot, activitySessionCountSpec, context);
       }
       const spec = getHostedVaultShareDailyMetricProjectionSpec(projectionKind);
       if (spec) {
         if (spec.source.kind === "meal-nutrition-total") {
           return ({ context, vaultRoot }) =>
-            readProjectableMealNutritionDays(vaultRoot, spec, context, historyDays);
+            readProjectableMealNutritionDays(vaultRoot, spec, context);
         }
-        return ({ vaultRoot }) => readProjectableDailyMetricDays(vaultRoot, spec, historyDays);
+        return ({ vaultRoot }) => readProjectableDailyMetricDays(vaultRoot, spec);
       }
       return null;
     }
@@ -669,13 +668,12 @@ export async function readProjectableTimeZone(
 
 export async function readProjectableSleepNights(
   vaultRoot: string,
-  historyDays: 7 | 90 = 7,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const dateContext = await readProjectableVaultDateContext(vaultRoot, Date.now());
   if (!dateContext) {
     return [];
   }
-  const cutoffDate = projectionCutoffDate(dateContext.currentDate, historyDays - 1);
+  const cutoffDate = projectionCutoffDate(dateContext.currentDate, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1);
   if (!cutoffDate) return [];
   const sourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot, {
     from: cutoffDate,
@@ -703,17 +701,15 @@ export async function readProjectableSleepNights(
       summaries,
       dateContext.currentDate,
       source,
-      historyDays,
     ));
   }
-  assertCompleteProjectionRecords(records, historyDays * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
+  assertCompleteProjectionRecords(records, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records.sort(compareHostedVaultShareDeliveryRecords);
 }
 
 export async function readProjectableDailyMetricDays(
   vaultRoot: string,
   spec: HostedVaultShareDailyMetricProjectionSpec,
-  historyDays: 7 | 90 = 7,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
   const dateContext = await readProjectableVaultDateContext(vaultRoot, nowMs);
@@ -722,7 +718,7 @@ export async function readProjectableDailyMetricDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    historyDays - 1,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
@@ -766,7 +762,7 @@ export async function readProjectableDailyMetricDays(
     "rem-sleep-sources-days.v1",
   ].includes(spec.projectionKind);
   if (!completedDateScope) {
-    return selectProjectableDailyMetricDays(rows, spec, nowMs, dateContext.currentDate, historyDays);
+    return selectProjectableDailyMetricDays(rows, spec, nowMs, dateContext.currentDate);
   }
 
   return selectProjectableDailyMetricDays(rows.flatMap((row) => {
@@ -775,7 +771,7 @@ export async function readProjectableDailyMetricDays(
     if (!timeZone) return [];
     const currentDate = formatTimeZoneDateTimeParts(nowMs, timeZone).dayKey;
     return row.date > currentDate ? [] : [row];
-  }), spec, nowMs, dateContext.currentDate, historyDays);
+  }), spec, nowMs, dateContext.currentDate);
 }
 
 function selectPublicSourceMetricSeries(input: {
@@ -961,7 +957,6 @@ function selectAuthoritativeManualSleepStageCorrections(
 
 export async function readProjectableWorkoutDays(
   vaultRoot: string,
-  historyDays: 7 | 90 = 7,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
   const dateContext = await readProjectableVaultDateContext(vaultRoot, nowMs);
@@ -970,7 +965,7 @@ export async function readProjectableWorkoutDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    historyDays - 1,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
@@ -995,7 +990,6 @@ export async function readProjectableWorkoutDays(
     return [];
   }
   return selectProjectableWorkoutDays({
-    historyDays,
     countRows,
     currentDate: dateContext.currentDate,
     minuteRows,
@@ -1005,28 +999,24 @@ export async function readProjectableWorkoutDays(
 export async function readProjectableWorkoutsDays(
   vaultRoot: string,
   context?: HostedVaultShareProjectionReadContext,
-  historyDays: 7 | 90 = 7,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
   const vaultTimeZone = await readProjectableVaultTimeZone(vaultRoot);
-  const currentDate = readTimeZoneDate(nowMs, historyDays === 7
-    ? HOSTED_VAULT_SHARE_WORKOUT_CALENDAR_TIME_ZONE
-    : vaultTimeZone ?? "");
+  const currentDate = readTimeZoneDate(nowMs, vaultTimeZone ?? "");
   if (!currentDate) return [];
-  const sourceReadFromDate = shiftIsoDate(currentDate, -historyDays);
+  const sourceReadFromDate = shiftIsoDate(currentDate, -HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS);
   if (!sourceReadFromDate) {
     return [];
   }
   const sourceReadThroughDate = shiftIsoDate(currentDate, 1);
   if (!sourceReadThroughDate) return [];
   const activityRead = await readProjectableActivitySessionRows(
-    vaultRoot, sourceReadFromDate, sourceReadThroughDate, historyDays, context,
+    vaultRoot, sourceReadFromDate, sourceReadThroughDate, context,
   );
   if (!activityRead.complete) {
     throw new TypeError("Vault share canonical session query exceeded its complete-read bound.");
   }
   return requireCompleteWorkoutItemSources(selectProjectableWorkoutsDays({
-    historyDays,
     nowMs,
     rows: activityRead.rows,
     vaultTimeZone,
@@ -1067,7 +1057,6 @@ export async function readProjectableActivityMinutesDays(
   vaultRoot: string,
   spec: HostedVaultShareActivityMinutesProjectionSpec,
   context?: HostedVaultShareProjectionReadContext,
-  historyDays: 7 | 90 = 7,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
   const dateContext = await readProjectableVaultDateContext(vaultRoot, nowMs);
@@ -1076,7 +1065,7 @@ export async function readProjectableActivityMinutesDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    historyDays - 1,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
@@ -1085,14 +1074,12 @@ export async function readProjectableActivityMinutesDays(
     vaultRoot,
     cutoffDate,
     dateContext.currentDate,
-    historyDays,
     context,
   );
   if (!activityRead.complete) {
     throw new TypeError("Vault share canonical session query exceeded its complete-read bound.");
   }
   return requireCompleteRecordSources(selectProjectableActivityMinutesDays({
-    historyDays,
     currentDate: dateContext.currentDate,
     rows: activityRead.rows,
     spec,
@@ -1103,7 +1090,6 @@ export async function readProjectableActivityDistanceDays(
   vaultRoot: string,
   spec: HostedVaultShareActivityDistanceProjectionSpec,
   context?: HostedVaultShareProjectionReadContext,
-  historyDays: 7 | 90 = 7,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
   const dateContext = await readProjectableVaultDateContext(vaultRoot, nowMs);
@@ -1112,7 +1098,7 @@ export async function readProjectableActivityDistanceDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    historyDays - 1,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
@@ -1121,14 +1107,12 @@ export async function readProjectableActivityDistanceDays(
     vaultRoot,
     cutoffDate,
     dateContext.currentDate,
-    historyDays,
     context,
   );
   if (!activityRead.complete) {
     throw new TypeError("Vault share canonical session query exceeded its complete-read bound.");
   }
   return requireCompleteRecordSources(selectProjectableActivityDistanceDays({
-    historyDays,
     currentDate: dateContext.currentDate,
     rows: activityRead.rows,
     spec,
@@ -1139,7 +1123,6 @@ export async function readProjectableActivitySessionCountDays(
   vaultRoot: string,
   spec: HostedVaultShareActivitySessionCountProjectionSpec,
   context?: HostedVaultShareProjectionReadContext,
-  historyDays: 7 | 90 = 7,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
   const dateContext = await readProjectableVaultDateContext(vaultRoot, nowMs);
@@ -1148,7 +1131,7 @@ export async function readProjectableActivitySessionCountDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    historyDays - 1,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
@@ -1157,14 +1140,12 @@ export async function readProjectableActivitySessionCountDays(
     vaultRoot,
     cutoffDate,
     dateContext.currentDate,
-    historyDays,
     context,
   );
   if (!activityRead.complete) {
     throw new TypeError("Vault share canonical session query exceeded its complete-read bound.");
   }
   return requireCompleteRecordSources(selectProjectableActivitySessionCountDays({
-    historyDays,
     currentDate: dateContext.currentDate,
     rows: activityRead.rows,
     spec,
@@ -1173,7 +1154,6 @@ export async function readProjectableActivitySessionCountDays(
 
 export async function readProjectableHeartRateZoneDays(
   vaultRoot: string,
-  historyDays: 7 | 90 = 7,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
   const dateContext = await readProjectableVaultDateContext(vaultRoot, nowMs);
@@ -1182,7 +1162,7 @@ export async function readProjectableHeartRateZoneDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    historyDays - 1,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
@@ -1206,7 +1186,7 @@ export async function readProjectableHeartRateZoneDays(
     rows.push(...metricRows);
   }
   return requireCompleteRecordSources(
-    selectProjectableHeartRateZoneDays(rows, dateContext.currentDate, historyDays),
+    selectProjectableHeartRateZoneDays(rows, dateContext.currentDate),
   );
 }
 
@@ -1226,7 +1206,6 @@ export function selectProjectableSleepNights(
   )[],
   currentDate: string,
   source?: HostedVaultShareDataSource,
-  historyDays: 7 | 90 = 7,
 ): HostedVaultShareDeliveryRecord[] {
   const records: HostedVaultShareDeliveryRecord[] = [];
 
@@ -1242,7 +1221,7 @@ export function selectProjectableSleepNights(
     if (!isDateInProjectionWindow(
       summary.date,
       currentDate,
-      historyDays - 1,
+      HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
     )) {
       continue;
     }
@@ -1260,7 +1239,7 @@ export function selectProjectableSleepNights(
 
   }
 
-  assertCompleteProjectionRecords(records, historyDays);
+  assertCompleteProjectionRecords(records, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS);
   return records;
 }
 
@@ -1269,7 +1248,6 @@ export function selectProjectableDailyMetricDays(
   spec: HostedVaultShareDailyMetricProjectionSpec,
   nowMs: number,
   currentDate: string,
-  historyDays: 7 | 90 = 7,
 ): HostedVaultShareDeliveryRecord[] {
   const records: HostedVaultShareDeliveryRecord[] = [];
 
@@ -1280,7 +1258,7 @@ export function selectProjectableDailyMetricDays(
     if (!isDateInProjectionWindow(
       point.date,
       currentDate,
-      historyDays - 1,
+      HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
     )) {
       continue;
     }
@@ -1353,7 +1331,7 @@ export function selectProjectableDailyMetricDays(
 
   }
 
-  assertCompleteProjectionRecords(records, historyDays * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
+  assertCompleteProjectionRecords(records, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records;
 }
 
@@ -1409,7 +1387,6 @@ export async function readProjectableMealNutritionDays(
   vaultRoot: string,
   spec: HostedVaultShareDailyMetricProjectionSpec,
   context?: HostedVaultShareProjectionReadContext,
-  historyDays: 7 | 90 = 7,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
   const dateContext = await readProjectableVaultDateContext(vaultRoot, nowMs);
@@ -1418,7 +1395,7 @@ export async function readProjectableMealNutritionDays(
   }
   const cutoffDate = projectionCutoffDate(
     dateContext.currentDate,
-    historyDays - 1,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   );
   if (!cutoffDate) {
     return [];
@@ -1428,7 +1405,6 @@ export async function readProjectableMealNutritionDays(
     summary.days,
     spec,
     dateContext.currentDate,
-    historyDays,
   );
 }
 
@@ -1465,7 +1441,6 @@ export function selectProjectableMealNutritionDays(
   days: readonly MealNutritionDayTotal[],
   spec: HostedVaultShareDailyMetricProjectionSpec,
   currentDate: string,
-  historyDays: 7 | 90 = 7,
 ): HostedVaultShareDeliveryRecord[] {
   if (spec.source.kind !== "meal-nutrition-total") {
     return [];
@@ -1484,7 +1459,7 @@ export function selectProjectableMealNutritionDays(
     if (!isDateInProjectionWindow(
       day.date,
       currentDate,
-      historyDays - 1,
+      HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
     )) {
       continue;
     }
@@ -1513,13 +1488,12 @@ export function selectProjectableMealNutritionDays(
 
   }
 
-  assertCompleteProjectionRecords(records, historyDays);
+  assertCompleteProjectionRecords(records, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS);
   return records;
 }
 
 export function selectProjectableWorkoutDays(
   input: {
-    historyDays?: 7 | 90;
     countRows: readonly WorkoutMetricProjectionRow[];
     currentDate: string;
     minuteRows: readonly WorkoutMetricProjectionRow[];
@@ -1540,7 +1514,7 @@ export function selectProjectableWorkoutDays(
     if (!isDateInProjectionWindow(
       countRow.date,
       input.currentDate,
-      (input.historyDays ?? 7) - 1,
+      (HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS) - 1,
     )) {
       continue;
     }
@@ -1593,7 +1567,7 @@ export function selectProjectableWorkoutDays(
 
   }
 
-  assertCompleteProjectionRecords(records, (input.historyDays ?? 7) * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
+  assertCompleteProjectionRecords(records, (HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS) * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records;
 }
 
@@ -1643,7 +1617,6 @@ function requireCompleteWorkoutItemSources(
 
 export function selectProjectableWorkoutsDays(
   input: {
-    historyDays?: 7 | 90;
     nowMs: number;
     rows: readonly ActivitySessionProjectionRow[];
     vaultTimeZone: string | null;
@@ -1723,7 +1696,7 @@ export function selectProjectableWorkoutsDays(
     }
   }
 
-  const window = readProjectableWorkoutWindow(input.nowMs, vaultTimeZone, input.historyDays ?? 7);
+  const window = readProjectableWorkoutWindow(input.nowMs, vaultTimeZone);
   if (!window) return [];
   const { calendarClosedThroughDate, windowDates } = window;
   const windowDateSet = new Set(windowDates);
@@ -1773,7 +1746,7 @@ export function selectProjectableWorkoutsDays(
   });
 }
 
-function readProjectableWorkoutWindow(nowMs: number, vaultTimeZone: string | null, historyDays: 7 | 90) {
+function readProjectableWorkoutWindow(nowMs: number, vaultTimeZone: string | null) {
   // A date is complete only after it has ended in UTC-12, the last civil
   // timezone to leave it. This boundary is global and monotonic: changing a
   // member's declared timezone cannot reopen a result that was already final.
@@ -1788,11 +1761,10 @@ function readProjectableWorkoutWindow(nowMs: number, vaultTimeZone: string | nul
   if (!calendarClosedThroughDate) {
     return null;
   }
-  const currentDate = historyDays === 7 ? calendarCurrentDate
-    : vaultTimeZone ? readTimeZoneDate(nowMs, vaultTimeZone) : null;
+  const currentDate = vaultTimeZone ? readTimeZoneDate(nowMs, vaultTimeZone) : null;
   if (!currentDate) return null;
-  const windowDates = readRecentIsoDates(currentDate, historyDays);
-  if (windowDates.length !== historyDays) {
+  const windowDates = readRecentIsoDates(currentDate, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS);
+  if (windowDates.length !== HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS) {
     return null;
   }
   return { calendarClosedThroughDate, windowDates };
@@ -1879,7 +1851,6 @@ function readProjectableWorkoutLocalStart(
 
 export function selectProjectableActivityMinutesDays(
   input: {
-    historyDays?: 7 | 90;
     currentDate: string;
     rows: readonly ActivitySessionProjectionRow[];
     spec: HostedVaultShareActivityMinutesProjectionSpec;
@@ -1894,7 +1865,7 @@ export function selectProjectableActivityMinutesDays(
   }>();
 
   const projectableRows = input.rows.filter((row) =>
-    isProjectableActivitySessionRow(row, input.spec.activityKind, input.currentDate, input.historyDays ?? 7)
+    isProjectableActivitySessionRow(row, input.spec.activityKind, input.currentDate)
     && isProjectableActivitySessionDurationRow(row)
   );
   for (const row of dedupeActivitySessionRows(projectableRows, input.spec.activityKind)) {
@@ -1941,13 +1912,12 @@ export function selectProjectableActivityMinutesDays(
     });
   }
 
-  assertCompleteProjectionRecords(records, (input.historyDays ?? 7) * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
+  assertCompleteProjectionRecords(records, (HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS) * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records;
 }
 
 export function selectProjectableActivityDistanceDays(
   input: {
-    historyDays?: 7 | 90;
     currentDate: string;
     rows: readonly ActivitySessionProjectionRow[];
     spec: HostedVaultShareActivityDistanceProjectionSpec;
@@ -1963,7 +1933,7 @@ export function selectProjectableActivityDistanceDays(
   }>();
 
   const projectableRows = input.rows.filter((row) =>
-    isProjectableActivitySessionRow(row, input.spec.activityKind, input.currentDate, input.historyDays ?? 7)
+    isProjectableActivitySessionRow(row, input.spec.activityKind, input.currentDate)
   );
   for (const row of dedupeActivitySessionRows(
     projectableRows,
@@ -2013,13 +1983,12 @@ export function selectProjectableActivityDistanceDays(
     });
   }
 
-  assertCompleteProjectionRecords(records, (input.historyDays ?? 7) * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
+  assertCompleteProjectionRecords(records, (HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS) * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records;
 }
 
 export function selectProjectableActivitySessionCountDays(
   input: {
-    historyDays?: 7 | 90;
     currentDate: string;
     rows: readonly ActivitySessionProjectionRow[];
     spec: HostedVaultShareActivitySessionCountProjectionSpec;
@@ -2033,7 +2002,7 @@ export function selectProjectableActivitySessionCountDays(
   }>();
 
   const projectableRows = input.rows.filter((row) =>
-    isProjectableActivitySessionRow(row, input.spec.activityKind, input.currentDate, input.historyDays ?? 7)
+    isProjectableActivitySessionRow(row, input.spec.activityKind, input.currentDate)
   );
   for (const row of dedupeActivitySessionRows(projectableRows, input.spec.activityKind)) {
     const groupKey = sourceDateKey(row.date, row.source);
@@ -2070,14 +2039,13 @@ export function selectProjectableActivitySessionCountDays(
     });
   }
 
-  assertCompleteProjectionRecords(records, (input.historyDays ?? 7) * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
+  assertCompleteProjectionRecords(records, (HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS) * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records;
 }
 
 export function selectProjectableHeartRateZoneDays(
   points: readonly HeartRateZoneMetricProjectionRow[],
   currentDate: string,
-  historyDays: 7 | 90 = 7,
 ): HostedVaultShareDeliveryRecord[] {
   const records: HostedVaultShareDeliveryRecord[] = [];
 
@@ -2146,7 +2114,7 @@ export function selectProjectableHeartRateZoneDays(
     if (!isDateInProjectionWindow(
       date,
       currentDate,
-      historyDays - 1,
+      HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
     )) {
       continue;
     }
@@ -2172,7 +2140,7 @@ export function selectProjectableHeartRateZoneDays(
     });
   }
 
-  assertCompleteProjectionRecords(records, historyDays * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
+  assertCompleteProjectionRecords(records, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS * HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES);
   return records;
 }
 
@@ -2180,23 +2148,22 @@ async function readProjectableActivitySessionRows(
   vaultRoot: string,
   cutoffDate: string,
   throughDate: string,
-  historyDays: 7 | 90,
   context?: HostedVaultShareProjectionReadContext,
 ): Promise<ActivitySessionProjectionReadResult> {
   if (context) {
-    const cacheKey = `${vaultRoot}\u0000${cutoffDate}\u0000${throughDate}\u0000${historyDays}`;
+    const cacheKey = `${vaultRoot}\u0000${cutoffDate}\u0000${throughDate}`;
     context.activityRowsByVaultAndCutoff ??= new Map();
     const cached = context.activityRowsByVaultAndCutoff.get(cacheKey);
     if (cached) {
       return cached;
     }
 
-    const read = readProjectableActivitySessionRows(vaultRoot, cutoffDate, throughDate, historyDays);
+    const read = readProjectableActivitySessionRows(vaultRoot, cutoffDate, throughDate);
     context.activityRowsByVaultAndCutoff.set(cacheKey, read);
     return read;
   }
 
-  const rowLimit = activitySessionSourceRowLimit(historyDays);
+  const rowLimit = ACTIVITY_SESSION_SOURCE_ROW_LIMIT;
   const entities = await listCanonicalEntities(vaultRoot, {
     family: "event",
     from: cutoffDate,
@@ -2423,12 +2390,11 @@ function isProjectableActivitySessionRow(
   row: ActivitySessionProjectionRow,
   activityKind: string,
   currentDate: string,
-  historyDays: 7 | 90,
 ): boolean {
   return isDateInProjectionWindow(
     row.date,
     currentDate,
-    historyDays - 1,
+    HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - 1,
   )
     && activityTextMatchesKind(row.activityKind, activityKind);
 }

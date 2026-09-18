@@ -5,9 +5,9 @@
     "id": "group-sharing-history",
     "kind": "improvement",
     "priority": 3,
-    "title": "Longer trends with your permission",
-    "summary": "New group health-sharing approvals can include up to 90 days of available daily data.",
-    "details": "Existing seven-day permissions stay limited until you explicitly approve more history. Choose which metrics to share, keep each source visible, and revoke future access at any time. Longer trends use available observations, not a promise to retrieve missing history.",
+    "title": "Longer trends for shared health data",
+    "summary": "Existing and new group health-sharing permissions now cover up to 90 days of available daily data.",
+    "details": "The metrics you already share use the same rolling window as new permissions: today and the previous 89 days, with no extra history approval. Your metric choices and revocations stay intact. Weekly updates stay focused on their reporting dates, and longer trends use available observations without fetching missing history.",
     "relevanceTags": [
       "groups"
     ],

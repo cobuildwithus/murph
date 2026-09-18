@@ -6,6 +6,7 @@ import {
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
+  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   HOSTED_GROUP_SHARED_READ_RESPONSE_MAX_BYTES,
   parseHostedGroupSharedReadOptions,
   pageHostedGroupSharedHistory,
@@ -16,7 +17,6 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedVaultShareProjectionScopeKey,
-  withHostedVaultShareHistory,
   hostedVaultShareReadAuthorityScopes,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
@@ -82,8 +82,6 @@ import {
 } from "../hosted-vault-share/projection-snapshot";
 import { parseHostedVaultShareRowProjectionScope } from "../hosted-vault-share/row-projection-scope";
 import {
-  collapseSelectedHostedGroupHistoryScopes,
-  freshHostedGroupHistoryOfferScopes,
   includeLegacyHostedGroupSleepProjectionScopes,
   includeSourceAwareHostedGroupSleepProjectionScopes,
   legacyHostedGroupSleepProjectionScope,
@@ -442,10 +440,11 @@ const HOSTED_GROUP_SHARED_READ_SELECTABLE_SCOPE_KEYS = new Set(
     buildHostedVaultShareProjectionScopeKey,
   ),
 );
-// Three scopes, two sleep counterparts, both histories, plus profile name.
+// Three requested metrics, at most two legacy sleep counterparts, plus profile name.
 // Only the preferred exact authority per requested scope is decrypted.
 const HOSTED_GROUP_SHARED_READ_MAX_GRANTS =
-  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS * 11;
+  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS
+  * (HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES + 2 + 1);
 const HOSTED_GROUP_SHARED_READ_MAX_DEVICE_CONNECTIONS =
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS
   * HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES;
@@ -1828,9 +1827,7 @@ export async function readHostedGroupJoinView(input: {
   }
 
   const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
-  const offeredProjectionScopes = freshHostedGroupHistoryOfferScopes(
-    policy.requestedVaultShareProjectionScopes,
-  );
+  const offeredProjectionScopes = policy.requestedVaultShareProjectionScopes;
   const activeVaultShareProjectionScopes = normalizeHostedVaultShareProjectionScopes(
     input.memberId && group.runtimeMemberId
       ? await readActiveHostedVaultShareProjectionScopes({
@@ -2280,16 +2277,6 @@ async function revokeHostedGroupJoinOffersTx(
   });
 }
 
-function supersededHostedGroupScopes(scope: HostedVaultShareProjectionScope): HostedVaultShareProjectionScope[] {
-  const legacy = legacyHostedGroupSleepProjectionScope(scope);
-  const priorHistory = scope.historyDays === 90
-    ? includeLegacyHostedGroupSleepProjectionScopes(
-        includeSourceAwareHostedGroupSleepProjectionScopes([withHostedVaultShareHistory(scope, 7)]),
-      )
-    : [];
-  return [...priorHistory, ...(legacy ? [legacy] : [])];
-}
-
 async function acceptHostedGroupJoinTx(input: {
   additiveOnly: boolean;
   confirmationPublicBaseUrl: string | null;
@@ -2350,17 +2337,13 @@ async function acceptHostedGroupJoinTx(input: {
     });
   }
 
-  const selected = collapseSelectedHostedGroupHistoryScopes(
+  const selected = normalizeHostedVaultShareProjectionScopes(
     input.selectedVaultShareProjectionScopes,
   );
   const storedPolicy = readHostedGroupJoinPolicy(group.joinPolicyJson);
   const policyRequestedProjectionScopes = input.policyProjectionScopes
     ? normalizeHostedVaultShareProjectionScopes(input.policyProjectionScopes)
-    : normalizeHostedVaultShareProjectionScopes([
-        ...storedPolicy.requestedVaultShareProjectionScopes,
-        ...storedPolicy.requestedVaultShareProjectionScopes.map((scope) => withHostedVaultShareHistory(scope, 7)),
-        ...freshHostedGroupHistoryOfferScopes(storedPolicy.requestedVaultShareProjectionScopes),
-      ]);
+    : storedPolicy.requestedVaultShareProjectionScopes;
   const activeManageableProjectionScopes = existingMembership
     && input.joinOrigin === "web"
     && !input.additiveOnly
@@ -2414,32 +2397,13 @@ async function acceptHostedGroupJoinTx(input: {
     await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: input.tx });
   }
 
-  // New history choices are allowed consent controls, not existing grants to
-  // revoke. Manage only saved scopes, active scopes and explicitly selected
-  // additions; leaving a seven-day permission checked does not churn authority.
+  // Manage saved and active metric choices, including the existing sleep
+  // compatibility selection. Explicit saves retain the existing refresh recovery.
   const managedProjectionScopes = normalizeHostedVaultShareProjectionScopes([
     ...(input.policyProjectionScopes ?? storedPolicy.requestedVaultShareProjectionScopes),
     ...activeManageableProjectionScopes,
     ...selected,
   ]);
-  const storedPolicyScopeKeys = new Set(
-    storedPolicy.requestedVaultShareProjectionScopes.map(
-      buildHostedVaultShareProjectionScopeKey,
-    ),
-  );
-  const selectedPolicyAdditions = input.policyProjectionScopes === null
-    ? selected.filter((scope) => !storedPolicyScopeKeys.has(buildHostedVaultShareProjectionScopeKey(scope)))
-    : [];
-  if (selectedPolicyAdditions.length > 0) {
-    const mergedPolicy = mergeHostedGroupJoinPolicy({
-      existing: group.joinPolicyJson,
-      requestedVaultShareProjectionScopes: selectedPolicyAdditions,
-    });
-    await input.tx.hostedGroup.update({
-      where: { id: group.id },
-      data: { joinPolicyJson: toHostedGroupJoinPolicyJson(mergedPolicy) },
-    });
-  }
 
   let membershipId: string;
   let alreadyMember = false;
@@ -2484,18 +2448,17 @@ async function acceptHostedGroupJoinTx(input: {
       ? buildHostedVaultShareProjectionScopeKey(legacyProjectionScope)
       : null;
     if (selectedSet.has(projectionScopeKey)) {
-      const supersededScopes = supersededHostedGroupScopes(projectionScope);
-      for (const priorScope of supersededScopes) {
+      if (legacyProjectionScope) {
         const revokedCount = await revokeHostedVaultSharesTx({
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
           now: input.now,
-          projectionScopes: [priorScope],
+          projectionScopes: [legacyProjectionScope],
           tx: input.tx,
         });
         if (revokedCount > 0) {
-          revokedVaultShareProjectionKinds.push(priorScope.projectionKind);
-          revokedVaultShareProjectionScopes.push(priorScope);
+          revokedVaultShareProjectionKinds.push(legacyProjectionScope.projectionKind);
+          revokedVaultShareProjectionScopes.push(legacyProjectionScope);
         }
       }
       await assertHostedGroupVaultShareDestinationLimitTx(input.tx, {

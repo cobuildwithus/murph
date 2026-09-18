@@ -1,5 +1,4 @@
 import {
-  getHostedVaultShareHistoryDays,
   isHostedVaultShareRecentDateProjectionKind,
   type HostedVaultShareProjectionScope,
 } from "./vault-share.ts";
@@ -37,9 +36,7 @@ export function parseHostedGroupSharedReadOptions(
     }
     result.participantId = value.participantId;
   }
-  const expanded = scopes.some((scope) => getHostedVaultShareHistoryDays(scope) === 90);
   if (value.history === undefined) {
-    if (expanded) throw new TypeError("A 90-day read requires participantId and history dates.");
     return result;
   }
   const history = value.history;
@@ -49,15 +46,15 @@ export function parseHostedGroupSharedReadOptions(
     || history.fromDate > history.throughDate
     || Date.parse(history.throughDate) - Date.parse(history.fromDate) > 89 * 86_400_000
     || !result.participantId || value.freshness !== undefined
-    || scopes.length !== 1 || !expanded
+    || scopes.length !== 1
     || !isHostedVaultShareRecentDateProjectionKind(scopes[0]!.projectionKind)) {
-    throw new TypeError("History reads require one 90-day health scope, one participant, at most 90 civil dates, and no freshness request.");
+    throw new TypeError("History reads require one health scope, one participant, at most 90 civil dates, and no freshness request.");
   }
   result.history = { fromDate: history.fromDate, throughDate: history.throughDate };
   return result;
 }
 
-/** Call only AFTER grant validation, decryption and the member-local consent clip. */
+/** Call only AFTER grant validation, decryption and the member-local retention clip. */
 export function pageHostedGroupSharedHistory<T extends { occurredAt: string }>(
   records: readonly T[],
   history: NonNullable<HostedGroupSharedReadOptions["history"]>,

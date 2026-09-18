@@ -406,7 +406,7 @@ describe("vault-share deliver route", () => {
 
     expect(() => parseHostedVaultShareDeliverRequest(body)).not.toThrow();
     expect(() => parseHostedVaultShareDeliverRequest(nextBoundBody)).toThrow(
-      /at most 56 records/u,
+      /at most 8 public sources/u,
     );
     expect(bodyBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
@@ -1026,9 +1026,9 @@ describe("vault-share deliver route", () => {
     });
   });
 
-  it("delivers day 89 of expanded history but excludes day 90", async () => {
-    const projectionScope = { ...SLEEP_SCOPE, historyDays: 90 as const };
-    const share = { ...ACTIVE_SHARE, projectionScope, projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope) };
+  it("publishes day 89 on an already-active plain grant without regrant and excludes day 90", async () => {
+    const projectionScope = SLEEP_SCOPE;
+    const share = ACTIVE_SHARE;
     mocks.findActiveHostedVaultShares.mockResolvedValue([share]);
     const retained = recentRecord(89);
     const response = await deliverRoute.POST(buildRequest({

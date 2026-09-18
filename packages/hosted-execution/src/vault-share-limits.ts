@@ -2,7 +2,6 @@
 export const HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES = 4 * 1024 * 1024;
 export const HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS = 8;
 export const HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES = 8;
-export const HOSTED_VAULT_SHARE_LEGACY_HISTORY_DAYS = 7;
 export const HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS = 90;
 // Complete source/date results only. The independent byte ceiling still rejects
 // an oversized projection as a whole; it never silently drops observations.

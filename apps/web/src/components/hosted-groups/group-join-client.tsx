@@ -301,8 +301,8 @@ export function GroupJoinAcceptForm(props: {
               Uncheck anything you don&apos;t want to share. Join either way. Change anytime.
             </p>
             <p className="text-[13px] leading-5 text-muted-foreground">
-              New approvals share up to 90 days of available history. To expand an existing
-              seven-day permission, select its 90-day option.
+              Each health permission shares available data for today and the previous 89 days.
+              This 90-day window also applies to health permissions already on.
             </p>
             {usesScrollablePermissionReview ? (
               <div className="flex min-h-10 items-center justify-between gap-3">

@@ -40,7 +40,7 @@ describe("shared wearable sync requests", () => {
       provider: "junction", expectedConnectedAt: connection.connectedAt.toISOString(), occurredAt: "2026-08-04T14:20:00.000Z" });
     expect(mocks.grants).toHaveBeenCalledWith(expect.objectContaining({ take: 33, where: expect.objectContaining({
       destinationMemberId: "runtime_example", status: "granted",
-      OR: [{ grantorMemberId: "member_example", projectionScopeKey: { in: [scope.projectionKind, "sleep-duration-days.v0.historyDays.90"] } }],
+      OR: [{ grantorMemberId: "member_example", projectionScopeKey: { in: [scope.projectionKind] } }],
       grantor: expect.objectContaining({ hostedGroupMemberships: { some: { group: { runtimeMemberId: "runtime_example" } } }, AND: expect.any(Array) }),
     }) }));
     expect(result).toEqual({ ...updated, freshness: { checkedAt: "2026-08-04T14:22:00.000Z", refreshStatus: "requested" } });

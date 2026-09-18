@@ -877,10 +877,10 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(projectableScopes).toHaveLength(194);
+    expect(projectableScopes).toHaveLength(98);
     expect(
       projectableScopes.length * HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
-    ).toBe(4_850);
+    ).toBe(2_450);
     expect(result).toEqual({ outcome: "delivered" });
     expect(deliveredScopeKeys).toEqual(
       projectableScopes.map(buildHostedVaultShareProjectionScopeKey),
@@ -1109,7 +1109,7 @@ describe("selectProjectableDailyMetricDays", () => {
     ).toEqual(sleepDurations);
   });
 
-  it("limits eight sleep-duration dates to the seven dates disclosed by consent", () => {
+  it("retains all eight available sleep-duration dates within the 90-date window", () => {
     const boundaryNowMs = Date.parse("2026-07-08T12:00:00.000Z");
     const dates = [
       "2026-07-01",
@@ -1144,6 +1144,7 @@ describe("selectProjectableDailyMetricDays", () => {
       "2026-07-04",
       "2026-07-03",
       "2026-07-02",
+      "2026-07-01",
     ]);
   });
 
@@ -2415,60 +2416,26 @@ describe("selectProjectableDailyMetricDays", () => {
       label: "UTC+14 Monday",
       currentDate: "2026-07-27",
       nowMs: Date.parse("2026-07-26T10:15:00.000Z"),
-      expectedDates: [
-        "2026-07-27",
-        "2026-07-26",
-        "2026-07-25",
-        "2026-07-24",
-        "2026-07-23",
-        "2026-07-22",
-        "2026-07-21",
-      ],
     },
     {
       label: "UTC-12 Monday",
       currentDate: "2026-07-27",
       nowMs: Date.parse("2026-07-28T11:45:00.000Z"),
-      expectedDates: [
-        "2026-07-27",
-        "2026-07-26",
-        "2026-07-25",
-        "2026-07-24",
-        "2026-07-23",
-        "2026-07-22",
-        "2026-07-21",
-      ],
     },
     {
       label: "Chicago before UTC midnight",
       currentDate: "2026-07-27",
       nowMs: Date.parse("2026-07-28T04:30:00.000Z"),
-      expectedDates: [
-        "2026-07-27",
-        "2026-07-26",
-        "2026-07-25",
-        "2026-07-24",
-        "2026-07-23",
-        "2026-07-22",
-        "2026-07-21",
-      ],
     },
-  ])("keeps the member-local seven-date disclosure window on $label", ({
+  ])("keeps the member-local 90-date retention window on $label", ({
     currentDate,
-    expectedDates,
     nowMs: boundaryNowMs,
   }) => {
-    const dates = [
-      "2026-07-19",
-      "2026-07-20",
-      "2026-07-21",
-      "2026-07-22",
-      "2026-07-23",
-      "2026-07-24",
-      "2026-07-25",
-      "2026-07-26",
-      "2026-07-27",
-    ];
+    const dates = Array.from({ length: 92 }, (_, index) =>
+      new Date(Date.parse(`${currentDate}T00:00:00Z`) - (index - 1) * 86_400_000)
+        .toISOString().slice(0, 10)
+    );
+    const expectedDates = dates.slice(1, 91);
     const selected = selectProjectableDailyMetricDays(
       dates.map((date, index) => ({
         date,
@@ -2488,7 +2455,7 @@ describe("selectProjectableDailyMetricDays", () => {
 
   it("excludes sparse dates outside the member-local window", () => {
     const selected = selectProjectableDailyMetricDays(
-      ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-22", "2026-07-20"]
+      ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-22", "2026-04-28"]
         .map((date, index) => ({
           date,
           grain: "day" as const,
@@ -2510,7 +2477,7 @@ describe("selectProjectableDailyMetricDays", () => {
     ]);
   });
 
-  it("keeps seven civil dates across daylight-saving changes", () => {
+  it("retains available civil dates across daylight-saving changes", () => {
     const selected = selectProjectableDailyMetricDays(
       [
         "2026-03-08",
@@ -2542,6 +2509,7 @@ describe("selectProjectableDailyMetricDays", () => {
       "2026-03-04",
       "2026-03-03",
       "2026-03-02",
+      "2026-03-01",
     ]);
   });
 
@@ -2741,13 +2709,13 @@ describe("selectProjectableMealNutritionDays", () => {
     ], proteinSpec, utcDateKey(nowMs))).toEqual([]);
   });
 
-  it("skips protein days older than the seven-date cutoff", () => {
+  it("skips protein days older than the 90-date cutoff", () => {
     expect(selectProjectableMealNutritionDays([
-      mealNutritionDay({ date: "2026-06-25", proteinTotal: 55 }),
+      mealNutritionDay({ date: "2026-04-01", proteinTotal: 55 }),
     ], proteinSpec, utcDateKey(nowMs))).toEqual([]);
   });
 
-  it("keeps at most the seven newest complete protein days", () => {
+  it("retains all eight available complete protein days within the 90-date window", () => {
     const selected = selectProjectableMealNutritionDays([
       "2026-07-04",
       "2026-06-30",
@@ -2762,7 +2730,7 @@ describe("selectProjectableMealNutritionDays", () => {
       proteinTotal: 40 + index,
     })), proteinSpec, utcDateKey(nowMs));
 
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(8);
     expect(selected.map((record) => record.recordKey)).toEqual([
       "2026-07-04.murph",
       "2026-07-03.murph",
@@ -2771,6 +2739,7 @@ describe("selectProjectableMealNutritionDays", () => {
       "2026-06-30.murph",
       "2026-06-29.murph",
       "2026-06-28.murph",
+      "2026-06-27.murph",
     ]);
   });
 
@@ -2990,6 +2959,7 @@ describe("selectProjectableMealNutritionDays", () => {
       expect(deliver).toHaveBeenCalledTimes(1);
       expect(deliver).toHaveBeenCalledWith({
         expectedGenerationToken: GENERATION_TOKEN,
+        memberTimeZone: "America/Los_Angeles",
         projectionKind: "protein-days.v0",
         projectionScope: PROTEIN_SCOPE,
         records: selected,
@@ -3051,6 +3021,7 @@ describe("selectProjectableWorkoutDays", () => {
       })).resolves.toEqual({ outcome: "delivered" });
       expect(deliver).toHaveBeenCalledWith({
         expectedGenerationToken: GENERATION_TOKEN,
+        memberTimeZone: "UTC",
         projectionKind: "workout-days.v0",
         projectionScope: WORKOUT_DAYS_SCOPE,
         records: selected,
@@ -3205,7 +3176,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(90);
     expect(findWorkoutsRecord(selected, "2026-07-03")).toEqual({
       data: {
         calendarClosedThroughDate: "2026-07-03",
@@ -3484,7 +3455,8 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "Pacific/Kiritimati",
     });
 
-    expect(afterChange).toEqual(beforeChange);
+    expect(findWorkoutsRecord(afterChange, "2026-07-03"))
+      .toEqual(findWorkoutsRecord(beforeChange, "2026-07-03"));
     expect(scoreSettledWorkoutsDate(
       afterChange,
       "2026-07-03",
@@ -3492,7 +3464,7 @@ describe("selectProjectableWorkoutsDays", () => {
     )).toMatchObject({ status: "settled" });
   });
 
-  it("does not require a declared timezone when the event timezone is valid", () => {
+  it("requires canonical member timezone for retention even with a valid event timezone", () => {
     const rows = [activitySessionRow({
       activityKind: "running",
       date: "2026-07-03",
@@ -3506,11 +3478,12 @@ describe("selectProjectableWorkoutsDays", () => {
       nowMs,
       rows,
       vaultTimeZone: null,
-    })).toEqual(selectProjectableWorkoutsDays({
+    })).toEqual([]);
+    expect(selectProjectableWorkoutsDays({
       nowMs,
       rows,
       vaultTimeZone: "Pacific/Kiritimati",
-    }));
+    })).toHaveLength(90);
   });
 
   it("defers a valid date-line workout outside the window without erasing it", () => {
@@ -3537,7 +3510,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(90);
     expect(findWorkoutsRecord(selected, "2026-07-03")?.data.workouts)
       .toHaveLength(1);
     expect(findWorkoutsRecord(selected, "2026-07-05")).toBeUndefined();
@@ -3861,17 +3834,10 @@ describe("selectProjectableWorkoutsDays", () => {
     })).toThrow(/bound/);
   });
 
-  it("reads the complete source-tagged workout capacity across its eight-date source window", async () => {
-    const sourceDates = [
-      "2026-06-27",
-      "2026-06-28",
-      "2026-06-29",
-      "2026-06-30",
-      "2026-07-01",
-      "2026-07-02",
-      "2026-07-03",
-      "2026-07-04",
-    ];
+  it("reads the complete source-tagged workout capacity across its 90-date member window plus date-line margins", async () => {
+    const sourceDates = Array.from({ length: 92 }, (_, index) =>
+      new Date(nowMs - (index - 1) * 86_400_000).toISOString().slice(0, 10)
+    );
     const providers = [
       "coros",
       "fitbit",
@@ -3915,7 +3881,7 @@ describe("selectProjectableWorkoutsDays", () => {
     );
     expect(records).toHaveLength(
       HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
-        * (HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW + 1),
+        * (HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW + 2),
     );
     const vaultRoot = await createActivitySessionVault(records);
     const overBoundVaultRoot = await createActivitySessionVault([
@@ -3932,7 +3898,7 @@ describe("selectProjectableWorkoutsDays", () => {
         },
       },
     ]);
-    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs + 23 * 60 * 60 * 1_000);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
 
     try {
       const selected = await readProjectableWorkoutsDays(vaultRoot);
@@ -4001,7 +3967,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(90);
     expect(findWorkoutsRecord(selected, "2026-07-03")?.data).toEqual({
       calendarClosedThroughDate: "2026-07-03",
       date: "2026-07-03",
@@ -4045,7 +4011,7 @@ describe("selectProjectableWorkoutsDays", () => {
     });
     expect(scoreSettledWorkoutsDate(
       selected,
-      "2026-06-26",
+      "2026-04-05",
       18 * 60 * 60 * 1_000,
     )).toEqual({ status: "missing" });
   });
@@ -4399,7 +4365,7 @@ describe("selectProjectableWorkoutsDays", () => {
     }
   });
 
-  it("keeps the oldest UTC-12 workout stable across UTC midnight", async () => {
+  it("ages out date 89 at canonical member midnight without advancing global completion", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",
       id: "evt_rederived_date_cutoff",
@@ -4412,15 +4378,15 @@ describe("selectProjectableWorkoutsDays", () => {
       durationMinutes: 30,
     }]);
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(
-      Date.parse("2026-07-08T23:59:59.999Z"),
+      Date.parse("2026-09-29T23:59:59.999Z"),
     );
 
     try {
-      const assertStableOldestDate = async () => {
+      const assertOldestDate = async () => {
         const selected = await readProjectableWorkoutsDays(vaultRoot);
         expect(findWorkoutsRecord(selected, "2026-07-02")).toMatchObject({
           data: {
-            calendarClosedThroughDate: "2026-07-07",
+            calendarClosedThroughDate: "2026-09-28",
             workouts: [{
               kind: "running",
               minutes: 30,
@@ -4431,25 +4397,25 @@ describe("selectProjectableWorkoutsDays", () => {
         });
       };
 
-      await assertStableOldestDate();
-      dateNow.mockReturnValue(Date.parse("2026-07-09T00:00:00.000Z"));
-      await assertStableOldestDate();
+      await assertOldestDate();
+      dateNow.mockReturnValue(Date.parse("2026-09-30T00:00:00.000Z"));
+      const midnight = await readProjectableWorkoutsDays(vaultRoot);
+      expect(midnight).toHaveLength(90);
+      expect(findWorkoutsRecord(midnight, "2026-07-02")).toBeUndefined();
+      expect(midnight.every((record) =>
+        "calendarClosedThroughDate" in record.data
+        && record.data.calendarClosedThroughDate === "2026-09-28"
+      )).toBe(true);
 
-      dateNow.mockReturnValue(Date.parse("2026-07-09T12:00:00.000Z"));
+      dateNow.mockReturnValue(Date.parse("2026-09-30T12:00:00.000Z"));
       const advanced = await readProjectableWorkoutsDays(vaultRoot);
-      expect(advanced.map((record) => record.recordKey)).toEqual([
-        "2026-07-09",
-        "2026-07-08",
-        "2026-07-07",
-        "2026-07-06",
-        "2026-07-05",
-        "2026-07-04",
-        "2026-07-03",
-      ]);
+      expect(advanced).toHaveLength(90);
+      expect(advanced[0]?.recordKey).toBe("2026-09-30");
+      expect(advanced.at(-1)?.recordKey).toBe("2026-07-03");
       expect(findWorkoutsRecord(advanced, "2026-07-02")).toBeUndefined();
       expect(advanced.every((record) =>
         "calendarClosedThroughDate" in record.data
-        && record.data.calendarClosedThroughDate === "2026-07-08"
+        && record.data.calendarClosedThroughDate === "2026-09-29"
       )).toBe(true);
     } finally {
       dateNow.mockRestore();
@@ -4986,7 +4952,7 @@ describe("selectProjectableActivityMinutesDays", () => {
     expect(activitySessionReader).toContain("listCanonicalEntities");
     expect(activitySessionReader).toContain('family: "event"');
     expect(activitySessionReader).toContain('from: cutoffDate');
-    expect(activitySessionReader).toContain("activitySessionSourceRowLimit(historyDays)");
+    expect(activitySessionReader).toContain("ACTIVITY_SESSION_SOURCE_ROW_LIMIT");
     expect(activitySessionReader).toContain("entities.length > rowLimit");
     expect(activitySessionReader).toContain(
       "return { complete: false, rows: [] }",
@@ -5147,7 +5113,7 @@ describe("selectProjectableActivityDistanceDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
   const runningDistanceSpec = requireActivityDistanceSpec(RUNNING_DISTANCE_SCOPE);
 
-  it("limits an eight-date source set to the seven dates disclosed by consent", () => {
+  it("retains all eight available dates within the 90-date window", () => {
     const boundaryNowMs = Date.parse("2026-07-08T12:00:00.000Z");
     const dates = [
       "2026-07-01",
@@ -5181,13 +5147,14 @@ describe("selectProjectableActivityDistanceDays", () => {
       "2026-07-04",
       "2026-07-03",
       "2026-07-02",
+      "2026-07-01",
     ]);
   });
 
   it.each([
     {
       expectedDates: ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-21"],
-      label: "UTC+14 excludes a sparse eighth local date",
+      label: "UTC+14 excludes a sparse date outside the 90-date window",
       nowMs: Date.parse("2026-07-26T10:15:00.000Z"),
       timeZone: "Pacific/Kiritimati",
     },
@@ -5208,7 +5175,7 @@ describe("selectProjectableActivityDistanceDays", () => {
     nowMs: boundaryNowMs,
     timeZone,
   }) => {
-    const dates = ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-21", "2026-07-20"];
+    const dates = ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-21", "2026-04-28"];
     const vaultRoot = await createActivitySessionVault(
       dates.map((date, index) => ({
         activityType: "running",
@@ -5431,7 +5398,7 @@ describe("selectProjectableActivitySessionCountDays", () => {
   const runningSessionCountSpec =
     requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE);
 
-  it("limits an eight-date source set to the seven dates disclosed by consent", () => {
+  it("retains all eight available dates within the 90-date window", () => {
     const boundaryNowMs = Date.parse("2026-07-08T12:00:00.000Z");
     const dates = [
       "2026-07-01",
@@ -5464,6 +5431,7 @@ describe("selectProjectableActivitySessionCountDays", () => {
       "2026-07-04",
       "2026-07-03",
       "2026-07-02",
+      "2026-07-01",
     ]);
   });
 
@@ -5881,14 +5849,14 @@ describe("selectProjectableSleepNights", () => {
   });
 
   it("maps recent fully-timed nights to records keyed by night date and drops stale or partial ones", () => {
-    const staleDate = "2026-05-01";
+    const staleDate = "2026-02-01";
     const summaries = [
       { date: NIGHT.date, sleepEndAt: NIGHT.sleepEndAt, sleepStartAt: NIGHT.sleepStartAt },
       { date: "2026-06-08", sleepEndAt: null, sleepStartAt: "2026-06-08T22:00:00.000Z" },
       {
         date: staleDate,
-        sleepEndAt: "2026-05-02T06:00:00.000Z",
-        sleepStartAt: "2026-05-01T22:00:00.000Z",
+        sleepEndAt: "2026-02-02T06:00:00.000Z",
+        sleepStartAt: "2026-02-01T22:00:00.000Z",
       },
     ];
 
@@ -5902,7 +5870,7 @@ describe("selectProjectableSleepNights", () => {
     expect(selected[0]?.occurredAt).toBe(`${NIGHT.date}T00:00:00.000Z`);
   });
 
-  it("limits an eight-night source set to the seven nights disclosed by consent", () => {
+  it("retains all eight available sleep nights within the 90-date window", () => {
     const boundaryNowMs = Date.parse("2026-07-08T12:00:00.000Z");
     const dates = [
       "2026-07-08",
@@ -5924,7 +5892,7 @@ describe("selectProjectableSleepNights", () => {
       utcDateKey(boundaryNowMs),
     );
 
-    expect(selected.map((record) => record.recordKey)).toEqual(dates.slice(0, 7));
+    expect(selected.map((record) => record.recordKey)).toEqual(dates);
   });
 
   it("emits records the hosted-execution deliver-request parser accepts unchanged", () => {
@@ -6135,7 +6103,7 @@ describe("readProjectableProfileName", () => {
 
 
 describe("canonical history capture", () => {
-  it("queries and captures all 90 dates and eight sources only for the expanded grant", async () => {
+  it("queries and captures all 90 dates and eight sources under an already-active plain grant without regrant", async () => {
     const nowMs = Date.parse("2026-09-17T23:00:00.000Z");
     const providers = ["coros", "fitbit", "garmin", "oura", "polar", "strava", "suunto", "whoop"];
     const records = Array.from({ length: 92 }, (_, index) => {
@@ -6157,29 +6125,27 @@ describe("canonical history capture", () => {
     }).flat();
     const vaultRoot = await createActivitySessionVault(records);
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
-    const legacy = hostedVaultShareProjectionKindToScope("workout-days.v0");
-    const expanded = { ...legacy, historyDays: 90 as const };
+    const scope = hostedVaultShareProjectionKindToScope("workout-days.v0");
     try {
       const result = await captureHostedVaultShareProjectionBestEffort({
         generationTokensByProjectionScopeKey: {
-          [buildHostedVaultShareProjectionScopeKey(legacy)]: GENERATION_TOKEN,
-          [buildHostedVaultShareProjectionScopeKey(expanded)]: GENERATION_TOKEN,
+          [buildHostedVaultShareProjectionScopeKey(scope)]: GENERATION_TOKEN,
         },
         hasDeferredProjectionWork: false,
-        projectionScopes: [legacy, expanded],
+        projectionScopes: [scope],
         sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
         vaultRoot,
       });
       expect(result.outcome).toBe("captured");
       if (result.outcome !== "captured") throw new Error("Expected complete canonical capture.");
-      expect(result.capture.snapshots.map((snapshot) => snapshot.records.length)).toEqual([56, 720]);
+      expect(result.capture.snapshots.map((snapshot) => snapshot.records.length)).toEqual([720]);
       for (const snapshot of result.capture.snapshots) {
-        expect(snapshot.memberTimeZone).toBe(snapshot.projectionScope.historyDays === 90 ? "UTC" : undefined);
+        expect(snapshot.memberTimeZone).toBe("UTC");
         expect(new Set(snapshot.records.map((record) => record.source?.source))).toEqual(new Set(providers));
         expect(snapshot.records.some((record) => record.occurredAt.startsWith("2026-09-18"))).toBe(false);
         expect(snapshot.records.some((record) => record.occurredAt.startsWith("2026-06-19"))).toBe(false);
       }
-      expect(result.capture.snapshots[1]?.records.some((record) => record.occurredAt.startsWith("2026-06-20"))).toBe(true);
+      expect(result.capture.snapshots[0]?.records.some((record) => record.occurredAt.startsWith("2026-06-20"))).toBe(true);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });

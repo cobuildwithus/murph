@@ -13,6 +13,11 @@ import {
 } from "../src/runtime-control.ts";
 
 import {
+  buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+} from "../src/vault-share.ts";
+
+import {
   parseHostedExecutionDirectRoute,
   parseHostedExecutionExternalThreadRouteAuthority,
   parseHostedExecutionEvent,
@@ -2886,7 +2891,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           projections: [{
             ...projection,
             records: Array.from(
-              { length: 56 + 1 },
+              { length: 720 + 1 },
               (_, index) => {
                 const date = new Date(Date.UTC(2026, 0, index + 1))
                   .toISOString()
@@ -2902,7 +2907,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           }],
         }],
       },
-    })).toThrow(/at most 56/u);
+    })).toThrow(/at most 720/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "read_shared",
       result: {
@@ -3920,6 +3925,23 @@ describe("parseHostedRuntimeGroupEmailEffect", () => {
   });
 
   it("bounds group email participants and per-participant authorization snapshots", () => {
+    const authorizedShares = HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES
+      .filter((scope) => scope.projectionKind !== "group-email.v0")
+      .map((scope, index) => ({
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(scope),
+        shareId: `share_${index}`,
+      }));
+    expect(authorizedShares).toHaveLength(99);
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
+      result: {
+        authorizationProof: AUTHORIZATION_PROOF,
+        groupId: "group_123",
+        missingEmailParticipants: [],
+        participants: [{ ...PARTICIPANT, authorizedShares }],
+        status: "ok",
+      },
+    })).toMatchObject({ result: { participants: [{ authorizedShares }] } });
     const participant = {
       ...PARTICIPANT,
       authorizedShares: Array.from({ length: HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX + 1 }, (_, index) => ({

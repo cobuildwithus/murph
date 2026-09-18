@@ -1421,29 +1421,29 @@ describe("murph.group dynamic tool", () => {
     );
   });
 
-  it("requires exact participant and date authority for 90-day history", async () => {
-    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("try this read: the host checks existing consent");
-    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("ask for expanded consent only if the history result reports not_granted");
+  it("uses the existing metric scope for bounded participant history, including detached reads", async () => {
+    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("every active metric grant already covers this window");
+    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("not_granted means the metric itself is unshared");
+    expect(JSON.stringify(MURPH_GROUP_SHARED_READ_TOOL.inputSchema)).not.toContain("historyDays");
     const args = {
       action: "read_shared", participantId: "participant_history",
-      projectionScopes: [{ projectionKind: "steps-days.v0", historyDays: 90 }],
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
       history: { fromDate: "2026-06-21", throughDate: "2026-09-18" },
     };
     const request = readMurphDynamicToolRequest(groupToolCall(args));
     expect(request).toMatchObject({ kind: "group", request: args });
     for (const invalid of [
       { ...args, participantId: undefined },
-      { ...args, history: undefined },
       { ...args, history: { fromDate: "2026-06-20", throughDate: "2026-09-18" } },
-      { ...args, projectionScopes: [{ projectionKind: "steps-days.v0" }] },
-      { ...args, projectionScopes: [...args.projectionScopes, { projectionKind: "activity-days.v0", historyDays: 90 }] },
+      { ...args, projectionScopes: [{ projectionKind: "steps-days.v0", historyDays: 90 }] },
+      { ...args, projectionScopes: [...args.projectionScopes, { projectionKind: "activity-days.v0" }] },
       { ...args, freshness: [{ projectionScopeKey: "steps-days.v0", date: "2026-09-18" }] },
       { ...args, audience: "group_email" },
     ]) {
       expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind).toBe("invalid-group-arguments");
     }
     if (!request || request.kind !== "group") throw new Error("Expected history read");
-    const groupSharedReadRequest = vi.fn(async () => ({ status: "ok" as const, members: [], requestedProjectionScopeKeys: ["steps-days.v0.historyDays.90"] }));
+    const groupSharedReadRequest = vi.fn(async () => ({ status: "ok" as const, members: [], requestedProjectionScopeKeys: ["steps-days.v0"] }));
     await executeMurphDynamicToolRequest({
       env: {}, fetchImpl: fetch, hostedToolContext: createGroupHostedToolContext({ groupSharedReadRequest, groupToolAvailable: false }),
       nextUsageOrdinal: () => 1, progressDelivery: null, request, vaultRoot: null,
@@ -6270,7 +6270,7 @@ describe("murph.group email actions", () => {
     });
   });
 
-  it("exposes only email-eligible members and their exact authorized projections", async () => {
+  it("uses ordinary reporting reads for email-eligible members and their exact plain metric grants", async () => {
     const requestedScopes = [
       { projectionKind: "steps-days.v0" as const },
       { projectionKind: "sleep-times.v0" as const },
@@ -6389,7 +6389,7 @@ describe("murph.group email actions", () => {
       action: "prepare_email",
       projectionScopes: requestedScopes,
     });
-    expect(groupSharedReadRequest).toHaveBeenCalledWith({
+    expect(groupSharedReadRequest).toHaveBeenCalledExactlyOnceWith({
       projectionScopes: requestedScopes,
     });
     expect(result.rpcResult.success).toBe(true);

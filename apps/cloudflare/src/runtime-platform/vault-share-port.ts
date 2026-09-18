@@ -7,8 +7,6 @@ import {
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
-  HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM,
-  HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE,
   HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
   HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
   parseHostedVaultShareActiveProjectionKindsResponse,
@@ -199,9 +197,7 @@ function buildHostedVaultShareActiveKindsPath(
   projectionMode?: HostedVaultShareProjectionMode,
 ): string {
   const params = new URLSearchParams();
-  params.set(HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM, HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE);
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
-    if (projectionScope.historyDays === 90) continue;
     params.append(
       HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM,
       buildHostedVaultShareProjectionScopeKey(projectionScope),

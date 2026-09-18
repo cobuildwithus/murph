@@ -15,8 +15,6 @@ import {
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
-  HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM,
-  HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE,
 } from "@murphai/hosted-execution/vault-share";
 
 import {
@@ -127,13 +125,11 @@ function isHostedReplaySafeGroupToolRequest(
 
 function buildHostedRuntimeGroupToolPath(): string {
   const params = new URLSearchParams();
-  params.set(HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM, HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE);
   params.set(
     HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
     HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
   );
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
-    if (projectionScope.historyDays === 90) continue;
     params.append(
       HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM,
       buildHostedVaultShareProjectionScopeKey(projectionScope),

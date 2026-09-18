@@ -750,7 +750,6 @@ const GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA = {
   additionalProperties: false,
   required: ['projectionKind'],
   properties: {
-    historyDays: { type: 'integer', enum: [90], description: 'Dated health scopes only. Omit for ordinary seven-day reads; 90 requires explicit member consent and a paged history read.' },
     projectionKind: {
       type: 'string',
       enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
@@ -763,7 +762,6 @@ const GROUP_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_SCOPE_SCHEMA = {
   additionalProperties: false,
   required: ['projectionKind', 'selector'],
   properties: {
-    historyDays: { type: 'integer', enum: [90], description: 'Dated health scopes only. Omit for ordinary seven-day reads; 90 requires explicit member consent and a paged history read.' },
     projectionKind: {
       type: 'string',
       enum: [HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND],
@@ -789,7 +787,6 @@ const GROUP_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_SCOPE_SCHEMA = {
   additionalProperties: false,
   required: ['projectionKind', 'selector'],
   properties: {
-    historyDays: { type: 'integer', enum: [90], description: 'Dated health scopes only. Omit for ordinary seven-day reads; 90 requires explicit member consent and a paged history read.' },
     projectionKind: {
       type: 'string',
       enum: [HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND],
@@ -815,7 +812,6 @@ const GROUP_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_SCOPE_SCHEMA = {
   additionalProperties: false,
   required: ['projectionKind', 'selector'],
   properties: {
-    historyDays: { type: 'integer', enum: [90], description: 'Dated health scopes only. Omit for ordinary seven-day reads; 90 requires explicit member consent and a paged history read.' },
     projectionKind: {
       type: 'string',
       enum: [HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND],
@@ -854,7 +850,7 @@ const GROUP_SHARED_HISTORY_READ_PROPERTIES = {
       fromDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
       throughDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
     },
-    description: 'read_shared only: at most 90 member-local civil dates, one participant and one exact health scope with historyDays:90; no freshness or group_email. Follow dateCoverage.nextFromDate with the same throughDate until exhausted. Every page retains complete source/date observations. For requested history, try this read: the host checks existing consent. A seven-day result does not prove that 90-day permission is missing; ask for expanded consent only if the history result reports not_granted. This reads available canonical data, never provider backfill. State requested range and actually available dates in trends; do not treat absent dates as zeros or missing permission.' },
+    description: 'read_shared only: at most 90 member-local civil dates, one current participant and one existing health metric scope; no freshness or group_email. Follow dateCoverage.nextFromDate with the same throughDate until exhausted. Every page retains complete source/date observations. For requested history, use the existing metric scope: every active metric grant already covers this window. No history permission or settings visit is needed. not_granted means the metric itself is unshared and ordinary metric consent is required. This reads available canonical data, never provider backfill. State requested range and actually available dates in trends; do not treat absent dates as zeros or missing permission.' },
 } as const
 
 /**
@@ -866,7 +862,7 @@ export const MURPH_GROUP_SHARED_READ_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read 1–3 consent-aware projections in this group; the host binds authority. Ordinary reads cover seven days; history needs participantId, dates and a 90-day scope. status="partial" means omittedParticipantIds have omitted rows: the result is incomplete and cannot prove departure, score, diagnosis or permission state.',
+    'Read 1–3 consent-aware projections in this group; the host binds authority. Ordinary reads cover seven days; history needs participantId, an inclusive range of up to 90 dates, and one metric scope. status="partial" means omittedParticipantIds have omitted rows: the result is incomplete and cannot prove departure, score, diagnosis or permission state.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1205,7 +1201,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'For ordinary read_shared, keep historyDays omitted and read one to three seven-day consent-aware group projections; weekly standings and newsletters still use their requested dates, not a 90-day average. For longer trends, use one explicitly consented historyDays:90 scope with participantId and history dates, consume every dateCoverage page, and pass exact observed values to generate_image without storing a group history copy. State requested versus available date coverage. New offer_access approvals default to 90 rolling member-local dates; old approvals remain seven until a fresh explicit approval. For read_shared, including additive exact-grant activation time when available. For read_shared with audience="group_email", the exact bounded projections allowed into this email composition; the trusted host intersects them with live recipient grants. For offer_access, supply only the exact permissions requested by the person; existing sleep timing or connection-status permission does not include sleep duration. Show the consent surface immediately for a direct request or accepted offer, with no preliminary confirmation. Omitting projectionScopes requests every selectable permission and is not appropriate for adding one missing scope. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
+          'Ordinary read_shared returns one to three seven-day consent-aware group projections; weekly standings and newsletters still use their requested dates, not a 90-day average. For longer trends, use one existing health metric scope with participantId and history dates, consume every dateCoverage page, and pass exact observed values to generate_image without storing a group history copy. All active health grants cover 90 rolling member-local dates, including existing grants; never ask to expand history permission. not_granted means the metric is unshared and requires ordinary metric consent. State requested versus actually available date coverage; sparse or pending history is not missing permission. For read_shared, including additive exact-grant activation time when available. For read_shared with audience="group_email", the exact bounded projections allowed into this email composition; the trusted host intersects them with live recipient grants. For offer_access, supply only the exact permissions requested by the person; existing sleep timing or connection-status permission does not include sleep duration. Show the consent surface immediately for a direct request or accepted offer, with no preliminary confirmation. Omitting projectionScopes requests every selectable permission and is not appropriate for adding one missing scope. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
       },
       freshness: GROUP_SHARED_FRESHNESS_SCHEMA,
       audience: {

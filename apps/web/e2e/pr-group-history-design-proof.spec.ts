@@ -12,19 +12,20 @@ for (const width of [390, 1280]) {
       for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) ancestor.removeAttribute("inert");
     });
     await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); });
-    const upgrade = page.locator('[data-design-state="group-join-history-upgrade"]');
+    const upgrade = page.locator('[data-design-state="group-join-history-existing"]');
     const choices = upgrade.getByRole("checkbox");
-    await expect(choices).toHaveCount(2);
+    await expect(choices).toHaveCount(1);
     await expect(choices.nth(0)).toBeChecked();
-    await expect(choices.nth(1)).not.toBeChecked();
     await expect(upgrade).toContainText("90 days");
     const output = process.env.DESIGN_PROOF_OUTPUT_DIR;
     if (output) {
       await mkdir(output, { recursive: true });
       await upgrade.screenshot({ path: path.join(output, `history-existing-${width}.png`), style: "nextjs-portal { visibility: hidden; }" });
     }
-    await choices.nth(1).locator("..").click();
-    await expect(choices.nth(1)).toBeChecked();
+    await choices.nth(0).locator("..").click();
+    await expect(choices.nth(0)).not.toBeChecked();
+    await choices.nth(0).locator("..").click();
+    await expect(choices.nth(0)).toBeChecked();
     const fresh = page.locator('[data-design-state="group-join-comprehensive-default"]');
     await expect(fresh).toContainText("90 days");
     for (const choice of await fresh.getByRole("checkbox").all()) await expect(choice).toBeChecked();

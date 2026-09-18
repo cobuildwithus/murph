@@ -6,6 +6,7 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   getHostedVaultShareProjectionMaxRecords,
   filterHostedVaultShareHistoryRecords,
+  isHostedVaultShareRecentDateProjectionKind,
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
   type HostedVaultShareDeliveryRecord,
@@ -158,12 +159,14 @@ export async function decryptHostedVaultShareProjectionSnapshots(input: {
       throw new Error("Hosted vault-share projection snapshot entry is missing.");
     }
     const snapshot = parseSnapshotEnvelope({ plaintext, share: entry });
-    if (entry.projectionScope.historyDays !== 90) {
+    if (!isHostedVaultShareRecentDateProjectionKind(entry.projectionScope.projectionKind)) {
       return snapshot.records;
     }
-    // Expanded snapshots require the signed publisher's civil-date context.
-    // Legacy seven-day snapshots retain their existing read behavior above.
-    if (!snapshot.memberTimeZone) return null;
+    // Old snapshots remain usable for ordinary reads. Never infer a timezone
+    // or promise longer history until a compatible publisher replaces them.
+    if (!snapshot.memberTimeZone) {
+      return input.requestedHistoryDays === 90 ? null : snapshot.records;
+    }
     return filterHostedVaultShareHistoryRecords({
       nowMs: input.nowMs,
       records: snapshot.records,

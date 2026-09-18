@@ -9,7 +9,7 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 import { groupJoinPermissionsForDisplay } from "@/src/components/hosted-groups/group-join-permission-groups";
 import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
-import { resolveHostedGroupAccessOfferProjectionScopes } from "@/src/lib/hosted-groups/join-policy";
+import { projectHostedVaultShareProjectionDisplays, resolveHostedGroupAccessOfferProjectionScopes } from "@/src/lib/hosted-groups/join-policy";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
@@ -370,6 +370,62 @@ test("clears every visible optional grant for an existing member", async () => {
   });
 });
 
+test.each([false, true])(
+  "uses current 90-day copy and plain choices from a saved seven-day offer (active=%s)",
+  async (alreadyActiveMember) => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+    const { GroupJoinAcceptForm } = await import(
+      "@/src/components/hosted-groups/group-join-client"
+    );
+    // The stored offer remains immutable, including its historical description.
+    const offer = Object.freeze({
+      description: "Share seven days of sleep and steps.",
+      projectionScopes: [{ projectionKind: "sleep-duration-days.v0" as const },
+        { projectionKind: "steps-days.v0" as const }],
+    });
+    const { cleanup, container, window } = await renderClientComponent(
+      createElement(GroupJoinAcceptForm, {
+        activeVaultShareProjectionScopes: alreadyActiveMember ? [offer.projectionScopes[0]!] : [],
+        alreadyActiveMember,
+        expectedMembershipId: alreadyActiveMember ? "membership_existing" : null,
+        groupName: "Synthetic group",
+        joinCode: "JOIN123",
+        permissions: projectHostedVaultShareProjectionDisplays(offer.projectionScopes),
+        postJoinContactOption: null,
+        postJoinDestination: "/home",
+      }),
+    );
+    cleanupRender = cleanup;
+    const choices = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    expect(choices).toHaveLength(2);
+    expect(choices.map((choice) => choice.checked)).toEqual(
+      alreadyActiveMember ? [true, false] : [true, true],
+    );
+    expect(container.textContent).toContain("Shares 90 days of total sleep duration");
+    expect(container.textContent).toContain("Shares 90 days of step counts");
+    expect(container.textContent).toContain("today and the previous 89 days");
+    expect(container.textContent).not.toMatch(/seven days|7 days|expand history|history checkbox/i);
+    const submit = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent === (alreadyActiveMember ? "Save changes" : "Join group")
+    );
+    if (!submit) throw new Error("Expected the join or settings action.");
+    await act(async () => {
+      submit.dispatchEvent(new window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        expectedMembershipId: alreadyActiveMember ? "membership_existing" : null,
+        selectedVaultShareProjectionScopes: alreadyActiveMember
+          ? [offer.projectionScopes[0]] : offer.projectionScopes,
+      },
+      url: "/api/groups/join/JOIN123/accept",
+    });
+    expect(offer.description).toBe("Share seven days of sleep and steps.");
+  },
+);
+
 test("discloses and submits source-aware sleep metadata on the link-only join page", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
   const { GroupJoinAcceptForm } = await import(
@@ -384,14 +440,14 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
       joinCode: "JOIN123",
       permissions: [
         {
-          description: "Shares 7 days of deep sleep minutes and recorded times by source.",
+          description: "Shares 90 days of deep sleep minutes and recorded times by source.",
           label: "Deep sleep",
           legacyProjectionScope: { projectionKind: "deep-sleep-days.v0" as const },
           projectionScope: { projectionKind: "deep-sleep-sources-days.v1" as const },
           projectionScopeKey: "deep-sleep-sources-days.v1",
         },
         {
-          description: "Shares 7 days of REM sleep minutes and recorded times by source.",
+          description: "Shares 90 days of REM sleep minutes and recorded times by source.",
           label: "REM sleep",
           legacyProjectionScope: { projectionKind: "rem-sleep-days.v0" as const },
           projectionScope: { projectionKind: "rem-sleep-sources-days.v1" as const },
@@ -409,10 +465,10 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
   )).toEqual(["Deep sleep", "REM sleep"]);
 
   expect(container.textContent).toContain(
-    "Shares 7 days of deep sleep minutes and recorded times by source.",
+    "Shares 90 days of deep sleep minutes and recorded times by source.",
   );
   expect(container.textContent).toContain(
-    "Shares 7 days of REM sleep minutes and recorded times by source.",
+    "Shares 90 days of REM sleep minutes and recorded times by source.",
   );
   expect(Array.from(container.querySelectorAll<HTMLInputElement>(
     'input[type="checkbox"]',
@@ -456,7 +512,7 @@ test.each([
         groupName: "Sunday Sleep Crew",
         joinCode: "JOIN123",
         permissions: [{
-          description: "Shares 7 days of deep sleep minutes and recorded times by source.",
+          description: "Shares 90 days of deep sleep minutes and recorded times by source.",
           label: "Deep sleep",
           legacyProjectionScope: { projectionKind: "deep-sleep-days.v0" as const },
           projectionScope: { projectionKind: "deep-sleep-sources-days.v1" as const },
@@ -472,7 +528,7 @@ test.each([
     if (!checkbox) throw new Error("Expected the Deep sleep checkbox.");
     expect(checkbox.checked).toBe(true);
     expect(container.textContent).toContain(
-      "Shares 7 days of deep sleep minutes and recorded times by source.",
+      "Shares 90 days of deep sleep minutes and recorded times by source.",
     );
     expect(container.textContent).not.toContain("Include source details");
 
@@ -511,7 +567,7 @@ test("groups the four macro nutrients into one Daily macros card, calories separ
     projectionKind: HostedVaultShareFixedProjectionKind,
     label: string,
   ) => ({
-    description: `Shares your last 7 days of daily ${label} totals from meals in Murph, including meals imported from connected apps.`,
+    description: `Shares your last 90 days of daily ${label} totals from meals in Murph, including meals imported from connected apps.`,
     label: `Daily ${label}`,
     projectionScope: { projectionKind },
     projectionScopeKey: projectionKind,
@@ -519,7 +575,7 @@ test("groups the four macro nutrients into one Daily macros card, calories separ
 
   const permissions = [
     {
-      description: "Shares your last 7 days of steps.",
+      description: "Shares your last 90 days of steps.",
       label: "Steps",
       projectionScope: { projectionKind: "steps-days.v0" as const },
       projectionScopeKey: "steps-days.v0",
@@ -530,7 +586,7 @@ test("groups the four macro nutrients into one Daily macros card, calories separ
     nutrientPermission("fiber-days.v0", "fiber"),
     {
       description:
-        "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+        "Shares your last 90 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
       label: "Daily calories",
       projectionScope: { projectionKind: "calories-days.v0" as const },
       projectionScopeKey: "calories-days.v0",
@@ -543,7 +599,7 @@ test("groups the four macro nutrients into one Daily macros card, calories separ
 
   expect(groups).toEqual([
     {
-      description: "Shares your last 7 days of steps.",
+      description: "Shares your last 90 days of steps.",
       key: "steps-days.v0",
       label: "Steps",
       legacyScopeKeys: [],
@@ -551,7 +607,7 @@ test("groups the four macro nutrients into one Daily macros card, calories separ
     },
     {
       description:
-        "Shares 7 days of daily protein, carbs, fat, and fiber totals from meals in Murph, including meals imported from connected apps.",
+        "Shares 90 days of daily protein, carbs, fat, and fiber totals from meals in Murph, including meals imported from connected apps. Includes today and the previous 89 days. Only available data is shared.",
       key: "group:daily-macros",
       label: "Daily macros",
       legacyScopeKeys: [],
@@ -564,7 +620,7 @@ test("groups the four macro nutrients into one Daily macros card, calories separ
     },
     {
       description:
-        "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+        "Shares your last 90 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
       key: "calories-days.v0",
       label: "Daily calories",
       legacyScopeKeys: [],
@@ -582,7 +638,7 @@ test("renders one Daily macros card that toggles every macro scope together", as
     projectionKind: HostedVaultShareFixedProjectionKind,
     label: string,
   ) => ({
-    description: `Shares your last 7 days of daily ${label} totals from meals in Murph, including meals imported from connected apps.`,
+    description: `Shares your last 90 days of daily ${label} totals from meals in Murph, including meals imported from connected apps.`,
     label: `Daily ${label}`,
     projectionScope: { projectionKind },
     projectionScopeKey: projectionKind,
@@ -602,7 +658,7 @@ test("renders one Daily macros card that toggles every macro scope together", as
         macroPermission("fiber-days.v0", "fiber"),
         {
           description:
-            "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+            "Shares your last 90 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
           label: "Daily calories",
           projectionScope: { projectionKind: "calories-days.v0" as const },
           projectionScopeKey: "calories-days.v0",
@@ -649,7 +705,7 @@ test("keeps macros as individual cards when the initial macro selection is mixed
     "@/src/components/hosted-groups/group-join-permission-groups"
   );
   const macro = (projectionKind: HostedVaultShareFixedProjectionKind, label: string) => ({
-    description: `Shares your last 7 days of daily ${label} totals from meals in Murph, including meals imported from connected apps.`,
+    description: `Shares your last 90 days of daily ${label} totals from meals in Murph, including meals imported from connected apps.`,
     label: `Daily ${label}`,
     projectionScope: { projectionKind },
     projectionScopeKey: projectionKind,
@@ -683,7 +739,7 @@ test("shows revocable individual macro cards for an existing mixed macro grant",
     "@/src/components/hosted-groups/group-join-client"
   );
   const macro = (projectionKind: HostedVaultShareFixedProjectionKind, label: string) => ({
-    description: `Shares your last 7 days of daily ${label} totals from meals in Murph, including meals imported from connected apps.`,
+    description: `Shares your last 90 days of daily ${label} totals from meals in Murph, including meals imported from connected apps.`,
     label: `Daily ${label}`,
     projectionScope: { projectionKind },
     projectionScopeKey: projectionKind,

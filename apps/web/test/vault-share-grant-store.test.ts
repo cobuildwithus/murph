@@ -326,9 +326,9 @@ describe("grantHostedVaultShareTx", () => {
 });
 
 
-describe("history-bound grant lifecycle", () => {
-  it("creates a separate expanded tuple and rotates that generation on revoke/regrant", async () => {
-    const scope = { ...SLEEP_SCOPE, historyDays: 90 as const };
+describe("plain metric grant lifecycle", () => {
+  it("keeps the plain tuple and rotates its generation on revoke/regrant", async () => {
+    const scope = SLEEP_SCOPE;
     const scopeKey = buildHostedVaultShareProjectionScopeKey(scope);
     const tx = createPrismaStub({
       hostedVaultShare: {

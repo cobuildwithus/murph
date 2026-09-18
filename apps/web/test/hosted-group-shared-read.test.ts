@@ -127,10 +127,11 @@ function snapshot(input: {
   memberId: string;
   projectionScope: TestProjectionScope;
   records: readonly HostedVaultShareDeliveryRecord[];
+  memberTimeZone?: string;
 }): string {
   const share = shareRow(input);
   return serializeHostedVaultShareProjectionSnapshot({
-    memberTimeZone: "UTC",
+    ...(input.memberTimeZone ? { memberTimeZone: input.memberTimeZone } : {}),
     records: input.records,
     share: {
       destinationMemberId: share.destinationMemberId,
@@ -317,7 +318,6 @@ async function replaceAndReadProjectionRecords(input: {
   });
 
   await expect(replaceHostedVaultShareProjectionSnapshot({
-    memberTimeZone: "UTC",
     prisma,
     records: input.records,
     share: {
@@ -2052,22 +2052,21 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
 });
 
 
-describe("consented group history reads", () => {
+describe("plain-grant group history reads", () => {
   const date = (age: number) => new Date(Date.now() - age * 86_400_000).toISOString().slice(0, 10);
-  const expanded = { ...STEPS_SCOPE, historyDays: 90 as const };
   const records = (count: number): HostedVaultShareDeliveryRecord[] => Array.from({ length: count }, (_, age) => ({
     recordKey: `${date(age)}.whoop`, occurredAt: `${date(age)}T00:00:00.000Z`,
     source: { source: "whoop", label: "WHOOP" },
     data: { date: date(age), metricKey: "steps", unit: "count", value: age + 1 },
   }));
-  function fixture(scope: TestProjectionScope = expanded, values = records(90)) {
-    const plaintext = snapshot({ id: "history", memberId: "member_a", projectionScope: scope, records: values });
+  function fixture(scope: TestProjectionScope = STEPS_SCOPE, values = records(90)) {
+    const plaintext = snapshot({ id: "history", memberId: "member_a", projectionScope: scope, records: values, memberTimeZone: "UTC" });
     installCiphertexts({ history: plaintext });
     return createPrisma({ group: { members: [{ id: "participant_a", memberId: "member_a" }] }, shares: [
       shareRow({ ciphertext: "history", id: "history", memberId: "member_a", projectionScope: scope }),
     ] });
   }
-  it("keeps ordinary reads at seven dates even under a 90-day grant", async () => {
+  it("clips the 90-date snapshot to the ordinary weekly/email seven-date read boundary", async () => {
     const { prisma } = fixture();
     const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, runtimeMemberId: RUNTIME_MEMBER_ID, projectionScopes: [STEPS_SCOPE] });
     expect(result.status).toBe("ok");
@@ -2075,10 +2074,10 @@ describe("consented group history reads", () => {
     expect(result.members[0]?.projections[0]?.records).toHaveLength(7);
     expect(result.dateCoverage).toBeUndefined();
   });
-  it("returns only consented requested history with exact available dates", async () => {
+  it("reads 90 dates from the same active plain metric with exact available dates", async () => {
     const { prisma, hostedGroupFindUnique } = fixture();
     const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, runtimeMemberId: RUNTIME_MEMBER_ID,
-      projectionScopes: [expanded], participantId: "participant_a", history: { fromDate: date(89), throughDate: date(0) } });
+      projectionScopes: [STEPS_SCOPE], participantId: "participant_a", history: { fromDate: date(89), throughDate: date(0) } });
     expect(result.status).toBe("ok");
     if (result.status !== "ok") throw new Error("expected ok");
     expect(result.members[0]?.projections[0]?.records).toHaveLength(90);
@@ -2087,23 +2086,38 @@ describe("consented group history reads", () => {
       members: expect.objectContaining({ where: { id: "participant_a" } }),
     } }));
   });
-  it("cannot widen a legacy grant through model-provided history", async () => {
-    const { prisma } = fixture(STEPS_SCOPE, records(7));
+  it("does not turn an unshared metric into a history permission", async () => {
+    const { prisma } = fixture();
     const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, runtimeMemberId: RUNTIME_MEMBER_ID,
-      projectionScopes: [expanded], participantId: "participant_a", history: { fromDate: date(89), throughDate: date(0) } });
+      projectionScopes: [PROTEIN_SCOPE], participantId: "participant_a", history: { fromDate: date(89), throughDate: date(0) } });
     expect(result.status).toBe("ok");
     if (result.status !== "ok") throw new Error("expected ok");
     expect(result.members[0]?.projections[0]).toMatchObject({ grantStatus: "not_granted", records: [] });
+    expect(result.dateCoverage?.availableDates).toEqual([]);
   });
-  it("clips dormant expanded snapshots and preserves pre-upgrade seven-day snapshots", async () => {
+  it("reports only available dates when an active plain grant has a sparse publication", async () => {
+    const { prisma } = fixture(STEPS_SCOPE, [records(90)[0]!, records(90)[89]!]);
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({ prisma, runtimeMemberId: RUNTIME_MEMBER_ID,
+      projectionScopes: [STEPS_SCOPE], participantId: "participant_a", history: { fromDate: date(89), throughDate: date(0) } });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok");
+    expect(result.members[0]?.projections[0]).toMatchObject({ grantStatus: "granted", records: [records(90)[89]!, records(90)[0]!] });
+    expect(result.dateCoverage?.availableDates).toEqual([date(89), date(0)]);
+  });
+  it("clips dormant snapshots and preserves no-zone ordinary reads until compatible publication", async () => {
     const share = { ...shareRow({ id: "history", memberId: "member_a", projectionScope: STEPS_SCOPE }), projectionScope: STEPS_SCOPE };
-    const expandedShare = { ...share, projectionScope: expanded, projectionScopeKey: buildHostedVaultShareProjectionScopeKey(expanded) };
-    const current = serializeHostedVaultShareProjectionSnapshot({ share: expandedShare, records: records(1).map((record) => ({ ...record, occurredAt: `${date(90)}T00:00:00.000Z`, recordKey: `${date(90)}.whoop`, data: { ...record.data, date: date(90) } })), memberTimeZone: "UTC" });
+    const current = serializeHostedVaultShareProjectionSnapshot({ share, records: records(1).map((record) => ({ ...record, occurredAt: `${date(90)}T00:00:00.000Z`, recordKey: `${date(90)}.whoop`, data: { ...record.data, date: date(90) } })), memberTimeZone: "UTC" });
     const legacy = serializeHostedVaultShareProjectionSnapshot({ share, records: records(7) });
     installCiphertexts({ current, legacy });
     await expect(decryptHostedVaultShareProjectionSnapshots({ entries: [
-      { ...expandedShare, ciphertext: "current" }, { ...share, ciphertext: "legacy" },
-    ] })).resolves.toEqual([[], records(7)]);
+      { ...share, ciphertext: "current" }, { ...share, ciphertext: "legacy" },
+    ], requestedHistoryDays: 7 })).resolves.toEqual([[], records(7)]);
+    await expect(decryptHostedVaultShareProjectionSnapshots({ entries: [{ ...share, ciphertext: "legacy" }],
+      requestedHistoryDays: 90 })).resolves.toEqual([null]);
+    const published = serializeHostedVaultShareProjectionSnapshot({ share, records: records(90), memberTimeZone: "UTC" });
+    installCiphertexts({ published });
+    await expect(decryptHostedVaultShareProjectionSnapshots({ entries: [{ ...share, ciphertext: "published" }],
+      requestedHistoryDays: 90 })).resolves.toEqual([records(90)]);
   });
   it("cannot substitute a regrant ciphertext for an id captured before revocation", async () => {
     const { prisma, hostedVaultShareFindMany } = fixture();
@@ -2123,9 +2137,10 @@ describe("consented group history reads", () => {
 });
 
 it("bounds a maximum 200-member three-scope read to sequential four-snapshot batches", async () => {
-  const scopes = [STEPS_SCOPE, PROTEIN_SCOPE, DEEP_SLEEP_SCOPE];
+  const scopes = [STEPS_SCOPE, DEEP_SLEEP_SCOPE, { projectionKind: "rem-sleep-days.v0" } as const];
   const members = Array.from({ length: 200 }, (_, index) => ({ id: `participant_load_${index}`, memberId: `member_load_${index}` }));
-  const shares = members.flatMap(({ memberId }) => [...scopes, PROFILE_SCOPE].map((projectionScope) => shareRow({
+  const shares = members.flatMap(({ memberId }) => [...scopes, { projectionKind: "deep-sleep-sources-days.v1" } as const,
+    { projectionKind: "rem-sleep-sources-days.v1" } as const, PROFILE_SCOPE].map((projectionScope) => shareRow({
     id: `${memberId}_${buildHostedVaultShareProjectionScopeKey(projectionScope)}`,
     memberId, projectionScope,
   })));
@@ -2134,6 +2149,10 @@ it("bounds a maximum 200-member three-scope read to sequential four-snapshot bat
   expect(result.status).toBe("ok");
   if (result.status !== "ok") throw new Error("Expected bounded room read");
   expect(result.members).toHaveLength(200);
+  expect(shares).toHaveLength(1_200); // Three requests, two sleep counterparts, one profile per participant.
+  for (const [request] of hostedVaultShareFindMany.mock.calls.slice(0, 2)) {
+    expect(request.take).toBe(1_201); // One overflow sentinel, no duplicate history authority.
+  }
   expect(transaction).toHaveBeenCalledTimes(201);
   expect(hostedVaultShareFindMany).toHaveBeenCalledTimes(202);
   expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledTimes(201);

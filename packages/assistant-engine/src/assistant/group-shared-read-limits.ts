@@ -6,7 +6,7 @@ import {
   HOSTED_RUNTIME_GROUP_SHARED_READ_PARTICIPANT_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS,
 } from '@murphai/hosted-execution/runtime-control'
-// Retain the pre-history per-scope model budget. Expanded reads are date-paged.
+// Retain the pre-history per-scope model budget. Longer reads are date-paged.
 const GROUP_SHARED_READ_MODEL_PROJECTION_MAX_CODE_UNITS = 320 * 1024
 
 export {

@@ -203,6 +203,7 @@ import {
   hostedVaultShareProjectionKindToScope,
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
+  isHostedVaultShareRecentDateProjectionKind,
   type HostedVaultShareProjectionScope,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareSelectableProjectionScope,
@@ -2592,10 +2593,10 @@ function parseHostedRuntimeGroupSharedReadResult(
 
   const dateCoverage = result.dateCoverage === undefined
     ? undefined : parseHostedGroupSharedDateCoverage(result.dateCoverage);
-  const expanded = requestedScopes.some(({ projectionScope }) => projectionScope.historyDays === 90);
-  if (expanded !== (dateCoverage !== undefined)
-    || (dateCoverage && (requestedScopes.length !== 1 || members.length > 1 || result.freshness !== undefined))) {
-    throw new TypeError("Shared history coverage requires one expanded scope and at most one participant.");
+  if (dateCoverage && (requestedScopes.length !== 1 || members.length > 1
+    || result.freshness !== undefined
+    || !isHostedVaultShareRecentDateProjectionKind(requestedScopes[0]!.projectionScope.projectionKind))) {
+    throw new TypeError("Shared history coverage requires one health scope and at most one participant.");
   }
   if (dateCoverage) {
     const dates = [...new Set(members.flatMap((member) => member.projections.flatMap((projection) =>

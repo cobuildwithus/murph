@@ -58,8 +58,6 @@ import {
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
-  HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM,
-  HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
 } from "@murphai/hosted-execution/vault-share";
@@ -70,9 +68,7 @@ const mocks = vi.hoisted(() => ({
 
 function buildExpectedSupportedProjectionScopePath(path: string): string {
   const params = new URLSearchParams();
-  params.set(HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM, HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE);
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
-    if (projectionScope.historyDays === 90) continue;
     params.append(
       "supportedProjectionScope",
       buildHostedVaultShareProjectionScopeKey(projectionScope),
@@ -97,13 +93,11 @@ function buildExpectedVaultShareActiveKindsPath(
 
 function buildExpectedGroupToolPath(): string {
   const params = new URLSearchParams();
-  params.set(HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM, HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE);
   params.set(
     HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
     HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
   );
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
-    if (projectionScope.historyDays === 90) continue;
     params.append(
       "supportedProjectionScope",
       buildHostedVaultShareProjectionScopeKey(projectionScope),
@@ -6990,6 +6984,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       `http://web-control.worker${buildExpectedVaultShareActiveKindsPath(HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE)}`,
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",
     ]);
+    // The composed group and both publication paths advertise one canonical
+    // scope per metric, not a second history registry or capability flag.
+    for (const request of requests.slice(12, 15)) {
+      const url = new URL(request.url);
+      const scopes = url.searchParams.getAll("supportedProjectionScope");
+      expect(scopes).toHaveLength(100);
+      expect(new Set(scopes).size).toBe(100);
+      expect(scopes.every((scope) => !scope.includes("historyDays"))).toBe(true);
+      expect(url.searchParams.has("supportedHistoryDays")).toBe(false);
+    }
     for (const request of requests) {
       expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
       expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");

@@ -30,7 +30,6 @@ import type {
 } from "@murphai/hosted-execution/vault-share";
 import {
   buildHostedVaultShareProjectionScopeKey,
-  getHostedVaultShareHistoryDays,
   getHostedVaultShareDailyMetricProjectionSpec,
   isHostedVaultShareRecentDateProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
@@ -151,7 +150,6 @@ import {
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
   resolveHostedGroupAccessOfferProjectionScopes,
-  freshHostedGroupHistoryOfferScopes,
 } from "./join-policy";
 import { sha256Hex } from "../primitives";
 import {
@@ -1655,7 +1653,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       throw new Error("The existing group offer is unavailable.");
     }
     const projectionScopes = newProjectionScopes
-      ?? freshHostedGroupHistoryOfferScopes(priorOffer?.group.requestedVaultShareProjectionScopes ?? []);
+      ?? priorOffer?.group.requestedVaultShareProjectionScopes ?? [];
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       additiveOnly: true,
       actorMemberId: ownerAccess.ownerMemberId,
@@ -2053,22 +2051,14 @@ async function handleHostedRuntimeGroupReadChatName(input: {
 function renderHostedGroupJoinOfferScopeSentence(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): string {
-  const historyDays = [...new Set(projectionScopes
-    .filter((scope) => isHostedVaultShareRecentDateProjectionKind(scope.projectionKind))
-    .map(getHostedVaultShareHistoryDays))];
   const displays = projectHostedVaultShareProjectionDisplays(projectionScopes);
-  const useCategories = historyDays.length < 2 && displays.length > HOSTED_GROUP_JOIN_OFFER_EXACT_SCOPE_MAX;
+  const useCategories = displays.length > HOSTED_GROUP_JOIN_OFFER_EXACT_SCOPE_MAX;
   const shareScopeLabels = useCategories
     ? renderHostedGroupJoinOfferScopeCategories(projectionScopes)
       : [
           "Murph profile name",
           ...displays.map((display) =>
-            formatHostedGroupJoinOfferShareScopeLabel(historyDays.length === 1
-              ? display.label.replace(/ \((?:7|90)-day history\)$/u, "")
-              : isHostedVaultShareRecentDateProjectionKind(display.projectionKind)
-                && getHostedVaultShareHistoryDays(display.projectionScope) === 7
-                ? `${display.label} (7-day history)`
-                : display.label)
+            formatHostedGroupJoinOfferShareScopeLabel(display.label)
           ),
         ];
   const sentence = `your ${formatHumanList(shareScopeLabels)}`;
@@ -2091,10 +2081,8 @@ function renderHostedGroupJoinOfferScopeSentence(
     );
   }
 
-  if (historyDays.length > 0) {
-    disclosures.push(historyDays.length === 1
-      ? `health sharing covers ${historyDays[0]} days, including today`
-      : "each health permission keeps its displayed 7-day or 90-day history");
+  if (projectionScopes.some((scope) => isHostedVaultShareRecentDateProjectionKind(scope.projectionKind))) {
+    disclosures.push("health sharing covers 90 days, including today and the previous 89 days");
     disclosures.push("only available data is shared; older provider history is not fetched");
   }
   return disclosures.length > 0

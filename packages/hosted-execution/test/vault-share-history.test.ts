@@ -7,12 +7,14 @@ import {
   hostedVaultShareHistoryDateWindow,
   hostedVaultShareReadAuthorityScopes,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_PROJECTION_KINDS,
+  parseHostedVaultShareActiveProjectionKindsResponse,
   HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   parseHostedVaultShareDeliverRequest,
   parseHostedVaultShareProjectionScope,
   parseHostedVaultShareProjectionScopeKey,
-  withHostedVaultShareHistory,
   type HostedVaultShareProjectionScope,
 } from "../src/vault-share.ts";
 import {
@@ -25,7 +27,6 @@ import {
 const NOW = Date.parse("2026-09-17T12:00:00.000Z");
 const date = (age: number) => new Date(NOW - age * 86_400_000).toISOString().slice(0, 10);
 const STEPS: HostedVaultShareProjectionScope = { projectionKind: "steps-days.v0" };
-const EXPANDED = withHostedVaultShareHistory(STEPS, 90);
 const source = (index: number) => ({ source: `source-${index}`, label: `source-${index}` });
 const records = (days: number, sources = 8) => Array.from({ length: days }, (_, age) =>
   Array.from({ length: sources }, (_, index) => ({
@@ -39,24 +40,38 @@ const deliver = (projectionScope: HostedVaultShareProjectionScope, values: unkno
     expectedGenerationToken: "a".repeat(43), sourceWorkspaceVersion: "7",
   });
 
-describe("consent-bound shared history", () => {
-  it("preserves every old key and requires explicit dated 90-day authority", () => {
+describe("plain metric shared history", () => {
+  it("has one plain identity per metric and retains only the pre-existing sleep aliases", () => {
     assert.equal(key(STEPS), "steps-days.v0");
-    assert.equal(key(EXPANDED), "steps-days.v0.historyDays.90");
+    const keys = HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.map(key);
+    assert.equal(keys.length, 100);
+    assert.equal(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length, 99);
+    assert.equal(new Set(keys).size, keys.length);
+    assert.equal(parseHostedVaultShareActiveProjectionKindsResponse({
+      projectionScopes: HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+    }).projectionScopes.length, 100);
+    assert.throws(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      projectionScopes: [...HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES, STEPS],
+    }), /too many scopes/);
+    assert.throws(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      projectionKinds: [...HOSTED_VAULT_SHARE_PROJECTION_KINDS, "steps-days.v0"],
+    }), /too many kinds/);
+    assert.ok(keys.every((value) => !value.includes("historyDays")));
     for (const scope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
       assert.deepEqual(parseHostedVaultShareProjectionScopeKey(key(scope), "scope"), scope);
       assert.deepEqual(parseHostedVaultShareProjectionScope(scope, "scope"), scope);
     }
-    for (const value of [7, 89, 91, "90", null]) {
+    for (const value of [7, 89, 90, 91, "90", null]) {
       assert.throws(() => parseHostedVaultShareProjectionScope({ ...STEPS, historyDays: value }, "scope"));
     }
-    assert.throws(() => parseHostedVaultShareProjectionScope({ projectionKind: "time-zone.v0", historyDays: 90 }, "scope"));
-    assert.equal(getHostedVaultShareProjectionMaxRecords(STEPS), 56);
-    assert.equal(getHostedVaultShareProjectionMaxRecords(EXPANDED), 720);
-    assert.equal(getHostedVaultShareProjectionMaxRecords({ projectionKind: "protein-days.v0" }), 8);
-    assert.equal(getHostedVaultShareProjectionMaxRecords({ projectionKind: "protein-days.v0", historyDays: 90 }), 90);
-    assert.deepEqual(hostedVaultShareReadAuthorityScopes(STEPS), [STEPS, EXPANDED]);
-    assert.deepEqual(hostedVaultShareReadAuthorityScopes(EXPANDED), [EXPANDED]);
+    assert.throws(() => parseHostedVaultShareProjectionScopeKey("steps-days.v0.historyDays.90", "scope"));
+    assert.equal(getHostedVaultShareProjectionMaxRecords(STEPS), 720);
+    assert.equal(getHostedVaultShareProjectionMaxRecords({ projectionKind: "protein-days.v0" }), 90);
+    assert.equal(getHostedVaultShareProjectionMaxRecords({ projectionKind: "time-zone.v0" }), 8);
+    assert.deepEqual(hostedVaultShareReadAuthorityScopes(STEPS), [STEPS]);
+    assert.deepEqual(hostedVaultShareReadAuthorityScopes({ projectionKind: "deep-sleep-days.v0" }), [
+      { projectionKind: "deep-sleep-days.v0" }, { projectionKind: "deep-sleep-sources-days.v1" },
+    ]);
   });
 
   it("clips today and 89 previous civil dates across DST and the date line", () => {
@@ -69,20 +84,20 @@ describe("consent-bound shared history", () => {
           new Date(Date.parse(window.through) + 86_400_000).toISOString().slice(0, 10)];
         const input = dates.map((day) => ({ ...records(1, 1)[0]!,
           recordKey: day, occurredAt: `${day}T00:00:00.000Z`, data: { ...records(1, 1)[0]!.data, date: day } }));
-        assert.deepEqual(clip({ records: input, scope: EXPANDED, timeZone, nowMs: instant })
+        assert.deepEqual(clip({ records: input, scope: STEPS, timeZone, nowMs: instant })
           .map((record) => record.occurredAt.slice(0, 10)), [window.from, window.through]);
       }
     }
-    assert.equal(clip({ records: records(90), scope: EXPANDED, timeZone: "UTC", nowMs: NOW, requestedHistoryDays: 7 }).length, 56);
-    assert.equal(clip({ records: records(90), scope: STEPS, timeZone: "UTC", nowMs: NOW, requestedHistoryDays: 90 }).length, 56);
+    assert.equal(clip({ records: records(90), scope: STEPS, timeZone: "UTC", nowMs: NOW, requestedHistoryDays: 7 }).length, 56);
+    assert.equal(clip({ records: records(90), scope: STEPS, timeZone: "UTC", nowMs: NOW, requestedHistoryDays: 90 }).length, 720);
   });
 
   it("admits all 720 source/dates and rejects overflow without truncation", () => {
-    assert.equal(deliver(EXPANDED, records(90)).records.length, 720);
+    assert.equal(deliver(STEPS, records(90)).records.length, 720);
     assert.equal(deliver(STEPS, records(7)).records.length, 56);
-    assert.throws(() => deliver(STEPS, records(8)));
-    assert.throws(() => deliver(EXPANDED, records(91)));
-    assert.throws(() => deliver(EXPANDED, records(1, 9)));
+    assert.equal(deliver(STEPS, records(8)).records.length, 64);
+    assert.throws(() => deliver(STEPS, records(91)));
+    assert.throws(() => deliver(STEPS, records(1, 9)));
   });
 
   it("keeps every source/workout in an admitted worst-width 90-day snapshot and each date page", () => {
@@ -97,7 +112,7 @@ describe("consent-bound shared history", () => {
       occurredAt: `${date(age)}T00:00:00.000Z`, recordKey: date(age), sourceRevision: "A".repeat(96),
       data: { date: date(age), workouts, calendarClosedThroughDate: date(1), timeSemantics: HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS },
     }));
-    const scope: HostedVaultShareProjectionScope = { projectionKind: "workouts.v0", historyDays: 90 };
+    const scope: HostedVaultShareProjectionScope = { projectionKind: "workouts.v0" };
     const admitted = deliver(scope, values);
     assert.ok(Buffer.byteLength(JSON.stringify(admitted)) < HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES - 1024);
     const seen: typeof admitted.records = [];
@@ -122,13 +137,14 @@ describe("consent-bound shared history", () => {
 
   it("leaves ordinary reads weekly and requires bounded single-member history", () => {
     assert.deepEqual(parseHostedGroupSharedReadOptions({}, [STEPS]), {});
-    assert.throws(() => parseHostedGroupSharedReadOptions({}, [EXPANDED]));
+
     const options = { participantId: "participant-synthetic", history: { fromDate: date(89), throughDate: date(0) } };
-    assert.deepEqual(parseHostedGroupSharedReadOptions(options, [EXPANDED]), options);
-    assert.throws(() => parseHostedGroupSharedReadOptions(options, [STEPS]));
-    assert.throws(() => parseHostedGroupSharedReadOptions({ ...options, freshness: {} }, [EXPANDED]));
-    assert.throws(() => parseHostedGroupSharedReadOptions({ ...options, history: { fromDate: date(90), throughDate: date(0) } }, [EXPANDED]));
-    assert.throws(() => parseHostedGroupSharedReadOptions(options, [EXPANDED, EXPANDED]));
+    assert.deepEqual(parseHostedGroupSharedReadOptions(options, [STEPS]), options);
+    assert.throws(() => parseHostedGroupSharedReadOptions({ history: options.history }, [STEPS]));
+    assert.throws(() => parseHostedGroupSharedReadOptions(options, [{ projectionKind: "profile-name.v0" }]));
+    assert.throws(() => parseHostedGroupSharedReadOptions({ ...options, freshness: {} }, [STEPS]));
+    assert.throws(() => parseHostedGroupSharedReadOptions({ ...options, history: { fromDate: date(90), throughDate: date(0) } }, [STEPS]));
+    assert.throws(() => parseHostedGroupSharedReadOptions(options, [STEPS, STEPS]));
   });
 
   it("never splits sources, handles exact byte boundaries, and discloses empty coverage", () => {
@@ -144,5 +160,21 @@ describe("consent-bound shared history", () => {
       assert.equal(page.records.filter((value) => value.data.date === available).length, 8);
     }
     assert.deepEqual(pageHostedGroupSharedHistory([], history).dateCoverage.availableDates, []);
+    // Two sparse dates, eight observations each; neither a date nor its sources
+    // may be split to fill a page, and the intervening gap is not observed zero.
+    const sparse = [date(89), day].flatMap((value) => Array.from({ length: 8 }, (_, index) => ({
+      occurredAt: `${value}T00:00:00.000Z`, recordKey: `${value}.source-${index}`,
+      padding: "x".repeat(20_000),
+    })));
+    const first = pageHostedGroupSharedHistory(sparse, { fromDate: date(89), throughDate: day });
+    assert.equal(first.records.length, 8);
+    assert.deepEqual(first.dateCoverage.availableDates, [date(89)]);
+    assert.ok(first.dateCoverage.nextFromDate);
+    const second = pageHostedGroupSharedHistory(sparse, {
+      fromDate: first.dateCoverage.nextFromDate!, throughDate: day,
+    });
+    assert.equal(second.records.length, 8);
+    assert.deepEqual(second.dateCoverage.availableDates, [day]);
+    assert.equal(second.dateCoverage.nextFromDate, undefined);
   });
 });

@@ -254,7 +254,7 @@ function filterDeliverableRecords(
   projectionScope: HostedVaultShareProjectionScope,
   memberTimeZone?: string,
 ): HostedVaultShareDeliveryRecord[] {
-  if (projectionScope.historyDays === 90 && memberTimeZone) {
+  if (memberTimeZone) {
     return filterHostedVaultShareHistoryRecords({ records, scope: projectionScope, timeZone: memberTimeZone });
   }
   // Preserve the deployed legacy guard during consumer-first rollout.

@@ -25,7 +25,7 @@ const DESIGN_ACTIVITY_SCOPE: HostedVaultShareProjectionScope = {
 
 const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   {
-    description: "Shares 7 days of deep sleep minutes and recorded times by source.",
+    description: "Shares 90 days of deep sleep minutes and recorded times by source.",
     label: "Deep sleep",
     legacyProjectionScope: { projectionKind: "deep-sleep-days.v0" },
     projectionScope: { projectionKind: "deep-sleep-sources-days.v1" },
@@ -34,7 +34,7 @@ const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description: "Shares 7 days of REM sleep minutes and recorded times by source.",
+    description: "Shares 90 days of REM sleep minutes and recorded times by source.",
     label: "REM sleep",
     legacyProjectionScope: { projectionKind: "rem-sleep-days.v0" },
     projectionScope: { projectionKind: "rem-sleep-sources-days.v1" },
@@ -46,7 +46,7 @@ const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
 
 const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   {
-    description: "Shares 7 days of active minutes by source.",
+    description: "Shares 90 days of active minutes by source.",
     label: "Activity minutes",
     projectionScope: DESIGN_ACTIVITY_SCOPE,
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey(DESIGN_ACTIVITY_SCOPE),
@@ -55,7 +55,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   // The four gram-macro scopes render as a single "Daily macros" card; dietary
   // calories stay a separate "Daily calories" card.
   {
-    description: "Shares 7 days of meal protein totals, including imports, with Murph as the source.",
+    description: "Shares 90 days of meal protein totals, including imports, with Murph as the source.",
     label: "Daily protein",
     projectionScope: { projectionKind: "protein-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -63,7 +63,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description: "Shares 7 days of meal carbohydrate totals, including imports, with Murph as the source.",
+    description: "Shares 90 days of meal carbohydrate totals, including imports, with Murph as the source.",
     label: "Daily carbs",
     projectionScope: { projectionKind: "carbs-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -71,7 +71,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description: "Shares 7 days of meal fat totals, including imports, with Murph as the source.",
+    description: "Shares 90 days of meal fat totals, including imports, with Murph as the source.",
     label: "Daily fat",
     projectionScope: { projectionKind: "fat-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -79,7 +79,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description: "Shares 7 days of meal fiber totals, including imports, with Murph as the source.",
+    description: "Shares 90 days of meal fiber totals, including imports, with Murph as the source.",
     label: "Daily fiber",
     projectionScope: { projectionKind: "fiber-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -87,7 +87,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description: "Shares 7 days of meal calorie totals, including imports, with Murph as the source.",
+    description: "Shares 90 days of meal calorie totals, including imports, with Murph as the source.",
     label: "Daily calories",
     projectionScope: { projectionKind: "calories-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -124,20 +124,17 @@ export function GroupJoinStudy({
       inert
     >
       <GroupJoinVariant
-        caption="An existing seven-day activity approval remains selected. Expanding to 90 days requires selecting its separate option."
-        title="History · existing seven-day approval"
+        caption="An existing activity permission now shares 90 days automatically and remains selected. Unchecking it stops sharing."
+        title="History · existing permission"
       >
-        <GroupJoinPageMock alreadyActiveMember designState="group-join-history-upgrade">
+        <GroupJoinPageMock alreadyActiveMember designState="group-join-history-existing">
           <GroupJoinAcceptForm
             activeVaultShareProjectionScopes={[DESIGN_ACTIVITY_SCOPE]}
             alreadyActiveMember
             expectedMembershipId="membership_design"
             groupName={DESIGN_GROUP_NAME}
             joinCode={DESIGN_JOIN_CODE}
-            permissions={[
-              DESIGN_PERMISSIONS[0]!,
-              ...comprehensivePermissions.filter(({ projectionScope }) => projectionScope.projectionKind === "activity-days.v0"),
-            ]}
+            permissions={comprehensivePermissions.filter(({ projectionScope }) => projectionScope.projectionKind === "activity-days.v0")}
             postJoinContactOption={null}
             postJoinDestination="/home"
           />

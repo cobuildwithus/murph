@@ -9732,7 +9732,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     720_000,
   )
 
-  it('reports sparse 90-day shared history after following date pages', async () => {
+  it('reports sparse 90-day history from an already-active metric grant after following date pages', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-history-e2e-'))
     const sharedRequests: unknown[] = []
@@ -9743,7 +9743,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildHostedGroupStatusDeveloperInstructions('shared_read'),
+        developerInstructions: buildHostedGroupStatusDeveloperInstructions('shared_read', false, '2026-09-18'),
         dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
         env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
         groupConversation: true,
@@ -9755,13 +9755,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             const history = request.history
             if (history) {
               expect(request.participantId).toBe('participant_history')
-              expect(request.projectionScopes).toEqual([{ projectionKind: 'steps-days.v0', historyDays: 90 }])
+              expect(request.projectionScopes).toEqual([{ projectionKind: 'steps-days.v0' }])
               expect(history.throughDate).toBe('2026-09-18')
             }
             const first = history?.fromDate === '2026-06-21'
             const dates = history ? (first ? ['2026-06-21'] : ['2026-09-18']) : []
-            const scope = history ? { projectionKind: 'steps-days.v0' as const, historyDays: 90 as const } : { projectionKind: 'steps-days.v0' as const }
-            const key = history ? 'steps-days.v0.historyDays.90' : 'steps-days.v0'
+            const scope = { projectionKind: 'steps-days.v0' as const }
+            const key = 'steps-days.v0'
             return {
               status: 'ok', requestedProjectionScopeKeys: [key],
               ...(history ? { dateCoverage: {
@@ -9770,9 +9770,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                 availableDates: dates, ...(first ? { nextFromDate: '2026-09-18' } : {}),
               } } : {}),
               members: [{ displayName: 'Avery', participantId: 'participant_history', memberId: 'member_history', currentTurnHandles: [],
-                projections: [{ dataStatus: 'available', grantStatus: 'granted', grantedAt: '2026-06-01T12:00:00.000Z',
+                projections: [{ dataStatus: dates.length ? 'available' : 'missing', grantStatus: 'granted', grantedAt: '2026-06-01T12:00:00.000Z',
                   projectionScope: scope, projectionScopeKey: key,
-                  records: dates.map((date) => ({ recordKey: date, occurredAt: `${date}T00:00:00.000Z`,
+                  records: dates.map((date) => ({ recordKey: `${date}.garmin`, occurredAt: `${date}T00:00:00.000Z`,
                     data: { date, metricKey: 'steps', value: first ? 4000 : 8000, unit: 'count' }, source: { label: 'Garmin', source: 'garmin' as const } })),
                 }],
               }],
@@ -9787,14 +9787,15 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       process.stdout.write(`[group-history-e2e] ${JSON.stringify({ finalMessage: result.finalMessage, sharedRequests })}\n`)
       expect(sharedRequests).toEqual([
         { projectionScopes: [{ projectionKind: 'steps-days.v0' }] },
-        { projectionScopes: [{ projectionKind: 'steps-days.v0', historyDays: 90 }], participantId: 'participant_history', history: { fromDate: '2026-06-21', throughDate: '2026-09-18' } },
-        { projectionScopes: [{ projectionKind: 'steps-days.v0', historyDays: 90 }], participantId: 'participant_history', history: { fromDate: '2026-09-18', throughDate: '2026-09-18' } },
+        { projectionScopes: [{ projectionKind: 'steps-days.v0' }], participantId: 'participant_history', history: { fromDate: '2026-06-21', throughDate: '2026-09-18' } },
+        { projectionScopes: [{ projectionKind: 'steps-days.v0' }], participantId: 'participant_history', history: { fromDate: '2026-09-18', throughDate: '2026-09-18' } },
       ])
       expect(result.finalMessage).toMatch(/4,?000/u)
       expect(result.finalMessage).toMatch(/8,?000/u)
       expect(result.finalMessage).toMatch(/(?:two|2) (?:recorded |available |shared |observed |data )?(?:days|dates|points|observations)|only.*(?:June 21|Jun 21)/iu)
       expect(result.finalMessage).toMatch(/(?:not|can.t|cannot|insufficient|isn.t|too (?:little|sparse)|doesn.t).*?(?:trend|steady|consistent)|(?:trend|steady|consistent).*?(?:not|can.t|cannot|insufficient|isn.t|doesn.t)/isu)
       expect(result.finalMessage).not.toMatch(/(?:steady|consistent) (?:90.day |three.month )?increase|averaged? .* (?:over|across) (?:all )?90 days/iu)
+      expect(result.finalMessage).not.toMatch(/(?:enable|expand|approve|grant|upgrade).{0,50}(?:history|90.day)|(?:visit|open).{0,30}(?:settings|permissions)/iu)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
@@ -38553,6 +38554,7 @@ function buildHostedGroupStatusDeveloperInstructions(
     | 'shared_read'
     | 'none' = 'families',
   assistantHostedAutomationAvailable = false,
+  currentLocalDate = '2026-07-29',
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -38568,7 +38570,7 @@ function buildHostedGroupStatusDeveloperInstructions(
       setupCommand: 'murph',
     },
     conversationScope: 'group',
-    currentLocalDate: '2026-07-29',
+    currentLocalDate,
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',

@@ -783,7 +783,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       } catch {
         return false
       }
-    }, { message: 'history requires one participant, one 90-day health scope and a date range, without freshness or group_email; freshness requires exact requested wearable dates', path: ['freshness'] })
+    }, { message: 'history requires one participant, one existing health metric scope and at most 90 inclusive dates, without freshness or group_email; freshness requires exact requested wearable dates', path: ['freshness'] })
     .refine(
       (request) =>
         request.audience === 'group_email'
@@ -6631,8 +6631,8 @@ async function readGroupEmailSharedData(input: {
     }
 
     // Keep the actual share id/key in the final send authorization proof.
-    // Only this read-side intersection admits a wider live grant for a narrower
-    // requested week; it never treats a legacy grant as 90-day authority.
+    // The shared reader already clips ordinary/email reporting windows. Only
+    // the pre-existing sleep v0/v1 mapping may match another metric scope key.
     const authorizedScopeKeysByMember = new Map(
       input.participants.filter((participant) => participant.hasEmail).map((participant) => {
         const liveKeys = new Set(participant.authorizedShares.map((share) => share.projectionScopeKey))

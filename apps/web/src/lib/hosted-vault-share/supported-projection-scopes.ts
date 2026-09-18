@@ -1,8 +1,5 @@
 import {
   buildHostedVaultShareProjectionScopeKey,
-  withHostedVaultShareHistory,
-  HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM,
-  HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE,
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -118,10 +115,6 @@ export function readHostedVaultShareSupportedProjectionScopeKeysFromRequest(
     try {
       const scope = parseHostedVaultShareProjectionScopeKey(value, "Vault share supported projection scope");
       supported.add(buildHostedVaultShareProjectionScopeKey(scope));
-      if (url.searchParams.get(HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_PARAM)
-        === HOSTED_VAULT_SHARE_HISTORY_CAPABILITY_VALUE) {
-        supported.add(buildHostedVaultShareProjectionScopeKey(withHostedVaultShareHistory(scope, 90)));
-      }
     } catch {
       // Unknown future scopes are not a reason to fall back to legacy support.
     }
