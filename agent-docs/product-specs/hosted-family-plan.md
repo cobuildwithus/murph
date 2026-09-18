@@ -80,8 +80,9 @@ quantities. One subscription contains at most one licensed monthly item for
 each supported Family tier. Murph stores only the hosted read model needed for
 entitlement, settings display, and reconciliation: customer id, subscription
 id, current billing phase/period, a per-tier capacity projection, and the
-subscription-item identity and a legacy billed total temporarily dual-written
-for older Web readers. Current capacity reads use only the per-tier projection.
+subscription-item identity. Capacity reads and writes use only the per-tier
+projection; the retired aggregate column remains physically present until the
+separately gated contract cleanup.
 
 Internal Family MRR derives from the same per-tier projection and each tier's
 Family offer price. Do not multiply the aggregate seat count by the Pulse
@@ -248,11 +249,11 @@ legacy-only groups, no invalid tier quantities/totals, and no aggregate-only
 billing authority on owner drafts. Preserve Stripe identifiers, effect claims,
 checkout intent, and billing phase/period/event history as their own authority.
 
-The reader release continues writing `billedSeatCount` atomically with tier
-rows so older growth readers still recognize newly paid groups. After that
-release is the Web reader/rollback floor and prior reader requests have drained,
-a separate release may remove aggregate writes and the Prisma field while
-leaving the physical column present. Do not roll that writer release back below
+The preceding reader release dual-writes `billedSeatCount` atomically with tier
+rows so older growth readers recognize newly paid groups. This writer-removal
+release requires that reader release to be the Web reader/rollback floor and
+all prior reader requests to have drained. It removes aggregate writes and the
+Prisma field while leaving the physical column present. Do not roll back below
 the reader floor: aggregates may already be absent or stale.
 
 Only a later contract migration may drop the physical column, after all ordinary
