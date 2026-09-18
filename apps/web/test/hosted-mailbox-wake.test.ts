@@ -1,6 +1,8 @@
+import { runtimeAdmission } from "./support/hosted-runtime-admission-fixture";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  executeHostedRuntimeOwnerCommand: vi.fn(),
   after: vi.fn(),
   ensureRuntimeProcessing: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
@@ -11,6 +13,9 @@ vi.mock("next/server", async () => {
   const actual = await vi.importActual<typeof import("next/server")>("next/server");
   return { ...actual, after: mocks.after };
 });
+vi.mock("@/src/lib/hosted-execution/runtime-owner-control", () => ({
+  executeHostedRuntimeOwnerCommand: mocks.executeHostedRuntimeOwnerCommand,
+}));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured:
     mocks.readHostedExecutionControlClientIfConfigured,
@@ -40,6 +45,7 @@ const directResult = {
 describe("hosted mailbox wake handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.executeHostedRuntimeOwnerCommand.mockImplementation(async ({ userId }) => runtimeAdmission(userId));
     mocks.after.mockReset();
     mocks.ensureRuntimeProcessing.mockReset().mockResolvedValue(directResult);
     mocks.signalHostedMailboxAppendRuntime.mockReset().mockImplementation(
@@ -75,11 +81,12 @@ describe("hosted mailbox wake handoff", () => {
     });
 
     const handoff = handoffHostedMailboxWake({ ...request, directWakeSource });
-    expect(order).toEqual(["temporal", "direct"]);
+    await vi.waitFor(() => expect(order).toEqual(["temporal", "direct"]));
     expect(mocks.after).not.toHaveBeenCalled();
     acceptTemporal(signalResult);
     await expect(handoff).resolves.toEqual(signalResult);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledExactlyOnceWith({
+      admission: runtimeAdmission(request.expectedUserId),
       commandTimeoutMs: expect.any(Number),
       onTiming: expect.any(Function),
       orchestrationAttemptId: expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u),
