@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
@@ -49,6 +50,33 @@ describe("hosted Stripe billing workflow guard", () => {
     expect(issueCodes((await readWorkflow()).replace(marker, ""))).toContain(code);
   });
 
+  it("requires the daily live schedule", async () => {
+    expect(issueCodes((await readWorkflow()).replace('  schedule:\n    - cron: "23 8 * * *"\n', "")))
+      .toContain("missing-live-schedule");
+  });
+
+  it.each([
+    ["schedule", "success", "success", 0],
+    ["schedule", "success", "skipped", 1],
+    ["schedule", "success", "failure", 1],
+    ["schedule", "failure", "success", 1],
+    ["push", "success", "skipped", 0],
+    ["push", "failure", "skipped", 1],
+    ["push", "success", "success", 1],
+    ["pull_request", "success", "skipped", 0],
+    ["pull_request", "success", "success", 1],
+  ])("enforces the actual %s result boundary for hermetic=%s live=%s", async (event, hermetic, live, status) => {
+    const job = (await readWorkflow()).split("      - name: Enforce hermetic proof and event-scoped live result")[1];
+    const script = job.split("        run: |\n")[1].replace(/^ {10}/gmu, "");
+    const result = spawnSync("bash", ["-c", script], {
+      env: { PATH: process.env.PATH, EVENT_NAME: event, HERMETIC_RESULT: hermetic,
+        LIVE_RESULT: live, SCOPE_RESULT: "success", MARKDOWN_ONLY: "false" },
+      encoding: "utf8", timeout: 5_000,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(status);
+  });
+
   it("rejects pull_request_target", async () => {
     const source = (await readWorkflow()).replace(
       "  pull_request:\n",
@@ -65,7 +93,7 @@ describe("hosted Stripe billing workflow guard", () => {
     expect(issueCodes(source)).toContain("unsafe-workflow-dispatch");
   });
 
-  it("rejects removing the main-push live trigger", async () => {
+  it("rejects removing the main-push hermetic trigger", async () => {
     const source = (await readWorkflow()).replace(
       "  push:\n    branches:\n      - main\n",
       "",
@@ -75,31 +103,31 @@ describe("hosted Stripe billing workflow guard", () => {
 
   it("rejects letting the live job start from pull request events", async () => {
     const source = (await readWorkflow()).replace(
-      "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+      "if: ${{ always() && !cancelled() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.ref_protected && needs.billing-hermetic.result == 'success' }}",
       "if: ${{ always() && !cancelled() && needs.billing-hermetic.result == 'success' }}",
     );
     expect(issueCodes(source)).toContain("missing-live-if");
   });
 
-  it("rejects allowing the skipped pull-request classifier to suppress the main live job", async () => {
+  it("rejects allowing the skipped pull-request classifier to suppress the scheduled live job", async () => {
     const source = (await readWorkflow()).replace(
-      "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
-      "if: ${{ github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
+      "if: ${{ always() && !cancelled() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.ref_protected && needs.billing-hermetic.result == 'success' }}",
+      "if: ${{ github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.ref_protected && needs.billing-hermetic.result == 'success' }}",
     );
     expect(issueCodes(source)).toContain("missing-live-if");
   });
 
   it("rejects admitting the live job without successful hermetic proof", async () => {
     const source = (await readWorkflow()).replace(
-      "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
-      "if: ${{ always() && !cancelled() && github.event_name == 'push' }}",
+      "if: ${{ always() && !cancelled() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.ref_protected && needs.billing-hermetic.result == 'success' }}",
+      "if: ${{ always() && !cancelled() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.ref_protected }}",
     );
     expect(issueCodes(source)).toContain("missing-live-if");
   });
 
   it("rejects dropping the pull-request live exclusion from the boundary", async () => {
     const source = (await readWorkflow()).replace(
-      'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]',
+      'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]; then\n                  echo "Full pull-request proof requires hermetic success and must not start the secret-bearing live job."',
       "if false",
     );
     expect(issueCodes(source)).toContain("missing-pr-live-exclusion");

@@ -2,10 +2,10 @@ name: Native Android Hosted E2E
 
 on:
   schedule:
-    - cron: "47 */6 * * *"
+    - cron: "47 */12 * * *"
   workflow_dispatch:
 
-# Every six-hour admission executes the provider journey, including unchanged
+# Every twelve-hour admission executes the provider journey, including unchanged
 # revisions. A successful scheduling job is never reused as provider evidence.
 # Manual recovery stays limited to exact current main; private source pins and
 # protected environments retain their existing authority.

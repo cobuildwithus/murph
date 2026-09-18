@@ -219,6 +219,11 @@ The OTP reauthentication cache correction and focused cryptographic regression
 proof are recorded in
 [`2026-09-17-reauth-otp-cache.md`](exec-plans/completed/2026-09-17-reauth-otp-cache.md).
 
+Live canary cadence and executed-proof requirements are owned by
+[`operations/live-provider-canaries.md`](operations/live-provider-canaries.md):
+Linq every six hours, native platforms every twelve hours, and Garmin,
+real-model, and live Stripe proof daily.
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

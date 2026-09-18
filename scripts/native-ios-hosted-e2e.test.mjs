@@ -77,7 +77,7 @@ test("protected-main policy owns both immutable native sources", async () => {
   }), /40-character SHA/u);
 });
 
-test("trusted iOS controller is six-hour, executed on every admission, and production-only", async () => {
+test("trusted iOS controller is twelve-hour, executed on every admission, and production-only", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
@@ -87,8 +87,8 @@ test("trusted iOS controller is six-hour, executed on every admission, and produ
     workflow.indexOf("\njobs:\n"),
   );
 
-  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/6 \* \* \*"/u);
-  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/6 \* \* \*"\n\s+workflow_dispatch:/u);
+  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/12 \* \* \*"/u);
+  assert.match(workflow, /schedule:\n\s+- cron: "17 \*\/12 \* \* \*"\n\s+workflow_dispatch:/u);
   assert.match(workflow, /actions: read\n\s+contents: read/u);
   assert.match(workflowConcurrency, /group: native-ios-production-canary/u);
   assert.match(workflowConcurrency, /cancel-in-progress: false/u);
@@ -136,7 +136,7 @@ test("trusted iOS controller is six-hour, executed on every admission, and produ
   }
 });
 
-test("iOS controller admits only current-main manual recovery and executes unchanged revisions on every six-hour admission", async () => {
+test("iOS controller admits only current-main manual recovery and executes unchanged revisions on every twelve-hour admission", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
