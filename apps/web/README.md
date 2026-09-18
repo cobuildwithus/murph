@@ -830,7 +830,7 @@ set, then prefers records with a reported package size, then keeps the existing
 relevance order. It does not claim sales or usage popularity. Supplement
 searches retain their existing ranking path. Food retrieval admits at
 most 250 literal exact-name rows and 10,000 GIN full-text matches before
-similarity scoring, canonical-key deduplication, and window sorting. When the
+similarity scoring and canonical-key deduplication. When the
 GIN set reaches that cap and may be truncated, one GiST branch admits up to
 10,000 strict-word-nearest names to recover stronger full-text candidates. An
 unsaturated GIN set is already exhaustive and skips that whole-catalog scan.
@@ -840,8 +840,12 @@ matches ahead of ineligible names before the cap. The bounded admissions
 preserve representative choice and canonical diversity across the established
 5,000-row boundary and ineligible-neighbor fixtures. Ranking is deterministic
 within the admitted set; it is intentionally not an exhaustive whole-catalog
-ranking. Exact IDs and UPCs continue to use direct lookup
-paths. On `foods_api_failed` failures from private food lookup, including exact
+ranking. After deduplication and any evidence, popularity, or comparison filters,
+food-name searches apply the complete deterministic order and LIMIT/OFFSET before
+computing the internal delivery ordinal. Numbering only the selected page permits
+top-N selection; the same order is retained after label and exact-record evidence
+joins, including on nonzero-offset pages. Exact IDs and UPCs continue to use direct
+lookup paths. On `foods_api_failed` failures from private food lookup, including exact
 ID/UPC dispatch and ranked search, the existing safe structured log adds only
 the closed `failureStage` value `search_rows` or `contaminant_summary`;
 PostgreSQL error codes remain in the existing safe error fields, and SQL/query

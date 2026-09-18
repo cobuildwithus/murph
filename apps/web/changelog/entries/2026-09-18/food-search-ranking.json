@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-18",
+  "order": 100,
+  "item": {
+    "id": "food-search-ranking",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less overhead in food search",
+    "summary": "Food searches do less work to prepare each page of results.",
+    "details": "Matching rules, typo recovery, result order, and returned label data stay the same. Delivery numbering applies only to the requested page.",
+    "relevanceTags": [
+      "food",
+      "search"
+    ],
+    "sourcePullRequests": []
+  }
+}
