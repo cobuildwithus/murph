@@ -220,7 +220,7 @@ proof are recorded in
 [`2026-09-17-reauth-otp-cache.md`](exec-plans/completed/2026-09-17-reauth-otp-cache.md).
 
 The iOS production-revision canary correction is tracked in
-[`2026-09-18-ios-canary-production.md`](exec-plans/active/2026-09-18-ios-canary-production.md).
+[`2026-09-18-ios-canary-production.md`](exec-plans/completed/2026-09-18-ios-canary-production.md).
 
 ## Canonical Docs
 

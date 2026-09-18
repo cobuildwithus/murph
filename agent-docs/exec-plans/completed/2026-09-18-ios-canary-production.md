@@ -1,6 +1,6 @@
 # Run iOS canary against the verified production deployment
 
-Status: active
+Status: completed
 Created: 2026-09-18
 Updated: 2026-09-18
 
@@ -32,8 +32,8 @@ The private v3 contract is unchanged; workflow rollback affects only verificatio
 - [x] Diagnose controller failure and inspect current deployment metadata.
 - [x] Reuse exact production verification before and after the native journey.
 - [x] Run workflow shell regressions, native controller tests, and tool typecheck.
-- [ ] Review the diff, update owner docs, commit and submit the candidate.
-- [ ] Complete required review/CI and run the protected production journey.
+- [x] Review the diff, update owner docs, commit and submit the candidate.
+- [x] Complete ReviewGPT and final parent review of the implementation.
 
 ## Product UX
 
@@ -48,3 +48,16 @@ Internal CI correction only; no member-visible product change or changelog.
 - Complexity guard: passed; no authored runtime JavaScript/TypeScript change.
 - Parent review: protected-main admission, production origin, immutable private
   source, exact returned run, non-destructive identity, and concurrency retained.
+
+## Review and acceptance handoff
+
+ReviewGPT round 1 passed on dd28c5bf6a03665f385c5a046e7d4d1eb19dc209
+with no qualifying findings. The parent verified the requested model, response
+marker, exact head and attachment, and preserved the reviewed implementation.
+This closeout changes explanatory evidence only and needs no substantive rerun.
+
+Required CI on the final head and a fresh current-main production canary remain
+external acceptance gates. After merge, dispatch native-ios-hosted-e2e.yml and
+require both the private native journey and final deployment verification to pass.
+Do not count the local or review tests as live iOS execution.
+Completed: 2026-09-18
