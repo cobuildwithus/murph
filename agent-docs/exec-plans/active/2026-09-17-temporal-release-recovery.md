@@ -58,3 +58,5 @@ Restore full integration coverage so the reviewed Temporal recovery-sweep respon
 - Correct only isolated test scaffolding: append while active, pause billing, and forward the existing committed-checkpoint input through the test helper. Assert acknowledgement and retain every retention/ownership assertion. Production access and runtime owners are unchanged.
 - The Non-Production Remediation exception applies: only test files and this plan change; no production source, configuration, runtime artifact, external state, or data changes.
 - All 33 signal-owner tests pass, including added paused-member checkpoint cases and existing expected-owner rejection. Final round 2 and exact-head CI remain pending.
+
+- Exact-head CI exposed a cross-app type boundary in the test helper: importing the production signal input type pulled Web internals into the Cloudflare typecheck and widened the local system-only checkpoint seam. Derive the optional input from the existing isolated test interface instead. Cloudflare typecheck passes; before/after helper JavaScript is byte-identical. The in-progress round-2 snapshot remains immutable and its result will be retained.

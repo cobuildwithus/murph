@@ -89,7 +89,6 @@ import { Client } from "pg";
 
 import { hostedRuntimeLogSubjectKey } from "@/src/lib/hosted-runtime-log/subject-key";
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
-import type { SignalHostedMailboxAppendInput } from "../../src/lib/hosted-orchestration/signal-runtime";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
 import type { HostedBillingStatusForTest } from "./hosted-billing-live-testkit";
 
@@ -2307,7 +2306,7 @@ export async function signalHostedManualRunRuntimeForTest(input: {
 export async function signalHostedMailboxAppendRuntimeForTest(input: {
   environment?: NodeJS.ProcessEnv;
   expectedUserId?: string | null;
-  knownCheckpoint?: SignalHostedMailboxAppendInput["knownCheckpoint"];
+  knownCheckpoint?: Parameters<HostedRuntimeSignalModule["signalHostedMailboxAppendRuntime"]>[0]["knownCheckpoint"];
   mailboxItemId: string;
 }): Promise<{
   signalAccepted: true;
