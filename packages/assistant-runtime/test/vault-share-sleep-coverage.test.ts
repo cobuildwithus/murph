@@ -9,6 +9,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   getHostedVaultShareDailyMetricProjectionSpec,
+  parseHostedVaultShareDeliveryRecord,
   type HostedVaultShareDailyMetricProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 import {
@@ -39,13 +40,14 @@ afterEach(async () => {
 function sleepRecords(input: {
   provider: string;
   date?: string;
-  sleepType?: "nap" | "main_sleep";
+  sleepType?: "nap" | "main_sleep" | "short_sleep";
+  sleepState?: "tentative" | "confirmed";
 }) {
   const date = input.date ?? DATE;
-  const nap = input.sleepType === "nap";
+  const nap = input.sleepType === "nap" || input.sleepType === "short_sleep";
   const id = `${input.provider}_${date}_${input.sleepType ?? "unknown"}`;
-  const startAt = `${date}T${nap ? "04:00" : "05:00"}:00.000Z`;
-  const endAt = `${date}T${nap ? "04:30" : "11:00"}:00.000Z`;
+  const startAt = `${date}T${input.sleepType === "short_sleep" ? "11:15" : nap ? "04:00" : "05:00"}:00.000Z`;
+  const endAt = `${date}T${input.sleepType === "short_sleep" ? "11:45" : nap ? "04:30" : "11:00"}:00.000Z`;
   const base = {
     schemaVersion: "murph.event.v1",
     dayKey: date,
@@ -58,7 +60,7 @@ function sleepRecords(input: {
     {
       ...base, id: `evt_${id}_session`, kind: "sleep_session",
       title: "Synthetic sleep session", startAt, endAt,
-      durationMinutes: nap ? 30 : 360, sleepType: input.sleepType,
+      durationMinutes: nap ? 30 : 360, sleepType: input.sleepType, sleepState: input.sleepState,
     },
     ...[
       ["sleep-total-minutes", nap ? 22 : 310],
@@ -192,4 +194,56 @@ it("preserves legacy unknown sleep types and independent main-sleep sources", as
   ]) {
     expect(records.map((record) => record.source?.source).sort()).toEqual(["garmin", "oura"]);
   }
+});
+
+
+it.each([
+  { sleepType: "short_sleep", sleepState: "confirmed" },
+  { sleepType: "main_sleep", sleepState: "tentative" },
+] as const)("preserves qualified sleep through personal queries, group delivery, and freshness: %j", async (classification) => {
+  const root = await createVault([
+    ...sleepRecords({ provider: "garmin", date: PREVIOUS_DATE, sleepType: "main_sleep" }),
+    ...sleepRecords({ provider: "garmin", ...classification }),
+  ]);
+  const [personal] = await summarizeWearableSleepRuntime(root, { date: DATE });
+  expect(personal).toMatchObject({ ...classification, summaryConfidence: { level: "low" } });
+  const database = openSqliteRuntimeDatabase(join(root, QUERY_DB_RELATIVE_PATH), { create: false });
+  try {
+    database.exec("PRAGMA user_version = 28");
+  } finally {
+    database.close();
+  }
+  const [rebuilt] = await summarizeWearableSleepRuntime(root, { date: DATE });
+  expect(rebuilt).toMatchObject({ ...classification, summaryConfidence: { level: "low" } });
+  const [projected] = await listMetricPointsByPublicSource(root, {
+    from: DATE, to: DATE, providers: ["garmin"], metricKeys: ["total-sleep-minutes"],
+  });
+  expect(projected?.points[0]).toMatchObject({ context: classification, confidence: "low" });
+  for (const scope of [TOTAL_SCOPE, "deep-sleep-sources-days.v1", "rem-sleep-sources-days.v1"] as const) {
+    const records = await shareMetric(root, scope);
+    const current = records.find((record) => "date" in record.data && record.data.date === DATE);
+    expect(current?.data).toMatchObject(classification);
+    expect(parseHostedVaultShareDeliveryRecord(current, { projectionKind: scope })).toEqual(current);
+    const projection: HostedRuntimeGroupSharedProjection = {
+      projectionScope: { projectionKind: scope }, projectionScopeKey: scope,
+      grantStatus: "granted", grantedAt: "2026-07-01T00:00:00.000Z",
+      dataStatus: "available", records,
+    };
+    expect(getHostedGroupWearableReportingGaps(projection, [{ projectionScopeKey: scope, date: DATE }])).toEqual([
+      { date: DATE, source: { source: "garmin", label: "Garmin" }, reportingHistory: "recent_reporting" },
+    ]);
+  }
+  expect((await readProjectableSleepNights(root)).some((record) => "date" in record.data && record.data.date === DATE)).toBe(false);
+});
+
+it("prefers main sleep when a later short session is also available", async () => {
+  const root = await createVault([
+    ...sleepRecords({ provider: "garmin", sleepType: "main_sleep", sleepState: "confirmed" }),
+    ...sleepRecords({ provider: "garmin", sleepType: "short_sleep", sleepState: "confirmed" }),
+  ]);
+  const [personal] = await summarizeWearableSleepRuntime(root, { date: DATE });
+  expect(personal).toMatchObject({ sleepType: "main_sleep", totalSleepMinutes: { selection: { value: 310 } } });
+  expect(await shareMetric(root, TOTAL_SCOPE)).toContainEqual(expect.objectContaining({
+    data: expect.objectContaining({ sleepType: "main_sleep", sleepState: "confirmed", value: 310 }),
+  }));
 });

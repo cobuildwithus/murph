@@ -21,6 +21,7 @@ import {
   type MealNutrition,
   type MeasurementQualifiers,
   type WorkoutSession,
+  type SleepSessionEventRecord,
 } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
 
@@ -6389,6 +6390,7 @@ function pushSleepSummary(
   );
   const durationMinutes = resolveSleepSummaryDurationMinutes(entry, startAt, endAt);
   const sleepType = resolveJunctionSleepType(firstStringFromPaths(entry, ["type"]));
+  const sleepState = firstStringFromPaths(entry, ["state"]);
   const sleepTimestamp = withTimestampOverride(timestamp, {
     occurredAt: endAt ?? startAt ?? timestamp.occurredAt,
   });
@@ -6412,6 +6414,7 @@ function pushSleepSummary(
         endAt,
         durationMinutes,
         sleepType,
+        sleepState: sleepState === "tentative" || sleepState === "confirmed" ? sleepState : undefined,
       }),
     }));
   }
@@ -6429,7 +6432,7 @@ function pushSleepSummary(
   pushJunctionRecoveryReadinessScore(entry, resourceContext, context, sleepTimestamp);
 }
 
-function resolveJunctionSleepType(value: string | undefined): "main_sleep" | "nap" | undefined {
+function resolveJunctionSleepType(value: string | undefined): SleepSessionEventRecord["sleepType"] {
   const normalized = value?.trim().toLowerCase().replace(/[\s-]+/gu, "_");
   if (!normalized) {
     return undefined;
@@ -6439,6 +6442,7 @@ function resolveJunctionSleepType(value: string | undefined): "main_sleep" | "na
     return "nap";
   }
 
+  if (normalized === "short_sleep" || normalized === "unknown") return normalized;
   return normalized === "sleep" || normalized === "long_sleep" ? "main_sleep" : undefined;
 }
 

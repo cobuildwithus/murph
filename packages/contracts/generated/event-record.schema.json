@@ -11581,7 +11581,16 @@
           "type": "string",
           "enum": [
             "main_sleep",
-            "nap"
+            "short_sleep",
+            "nap",
+            "unknown"
+          ]
+        },
+        "sleepState": {
+          "type": "string",
+          "enum": [
+            "tentative",
+            "confirmed"
           ]
         }
       },

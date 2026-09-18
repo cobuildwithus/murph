@@ -8,6 +8,13 @@ import {
 } from '../src/assistant/system-prompt.js'
 
 describe('group shared metric presentation prompt', () => {
+  it('qualifies short and tentative sleep in the assembled group prompt', () => {
+    const prompt = buildHostedGroupSharedPrompt()
+    expect(prompt).toContain('`sleepType=short_sleep` identifies a short session, not a confirmed nap or complete night')
+    expect(prompt).toContain('`sleepState=tentative` is a preliminary provider estimate')
+    expect(prompt).toContain('do not score a nightly target from them')
+  })
+
   it('composes bounded date checks and a consent-based schedule offer', () => {
     const prompt = buildHostedGroupSharedPrompt()
     expect(prompt).toContain('when the tool exposes `freshness`')

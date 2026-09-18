@@ -66,6 +66,7 @@ function makeNight(input: {
   recordedAt?: string;
   sleepLatencyMinutes?: number;
   sleepType?: WearableSleepSessionType;
+  sleepState?: WearableSleepNight["sleepState"];
   startAt: string;
   timeZone?: string | null;
   totalSleepMinutes?: number;
@@ -111,6 +112,7 @@ function makeNight(input: {
     sleepScore: metric("sleepScore"),
     sleepStartAt: input.startAt,
     sleepType: input.sleepType ?? "main_sleep",
+    sleepState: input.sleepState,
     sleepWindowProvider: provider,
     spo2: metric("spo2"),
     summaryConfidence: {
@@ -678,4 +680,20 @@ test("sleep patterns cap an explicit future end date at the as-of date", () => {
   assert.equal(summary.validNightCount, 1);
   assert.equal(summary.missingNightCount, 2);
   assert.equal(summary.notes.some((note) => note.includes("stop at the as-of date")), true);
+});
+
+
+test.each([
+  { sleepType: "short_sleep", sleepState: "confirmed" },
+  { sleepType: "main_sleep", sleepState: "tentative" },
+] as const)("sleep patterns do not treat qualified sessions as completed nights: %j", (classification) => {
+  const night = makeNight({
+    date: "2026-04-10", startAt: "2026-04-10T06:00:00Z", endAt: "2026-04-10T07:00:00Z",
+    ...classification,
+  });
+  const summary = summarizeWearableSleepPatternFromBundle(makeBundle([night]), {
+    from: "2026-04-10", to: "2026-04-10", now: "2026-04-11T12:00:00Z",
+  });
+  assert.equal(summary.validNightCount, 0);
+  assert.ok(summary.notes.some((note) => note.includes("Short or tentative")));
 });
