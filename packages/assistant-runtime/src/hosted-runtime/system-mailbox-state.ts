@@ -842,7 +842,7 @@ export function isHostedPlainDeviceSyncWakeHintReason(reason: string | null | un
 
 export interface HostedDeviceHintCoverage {
   coveredHintIds: ReadonlySet<string>;
-  coveredScheduleIds: ReadonlySet<string>;
+  retirableHintIds: ReadonlySet<string>;
   admittedWake?: HostedDeviceHintCoverageOwner["wake"];
 }
 
@@ -860,7 +860,7 @@ export function projectHostedDeviceHintCoverage(input: {
   const activeByConnection = new Map<string, {
     owner: HostedDeviceHintCoverageOwner;
     coveredHintIds: Set<string>;
-    coveredScheduleIds: Set<string>;
+    retirableHintIds: Set<string>;
     scheduleBlocked: boolean;
   }>();
   for (const item of input.pending) {
@@ -869,13 +869,13 @@ export function projectHostedDeviceHintCoverage(input: {
     if (isHostedDeviceHintCoverageOwner(item)) {
       const active = {
         owner: item, coveredHintIds: new Set<string>(),
-        coveredScheduleIds: new Set<string>(), scheduleBlocked: false,
+        retirableHintIds: new Set<string>(), scheduleBlocked: false,
       };
       // Another owner is a barrier for the preceding owner on this connection.
       activeByConnection.set(connectionId, active);
       coverage.set(item.itemId, {
         coveredHintIds: active.coveredHintIds,
-        coveredScheduleIds: active.coveredScheduleIds,
+        retirableHintIds: active.retirableHintIds,
       });
       continue;
     }
@@ -896,10 +896,19 @@ export function projectHostedDeviceHintCoverage(input: {
       continue;
     }
     active.coveredHintIds.add(item.itemId);
-    // Dirty work needs an executing owner. Idle schedule retirement cannot
-    // cross it, even when later schedules would otherwise be superseded.
-    if (item.wake.reason === "webhook_hint") active.scheduleBlocked = true;
-    if (!active.scheduleBlocked) active.coveredScheduleIds.add(item.itemId);
+    // Retention has already transferred a plain webhook to this exact retry.
+    // Its durable owner will fetch canonical dirty state on the next pass;
+    // keeping the duplicate hint would only block the handling frontier.
+    if (item.wake.reason === "webhook_hint") {
+      active.scheduleBlocked = true;
+      if (item.nextAttemptAt !== null
+        && item.nextAttemptAt === active.owner.nextAttemptAt
+        && !systemMailboxItemIsDue(item, input.now)
+        && (input.eligibleItemIds === undefined || input.eligibleItemIds.has(active.owner.itemId))) {
+        active.retirableHintIds.add(item.itemId);
+      }
+    }
+    if (!active.scheduleBlocked) active.retirableHintIds.add(item.itemId);
   }
   return coverage;
 }

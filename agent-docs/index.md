@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Deferred device webhook transfer and restored duplicate retirement are owned by
+`agent-docs/RELIABILITY.md`; focused mailbox and composed runtime proof are
+indexed in `agent-docs/references/testing-ci-map.md`.
+
 Healthy retention rechecks, observation-only cleanup health, and incomplete
 provider-stream close classification are owned by `apps/cloudflare/README.md`; implementation
 work is tracked in `exec-plans/completed/2026-09-18-retention-proxy-triage.md`.

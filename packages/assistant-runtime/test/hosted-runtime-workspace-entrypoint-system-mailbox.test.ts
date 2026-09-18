@@ -1928,8 +1928,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(fetchDirtyStatesCalls, 0);
         assert.equal(providerPaths.length, 0);
         const waiting = (await readHostedSystemMailboxState(vaultRoot)).pending;
-        assert.deepEqual(waiting.map((item) => item.itemId), [deviceItem.id, "mailbox_synthetic_queued_1"]);
+        assert.deepEqual(waiting.map((item) => item.itemId), [deviceItem.id]);
         assert.deepEqual(waiting[0]?.wake.kind === "device-sync.wake" ? waiting[0].wake.hint?.jobs : null, futureJobs);
+        assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
         const early = await runPass();
         assert.equal(early.nextWakeAt, retryAt);
         assert.equal(fetchDirtyStatesCalls, 0);
@@ -1963,7 +1964,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(canonicalNextReconcileAt, checkpointedReconcileAt);
         assert.ok(Date.parse(canonicalNextReconcileAt) > Date.parse(TEST_NOW));
         assert.ok(Date.parse(canonicalNextReconcileAt) < Date.parse(retryAt));
-        assert.equal(pending.length, schedule === "equal" ? 2 : 1);
+        assert.equal(pending.length, 1);
         assert.equal(pending[0]?.itemId, deviceItem.id);
         assert.equal(pending[0]?.deviceSyncContinuationOwner, true);
         if (schedule === "equal") {
@@ -1976,7 +1977,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       }
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        schedule === "superseded" || schedule === "connected" || schedule === "manual" ? "3" : schedule === "equal" ? "2" : "1",
+        retainedRetry ? "3" : "1",
       );
       if (schedule === "manual") {
         assert.equal(pending[0]?.wake.kind === "device-sync.wake" ? pending[0].wake.hint?.reason : null,
@@ -2008,13 +2009,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
       }
       if (schedule === "equal") {
-        assert.equal(pending[1]?.wake.kind === "device-sync.wake" ? pending[1].wake.reason : null, "webhook_hint");
+        // Cadence advancement and deferred webhook transfer are acknowledged
+        // in the same pass; history remains owned and cannot run early.
+        const beforeEarlyFetchCount = fetchDirtyStatesCalls;
+        await runPass();
+        assert.equal(fetchDirtyStatesCalls, beforeEarlyFetchCount);
+        assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, pending);
         assert.equal(canonicalNextReconcileAt, checkpointedReconcileAt);
         assert.ok(result.nextWakeAt);
         vi.setSystemTime(new Date(result.nextWakeAt));
         const drained = await runPass();
-        // The schedule was retired at acknowledgement. The next cold admission
-        // fetches the retained webhook and leaves the history retry untouched.
+        // The next cadence admission leaves the historical retry untouched.
         const continued = (await readHostedSystemMailboxState(vaultRoot)).pending;
         assert.equal(continued.length, 1);
         assert.equal(continued[0]?.itemId, deviceItem.id);

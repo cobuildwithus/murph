@@ -6,12 +6,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   prepareHostedSystemMailboxItemForCheckpoint,
+  retireHostedCoveredDeviceHintsAfterImport,
+  restoreHostedSystemMailboxCheckpointRollbackState,
   type HostedSystemMailboxRuntime,
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
   resolveHostedSystemMailboxNextWakeCandidate,
+  resolveHostedSystemMailboxProgress,
   type HostedSystemMailboxPendingItem,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
@@ -41,7 +44,7 @@ afterEach(async () => {
 });
 
 describe("empty system-mailbox preparation", () => {
-  it("leaves deferred device work untouched when a premature wake arrives", async () => {
+  it.each(["prepare", "import"])("retires a restored deferred webhook without executing retained work (%s)", async (entrypoint) => {
     const workspace = await createHostedRuntimeWorkspace("deferred-device-mailbox-");
     tempRoots.push(workspace.workspaceRoot);
     const now = "2026-04-27T12:00:00.000Z";
@@ -71,6 +74,19 @@ describe("empty system-mailbox preparation", () => {
       ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: "2" },
     } });
     await updateHostedSystemMailboxState(workspace.vaultRoot, () => state);
+    await restoreHostedSystemMailboxCheckpointRollbackState({ state, vaultRoot: workspace.vaultRoot });
+    if (entrypoint === "prepare") {
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"], allowedWakeKinds: ["device-sync.wake"],
+        now: () => now, runtime: createRuntime(), runtimeEnv: {}, vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({ status: "processed", itemId: "dirty" });
+    } else {
+      await retireHostedCoveredDeviceHintsAfterImport({ now, vaultRoot: workspace.vaultRoot });
+    }
+    const transferred = { pending: [retained] };
+    expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(transferred);
+    expect(resolveHostedSystemMailboxProgress({ importedSeq: "2", now, state: transferred }))
+      .toMatchObject({ handledThroughSeq: "2", firstPendingSeq: null, deviceSyncContinuationSeqs: ["1"] });
     for (let pass = 0; pass < 3; pass += 1) {
       await expect(prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["run-device-sync-wake"], allowedWakeKinds: ["device-sync.wake"],
@@ -79,7 +95,7 @@ describe("empty system-mailbox preparation", () => {
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
         now: () => now, vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({ at: retryAt, executionClass: null, reason: "device-sync.reconcile" });
-      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(state);
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual(transferred);
     }
   });
 
