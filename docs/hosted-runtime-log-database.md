@@ -1031,15 +1031,16 @@ exclusive partition:
 | `post-dispatch` | Middleware completion to action completion, including output/filtering/formatting performed there. Not pure serialization and not a guarantee of OS stream flush. |
 | `teardown` | The existing entrypoint warm-Codex cleanup; recursive batch actions do not perform this cleanup. |
 | `unattributed` | Action elapsed when no dispatch boundary was reached. It is not zero-cost setup or a guessed command phase. |
-| `query-freshness` | Shared `ensureFreshQueryProjection`, including its nested phases/rechecks. Applies across query callers/CLI families. |
+| `query-freshness` | Shared `ensureFreshQueryProjection` or the wearable-only fresh-row read, including nested phases/rechecks. Applies across query callers/CLI families. |
 | `query-manifest` / `query-status` | Each existing canonical manifest scan / projection-status read, including rechecks. |
-| `query-rebuild` / `query-wait` | Existing single-flight leader rebuild / follower's wait for that same promise. Only the leader owns rebuild time. |
+| `query-rebuild` / `query-wait` | Existing stale-reader rebuild / canonical write-lock acquisition. A reader rechecks after acquiring the lock; only actual rebuilding gets `query-rebuild`. |
 
 Nested scope summaries must not be added to their inclusive parents. Concurrent
 or overlapping named spans can overlap in time; repeated rechecks increase phase
 `count`, not command `calls`. Remaining dispatch time is **unattributed work**:
-for example stored-row reads, composition or other handler work. This patch does
-not distinguish database, provider, query execution or serialization subphases.
+for example stored-row reads, composition or other handler work. Rebuild
+subphases below distinguish existing derivation and publication owners, not
+provider/network work, query execution or output serialization.
 CPU timing is intentionally omitted: process-wide CPU deltas would mix concurrent
 invocations and single-flight owners, not reliably distinguish one caller's waits.
 
@@ -1069,9 +1070,9 @@ and children rejected before entering the CLI have no invented command timing.
 Legacy batch output, counts, lengths, durations and failure handling are unchanged.
 
 Bounds are source-owned: 32 distinct command/outcome entries per report/active
-window; 11 fixed phase names; 64 started scoped spans per invocation (plus fixed
-lifecycle samples); at most 8,192 bytes per complete UDP envelope (including the
-ephemeral key/ticks) and 256 received packets per window. The 8 KiB cap is below
+window; 17 fixed phase names (the original 11 plus six rebuild names); 64 started
+scoped spans per invocation (plus fixed lifecycle samples); at most 8,192 bytes
+per complete UDP envelope (including the ephemeral key/ticks) and 256 received packets per window. The 8 KiB cap is below
 the supported macOS 9 KiB UDP datagram limit; no host setting or permission is
 changed. The sender trims before sending, and the receiver rejects envelopes
 over that same cap. No per-call list is retained. Known omitted/overflowed calls increment
@@ -1117,6 +1118,113 @@ For the final bucket, the observed maximum supplies a finite upper bound on the
 retained sample. Histograms merge by summing corresponding counts; never compute
 per-call percentiles from per-profile averages. Truncation/loss means even those
 bounds describe the retained samples, not the complete population.
+
+### Query rebuild subphases (reader-before-producer)
+
+`packages/query/src/projection/rebuild.ts` adds only six fixed names to the
+existing `runtime-state/cli-timing` enum. The portable consumer must admit these
+names before the producer runs. Schema `murph.cli-timing.v1`, monotonic integer
+microseconds, eight histogram buckets, command/outcome identity, failure fields,
+32-command / 64-scoped-span caps, UDP 8,192-byte and HTTP 16,384-byte ceilings,
+whole-command trimming and disabled-scope no-op behavior are unchanged. No entity
+counts, IDs, paths, arguments, content, result values or error text are added.
+The enum length itself owns the exact 17-entry per-command shape bound; no
+transport limit is widened to accommodate the extra phases.
+
+| New phase | Existing operation measured |
+| --- | --- |
+| `query-source-read` | Await the strict canonical snapshot read, including its parsing/validation; not reset or the separate manifest scan. |
+| `query-wearable-dataset` | `collectWearableDataset`; wearable-only also includes the inline `createVaultReadModel` argument. Full rebuild's prior read-model assembly remains residual. |
+| `query-metric-projection` | Full rebuild's global metric projection, daily sample/metric outputs and canonical metric-target extraction. Absent from wearable-only rebuilds. |
+| `query-wearable-summary` | Derive/encode stored wearable summary rows. Absent when full rebuild reuses an already-fresh wearable generation. |
+| `query-search-documents` | Full rebuild's search-visibility filter and canonical/sample-summary document construction. No SQLite work. Absent from wearable-only rebuilds. |
+| `query-publication` | Database opening and its schema/migration setup, the existing immediate transaction (deletes, inserts, manifests and metadata), and database close. Full rebuild's result-object construction is also inside this interval. This is **not transaction-only timing**. |
+
+Synchronous work uses finally-balanced `startCliPhase`, without an added
+await/yield, helper pipeline or changed operation ordering. The existing async
+strict read uses `timeCliPhase`. Publication's outer timing `finally` encloses
+the unchanged open / transaction / close ownership: failed opens finish the
+span; transaction failure still rolls back before close; close failure still
+propagates, even after a successful commit. No canonical locking, freshness,
+transaction, result or exception policy changes.
+
+These phases are not an exhaustive partition. Full rebuild's existing canonical
+lock entry, unsupported-projection reset, internal manifest scan, default entity
+filter/read-model construction and wearable-freshness check are outside the six.
+The reset and freshness check can themselves open/read/close SQLite databases;
+that work must not be attributed to `query-publication`. Wearable-only reset is
+also residual. Instrumented outer manifest/status/lock scopes retain their old
+boundaries. Stored-row capture and public composition remain outside the rebuild
+subphases. The explicit public `rebuildQueryProjection` path emits its subphases
+but has no newly invented outer `query-rebuild`; stale query callers retain their
+existing parent span. Fresh reads and reused summaries have **absent**, not zero,
+rebuild samples. Do not subtract maxima/percentile intervals or mix unequal
+sample populations to manufacture a residual measurement.
+
+The unchanged eleven-phase `normalizeCommandTiming` rejects a command with more
+than eleven phase entries **or any unknown phase**, and `normalizeCliTiming`
+then rejects the entire optional timing object. It does not selectively preserve
+old CLI histograms within that object. Mixed-version safety means the existing
+usage parser independently drops `cliTiming` while preserving legacy native tool
+calls, durations, failures, output characters/bytes, provider requests and token
+accounting. CLI `total` histograms in the rejected object are unavailable too.
+History-backed `query-rebuild-timing-compatibility.test.ts` executes the actual
+pre-admission portable and usage readers for both profile versions; old producers
+remain accepted by the new reader. Do not depend on mixed-version dropping for
+observability: deploy and verify all consuming artifacts before producers.
+
+**Deployment is blocked, not observation-ready.** Parent verified that the
+protected private deployment workflow resolves only public `main` and exposes
+no candidate source-SHA/ref input. An isolated unmerged telemetry deployment
+therefore requires separately reviewed protected candidate-revision deployment
+support, or separately authorized merge plus normal release. This telemetry
+patch authorizes neither option, changes no workflow and claims no deployment.
+After the authorized route exists, verify the deployed reader artifacts first,
+then producer artifacts and naturally generated end-to-end phase admission.
+Only **after verified production deployment** start the **24-hour preliminary**
+window and **72-hour baseline** window. Candidate creation, staging or an older
+telemetry rollout does not start those clocks.
+
+Inspect bounded validated initial-provider, first-attempt summaries from natural
+traffic, grouped by command/outcome and fixed phase. Track retained sample counts,
+coverage/drop counters, sums, maxima and the existing histogram intervals. A
+completed failing operation can contribute a sample; interrupted/unreceived or
+hard-killed work cannot contribute a fabricated completion. The absence of a
+phase does not disprove a slow/hung path. Do not inspect member content, command
+arguments/results or issue synthetic production calls for this investigation.
+
+The public rebuild tests use the existing synthetic source-health fixture and
+real `rebuildQueryProjection`, `searchVaultRuntime` and
+`summarizeWearableSourceHealthRuntime` entrypoints. They compare enabled/disabled
+outputs and freshness, assert finite private-safe samples and finally/lock/SQLite
+failure cleanup. Existing sender/receiver, terminating-process, assembled CLI and
+HTTP-budget tests remain applicable: the exact timing scope/module/transport is
+unchanged; only its enum and query-operation spans expand. The maximum-shape
+transport tests iterate the enum and retain complete admitted phase summaries.
+No real-Codex prompt, reply, routing, result channel or tool invocation changes;
+this diagnostic-only addition does not require a new paid model replay to prove
+its wire contract. Existing end-to-end transport evidence is not proof this
+candidate has been built or deployed.
+
+An opt-in local measurement reuses that fixture (no new benchmark harness):
+
+```bash
+MURPH_QUERY_REBUILD_PHASE_MEASURE=1 pnpm --dir packages/query test \
+  test/wearable-source-health-query.test.ts -t 'synthetic rebuild phase measurement'
+```
+
+It deletes only its temporary synthetic projection, runs seven rotated
+cold-projection enabled/disabled pairs per public operation after warmup, and
+prints the seven raw disabled/enabled wall-time samples and matched
+enabled-minus-disabled differences in microseconds, numeric medians/deltas,
+fixed phase histograms and a worst-tick synthetic envelope byte size. The sink
+stays in memory and the timing endpoint is
+explicitly cleared/restored. Fixture Date is fixed for result parity; durations
+still use the real monotonic clock. It checks the six/four executed subphases,
+unchanged results, zero dropped spans and unchanged packet budget. This bounds
+instrumentation cardinality/bytes and records observed local overhead, **not a
+universal latency bound or production speedup**. Transport cost is covered
+separately by the existing integration tests.
 
 ### Private device failure evidence
 
@@ -1426,7 +1534,9 @@ rows AS MATERIALIZED (
   FROM commands CROSS JOIN LATERAL jsonb_array_elements(c -> 'phases') p
   WHERE p ->> 'phase' IN ('total', 'setup', 'dispatch', 'post-dispatch',
     'teardown', 'unattributed', 'query-freshness', 'query-manifest',
-    'query-status', 'query-rebuild', 'query-wait')
+    'query-status', 'query-rebuild', 'query-wait', 'query-source-read',
+    'query-wearable-dataset', 'query-metric-projection', 'query-wearable-summary',
+    'query-search-documents', 'query-publication')
 ), totals AS (
   SELECT period, command, outcome, p ->> 'phase' AS phase,
          sum((p ->> 'count')::numeric) AS phase_samples,

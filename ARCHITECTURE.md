@@ -1066,6 +1066,9 @@ aborts and joins its exact owned children before snapshots, workspace release,
 fence loss or shutdown; cancellation leaves durable work available to retry.
 Active extraction may defer an idle checkpoint for one finite 125-second window,
 but cannot defer pending canonical receipts or durable effects.
+Checkpoint-only return paths keep extraction paused for the durable successor.
+If this invocation instead accepts another foreground pass after checkpointing,
+it resumes its paused extractor unless shutdown or owner handoff has started.
 
 `@murphai/vault-usecases/clinical-enrichment` freezes validated proposals in
 private operational state. A separate short `apply-clinical-enrichment` action

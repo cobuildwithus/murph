@@ -1,5 +1,11 @@
 # Murph Agent Docs Index
 
+Completed query rebuild phase telemetry implementation and parent validation are
+recorded in
+[`2026-09-17-query-rebuild-phase-telemetry.md`](exec-plans/completed/2026-09-17-query-rebuild-phase-telemetry.md).
+Deployment remains blocked and not observation-ready; the live phase and
+reader-before-producer contract is owned by `docs/hosted-runtime-log-database.md`.
+
 Hosted-local pre-allocation barrier control recovery is tracked in
 [`2026-09-17-runtime-test-target-routing.md`](exec-plans/active/2026-09-17-runtime-test-target-routing.md).
 
@@ -152,7 +158,9 @@ The canary runtime-authority and WebSocket queue-bound correction is tracked in
 [`2026-09-13-canary-consent-websocket-bounds.md`](exec-plans/completed/2026-09-13-canary-consent-websocket-bounds.md).
 The canary observation window follows the production checkpoint quiet window in
 [`operations/live-provider-canaries.md`](operations/live-provider-canaries.md);
-the timing correction is tracked in
+the shared quiet-window budget, bounded publication allowance, and workflow deadline are owned by
+[`RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
+The earlier timing correction is tracked in
 [`2026-09-13-canary-checkpoint-observation.md`](exec-plans/completed/2026-09-13-canary-checkpoint-observation.md).
 The live v2 checkpoint and canonical-replica freshness correction is tracked in
 [`2026-09-14-canary-replica-freshness.md`](exec-plans/completed/2026-09-14-canary-replica-freshness.md).

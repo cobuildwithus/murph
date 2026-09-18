@@ -7,7 +7,7 @@ import { gzipSync } from "node:zlib";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
-import { HostedRuntimeReplicaPutRejectedError } from "../src/runtime-resource-client.ts";
+import { HostedRuntimeResourceRejectedError } from "../src/runtime-resource-client.ts";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER } from "@murphai/device-syncd/hosted-runtime";
 
 const hostedExecutionMocks = vi.hoisted(() => ({
@@ -5131,7 +5131,7 @@ describe("handleRunnerOutboundRequest", () => {
         "member_123",
       );
       if (kind === "malformed") {
-        await expect(response).rejects.toThrow();
+        expect((await response).status).toBe(500);
       } else {
         expect((await response).status).toBe(kind === "stale_version" ? 409 : 403);
       }
@@ -5286,14 +5286,16 @@ describe("handleRunnerOutboundRequest", () => {
     vi.stubGlobal("fetch", fixture.fetchMock);
     hostedExecutionMocks.emitHostedExecutionStructuredLog.mockClear();
 
-    await expect(handleRunnerOutboundRequest(
+    const failedResponse = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotStartRequest({
         expectedWorkspaceVersion: "4",
         workspaceVersion: "4",
       }),
       env,
       "member_123",
-    )).rejects.toThrow("workspace snapshot session create failed");
+    );
+    expect(failedResponse.status).toBe(500);
+    expect(await failedResponse.json()).toMatchObject({ code: "runtime_error" });
     const diagnosticLog =
       hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
         .map(([entry]) => entry)
@@ -5408,6 +5410,21 @@ describe("handleRunnerOutboundRequest", () => {
       }
     },
   );
+
+  it("contains asynchronous snapshot heartbeat failures at the outbound boundary", async () => {
+    vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).mockRejectedValueOnce(
+      new Error("Synthetic resource service unavailable"),
+    );
+    const response = await handleRunnerOutboundRequest(new Request(
+      "http://workspace-snapshots.worker/workspace-snapshots/synthetic-snapshot/heartbeat",
+      { method: "POST", headers: createRunnerWriteFenceProxyHeaders(), body: JSON.stringify({ snapshotId: "synthetic-snapshot" }) },
+    ), createRunnerOutboundEnv(), "member_123");
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ code: "runtime_error" });
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Hosted runner outbound request failed." }),
+    );
+  });
 
   it("refreshes only the write-fence-owned workspace snapshot handoff", async () => {
     vi.useFakeTimers();
@@ -10627,7 +10644,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     "returns replica admission rejection %s without writing or throwing from the proxy", async (code) => {
       const fixture = await createHostedRuntimeCryptoContextFixture();
       const runner = createWorkspaceVersionAwareUserRunner();
-      vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mockRejectedValue(new HostedRuntimeReplicaPutRejectedError(code));
+      vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mockRejectedValue(new HostedRuntimeResourceRejectedError(code));
       const env = createRunnerOutboundEnv({ ...fixture.env, USER_RUNNER: { getByName: runner.getByName } });
       const put = vi.spyOn(env.BUNDLES, "put");
       vi.stubGlobal("fetch", fixture.fetchMock);

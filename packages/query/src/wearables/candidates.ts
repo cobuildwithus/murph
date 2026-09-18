@@ -261,6 +261,16 @@ function collectInvalidAppleZeroSleepMetricCandidates(
   candidates: readonly WearableMetricCandidate[],
   sleepWindows: readonly WearableSleepWindowCandidate[],
 ): WearableMetricCandidate[] {
+  // Only zero-valued asleep metrics and positive awake evidence can trigger
+  // this repair. Do not associate the rest of the metric history with every window.
+  const repairCandidates = candidates.filter((candidate) =>
+    candidate.metric === "awakeMinutes"
+      ? candidate.value > 0
+      : candidate.value === 0 && INVALID_ZERO_SLEEP_METRICS.has(candidate.metric)
+  );
+  if (!repairCandidates.some((candidate) => candidate.metric === "totalSleepMinutes")) {
+    return [];
+  }
   const invalidCandidates: WearableMetricCandidate[] = [];
 
   for (const window of sleepWindows) {
@@ -268,7 +278,7 @@ function collectInvalidAppleZeroSleepMetricCandidates(
       continue;
     }
 
-    const windowCandidates = candidates.filter((candidate) => sleepMetricAssociatedWithWindow(candidate, window));
+    const windowCandidates = repairCandidates.filter((candidate) => sleepMetricAssociatedWithWindow(candidate, window));
     const awakeMinutes = firstPositiveMetricValue(windowCandidates, "awakeMinutes");
     const invalidZeroTotalCandidates = windowCandidates.filter((candidate) =>
       candidate.metric === "totalSleepMinutes" &&

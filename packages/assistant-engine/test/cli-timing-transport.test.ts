@@ -189,6 +189,7 @@ test('natural sender bounds the datagram and accounts for trimmed command summar
     assert.equal(report.outOfWindowReports, 0)
     assert.equal(report.transportTruncated, false)
     assert.ok(report.commands.length > 0)
+    assert.ok(report.commands.every(command => command.phases.length === CLI_TIMING_PHASES.length))
     assert.ok(report.droppedCalls > 0)
     assert.deepEqual(report.commands.find((command) => command.command === 'food search-labels' && command.outcome === 'error')?.failures,
       [{ code: 'VALIDATION_ERROR', stage: 'validation', count: 1, validation: { field: 'query', code: 'invalid_type', missing: true } }])

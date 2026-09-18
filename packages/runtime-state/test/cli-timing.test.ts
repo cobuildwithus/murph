@@ -829,3 +829,44 @@ test.skipIf(!researchFailureCompatibilityBase)("actual pre-research reader colla
   assert.deepEqual(old.normalizeCliTiming(expected), oldMixed);
   assert.deepEqual(normalizeCliTiming(oldMixed), oldMixed);
 });
+
+
+test("query rebuild admission is exactly seventeen fixed phases without raising invocation caps", async () => {
+  assert.deepEqual(CLI_TIMING_PHASES, [
+    "total", "setup", "dispatch", "post-dispatch", "teardown", "unattributed",
+    "query-freshness", "query-manifest", "query-status", "query-rebuild", "query-wait",
+    "query-source-read", "query-wearable-dataset", "query-metric-projection",
+    "query-wearable-summary", "query-search-documents", "query-publication",
+  ]);
+  assert.equal(CLI_TIMING_MAX_COMMANDS, 32);
+  assert.equal(CLI_TIMING_MAX_SPANS, 64);
+  const report = sample("search query");
+  for (const phase of CLI_TIMING_PHASES.slice(1)) {
+    assert.equal(addCliPhaseSample(report.commands[0]!.phases, phase, 37_000_000), true);
+  }
+  assert.equal(report.commands[0]!.phases.length, 17);
+  assert.deepEqual(normalizeCliTiming(report), report);
+  // Unknown labels are rejected, not pattern-admitted or serialized as paths.
+  for (const phase of ["query-publication/PRIVATE_SENTINEL", "QUERY-SOURCE-READ", "query-source-read "]) {
+    assert.equal(normalizeCliTiming({ ...report, commands: [{ ...report.commands[0], phases: [
+      { ...report.commands[0]!.phases[0], phase },
+    ] }] }), null);
+  }
+  assert.equal(normalizeCliTiming({ ...report, commands: [{ ...report.commands[0],
+    phases: [...report.commands[0]!.phases, report.commands[0]!.phases[0]],
+  }] }), null);
+  await clocked(async advance => {
+    let bounded!: CliTiming;
+    await withCliTiming(() => timeCliDispatch("search query", async () => {
+      for (let index = 0; index < CLI_TIMING_MAX_SPANS + 2; index += 1) {
+        const end = startCliPhase(CLI_TIMING_PHASES[11 + index % 6]!);
+        advance(1);
+        end();
+      }
+    }), value => { bounded = value; });
+    assert.equal(bounded.droppedSpans, 3); // Dispatch already owns one of 64.
+    assert.equal(bounded.commands[0]!.phases.filter(phase => CLI_TIMING_PHASES.slice(11).some(name => name === phase.phase))
+      .reduce((count, phase) => count + phase.count, 0), 63);
+    assert.deepEqual(normalizeCliTiming(bounded), bounded);
+  });
+});

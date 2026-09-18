@@ -133,6 +133,11 @@ to apply after cutover.
   one fixed synthetic goal. A read-only observer requires the current checkpoint's
   published replica and no pending conversation input, then checks canonical
   goal and distinct-ID counts. A reply alone cannot satisfy this outcome gate.
+  Each observation allows the shared default runner quiet window plus two
+  minutes for checkpoint publication (currently twelve minutes total).
+  The workflow allows fifty-five minutes for reset, three observations, replies,
+  setup, and deployment checks. Observation never relaxes the twenty-second
+  reply limit or accepts stale/missing canonical evidence.
   Initial and final authority reuse active member access followed by the ordinary
   iMessage runtime access decision. Missing or outdated browser launch grants do
   not invalidate a messaging-only canary, but lost access, suspension, deletion,
