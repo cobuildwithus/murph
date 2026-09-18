@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-18",
+  "order": 100,
+  "item": {
+    "id": "blood-oxygen-zero-samples",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable blood-oxygen imports",
+    "summary": "Unusable zero readings no longer hold up blood-oxygen imports.",
+    "details": "Days containing these readings keep your previously saved complete-day history until usable data arrives.",
+    "relevanceTags": ["devices", "reliability"],
+    "sourcePullRequests": []
+  }
+}

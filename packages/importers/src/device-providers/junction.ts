@@ -277,6 +277,7 @@ interface NormalizationContext {
   temporalFeatureCurrentFacetsByResource: Map<string, Set<string>>;
   temporalFeatureObservationCountsByDay: Map<string, number>;
   temporalFeatureSourceDay?: NonNullable<DeviceProviderNormalizationContext["completeSourceDay"]>;
+  hasZeroBloodOxygenSample?: boolean;
   authoritativeEventSets: DeviceAuthoritativeEventSetPayload[];
 }
 
@@ -3935,19 +3936,35 @@ function junctionDailyTimeseriesEntries(
     : timeseriesResourceEntries(input.payload);
 }
 
-function junctionDailyTimeseriesRowFailureReason(
-  providerValue: unknown,
-  numericProviderValue: number | undefined,
-  value: number | undefined,
-): JunctionCalendarRefreshNormalizationFailureReason {
-  if (numericProviderValue === undefined) {
-    return providerValue === undefined || providerValue === null
-      ? "daily.value_missing"
-      : "daily.value_non_numeric";
+function validateJunctionDailyTimeseriesRowOmission(
+  input: JunctionDailyTimeseriesInput,
+  { ownsTemporalFeatures, providerValue, numericProviderValue, value, timestamp, resolvedRowDiagnostic }: {
+    ownsTemporalFeatures: boolean;
+    providerValue: unknown;
+    numericProviderValue: number | undefined;
+    value: number | undefined;
+    timestamp: ReturnType<typeof resolveRecordTimestamp>;
+    resolvedRowDiagnostic: Omit<JunctionCalendarRefreshNormalizationDiagnostic, "reason">;
+  },
+): void {
+  if (!ownsTemporalFeatures) return;
+  if (input.resource === "blood_oxygen" && numericProviderValue === 0) {
+    const sourceDay = input.context.temporalFeatureSourceDay;
+    if (sourceDay) {
+      // Zero is unusable SpO2, not an exception to source/day validation.
+      resolveJunctionTemporalSourceDayInstant(sourceDay, timestamp, resolvedRowDiagnostic);
+      input.context.hasZeroBloodOxygenSample = true;
+    }
+    return;
   }
-  return value === undefined
-    ? "daily.value_out_of_range"
-    : "daily.timestamp_or_day_unresolved";
+  const reason = numericProviderValue === undefined
+    ? providerValue === undefined || providerValue === null
+      ? "daily.value_missing"
+      : "daily.value_non_numeric"
+    : value === undefined
+      ? "daily.value_out_of_range"
+      : "daily.timestamp_or_day_unresolved";
+  throw junctionCalendarRefreshNormalizationError(reason, resolvedRowDiagnostic);
 }
 
 function junctionBloodOxygenValueDiagnostic(
@@ -4077,15 +4094,11 @@ function resolveJunctionDailyTimeseriesRow(
     || !sampleAt
     || !dayKey
   ) {
-    // Rows without a usable value, timestamp semantics, or target day cannot
-    // certify a complete source day; fail the import instead of certifying a
-    // lossy response as authoritative.
-    if (ownsTemporalFeatures) {
-      const reason = junctionDailyTimeseriesRowFailureReason(
-        providerValue, numericProviderValue, value,
-      );
-      throw junctionCalendarRefreshNormalizationError(reason, resolvedRowDiagnostic);
-    }
+    // Ordinary imports may omit unusable rows. Complete days must validate
+    // the omission before they can contribute any replacement authority.
+    validateJunctionDailyTimeseriesRowOmission(input, {
+      ownsTemporalFeatures, providerValue, numericProviderValue, value, timestamp, resolvedRowDiagnostic,
+    });
     return undefined;
   }
 
@@ -4378,18 +4391,15 @@ function appendJunctionTimeseriesSample(
   }
 }
 
-function appendJunctionTemporalSourceDaySample(
-  temporalAggregates: Map<string, JunctionDailyTimeseriesAggregate>,
+function resolveJunctionTemporalSourceDayInstant(
   sourceDay: NonNullable<NormalizationContext["temporalFeatureSourceDay"]>,
-  sample: JunctionDailyTimeseriesSample,
-  resourceSlug: string,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
   resolvedRowDiagnostic: Omit<JunctionCalendarRefreshNormalizationDiagnostic, "reason">,
-): void {
-  const { resourceContext, timestamp, value } = sample;
+): string | null {
   const temporalSampleAt = resolveJunctionTemporalFeatureInstant(
     timestamp, sourceDay.timeZone, resolvedRowDiagnostic,
   );
-  if (temporalSampleAt === null) return;
+  if (temporalSampleAt === null) return null;
   const vaultDayKey = toLocalDayKey(temporalSampleAt, sourceDay.timeZone);
   if (vaultDayKey !== sourceDay.dayKey) {
     // The provider fetched the exact authorized window, so a row that
@@ -4400,6 +4410,21 @@ function appendJunctionTemporalSourceDaySample(
       resolvedRowDiagnostic,
     );
   }
+  return temporalSampleAt;
+}
+
+function appendJunctionTemporalSourceDaySample(
+  temporalAggregates: Map<string, JunctionDailyTimeseriesAggregate>,
+  sourceDay: NonNullable<NormalizationContext["temporalFeatureSourceDay"]>,
+  sample: JunctionDailyTimeseriesSample,
+  resourceSlug: string,
+  resolvedRowDiagnostic: Omit<JunctionCalendarRefreshNormalizationDiagnostic, "reason">,
+): void {
+  const { resourceContext, timestamp, value } = sample;
+  const temporalSampleAt = resolveJunctionTemporalSourceDayInstant(
+    sourceDay, timestamp, resolvedRowDiagnostic,
+  );
+  if (temporalSampleAt === null) return;
   const temporalKey = junctionTimeseriesSourceDayKey(resourceContext, sourceDay.dayKey);
   let temporalAggregate = temporalAggregates.get(temporalKey);
   if (!temporalAggregate) {
@@ -4443,6 +4468,8 @@ function publishJunctionTemporalAggregates(
   temporalFeatureResource: Parameters<typeof buildJunctionTemporalFeatures>[0]["resource"],
   temporalAggregates: ReadonlyMap<string, JunctionDailyTimeseriesAggregate>,
 ): void {
+  // Every row has been validated; never publish a filtered replacement day.
+  if (resource === "blood_oxygen" && context.hasZeroBloodOxygenSample) return;
   for (const aggregate of [...temporalAggregates.values()].sort(
     compareJunctionDailyTimeseriesAggregates,
   )) {
@@ -4997,7 +5024,10 @@ function finalizeJunctionTemporalAuthoritativeSets(context: NormalizationContext
     return;
   }
   for (const resource of [...new Set(sourceDay.resources)].sort()) {
-    if (!isJunctionTemporalFeatureResource(resource)) {
+    if (
+      !isJunctionTemporalFeatureResource(resource)
+      || (resource === "blood_oxygen" && context.hasZeroBloodOxygenSample)
+    ) {
       continue;
     }
     context.authoritativeEventSets.push({

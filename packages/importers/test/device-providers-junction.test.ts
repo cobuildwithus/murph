@@ -1380,7 +1380,6 @@ test("Junction complete source days reject lossy rows before the canonical write
 });
 
 test.each([
-  { value: 0, unit: "%", valueKind: "number", valueRange: "zero", unitKind: "percent" },
   { value: -1, unit: "percent", valueKind: "number", valueRange: "negative", unitKind: "percent" },
   { value: "101", unit: "fraction", valueKind: "numeric_string", valueRange: "above_percentage", unitKind: "ratio" },
   { value: 101, unit: undefined, valueKind: "number", valueRange: "above_percentage", unitKind: "missing" },
@@ -1405,15 +1404,22 @@ test.each([
   });
 });
 
-test("Junction Withings blood oxygen preserves valid facts across invalid days and recovers", async () => {
+const JUNCTION_ZERO_BLOOD_OXYGEN_RESPONSES = [
+  [0], ["0"], ["0.0"], [-0], [97, 0, 98], [0, 97],
+  [0.97, "0", 0.98], ["97", "0", "98"],
+] as const;
+
+test("Junction blood oxygen preserves temporal facts across zero and invalid days and recovers", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-oxygen-recovery");
-  const importDay = (values: readonly number[], revisionAt: string) =>
+  const importDay = (
+    values: readonly (number | string)[], revisionAt: string, includeSibling = false,
+  ) =>
     importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       {
         completeSourceDay: {
           connectionId: "junction-test-connection",
           dayKey: "2026-04-22",
-          resources: ["blood_oxygen"],
+          resources: includeSibling ? ["blood_oxygen", "stress_level"] : ["blood_oxygen"],
           revisionAt,
           timeZone: "UTC",
         },
@@ -1423,6 +1429,15 @@ test("Junction Withings blood oxygen preserves valid facts across invalid days a
           accountId: "junction-test-account",
           importedAt: revisionAt,
           timeseries: {
+            ...(includeSibling ? {
+              stress_level: { groups: { garmin: [{
+                source: { provider: "garmin", type: "watch" },
+                data: [0, 20, 70, 80].map((value, index) => ({
+                  timestamp: `2026-04-22T${index < 2 ? "07" : "19"}:0${index}:00.000Z`,
+                  value,
+                })),
+              }] } },
+            } : {}),
             blood_oxygen: {
               groups: {
                 withings: [{
@@ -1453,10 +1468,29 @@ test("Junction Withings blood oxygen preserves valid facts across invalid days a
       createdAt: "2026-04-22T00:00:00.000Z",
       timezone: "UTC",
     });
+    const zeroWithoutHistory = await importDay([0], "2026-04-24T11:00:00.000Z");
+    assert.deepEqual(zeroWithoutHistory.events, []);
+    assert.deepEqual(zeroWithoutHistory.eventShardPaths, []);
+    assert.equal(zeroWithoutHistory.persistedEvidencePartCount, 0);
     const seeded = await importDay([97, 98, 98, 99], "2026-04-24T12:00:00.000Z");
     const before = await liveFacets(seeded.eventShardPaths);
     assert.ok(before.length > 0);
-    for (const invalid of [0, -1, 101]) {
+    const readEventBytes = () => Promise.all(seeded.eventShardPaths.map((relativePath) =>
+      readFile(join(vaultRoot, relativePath))
+    ));
+    const beforeBytes = await readEventBytes();
+    for (const values of JUNCTION_ZERO_BLOOD_OXYGEN_RESPONSES) {
+      // Replay both the exact response and a later pull: neither may append a
+      // partial revision or a tombstone, even when valid samples accompany zero.
+      for (const revisionAt of [
+        "2026-04-24T13:00:00.000Z", "2026-04-24T13:00:00.000Z", "2026-04-24T13:30:00.000Z",
+      ]) {
+        await importDay(values, revisionAt);
+        assert.deepEqual(await readEventBytes(), beforeBytes);
+        assert.deepEqual(await liveFacets(seeded.eventShardPaths), before);
+      }
+    }
+    for (const invalid of [-1, 101]) {
       await assert.rejects(
         importDay([invalid, 98, 99], "2026-04-24T13:00:00.000Z"),
         (error: unknown) => {
@@ -1471,18 +1505,36 @@ test("Junction Withings blood oxygen preserves valid facts across invalid days a
       assert.deepEqual(await liveFacets(seeded.eventShardPaths), before);
     }
 
+    const sibling = await importDay([97, 0, 98], "2026-04-24T13:45:00.000Z", true);
+    const siblingRecords = latestLiveRecords((await Promise.all(sibling.eventShardPaths.map(
+      (relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath }),
+    ))).flat());
+    assert.equal(siblingRecords.filter((record) => typeof record.metric === "string"
+      && record.metric.startsWith("stress-")).length, 3);
+    assert.deepEqual(await liveFacets(seeded.eventShardPaths), before);
+
     // Both supported scalar representations recover through the same day owner.
     const corrected = await importDay([88, 88, 98, 98], "2026-04-24T14:00:00.000Z");
     const after = await liveFacets(corrected.eventShardPaths);
     const below = after.find((record) => record.metric === "spo2-samples-below-90-percent");
     assert.equal(storedObservationValue(below), 50);
     assert.ok(eventRevisionFromLifecycle(below?.lifecycle) > 1);
+    const correctedBytes = await readEventBytes();
+    await importDay([88, 88, 98, 98], "2026-04-24T14:00:00.000Z");
+    assert.deepEqual(await readEventBytes(), correctedBytes);
     const fraction = await importDay([0.88, 0.88, 0.98, 0.98], "2026-04-24T15:00:00.000Z");
     const fractionFacets = await liveFacets(fraction.eventShardPaths);
     assert.deepEqual(
       fractionFacets.map((record) => [record.id, record.metric, storedObservationValue(record)]).sort(),
       after.map((record) => [record.id, record.metric, storedObservationValue(record)]).sort(),
     );
+
+    await importDay([], "2026-04-24T16:00:00.000Z");
+    assert.deepEqual(await liveFacets(seeded.eventShardPaths), []);
+    const emptyBytes = await readEventBytes();
+    await importDay([], "2026-04-24T16:00:00.000Z");
+    await importDay([0], "2026-04-24T17:00:00.000Z");
+    assert.deepEqual(await readEventBytes(), emptyBytes);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -16596,6 +16648,101 @@ test("Junction daily row validation reports the first invalid delivered row befo
         timestampKind: "absolute", timestampSemantics: "utc",
         valueKind, valueRange, unitKind: "missing",
       });
+      return true;
+    });
+  }
+});
+
+
+test("Junction zero oxygen samples do not grant complete-day replacement authority", () => {
+  for (const values of JUNCTION_ZERO_BLOOD_OXYGEN_RESPONSES) {
+    const payload = normalizeCompleteTemporalSourceDay({
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: { blood_oxygen: { groups: { withings: [{
+        source: { provider: "withings", type: "watch" },
+        data: values.map((value, index) => ({
+          timestamp: new Date(Date.UTC(2026, 3, 22, 7, index)).toISOString(),
+          value, unit: "%",
+        })),
+      }] } } },
+    }, "2026-04-22");
+    assert.equal(payload.events?.length ?? 0, 0);
+    assert.equal(payload.authoritativeEventSets?.length ?? 0, 0);
+    assert.equal(payload.evidenceParts?.length ?? 0, 0);
+    assert.equal(payload.samples?.length ?? 0, 0);
+  }
+});
+
+
+test("Junction zero oxygen uses finite numeric alias selection and stays resource-local", () => {
+  const timestamp = "2026-04-22T07:00:00.000Z";
+  for (const alias of [
+    "value", "spo2", "spO2", "bloodOxygen", "blood_oxygen", "oxygenSaturation", "oxygen_saturation",
+  ]) {
+    const payload = normalizeCompleteTemporalSourceDay({
+      timeseries: { blood_oxygen: { groups: {
+        garmin: [{ source: { provider: "garmin", type: "watch" }, data: [{ timestamp, value: 97 }] }],
+        withings: [{ source: { provider: "withings", type: "watch" }, data: [
+          { timestamp, value: "not-numeric", [alias]: "0" },
+        ] }],
+      } } },
+    }, "2026-04-22");
+    assert.equal(payload.events?.length ?? 0, 0);
+    assert.equal(payload.evidenceParts?.length ?? 0, 0);
+    assert.equal(payload.authoritativeEventSets?.length ?? 0, 0);
+  }
+
+  const normalize = (data: readonly Record<string, unknown>[]) => normalizeJunctionSnapshot({
+    timeseries: { blood_oxygen: { groups: { garmin: [{
+      source: { provider: "garmin", type: "watch" }, data,
+    }] } } },
+  });
+  for (const values of [[97, 0, 98], [0.97, "0", 0.98], ["97", "0.0", "98"]]) {
+    const payload = normalize(values.map((value) => ({ timestamp, value })));
+    assert.equal(payload.events?.find((event) => event.fields?.metric === "spo2")?.fields?.value, 97.5);
+    assert.equal(payload.events?.find((event) => event.fields?.metric === "lowest-spo2")?.fields?.value, 97);
+  }
+  assert.equal(normalize([{ timestamp, value: 0, spo2: 97 }]).events?.length ?? 0, 0);
+  assert.equal(normalize([{ timestamp, value: 97, spo2: 0 }]).events?.[0]?.fields?.value, 97);
+});
+
+test("Junction zero oxygen does not hide malformed values, timestamps, or source identity", () => {
+  const timestamp = "2026-04-22T07:00:00.000Z";
+  const zero = { timestamp, value: 0 };
+  const invalidRows: Record<string, unknown>[] = [
+    ...[-1, 101, undefined, null, Number.NaN, Number.POSITIVE_INFINITY, "bad", {}, false]
+      .map((value) => ({ timestamp, value })),
+    ...[undefined, 0, "not-a-timestamp", "2026-04-22T07:00:00Z-extra", "2026-04-31T07:00:00Z",
+      "2026-04-23T00:00:00Z"].map((timestamp) => ({ timestamp, value: "0" })),
+    { timestamp, timestampSemantics: "floating", value: 0 },
+  ];
+  for (const row of invalidRows) {
+    for (const data of [[zero, row], [row, zero]]) {
+      assert.throws(() => normalizeCompleteTemporalSourceDay({
+        importedAt: "2026-04-24T12:00:00.000Z",
+        timeseries: { blood_oxygen: { groups: { garmin: [{
+          source: { provider: "garmin", type: "watch" }, data,
+        }] } } },
+      }, "2026-04-22"), JunctionSparseCalendarRepairNormalizationError);
+    }
+  }
+  assert.throws(() => normalizeCompleteTemporalSourceDay({
+    timeseries: { blood_oxygen: [zero] },
+  }, "2026-04-22"), (error: unknown) => {
+    assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+    assert.equal(error.diagnostic.reason, "source_context.unresolved");
+    return true;
+  });
+  for (const [dayKey, timestamp] of [
+    ["2026-03-08", "2026-03-08 02:30"], ["2026-11-01", "2026-11-01 01:30"],
+  ] as const) {
+    assert.throws(() => normalizeCompleteTemporalSourceDay({
+      timeseries: { blood_oxygen: { groups: { garmin: [{
+        source: { provider: "garmin", type: "watch" }, data: [{ timestamp, value: 0 }],
+      }] } } },
+    }, dayKey, "2026-11-03T12:00:00.000Z", "America/Chicago"), (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.equal(error.diagnostic.reason, "temporal.local_time_ambiguous_or_nonexistent");
       return true;
     });
   }
