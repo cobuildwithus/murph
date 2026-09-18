@@ -2753,6 +2753,13 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
   userId: string;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }): Promise<void> {
+  // This is an observed interrupted generation, not proof of failed delivery:
+  // Codex still owns cancellation and transport recovery.
+  const interruptedGeneration = input.diagnostic.responseRequestKind === "generation"
+    && input.diagnostic.responseAssociationKind === "single-request"
+    && input.diagnostic.responseInspectionIncomplete === false
+    && input.diagnostic.responseTerminalKind === null
+    && (input.diagnostic.closeCode === 1006 || input.diagnostic.closeCode === 1011);
   const route = HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite;
   const writeFence = input.writeFence ?? readRuntimeLogWriteFenceMetadata({
     headers: input.request.headers,
@@ -2772,7 +2779,7 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
               || input.diagnostic.providerResponseOutcomeKind === "transport_error"
               || (input.diagnostic.websocketMilestone === "closed"
                 && input.diagnostic.upstreamSendObserved === true
-                && input.diagnostic.upstreamFrameObserved === false)
+                && (input.diagnostic.upstreamFrameObserved === false || interruptedGeneration))
               ? "warn"
               : "debug",
           phase: "fetch",

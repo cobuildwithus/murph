@@ -533,6 +533,15 @@ function runnerWorkspaceInvocationOperationMatches(
     && operation.userId === userId;
 }
 
+function runnerWorkspaceInvocationMatchesWake(
+  operation: RunnerWorkspaceInvocationOperation,
+  input: RunnerRuntimeWakeInput,
+): boolean {
+  return runnerWorkspaceInvocationOperationMatches(operation, input, input.userId)
+    && (input.processingMode === undefined
+      || operation.processingMode === normalizeRunnerRuntimeProcessingMode(input.processingMode));
+}
+
 function createActiveRuntimeUserFence(
   operation: {
     attemptId: string;
@@ -1630,18 +1639,7 @@ export class RunnerContainer extends Container {
     const active = this.readWorkspaceInvocationOperation();
     diagnostics.wakeActivePointerPresent = active !== null;
     diagnostics.wakeLifecyclePendingCount = this.lifecycleLockPendingCount;
-    if (
-      active
-      && (
-        active.userId !== input.userId
-        || active.attemptId !== input.attemptId
-        || active.leaseGeneration !== input.leaseGeneration
-        || (
-          input.processingMode !== undefined
-          && active.processingMode !== normalizeRunnerRuntimeProcessingMode(input.processingMode)
-        )
-      )
-    ) {
+    if (active && !runnerWorkspaceInvocationMatchesWake(active, input)) {
       return { kind: "unknown", reason: "active-child-rejected" };
     }
 
@@ -1713,6 +1711,18 @@ export class RunnerContainer extends Container {
 
     if (!active && this.isPlatformContainerDefinitelyStopped()) {
       return { kind: "not-wakeable", reason: "no-active-child" };
+    }
+
+    if (
+      active
+      && input.processingMode === "inbox_media_retention"
+      && !active.requiresFailClosedStopReason
+    ) {
+      // Finite retention work treats a wake as foreground preemption, which
+      // interrupts its checkpoint. The exact healthy operation already proves
+      // admission; same-mode rechecks must not interrupt it. Recovery and
+      // pointerless probes keep the existing paths above and below.
+      return { action: "already_running", kind: "accepted" };
     }
 
     this.noteRunnerActivity("runtime-wake");
@@ -2250,7 +2260,7 @@ export class RunnerContainer extends Container {
       );
       return false;
     }
-    if (isRunnerContainerStopped(status)) {
+    if (this.isPlatformContainerDefinitelyStopped() || isRunnerContainerStopped(status)) {
       this.deleteSchedules("onActivityExpired");
       return false;
     }
@@ -2585,7 +2595,9 @@ export class RunnerContainer extends Container {
 
   private async readWorkspaceInvocationHealth(): Promise<RunnerContainerHealth> {
     const signal = AbortSignal.timeout(DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS);
-    const response = await this.containerFetch(RUNNER_HEALTH_URL, {
+    // Health observes an existing process. SDK proxying can start a stopped
+    // container when its cached lifecycle state has not caught up.
+    const response = await this.ctx.container!.getTcpPort(RUNNER_PORT).fetch(RUNNER_HEALTH_URL, {
       method: "GET",
       signal,
     });

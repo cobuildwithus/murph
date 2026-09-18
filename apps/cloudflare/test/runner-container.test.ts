@@ -1532,7 +1532,7 @@ describe("RunnerContainer", () => {
     await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
-  it("does not trust an identity-blind accepted wake when the outer active-operation pointer is missing", async () => {
+  it.each(["default", "inbox_media_retention"] as const)("does not trust an identity-blind accepted %s wake when the outer active-operation pointer is missing", async (processingMode) => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/internal/runtime-wake")) {
@@ -1551,6 +1551,7 @@ describe("RunnerContainer", () => {
     await expect(container.wakeRuntime({
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
+      processingMode,
       userId: "member_123",
     })).resolves.toMatchObject({
       kind: "unknown",
@@ -1908,6 +1909,43 @@ describe("RunnerContainer", () => {
     );
     expect(executeCalls).toHaveLength(1);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("observes a running retention checkpoint without sending a runtime wake", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), { status: 200 });
+        }
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, { status: 204, headers: { "x-runtime-wake-accepted": "1" } });
+        }
+        runnerRequestStarted.resolve();
+        return await runnerResponse.promise;
+      }),
+    });
+    const request = { ...createRunnerRequest(), processingMode: "inbox_media_retention" as const };
+    const invocation = container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 60_000, userId: request.userId });
+    await runnerRequestStarted.promise;
+    try {
+      for (const mismatch of [{ attemptId: "other-attempt" }, { leaseGeneration: "12" }, { processingMode: "default" as const }]) {
+        await expect(container.wakeRuntime({ attemptId: request.attemptId, leaseGeneration: request.leaseGeneration,
+          processingMode: request.processingMode, userId: request.userId, ...mismatch }))
+          .resolves.toMatchObject({ kind: "unknown", reason: "active-child-rejected" });
+      }
+      await expect(container.ensureProcessing({ activeRuntime: {
+        attemptId: request.attemptId, leaseGeneration: request.leaseGeneration,
+        processingMode: request.processingMode, userId: request.userId,
+      }, userId: request.userId })).resolves.toMatchObject({ kind: "accepted", action: "already_running" });
+      // Runtime retention treats a wake as foreground preemption and aborts
+      // its checkpoint. An ordinary same-mode recheck must leave it alone.
+      expect(containerFetch.mock.calls.some(([url]) => String(url).endsWith("/internal/runtime-wake"))).toBe(false);
+    } finally {
+      runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), { status: 200 }));
+      await expect(invocation).resolves.toEqual(createRunnerResult());
+    }
   });
 
   it("reports already_running when the active child records a pending wake", async () => {
@@ -6692,7 +6730,7 @@ describe("RunnerContainer", () => {
     proveFailClosedChildAbortFallback,
   );
 
-  it("retries failed invocation cleanup from the next exact wake", async () => {
+  it.each(["default", "inbox_media_retention"] as const)("retries failed %s invocation cleanup from the next exact wake", async (processingMode) => {
     let destroyAttempts = 0;
     let status: "running" | "stopped" = "running";
     const destroy = vi.fn(async () => {
@@ -6732,7 +6770,7 @@ describe("RunnerContainer", () => {
       getState,
       initialStatus: "running",
     });
-    const request = createRunnerRequest("evt_cleanup_retry_from_exact_wake");
+    const request = { ...createRunnerRequest("evt_cleanup_retry_from_exact_wake"), processingMode };
 
     const invokeError = await container.invoke({
       job: {
@@ -6754,6 +6792,7 @@ describe("RunnerContainer", () => {
     await expect(container.wakeRuntime({
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
+      processingMode,
       userId: "member_123",
     })).resolves.toMatchObject({
       kind: "not-wakeable",
@@ -6844,7 +6883,7 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("ignores health zero until an absent wake settles the exact stop", async () => {
+  it.each(["default", "inbox_media_retention"] as const)("ignores %s health zero until an absent wake settles the exact stop", async (processingMode) => {
     let healthProbeFails = false;
     let status: "running" | "stopped" = "running";
     const containerFetch = vi.fn(async (url: string) => {
@@ -6896,7 +6935,7 @@ describe("RunnerContainer", () => {
       getState,
       initialStatus: "running",
     });
-    const request = createRunnerRequest("evt_response_lost_after_accept");
+    const request = { ...createRunnerRequest("evt_response_lost_after_accept"), processingMode };
 
     await expect(container.invoke({
       job: {
@@ -6953,6 +6992,7 @@ describe("RunnerContainer", () => {
     await expect(container.wakeRuntime({
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
+      processingMode,
       userId: "member_123",
     })).resolves.toMatchObject({
       kind: "not-wakeable",
@@ -10076,6 +10116,54 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledOnce();
     expect(renewActivityTimeout).not.toHaveBeenCalled();
     expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+  });
+
+  it("does not restart a natively stopped container during lifecycle health cleanup", async () => {
+    const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      platformRunning: false,
+    });
+
+    await container.onActivityExpired();
+
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+  });
+
+  it("does not restart a container that stops between lifecycle status and health reads", async () => {
+    let platformRunning = true;
+    const startContainer = vi.fn();
+    const health = vi.fn(async () => {
+      // The native request observes stoppedness after the cleanup status read.
+      platformRunning = false;
+      throw new Error("Container is not running");
+    });
+    const sdkFetch = vi.fn(async () => {
+      platformRunning = false;
+      // Model the SDK's automatic restart when its cached status is stale.
+      startContainer();
+      return Response.json(createRunnerHealthResult());
+    });
+    const { container, destroy } = createContainerDouble({
+      initialStatus: "running",
+      containerFetch: sdkFetch,
+      state: {
+        container: {
+          get running() { return platformRunning; },
+          getTcpPort: () => ({ fetch: health }),
+        },
+      },
+    });
+
+    await container.onActivityExpired();
+
+    expect(startContainer).not.toHaveBeenCalled();
+    expect(sdkFetch).not.toHaveBeenCalled();
+    expect(health).toHaveBeenCalledOnce();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
   });
 
   it("re-arms cleanup when child health is unavailable", async () => {
