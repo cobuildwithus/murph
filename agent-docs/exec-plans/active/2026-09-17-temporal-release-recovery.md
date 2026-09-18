@@ -53,7 +53,8 @@ Restore full integration coverage so the reviewed Temporal recovery-sweep respon
 - Passed: PR #3558 exact-head required public CI and final ReviewGPT; merged.
 - Fresh full integration passes Temporal orchestration but exposes three remaining blockers: managed snapshot identity rejection becomes HTTP 500, the fairness observer requires a retired admission event, and the media fixture's idle period exceeds its completion deadline.
 - Passed: 357 snapshot/outbound and admission-window tests, Cloudflare typecheck, and the complexity guard for the follow-up correction. PR #3570 passed final ReviewGPT and exact-head CI and merged. Fresh integration passed checkpoint durability and fairness; its media lane reached a later provider-handoff scenario and exposed a one-shot webhook sender that omitted the existing bounded retry contract. Reuse the common signed sender; retain the handoff race and all provider/completion assertions. Fresh full integration and release admission remain pending.
-- Pending: read-only production routing and recovery-sweep outcomes.
+- PR #3574 passed exact-head CI and final ReviewGPT, then merged the shared sender correction. A fresh integration candidate exposed a redundant lost-operation test expiry after the runtime fence was already cleared. Remove that call while preserving recovery and subsequent fresh-message assertions.
+- Pending: fresh full integration, release admission, and read-only production routing and recovery-sweep outcomes.
 
 ## Review disposition
 
