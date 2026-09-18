@@ -224,6 +224,9 @@ Live canary cadence and executed-proof requirements are owned by
 Linq every six hours, native platforms every twelve hours, and Garmin,
 real-model, and live Stripe proof daily.
 
+The iOS production-revision canary correction is tracked in
+[`2026-09-18-ios-canary-production.md`](exec-plans/completed/2026-09-18-ios-canary-production.md).
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

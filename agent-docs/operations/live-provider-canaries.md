@@ -12,7 +12,10 @@ age of an executed run; this system adds no product-state receipt database.
 - Native iOS and Android execute on every staggered twelve-hour schedule, including
   unchanged revisions. They retain immutable private-source pins, exact deployed
   revision checks, non-destructive identity ownership, and fixed non-canceling
-  concurrency. Manual recovery is restricted to current protected main.
+  concurrency. Manual recovery is restricted to current protected main. iOS
+  independently selects and verifies the actual production deployment, including
+  protected-main ancestry, dispatch-time equality, and final exact-deployment
+  verification; a newer controller revision does not block a stable deployment.
 - Linq resolves the actual production alias before its six-hour journey, verifies
   protected-main ancestry and exact deployment, and repeats deployment validation
   after execution. A manual requested SHA must match the deployed revision.

@@ -181,9 +181,12 @@ to apply after cutover.
   waiter for every pull request or deployment event. The workflows are
   production-only and non-destructive, with no pull-request or
   deployment-status trigger and no arbitrary-branch manual admission. They
-  dispatch the current production alias SHA only when it exactly matches the
-  selected `main` revision. A pending or failed production admission retries at
-  the next slot instead of testing a stale deployment.
+  keep controller admission separate from the deployed revision under test.
+  iOS selects the current production alias, verifies protected-main ancestry and
+  exact deployment, retains dispatch-time equality, and repeats exact deployment
+  verification after the native journey. Main advancing while production remains
+  stable does not prevent iOS execution. Android still requires the production
+  alias to equal the selected main revision and retries mismatches at the next slot.
 - Protected native Android hosted E2E treats private workflow dispatch as an
   uncertain external effect. A timeout, network failure, ambiguous HTTP
   response, malformed successful response, or missing run id after the request

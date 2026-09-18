@@ -2306,6 +2306,7 @@ export async function signalHostedManualRunRuntimeForTest(input: {
 export async function signalHostedMailboxAppendRuntimeForTest(input: {
   environment?: NodeJS.ProcessEnv;
   expectedUserId?: string | null;
+  knownCheckpoint?: Parameters<HostedRuntimeSignalModule["signalHostedMailboxAppendRuntime"]>[0]["knownCheckpoint"];
   mailboxItemId: string;
 }): Promise<{
   signalAccepted: true;
@@ -2317,6 +2318,7 @@ export async function signalHostedMailboxAppendRuntimeForTest(input: {
       client: deps.temporalSignalClient,
       environment: deps.environment,
       expectedUserId: input.expectedUserId ?? null,
+      knownCheckpoint: input.knownCheckpoint,
       mailboxItemId: input.mailboxItemId,
       prisma: deps.prisma,
     });
