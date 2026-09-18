@@ -168,7 +168,7 @@ describe("hosted local Linq lost active-operation e2e", () => {
       async () => await readActiveRuntimeFenceForTest() === null,
       "Expected the container-origin completion receipt to clear the exact fence after the activation-owned outer result was lost.",
     );
-    await requireScenario().harness.expireRunnerActivityForTest(userId);
+    // Fence clearance is sufficient; the next inbound must acquire a fresh owner.
     const outboundCountBeforeFreshWake = requireLinqStub().countObservedSends(replyPath);
     const thirdWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,

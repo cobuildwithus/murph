@@ -23,6 +23,8 @@ Use the minimum supported test timeout. Exercise inactive-account retention with
 
 Count distinct write-fence attempts from actual container invocation events, preserving the complete observation window and ignoring readiness-only events. Keep the media fixture's idle checkpoint inside its completion deadline; explicit provider barriers continue to hold detached image work.
 
+The lost-operation fixture also tried to expire activity after requiring its runtime fence to be cleared. Remove the redundant lifecycle call after completion; retain the null-fence proof and the next inbound message's exact-once reply and provider assertions.
+
 ## Context
 
 These stale proof preconditions block full worker release integration even though the intended runtime behavior is already deployed.
