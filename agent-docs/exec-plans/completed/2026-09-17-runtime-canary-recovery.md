@@ -1,6 +1,6 @@
 # Restore clinical progress across checkpoints and align canary observation
 
-Status: active
+Status: completed
 Created: 2026-09-17
 Updated: 2026-09-17
 
@@ -65,5 +65,8 @@ Updated: 2026-09-17
 - After correction, 59 focused runtime tests, 26 canary runner tests, 77 adjacent outcome/route tests, 10 changelog tests, and four workflow checks pass. Both regressions failed before their source fixes.
 - Assistant-runtime and Web typechecks pass. The final continuation guard was rechecked through the runtime regression and both typechecks.
 - Complexity passes with unchanged hotspot debt; the existing large orchestration owner does not need a new lifecycle abstraction for this correction.
+- Documentation drift, focused Web lint, and diff whitespace checks pass. Parent candidate review found no additional state or compatibility owner was needed.
+- PR #3557 carries the exact-head CI and external review gates; production rollout and live recovery verification follow those gates.
 - Adjacent Web observer suites initially required Prisma generation in the fresh checkout; the normal generation command completed successfully.
 - Production recovery and a full production canary remain post-deployment proof, not claims from local tests.
+Completed: 2026-09-17

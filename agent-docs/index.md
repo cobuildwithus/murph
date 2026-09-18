@@ -152,7 +152,7 @@ The canary runtime-authority and WebSocket queue-bound correction is tracked in
 [`2026-09-13-canary-consent-websocket-bounds.md`](exec-plans/completed/2026-09-13-canary-consent-websocket-bounds.md).
 The canary observation window follows the production checkpoint quiet window in
 [`operations/live-provider-canaries.md`](operations/live-provider-canaries.md);
-the shared quiet-window budget and bounded publication allowance are owned by
+the shared quiet-window budget, bounded publication allowance, and workflow deadline are owned by
 [`RELIABILITY.md`](RELIABILITY.md#runtime-expectations).
 The earlier timing correction is tracked in
 [`2026-09-13-canary-checkpoint-observation.md`](exec-plans/completed/2026-09-13-canary-checkpoint-observation.md).
