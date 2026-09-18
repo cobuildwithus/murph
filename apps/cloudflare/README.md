@@ -575,7 +575,11 @@ reuses the response observation parser.
 Postgres processing logs the failed operation, elapsed time, remaining command
 budget and timeout classification. Command-budget and execution transport
 timeouts return the existing three-second retry response without retiring or
-releasing an uncertain runtime owner. Snapshot commands and replica admission preserve the finite
+releasing an uncertain runtime owner. Startup and health-fetch transport failures
+retain their associated AbortSignal reason after cancellation, even when the
+Containers SDK substitutes a plain Error. Non-cancelled failures, fatal health
+validation, and cleanup settlement keep their existing behavior.
+Snapshot commands and replica admission preserve the finite
 `HOSTED_RUNTIME_OWNER_STALE` and `HOSTED_RUNTIME_RESOURCE_RETIRED` reasons as
 HTTP 409 responses; neither authorizes a write or bypasses upload cleanup.
 Snapshot handlers await completion inside the outbound error boundary so rejected

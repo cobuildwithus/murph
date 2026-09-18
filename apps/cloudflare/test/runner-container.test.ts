@@ -2586,6 +2586,57 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it.each([
+    { phase: "ports", expired: true },
+    { phase: "health", expired: true },
+    { phase: "ports", expired: false },
+    { phase: "health", expired: false },
+  ] as const)(
+    "preserves transport failure identity for $phase (deadline expired: $expired)",
+    async ({ phase, expired }) => {
+      const deadline = new AbortController();
+      const deadlineReason = new DOMException("Synthetic readiness deadline", "TimeoutError");
+      const originalTimeout = AbortSignal.timeout;
+      const timeout = vi.spyOn(AbortSignal, "timeout")
+        .mockImplementationOnce(() => deadline.signal)
+        .mockImplementation((ms) => originalTimeout(ms));
+      const transportStarted = createDeferred<void>();
+      const transportFailure = createDeferred<never>();
+      const sdkFailure = new Error("Synthetic SDK cancellation without a typed reason");
+      const rejectOnAbort = (signal: AbortSignal) => {
+        signal.addEventListener("abort", () => transportFailure.reject(sdkFailure), { once: true });
+        transportStarted.resolve(undefined);
+        return transportFailure.promise;
+      };
+      const startAndWaitForPorts = vi.fn(async (input: {
+        cancellationOptions: { abort: AbortSignal };
+      }) => {
+        if (phase === "ports") await rejectOnAbort(input.cancellationOptions.abort);
+      });
+      const containerFetch = vi.fn(async (_url: string, init: { signal: AbortSignal }) =>
+        rejectOnAbort(init.signal));
+      const { container, destroy } = createContainerDouble({
+        initialStatus: "stopped", startAndWaitForPorts, containerFetch,
+      });
+      try {
+        const readiness = container.ensureReadyForProcessing({
+          timeoutMs: 15_000, userId: "member_123",
+        });
+        const failure = expect(readiness).rejects.toBe(expired
+          ? deadlineReason : sdkFailure);
+        await transportStarted.promise;
+        if (expired) deadline.abort(deadlineReason);
+        else transportFailure.reject(sdkFailure);
+        await failure;
+        expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+        expect(containerFetch).toHaveBeenCalledTimes(phase === "health" ? 1 : 0);
+        expect(destroy).not.toHaveBeenCalled();
+      } finally {
+        timeout.mockRestore();
+      }
+    },
+  );
+
   it("starts the readiness deadline before lifecycle-lock admission", async () => {
     const firstDeadline = new AbortController();
     const queuedDeadline = new AbortController();
@@ -3530,6 +3581,7 @@ describe("RunnerContainer", () => {
       .mockImplementationOnce(() => readinessDeadline.signal)
       .mockImplementation(() => queuedReadinessDeadline.signal);
     const startObserved = createDeferred<void>();
+    const cleanupStateReadStarted = createDeferred<void>();
     const queuedHealthStarted = createDeferred<number>();
     let queuedHealthStartedAt: number | null = null;
     const cleanupStatus = createDeferred<{
@@ -3554,6 +3606,7 @@ describe("RunnerContainer", () => {
         });
       }
       if (stateReads === 2) {
+        cleanupStateReadStarted.resolve(undefined);
         return cleanupStatus.promise;
       }
       return Promise.resolve({
@@ -3616,8 +3669,7 @@ describe("RunnerContainer", () => {
         readyObservedBy: "cold-start-ready",
       });
       readinessDeadline.abort(new DOMException("Timed out", "TimeoutError"));
-      await Promise.resolve();
-      await Promise.resolve();
+      await cleanupStateReadStarted.promise;
       expect(getState).toHaveBeenCalledTimes(2);
       const queuedReadiness = container.ensureReadyForProcessing({
         timeoutMs: 30_000,
