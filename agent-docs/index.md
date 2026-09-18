@@ -230,8 +230,6 @@ The iOS production-revision canary correction is tracked in
 The production-promotion continuity correction for the native iOS health canary
 is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/completed/2026-09-18-ios-canary-deployment-continuity.md).
 
-Active work: [Canonical empty-day recovery](exec-plans/active/2026-09-18-canonical-empty-day-recovery.md).
-
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
@@ -462,3 +460,6 @@ The Responses relay queue-pressure observation and implementation proof are reco
 
 Zero-valued SpO2 sample handling is tracked in
 [`2026-09-18-spo2-zero-samples.md`](exec-plans/completed/2026-09-18-spo2-zero-samples.md).
+
+Authoritative empty-day recovery is recorded in
+[`2026-09-18-canonical-empty-day-recovery.md`](exec-plans/completed/2026-09-18-canonical-empty-day-recovery.md).

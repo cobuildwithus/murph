@@ -1,6 +1,6 @@
 # Recover authoritative device days after empty imports
 
-Status: active
+Status: completed
 Created: 2026-09-18
 Updated: 2026-09-18
 
@@ -61,7 +61,9 @@ patch. Junction importer suite: 266 tests pass. Core, importer and Web
 typechecks pass; changelog archive rendering: 10 tests pass. Public lookup
 confirms the original ID and restored value. Additional member-deletion cases
 retain the deleted versioned spine. Core full suite: 190 tests pass; two additional member-deletion cases pass.
-Final PR review and CI gates pending.
+Final ReviewGPT round 1: PASS on 275003c8a01333e7810cb0a120e0ecface5e0efe.
+Required exact-final-head CI and refreshed-base mergeability are the remaining
+completion checks, tracked in the PR rather than this immutable closed record.
 
 ## Implementation and review
 
@@ -91,3 +93,14 @@ guard; its output is not implementation evidence. A fresh full-context authoring
 request on another configured lane keeps the same required model.
 
 PR: https://github.com/cobuildwithus/murph/pull/3575.
+
+## Final candidate review
+
+The parent accepted no unresolved findings. Verified ReviewGPT response and
+model metadata hashes agree, with requested and response model both gpt-6-pro.
+Response SHA-256: d897876fe7da116fc72776e683f5ac9934f996629e864d68f6b6f13a233af7f0.
+The final change after review only archives this plan and updates its index;
+production, tests, owner contract and changelog remain the reviewed content.
+No second substantive review is required for that explanatory documentation.
+The PR remains unmerged; no manual deployment or production import was performed.
+Completed: 2026-09-18
