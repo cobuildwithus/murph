@@ -47,6 +47,7 @@ Restore full integration coverage so the reviewed Temporal recovery-sweep respon
 ## Verification
 
 - Passed: four focused runner lifecycle/TTL unit tests; complexity diff and whitespace checks.
-- Running: hosted-local Temporal orchestration and reminder/device-sync non-starvation scenarios.
+- Passed: 67 Web reconciliation/frontier tests and the production runner bundle build.
+- Local composed E2E proof is unavailable: Docker runner init exits before scenario execution because child-subreaper support is absent. The owned attempt was stopped; full Linux release integration remains mandatory before deployment.
 - Pending: exact-head public CI, final ReviewGPT, private full integration and release admission.
 - Pending: read-only production routing and recovery-sweep outcomes.
