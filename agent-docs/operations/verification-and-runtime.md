@@ -187,7 +187,7 @@ failure exits, exactly-once release, and awaited cleanup. Text inspection may
 supplement that proof, but it cannot establish runtime cleanup behavior.
 
 Native iOS and Android hosted E2E are production canaries, not pull-request
-statuses. The trusted default-branch controllers run on staggered six-hour
+statuses. The trusted default-branch controllers run on staggered twelve-hour
 schedules: iOS at minute 17 and Android at minute 47. An authenticated manual
 dispatch is the scheduler-drop recovery path, but its event ref must be
 `refs/heads/main` and its exact event SHA must still equal current `main` when
@@ -273,7 +273,7 @@ count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
 
 The separate `.github/workflows/assistant-real-model.yml` acceptance lane runs
-only on protected `main` pushes or manual dispatch from protected `main`. Before
+daily on protected `main` or by manual dispatch from protected `main`. Before
 enabling it, configure the `assistant-real-model-sandbox` GitHub Environment to
 allow only `main` and set its `ASSISTANT_REAL_MODEL_SANDBOX_OPENAI_API_KEY` to a
 dedicated budgeted test-project credential. Do not use a production credential.
@@ -436,7 +436,7 @@ remain external to the checkout.
 ## Live Junction Garmin Canary Verification
 
 The public live wearable workflow dispatches protected-main source to the
-private hosted-runtime executor. It runs after main pushes, daily, and on manual
+private hosted-runtime executor. It runs daily and on manual
 recovery; it accepts only an exact completed canonical-data receipt. The public
 controller has no provider credentials, private checkout, or artifact access.
 See [Live provider canaries](live-provider-canaries.md) for the execution,

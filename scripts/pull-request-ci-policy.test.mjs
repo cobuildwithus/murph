@@ -793,6 +793,14 @@ test("required Stripe boundary accepts docs-only skipped and full proof modes", 
     ...base,
     EVENT_NAME: "push",
     HERMETIC_RESULT: "success",
+    LIVE_RESULT: "skipped",
+    MARKDOWN_ONLY: "",
+    SCOPE_RESULT: "skipped",
+  }).status, 0);
+  assert.equal(runWorkflowStep(source, "Enforce hermetic proof and event-scoped live result", {
+    ...base,
+    EVENT_NAME: "schedule",
+    HERMETIC_RESULT: "success",
     LIVE_RESULT: "success",
     MARKDOWN_ONLY: "",
     SCOPE_RESULT: "skipped",
@@ -1104,7 +1112,7 @@ test("operator docs preserve the ready-only exact-head lifecycle and native cana
     assert.match(document, /synchronize[\s\S]{0,240}draft/u);
     assert.match(document, /exact head|exact-head/u);
     assert.match(document, /production canar/u);
-    assert.match(document, /six-hour/u);
+    assert.match(document, /twelve-hour/u);
     assert.doesNotMatch(
       document,
       /native-ios-hosted-e2e-retry\.mjs|--failure-code (?:android_workflow_rerun|xcodebuild_failed)/u,
