@@ -1629,9 +1629,14 @@ to apply after cutover.
   no caller timeout is restarted or extended. The R2 binding PUT itself has no
   cancellation option: an already-issued write is awaited, never raced into an
   overlapping retry or detached task.
-  Two failed PUTs rethrow the original failure unchanged for the existing typed
-  transport classification and durable device-sync job backoff. At this lower
-  R2-storage layer, generic fetch or TypeError, unknown/non-service codes
+  Two failed PUTs rethrow the original failure unchanged to the outbound
+  dispatcher. It awaits storage promises inside its existing error boundary,
+  returning HTTP 500 with a bounded code, summary and allowlisted error name;
+  the container retains typed retryability and durable device-sync job backoff.
+  The outer error event keeps finite classification and route metadata, without
+  forwarding exception objects, messages, causes or stacks. Existing artifact
+  stage events retain the original R2 service code and recovery disposition.
+  At this lower R2-storage layer, generic fetch or TypeError, unknown/non-service codes
   (including quota/rate-limit), HTTP/auth, lease, hash, body, encryption and
   client-abort failures do not admit recovery. Exhausted R2 errors and HTTP
   responses do not trigger the container's transport replay or multiply these

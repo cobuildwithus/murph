@@ -3888,13 +3888,46 @@ describe("handleRunnerOutboundRequest", () => {
     expect(test.put).toHaveBeenCalledTimes(2);
   });
 
-  it.each([10001, 10043])("preserves the first R2 failure when two PUTs fail (%i)", async (code) => {
+  it.each([10001, 10043])("returns a safe HTTP 500 and finite R2 diagnostics when two PUTs fail (%i)", async (code) => {
     const test = await createArtifactPutRecoveryFixture();
-    const first = new Error(`put: Synthetic first failure (${code})`);
-    test.put.mockRejectedValueOnce(first)
-      .mockRejectedValueOnce(new Error("put: Synthetic second failure (10043)"));
+    const key = await hostedArtifactObjectKey({ sha256: test.sha256, userId: "member_123" });
+    const privateCanary = "SYNTHETIC_PRIVATE_R2_FAILURE";
+    const cause = new Error("SYNTHETIC_PRIVATE_R2_CAUSE");
+    const first = new Error(`put: ${privateCanary} ${key} member_123 attempt_1 (${code})`, { cause });
+    const second = new Error(`put: Synthetic second failure (${code === 10001 ? 10043 : 10001})`);
+    test.put.mockRejectedValueOnce(first).mockRejectedValueOnce(second);
 
-    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(first);
+    const response = await handleRunnerOutboundRequest(test.request, test.env, "member_123");
+    expect(response.status).toBe(500);
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual({
+      code: "runtime_error", error: "Hosted execution runtime failed.", errorName: "Error",
+    });
+    const events = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls.map(([event]) => event);
+    expect(events).toContainEqual({
+      component: "runner",
+      details: {
+        errorCode: "runtime_error", errorName: "Error", hostKind: "artifact_store",
+        method: "PUT", operation: "artifact_upload", userIdPresent: true,
+      },
+      level: "error",
+      message: "Hosted runner outbound request failed.",
+      phase: "wake.running",
+    });
+    for (const event of events) {
+      // Error.message/cause/stack are nonenumerable; JSON.stringify alone misses them.
+      for (const property of ["error", "cause", "stack"]) {
+        expect(event).not.toHaveProperty(property);
+        expect(event.details).not.toHaveProperty(property);
+      }
+      expect(event.details).not.toHaveProperty("message");
+      expect(buildHostedExecutionStructuredLogRecord(event).details).toEqual(event.details);
+    }
+    const logs = JSON.stringify({ events, records: events.map((event) => buildHostedExecutionStructuredLogRecord(event)) });
+    for (const forbidden of [privateCanary, cause.message, first.message, second.message, key, test.sha256, "member_123", "attempt_1"]) {
+      expect(body).not.toContain(forbidden);
+      expect(logs).not.toContain(forbidden);
+    }
 
     expect(test.put).toHaveBeenCalledTimes(2);
     expect(test.put.mock.calls[0]).toEqual(test.put.mock.calls[1]);
@@ -3918,7 +3951,17 @@ describe("handleRunnerOutboundRequest", () => {
     const first = new Error("put: Synthetic first failure (10001)");
     test.put.mockRejectedValueOnce(first)
       .mockRejectedValueOnce(new Error("put: Synthetic access denied (10003)"));
-    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(first);
+    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123"))
+      .resolves.toMatchObject({ status: 500 });
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Hosted runner artifact request failed.",
+        details: expect.objectContaining({
+          artifactR2Code: 10001, artifactStorageStage: "r2_put",
+          artifactWriteAttempt: 2, artifactWriteDisposition: "exhausted",
+        }),
+      }),
+    );
     expect(test.put).toHaveBeenCalledTimes(2);
   });
 
@@ -3946,7 +3989,8 @@ describe("handleRunnerOutboundRequest", () => {
   ])("does not retry an out-of-scope artifact PUT failure: %s", async (_name, error) => {
     const test = await createArtifactPutRecoveryFixture();
     test.put.mockRejectedValueOnce(error);
-    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(error);
+    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123"))
+      .resolves.toMatchObject({ status: 500 });
     expect(test.put).toHaveBeenCalledOnce();
     expect(test.validate).toHaveBeenCalledOnce();
     expect(JSON.stringify(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls))
@@ -3957,6 +4001,7 @@ describe("handleRunnerOutboundRequest", () => {
     const test = await createArtifactPutRecoveryFixture();
     const response = await handleRunnerOutboundRequest(test.request, test.env, "member_123");
     expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, sha256: test.sha256, size: test.bytes.byteLength });
     expect(test.put).toHaveBeenCalledOnce();
     expect(test.validate).toHaveBeenCalledOnce();
     expect(test.bodyRead).toHaveBeenCalledOnce();
@@ -4044,7 +4089,7 @@ describe("handleRunnerOutboundRequest", () => {
       }
       const addListener = vi.spyOn(test.request.signal, "addEventListener");
       await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123"))
-        .rejects.toBe(cancelled);
+        .resolves.toMatchObject({ status: 500 });
       expect(test.put).toHaveBeenCalledTimes(["before request", "during encryption"].includes(when) ? 0 : 1);
       expect(test.validate).toHaveBeenCalledTimes(when === "during revalidation" ? 2 : 1);
       if (when === "during backoff") {
@@ -4082,7 +4127,8 @@ describe("handleRunnerOutboundRequest", () => {
         if (stage === "first PUT") expire();
         throw first;
       });
-      await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(first);
+      await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123"))
+        .resolves.toMatchObject({ status: 500 });
       expect(test.put).toHaveBeenCalledOnce();
       expect(test.validate).toHaveBeenCalledTimes(stage === "revalidation" ? 2 : 1);
       expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -4104,7 +4150,8 @@ describe("handleRunnerOutboundRequest", () => {
       test.request.headers.set(HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER, deadlines[kind]!);
       const first = new Error("put: Synthetic service failure (10043)");
       test.put.mockRejectedValueOnce(first);
-      await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(first);
+      await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123"))
+        .resolves.toMatchObject({ status: 500 });
       expect(test.put).toHaveBeenCalledOnce();
     },
   );
@@ -4117,7 +4164,8 @@ describe("handleRunnerOutboundRequest", () => {
       test.clock.mockReturnValue(test.now + 1_000);
       throw first;
     });
-    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(first);
+    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123"))
+      .resolves.toMatchObject({ status: 500 });
     expect(test.put).toHaveBeenCalledOnce();
   });
 
@@ -4130,10 +4178,63 @@ describe("handleRunnerOutboundRequest", () => {
     expect(test.cryptoFixture.fetchMock).not.toHaveBeenCalled();
   });
 
+  it("returns a safe HTTP 500 without storage work when the initial fence RPC rejects", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    const privateCanary = "SYNTHETIC_PRIVATE_FENCE_FAILURE";
+    const cause = new Error("SYNTHETIC_PRIVATE_FENCE_CAUSE");
+    const error = new Error(`Synthetic RPC network failure: ${privateCanary} member_123 attempt_1 ${test.request.url}`, { cause });
+    test.validate.mockRejectedValueOnce(error);
+    const get = vi.spyOn(test.env.BUNDLES, "get");
+    const deleteObject = vi.spyOn(test.env.BUNDLES, "delete");
+
+    const response = await handleRunnerOutboundRequest(test.request, test.env, "member_123");
+
+    expect(response.status).toBe(500);
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual({
+      code: "runtime_error", error: "Hosted execution runtime failed.", errorName: "Error",
+    });
+    expect(test.validate).toHaveBeenCalledOnce();
+    expect(test.put).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(test.bodyRead).not.toHaveBeenCalled();
+    expect(test.cryptoFixture.fetchMock).not.toHaveBeenCalled();
+    const events = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls.map(([event]) => event);
+    expect(events.map((event) => event.message)).toEqual([
+      "Hosted runner artifact write fence validation started.",
+      "Hosted runner outbound request failed.",
+    ]);
+    expect(events).toContainEqual({
+      component: "runner",
+      details: {
+        errorCode: "runtime_error", errorName: "Error", hostKind: "artifact_store",
+        method: "PUT", operation: "artifact_upload", userIdPresent: true,
+      },
+      level: "error",
+      message: "Hosted runner outbound request failed.",
+      phase: "wake.running",
+    });
+    for (const event of events) {
+      for (const property of ["error", "cause", "stack"]) {
+        expect(event).not.toHaveProperty(property);
+        expect(event.details).not.toHaveProperty(property);
+      }
+      expect(event.details).not.toHaveProperty("message");
+      expect(buildHostedExecutionStructuredLogRecord(event).details).toEqual(event.details);
+    }
+    const logs = JSON.stringify({ events, records: events.map((event) => buildHostedExecutionStructuredLogRecord(event)) });
+    for (const forbidden of [privateCanary, cause.message, error.message, test.request.url, test.sha256, "member_123", "attempt_1"]) {
+      expect(body).not.toContain(forbidden);
+      expect(logs).not.toContain(forbidden);
+    }
+  });
+
   it("does not PUT or retry on artifact hash mismatch", async () => {
     const test = await createArtifactPutRecoveryFixture();
     const request = createArtifactPutRequest({ bytes: test.bytes, sha256: "a".repeat(64), workspaceVersion: "4" });
-    await expect(handleRunnerOutboundRequest(request, test.env, "member_123")).rejects.toThrow("hash mismatch");
+    await expect(handleRunnerOutboundRequest(request, test.env, "member_123"))
+      .resolves.toMatchObject({ status: 500 });
     expect(test.put).not.toHaveBeenCalled();
     expect(test.validate).toHaveBeenCalledOnce();
   });
@@ -4143,7 +4244,8 @@ describe("handleRunnerOutboundRequest", () => {
     const error = new Error(`put: Synthetic ${stage} failure (10001)`);
     if (stage === "body") test.bodyRead.mockRejectedValueOnce(error);
     else vi.spyOn(hostedCrypto, "encryptHostedStorageEnvelope").mockRejectedValueOnce(error);
-    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(error);
+    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123"))
+      .resolves.toMatchObject({ status: 500 });
     expect(test.put).not.toHaveBeenCalled();
     expect(test.validate).toHaveBeenCalledOnce();
     expect(JSON.stringify(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls))
@@ -4153,7 +4255,8 @@ describe("handleRunnerOutboundRequest", () => {
   it("does not retry crypto-context acquisition when it fails", async () => {
     const test = await createArtifactPutRecoveryFixture();
     test.cryptoFixture.fetchMock.mockResolvedValueOnce(new Response(null, { status: 403 }));
-    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toThrow();
+    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123"))
+      .resolves.toMatchObject({ status: 500 });
     expect(test.cryptoFixture.fetchMock).toHaveBeenCalledOnce();
     expect(test.put).not.toHaveBeenCalled();
     expect(test.bodyRead).not.toHaveBeenCalled();
@@ -4378,20 +4481,11 @@ describe("handleRunnerOutboundRequest", () => {
     expect(test.put).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    { code: 10001, asHttp: false }, { code: 10043, asHttp: false },
-    { code: 10001, asHttp: true }, { code: 10043, asHttp: true },
-  ])("does not multiply exhausted R2 retries ($code, HTTP: $asHttp)", async ({ code, asHttp }) => {
+  it.each([10001, 10043])("does not multiply exhausted R2 retries after HTTP 500 (%i)", async (code) => {
     const test = await createArtifactPutRecoveryFixture();
     test.put.mockRejectedValue(new Error(`put: Synthetic network service failure (${code})`));
-    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
-      try {
-        return await handleRunnerOutboundRequest(new Request(url, init), test.env, "member_123");
-      } catch (error) {
-        if (asHttp) return new Response(null, { status: 503 });
-        throw error;
-      }
-    });
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) =>
+      handleRunnerOutboundRequest(new Request(url, init), test.env, "member_123"));
     const store = createCloudflareArtifactStore({
       fetchImpl, timeoutMs: 5_000,
       workspaceCheckpointBridge: {
@@ -4399,7 +4493,7 @@ describe("handleRunnerOutboundRequest", () => {
       },
     });
     await expect(store.put({ bytes: test.bytes, sha256: test.sha256 })).rejects.toMatchObject({
-      retryable: true, ...(asHttp ? { cause: { status: 503 } } : {}),
+      retryable: true, cause: { status: 500 },
     });
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(test.put).toHaveBeenCalledTimes(2);
@@ -10723,7 +10817,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       releaseDelayedPut();
       await writePromise.catch(() => {});
     }
-    await expect(writePromise).rejects.toThrow("synthetic core write failure");
+    await expect(writePromise).resolves.toMatchObject({ status: 500 });
 
     const root = readRootReplicaAdmission();
     expect(root?.objectKey).toMatch(/\.json$/u);
@@ -10915,11 +11009,17 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     expect(secondContext.rootKey[0]).toBe(101);
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
     expect(bindUser).not.toHaveBeenCalled();
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
   });
 
-  it("coalesces concurrent outbound runtime crypto cold fetches without binding the runner", async () => {
+  it.each([
+    { clockOffsetMs: -1_000, pendingAgeMs: 0 },
+    { clockOffsetMs: 0, pendingAgeMs: 0 },
+    { clockOffsetMs: 1_234, pendingAgeMs: 1_234 },
+    { clockOffsetMs: 29_999, pendingAgeMs: 29_999 },
+  ])("coalesces concurrent outbound runtime crypto cold fetches without binding the runner ($clockOffsetMs ms)", async ({ clockOffsetMs, pendingAgeMs }) => {
     const fixture = await createHostedRuntimeCryptoContextFixture({
-      cacheMaxAgeMs: 10_000,
+      cacheMaxAgeMs: 60_000,
       cryptoContextVersion: "ctx-pending-single-flight",
       fetchedAt: "2026-05-04T00:00:00.000Z",
     });
@@ -10939,6 +11039,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     vi.setSystemTime(new Date("2026-05-04T00:00:00.000Z"));
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
 
+    const log = hostedExecutionMocks.emitHostedExecutionStructuredLog;
     const firstContext = resolveRunnerOutboundUserCryptoContext({
       bucket: env.BUNDLES,
       domain: "runtime",
@@ -10946,6 +11047,8 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       environment,
       userId: "member_123",
     });
+    expect(log).not.toHaveBeenCalled();
+    vi.setSystemTime(new Date(Date.now() + clockOffsetMs));
     const secondContext = resolveRunnerOutboundUserCryptoContext({
       bucket: env.BUNDLES,
       domain: "runtime",
@@ -10953,6 +11056,18 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       environment,
       userId: "member_123",
     });
+
+    expect(log.mock.calls).toEqual([[{
+      component: "runner",
+      details: { domain: "runtime", pendingAgeMs },
+      level: "info",
+      message: "Hosted runner outbound crypto context joined pending load.",
+      phase: "wake.running",
+    }]]);
+    const loggedAgeMs = log.mock.calls[0]?.[0].details.pendingAgeMs;
+    expect(Number.isInteger(loggedAgeMs)).toBe(true);
+    expect(loggedAgeMs).toBeGreaterThanOrEqual(0);
+    expect(loggedAgeMs).toBeLessThanOrEqual(30_000);
 
     const [firstResolved, secondResolved] = await Promise.all([firstContext, secondContext]);
 
@@ -10971,6 +11086,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     expect(thirdResolved).not.toBe(firstResolved);
     expect(bindUser).not.toHaveBeenCalled();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledOnce();
   });
 
   it("does not reuse outbound runtime crypto envelopes across hosted environment identity", async () => {
