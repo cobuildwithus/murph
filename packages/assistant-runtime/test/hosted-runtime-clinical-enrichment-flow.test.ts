@@ -92,7 +92,7 @@ describe("clinical enrichment import-to-query flow", () => {
       expect(await readNextClinicalEnrichment({ vaultRoot })).toMatchObject({ status: "extract", jobId: prepared.jobId });
       await persistClinicalEnrichmentProposals({
         vaultRoot, jobId: prepared.jobId, sourceSha256: prepared.sha256, page: 1, totalPages: 1,
-        outputs: { measurements: empty, history: empty, labs: { status: "complete", records: [{ payload: {
+        outputs: { measurements: empty, history: empty, labs: { status: "complete", records: [{ dateBasis: "document", dateEvidence: "Collected 2020-03-12T12:00:00Z", payload: {
           kind: "test", occurredAt: OCCURRED_AT, title: "Synthetic serum glucose", note: null,
           testName: "Glucose", specimenType: "serum", resultStatus: "normal",
           results: [{ analyte: "Glucose", value: 90, unit: "mg/dL" }],
@@ -132,7 +132,7 @@ describe("clinical enrichment import-to-query flow", () => {
         expect(request.source.rawRef).toBe(job.rawRef);
         expect(request.extractedText).toBe(SOURCE_TEXT);
         return request.family !== "labs" ? empty : {
-          status: "complete", records: [{ page: 1, payload: {
+          status: "complete", records: [{ dateBasis: "document", dateEvidence: "Collected 2020-03-12T12:00:00Z", page: 1, payload: {
             kind: "test", occurredAt: OCCURRED_AT, title: "Synthetic serum glucose", note: null,
             testName: "Glucose", specimenType: "serum", resultStatus: "normal",
             results: [{ analyte: "Glucose", value: 90, unit: "mg/dL" }],
@@ -193,7 +193,7 @@ describe("clinical enrichment import-to-query flow", () => {
       const prepare = async (job: Awaited<ReturnType<typeof importSource>>) => {
         expect(await readNextClinicalEnrichment({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "extract" });
         await persistClinicalEnrichmentProposals({ vaultRoot, jobId: job.jobId, sourceSha256: job.sha256, page: 1, totalPages: 1,
-          outputs: { measurements: empty, history: empty, labs: { status: "complete", records: [{ payload: {
+          outputs: { measurements: empty, history: empty, labs: { status: "complete", records: [{ dateBasis: "document", dateEvidence: "Collected 2020-03-12T12:00:00Z", payload: {
             kind: "test", occurredAt: OCCURRED_AT, title: "Synthetic serum glucose", note: null,
             testName: "Glucose", specimenType: "serum", resultStatus: "normal", results: [{ analyte: "Glucose", value: 90, unit: "mg/dL" }],
           } }] } },
@@ -259,10 +259,10 @@ describe("clinical enrichment import-to-query flow", () => {
 
       const executeExtraction = vi.fn<NonNullable<HostedClinicalEnrichmentInput["executeExtraction"]>>(async (request) => {
         await request.beforeProviderEntry?.();
-        expect(request.source).toEqual({ rawRef: job.rawRef, sha256: job.sha256, mediaType: "text/plain" });
+        expect(request.source).toEqual({ rawRef: job.rawRef, sha256: job.sha256, mediaType: "text/plain", clinicalOccurredAt: OCCURRED_AT });
         expect(request.extractedText).toBe(SOURCE_TEXT);
         return request.family !== "labs" ? empty : {
-          status: "complete", records: [{ page: 1, excerpt: "Serum glucose 90 mg/dL.", payload: {
+          status: "complete", records: [{ dateBasis: "document", dateEvidence: "Collected 2020-03-12T12:00:00Z", page: 1, excerpt: "Serum glucose 90 mg/dL.", payload: {
             kind: "test", occurredAt: OCCURRED_AT, title: "Synthetic serum glucose", note: null, testName: "Glucose",
             specimenType: "serum", resultStatus: "normal",
             results: [{ analyte: "Glucose", value: 90, unit: "mg/dL", referenceRange: { low: 70, high: 99 } }],
@@ -298,7 +298,7 @@ describe("clinical enrichment import-to-query flow", () => {
       expect(tests[0]?.attributes).toMatchObject({
         source: "import", rawRefs: [job.rawRef], specimenType: "serum",
         externalRef: { ...job.parentExternalRef, facet: expect.stringMatching(/^document-extraction-/u) },
-        evidence: [{ rawRef: job.rawRef, page: 1, excerpt: "Serum glucose 90 mg/dL." }],
+        evidence: [{ rawRef: job.rawRef, page: 1, excerpt: "Collected 2020-03-12T12:00:00Z · Serum glucose 90 mg/dL." }],
       });
       const points = await listMetricPoints(vaultRoot, { limit: 10 });
       expect(points).toEqual(expect.arrayContaining([expect.objectContaining({

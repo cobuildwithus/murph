@@ -1,6 +1,6 @@
 # Restore Temporal release integration fixtures and deploy recovery
 
-Status: active
+Status: completed
 Created: 2026-09-17
 Updated: 2026-09-18
 
@@ -52,8 +52,12 @@ Restore full integration coverage so the reviewed Temporal recovery-sweep respon
 - Local composed E2E proof is unavailable: Docker runner init exits before scenario execution because child-subreaper support is absent. The owned attempt was stopped; full Linux release integration remains mandatory before deployment.
 - Passed: PR #3558 exact-head required public CI and final ReviewGPT; merged.
 - Fresh full integration passes Temporal orchestration but exposes three remaining blockers: managed snapshot identity rejection becomes HTTP 500, the fairness observer requires a retired admission event, and the media fixture's idle period exceeds its completion deadline.
-- Passed: 357 snapshot/outbound and admission-window tests, Cloudflare typecheck, and the complexity guard for the follow-up correction. PR #3570 passed final ReviewGPT and exact-head CI and merged. Fresh integration passed checkpoint durability and fairness; its media lane reached a later provider-handoff scenario and exposed a one-shot webhook sender that omitted the existing bounded retry contract. Reuse the common signed sender; retain the handoff race and all provider/completion assertions. Fresh full integration and release admission remain pending.
-- Pending: read-only production routing and recovery-sweep outcomes.
+- Passed: 357 snapshot/outbound and admission-window tests, Cloudflare typecheck, and the complexity guard for the follow-up correction. PR #3570 passed final ReviewGPT and exact-head CI and merged. Fresh integration passed checkpoint durability and fairness; its media lane reached a later provider-handoff scenario and exposed a one-shot webhook sender that omitted the existing bounded retry contract. Reuse the common signed sender; retain the handoff race and all provider/completion assertions. The later full integration and admission run passed.
+- PR #3574 passed exact-head CI and final ReviewGPT, then merged the shared sender correction. A fresh integration candidate exposed a redundant lost-operation test expiry after the runtime fence was already cleared. PR #3576 removed that call while preserving recovery and subsequent fresh-message assertions; focused test-control checks, typecheck, exact-head CI, and final ReviewGPT passed.
+- Passed: both release builds and all 14 composed Linux integration lanes on the final candidate.
+- Passed: exact-source admission, synthetic and protected-history replay, and the normal protected worker deployment.
+- Passed: read-only checks confirmed the fixed worker is Current, recurring recovery sweeps complete with the bounded continuation response, and the former worker is suspended.
+- No production schedule changes, manual routing overrides, rollbacks, or failed-run replays were needed.
 
 ## Review disposition
 
@@ -63,3 +67,4 @@ Restore full integration coverage so the reviewed Temporal recovery-sweep respon
 - All 33 signal-owner tests pass, including added paused-member checkpoint cases and existing expected-owner rejection. Round 2's isolated type-boundary finding was corrected and round 3 passed before merge.
 
 - Exact-head CI exposed a cross-app type boundary in the test helper: importing the production signal input type pulled Web internals into the Cloudflare typecheck and widened the local system-only checkpoint seam. Derive the optional input from the existing isolated test interface instead. Cloudflare typecheck passes; before/after helper JavaScript is byte-identical. The in-progress round-2 snapshot remains immutable and its result will be retained.
+Completed: 2026-09-18

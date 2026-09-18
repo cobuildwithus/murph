@@ -483,6 +483,8 @@ describe('knowledge and memory command completion diagnostics', () => {
 
 describe('bounded CLI validation completion metadata', () => {
   it.each([
+    ['automation list', 'limit', 'too_big', false],
+    ['automation list', 'status', 'invalid_value', false],
     ['food search-labels', 'limit', 'too_big', false],
     ['food search-labels', 'query', 'invalid_type', true],
     ['knowledge upsert', 'body', 'invalid_type', true],
@@ -505,6 +507,61 @@ describe('bounded CLI validation completion metadata', () => {
       expect(Object.keys(issue?.details ?? {}).length).toBeLessThanOrEqual(24)
       expect(JSON.stringify(issue)).not.toContain(sentinel)
       expect(commandIssue(output, `vault-cli ${command} --format json`, 0)).toBeNull()
+    }
+  })
+
+  it('adds only finite automation completion fields and omits unsupported or malformed detail', () => {
+    const command = `vault-cli automation list --status ${sentinel} --format json`
+    const base = envelope('VALIDATION_ERROR', 'validation')
+    const baseline = commandIssue(JSON.stringify(base), command)
+    expect(baseline?.details).toMatchObject({ vaultCliCommand: 'automation list',
+      vaultCliErrorCode: 'VALIDATION_ERROR', vaultCliErrorStage: 'validation', errorCategory: 'invalid_input' })
+    for (const [field, code] of [['limit', 'too_big'], ['status', 'invalid_value']] as const) {
+      for (const missing of [false, undefined]) for (const full of [false, true]) {
+        const error = { ...base, fieldErrors: [{ path: field, code, ...(missing === undefined ? {} : { missing }),
+          message: sentinel, value: sentinel, received: sentinel, expected: sentinel }] }
+        const output = JSON.stringify(full ? { ok: false, error } : error)
+        const issue = commandIssue(output, command)
+        expect(issue).toEqual({ ...baseline, details: { ...baseline?.details,
+          vaultCliValidationField: field, vaultCliValidationCode: code,
+          ...(missing === undefined ? {} : { vaultCliValidationMissing: missing }) } })
+        expect(JSON.stringify(issue)).not.toContain(sentinel)
+        expect(commandIssue(output, command, 0)).toBeNull()
+      }
+    }
+    for (const fieldErrors of [undefined, null, {}, [],
+      ...['vault', 'requestId', 'sourcePath', 'text', 'supportSeriesId', 'cursor', 'compact', 'status.0', 'status[0]', sentinel]
+        .map((path) => [{ path, code: 'invalid_value', missing: false }]),
+      [{ path: ['status'], code: 'invalid_value', missing: false }],
+      [{ path: 'status', code: 'invalid_value', missing: 'false' }],
+      [{ path: 'limit', code: sentinel, missing: false }],
+      Array(8).fill({ path: sentinel, code: 'invalid_type' }).concat({ path: 'limit', code: 'too_big' })]) {
+      for (const full of [false, true]) {
+        const error = { ...base, fieldErrors }
+        expect(commandIssue(JSON.stringify(full ? { ok: false, error } : error), command)).toEqual(baseline)
+      }
+    }
+    expect(JSON.stringify(baseline)).not.toContain(sentinel)
+  })
+
+  it('round-trips automation detail and absence through the existing issue sanitizer and parser', async () => {
+    const issues = [undefined, { path: 'limit', code: 'too_big', missing: false },
+      { path: 'status', code: 'invalid_value', missing: false }].map((detail) => {
+      const issue = commandIssue(JSON.stringify({ ...envelope('VALIDATION_ERROR', 'validation'),
+        fieldErrors: detail ? [{ ...detail, message: sentinel, value: sentinel }] : [] }),
+      'vault-cli automation list --format json')
+      if (!issue) throw new Error('Expected synthetic automation validation diagnostic')
+      return issue
+    })
+    writes.write.mockResolvedValue(undefined)
+    recordAssistantRuntimeIssueInputsBestEffort({ issues, vault: 'synthetic-vault',
+      policy: { environment: 'hosted', surface: null, privateIssueCaptureEnabled: true } })
+    await flushPendingAssistantRuntimeIssueWrites()
+    expect(writes.write).toHaveBeenCalledTimes(issues.length)
+    for (const [index, [input]] of writes.write.mock.calls.entries()) {
+      const encoded = JSON.stringify(input.record)
+      expect(encoded).not.toContain(sentinel)
+      expect(parseAssistantRuntimeIssueRecord(JSON.parse(encoded)).details).toEqual(issues[index]!.details)
     }
   })
 

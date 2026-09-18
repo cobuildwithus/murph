@@ -470,7 +470,19 @@ if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
 fi
 package_audit_context_bin="$(cobuild_repo_tool_bin cobuild-package-audit-context)"
 if [[ -z "$review_gpt_pr_ref" ]]; then
-  exec "$package_audit_context_bin" "$@"
+  mkdir -p "$ROOT_DIR/audit-packages"
+  review_gpt_custom_dir="$(mktemp -d "$ROOT_DIR/audit-packages/review-gpt-custom.XXXXXX")"
+  review_gpt_custom_status=0
+  "$package_audit_context_bin" "$@" 2> "$review_gpt_custom_dir/package-errors.txt" \
+    || review_gpt_custom_status=$?
+  # Custom authoring uses the same guarded snapshot and can exceed the same
+  # child-output buffer as PR review. Preserve diagnostics and the exit status.
+  awk '
+    /^Warning: excluding path from audit package: / { excluded++; next }
+    { print }
+    END { if (excluded) printf "Warning: excluded %d paths from audit package.\n", excluded }
+  ' "$review_gpt_custom_dir/package-errors.txt" >&2
+  exit "$review_gpt_custom_status"
 fi
 
 if [[ "$review_gpt_has_explicit_output_dir" != "1" ]]; then

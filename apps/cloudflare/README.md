@@ -572,6 +572,11 @@ missing evidence, not successful transport. Upstream and client frame inspection
 share a six-megacharacter bound; larger frames remain uninspected and are
 forwarded under the existing relay admission rules. First-frame classification
 reuses the response observation parser.
+Abnormal closes during an attributable, inspected single-request generation
+with no terminal response are warnings even after response frames arrive.
+The diagnostic outcome remains `closed`; it does not assert that Codex recovery
+failed. Completed, normal, prewarm and ambiguous closes keep their existing
+classification. Frame-send counts record relay calls, not client receipt proof.
 
 Postgres processing logs the failed operation, elapsed time, remaining command
 budget and timeout classification. Command-budget and execution transport
@@ -869,6 +874,18 @@ side-effect authority.
 Active, unsupported, error, and timeout liveness outcomes preserve the write
 fence. Only explicit inactive or mismatch proof, or exact successful
 completion, may enter the corresponding identity-safe recovery or clear path.
+A matching `inbox_media_retention` orchestration recheck acknowledges an exact,
+healthy active invocation as `already_running` without sending a container wake.
+The finite retention checkpoint treats a pending wake as an interruption, so a
+same-mode recheck must not interrupt its own work. Existing abort, failed-cleanup,
+transport-uncertain and pointerless recovery checks remain authoritative; this
+shortcut never treats a preserved uncertain operation as healthy. A foreground
+request retains the earlier retention-preemption branch.
+Lifecycle and liveness health observations use the native container TCP port,
+which cannot implicitly start a stopped container. Cleanup recognizes native
+stopped state even if the SDK's cached lifecycle state still says running.
+Explicit readiness retains its separate authorized startup path; ambiguous
+health or active work still prevents cleanup.
 After an exact successful completion clears the fence, Cloudflare makes at most
 one signed, bodyless owner-release callback to web with a timeout capped at two
 seconds. Its signed query binds the opaque runtime attempt whose fence was

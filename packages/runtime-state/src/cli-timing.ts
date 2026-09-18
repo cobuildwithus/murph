@@ -57,6 +57,7 @@ export function cliTimingFailureStage(value: unknown): CliFailureTiming["stage"]
 // Only these command schemas own these exact top-level names. No path parsing,
 // coercion, array-index admission or prefix matching belongs in telemetry.
 const validationFields = [
+  ["automation list", ["limit", "status"]],
   ["food search-labels", ["query", "limit"]],
   ["knowledge upsert", ["body", "slug", "title", "pageType", "status", "clearLibraryLinks",
     "relatedSlug", "librarySlug", "sourcePath"]],

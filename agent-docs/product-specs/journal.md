@@ -211,6 +211,19 @@ grouped source sessions once.
 The old `journal_day` surface stays untouched. The new Journal view does not
 depend on it.
 
+Imported clinical records use human-readable labels and source names. Raw FHIR
+objects, coding-system identifiers and source identity keys stay in canonical
+evidence rather than display copy. Records explicitly dated only by retrieval
+or source-update metadata do not enter dated Journal bands.
+
+Clinical notes and tests from the same source resource, revision and clinical
+day form one entry. Distinct source resources or clinical days remain separate.
+When a legacy document-extraction facet was placed on the retrieval/recording
+day despite an older dated source parent, without explicit date provenance,
+Journal omits the ambiguous facet from dated bands and retains the original
+source report on its documented date. Host-tagged document/source dates and
+other historical dates remain intact. The projection never rewrites evidence.
+
 The projection is built during the existing Browser Vault refresh. Opening
 `/journal` shows the available projection and requests one runtime refresh.
 The ready timeline has no Refresh control; unavailable older projections offer
@@ -272,6 +285,10 @@ with its summary, metrics, additional details, and source records. Seven-day
 summary values use main sleep and grouped activity once. Additions and
 corrections remain conversational. Home and Personal Patterns keep their
 separate presentation owners.
+
+Native feed previews use at most three lines. The entry drawer retains the full
+summary, and long secondary source text expands on demand. Date-only records
+never display a fabricated clock time.
 
 The response remains in session memory using ephemeral networking. Sign-out,
 account changes, and consent recovery clear it; late responses cannot restore
