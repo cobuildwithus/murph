@@ -37,7 +37,7 @@ function schemaHasFormat(schema: JsonSchemaObject | undefined, format: string): 
   return schema.format === format || (schema.anyOf?.some((branch) => schemaHasFormat(branch, format)) ?? false);
 }
 
-test("sleep session records accept only explicit canonical main-sleep and nap identities", () => {
+test("sleep session records preserve bounded sleep classification and provider state", () => {
   const base = {
     schemaVersion: "murph.event.v1",
     id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
@@ -56,6 +56,12 @@ test("sleep session records accept only explicit canonical main-sleep and nap id
   assert.equal(eventRecordSchema.safeParse(base).success, true);
   assert.equal(eventRecordSchema.safeParse({ ...base, sleepType: "main_sleep" }).success, true);
   assert.equal(eventRecordSchema.safeParse({ ...base, sleepType: "nap" }).success, true);
+  for (const sleepType of ["short_sleep", "unknown"] as const) {
+    for (const sleepState of ["tentative", "confirmed"] as const) {
+      assert.equal(eventRecordSchema.safeParse({ ...base, sleepType, sleepState }).success, true);
+    }
+  }
+  assert.equal(eventRecordSchema.safeParse({ ...base, sleepState: "final-ish" }).success, false);
   assert.equal(eventRecordSchema.safeParse({ ...base, sleepType: "rest" }).success, false);
 });
 

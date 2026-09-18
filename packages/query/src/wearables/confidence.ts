@@ -4,6 +4,7 @@ import type {
   WearableConfidenceLevel,
   WearableResolvedMetric,
   WearableSummaryConfidence,
+  WearableSleepWindowCandidate,
 } from "./types.ts";
 
 export function summarizeMetricsConfidence(
@@ -102,4 +103,18 @@ export function inferDaySummaryConfidence(
   }
 
   return "medium";
+}
+
+export function qualifySleepSummaryConfidence(
+  confidence: WearableSummaryConfidence,
+  session: Pick<WearableSleepWindowCandidate, "sleepType" | "sleepState"> | null,
+): WearableSummaryConfidence {
+  const notes: string[] = [];
+  if (session?.sleepType === "short_sleep") {
+    notes.push("Only a provider-classified short sleep session is selected; this does not establish a complete night or identify a nap.");
+  }
+  if (session?.sleepState === "tentative") {
+    notes.push("The selected sleep session is a tentative provider estimate and may change.");
+  }
+  return notes.length ? { ...confidence, level: "low", notes: uniqueStrings([...confidence.notes, ...notes]) } : confidence;
 }

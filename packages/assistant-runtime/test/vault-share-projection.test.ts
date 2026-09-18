@@ -1275,6 +1275,7 @@ describe("selectProjectableDailyMetricDays", () => {
           data: {
             date: ACTIVITY_DAY.date,
             metricKey,
+            sleepType: "unknown",
             recordedAt: metricKey === "deep-sleep-minutes"
               ? "2026-07-03T07:01:00.000Z"
               : "2026-07-03T07:02:00.000Z",

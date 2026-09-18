@@ -1,6 +1,7 @@
 import {
   addDaysToIsoDate,
   formatTimeZoneDateTimeParts,
+  isShortOrTentativeSleepSession,
   isValidIanaTimeZone,
 } from "@murphai/contracts";
 
@@ -42,6 +43,7 @@ interface PreparedSleepNight {
   sessionDurationMinutes: number;
   sleepLatencyMinutes: number | null;
   sleepType: WearableSleepSessionType;
+  sleepState?: WearableSleepNight["sleepState"];
   startAt: string;
   startMs: number;
   timeZone: string | null;
@@ -59,9 +61,9 @@ export interface WearableSleepPatternBuildContext {
 }
 
 export function isWearableSleepPatternEligibleNight(
-  night: { sleepType: WearableSleepSessionType },
+  night: { sleepType: WearableSleepSessionType; sleepState?: WearableSleepNight["sleepState"] },
 ): boolean {
-  return night.sleepType !== "nap";
+  return night.sleepType !== "nap" && !isShortOrTentativeSleepSession(night);
 }
 
 export function resolveWearableSleepAnalysisDate(
@@ -239,6 +241,9 @@ export function buildWearableSleepPatternSummary(
     unknownSleepTypeNightCount,
     validNightCount: validDates.size,
   });
+  if (preparedInWindow.some(isShortOrTentativeSleepSession)) {
+    notes.push("Short or tentative sleep sessions were excluded from completed-night patterns.");
+  }
 
   return {
     allSourcesStale,
@@ -334,6 +339,7 @@ function prepareSleepNight(
     sessionDurationMinutes: (endMs - startMs) / 60_000,
     sleepLatencyMinutes: directMetricValue(night.sleepLatencyMinutes),
     sleepType: resolveSleepType(night),
+    sleepState: night.sleepState,
     startAt,
     startMs,
     timeZone,
@@ -391,6 +397,7 @@ function prepareSleepWindowEvidence(
     sleepEndAt: evidence.endAt,
     sleepStartAt: evidence.startAt,
     sleepType: evidence.sleepType,
+    sleepState: evidence.sleepState,
     sleepWindowProvider: evidence.provider,
     timeZone: evidence.timeZone,
   };
@@ -506,7 +513,7 @@ function confidenceRank(value: WearableSleepNight["summaryConfidence"]["level"])
 }
 
 function resolveSleepType(night: WearableSleepNight): WearableSleepSessionType {
-  return night.sleepType === "main_sleep" || night.sleepType === "nap" ? night.sleepType : "unknown";
+  return night.sleepType ?? "unknown";
 }
 
 function newestCompletedNonNapCanonicalTimeZone(
@@ -514,7 +521,7 @@ function newestCompletedNonNapCanonicalTimeZone(
   asOfMs: number,
 ): string | null {
   return nights
-    .filter((night) => resolveSleepType(night) !== "nap")
+    .filter(isWearableSleepPatternEligibleNight)
     .map((night) => ({
       endMs: Date.parse(night.sleepEndAt ?? ""),
       startMs: Date.parse(night.sleepStartAt ?? ""),

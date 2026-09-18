@@ -10245,6 +10245,91 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'qualifies short and tentative sleep without scoring them as complete nights',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-qualified-sleep-e2e-'))
+      const sharedRequests: unknown[] = []
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildScheduledAutomationDeveloperInstructions('group', 'shared_read'),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL],
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return {
+                  status: 'ok', requestedProjectionScopeKeys: ['sleep-duration-days.v0'],
+                  members: ([
+                    { displayName: 'Avery', value: 42, sleepType: 'short_sleep', sleepState: 'confirmed' },
+                    { displayName: 'Jordan', value: 405, sleepType: 'main_sleep', sleepState: 'tentative' },
+                    { displayName: 'Casey', value: 450, sleepType: 'main_sleep', sleepState: 'confirmed' },
+                  ] as const).map((entry, index) => ({
+                    displayName: entry.displayName, currentTurnHandles: [],
+                    memberId: `member_qualified_${index}`, participantId: `participant_qualified_${index}`,
+                    projections: [{
+                      dataStatus: 'available', grantStatus: 'granted',
+                      grantedAt: '2026-07-01T12:00:00.000Z',
+                      projectionScope: { projectionKind: 'sleep-duration-days.v0' },
+                      projectionScopeKey: 'sleep-duration-days.v0',
+                      records: [{
+                        recordKey: '2026-08-04.garmin', occurredAt: '2026-08-04T00:00:00.000Z',
+                        source: { source: 'garmin', label: 'Garmin' },
+                        data: { date: '2026-08-04', metricKey: 'total-sleep-minutes', unit: 'minutes',
+                          value: entry.value, sleepType: entry.sleepType, sleepState: entry.sleepState },
+                      }],
+                    }],
+                  })),
+                } satisfies AssistantHostedGroupSharedReadResponse
+              },
+            },
+            sendVaultFile: async () => { throw new Error('No file delivery in this journey.') },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: 'Scheduled group check-in: report sleep for August 4. The group target is seven hours. Keep each person on a separate line and mark completed results with a check or cross.',
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')
+        expect(actions).toHaveLength(1)
+        expect(actions[0]).toMatchObject({ tool: MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.name,
+          argumentsValue: { action: 'read_shared', projectionScopes: [{ projectionKind: 'sleep-duration-days.v0' }] } })
+        expect(sharedRequests).toHaveLength(1)
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected a qualified sleep report.')
+        const reply = renderMarkdownMessageText(decision.text).text
+        process.stdout.write(`[qualified-sleep-e2e] ${JSON.stringify({ model: config.model, reply })}\n`)
+        const rows = reply.split('\n')
+        const short = rows.find((row) => row.includes('Avery')) ?? ''
+        const tentative = rows.find((row) => row.includes('Jordan')) ?? ''
+        const complete = rows.find((row) => row.includes('Casey')) ?? ''
+        expect(short).toMatch(/42\s*m|42 minutes/iu)
+        expect(short).toMatch(/short|session/iu)
+        expect(tentative).toMatch(/tentative|preliminary|provisional|unconfirmed|estimate/iu)
+        expect(`${short} ${tentative}`).not.toMatch(/[✅✓✔☑❌✗✘✖×]|failed|fell short|missed.{0,15}target/iu)
+        expect(complete).toMatch(/7\s*h(?:ours?)?\s*30|7:30|450/iu)
+        expect(complete).toMatch(/[✅✓✔☑]/u)
+        expect(reply).not.toMatch(/disconnected|reconnect|definitely a nap/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'keeps four-person scheduled sleep and steps reports in separate participant rows',
     async () => {
       const config = await resolveRealCodexE2eConfig()
