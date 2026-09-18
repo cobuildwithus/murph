@@ -1073,7 +1073,13 @@ it resumes its paused extractor unless shutdown or owner handoff has started.
 `@murphai/vault-usecases/clinical-enrichment` freezes validated proposals in
 private operational state. A separate short `apply-clinical-enrichment` action
 uses the canonical writer, attaches host-derived source identity and evidence,
-checks existing facts and reads back accepted writes before advancing the page.
+requires an explicit document date with supporting excerpt or resolves a
+source-based date against the attested parent, checks existing facts and reads
+back accepted writes before advancing the page. Host-owned date provenance tags
+and evidence travel with accepted records. Legacy frozen proposals with ambiguous
+retrieval-day dates are held rather than rewritten; independently dated facts
+retain their dates. Extraction cache v2 binds bytes, media type and parent clinical-date context;
+cached source-based proposals resolve against each current attested parent.
 Derived records use the attested parent source identity, an extraction facet and
 the parent revision. The existing writer index enforces parent revision guards
 and retires older extraction facets when the authoritative parent changes.

@@ -370,6 +370,48 @@ function describeRealCodex(name: string, factory: () => void): void {
 }
 
 describeRealCodex('real clinical document extraction journeys', () => {
+  it('clinical extraction live preserves historical dates and blocks undated visits', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config)
+    const rawRef = 'raw/clinical/fhir/synthetic-source/synthetic-batch/attachments/history.txt'
+    const documentPath = path.join(fixture.vault, rawRef)
+    const sourceText = [
+      'SYNTHETIC HISTORY REPORT. These are three separate facts for the current member.',
+      'Visit: routine review, occurred 2025-02-03T15:00:00Z.',
+      'Separate follow-up: exercise counseling, occurred 2026-07-10T12:00:00Z.',
+      'Separate visit: nutrition counseling. Its date is unknown; no date elsewhere applies to it.',
+      'Exported 2026-07-10. Export time is not a visit date.',
+    ].join('\n')
+    let providerEntries = 0
+    try {
+      await mkdir(path.dirname(documentPath), { recursive: true })
+      await writeFile(documentPath, sourceText)
+      const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+      const result = await executeClinicalDocumentExtraction({
+        workspaceRoot: fixture.vault, documentPath, extractedText: sourceText,
+        source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain' },
+        family: 'history', codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
+        env: fixture.env, model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low',
+        beforeProviderEntry: async () => { providerEntries += 1 },
+        onProviderUsage: ({ usage }) => { recordRealCodexProviderUsage(usage.usage) },
+      })
+      expect(providerEntries).toBe(1)
+      expect(result.status).toBe('blocked')
+      expect(result.records).toHaveLength(2)
+      expect(result.records.map((record) => new Date(record.payload.occurredAt).toISOString()).sort())
+        .toEqual(['2025-02-03T15:00:00.000Z', '2026-07-10T12:00:00.000Z'])
+      expect(result.records.every((record) => record.dateBasis === 'document' && Boolean(record.dateEvidence))).toBe(true)
+      expect(result.records.every((record) => sourceText.includes(record.dateEvidence!))).toBe(true)
+      expect(result.reason).toMatch(/unknown|undated|date/iu)
+      expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+      expect(await readFile(documentPath, 'utf8')).toBe(sourceText)
+      process.stdout.write(`[clinical-date-live] ${JSON.stringify({ status: result.status, records: result.records, reason: result.reason })}\n`)
+    } finally {
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 360_000)
+
   for (const family of ['measurements', 'history'] as const) {
     it(`clinical document extraction live views rendered ${family} evidence`, async () => {
       const config = await resolveRealCodexE2eConfig()
