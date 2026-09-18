@@ -148,7 +148,7 @@ jobs:
 
       - name: Test canary, review fetch, and container probe helpers
         if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}
-        run: node --test scripts/linq-production-canary-ci.test.mjs scripts/review-gpt-pr-base-fetch.test.mjs scripts/container-resource-probe.test.mjs
+        run: node --test scripts/linq-production-canary-ci.test.mjs scripts/review-gpt-pr-base-fetch.test.mjs scripts/container-resource-probe.test.mjs scripts/package-audit-context-custom.test.mjs
 
       - name: Test native iOS hosted E2E control contract
         if: ${{ github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true' }}

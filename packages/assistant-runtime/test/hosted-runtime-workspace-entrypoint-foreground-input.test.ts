@@ -2,6 +2,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
   createSnapshotFixtureRef,
+  createVaultSnapshotBundle,
   createDeferred,
   createImageFailureCodexAppServerCommand,
   createMailboxItem,
@@ -3204,6 +3205,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         },
       );
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Restore canonical timezone metadata instead of a null/empty workspace.
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
 
       const firstResult = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -3223,6 +3226,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             return { status: "imported" };
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort: createMailboxPort({ events, items: [] }),
             vaultSharePort: {
               async listActiveProjectionScopes() {
@@ -3256,7 +3260,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             workspacePort: createWorkspacePort({
               checkpointRequests: [],
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           async runAssistantPhase() {
@@ -3331,6 +3335,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             };
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort: createMailboxPort({
               events,
               items: [secondMailboxItem],
@@ -3338,7 +3343,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             workspacePort: createWorkspacePort({
               checkpointRequests: [],
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           signal: secondAbortController.signal,
@@ -3391,6 +3396,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       vi.setSystemTime(new Date(TEST_NOW));
       mocks.summarizeWearableSleepRuntime.mockResolvedValue([]);
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Restore canonical timezone metadata instead of a null/empty workspace.
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -3415,6 +3422,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             throw new Error("Projection retry proof should not import mailbox work.");
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort: createMailboxPort({ events, items: [] }),
             vaultSharePort: {
               async listActiveProjectionScopes() {
@@ -3451,7 +3459,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           async runAssistantPhase() {
@@ -3562,6 +3570,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         sleepStartAt: "2026-04-26T22:04:00.000Z",
       }]);
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Restore canonical timezone metadata instead of a null/empty workspace.
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
       const baseMailboxPort = createMailboxPort({
         events,
         fetchRequests,
@@ -3609,6 +3619,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             return { status: "imported" };
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort,
             vaultSharePort: {
               async listActiveProjectionScopes() {
@@ -3661,7 +3672,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 });
               },
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           runtimeWakeSignal,
@@ -4059,6 +4070,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       vi.setSystemTime(new Date(TEST_NOW));
       mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([]);
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Restore canonical timezone metadata instead of a null/empty workspace.
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
       const baseMailboxPort = createMailboxPort({
         events,
         items: mailboxItems,
@@ -4115,6 +4128,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             };
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort,
             vaultSharePort: {
               async listActiveProjectionScopes() {
@@ -4154,7 +4168,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 });
               },
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           runtimeWakeSignal,
@@ -4558,6 +4572,8 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         sleepStartAt: "2026-04-26T22:04:00.000Z",
       }]);
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Restore canonical timezone metadata instead of a null/empty workspace.
+      const initialSnapshot = await createVaultSnapshotBundle({ vaultRoot });
       const baseMailboxPort = createMailboxPort({
         events,
         fetchRequests,
@@ -4600,6 +4616,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             return { status: "imported" };
           },
           platform: createPlatform({
+            artifactBytesByHash: new Map([[initialSnapshot.hash, initialSnapshot.bytes]]),
             mailboxPort,
             vaultSharePort: {
               async listActiveProjectionScopes() {
@@ -4661,7 +4678,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 });
               },
               events,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({ snapshotRef: initialSnapshot.snapshotRef, version: "4" }),
             }),
           }),
           runtimeWakeSignal,

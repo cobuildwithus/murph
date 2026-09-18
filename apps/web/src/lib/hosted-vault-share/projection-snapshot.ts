@@ -1,8 +1,12 @@
 import "server-only";
 
+import { normalizeIanaTimeZone } from "@murphai/contracts";
+
 import {
   buildHostedVaultShareProjectionScopeKey,
   getHostedVaultShareProjectionMaxRecords,
+  filterHostedVaultShareHistoryRecords,
+  isHostedVaultShareRecentDateProjectionKind,
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
   type HostedVaultShareDeliveryRecord,
@@ -40,6 +44,7 @@ export interface HostedVaultShareProjectionSnapshotEntry
 }
 
 export function serializeHostedVaultShareProjectionSnapshot(input: {
+  memberTimeZone?: string;
   records: readonly HostedVaultShareDeliveryRecord[];
   share: HostedVaultShareProjectionSnapshotAuthority;
 }): string {
@@ -48,6 +53,7 @@ export function serializeHostedVaultShareProjectionSnapshot(input: {
     input.share,
   );
   const serialized = JSON.stringify({
+    ...(input.memberTimeZone ? { memberTimeZone: requireMemberTimeZone(input.memberTimeZone) } : {}),
     records,
     schema: HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_SCHEMA,
   });
@@ -59,6 +65,13 @@ export function parseHostedVaultShareProjectionSnapshot(input: {
   plaintext: string;
   share: HostedVaultShareProjectionSnapshotAuthority;
 }): HostedVaultShareDeliveryRecord[] {
+  return parseSnapshotEnvelope(input).records;
+}
+
+function parseSnapshotEnvelope(input: {
+  plaintext: string;
+  share: HostedVaultShareProjectionSnapshotAuthority;
+}): { memberTimeZone?: string; records: HostedVaultShareDeliveryRecord[] } {
   assertHostedVaultShareProjectionSnapshotSize(input.plaintext);
 
   let value: unknown;
@@ -73,7 +86,7 @@ export function parseHostedVaultShareProjectionSnapshot(input: {
   );
   assertExactKeys(
     snapshot,
-    ["records", "schema"],
+    snapshot.memberTimeZone === undefined ? ["records", "schema"] : ["memberTimeZone", "records", "schema"],
     "Hosted vault-share projection snapshot",
   );
   if (snapshot.schema !== HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_SCHEMA) {
@@ -82,13 +95,14 @@ export function parseHostedVaultShareProjectionSnapshot(input: {
   if (!Array.isArray(snapshot.records)) {
     throw new TypeError("Hosted vault-share projection snapshot records must be an array.");
   }
-  return parseHostedVaultShareProjectionSnapshotRecords(
-    snapshot.records,
-    input.share,
-  );
+  return {
+    ...(snapshot.memberTimeZone === undefined ? {} : { memberTimeZone: requireMemberTimeZone(snapshot.memberTimeZone) }),
+    records: parseHostedVaultShareProjectionSnapshotRecords(snapshot.records, input.share),
+  };
 }
 
 export async function encryptHostedVaultShareProjectionSnapshot(input: {
+  memberTimeZone?: string;
   prisma?: HostedSecureBoxPrismaClient;
   records: readonly HostedVaultShareDeliveryRecord[];
   share: HostedVaultShareProjectionSnapshotAuthority;
@@ -111,6 +125,8 @@ export async function encryptHostedVaultShareProjectionSnapshot(input: {
 }
 
 export async function decryptHostedVaultShareProjectionSnapshots(input: {
+  nowMs?: number;
+  requestedHistoryDays?: 7 | 90;
   entries: readonly HostedVaultShareProjectionSnapshotEntry[];
   prisma?: HostedSecureBoxPrismaClient;
 }): Promise<Array<HostedVaultShareDeliveryRecord[] | null>> {
@@ -142,7 +158,22 @@ export async function decryptHostedVaultShareProjectionSnapshots(input: {
     if (!entry) {
       throw new Error("Hosted vault-share projection snapshot entry is missing.");
     }
-    return parseHostedVaultShareProjectionSnapshot({ plaintext, share: entry });
+    const snapshot = parseSnapshotEnvelope({ plaintext, share: entry });
+    if (!isHostedVaultShareRecentDateProjectionKind(entry.projectionScope.projectionKind)) {
+      return snapshot.records;
+    }
+    // Old snapshots remain usable for ordinary reads. Never infer a timezone
+    // or promise longer history until a compatible publisher replaces them.
+    if (!snapshot.memberTimeZone) {
+      return input.requestedHistoryDays === 90 ? null : snapshot.records;
+    }
+    return filterHostedVaultShareHistoryRecords({
+      nowMs: input.nowMs,
+      records: snapshot.records,
+      requestedHistoryDays: input.requestedHistoryDays,
+      scope: entry.projectionScope,
+      timeZone: snapshot.memberTimeZone,
+    });
   });
 }
 
@@ -250,4 +281,10 @@ function assertExactKeys(
   ) {
     throw new TypeError(`${label} has unexpected fields.`);
   }
+}
+
+function requireMemberTimeZone(value: unknown): string {
+  const timeZone = typeof value === "string" ? normalizeIanaTimeZone(value) : null;
+  if (!timeZone) throw new TypeError("Hosted vault-share snapshot member timezone is invalid.");
+  return timeZone;
 }

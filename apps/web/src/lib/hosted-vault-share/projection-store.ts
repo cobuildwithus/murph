@@ -304,6 +304,7 @@ function parseHostedVaultShareDeliveryContinuation(value: unknown): string | nul
  * encryption finish before the short database-only replacement transaction starts.
  */
 export async function replaceHostedVaultShareProjectionSnapshot(input: {
+  memberTimeZone?: string;
   deadlineAtEpochMs?: number;
   prisma?: PrismaClient;
   projectionMode?: HostedVaultShareProjectionMode;
@@ -315,6 +316,7 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
   const prisma = input.prisma ?? getPrisma();
   const projectionSnapshotCiphertext =
     await encryptHostedVaultShareProjectionSnapshot({
+      memberTimeZone: input.memberTimeZone,
       prisma,
       records: input.records,
       share: input.share,
