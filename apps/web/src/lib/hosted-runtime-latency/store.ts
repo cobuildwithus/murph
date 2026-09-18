@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES,
+  HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
@@ -535,6 +536,44 @@ export async function recordHostedIngressProviderStarted(input: {
   });
 }
 
+export async function recordHostedIngressDeliveryCommitted(input: {
+  authenticatedUserId: string;
+  mailboxItemIds: readonly string[];
+  source: HostedIngressLatencySource;
+  at: string;
+  checkpointPublicationExpectedBy: string;
+  runtimeAttemptId: string;
+  runtimeLeaseGeneration: string;
+  prisma?: HostedIngressLatencyPrismaClient;
+}): Promise<HostedIngressLatencyWriteResult> {
+  const prisma = input.prisma ?? getPrisma();
+  if (input.mailboxItemIds.length > HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
+    throw new TypeError("Hosted ingress delivery exceeds the mailbox item bound.");
+  }
+  const ids = [...new Set(input.mailboxItemIds.map((id) =>
+    requireSafeLatencyIdentifier(id, "Hosted ingress delivery mailboxItemId")
+  ))];
+  if (ids.length === 0) return { matchedCount: 0, recorded: false, unmatchedCount: 0 };
+  const traces = await prisma.hostedIngressLatencyTrace.findMany({
+    where: {
+      userId: input.authenticatedUserId,
+      source: input.source,
+      mailboxItemId: { in: ids },
+      assistantInputId: { not: null },
+    },
+    select: { assistantInputId: true },
+    take: ids.length,
+  });
+  const assistantInputIds = traces.flatMap((row) => row.assistantInputId ? [row.assistantInputId] : []);
+  const result = await recordHostedIngressAssistantMilestone({
+    ...input,
+    prisma,
+    assistantInputIds,
+    milestone: "terminal_reply_committed",
+  });
+  return { ...result, unmatchedCount: result.unmatchedCount + ids.length - traces.length };
+}
+
 export async function recordHostedIngressAssistantMilestone(input: {
   assistantInputIds: readonly string[];
   at?: Date | string | null;
@@ -562,12 +601,13 @@ export async function recordHostedIngressAssistantMilestone(input: {
     input.checkpointPublicationExpectedBy,
     "Hosted ingress latency checkpoint publication expected by",
   );
+  const terminalLeaf = readHostedIngressTerminalCompletionLeaf(input.milestone);
   if (
     checkpointPublicationExpectedBy
-    && input.milestone !== "terminal_non_reply_committed"
+    && terminalLeaf === null
   ) {
     throw new TypeError(
-      "Hosted ingress latency checkpoint publication expectation requires terminal_non_reply_committed.",
+      "Hosted ingress latency checkpoint publication expectation requires a terminal completion milestone.",
     );
   }
 
@@ -576,26 +616,27 @@ export async function recordHostedIngressAssistantMilestone(input: {
   }
 
   const requestedIds = buildHostedIngressLatencyRequestedIdsSql(assistantInputIds);
-  const terminalNonReplyProjection = input.milestone === "terminal_non_reply_committed";
+  const terminalCompletionProjection = terminalLeaf !== null;
   const lifecycleProjection = isHostedIngressLifecycleAssistantMilestone(
     input.milestone,
   );
-  const nextPhaseBreakdown = terminalNonReplyProjection
-    ? buildHostedIngressTerminalNonReplyPhaseBreakdownSql({
+  const nextPhaseBreakdown = terminalCompletionProjection
+    ? buildHostedIngressTerminalCompletionPhaseBreakdownSql({
         hasCheckpointPublicationExpectedBy: checkpointPublicationExpectedBy !== null,
+        terminalLeaf,
       })
     : lifecycleProjection
       ? buildHostedIngressLifecycleAssistantMilestonePhaseBreakdownSql()
       : buildHostedIngressOrdinaryAssistantMilestonePhaseBreakdownSql();
-  const nextRuntimeAttemptId = terminalNonReplyProjection
-    ? buildHostedIngressTerminalNonReplyRuntimeAttemptSql()
+  const nextRuntimeAttemptId = terminalCompletionProjection
+    ? buildHostedIngressTerminalCompletionRuntimeAttemptSql()
     : lifecycleProjection
       ? Prisma.sql`input.runtime_attempt_id`
       : Prisma.sql`trace.runtime_attempt_id`;
   // Accepted typing is alert evidence. Wait for competing short trace writes
   // instead of losing the final retry to SKIP LOCKED. This callback is detached
   // from provider execution and delivery; other diagnostic writes still skip.
-  const ordinaryMilestoneLeaf = terminalNonReplyProjection
+  const ordinaryMilestoneLeaf = terminalCompletionProjection
     ? null
     : readHostedIngressAssistantMilestoneLeaf(input.milestone);
   const rows = await prisma.$queryRaw<HostedIngressLatencySetWriteProjectionRow[]>(Prisma.sql`
@@ -612,7 +653,7 @@ export async function recordHostedIngressAssistantMilestone(input: {
         ${ordinaryMilestoneLeaf?.leafKey ?? null}::text AS milestone_leaf,
         ${ordinaryMilestoneLeaf?.keepEarliest ?? false}::boolean AS keep_earliest,
         ${lifecycleProjection}::boolean AS lifecycle_projection,
-        ${terminalNonReplyProjection}::boolean AS terminal_non_reply_projection,
+        ${terminalCompletionProjection}::boolean AS terminal_completion_projection,
         1::integer AS phase_schema_version,
         ${HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON}::jsonb AS phase_leaf_rules
     ),
@@ -624,7 +665,7 @@ export async function recordHostedIngressAssistantMilestone(input: {
         requested.assistant_input_id,
         trace.id AS trace_id,
         (
-          input.terminal_non_reply_projection
+          input.terminal_completion_projection
           OR (
             input.lifecycle_projection
             AND ${buildHostedIngressLifecycleAssistantMilestoneEligibilitySql()}
@@ -649,7 +690,7 @@ export async function recordHostedIngressAssistantMilestone(input: {
         ON trace.id = scoped.trace_id
       WHERE scoped.eligible
         AND (
-          input.terminal_non_reply_projection
+          input.terminal_completion_projection
           OR (
             input.lifecycle_projection
             AND ${buildHostedIngressLifecycleAssistantMilestoneEligibilitySql()}
@@ -898,13 +939,11 @@ function buildHostedIngressLifecycleAssistantMilestoneEligibilitySql(): Prisma.S
     ${storedGeneration} IS NULL
     OR ${storedGeneration} < ${incomingGeneration}
   )`;
-  const terminalLeaf = Prisma.sql`${assistant}
-    -> 'terminalNonReplyCommittedAtEpochMs'`;
   const unresolved = Prisma.sql`(
     trace.provider_start_at IS NULL
     AND trace.reply_runtime_attempt_id IS NULL
     AND trace.linq_delivery_id IS NULL
-    AND NOT ${buildHostedIngressLatencySafeJsonIntegerPredicateSql(terminalLeaf)}
+    AND NOT ${hasHostedIngressTerminalCompletionSql(assistant)}
   )`;
   return Prisma.sql`(
     (${exactAttempt} AND ${incomingNotOlder})
@@ -912,8 +951,24 @@ function buildHostedIngressLifecycleAssistantMilestoneEligibilitySql(): Prisma.S
   )`;
 }
 
-function buildHostedIngressTerminalNonReplyPhaseBreakdownSql(input: {
+function readHostedIngressTerminalCompletionLeaf(milestone: HostedRuntimeAssistantMilestone) {
+  switch (milestone) {
+    case "terminal_reply_committed": return "terminalReplyCommittedAtEpochMs";
+    case "terminal_non_reply_committed": return "terminalNonReplyCommittedAtEpochMs";
+    default: return null;
+  }
+}
+
+function hasHostedIngressTerminalCompletionSql(assistant: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`(
+    ${buildHostedIngressLatencySafeJsonIntegerPredicateSql(Prisma.sql`${assistant} -> 'terminalNonReplyCommittedAtEpochMs'`)}
+    OR ${buildHostedIngressLatencySafeJsonIntegerPredicateSql(Prisma.sql`${assistant} -> 'terminalReplyCommittedAtEpochMs'`)}
+  )`;
+}
+
+function buildHostedIngressTerminalCompletionPhaseBreakdownSql(input: {
   hasCheckpointPublicationExpectedBy: boolean;
+  terminalLeaf: "terminalReplyCommittedAtEpochMs" | "terminalNonReplyCommittedAtEpochMs";
 }): Prisma.Sql {
   const stored = Prisma.sql`trace.phase_breakdown_json`;
   const sanitizedObject = buildHostedIngressLatencySanitizedJsonObjectSql(stored);
@@ -935,11 +990,11 @@ function buildHostedIngressTerminalNonReplyPhaseBreakdownSql(input: {
     )
   )`;
   let assistantPatch = Prisma.sql`jsonb_build_object(
-    'terminalNonReplyCommittedAtEpochMs',
+    ${input.terminalLeaf}::text,
     ${buildHostedIngressLatencyMaxEpochMsValueSql({
       assistant,
       incomingEpochMs: Prisma.sql`input.at_epoch_ms`,
-      leafKey: "terminalNonReplyCommittedAtEpochMs",
+      leafKey: input.terminalLeaf,
     })},
     'runtimeLeaseGeneration',
     input.runtime_lease_generation
@@ -995,7 +1050,7 @@ function buildHostedIngressCheckpointPublicationPhaseBreakdownSql(): Prisma.Sql 
   )`;
 }
 
-function buildHostedIngressTerminalNonReplyRuntimeAttemptSql(): Prisma.Sql {
+function buildHostedIngressTerminalCompletionRuntimeAttemptSql(): Prisma.Sql {
   const stored = Prisma.sql`trace.phase_breakdown_json`;
   const object = buildHostedIngressLatencyJsonObjectSql(stored);
   const assistant = buildHostedIngressLatencyJsonObjectSql(
@@ -1015,11 +1070,10 @@ function buildHostedIngressLatencyMaxEpochMsValueSql(input: {
   incomingEpochMs: Prisma.Sql;
   leafKey:
     | "checkpointPublicationExpectedByEpochMs"
-    | "terminalNonReplyCommittedAtEpochMs";
+    | "terminalNonReplyCommittedAtEpochMs"
+    | "terminalReplyCommittedAtEpochMs";
 }): Prisma.Sql {
-  const leaf = input.leafKey === "terminalNonReplyCommittedAtEpochMs"
-    ? Prisma.sql`${input.assistant} -> 'terminalNonReplyCommittedAtEpochMs'`
-    : Prisma.sql`${input.assistant} -> 'checkpointPublicationExpectedByEpochMs'`;
+  const leaf = Prisma.sql`${input.assistant} -> ${input.leafKey}::text`;
   const safeLeaf = buildHostedIngressLatencySafeJsonIntegerPredicateSql(leaf);
   const leafText = Prisma.sql`(${leaf}) #>> '{}'`;
   return Prisma.sql`CASE
@@ -1171,8 +1225,9 @@ function readHostedIngressAssistantMilestoneLeaf(
       return { keepEarliest: false, leafKey: "firstCodexOutputObservedAtEpochMs" };
     case "first_codex_text_observed":
       return { keepEarliest: false, leafKey: "firstCodexTextObservedAtEpochMs" };
+    case "terminal_reply_committed":
     case "terminal_non_reply_committed":
-      throw new TypeError("Terminal non-reply milestones do not use an ordinary assistant leaf.");
+      throw new TypeError("Terminal completion milestones do not use an ordinary assistant leaf.");
   }
 }
 
@@ -2281,11 +2336,6 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
   const storedLeaseGeneration = buildHostedIngressLatencyStoredLeaseGenerationSql(
     storedAssistant,
   );
-  const terminalNonReplyLeaf = Prisma.sql`
-    ${storedAssistant} -> 'terminalNonReplyCommittedAtEpochMs'
-  `;
-  const hasTerminalNonReplyEvidence =
-    buildHostedIngressLatencySafeJsonIntegerPredicateSql(terminalNonReplyLeaf);
   const candidateStoredObject = buildHostedIngressLatencyJsonObjectSql(
     Prisma.sql`candidate.phase_breakdown_json`,
   );
@@ -2294,13 +2344,6 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
   );
   const candidateStoredLeaseGeneration =
     buildHostedIngressLatencyStoredLeaseGenerationSql(candidateStoredAssistant);
-  const candidateTerminalNonReplyLeaf = Prisma.sql`
-    ${candidateStoredAssistant} -> 'terminalNonReplyCommittedAtEpochMs'
-  `;
-  const candidateHasTerminalNonReplyEvidence =
-    buildHostedIngressLatencySafeJsonIntegerPredicateSql(
-      candidateTerminalNonReplyLeaf,
-    );
   const nextPhaseBreakdown =
     buildHostedIngressCheckpointPublicationPhaseBreakdownSql();
 
@@ -2319,7 +2362,7 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
           AND candidate.user_id = ${input.userId}
           AND candidate.source = ${input.source}
           AND (
-            ${candidateHasTerminalNonReplyEvidence}
+            ${hasHostedIngressTerminalCompletionSql(candidateStoredAssistant)}
             OR candidate.runtime_attempt_id = ${input.runtimeAttemptId}
           )
           AND (
@@ -2375,7 +2418,7 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
           AND trace.user_id = input.user_id
           AND trace.source = input.source
           AND (
-            ${hasTerminalNonReplyEvidence}
+            ${hasHostedIngressTerminalCompletionSql(storedAssistant)}
             OR trace.runtime_attempt_id = input.runtime_attempt_id
           )
           AND (

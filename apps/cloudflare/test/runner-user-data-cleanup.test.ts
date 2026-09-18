@@ -1,59 +1,18 @@
-import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
-import {
-  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
-  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
-  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
-  HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
-  type HostedBrowserVaultReplicaMetricBucketSetRef,
-  type HostedBrowserVaultReplicaRef,
-} from "@murphai/hosted-execution/contracts";
-import {
-  buildHostedWorkspaceSnapshotV2Aad,
-  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
-} from "@murphai/hosted-execution/workspace-snapshot-v2";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  resolveHostedExecutionRunnerContainerName,
-  type HostedExecutionContainerNamespaceLike,
-  type HostedExecutionContainerStubLike,
-} from "../src/runner-container.js";
-import type {
-  HostedStandbySlotBinding,
-} from "../src/standby-runner-contract.js";
-import {
   hostedBundleUserPrefix,
-  hostedBrowserVaultReplicaUserPrefix,
   hostedMealPhotoUserPrefix,
   hostedPrivateMediaUserPrefix,
 } from "../src/storage-paths.js";
+
 import {
-  HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
-  type HostedWorkspaceSnapshotUploadSession,
-} from "../src/workspace-snapshot-store.js";
-import {
-  HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
-  listHostedBrowserVaultReplicaSiblingObjectKeys,
-} from "../src/browser-vault-store.ts";
-import {
-  deleteHostedRunnerUserData,
+  deleteHostedUserR2DataBeforeStateDeletion,
 } from "../src/user-runner/user-data-deletion.js";
 import {
   deleteR2ObjectsWithPrefix,
 } from "../src/user-runner/r2-delete.js";
-import {
-  createWorkspaceSnapshotSessionService,
-  browserVaultReplicaOrphanCandidateStorageKey,
-  workspaceSnapshotOrphanCandidateStorageKey,
-} from "../src/user-runner/workspace-snapshot-sessions.js";
-import type {
-  DurableObjectStateLike,
-  DurableObjectStorageLike,
-} from "../src/user-runner/types.js";
-import { withSerializedLock } from "../src/serialized-lock.ts";
-import { abortAllLegacyManagedSnapshots, readLegacyManagedSnapshot, scanLegacyManagedSnapshots } from "../src/user-runner/legacy-managed-snapshot.ts";
-import { requireLegacyRuntimeStorageCoverage } from "../src/user-runner/legacy-runtime-export.ts";
+
 import { MemoryEncryptedR2Bucket } from "./test-helpers.js";
 
 const hostedExecutionMocks = vi.hoisted(() => ({
@@ -72,7 +31,6 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 const USER_ID = "member_cleanup_test";
-const NOW = "2026-04-27T00:00:00.000Z";
 
 describe("hosted runner user data cleanup", () => {
   afterEach(() => {
@@ -80,9 +38,7 @@ describe("hosted runner user data cleanup", () => {
     vi.restoreAllMocks();
   });
 
-  it("deletes staged meal photos before deleting runner state", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore();
+  it("deletes staged meal photos during user erasure", async () => {
     const bucket = new ListableMemoryEncryptedR2Bucket();
     const prefix = await hostedMealPhotoUserPrefix({ userId: USER_ID });
     const stagedPhotoKey = `${prefix}${"a".repeat(48)}.jpg.enc`;
@@ -90,33 +46,21 @@ describe("hosted runner user data cleanup", () => {
     await bucket.put(stagedPhotoKey, "encrypted-photo");
     await bucket.put(unrelatedKey, "other-user-photo");
 
-    const result = await deleteHostedRunnerUserData({
+    const result = await deleteHostedUserR2DataBeforeStateDeletion({
       bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
       userId: USER_ID,
     });
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      throw new Error("Expected hosted user-data deletion to complete.");
-    }
-    expect(result.r2).toMatchObject({
+    expect(result).toMatchObject({
       deletedObjectCount: 1,
       skippedUserScopedPrefixes: false,
       supported: true,
     });
     expect(bucket.objects.has(stagedPhotoKey)).toBe(false);
     expect(bucket.objects.has(unrelatedKey)).toBe(true);
-    expect(stateStore.deleteStateCallCount).toBe(1);
-    expect(durable.deleteAllCount).toBe(1);
   });
 
-  it("deletes private avatar ingress objects before deleting runner state", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore();
+  it("deletes private avatar ingress objects during user erasure", async () => {
     const bucket = new ListableMemoryEncryptedR2Bucket();
     const prefix = await hostedPrivateMediaUserPrefix({ userId: USER_ID });
     const stagedMediaKey = `${prefix}${"a".repeat(48)}.image.enc`;
@@ -125,234 +69,21 @@ describe("hosted runner user data cleanup", () => {
     await bucket.put(stagedMediaKey, "encrypted-private-media");
     await bucket.put(unrelatedKey, "other-user-private-media");
 
-    const result = await deleteHostedRunnerUserData({
+    const result = await deleteHostedUserR2DataBeforeStateDeletion({
       bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
       userId: USER_ID,
     });
 
     expect(result).toMatchObject({
-      ok: true,
-      r2: {
-        deletedObjectCount: 1,
-        skippedUserScopedPrefixes: false,
-        supported: true,
-      },
+      deletedObjectCount: 1,
+      skippedUserScopedPrefixes: false,
+      supported: true,
     });
     expect(bucket.objects.has(stagedMediaKey)).toBe(false);
     expect(bucket.objects.has(unrelatedKey)).toBe(true);
-    expect(stateStore.deleteStateCallCount).toBe(1);
-    expect(durable.deleteAllCount).toBe(1);
   });
 
-  it("retries the retained prior-version runner target before deleting user data", async () => {
-    const priorRunnerContainerName = `${USER_ID}--v-current`;
-    const rollbackRunnerContainerName = resolveHostedExecutionRunnerContainerName({
-      source: { CF_VERSION_METADATA: { id: "rollback" } },
-      userId: USER_ID,
-    });
-    expect(rollbackRunnerContainerName).not.toBe(priorRunnerContainerName);
-
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore({
-      activeAttemptId: "attempt_active",
-      runnerContainerName: priorRunnerContainerName,
-    });
-    const bucket = new ListableMemoryEncryptedR2Bucket();
-    const requestedRunnerContainerNames: string[] = [];
-    const rollbackDestroyInstance = vi.fn(async () => {});
-    const priorDestroyInstance = vi.fn(async () => {
-      if (priorDestroyInstance.mock.calls.length === 1) {
-        throw new Error("prior runner destroy failed");
-      }
-    });
-    const runnerContainerNamespace: HostedExecutionContainerNamespaceLike = {
-      getByName(name) {
-        requestedRunnerContainerNames.push(name);
-        return createDestroyOnlyRunnerContainerStub(
-          name === priorRunnerContainerName
-            ? priorDestroyInstance
-            : rollbackDestroyInstance,
-        );
-      },
-    };
-    const request = {
-      bucket,
-      runnerContainerNamespace,
-      runnerRuntimeEnvSource: {
-        CF_VERSION_METADATA: { id: "current" },
-      },
-      state: durable.state,
-      stateStore,
-      userId: USER_ID,
-    };
-
-    await expect(deleteHostedRunnerUserData(request)).rejects.toThrow(
-      "container cleanup failed before user data deletion",
-    );
-    expect(requestedRunnerContainerNames).toEqual([priorRunnerContainerName]);
-    expect(stateStore.runnerContainerName).toBe(priorRunnerContainerName);
-    expect(stateStore.deleteStateCallCount).toBe(0);
-    expect(durable.deleteAllCount).toBe(0);
-
-    await expect(deleteHostedRunnerUserData(request)).resolves.toMatchObject({
-      durableObject: {
-        deleteAllCompleted: true,
-        stateDeleted: true,
-      },
-      ok: true,
-    });
-    expect(requestedRunnerContainerNames).toEqual([
-      priorRunnerContainerName,
-      priorRunnerContainerName,
-    ]);
-    expect(priorDestroyInstance).toHaveBeenCalledTimes(2);
-    expect(rollbackDestroyInstance).not.toHaveBeenCalled();
-    expect(stateStore.runnerContainerName).toBeNull();
-    expect(stateStore.deleteStateCallCount).toBe(1);
-    expect(durable.deleteAllCount).toBe(1);
-  });
-
-  it("retries the exact claimed standby retirement before deleting user data", async () => {
-    const slotName = `standby--v-release_1--${"a".repeat(32)}`;
-    const claimId = "claim_cleanup_test";
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore({
-      activeAttemptId: "attempt_active",
-      runnerContainerName: slotName,
-    });
-    const bucket = new ListableMemoryEncryptedR2Bucket();
-    const requestedRunnerContainerNames: string[] = [];
-    const destroyInstance = vi.fn(async () => {
-      throw new Error("Claimed standby cleanup must use retirement.");
-    });
-    let bindingState: "bound" | "retired" | "retiring" = "bound";
-    const readStandbySlotBinding = vi.fn(async (): Promise<HostedStandbySlotBinding> =>
-      bindingState === "retired"
-        ? {
-            claimId: null,
-            releaseId: "release_1",
-            region: "ENAM",
-            slotName,
-            state: "retired",
-            userId: null,
-          }
-        : {
-            claimId,
-            releaseId: "release_1",
-            region: "ENAM",
-            slotName,
-            state: bindingState,
-            userId: USER_ID,
-          });
-    const retireStandbySlot = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["retireStandbySlot"]>
-    >(async (input) => {
-      expect(input).toEqual({ target: { slotName, userId: USER_ID } });
-      expect(stateStore.runnerContainerName).toBe(slotName);
-      if (retireStandbySlot.mock.calls.length === 1) {
-        bindingState = "retiring";
-        throw new Error("standby retirement did not settle");
-      }
-      bindingState = "retired";
-      return { retired: true as const };
-    });
-    const runnerContainerNamespace: HostedExecutionContainerNamespaceLike = {
-      getByName(name) {
-        requestedRunnerContainerNames.push(name);
-        return {
-          ...createDestroyOnlyRunnerContainerStub(destroyInstance),
-          readStandbySlotBinding,
-          retireStandbySlot,
-        };
-      },
-    };
-    const request = {
-      bucket,
-      runnerContainerNamespace,
-      runnerRuntimeEnvSource: {
-        CF_VERSION_METADATA: { id: "release_1" },
-      },
-      state: durable.state,
-      stateStore,
-      userId: USER_ID,
-    };
-
-    await expect(deleteHostedRunnerUserData(request)).rejects.toThrow(
-      "container cleanup failed before user data deletion",
-    );
-    expect(stateStore.runnerContainerName).toBe(slotName);
-    expect(stateStore.deleteStateCallCount).toBe(0);
-    expect(durable.deleteAllCount).toBe(0);
-
-    await expect(deleteHostedRunnerUserData(request)).resolves.toMatchObject({
-      durableObject: {
-        deleteAllCompleted: true,
-        stateDeleted: true,
-      },
-      ok: true,
-    });
-    expect(requestedRunnerContainerNames).toEqual([slotName, slotName]);
-    expect(readStandbySlotBinding).not.toHaveBeenCalled();
-    expect(retireStandbySlot).toHaveBeenCalledTimes(2);
-    expect(destroyInstance).not.toHaveBeenCalled();
-    expect(stateStore.runnerContainerName).toBeNull();
-    expect(stateStore.deleteStateCallCount).toBe(1);
-    expect(durable.deleteAllCount).toBe(1);
-  });
-
-  it("fails closed before logical state deletion when deleteAll is unavailable", async () => {
-    const durable = createDurableObjectHarness();
-    durable.state.storage.deleteAll = undefined;
-    const stateStore = createDeletionStateStore();
-    const bucket = new ListableMemoryEncryptedR2Bucket();
-
-    await expect(deleteHostedRunnerUserData({
-      bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
-      userId: USER_ID,
-    })).rejects.toThrow("deleteAll is required");
-    expect(stateStore.deleteStateCallCount).toBe(0);
-  });
-
-  it("retries after Durable Object deleteAll fails without reporting completion", async () => {
-    const deleteAllError = new Error("Durable Object deleteAll failed");
-    const durable = createDurableObjectHarness({ deleteAllError });
-    const stateStore = createDeletionStateStore();
-    const bucket = new ListableMemoryEncryptedR2Bucket();
-    const request = {
-      bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
-      userId: USER_ID,
-    };
-
-    await expect(deleteHostedRunnerUserData(request)).rejects.toBe(deleteAllError);
-    expect(stateStore.deleteStateCallCount).toBe(1);
-    expect(durable.deleteAllCount).toBe(1);
-
-    await expect(deleteHostedRunnerUserData(request)).resolves.toMatchObject({
-      durableObject: {
-        alarmCleared: true,
-        deleteAllCompleted: true,
-        stateDeleted: true,
-      },
-    });
-    expect(stateStore.deleteStateCallCount).toBe(2);
-    expect(durable.deleteAllCount).toBe(2);
-  });
-
-  it("does not delete Durable Object state or alarms when R2 cleanup fails", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore();
+  it("withholds completion when R2 cleanup fails", async () => {
     const prefix = await hostedBundleUserPrefix({ userId: USER_ID });
     const deletedBeforeFailureKey = `${prefix}a.bundle.json`;
     const failedKey = `${prefix}z.bundle.json`;
@@ -360,18 +91,11 @@ describe("hosted runner user data cleanup", () => {
     await bucket.put(deletedBeforeFailureKey, "first");
     await bucket.put(failedKey, "second");
 
-    await expect(deleteHostedRunnerUserData({
+    await expect(deleteHostedUserR2DataBeforeStateDeletion({
       bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
       userId: USER_ID,
     })).rejects.toThrow("Hosted runner R2 cleanup failed before user data deletion.");
 
-    expect(stateStore.deleteStateCallCount).toBe(0);
-    expect(durable.alarmDeleteCount).toBe(0);
-    expect(durable.deleteAllCount).toBe(0);
     expect(bucket.deleted).toEqual([deletedBeforeFailureKey]);
     expect(bucket.objects.has(failedKey)).toBe(true);
     const serializedLogs = JSON.stringify(
@@ -381,24 +105,15 @@ describe("hosted runner user data cleanup", () => {
     expect(serializedLogs).not.toContain("R2 delete failed for");
   });
 
-  it("does not delete Durable Object state or alarms when R2 listing fails", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore();
+  it("withholds completion when R2 listing fails", async () => {
     const bucket = new FailingListableR2Bucket();
     const leakedPrefix = await hostedBundleUserPrefix({ userId: USER_ID });
 
-    await expect(deleteHostedRunnerUserData({
+    await expect(deleteHostedUserR2DataBeforeStateDeletion({
       bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
       userId: USER_ID,
     })).rejects.toThrow("Hosted runner R2 cleanup failed before user data deletion.");
 
-    expect(stateStore.deleteStateCallCount).toBe(0);
-    expect(durable.alarmDeleteCount).toBe(0);
-    expect(durable.deleteAllCount).toBe(0);
     const serializedLogs = JSON.stringify(
       hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls,
     );
@@ -407,305 +122,26 @@ describe("hosted runner user data cleanup", () => {
   });
 
   it("rejects a bucket without list support instead of reporting success", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore();
     const unsupported = new MemoryEncryptedR2Bucket();
 
-    await expect(deleteHostedRunnerUserData({
+    await expect(deleteHostedUserR2DataBeforeStateDeletion({
       bucket: unsupported,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
       userId: USER_ID,
     })).rejects.toThrow("Hosted runner R2 cleanup failed");
 
-    expect(stateStore.deleteStateCallCount).toBe(0);
-    expect(durable.deleteAllCount).toBe(0);
-  });
-
-  it("returns retryable pending before touching R2 while a direct PUT can still finish", async () => {
-    const now = Date.parse("2026-07-28T12:00:00.000Z");
-    vi.spyOn(Date, "now").mockReturnValue(now);
-    const durable = createDurableObjectHarness();
-    durable.storageValues.set("workspace-snapshot:r2-put-drain:v1", {
-      drainUntil: "2026-07-28T12:05:00.000Z",
-      schema: "murph.hosted-workspace-snapshot-r2-put-drain.v1",
-      userId: USER_ID,
-    });
-    const stateStore = createDeletionStateStore();
-    const bucket = new ListableMemoryEncryptedR2Bucket();
-
-    await expect(deleteHostedRunnerUserData({
-      bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
-      userId: USER_ID,
-    })).resolves.toEqual({
-      ok: false,
-      reason: "r2_upload_drain_pending",
-      retryAfterSeconds: 300,
-      userId: USER_ID,
-    });
-
-    expect(bucket.deleteBatches).toEqual([]);
-    expect(stateStore.deleteStateCallCount).toBe(0);
-  });
-
-  it("carries a real owner-recorded monotonic PUT drain into deletion admission", async () => {
-    const now = Date.parse("2026-07-28T12:00:00.000Z");
-    vi.spyOn(Date, "now").mockReturnValue(now);
-    const durable = createDurableObjectHarness();
-    const ownerStateStore = createOwningSnapshotStateStore();
-    const bucket = new ListableMemoryEncryptedR2Bucket();
-    const snapshotId = "snapshot_ticket";
-    const objectKey =
-      `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
-    const session: HostedWorkspaceSnapshotUploadSession = {
-      attemptId: "attempt_1",
-      createdAt: "2026-07-28T12:00:00.000Z",
-      encryption: {
-        aad: buildHostedWorkspaceSnapshotV2Aad({
-          objectKey,
-          snapshotId,
-          userId: USER_ID,
-        }),
-        ivBase64: "AQIDBAUGBwgJCgsM",
-        rootKeyId: "root_1",
-        scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
-        wrappedDataKey: "wrapped",
-      },
-      expectedWorkspaceVersion: "7",
-      expiresAt: "2026-07-28T13:00:00.000Z",
-      leaseGeneration: "3",
-      objectKey,
-      schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
-      snapshotId,
-      userId: USER_ID,
-      workspaceVersion: "7",
-    };
-    const service = createWorkspaceSnapshotSessionService({
-      withSnapshotMutation: run => run(),
-      bucket,
-      runnerStoreCache: createUnusedRunnerStoreCache(),
-      state: durable.state,
-      stateStore: ownerStateStore,
-      readHostedWorkspaceFromWeb: async (userId) => ({
-        fetchedAt: NOW,
-        workspace: createWorkspaceState(userId),
-      }),
-      assertWorkspaceBelongsToRunnerUser() {},
-    });
-
-    const created = await service.create(session);
-    expect(created).toEqual({
-      ...session,
-      checkpointHandoffHeartbeatAt: expect.any(String),
-    });
-    const first = await service.rememberPresignedPut({
-      drainUntil: "2026-07-28T12:20:00.000Z",
-      expectedSession: session,
-      expiresAt: "2026-07-28T12:10:00.000Z",
-    });
-    if (!first) {
-      throw new Error("Expected the first owner-recorded PUT drain.");
-    }
-    await expect(service.rememberPresignedPut({
-      drainUntil: "2026-07-28T12:15:00.000Z",
-      expectedSession: first,
-      expiresAt: "2026-07-28T12:10:00.000Z",
-    })).resolves.not.toBeNull();
-    expect(durable.storageValues.get("workspace-snapshot:r2-put-drain:v1")).toEqual({
-      drainUntil: "2026-07-28T12:20:00.000Z",
-      schema: "murph.hosted-workspace-snapshot-r2-put-drain.v1",
-      userId: USER_ID,
-    });
-
-    await expect(deleteHostedRunnerUserData({
-      bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore: createDeletionStateStore(),
-      userId: USER_ID,
-    })).resolves.toEqual({
-      ok: false,
-      reason: "r2_upload_drain_pending",
-      retryAfterSeconds: 1_200,
-      userId: USER_ID,
-    });
-
-    expect(bucket.listCalls).toEqual([]);
-    expect(bucket.deleteBatches).toEqual([]);
-  });
-
-  it("waits out an admitted browser-vault PUT and deletes its late object on retry", async () => {
-    const startedAt = Date.parse("2026-07-28T12:00:00.000Z");
-    vi.spyOn(Date, "now").mockReturnValue(startedAt);
-    const durable = createDurableObjectHarness();
-    const bucket = new ListableMemoryEncryptedR2Bucket();
-    const service = createWorkspaceSnapshotSessionService({
-      withSnapshotMutation: run => run(),
-      bucket,
-      runnerStoreCache: createUnusedRunnerStoreCache(),
-      state: durable.state,
-      stateStore: createOwningSnapshotStateStore(),
-      readHostedWorkspaceFromWeb: async (userId) => ({
-        fetchedAt: NOW,
-        workspace: createWorkspaceState(userId),
-      }),
-      assertWorkspaceBelongsToRunnerUser() {},
-    });
-    const writeId = "browser-vault-put-test";
-    await expect(service.admitBrowserVaultReplicaDirectPut({
-      admittedAt: "2026-07-28T12:00:00.000Z",
-      attemptId: "attempt_1",
-      leaseGeneration: "3",
-      userId: USER_ID,
-      writeId,
-    })).resolves.toBe(true);
-    const objectKey = `${await hostedBrowserVaultReplicaUserPrefix({
-      userId: USER_ID,
-    })}${"d".repeat(48)}.json`;
-    let releasePut = (): void => {};
-    const putGate = new Promise<void>((resolve) => {
-      releasePut = resolve;
-    });
-    const delayedPut = (async () => {
-      await putGate;
-      await bucket.put(objectKey, "late-encrypted-browser-vault-replica");
-    })();
-    const deletionStateStore = createDeletionStateStore();
-
-    await expect(deleteHostedRunnerUserData({
-      bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore: deletionStateStore,
-      userId: USER_ID,
-    })).resolves.toEqual({
-      ok: false,
-      reason: "r2_upload_drain_pending",
-      retryAfterSeconds: 60,
-      userId: USER_ID,
-    });
-    expect(bucket.listCalls).toEqual([]);
-
-    releasePut();
-    await delayedPut;
-    await service.releaseBrowserVaultReplicaDirectPut({ userId: USER_ID, writeId });
-    expect(bucket.objects.has(objectKey)).toBe(true);
-
-    await expect(deleteHostedRunnerUserData({
-      bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore: deletionStateStore,
-      userId: USER_ID,
-    })).resolves.toMatchObject({ ok: true });
-    expect(bucket.objects.has(objectKey)).toBe(false);
-    expect(deletionStateStore.deleteStateCallCount).toBe(1);
-  });
-
-  it("clears a crashed browser-vault writer after the post-stop drain window", async () => {
-    const admittedAt = Date.parse("2026-07-28T12:00:00.000Z");
-    const deletionStartedAt = admittedAt + 2 * 60 * 60_000;
-    const dateNow = vi.spyOn(Date, "now").mockReturnValue(deletionStartedAt);
-    const durable = createDurableObjectHarness();
-    const bucket = new ListableMemoryEncryptedR2Bucket();
-    const service = createWorkspaceSnapshotSessionService({
-      withSnapshotMutation: run => run(),
-      bucket,
-      runnerStoreCache: createUnusedRunnerStoreCache(),
-      state: durable.state,
-      stateStore: createOwningSnapshotStateStore(),
-      readHostedWorkspaceFromWeb: async (userId) => ({
-        fetchedAt: NOW,
-        workspace: createWorkspaceState(userId),
-      }),
-      assertWorkspaceBelongsToRunnerUser() {},
-    });
-    await expect(service.admitBrowserVaultReplicaDirectPut({
-      admittedAt: "2026-07-28T12:00:00.000Z",
-      attemptId: "attempt_1",
-      leaseGeneration: "3",
-      userId: USER_ID,
-      writeId: "stale-browser-vault-put",
-    })).resolves.toBe(true);
-    const deletionStateStore = createDeletionStateStore();
-
-    await expect(deleteHostedRunnerUserData({
-      bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore: deletionStateStore,
-      userId: USER_ID,
-    })).resolves.toMatchObject({
-      ok: false,
-      reason: "r2_upload_drain_pending",
-      retryAfterSeconds: 60,
-    });
-    expect(bucket.listCalls).toEqual([]);
-
-    const objectKey = `${await hostedBrowserVaultReplicaUserPrefix({
-      userId: USER_ID,
-    })}${"e".repeat(48)}.json`;
-    await bucket.put(objectKey, "late-encrypted-browser-vault-replica");
-    dateNow.mockReturnValue(deletionStartedAt + 60_001);
-
-    await expect(deleteHostedRunnerUserData({
-      bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore: deletionStateStore,
-      userId: USER_ID,
-    })).resolves.toMatchObject({ ok: true });
-    expect(bucket.objects.has(objectKey)).toBe(false);
-    expect(deletionStateStore.deleteStateCallCount).toBe(1);
   });
 
   it("withholds completion when a late object appears between empty observations", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore();
     const prefix = await hostedBundleUserPrefix({ userId: USER_ID });
     const lateKey = `${prefix}late.bundle.json`;
     const bucket = new LateWriteListableR2Bucket(prefix, lateKey);
 
-    await expect(deleteHostedRunnerUserData({
+    await expect(deleteHostedUserR2DataBeforeStateDeletion({
       bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
       userId: USER_ID,
     })).rejects.toThrow("Hosted runner R2 cleanup failed");
 
     expect(bucket.objects.has(lateKey)).toBe(true);
-    expect(stateStore.deleteStateCallCount).toBe(0);
-    expect(durable.deleteAllCount).toBe(0);
-  });
-
-  it("does not report success when logical state deletion declines", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore({ deleted: false });
-    const bucket = new ListableMemoryEncryptedR2Bucket();
-
-    await expect(deleteHostedRunnerUserData({
-      bucket,
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
-      userId: USER_ID,
-    })).rejects.toThrow("logical state was not deleted");
-
-    expect(durable.deleteAllCount).toBe(0);
   });
 
   it("bulk-deletes every listed R2 prefix page without cursor skips", async () => {
@@ -723,354 +159,7 @@ describe("hosted runner user data cleanup", () => {
     expect(bucket.objects.size).toBe(0);
   });
 
-  it("skips malformed workspace snapshot orphan candidates and keeps cleaning valid candidates", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createBindOnlyStateStore();
-    const bucket = new ListableMemoryEncryptedR2Bucket();
-    const malformedCandidateKey = workspaceSnapshotOrphanCandidateStorageKey("bad");
-    const validCandidateKey = workspaceSnapshotOrphanCandidateStorageKey("valid");
-    const validObjectKey = "users/snapshots/member_cleanup_test/orphan.snapshot.enc";
-    durable.storageValues.set(malformedCandidateKey, {
-      schema: "wrong",
-    });
-    durable.storageValues.set(validCandidateKey, {
-      createdAt: "2026-04-26T00:00:00.000Z",
-      objectKey: validObjectKey,
-      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-      snapshotId: "valid",
-      userId: USER_ID,
-    });
-    await bucket.put(validObjectKey, "encrypted-snapshot");
-    const readHostedWorkspaceFromWeb = vi.fn(async (userId: string) => {
-      expect(bucket.deleted).toEqual([]);
-      return {
-        fetchedAt: NOW,
-        workspace: createWorkspaceState(userId),
-      };
-    });
-    const service = createWorkspaceSnapshotSessionService({
-      withSnapshotMutation: run => run(),
-      bucket,
-      runnerStoreCache: createUnusedRunnerStoreCache(),
-      state: durable.state,
-      stateStore,
-      readHostedWorkspaceFromWeb,
-      assertWorkspaceBelongsToRunnerUser(workspace, userId) {
-        if (workspace?.userId !== userId) {
-          throw new Error("Workspace user mismatch.");
-        }
-      },
-    });
-
-    await service.cleanupOrphanCandidates(USER_ID);
-
-    expect(bucket.deleted).toEqual([validObjectKey]);
-    expect(bucket.objects.has(validObjectKey)).toBe(false);
-    expect(durable.storageValues.has(malformedCandidateKey)).toBe(false);
-    expect(durable.storageValues.has(validCandidateKey)).toBe(false);
-    expect(stateStore.boundUsers).toEqual([USER_ID]);
-    expect(readHostedWorkspaceFromWeb).toHaveBeenCalledExactlyOnceWith(USER_ID);
-  });
-
-  it("protects every live browser-vault shard while deleting replaced replica objects", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createBindOnlyStateStore();
-    const bucket = new ListableMemoryEncryptedR2Bucket();
-    const prefix = await hostedBrowserVaultReplicaUserPrefix({ userId: USER_ID });
-    const objectKey = `${prefix}${"a".repeat(48)}.json`;
-    const currentObjectKeys = [
-      objectKey,
-      ...listHostedBrowserVaultReplicaSiblingObjectKeys(objectKey),
-    ];
-    const replacedObjectKey = `${prefix}${"b".repeat(48)}.json`;
-    const metricBucketRefs = Object.fromEntries(
-      HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) => [
-        bucketId,
-        createHostedBrowserVaultShardRef(
-          objectKey.replace(/\.json$/u, `.metric-bucket-${bucketId}.json`),
-        ),
-      ]),
-    ) as HostedBrowserVaultReplicaMetricBucketSetRef["buckets"];
-    const replicaRef: HostedBrowserVaultReplicaRef = {
-      byteLength: 10_000,
-      dataVersion: "cleanup-test",
-      generatedAt: "2026-04-26T00:00:00.000Z",
-      keyId: "browser-vault-replica:cleanup-test",
-      objectKey,
-      replicaSchema: "murph.browser-vault-replica" as const,
-      runtimeRootKeyId: "runtime-root-cleanup-test",
-      schema: "murph.hosted-browser-vault-replica-ref.v1" as const,
-      metricBuckets: {
-        bucketCount: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
-        buckets: metricBucketRefs,
-        schema: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
-      },
-      shards: {
-        core: createHostedBrowserVaultShardRef(
-          objectKey.replace(/\.json$/u, ".core.json"),
-        ),
-        labs: createHostedBrowserVaultShardRef(
-          objectKey.replace(/\.json$/u, ".labs.json"),
-        ),
-        metricsIndex: createHostedBrowserVaultShardRef(
-          objectKey.replace(/\.json$/u, ".metrics-index.json"),
-        ),
-        schema: HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
-      },
-      sourceBundleHash: "c".repeat(64),
-    };
-    const candidateObjectKeys = [objectKey, replacedObjectKey];
-    for (const candidateObjectKey of candidateObjectKeys) {
-      durable.storageValues.set(
-        browserVaultReplicaOrphanCandidateStorageKey(candidateObjectKey),
-        {
-          createdAt: "2026-04-26T00:00:00.000Z",
-          objectKey: candidateObjectKey,
-          schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
-          userId: USER_ID,
-        },
-      );
-    }
-    const replacedObjectKeys = [
-      replacedObjectKey,
-      ...listHostedBrowserVaultReplicaSiblingObjectKeys(replacedObjectKey),
-    ];
-    for (const storedObjectKey of [...currentObjectKeys, ...replacedObjectKeys]) {
-      await bucket.put(storedObjectKey, "encrypted-replica-object");
-    }
-    const service = createWorkspaceSnapshotSessionService({
-      withSnapshotMutation: run => run(),
-      bucket,
-      runnerStoreCache: createUnusedRunnerStoreCache(),
-      state: durable.state,
-      stateStore,
-      readHostedWorkspaceFromWeb: async (userId) => ({
-        fetchedAt: NOW,
-        workspace: {
-          ...createWorkspaceState(userId),
-          browserVaultReplicaRef: replicaRef,
-        },
-      }),
-      assertWorkspaceBelongsToRunnerUser(workspace, userId) {
-        if (workspace?.userId !== userId) {
-          throw new Error("Workspace user mismatch.");
-        }
-      },
-    });
-
-    await service.cleanupOrphanCandidates(USER_ID);
-
-    expect(bucket.deleted).toEqual(replacedObjectKeys);
-    expect(currentObjectKeys.every((key) => bucket.objects.has(key))).toBe(true);
-    expect(replacedObjectKeys.every((key) => !bucket.objects.has(key))).toBe(true);
-    expect(candidateObjectKeys.every((key) =>
-      !durable.storageValues.has(browserVaultReplicaOrphanCandidateStorageKey(key))))
-      .toBe(true);
-  });
-
-  it("does not log malformed orphan candidate keys when invalid-record discard fails", async () => {
-    const malformedCandidateKey = workspaceSnapshotOrphanCandidateStorageKey("bad");
-    const durable = createDurableObjectHarness({
-      deleteFailures: new Map([
-        [
-          malformedCandidateKey,
-          new Error(`Storage delete failed for ${malformedCandidateKey}`),
-        ],
-      ]),
-    });
-    const stateStore = createBindOnlyStateStore();
-    const bucket = new ListableMemoryEncryptedR2Bucket();
-    const validCandidateKey = workspaceSnapshotOrphanCandidateStorageKey("valid");
-    const validObjectKey = "users/snapshots/member_cleanup_test/orphan.snapshot.enc";
-    durable.storageValues.set(malformedCandidateKey, {
-      schema: "wrong",
-    });
-    durable.storageValues.set(validCandidateKey, {
-      createdAt: "2026-04-26T00:00:00.000Z",
-      objectKey: validObjectKey,
-      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-      snapshotId: "valid",
-      userId: USER_ID,
-    });
-    await bucket.put(validObjectKey, "encrypted-snapshot");
-    const service = createWorkspaceSnapshotSessionService({
-      withSnapshotMutation: run => run(),
-      bucket,
-      runnerStoreCache: createUnusedRunnerStoreCache(),
-      state: durable.state,
-      stateStore,
-      readHostedWorkspaceFromWeb: async (userId) => ({
-        fetchedAt: NOW,
-        workspace: createWorkspaceState(userId),
-      }),
-      assertWorkspaceBelongsToRunnerUser(workspace, userId) {
-        if (workspace?.userId !== userId) {
-          throw new Error("Workspace user mismatch.");
-        }
-      },
-    });
-
-    await service.cleanupOrphanCandidates(USER_ID);
-
-    expect(bucket.deleted).toEqual([validObjectKey]);
-    expect(durable.storageValues.has(malformedCandidateKey)).toBe(true);
-    expect(durable.storageValues.has(validCandidateKey)).toBe(false);
-    const serializedLogs = JSON.stringify(
-      hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls,
-    );
-    expect(serializedLogs).not.toContain(malformedCandidateKey);
-    expect(serializedLogs).not.toContain("Storage delete failed for");
-  });
 });
-
-function createDeletionStateStore(input: {
-  activeAttemptId?: string | null;
-  deleted?: boolean;
-  runnerContainerName?: string | null;
-} = {}): {
-  assertStateForUser(userId: string): Promise<void>;
-  clearWriteFenceForUserControl(userId: string): Promise<{
-    attemptId: string | null;
-    cleared: boolean;
-    runnerContainerName: string | null;
-  }>;
-  deleteStateCallCount: number;
-  deleteStateForUser(userId: string): Promise<{ deleted: boolean }>;
-  readonly runnerContainerName: string | null;
-} {
-  let activeAttemptId = input.activeAttemptId ?? null;
-  let deleteStateCallCount = 0;
-  let runnerContainerName = input.runnerContainerName ?? null;
-  return {
-    async assertStateForUser(userId) {
-      expect(userId).toBe(USER_ID);
-    },
-    async clearWriteFenceForUserControl(userId) {
-      expect(userId).toBe(USER_ID);
-      const attemptId = activeAttemptId;
-      const cleared = attemptId !== null;
-      if (cleared) {
-        activeAttemptId = null;
-        runnerContainerName ??= userId;
-      }
-      return {
-        attemptId,
-        cleared,
-        runnerContainerName,
-      };
-    },
-    get deleteStateCallCount() {
-      return deleteStateCallCount;
-    },
-    async deleteStateForUser(userId) {
-      expect(userId).toBe(USER_ID);
-      deleteStateCallCount += 1;
-      const deleted = input.deleted ?? true;
-      if (deleted) {
-        runnerContainerName = null;
-      }
-      return { deleted };
-    },
-    get runnerContainerName() {
-      return runnerContainerName;
-    },
-  };
-}
-
-function createDestroyOnlyRunnerContainerStub(
-  destroyInstance: () => Promise<void>,
-): HostedExecutionContainerStubLike {
-  return {
-    destroyInstance,
-    async invoke() {
-      return {
-        nextWakeAt: null,
-        status: "idle",
-      };
-    },
-    async smokeHealth() {
-      return {
-        ok: true,
-        runnerBundle: null,
-        service: "runner",
-        status: 200,
-      };
-    },
-  };
-}
-
-function createBindOnlyStateStore(): {
-  bindUser(userId: string): Promise<string>;
-  boundUsers: string[];
-  validateWriteFenceToken(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-  }): Promise<{ owns: false; record: null }>;
-} {
-  const boundUsers: string[] = [];
-  return {
-    async bindUser(userId) {
-      boundUsers.push(userId);
-      return userId;
-    },
-    boundUsers,
-    async validateWriteFenceToken() {
-      return {
-        owns: false,
-        record: null,
-      };
-    },
-  };
-}
-
-function createOwningSnapshotStateStore(): {
-  bindUser(userId: string): Promise<string>;
-  validateWriteFenceToken(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-  }): Promise<{ owns: true; record: null }>;
-} {
-  return {
-    async bindUser(userId) {
-      return userId;
-    },
-    async validateWriteFenceToken() {
-      return {
-        owns: true,
-        record: null,
-      };
-    },
-  };
-}
-
-function createUnusedRunnerStoreCache() {
-  return {
-    async ensure(): Promise<never> {
-      throw new Error("V2 orphan cleanup must not load runtime stores.");
-    },
-  };
-}
-
-function createWorkspaceState(userId: string): HostedWorkspaceState {
-  return {
-    createdAt: NOW,
-    snapshotRef: null,
-    updatedAt: NOW,
-    userId,
-    version: "1",
-  };
-}
-
-function createHostedBrowserVaultShardRef(objectKey: string) {
-  return {
-    byteLength: 1_000,
-    contentEncoding: "gzip" as const,
-    encodedByteLength: 100,
-    objectKey,
-  };
-}
 
 class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
   readonly deleteBatches: string[][] = [];
@@ -1168,179 +257,3 @@ class FailingListableR2Bucket extends ListableMemoryEncryptedR2Bucket {
     throw new Error(`R2 list failed for ${input.prefix ?? "<none>"}`);
   }
 }
-
-function createDurableObjectHarness(input: {
-  deleteAllError?: Error;
-  deleteFailures?: ReadonlyMap<string, Error>;
-} = {}): {
-  alarmDeleteCount: number;
-  deleteAllCount: number;
-  state: DurableObjectStateLike;
-  storageValues: Map<string, unknown>;
-} {
-  let alarmDeleteCount = 0;
-  let deleteAllCount = 0;
-  const storageValues = new Map<string, unknown>();
-  const storage: DurableObjectStorageLike = {
-    delete: async (key) => {
-      const failure = input.deleteFailures?.get(key);
-      if (failure) {
-        throw failure;
-      }
-      return storageValues.delete(key);
-    },
-    deleteAll: async () => {
-      deleteAllCount += 1;
-      if (input.deleteAllError && deleteAllCount === 1) {
-        throw input.deleteAllError;
-      }
-      storageValues.clear();
-    },
-    deleteAlarm: async () => {
-      alarmDeleteCount += 1;
-    },
-    get: async <T>(key: string): Promise<T | undefined> => {
-      const value = storageValues.get(key);
-      return value === undefined ? undefined : value as T;
-    },
-    getAlarm: async () => null,
-    list: async <T>(options: { prefix?: string; startAfter?: string; limit?: number } = {}): Promise<Map<string, T>> => {
-      const result = new Map<string, T>();
-      for (const [key, value] of [...storageValues].sort(([a], [b]) => a.localeCompare(b))) {
-        if (result.size >= (options.limit ?? Infinity)) break;
-        if (key > (options.startAfter ?? "") && (!options.prefix || key.startsWith(options.prefix))) {
-          result.set(key, value as T);
-        }
-      }
-      return result;
-    },
-    put: async <T>(key: string, value: T): Promise<void> => {
-      storageValues.set(key, value);
-    },
-    setAlarm: async () => {},
-  };
-
-  return {
-    get alarmDeleteCount() {
-      return alarmDeleteCount;
-    },
-    get deleteAllCount() {
-      return deleteAllCount;
-    },
-    state: {
-      storage,
-      waitUntil() {},
-    },
-    storageValues,
-  };
-}
-
-
-function managedSnapshotHarness() {
-  const durable = createDurableObjectHarness();
-  const bucket = new ListableMemoryEncryptedR2Bucket();
-  const abort = vi.fn(async () => {});
-  const resumeMultipartUpload = vi.fn(() => ({ uploadId: "synthetic-upload", abort,
-    complete: async () => undefined, uploadPart: async () => ({ partNumber: 1, etag: "synthetic-etag" }) }));
-  const managedBucket = Object.assign(bucket, { resumeMultipartUpload });
-  let lock: Promise<void> | null = null;
-  const service = createWorkspaceSnapshotSessionService({
-    withSnapshotMutation: run => withSerializedLock({ get: () => lock, set: value => { lock = value; } }, run),
-    bucket: managedBucket, runnerStoreCache: createUnusedRunnerStoreCache(), state: durable.state,
-    stateStore: createOwningSnapshotStateStore(),
-    readHostedWorkspaceFromWeb: async userId => ({ fetchedAt: NOW, workspace: createWorkspaceState(userId) }),
-    assertWorkspaceBelongsToRunnerUser() {},
-  });
-  const snapshotId = "synthetic-managed-snapshot";
-  const objectKey = `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
-  const session: HostedWorkspaceSnapshotUploadSession = {
-    schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA, userId: USER_ID, snapshotId, objectKey,
-    attemptId: "attempt_1", leaseGeneration: "3", expectedWorkspaceVersion: "7", workspaceVersion: "7",
-    createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-    encryption: { aad: buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId: USER_ID }),
-      ivBase64: "AQIDBAUGBwgJCgsM", rootKeyId: "root_1", scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME, wrappedDataKey: "wrapped" },
-  };
-  const admit = (uploadId = "synthetic-upload", encryptedSha256 = "a".repeat(64), encryptedMd5?: string) => service.manageSnapshotUpload({
-    userId: USER_ID, command: { operation: "snapshot_managed_admit", expectedSession: session,
-      uploadId, encryptedByteSize: 42, encryptedSha256, ...(encryptedMd5 === undefined ? {} : { encryptedMd5 }) },
-  });
-  const direct = () => service.rememberPresignedPut({ expectedSession: session,
-    expiresAt: new Date(Date.now() + 600_000).toISOString(), drainUntil: new Date(Date.now() + 1_200_000).toISOString() });
-  return { ...durable, bucket: managedBucket, abort, resumeMultipartUpload, service, session, admit, direct };
-}
-
-describe("legacy managed checkpoint capability ownership", () => {
-  it("stores a declared MD5 on the legacy receipt and returns it on replay", async () => {
-    const h = managedSnapshotHarness();
-    await h.service.create(h.session);
-    const admitted = await h.admit("synthetic-upload", "a".repeat(64), "c".repeat(32));
-    expect(admitted.applied).toBe(true);
-    expect(admitted.managedUpload).toMatchObject({ encryptedMd5: "c".repeat(32) });
-    const replay = await h.admit("synthetic-upload", "a".repeat(64), "c".repeat(32));
-    expect(replay.managedUpload).toEqual(admitted.managedUpload);
-    expect((await h.service.manageSnapshotUpload({ userId: USER_ID, command: { operation: "snapshot_managed_read",
-      snapshotId: h.session.snapshotId, attemptId: h.session.attemptId, generation: h.session.leaseGeneration } })).managedUpload?.encryptedMd5).toBe("c".repeat(32));
-  });
-
-  it.each([true, false])("serializes competing direct and managed admission (managed first: %s)", async managedFirst => {
-    const h = managedSnapshotHarness();
-    await h.service.create(h.session);
-    if (managedFirst) {
-      const [managed, direct] = await Promise.all([h.admit(), h.direct()]);
-      expect(managed.applied).toBe(true);
-      expect(direct).toBeNull();
-    } else {
-      const [direct, managed] = await Promise.all([h.direct(), h.admit()]);
-      expect(direct?.r2PutExpiresAt).toBeDefined();
-      expect(managed.applied).toBe(false);
-    }
-  });
-
-  it("reuses immutable admission and retains its independent receipt after current-session loss", async () => {
-    const h = managedSnapshotHarness();
-    await h.service.create(h.session);
-    const [first, duplicate] = await Promise.all([h.admit(), h.admit("unused-allocation")]);
-    expect(first.managedUpload?.uploadId).toBe("synthetic-upload");
-    expect(duplicate.managedUpload).toEqual(first.managedUpload);
-    expect((await h.admit("different-bytes", "b".repeat(64))).applied).toBe(false);
-    for (const key of [...h.storageValues.keys()]) if (!key.startsWith("workspace-snapshot-managed-upload:v1:")) h.storageValues.delete(key);
-    await abortAllLegacyManagedSnapshots({ state: h.state, bucket: h.bucket, userId: USER_ID });
-    expect(h.resumeMultipartUpload).toHaveBeenCalledExactlyOnceWith(h.session.objectKey, "synthetic-upload");
-    expect(await readLegacyManagedSnapshot(h.state, USER_ID, h.session.snapshotId)).toMatchObject({ completedAt: expect.any(String) });
-    await h.service.create(h.session);
-    expect((await h.admit("must-not-reopen")).managedUpload).toMatchObject({ uploadId: "synthetic-upload", completedAt: expect.any(String) });
-    expect(await h.direct()).toBeNull();
-  });
-
-  it("keeps unknown aborts pending and prevents both frozen export and member deletion", async () => {
-    const h = managedSnapshotHarness();
-    await h.service.create(h.session);
-    await h.admit();
-    h.abort.mockRejectedValue(new Error("synthetic abort response lost"));
-    await expect(requireLegacyRuntimeStorageCoverage(h.state, true)).rejects.toThrow("remains pending");
-    const deletion = createDeletionStateStore();
-    await expect(deleteHostedRunnerUserData({ bucket: h.bucket, runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {}, state: h.state, stateStore: deletion, userId: USER_ID })).rejects.toThrow("abort response lost");
-    expect(h.bucket.deleteBatches).toEqual([]);
-    expect(deletion.deleteStateCallCount).toBe(0);
-    expect(await scanLegacyManagedSnapshots({ state: h.state, userId: USER_ID })).toEqual({ pending: 1 });
-    h.abort.mockResolvedValue(undefined);
-    await abortAllLegacyManagedSnapshots({ state: h.state, bucket: h.bucket, userId: USER_ID });
-    await expect(requireLegacyRuntimeStorageCoverage(h.state, true)).resolves.toEqual(new Set([USER_ID]));
-    expect(await scanLegacyManagedSnapshots({ state: h.state, userId: USER_ID })).toEqual({ pending: 0 });
-  });
-
-  it("settles an exact admitted upload after session replacement without clearing prior verification", async () => {
-    const h = managedSnapshotHarness();
-    await h.service.create(h.session);
-    await h.admit();
-    for (const key of [...h.storageValues.keys()]) if (!key.startsWith("workspace-snapshot-managed-upload:v1:")) h.storageValues.delete(key);
-    const settle = (verified: boolean, uploadId = "synthetic-upload") => h.service.manageSnapshotUpload({ userId: USER_ID,
-      command: { operation: "snapshot_managed_settled", snapshotId: h.session.snapshotId,
-        attemptId: h.session.attemptId, generation: h.session.leaseGeneration, uploadId, verified } });
-    expect((await settle(true, "wrong-upload")).applied).toBe(false);
-    const verified = await settle(true);
-    expect(verified.managedUpload?.verifiedAt).toEqual(expect.any(String));
-    expect((await settle(false)).managedUpload).toEqual(verified.managedUpload);
-  });
-});

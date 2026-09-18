@@ -298,7 +298,7 @@ The seam stays healthy only if the lookup result remains nested and privacy-mini
 
 ### 17. Keep hosted execution status centered on mailbox and workspace truth
 
-**Seam:** `apps/web/src/lib/hosted-mailbox/store.ts`, `apps/web/src/lib/hosted-workspace/store.ts`, `packages/hosted-execution/src/runtime-control.ts`, `apps/cloudflare/src/user-runner.ts`
+**Seam:** `apps/web/src/lib/hosted-mailbox/store.ts`, `apps/web/src/lib/hosted-workspace/store.ts`, `packages/hosted-execution/src/runtime-control.ts`, `apps/cloudflare/src/runtime-processing.ts`
 
 Hosted execution now translates across two web-owned primitives: append-only
 mailbox items for producer input and versioned hosted workspace checkpoints for

@@ -6,6 +6,7 @@ import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  HOSTED_GROUP_SHARED_READ_RESPONSE_MAX_BYTES,
   HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
   HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
@@ -73,6 +74,7 @@ export function createHostedRuntimeGroupToolPort(input: {
           buildHostedRuntimeGroupToolPath(),
         ),
         replayOnceOnRetryableFailure: isHostedReplaySafeGroupToolRequest(request),
+        ...(request.action === "read_shared" ? { sensitiveResponseBody: { maxBytes: HOSTED_GROUP_SHARED_READ_RESPONSE_MAX_BYTES } } : {}),
         ...(isParticipantDisplayNameRead
           ? {
               sensitiveResponseBody: {

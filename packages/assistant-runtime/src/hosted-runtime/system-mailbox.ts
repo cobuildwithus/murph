@@ -148,7 +148,7 @@ export type HostedSystemMailboxCheckpointPreparation =
 
 type HostedSystemMailboxPreparationSelection =
   | {
-      disposition: "attempt_limit" | "schedule_satisfied";
+      disposition: "attempt_limit" | "hint_transferred";
       item: HostedSystemMailboxPendingItem;
     }
   | {
@@ -408,7 +408,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         state: selectionState,
       });
       if (!pending) {
-        const compacted = retireHostedCoveredDeviceScheduleHints({
+        const compacted = retireHostedCoveredDeviceHints({
           continuationItemIds,
           coverage,
           eligibleItemIds,
@@ -416,7 +416,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         });
         return {
           result: compacted.retired
-            ? { disposition: "schedule_satisfied", item: compacted.retired }
+            ? { disposition: "hint_transferred", item: compacted.retired }
             : null,
           state: compacted.state,
         };
@@ -721,14 +721,14 @@ function readHostedSystemMailboxErrorRetryable(error: unknown): boolean | null {
 }
 
 function createHostedSystemMailboxTerminalMetrics(
-  disposition: "attempt_limit" | "schedule_satisfied" = "attempt_limit",
+  disposition: "attempt_limit" | "hint_transferred" = "attempt_limit",
 ): HostedMailboxExecutionMetrics {
   return {
-    ...(disposition === "schedule_satisfied" ? { systemProgressed: true } : {}),
+    ...(disposition === "hint_transferred" ? { systemProgressed: true } : {}),
     bootstrapResult: null,
     conversationMetrics: null,
     deliveryIntentIds: [],
-    mailboxLane: disposition === "schedule_satisfied" ? "device-sync" : "assistant-notification",
+    mailboxLane: disposition === "hint_transferred" ? "device-sync" : "assistant-notification",
     nextWakeAt: null,
     postCheckpointRecord: null,
     redactedLogEntries: [],
@@ -784,8 +784,8 @@ async function retainHostedSystemMailboxPreparedItemAfterForegroundPreemption(in
   };
 }
 
-/** Retire only schedules covered by durable retained owners; never claim new work. */
-export async function retireHostedCoveredDeviceSchedulesAfterImport(input: {
+/** Retire hints covered by durable retained owners; never execute new work. */
+export async function retireHostedCoveredDeviceHintsAfterImport(input: {
   now: string;
   vaultRoot: string;
 }): Promise<void> {
@@ -793,7 +793,7 @@ export async function retireHostedCoveredDeviceSchedulesAfterImport(input: {
     const continuationItemIds = await readHostedSystemMailboxContinuationItemIds({
       state, vaultRoot: input.vaultRoot,
     });
-    const compacted = retireHostedCoveredDeviceScheduleHints({
+    const compacted = retireHostedCoveredDeviceHints({
       continuationItemIds,
       coverage: projectHostedDeviceHintCoverage({ now: input.now, pending: state.pending }),
       eligibleItemIds: new Set(state.pending.map((item) => item.itemId)),
@@ -803,7 +803,7 @@ export async function retireHostedCoveredDeviceSchedulesAfterImport(input: {
   });
 }
 
-function retireHostedCoveredDeviceScheduleHints(input: {
+function retireHostedCoveredDeviceHints(input: {
   continuationItemIds: ReadonlySet<string>;
   coverage: ReadonlyMap<string, HostedDeviceHintCoverage>;
   eligibleItemIds: ReadonlySet<string>;
@@ -811,7 +811,7 @@ function retireHostedCoveredDeviceScheduleHints(input: {
 }): { retired: HostedSystemMailboxPendingItem | null; state: HostedSystemMailboxState } {
   const retiredIds = new Set<string>();
   for (const ownerId of input.continuationItemIds) {
-    for (const id of input.coverage.get(ownerId)?.coveredScheduleIds ?? []) {
+    for (const id of input.coverage.get(ownerId)?.retirableHintIds ?? []) {
       if (input.eligibleItemIds.has(id)) retiredIds.add(id);
     }
   }
@@ -1273,7 +1273,7 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
   const nextAttemptAt = input.immediateDirtyContinuationCanProgress
     ? earliestHostedSystemMailboxWakeAt(input.dirtyWakeAt, input.nextAttemptAt) ?? input.nextAttemptAt
     : input.nextAttemptAt;
-  await updateHostedSystemMailboxState(input.vaultRoot, (state) => {
+  await updateHostedSystemMailboxState(input.vaultRoot, async (state) => {
     const retainedIndex = state.pending.findIndex((item) =>
       hostedSystemMailboxPendingItemsMatchForClaim(item, input.item)
     );
@@ -1321,12 +1321,17 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
       }
       return { ...item, nextAttemptAt: input.nextAttemptAt };
     });
-    const retained = pending[retainedIndex];
-    const coveredScheduleIds = retained && admittedAt !== null
-      ? projectHostedDeviceHintCoverage({ now: admittedAt, pending })
-        .get(retained.itemId)?.coveredScheduleIds
-      : undefined;
-    return { pending: pending.filter((item) => !coveredScheduleIds?.has(item.itemId)) };
+    if (admittedAt === null) return { pending };
+    const retainedState = { pending };
+    const continuationItemIds = await readHostedSystemMailboxContinuationItemIds({
+      state: retainedState, vaultRoot: input.vaultRoot,
+    });
+    return retireHostedCoveredDeviceHints({
+      continuationItemIds,
+      coverage: projectHostedDeviceHintCoverage({ now: admittedAt, pending }),
+      eligibleItemIds: new Set(pending.map((item) => item.itemId)),
+      state: retainedState,
+    }).state;
   });
 }
 

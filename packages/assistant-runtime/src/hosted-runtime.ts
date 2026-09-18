@@ -12,6 +12,8 @@ import {
 
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
+  HOSTED_INGRESS_LATENCY_SOURCES,
+  type HostedIngressLatencySource,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyTraceMilestone,
@@ -237,7 +239,7 @@ import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedSystemMailboxItemAfterCheckpoint,
   retainHostedSystemMailboxItemUntilDeliveryWake,
-  retireHostedCoveredDeviceSchedulesAfterImport,
+  retireHostedCoveredDeviceHintsAfterImport,
   resolveHostedBrowserVaultRefreshAttempt,
   resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxWakeCandidates,
@@ -1403,20 +1405,26 @@ function recordHostedRuntimeLatencyMilestoneBestEffort(input: {
     return;
   }
 
-  try {
-    void input.latencyTracePort.record({
-      event: {
-        at: input.at,
-        milestone: input.milestone,
-        runtimeAttemptId: input.runtimeAttemptId,
-        source: "linq",
-        type: "runtime_milestone",
-      },
-    }).catch(() => {
+  const sources: readonly HostedIngressLatencySource[] =
+    input.milestone === "checkpoint_publication_expected_by"
+      ? HOSTED_INGRESS_LATENCY_SOURCES
+      : ["linq"];
+  for (const source of sources) {
+    try {
+      void input.latencyTracePort.record({
+        event: {
+          at: input.at,
+          milestone: input.milestone,
+          runtimeAttemptId: input.runtimeAttemptId,
+          source,
+          type: "runtime_milestone",
+        },
+      }).catch(() => {
+        // Latency traces are diagnostic-only and must not affect runtime progress.
+      });
+    } catch {
       // Latency traces are diagnostic-only and must not affect runtime progress.
-    });
-  } catch {
-    // Latency traces are diagnostic-only and must not affect runtime progress.
+    }
   }
 }
 
@@ -3310,7 +3318,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             signal: backgroundWorkSignal,
             workspace: checkpointRequestBuilder.latestWorkspace() ?? activeWorkspace,
           });
-          await retireHostedCoveredDeviceSchedulesAfterImport({
+          await retireHostedCoveredDeviceHintsAfterImport({
             now: new Date().toISOString(), vaultRoot: restored.vaultRoot,
           });
           latestMailboxImport = tail.latestMailboxImport;
@@ -3883,6 +3891,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               },
               write: async () => {
                 await drainHostedPreparedAssistantDeliveries({
+                  deliveryTraceContext: {
+                    latencyTracePort: foregroundRuntime.platform.latencyTracePort,
+                    runtimeAttemptId: input.request.attemptId,
+                    runnerIdleTtlMs,
+                    commitTimeoutMs: foregroundRuntime.commitTimeoutMs,
+                  },
                   actionApprovalPort:
                     foregroundRuntime.platform.actionApprovalPort ?? null,
                   allowPreparedSending: true,
@@ -5922,6 +5936,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             checkpointPendingBeforePass,
             presentedProjectedAssistantWakeKey,
           );
+          if (!runtimeOwnerHandoffRequested && !backgroundWorkSignal.aborted) {
+            // Continued foreground work keeps this invocation alive after a
+            // checkpoint. Resume its paused clinical continuation as well.
+            clinicalEnrichmentController?.resume();
+          }
           result = await runWorkspaceForegroundPass({
             foregroundCausalOnly:
               singleWakeInput.foregroundCausalOnly === true,

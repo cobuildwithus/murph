@@ -40,7 +40,7 @@ describe('group shared metric presentation prompt', () => {
     const prompt = buildHostedGroupSharedPrompt()
 
     expect(prompt).toContain(
-      'pair projections only with the `displayName` in the same `read_shared` member row',
+      'the `displayName` in that same `read_shared` member row, including single-participant reports',
     )
     expect(prompt).toContain('unless anonymization was requested')
     expect(prompt).toContain('Never map a name across rows by order, values, or conversation')

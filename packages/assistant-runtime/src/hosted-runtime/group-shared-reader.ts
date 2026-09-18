@@ -11,6 +11,8 @@ import {
 } from "@murphai/assistant-engine";
 import {
   hostedGroupSharedNeedsWearableRecovery,
+  parseHostedGroupSharedReadOptions,
+  type HostedGroupSharedReadOptions,
   parseHostedGroupSharedFreshnessRequirements,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -107,7 +109,9 @@ export function createHostedGroupSharedReader(input: {
         return unavailable(GROUP_SHARED_REQUEST_INVALID);
       }
       let requirements;
+      let options: HostedGroupSharedReadOptions;
       try {
+        options = parseHostedGroupSharedReadOptions(request, projectionScopes);
         requirements = request.freshness === undefined ? undefined
           : parseHostedGroupSharedFreshnessRequirements(request.freshness, projectionScopes);
       } catch {
@@ -116,7 +120,7 @@ export function createHostedGroupSharedReader(input: {
       const signal = context?.signal ?? undefined;
       try {
         return await readSharedGroupWithFreshness({
-          groupToolPort: input.groupToolPort, projectionScopes, requirements, signal, waitMs,
+          groupToolPort: input.groupToolPort, projectionScopes, requirements, signal, waitMs, options,
         });
       } catch (error) {
         if (signal?.aborted) throw error;
@@ -124,7 +128,7 @@ export function createHostedGroupSharedReader(input: {
         // current read without claiming the requested refresh was completed.
         if (requirements) {
           try {
-            const response = await input.groupToolPort.request({ action: "read_shared", projectionScopes },
+            const response = await input.groupToolPort.request({ action: "read_shared", projectionScopes, ...options },
               ...(signal ? [{ signal }] : []));
             if (response.action === "read_shared" && response.result.status === "ok") {
               return { ...response.result, freshness: {
@@ -143,6 +147,7 @@ export function createHostedGroupSharedReader(input: {
 
 /** One refresh request per operation; polling only rereads the authorized snapshot. */
 async function readSharedGroupWithFreshness(input: {
+  options: HostedGroupSharedReadOptions;
   groupToolPort: HostedRuntimeGroupToolPort;
   projectionScopes: HostedVaultShareSelectableProjectionScope[];
   requirements: ReturnType<typeof parseHostedGroupSharedFreshnessRequirements> | undefined;
@@ -153,7 +158,7 @@ async function readSharedGroupWithFreshness(input: {
   const deadline = Date.now() + input.waitMs;
   signal?.throwIfAborted();
   let response = await groupToolPort.request({
-    action: "read_shared", projectionScopes,
+    action: "read_shared", projectionScopes, ...input.options,
     ...(requirements ? { freshness: requirements } : {}),
   }, ...(signal ? [{ signal }] : []));
   if (response.action !== "read_shared") return unavailable(GROUP_SHARED_RESULT_INVALID);
@@ -165,7 +170,7 @@ async function readSharedGroupWithFreshness(input: {
     && Date.now() < deadline) {
     await delay(Math.min(15_000, deadline - Date.now()), undefined, { signal });
     signal?.throwIfAborted();
-    response = await groupToolPort.request({ action: "read_shared", projectionScopes },
+    response = await groupToolPort.request({ action: "read_shared", projectionScopes, ...input.options },
       ...(signal ? [{ signal }] : []));
     if (response.action !== "read_shared") return unavailable(GROUP_SHARED_RESULT_INVALID);
     result = response.result.status === "ok" ? { ...response.result, freshness: {

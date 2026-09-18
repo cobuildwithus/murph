@@ -1,8 +1,10 @@
+import { readFile } from "node:fs/promises";
 import {
   MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-execution/contracts";
 import { LINQ_PRODUCTION_CANARY_GOAL_TITLE } from "@/src/lib/hosted-onboarding/linq-production-canary-contract";
 
 const mocks = vi.hoisted(() => ({
@@ -58,6 +60,9 @@ vi.mock("@spectrum-ts/imessage", () => ({
 }));
 
 import {
+  CANARY_OUTCOME_WAIT_MS,
+  CANARY_REPLY_WAIT_MS,
+  CANARY_RESET_TIMEOUT_MS,
   runLinqProductionCanary,
 } from "@/scripts/run-production-conversation-canary";
 
@@ -71,6 +76,15 @@ const TEST_ENV = {
 };
 
 describe("production conversation canary runner", () => {
+  it("fits every bounded observation and reply inside the workflow deadline", async () => {
+    const workflow = await readFile(new URL("../../../.github/workflows/linq-production-canary.yml", import.meta.url), "utf8");
+    const timeout = workflow.match(/timeout-minutes: (\d+)/u);
+    expect(timeout).not.toBeNull();
+    const journeyBudget = CANARY_RESET_TIMEOUT_MS
+      + 3 * CANARY_OUTCOME_WAIT_MS + 5 * CANARY_REPLY_WAIT_MS;
+    expect(Number(timeout?.[1]) * 60_000).toBeGreaterThanOrEqual(journeyBudget + 120_000);
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(Date, "now").mockReturnValue(1_000);
@@ -303,7 +317,7 @@ describe("production conversation canary runner", () => {
     let stage = 0;
     let stageStartedAt = 0;
     vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockImplementation(async () => {
-      if (clock.elapsedMs() - stageStartedAt < 185_000) {
+      if (clock.elapsedMs() - stageStartedAt < HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 5_000) {
         return outcomeResponse({ ready: false, matchingGoalCount: 0, matchingGoalIdCount: 0 });
       }
       const count = stage++ === 0 ? 0 : 1;
@@ -314,7 +328,7 @@ describe("production conversation canary runner", () => {
     const result = await runLinqProductionCanary(TEST_ENV);
     expect(result.canonicalOutcome).toEqual({ baselineGoalCount: 0, savedGoalCount: 1, readbackGoalCount: 1 });
     expect(result.turns.map((turn) => turn.latencyMs)).toEqual([1_000, 1_000, 1_000, 1_000, 1_000]);
-    expect(clock.elapsedMs()).toBe(555_000);
+    expect(clock.elapsedMs()).toBe(3 * (HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 5_000));
     expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
   });
 
@@ -325,7 +339,7 @@ describe("production conversation canary runner", () => {
       outcomeResponse({ ready: false, matchingGoalCount: 0, matchingGoalIdCount: 0 }));
 
     await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=runtime-identity" });
-    expect(clock.elapsedMs()).toBe(300_000);
+    expect(clock.elapsedMs()).toBe(HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 120_000);
     expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
     expect(mocks.stop).toHaveBeenCalledOnce();
   });

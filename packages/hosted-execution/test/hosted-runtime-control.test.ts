@@ -1454,10 +1454,26 @@ describe("hosted runtime control contracts", () => {
       "linq",
       "telegram",
       null,
-      null,
+      "email",
       null,
     ]);
 
+    const deliveryCompletion = {
+      event: {
+        type: "delivery_committed", source: "email", runtimeAttemptId: "attempt_email",
+        mailboxItemIds: ["mailbox_email"], at: "2026-04-26T00:01:00.000Z",
+        checkpointPublicationExpectedBy: "2026-04-26T00:30:00.000Z",
+      },
+    };
+    expect(parseHostedRuntimeLatencyTraceRequest(deliveryCompletion)).toEqual(deliveryCompletion);
+    for (const mailboxItemIds of [[], Array(65).fill("mailbox_email")]) {
+      expect(() => parseHostedRuntimeLatencyTraceRequest({
+        event: { ...deliveryCompletion.event, mailboxItemIds },
+      })).toThrow();
+    }
+    expect(() => parseHostedRuntimeLatencyTraceRequest({
+      event: { ...deliveryCompletion.event, message: "private content" },
+    })).toThrow();
     expect(parseHostedRuntimeLatencyTraceRequest({
       event: {
         assistantInputId: "input_1",

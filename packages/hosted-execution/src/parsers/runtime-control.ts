@@ -1,3 +1,4 @@
+import { parseHostedGroupSharedReadOptions, parseHostedGroupSharedDateCoverage } from "../group-shared-history.ts";
 import { parseHostedGroupSharedFreshnessRequirements } from "../group-shared-freshness.ts";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
@@ -202,6 +203,7 @@ import {
   hostedVaultShareProjectionKindToScope,
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
+  isHostedVaultShareRecentDateProjectionKind,
   type HostedVaultShareProjectionScope,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareSelectableProjectionScope,
@@ -1429,6 +1431,8 @@ function parseHostedRuntimeGroupSharedDataRequest(
       new Set([
         "action",
         "freshness",
+        "participantId",
+        "history",
         "linqSenderHandles",
         "projectionScopes",
         "telegramSenderHandles",
@@ -1443,6 +1447,7 @@ function parseHostedRuntimeGroupSharedDataRequest(
     return {
       action,
       ...senderHandles,
+      ...parseHostedGroupSharedReadOptions(record, projectionScopes),
       projectionScopes,
       ...(record.freshness === undefined ? {} : {
         freshness: parseHostedGroupSharedFreshnessRequirements(record.freshness, projectionScopes),
@@ -2513,7 +2518,7 @@ function parseHostedRuntimeGroupSharedReadResult(
 
   assertAllowedObjectKeys(
     result,
-    new Set(["members", "requestedProjectionScopeKeys", "status", "freshness"]),
+    new Set(["members", "requestedProjectionScopeKeys", "status", "freshness", "dateCoverage"]),
     `Hosted runtime group tool read_shared ${status} response result`,
   );
   const requestedScopes =
@@ -2525,7 +2530,7 @@ function parseHostedRuntimeGroupSharedReadResult(
     "Hosted runtime group tool read_shared response members",
   );
   if (status === "none") {
-    if (result.freshness !== undefined) {
+    if (result.freshness !== undefined || result.dateCoverage !== undefined) {
       throw new TypeError("Shared freshness requires an authorized ok response.");
     }
     if (rawMembers.length !== 0) {
@@ -2586,7 +2591,23 @@ function parseHostedRuntimeGroupSharedReadResult(
     return member;
   });
 
+  const dateCoverage = result.dateCoverage === undefined
+    ? undefined : parseHostedGroupSharedDateCoverage(result.dateCoverage);
+  if (dateCoverage && (requestedScopes.length !== 1 || members.length > 1
+    || result.freshness !== undefined
+    || !isHostedVaultShareRecentDateProjectionKind(requestedScopes[0]!.projectionScope.projectionKind))) {
+    throw new TypeError("Shared history coverage requires one health scope and at most one participant.");
+  }
+  if (dateCoverage) {
+    const dates = [...new Set(members.flatMap((member) => member.projections.flatMap((projection) =>
+      projection.records.map((record) => record.occurredAt.slice(0, 10))
+    )))].sort();
+    if (JSON.stringify(dates) !== JSON.stringify(dateCoverage.availableDates)) {
+      throw new TypeError("Shared history coverage must describe exactly the returned observations.");
+    }
+  }
   return {
+    ...(dateCoverage ? { dateCoverage } : {}),
     ...(result.freshness === undefined ? {} : {
       freshness: parseHostedGroupSharedFreshnessResult(result.freshness),
     }),
@@ -6588,6 +6609,22 @@ export function parseHostedRuntimeLatencyTraceEvent(
   );
 
   switch (type) {
+    case "delivery_committed": {
+      assertAllowedObjectKeys(record, new Set([
+        "type", "source", "at", "runtimeAttemptId", "mailboxItemIds", "checkpointPublicationExpectedBy",
+      ]), "Hosted runtime delivery committed event");
+      const mailboxItemIds = requireArray(record.mailboxItemIds, "Hosted runtime delivery mailboxItemIds")
+        .map((id) => requireString(id, "Hosted runtime delivery mailbox item id"));
+      if (mailboxItemIds.length === 0 || mailboxItemIds.length > HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
+        throw new TypeError("Hosted runtime delivery mailbox item count is invalid.");
+      }
+      return {
+        type, mailboxItemIds, source: parseHostedIngressLatencySource(record.source),
+        at: requireString(record.at, "Hosted runtime delivery at"),
+        runtimeAttemptId: requireString(record.runtimeAttemptId, "Hosted runtime delivery attempt"),
+        checkpointPublicationExpectedBy: requireString(record.checkpointPublicationExpectedBy, "Hosted runtime delivery checkpoint deadline"),
+      };
+    }
     case "assistant_input_staged":
       return parseHostedRuntimeLatencyTraceAssistantInputStagedEvent(record);
     case "assistant_milestone":
@@ -7663,6 +7700,11 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ),
       ...requireOptionalNonNegativeInteger(
         assistant,
+        "terminalReplyCommittedAtEpochMs",
+        assistantLabel,
+      ),
+      ...requireOptionalNonNegativeInteger(
+        assistant,
         "terminalNonReplyCommittedAtEpochMs",
         assistantLabel,
       ),
@@ -7999,10 +8041,10 @@ function parseHostedRuntimeLatencyTraceAssistantMilestoneEvent(
   if (
     checkpointPublicationExpectedBy !== undefined &&
     checkpointPublicationExpectedBy !== null &&
-    milestone !== "terminal_non_reply_committed"
+    milestone !== "terminal_non_reply_committed" && milestone !== "terminal_reply_committed"
   ) {
     throw new TypeError(
-      "Hosted runtime latency trace checkpointPublicationExpectedBy requires terminal_non_reply_committed.",
+      "Hosted runtime latency trace checkpointPublicationExpectedBy requires a terminal completion milestone.",
     );
   }
 

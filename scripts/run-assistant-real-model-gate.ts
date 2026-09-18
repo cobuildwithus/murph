@@ -63,9 +63,9 @@ export function requireRealModelGateEnvironment(env: NodeJS.ProcessEnv): void {
   if (
     env.CI !== 'true' || env.GITHUB_ACTIONS !== 'true'
     || env.GITHUB_REF !== 'refs/heads/main' || env.GITHUB_REF_PROTECTED !== 'true'
-    || !['push', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME ?? '')
+    || !['schedule', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME ?? '')
   ) {
-    throw new Error('Real-model gate requires a protected main push or main workflow dispatch.')
+    throw new Error('Real-model gate requires a protected main schedule or main workflow dispatch.')
   }
   if (
     !/^[a-f0-9]{40}$/u.test(env.GITHUB_SHA ?? '')

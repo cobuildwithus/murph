@@ -274,6 +274,7 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<void>;
   ensureRuntimeProcessing(input: {
+    admission?: import("@murphai/hosted-execution/runtime-owner").HostedRuntimeOwnerResponse;
     commandTimeoutMs?: number;
     onTiming?: (timing: CloudflareHostedControlRuntimeEnsureProcessingTiming) => void;
     orchestrationAttemptId: string;
@@ -651,6 +652,7 @@ export function createCloudflareHostedControlClient(
         request: {
           body: JSON.stringify({
             orchestrationAttemptId: input.orchestrationAttemptId,
+            ...(input.admission === undefined ? {} : { admission: input.admission }),
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",

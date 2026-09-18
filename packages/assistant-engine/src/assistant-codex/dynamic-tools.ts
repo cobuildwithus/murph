@@ -43,6 +43,8 @@ import {
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
   parseHostedGroupSharedFreshnessRequirements,
+  parseHostedGroupSharedReadOptions,
+  type HostedGroupSharedReadOptions,
   getHostedGroupWearableReportingGaps,
   HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
@@ -96,6 +98,7 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareProjectionScopeKey,
   parseHostedVaultShareProjectionScope,
+  hostedVaultShareReadAuthorityScopes,
   type HostedVaultShareSelectableProjectionScope,
 } from '@murphai/hosted-execution/vault-share'
 import {
@@ -745,6 +748,8 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_shared'),
+      participantId: z.string().min(1).max(200).optional(),
+      history: z.object({ fromDate: z.string(), throughDate: z.string() }).strict().optional(),
       audience: z.literal('group_email').optional(),
       freshness: z.array(z.object({
         projectionScopeKey: z.string().min(1).max(191),
@@ -764,6 +769,12 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     })
     .strict()
     .refine((request) => {
+      try {
+        parseHostedGroupSharedReadOptions(request, request.projectionScopes)
+        if (request.audience && (request.history || request.participantId)) return false
+      } catch {
+        return false
+      }
       if (request.freshness === undefined) return true
       if (request.audience !== undefined) return false
       try {
@@ -772,7 +783,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       } catch {
         return false
       }
-    }, { message: 'freshness requires exact requested wearable scopes and dates in an ordinary shared read', path: ['freshness'] })
+    }, { message: 'history requires one participant, one existing health metric scope and at most 90 inclusive dates, without freshness or group_email; freshness requires exact requested wearable dates', path: ['freshness'] })
     .refine(
       (request) =>
         request.audience === 'group_email'
@@ -1296,12 +1307,12 @@ type MurphGroupToolRequest =
           | 'revoke_own_email_share'
       }
     >
-  | {
+  | (HostedGroupSharedReadOptions & {
       action: 'read_shared'
       freshness?: readonly { projectionScopeKey: string; date: string }[]
       audience?: 'group_email'
       projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
-    }
+    })
   | {
       action: 'send_email'
       html: string
@@ -4575,8 +4586,10 @@ function groupSharedModelResult(
       status: result.status,
     }
   }
+  const checkedAtMs = result.freshness ? Date.parse(result.freshness.checkedAt) : Date.now()
   return {
     ...(result.freshness ? { freshness: result.freshness } : {}),
+    ...(result.dateCoverage ? { dateCoverage: result.dateCoverage } : {}),
     members: result.members.map((member) => ({
       // Empty handles and a null name carried no information but were
       // serialized for every member on every read.
@@ -4596,7 +4609,9 @@ function groupSharedModelResult(
             ? { grantedAt: projection.grantedAt }
             : {}),
           records: projection.records,
-          ...(requirements ? { reportingGaps: getHostedGroupWearableReportingGaps(projection, requirements) } : {}),
+          ...(requirements ? {
+            reportingGaps: getHostedGroupWearableReportingGaps(projection, requirements, checkedAtMs),
+          } : {}),
           status: groupSharedProjectionStatus(projection),
         },
       ])),
@@ -5026,11 +5041,14 @@ async function executeGroupSharedRead(input: {
   try {
     const result = await groupSharedReader.request({
       projectionScopes: input.request.projectionScopes,
+      ...(input.request.participantId ? { participantId: input.request.participantId } : {}),
+      ...(input.request.history ? { history: input.request.history } : {}),
       ...(input.request.freshness ? { freshness: input.request.freshness } : {}),
     }, ...(input.abortSignal ? [{ signal: input.abortSignal }] : []))
     const modelResult = groupSharedModelResultText(groupSharedModelResult(result, input.request.freshness))
     recordGroupSharedReadProof({
-      capacityPartial: modelResult.capacityPartial,
+      // A member/date page is not a complete current room roster/standings proof.
+      capacityPartial: modelResult.capacityPartial || input.request.participantId !== undefined,
       result,
       turnState: input.turnState,
     })
@@ -6615,20 +6633,18 @@ async function readGroupEmailSharedData(input: {
       return null
     }
 
-    const requestedScopeKeys = new Set(
-      input.projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
-    )
+    // Keep the actual share id/key in the final send authorization proof.
+    // The shared reader already clips ordinary/email reporting windows. Only
+    // the pre-existing sleep v0/v1 mapping may match another metric scope key.
     const authorizedScopeKeysByMember = new Map(
-      input.participants
-        .filter((participant) => participant.hasEmail)
-        .map((participant) => [
-          participant.memberId,
-          new Set(
-            participant.authorizedShares
-              .map((share) => share.projectionScopeKey)
-              .filter((scopeKey) => requestedScopeKeys.has(scopeKey)),
+      input.participants.filter((participant) => participant.hasEmail).map((participant) => {
+        const liveKeys = new Set(participant.authorizedShares.map((share) => share.projectionScopeKey))
+        return [participant.memberId, new Set(input.projectionScopes.filter((scope) =>
+          hostedVaultShareReadAuthorityScopes(scope).some((authority) =>
+            liveKeys.has(buildHostedVaultShareProjectionScopeKey(authority))
           ),
-        ]),
+        ).map(buildHostedVaultShareProjectionScopeKey))] as const
+      }),
     )
     const members = new Map<string, AssistantHostedGroupSharedMember>()
 

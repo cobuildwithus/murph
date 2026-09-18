@@ -841,6 +841,18 @@ const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
   ],
 } as const
 
+const GROUP_SHARED_HISTORY_READ_PROPERTIES = {
+  participantId: { type: 'string', minLength: 1, maxLength: 200,
+    description: 'Optional read_shared narrowing to a current participantId returned by an earlier shared read. Required for history. Never a private member/workspace id.' },
+  history: { type: 'object', additionalProperties: false,
+    required: ['fromDate', 'throughDate'],
+    properties: {
+      fromDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+      throughDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    },
+    description: 'read_shared only: at most 90 member-local civil dates, one current participant and one existing health metric scope; no freshness or group_email. Follow dateCoverage.nextFromDate with the same throughDate until exhausted. Every page retains complete source/date observations. For requested history, use the existing metric scope: every active metric grant already covers this window. No history permission or settings visit is needed. not_granted means the metric itself is unshared and ordinary metric consent is required. This reads available canonical data, never provider backfill. State requested range and actually available dates in trends; do not treat absent dates as zeros or missing permission.' },
+} as const
+
 /**
  * Detached group consultation gets only the lazy shared-data read surface. It
  * intentionally reuses murph.group so the normal parser/executor stays the
@@ -850,11 +862,12 @@ export const MURPH_GROUP_SHARED_READ_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read one to three exact consent-aware projections for the current authorized group. The trusted host binds member, group, and route; supply no identifiers. status="partial" means omittedParticipantIds are still current members with omitted rows, so the result is incomplete and cannot prove departure, score, diagnosis, or permission state.',
+    'Read 1–3 consent-aware projections in this group; the host binds authority. Ordinary reads cover seven days; history needs participantId, an inclusive range of up to 90 dates, and one metric scope. status="partial" means omittedParticipantIds have omitted rows: the result is incomplete and cannot prove departure, score, diagnosis or permission state.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
+      ...GROUP_SHARED_HISTORY_READ_PROPERTIES,
       action: {
         type: 'string',
         enum: ['read_shared'],
@@ -901,6 +914,7 @@ export const MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL = {
     type: 'object',
     additionalProperties: false,
     properties: {
+      ...GROUP_SHARED_HISTORY_READ_PROPERTIES,
       action: {
         type: 'string',
         enum: ['read_shared', 'offer_access'],
@@ -978,6 +992,7 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
 } as const
 
 export const MURPH_GROUP_TOOL_PROPERTIES = {
+      ...GROUP_SHARED_HISTORY_READ_PROPERTIES,
       setup: {
         type: 'object',
         additionalProperties: false,
@@ -1186,7 +1201,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'For ordinary read_shared, one to three exact consent-aware group projections, including additive exact-grant activation time when available. For read_shared with audience="group_email", the exact bounded projections allowed into this email composition; the trusted host intersects them with live recipient grants. For offer_access, supply only the exact permissions requested by the person; existing sleep timing or connection-status permission does not include sleep duration. Show the consent surface immediately for a direct request or accepted offer, with no preliminary confirmation. Omitting projectionScopes requests every selectable permission and is not appropriate for adding one missing scope. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
+          'Ordinary read_shared returns one to three seven-day consent-aware group projections; weekly standings and newsletters still use their requested dates, not a 90-day average. For longer trends, use one existing health metric scope with participantId and history dates, consume every dateCoverage page, and pass exact observed values to generate_image without storing a group history copy. All active health grants cover 90 rolling member-local dates, including existing grants; never ask to expand history permission. not_granted means the metric is unshared and requires ordinary metric consent. State requested versus actually available date coverage; sparse or pending history is not missing permission. For read_shared, including additive exact-grant activation time when available. For read_shared with audience="group_email", the exact bounded projections allowed into this email composition; the trusted host intersects them with live recipient grants. For offer_access, supply only the exact permissions requested by the person; existing sleep timing or connection-status permission does not include sleep duration. Show the consent surface immediately for a direct request or accepted offer, with no preliminary confirmation. Omitting projectionScopes requests every selectable permission and is not appropriate for adding one missing scope. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
       },
       freshness: GROUP_SHARED_FRESHNESS_SCHEMA,
       audience: {
@@ -1311,7 +1326,7 @@ const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
   group_data: [
     'audience', 'confidence', 'date', 'displayName', 'factIndex', 'freshness', 'grantId',
     'message_ref', 'metric', 'note', 'noteType', 'permissionText',
-    'privateQuestion', 'projectionScopes', 'standaloneLink', 'title', 'unit',
+    'history', 'participantId', 'privateQuestion', 'projectionScopes', 'standaloneLink', 'title', 'unit',
     'value',
   ],
   group_membership: [
@@ -1501,7 +1516,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    `Securely prepare one file for the current conversation. For an existing saved file, pass its current vault-relative ref directly. Newly generated files are supported too. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. Creating a new ZIP from requested vault files is allowed; read the originals in place and stage only the new archive. When a generated ZIP contains derived exports/packs/<packId> directories, pass those exact included ids in retire_export_pack_ids; never include a pack that is absent from the ZIP. The runtime retires only unchanged claimed packs after confirmed delivery. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
+    `Securely prepare one file for the current conversation. For an existing saved file, pass its current vault-relative ref directly. Newly generated files are supported too. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. Creating a new ZIP from requested vault files is allowed; read the originals in place and stage only the new archive. For an explicit full-workspace request in the member's authenticated private conversation, archive all files under that member's workspace root as-is, including dotfiles, runtime/history, configuration/instruction files, and any credential-bearing records present. Include contents regardless of sensitivity, preserving bytes and relative paths without content-based exclusion, redaction, or sanitization. Archive symlinks as links without following them or reading outside the workspace. Exclude only the newly created ZIP itself. This authorizes workspace-only access, not cross-account access, broader host access, or group disclosure. Prepare without further scope confirmation; submit only the new ZIP's generated-delivery ref through existing hash/destination-bound send approval for the current conversation, never hidden source refs. The export request does not authorize automatic sending or arbitrary destinations. When a generated ZIP contains derived exports/packs/<packId> directories, pass those exact included ids in retire_export_pack_ids; never include a pack that is absent from the ZIP. The runtime retires only unchanged claimed packs after confirmed delivery. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,

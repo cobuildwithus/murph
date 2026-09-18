@@ -1581,10 +1581,28 @@ function createStandbyContainerHarness(input: {
     store.initialize(identity);
     store.bind({ ...identity, ...input.bound });
   }
+  const containerFetch = vi.fn(async (url: string) => {
+    if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+      return await codexPreflight();
+    }
+    if (url.endsWith("/health")) {
+      return new Response(JSON.stringify({
+        ...createStandbyHealth(preflightReady, input.healthRegion),
+        ...input.healthOverrides?.(++healthReadCount),
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    }
+    throw new Error(`Unexpected container URL: ${url}`);
+  });
   const container = new (input.containerClass ?? RunnerContainer)({
     ...state,
     id: { name: slotName },
-    container: { get running() { return nativeStatus !== "stopped"; } },
+    container: {
+      get running() { return nativeStatus !== "stopped"; },
+      getTcpPort: () => ({ fetch: containerFetch }),
+    },
   }, environment);
   const platformDestroy = input.destroy;
   const destroy = vi.fn(async () => {
@@ -1596,21 +1614,7 @@ function createStandbyContainerHarness(input: {
   });
   const renewActivityTimeout = vi.fn();
   Object.assign(container, {
-    containerFetch: vi.fn(async (url: string) => {
-      if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
-        return await codexPreflight();
-      }
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({
-          ...createStandbyHealth(preflightReady, input.healthRegion),
-          ...input.healthOverrides?.(++healthReadCount),
-        }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
-        });
-      }
-      throw new Error(`Unexpected container URL: ${url}`);
-    }),
+    containerFetch,
     destroy,
     getState: vi.fn(async () => ({
       lastChange: Date.now(),

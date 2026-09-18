@@ -4,12 +4,13 @@ Last verified: 2026-09-04
 
 ## Runtime authority cutover
 
-[Hosted Postgres runtime ownership](hosted-postgres-runtime.md) owns the new
-execution authority, upload recovery, and finite fleet cutover. The Worker flag
-defaults off. The UserRunner coordination descriptions below apply to the legacy
-gate; after activation, Web/Postgres owns those facts while native containers
-and Temporal retain their execution and scheduling responsibilities. Mailbox,
-workspace, assistant, and delivery contracts below continue to apply.
+[Hosted Postgres runtime ownership](hosted-postgres-runtime.md) owns execution
+authority, upload recovery, and completed fleet cutover. The UserRunner class,
+binding, source bridge, and temporary capability have been retired. Web/Postgres
+owns admission and resources; native containers and Temporal retain execution
+and scheduling responsibilities. The current owner document supersedes older
+coordination details below. Mailbox, workspace, assistant, delivery, and historical
+latency-field contracts continue to apply.
 
 ## Decision
 
@@ -43,11 +44,10 @@ The live ownership split is:
   minimal receipt state in Postgres, and may start a separate Vercel Workflow
   with only the Stripe event id to retry reconciliation. Any appended activation
   work wakes the hosted runtime through the same Temporal signal path.
-- `apps/cloudflare` owns per-user runner coordination, lease/alarm/fence
-  coordination, container invocation, encrypted object plumbing, and signed
-  callback transport.
-  UserRunner holds one foreground runtime write fence for the whole hosted
-  invocation and passes the single `runnerIdleTtlMs` runtime policy.
+- `apps/cloudflare` owns container invocation, encrypted object plumbing, and
+  authenticated transport to the Web/Postgres runtime owner. Postgres holds one
+  foreground write fence for the invocation; the Worker passes the single
+  `runnerIdleTtlMs` runtime policy.
   The optional invocation field replaces `idleCheckpointDelayMs`: older runtimes
   ignore the new field and retain their safe legacy default during staged or
   interrupted releases. Updated runtimes ignore the retired field and use the
@@ -526,7 +526,9 @@ infrastructure fields.
 
 Ordinary shared reads may additionally request one to twenty-one unique
 `freshness` scope/date pairs for daily wearable metrics already in that read.
-Missing granted dates in the recent reconcile window cause Web to recheck the
+Web filters the recent reconcile dates independently, so older or future requested
+dates cannot suppress recovery of eligible missing dates. Missing granted dates
+in that recent window cause Web to recheck the
 exact member/scope grants, current membership, active access and health consent,
 then request existing personal manual-reconcile wakes. This does not force a
 watch upload. Connection selection is capped at 32, with four concurrent wake
@@ -549,12 +551,18 @@ Read-only detached schemas and group email reads do not expose freshness.
 The runtime also rejects freshness unless its trusted caller explicitly enables
 it; ordinary email reads and detached consultations retain read-only readers.
 
-Recovery derives each missing scope/date from the current shared snapshot.
-A record in the seven preceding calendar days means `recent_reporting`; an older
-grant with no record in that window means `no_recent_reporting`. Pending, new,
-or legacy grants without sufficient age evidence remain `unknown_history`.
+Recovery derives missing scope/date/source cells from public wearable source tags
+already present in the granted snapshot. Another wearable or a manual record cannot
+cover that source's gap. Manual and Murph records create no wearable expectation;
+legacy unsourced snapshots retain date-only checks. No unseen source is inferred.
+A same-source record in the seven preceding calendar days means `recent_reporting`.
+Only a current UTC-day check of an older grant with no such records means
+`no_recent_reporting`; historical or future absence without positive preceding
+evidence is `unknown_history`, as are pending, new, and legacy grants without
+sufficient age evidence. The model adapter uses the returned check timestamp.
 This is evidence of shared reporting only, never a device-connection diagnosis.
-The runtime waits for recent or unknown gaps; established nonreporters do not
+The runtime waits only for refreshable recent or unknown gaps; historical-only
+gaps never extend polling. Established nonreporters do not
 extend the wait after those gaps resolve. Web still makes its single bounded
 sync request for eligible missing sources, so returning contributors can recover.
 The assistant adapter adds these derived `reportingGaps` to each dated projection
@@ -2180,7 +2188,7 @@ without reaching the provider, later provider starts retain the canonical path
 but omit the subdivision so earlier group work and pass-shared history scans are
 not misattributed; the scan-nesting statement applies only to an emitted complete
 subdivision.
-The UserRunner Durable Object records optional constructor-start,
+Historical pre-cutover UserRunner telemetry recorded optional constructor-start,
 constructor-finish, and first-`ensureRuntimeProcessingForUser` epoch-millisecond
 facts in the existing in-memory orchestration phase. Production runner
 construction occurs between the two constructor stamps; recording and

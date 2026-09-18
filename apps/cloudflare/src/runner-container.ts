@@ -76,7 +76,7 @@ import type {
 } from "./worker-contracts.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
-import { HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH, HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER, parseHostedRuntimeMigrationCheckpointRequest, type HostedRuntimeMigrationCheckpointRequest, type HostedRuntimeMigrationCheckpointStatus } from "@murphai/hosted-execution/runtime-migration";
+
 import { RunnerInvocationReceiptStore, type RunnerInvocationReceipt } from "./runner-invocation-receipt.ts";
 
 const RUNNER_PORT = 8080;
@@ -284,6 +284,7 @@ export interface RunnerContainerColdStartTiming {
 
 type RunnerContainerEnsureReadyResult = {
   action: "already_warm" | "started";
+  runnerBusy: boolean;
   coldStartTiming?: Omit<
     RunnerContainerColdStartTiming,
     "lifecycleLockAcquiredAtEpochMs" | "readinessRequestedAtEpochMs"
@@ -306,14 +307,8 @@ interface HostedExecutionContainerRunnerInput {
   userId: string;
 }
 
-/** Whether the exact recorded container can take a migration checkpoint now:
- * "absent" when its process is not running, so the attempt it recorded can
- * never complete; "unsupported" when a running process cannot be asked. */
-export type HostedRuntimeMigrationCheckpointTarget = "absent" | "ready" | "unsupported";
-
 export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSlotLifecycle> {
-  supportsMigrationCheckpoint?(input: { userId: string }): Promise<HostedRuntimeMigrationCheckpointTarget>;
-  requestMigrationCheckpoint?(input: HostedRuntimeMigrationCheckpointRequest): Promise<HostedRuntimeMigrationCheckpointStatus>;
+
   abortWorkspaceInvocation?(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -536,6 +531,15 @@ function runnerWorkspaceInvocationOperationMatches(
   return operation.attemptId === input.attemptId
     && operation.leaseGeneration === input.leaseGeneration
     && operation.userId === userId;
+}
+
+function runnerWorkspaceInvocationMatchesWake(
+  operation: RunnerWorkspaceInvocationOperation,
+  input: RunnerRuntimeWakeInput,
+): boolean {
+  return runnerWorkspaceInvocationOperationMatches(operation, input, input.userId)
+    && (input.processingMode === undefined
+      || operation.processingMode === normalizeRunnerRuntimeProcessingMode(input.processingMode));
 }
 
 function createActiveRuntimeUserFence(
@@ -1356,6 +1360,9 @@ export class RunnerContainer extends Container {
           }
           throw error;
         }
+        if (readinessResult.runnerBusy) {
+          return { kind: "cleanup_unsettled" as const };
+        }
         return {
           action: readinessResult.action,
           ...(readinessResult.coldStartTiming === undefined ? {} : {
@@ -1416,43 +1423,6 @@ export class RunnerContainer extends Container {
         return { kind: "cleanup_unsettled" };
       }
       throw error;
-    }
-  }
-
-  async supportsMigrationCheckpoint(input: { userId: string }): Promise<HostedRuntimeMigrationCheckpointTarget> {
-    this.authorizeBoundUser(input.userId);
-    const platform = this.ctx.container;
-    // A stopped process is reported apart from a running one that cannot
-    // checkpoint: only the first proves the recorded attempt cannot complete.
-    if (!platform || platform.running !== true) return "absent";
-    const signal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
-    try {
-      const response = await platform.getTcpPort(RUNNER_PORT).fetch(`http://container${HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH}`, { method: "GET", signal });
-      await drainRunnerContainerMetadataResponseBody(response, { signal });
-      return response.ok && response.headers.get(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_CAPABILITY_HEADER) === HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PROTOCOL ? "ready" : "unsupported";
-    } catch { return "unsupported"; }
-  }
-
-  async requestMigrationCheckpoint(input: HostedRuntimeMigrationCheckpointRequest): Promise<HostedRuntimeMigrationCheckpointStatus> {
-    const request = parseHostedRuntimeMigrationCheckpointRequest(input);
-    this.authorizeBoundUser(request.userId);
-    const platform = this.ctx.container;
-    // A stopped process cannot be executing this exact attempt, and no
-    // replacement instance resumes it; only a lost reply stays unconfirmed.
-    if (!platform || platform.running !== true) return "absent";
-    const signal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
-    try {
-      // Do not use containerFetch: the SDK may start a stopped container.
-      const response = await platform.getTcpPort(RUNNER_PORT).fetch(`http://container${HOSTED_RUNTIME_MIGRATION_CHECKPOINT_PATH}`, {
-        method: "POST", body: JSON.stringify(request),
-        headers: { "content-type": "application/json; charset=utf-8" }, signal,
-      });
-      await drainRunnerContainerMetadataResponseBody(response, { signal });
-      const status = response.headers.get(HOSTED_RUNTIME_MIGRATION_CHECKPOINT_STATUS_HEADER);
-      return response.ok && (status === "accepted" || status === "stale" || status === "absent") ? status : "unconfirmed";
-    } catch {
-      // A lost reply must not be interpreted as checkpoint or stop evidence.
-      return "unconfirmed";
     }
   }
 
@@ -1669,18 +1639,7 @@ export class RunnerContainer extends Container {
     const active = this.readWorkspaceInvocationOperation();
     diagnostics.wakeActivePointerPresent = active !== null;
     diagnostics.wakeLifecyclePendingCount = this.lifecycleLockPendingCount;
-    if (
-      active
-      && (
-        active.userId !== input.userId
-        || active.attemptId !== input.attemptId
-        || active.leaseGeneration !== input.leaseGeneration
-        || (
-          input.processingMode !== undefined
-          && active.processingMode !== normalizeRunnerRuntimeProcessingMode(input.processingMode)
-        )
-      )
-    ) {
+    if (active && !runnerWorkspaceInvocationMatchesWake(active, input)) {
       return { kind: "unknown", reason: "active-child-rejected" };
     }
 
@@ -1752,6 +1711,18 @@ export class RunnerContainer extends Container {
 
     if (!active && this.isPlatformContainerDefinitelyStopped()) {
       return { kind: "not-wakeable", reason: "no-active-child" };
+    }
+
+    if (
+      active
+      && input.processingMode === "inbox_media_retention"
+      && !active.requiresFailClosedStopReason
+    ) {
+      // Finite retention work treats a wake as foreground preemption, which
+      // interrupts its checkpoint. The exact healthy operation already proves
+      // admission; same-mode rechecks must not interrupt it. Recovery and
+      // pointerless probes keep the existing paths above and below.
+      return { action: "already_running", kind: "accepted" };
     }
 
     this.noteRunnerActivity("runtime-wake");
@@ -2289,7 +2260,7 @@ export class RunnerContainer extends Container {
       );
       return false;
     }
-    if (isRunnerContainerStopped(status)) {
+    if (this.isPlatformContainerDefinitelyStopped() || isRunnerContainerStopped(status)) {
       this.deleteSchedules("onActivityExpired");
       return false;
     }
@@ -2624,7 +2595,9 @@ export class RunnerContainer extends Container {
 
   private async readWorkspaceInvocationHealth(): Promise<RunnerContainerHealth> {
     const signal = AbortSignal.timeout(DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS);
-    const response = await this.containerFetch(RUNNER_HEALTH_URL, {
+    // Health observes an existing process. SDK proxying can start a stopped
+    // container when its cached lifecycle state has not caught up.
+    const response = await this.ctx.container!.getTcpPort(RUNNER_PORT).fetch(RUNNER_HEALTH_URL, {
       method: "GET",
       signal,
     });
@@ -2909,14 +2882,14 @@ export class RunnerContainer extends Container {
             phase: "container.ready",
             userId: input.userId,
           });
-          return { action: "already_warm" };
+          return { action: "already_warm", runnerBusy: false };
         }
       } else {
         this.clearRecentReadinessProof();
       }
       const readinessTimeoutMs = Math.min(readinessBudgetMs, readyTimeoutMs);
       try {
-        await assertRunnerHealthy(
+        const health = await assertRunnerHealthy(
           this,
           readinessTimeoutMs,
           this.environment,
@@ -2932,12 +2905,13 @@ export class RunnerContainer extends Container {
             "Hosted runner container changed while warm readiness was recorded.",
           );
         }
-        this.recordRecentReadinessProof(input.userId, readyStart);
+        this.recordRecentReadinessProof(input.userId, readyStart, health.runnerBusy);
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
             readinessTimeoutMs,
+            runnerBusy: health.runnerBusy,
             startMode: "warm",
             statusBeforeStart: status,
           },
@@ -2945,7 +2919,7 @@ export class RunnerContainer extends Container {
           phase: "container.ready",
           userId: input.userId,
         });
-        return { action: "already_warm" };
+        return { action: "already_warm", runnerBusy: health.runnerBusy };
       } catch (error) {
         if (this.currentContainerStart !== observedStart) {
           throw error;
@@ -3028,7 +3002,12 @@ export class RunnerContainer extends Container {
       readyTimeoutMs,
     );
     let coldStartTiming: RunnerContainerEnsureReadyResult["coldStartTiming"];
+    let runnerBusy = false;
     const coldStartWaitStartedAtMs = Date.now();
+    const startupAbortSignal = combineRunnerContainerAbortSignals(
+      operationAbortSignal,
+      AbortSignal.timeout(readinessTimeoutMs),
+    );
     const currentStart = this.recordContainerStartIssued(
       coldStartWaitStartedAtMs,
       readyTimeoutMs,
@@ -3036,15 +3015,16 @@ export class RunnerContainer extends Container {
     try {
       await this.startAndWaitForPorts({
         cancellationOptions: {
-          abort: combineRunnerContainerAbortSignals(
-            operationAbortSignal,
-            AbortSignal.timeout(readinessTimeoutMs),
-          ),
+          abort: startupAbortSignal,
           instanceGetTimeoutMS: readinessTimeoutMs,
           portReadyTimeoutMS: readinessTimeoutMs,
           waitInterval: RUNNER_WAIT_INTERVAL_MS,
           portProbeTimeoutMS: RUNNER_PORT_PROBE_TIMEOUT_MS,
         },
+      }).catch((error: unknown) => {
+        // The SDK can replace a cancellation reason with a plain Error.
+        throwIfRunnerContainerOperationAborted(startupAbortSignal);
+        throw error;
       });
       if (options.startupFailureObservation) {
         options.startupFailureObservation.stage = "cold_health_or_finalization";
@@ -3068,7 +3048,8 @@ export class RunnerContainer extends Container {
           "Hosted runner container changed while cold readiness was recorded.",
         );
       }
-      this.recordRecentReadinessProof(input.userId, readyStart);
+      runnerBusy = healthStartupTiming.runnerBusy;
+      this.recordRecentReadinessProof(input.userId, readyStart, runnerBusy);
       const readyObservedAtEpochMs = Date.now();
 
       coldStartTiming = {
@@ -3155,6 +3136,7 @@ export class RunnerContainer extends Container {
         readinessPollIntervalMs: RUNNER_WAIT_INTERVAL_MS,
         readinessTimeoutMs,
         runnerPort: RUNNER_PORT,
+        runnerBusy,
         startMode: "cold",
         statusBeforeStart: status,
       },
@@ -3165,6 +3147,7 @@ export class RunnerContainer extends Container {
 
     return {
       action: "started",
+      runnerBusy,
       ...(coldStartTiming === undefined ? {} : { coldStartTiming }),
     };
   }
@@ -3773,7 +3756,12 @@ export class RunnerContainer extends Container {
   private recordRecentReadinessProof(
     userId: string,
     currentStart: RunnerContainerCurrentStart,
+    runnerBusy: boolean,
   ): void {
+    if (runnerBusy) {
+      this.clearRecentReadinessProof();
+      return;
+    }
     if (this.currentContainerStart !== currentStart) {
       return;
     }
@@ -4796,18 +4784,21 @@ async function assertRunnerHealthy(
   timeoutMs: number,
   environment: RunnerContainerEnvironmentSource,
   signal?: AbortSignal,
-): Promise<RunnerContainerHealthStartupTiming> {
+): Promise<RunnerContainerHealthMetadata> {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const abortSignal = signal
     ? combineRunnerContainerAbortSignals(signal, timeoutSignal)
     : timeoutSignal;
-  const response = await container.containerFetch(
-    RUNNER_HEALTH_URL,
-    {
+  let response: Response;
+  try {
+    response = await container.containerFetch(RUNNER_HEALTH_URL, {
       method: "GET",
       signal: abortSignal,
-    },
-  );
+    });
+  } catch (error) {
+    throwIfRunnerContainerOperationAborted(abortSignal);
+    throw error;
+  }
 
   const responseOk = response.ok;
   const payload = await readRunnerContainerMetadataJsonObject(response, {
@@ -4842,17 +4833,18 @@ async function assertRunnerHealthy(
     });
   }
 
-  return readRunnerContainerHealthStartupTiming(payload);
+  return readRunnerContainerHealthMetadata(payload);
 }
 
-interface RunnerContainerHealthStartupTiming {
+interface RunnerContainerHealthMetadata {
+  runnerBusy: boolean;
   processStartedAtEpochMs?: number;
   serverListeningAtEpochMs?: number;
 }
 
-function readRunnerContainerHealthStartupTiming(
+function readRunnerContainerHealthMetadata(
   payload: Record<string, unknown>,
-): RunnerContainerHealthStartupTiming {
+): RunnerContainerHealthMetadata {
   const processStartedAtEpochMs = readOptionalRunnerContainerEpochMs(
     payload.processStartedAtEpochMs,
   );
@@ -4860,6 +4852,8 @@ function readRunnerContainerHealthStartupTiming(
     payload.serverListeningAtEpochMs,
   );
   return {
+    // The entrypoint retains this count until its completion receipt settles.
+    runnerBusy: typeof payload.activeJobCount === "number" && payload.activeJobCount > 0,
     ...(processStartedAtEpochMs === undefined ? {} : {
       processStartedAtEpochMs,
     }),

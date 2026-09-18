@@ -1,3 +1,7 @@
+import type { HostedGroupSharedReadOptions, HostedGroupSharedDateCoverage } from "./group-shared-history.ts";
+export { parseHostedGroupSharedReadOptions, pageHostedGroupSharedHistory, parseHostedGroupSharedDateCoverage,
+  HOSTED_GROUP_SHARED_READ_RESPONSE_MAX_BYTES, HOSTED_GROUP_SHARED_HISTORY_PAGE_MAX_BYTES,
+  type HostedGroupSharedReadOptions, type HostedGroupSharedDateCoverage } from "./group-shared-history.ts";
 import type {
   HostedExecutionSnapshotRefState,
 } from "./bundles.ts";
@@ -40,6 +44,7 @@ import {
   HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 } from "./contracts.ts";
 
+import { HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES } from "./vault-share.ts";
 import type {
   HostedVaultShareDeliveryRecord,
   HostedVaultShareProjectionKind,
@@ -1419,7 +1424,7 @@ export interface HostedRuntimeGroupSharedFreshness {
   refreshStatus: "requested" | "unavailable" | "not_needed";
 }
 
-export interface HostedRuntimeGroupSharedReadRequest {
+export interface HostedRuntimeGroupSharedReadRequest extends HostedGroupSharedReadOptions {
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
   /** Only missing, currently consented wearable dates can request existing sync work. */
   freshness?: readonly HostedRuntimeGroupSharedFreshnessRequirement[];
@@ -1459,6 +1464,7 @@ export interface HostedRuntimeGroupSharedMember {
 
 export type HostedRuntimeGroupSharedReadResult =
   | {
+      dateCoverage?: HostedGroupSharedDateCoverage;
       freshness?: HostedRuntimeGroupSharedFreshness;
       members: readonly HostedRuntimeGroupSharedMember[];
       requestedProjectionScopeKeys: readonly string[];
@@ -1970,7 +1976,10 @@ export const HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH = 160;
 export const HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH = 100_000;
 export const HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH = 500_000;
 export const HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX = 100;
-export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX = 100;
+// One canonical key per scope. The email grant itself is carried separately
+// from the data/profile authorization snapshot (99 of the current 100 scopes).
+export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX =
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.length - 1;
 export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_HEX_LENGTH = 64;
 const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_PATTERN = new RegExp(
   `^[0-9a-f]{${HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_HEX_LENGTH}}$`,
@@ -2311,6 +2320,7 @@ export interface HostedRuntimeIssueExportResponse {
 }
 
 export const HOSTED_INGRESS_LATENCY_SOURCES = [
+  "email",
   "linq",
   "telegram",
 ] as const;
@@ -2351,6 +2361,7 @@ export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "first_codex_output_observed",
   "first_codex_text_observed",
   "terminal_non_reply_committed",
+  "terminal_reply_committed",
 ] as const;
 
 export type HostedRuntimeAssistantMilestone =
@@ -2613,6 +2624,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
     terminalNonReplyCommittedAtEpochMs?: number;
+    terminalReplyCommittedAtEpochMs?: number;
     checkpointPublicationExpectedByEpochMs?: number;
     runtimeLeaseGeneration?: string;
   };
@@ -3006,6 +3018,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
     "terminalNonReplyCommittedAtEpochMs",
+    "terminalReplyCommittedAtEpochMs",
     "checkpointPublicationExpectedByEpochMs",
     "runtimeLeaseGeneration",
   ],
@@ -3535,7 +3548,17 @@ export interface HostedRuntimeLatencyTraceMilestoneEvent {
   type: "runtime_milestone";
 }
 
+export interface HostedRuntimeLatencyTraceDeliveryCommittedEvent {
+  mailboxItemIds: string[];
+  at: string;
+  checkpointPublicationExpectedBy: string;
+  runtimeAttemptId: string;
+  source: HostedIngressLatencySource;
+  type: "delivery_committed";
+}
+
 export type HostedRuntimeLatencyTraceEvent =
+  | HostedRuntimeLatencyTraceDeliveryCommittedEvent
   | HostedRuntimeLatencyTraceAssistantInputStagedEvent
   | HostedRuntimeLatencyTraceAssistantMilestoneEvent
   | HostedRuntimeLatencyTraceProviderStartedEvent
@@ -4026,6 +4049,7 @@ export function isHostedRetiredMailboxKind(
 
 export {
   parseHostedGroupSharedFreshnessRequirements,
+  selectRefreshableHostedGroupWearableDates,
   hostedGroupMemberHasMissingWearableDates,
   hostedGroupSharedNeedsWearableRecovery,
   getHostedGroupWearableReportingGaps,

@@ -4864,6 +4864,19 @@ function planDeviceEventAliasRepairs(
   return { aliasRepairByEntryIndex, aliasRepairOwnerIds };
 }
 
+function findCurrentAuthoritativeDeviceEventSet(
+  externalRef: ExternalRef | undefined,
+  authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[],
+): NormalizedDeviceAuthoritativeEventSet | undefined {
+  return externalRef && authoritativeEventSets.find((set) =>
+    externalRef.system === set.system
+    && externalRef.resourceType === set.resourceType
+    && externalRef.resourceId === set.resourceId
+    && externalRef.facet !== undefined
+    && set.currentFacets.has(externalRef.facet)
+  );
+}
+
 function shouldRetainOlderAuthoritativeDeviceEvent(input: {
   authoritativeSet: NormalizedDeviceAuthoritativeEventSet | undefined;
   matchedEntries: ResolvedDeviceEventIdentity["matchedEntries"];
@@ -4915,6 +4928,19 @@ function isProviderOwnedDeviceRetraction(record: EventRecord): boolean {
   return isDeletedEventSpineRecord(record)
     && record.source === "device"
     && record.externalRef?.version !== undefined;
+}
+
+// Member deletion also preserves source/version. Newer explicit revisions may
+// reuse the deleted ID only when the authoritative-set writer stamped it.
+function canReassertDeviceRetraction(
+  record: EventRecord,
+  sourceVersionComparison: number | null,
+): boolean {
+  return isProviderOwnedDeviceRetraction(record)
+    && (sourceVersionComparison === null || (
+      sourceVersionComparison > 0
+      && record.recordedAt === record.externalRef?.version
+    ));
 }
 
 function retractMissingAuthoritativeDeviceFacets(
@@ -5201,12 +5227,9 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
-    const authoritativeSet = authoritativeEventSets.find((set) =>
-      externalRef.system === set.system
-      && externalRef.resourceType === set.resourceType
-      && externalRef.resourceId === set.resourceId
-      && externalRef.facet !== undefined
-      && set.currentFacets.has(externalRef.facet)
+    const authoritativeSet = findCurrentAuthoritativeDeviceEventSet(
+      externalRef,
+      authoritativeEventSets,
     );
     if (shouldRetainOlderAuthoritativeDeviceEvent({
       authoritativeSet,
@@ -5235,23 +5258,17 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
     }
 
-    // An unversioned member declared current by this batch's authoritative set
-    // reasserts a retracted facet in serialized arrival order rather than
-    // treating the tombstone's identical content as an exact replay. Ordinary
-    // versionless deliveries without complete-set authority never resurrect.
-    // Only provider-owned authoritative-set retractions may be reasserted.
-    // Their tombstones carry the set's explicit version marker on the external
-    // reference, while a member deletion preserves the member's unversioned
-    // reference and must stay deleted under authoritative replay.
-    const reassertsUnversionedSetMember = Boolean(
+    // Source ordering precedes reassertion: stale revisions were retained and
+    // conflicting equal revisions rejected above. Unversioned set members keep
+    // serialized arrival order; newer revisions reuse the provider tombstone.
+    const reassertsRetractedSetMember = Boolean(
       authoritativeSet
-      && indexedSourceVersionComparison === null
-      && isProviderOwnedDeviceRetraction(latest),
+      && canReassertDeviceRetraction(latest, indexedSourceVersionComparison),
     );
     if (
       deviceEventContentKey(latest) === deviceEventContentKey(entry.record)
       && (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0)
-      && !reassertsUnversionedSetMember
+      && !reassertsRetractedSetMember
     ) {
       skippedDuplicateCount += 1;
       retainRecord(entryIndex, latest);
@@ -5261,7 +5278,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const historicalUserEditMatch = matchedEntries.find((match) =>
       hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
     );
-    if (matchesIndexedProviderContent && !reassertsUnversionedSetMember) {
+    if (matchesIndexedProviderContent && !reassertsRetractedSetMember) {
       if (
         historicalUserEditMatch
         && indexedSourceVersionComparison !== null
@@ -5337,7 +5354,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
-    if (isDeletedEventSpineRecord(latest) && !reassertsUnversionedSetMember) {
+    if (isDeletedEventSpineRecord(latest) && !reassertsRetractedSetMember) {
       // A member-authored deletion tombstone (unversioned reference) stays
       // dead under authoritative replay: no append, no index change, so a
       // later empty-then-populated cadence cannot launder the deletion away.
@@ -7392,7 +7409,7 @@ timing: DeviceBatchImportTiming,
     currentEventOwners,
     deviceBatchPlan,
   });
-  const protectedPreparedEventIds = new Set(
+  const replayRetainedPreparedIds = new Set(
     deviceBatchPlan.preparedEvents
       .filter((entry) =>
         baselineRetainedPreparedIds.has(entry.record.id)
@@ -7409,6 +7426,29 @@ timing: DeviceBatchImportTiming,
       )
       .map((entry) => entry.record.id),
   );
+  // Historical delivery proof still authorizes an exact-receipt no-op, but it
+  // must not block a new authoritative delivery from reasserting its retraction.
+  const protectedPreparedEventIds = new Set(
+    deviceBatchPlan.preparedEvents
+      .filter((entry) => {
+        if (!replayRetainedPreparedIds.has(entry.record.id)) {
+          return false;
+        }
+        if (!findCurrentAuthoritativeDeviceEventSet(
+          entry.record.externalRef,
+          deviceBatchPlan.authoritativeEventSets,
+        )) {
+          return true;
+        }
+        const resolved = resolveDeviceEventIdentity(entry, eventIdentityContext);
+        return !resolved?.associationSafe
+          || !resolved.latest
+          || !isProviderOwnedDeviceRetraction(resolved.latest)
+          // Member deletion preserves source/version but not the set's stamp.
+          || resolved.latest.recordedAt !== resolved.latest.externalRef?.version;
+      })
+      .map((entry) => entry.record.id),
+  );
   const ordinaryReconciliationEntries = deviceBatchPlan.preparedEvents.filter((entry) =>
     baselineRetainedPreparedIds.has(entry.record.id)
     && !protectedPreparedEventIds.has(entry.record.id)
@@ -7421,10 +7461,9 @@ timing: DeviceBatchImportTiming,
     deviceBatchPlan.authoritativeEventSets,
     aliasRepairContext,
   );
-  const replayRetainedPreparedIds = new Set([
-    ...protectedPreparedEventIds,
-    ...currentEventReconciliation.retainedPreparedIds,
-  ]);
+  currentEventReconciliation.retainedPreparedIds.forEach((preparedId) =>
+    replayRetainedPreparedIds.add(preparedId)
+  );
   const unresolvedBaselinePreparedIds = new Set(
     [...baselineRetainedPreparedIds].filter((preparedId) =>
       !replayRetainedPreparedIds.has(preparedId)

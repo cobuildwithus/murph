@@ -27,6 +27,12 @@ Last verified: 2026-09-09
   the member. More context should reduce repetition and improve judgment and
   timing. Murph should keep asking new, high-value questions while material
   gaps remain; it should not ask merely to increase coverage.
+- In an authenticated private conversation, a requested whole-workspace archive
+  includes every file under the member's workspace root as-is, including hidden
+  files, runtime records, history, configuration and credential-bearing records.
+  Do not filter or sanitize the member's own export based on content sensitivity.
+  Preserve original bytes and paths and use the existing file-send approval.
+  This does not grant access to other workspaces or the host filesystem.
 - Current member controls are surface-specific: freeform memories can be
   inspected, updated, or forgotten; structured health records are corrected
   or statused through their canonical owners. Do not claim universal deletion

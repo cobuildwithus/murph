@@ -11,12 +11,14 @@ import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
 import { RuntimeInvocationPreparation } from "./runtime-invocation-preparation.ts";
 import { RunnerStoreCache } from "./user-runner/runner-store-cache.ts";
-import type { RuntimeProcessingInput } from "./user-runner/runtime-processing-controller.ts";
+import type { HostedRuntimeEnsureProcessingRequest } from "@murphai/hosted-execution/orchestration-control";
+import type { HostedRuntimeLatencyPhaseBreakdown } from "@murphai/hosted-execution/runtime-control";
+
 import { createRuntimeProcessingCommandBudget, isRuntimeProcessingCommandBudgetTimeout, readRuntimeProcessingCommandStepTimeoutMs, runRuntimeProcessingCommandStep } from "./user-runner/runtime-command-budget.ts";
 import { computeRuntimeProcessingOwnerRecheckAt } from "./user-runner/runtime-processing-responses.ts";
 import { ensureActiveRuntimeProcessing } from "./user-runner/runtime-container-wake.ts";
 import { readRuntimeFenceLivenessBestEffort } from "./user-runner/runtime-fence-liveness.ts";
-import type { RunnerWriteFenceToken } from "./user-runner/runner-state-store.ts";
+import type { RunnerWriteFenceToken } from "./runtime-invocation-token.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import {
   createHostedRunnerContainerNamespaceRouter, HOSTED_RUNNER_REGION, HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
@@ -24,6 +26,13 @@ import {
   resolveHostedStandbyCoordinatorName, readHostedRunnerTargetIdentity, requireHostedRunnerSlotLifecycle,
   type HostedStandbySlotBinding,
 } from "./standby-runner-contract.ts";
+
+type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
+  commandStartedAtEpochMs?: number;
+  commandTimeoutMs?: number;
+  orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
+  userId: string;
+};
 
 type RuntimeProcessingSource = Pick<WorkerEnvironmentSource, "BUNDLES" | "RUNNER_CONTAINER" | "NEXT_RUNNER_CONTAINER" | "STANDBY_RUNNER_CONTAINER" | "STANDBY_COORDINATOR"> & Readonly<Record<string, unknown>>;
 type ProcessingContext = ReturnType<typeof createProcessingContext> & {
@@ -50,16 +59,21 @@ function isProcessingTimeout(error: unknown): boolean {
 
 async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessingContext>): Promise<HostedRuntimeEnsureProcessingResponse> {
   const { diagnostics } = context;
-  let claim = await context.command({ operation: "claim", processingMode: context.mode });
+  let claim = context.input.admission ?? await context.command({ operation: "claim", processingMode: context.mode });
   if (claim.cutover !== "postgres") return retryProcessing(context, "cutover_blocked");
   if (!context.namespace) return retryProcessing(context, "missing_container_binding");
   if (!claim.owner) return retryProcessing(context, "claim_blocked");
+  if (claim.owner.userId !== context.input.userId) throw new TypeError("Runtime admission belongs to a different member.");
   if (claim.owner.attemptId && claim.owner.processingMode) observeRuntimeProcessingFence(diagnostics, {
     attemptId: claim.owner.attemptId, generation: claim.owner.generation, processingMode: claim.owner.processingMode,
   });
   const ctx = { ...context, namespace: context.namespace };
   if (claim.status === "existing") {
-    const outcome = await reconcileExistingRuntime(ctx, claim.owner);
+    diagnostics.stage = "liveness";
+    // The wake validates the exact live attempt. Read its receipt only for recovery.
+    const wake = await wakeExistingRuntime(ctx, claim.owner);
+    if (wake?.kind === "runtime_processing_accepted") return wake;
+    const outcome = await reconcileExistingRuntime(ctx, claim.owner, wake);
     if (outcome) return outcome;
     claim = await ctx.command({ operation: "claim", processingMode: ctx.mode });
   }
@@ -122,9 +136,8 @@ async function retireRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSn
 }
 
 /** A null result means this exact completed attempt was released. */
-async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
+async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, wake: HostedRuntimeEnsureProcessingResponse | null): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   const identity = requireIdentity(owner);
-  ctx.diagnostics.stage = "liveness";
   if (owner.phase === "retiring" && !owner.completedAt) {
     await retireRuntime(ctx, owner);
     return retryProcessing(ctx, "retirement_pending");
@@ -139,7 +152,6 @@ async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRun
     await retireRuntime(ctx, owner);
     return retryProcessing(ctx, "retirement_pending");
   }
-  const wake = await wakeExistingRuntime(ctx, owner);
   if (wake) return wake;
   // Age decides when to attempt retirement; it never proves stoppedness.
   if (owner.phase === "starting" && owner.startedAt && Date.now() - Date.parse(owner.startedAt) < 30_000) return retryProcessing(ctx, "starting_fence_preserved");
@@ -160,7 +172,8 @@ async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRu
 }
 
 async function wakeExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
-  if (!owner.runnerContainerName || owner.workspaceVersion === null) return null;
+  if (owner.phase === "retiring" || !owner.runnerContainerName || owner.workspaceVersion === null) return null;
+  if (owner.processingMode === "inbox_media_retention" && ctx.mode !== "inbox_media_retention") return null;
   if (ctx.mode === "inbox_media_retention" && owner.processingMode !== ctx.mode) return retryProcessing(ctx, "processing_mode_conflict");
   const identity = requireIdentity(owner);
   ctx.diagnostics.stage = "active_wake";

@@ -6984,6 +6984,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       `http://web-control.worker${buildExpectedVaultShareActiveKindsPath(HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE)}`,
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",
     ]);
+    // The composed group and both publication paths advertise one canonical
+    // scope per metric, not a second history registry or capability flag.
+    for (const request of requests.slice(12, 15)) {
+      const url = new URL(request.url);
+      const scopes = url.searchParams.getAll("supportedProjectionScope");
+      expect(scopes).toHaveLength(100);
+      expect(new Set(scopes).size).toBe(100);
+      expect(scopes.every((scope) => !scope.includes("historyDays"))).toBe(true);
+      expect(url.searchParams.has("supportedHistoryDays")).toBe(false);
+    }
     for (const request of requests) {
       expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
       expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");

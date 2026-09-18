@@ -45,6 +45,7 @@ const mocks = vi.hoisted(() => ({
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
   recordHostedIngressAssistantMilestone: vi.fn(),
+  recordHostedIngressDeliveryCommitted: vi.fn(),
   recordHostedIngressProviderStarted: vi.fn(),
   recordHostedIngressRuntimeMilestone: vi.fn(),
   tryMarkHostedMailboxConversationAiUsageDenied: vi.fn(),
@@ -160,6 +161,7 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
   recordHostedIngressAssistantInputStaged:
     mocks.recordHostedIngressAssistantInputStaged,
+  recordHostedIngressDeliveryCommitted: mocks.recordHostedIngressDeliveryCommitted,
   recordHostedIngressAssistantMilestone:
     mocks.recordHostedIngressAssistantMilestone,
   recordHostedIngressProviderStarted: mocks.recordHostedIngressProviderStarted,
@@ -3302,6 +3304,21 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.reportHostedRuntimeTypingAlerts).toHaveBeenCalledWith({
       userId: "member_routes_1", assistantInputIds: ["input_1"],
     });
+
+    mocks.recordHostedIngressDeliveryCommitted.mockResolvedValue({ matchedCount: 1, recorded: true, unmatchedCount: 0 });
+    const completion = {
+      type: "delivery_committed", source: "email", runtimeAttemptId: "attempt_routes_1",
+      mailboxItemIds: ["mailbox_item_1"], at: FIXED_NOW,
+      checkpointPublicationExpectedBy: "2026-04-26T00:30:00.000Z",
+    };
+    const completionResponse = await runtimeLatencyRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/latency", { event: completion }, runtimeWriteFenceHeaders(),
+    ));
+    expect(completionResponse.status).toBe(200);
+    expect(mocks.recordHostedIngressDeliveryCommitted).toHaveBeenCalledWith({
+      ...completion, authenticatedUserId: "member_routes_1", runtimeLeaseGeneration: "9",
+    });
+    expect(mocks.after).toHaveBeenCalledOnce();
 
     const providerResponse = await runtimeLatencyRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/latency",

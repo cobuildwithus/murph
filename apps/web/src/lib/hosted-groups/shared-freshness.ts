@@ -3,18 +3,18 @@ import "server-only";
 import {
   hostedGroupMemberHasMissingWearableDates,
   parseHostedGroupSharedFreshnessRequirements,
+  selectRefreshableHostedGroupWearableDates,
   type HostedRuntimeGroupSharedReadRequest,
   type HostedRuntimeGroupSharedReadResult,
 } from "@murphai/hosted-execution/runtime-control";
 
-import { buildHostedVaultShareProjectionScopeKey } from "@murphai/hosted-execution/vault-share";
+import { buildHostedVaultShareProjectionScopeKey, hostedVaultShareReadAuthorityScopes } from "@murphai/hosted-execution/vault-share";
 
 import { appendHostedDeviceSyncManualReconcileWake } from "../device-sync/wake-service";
 import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
 import { hostedHealthDataConsentNotRevokedWhere } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { readHostedGroupSharedDataByRuntimeMemberId } from "./group-store";
-import { includeSourceAwareHostedGroupSleepProjectionScopes } from "./join-policy";
 
 const MAX_REFRESH_CONNECTIONS = 32;
 const REFRESH_BUCKET_MS = 5 * 60_000;
@@ -33,26 +33,21 @@ export async function readHostedGroupSharedDataWithFreshness(
   if (!requirements || initial.status !== "ok") {
     return initial;
   }
+  if (!initial.members.some((member) => hostedGroupMemberHasMissingWearableDates(member, requirements))) {
+    return { ...initial, freshness: { checkedAt: new Date().toISOString(), refreshStatus: "not_needed" } };
+  }
+  const refreshable = selectRefreshableHostedGroupWearableDates(requirements);
   const missing = initial.members.flatMap((member) => {
     const projectionScopes = member.projections.filter((projection) =>
-      hostedGroupMemberHasMissingWearableDates({ ...member, projections: [projection] }, requirements)
+      hostedGroupMemberHasMissingWearableDates({ ...member, projections: [projection] }, refreshable)
     ).map((projection) => projection.projectionScope);
     return projectionScopes.length === 0 ? [] : [{
       grantorMemberId: member.memberId,
-      projectionScopeKey: { in: includeSourceAwareHostedGroupSleepProjectionScopes(projectionScopes)
+      projectionScopeKey: { in: projectionScopes.flatMap(hostedVaultShareReadAuthorityScopes)
         .map(buildHostedVaultShareProjectionScopeKey) },
     }];
   });
   if (missing.length === 0) {
-    return { ...initial, freshness: { checkedAt: new Date().toISOString(), refreshStatus: "not_needed" } };
-  }
-  // The normal reconcile window can recover recent days, not arbitrary history
-  // or future dates. Leave those reads immediate and honest.
-  const todayMs = Date.parse(new Date().toISOString().slice(0, 10));
-  if (requirements.some(({ date }) => {
-    const ageDays = (todayMs - Date.parse(date)) / 86_400_000;
-    return ageDays < -1 || ageDays > 2;
-  })) {
     return { ...initial, freshness: { checkedAt: new Date().toISOString(), refreshStatus: "unavailable" } };
   }
   let refreshStatus: "requested" | "unavailable" = "unavailable";

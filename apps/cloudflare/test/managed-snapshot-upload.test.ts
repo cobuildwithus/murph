@@ -5,7 +5,7 @@ import { parseHostedWorkspaceSnapshotUploadSession } from "@murphai/hosted-execu
 import { buildHostedWorkspaceSnapshotV2Aad, HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import { completeManagedSnapshotUpload, expectedManagedSnapshotEtag, prepareManagedSnapshotUpload, verifyManagedSnapshotBytes, verifyManagedSnapshotEtag } from "../src/managed-snapshot-upload.ts";
 import type { R2BucketLike } from "../src/bundle-store.ts";
-import { completeManagedSnapshotForSession, presignManagedSnapshot } from "../src/managed-snapshot-control.ts";
+import { completeManagedSnapshotForSession, ManagedSnapshotCompletionRejectedError, presignManagedSnapshot } from "../src/managed-snapshot-control.ts";
 
 const resource = vi.hoisted(() => ({ command: vi.fn() }));
 vi.mock("../src/runtime-resource-client.ts", () => ({ commandHostedRuntimeSnapshot: resource.command }));
@@ -62,12 +62,46 @@ describe("managed snapshot uploads", () => {
     expect(url.searchParams.get("uploadId")).toBe(receipt.uploadId);
     expect(url.searchParams.get("partNumber")).toBe("1");
     await expect(completeManagedSnapshotForSession({ source, session, encryptedByteSize: bytes.length, encryptedSha256,
-      part: { uploadId: "wrong-upload", etag: "synthetic-etag" } })).rejects.toThrow("does not match");
+      part: { uploadId: "wrong-upload", etag: "synthetic-etag" } })).rejects.toBeInstanceOf(ManagedSnapshotCompletionRejectedError);
     expect(h.complete).not.toHaveBeenCalled();
     expect(await completeManagedSnapshotForSession({ source, session, encryptedByteSize: bytes.length, encryptedSha256,
       part: { uploadId: signed.managedUploadId, etag: "synthetic-etag" } })).toBe(encryptedSha256);
     expect(stored).toMatchObject({ completedAt: "2026-09-15T00:01:00.000Z", verifiedAt: "2026-09-15T00:01:00.000Z" });
     expect(h.bucket.get).toHaveBeenCalledWith(objectKey);
+  });
+
+  it.each([
+    { uploadId: "other-upload" },
+    { userId: "other-member" },
+    { snapshotId: "other-snapshot" },
+    { objectKey: "other-object" },
+    { attemptId: "other-attempt" },
+    { generation: "2" },
+    { encryptedByteSize: bytes.length + 1 },
+    { encryptedSha256: "b".repeat(64) },
+  ])("rejects changed managed completion identity before storage or settlement: %j", async changed => {
+    const h = harness();
+    resource.command.mockReset().mockResolvedValue({
+      cutover: "postgres", applied: true, managedUpload: { ...receipt, ...changed },
+    });
+    await expect(completeManagedSnapshotForSession({
+      source: { BUNDLES: h.bucket }, session, encryptedByteSize: bytes.length, encryptedSha256,
+      part: { uploadId: receipt.uploadId, etag: "synthetic-etag" },
+    })).rejects.toBeInstanceOf(ManagedSnapshotCompletionRejectedError);
+    expect(h.bucket.resumeMultipartUpload).not.toHaveBeenCalled();
+    expect(h.bucket.get).not.toHaveBeenCalled();
+    expect(resource.command).toHaveBeenCalledOnce();
+  });
+
+  it("preserves resource transport failures instead of classifying them as a completion conflict", async () => {
+    const h = harness();
+    const failure = new Error("Resource transport unavailable.");
+    resource.command.mockReset().mockRejectedValue(failure);
+    await expect(completeManagedSnapshotForSession({
+      source: { BUNDLES: h.bucket }, session, encryptedByteSize: bytes.length, encryptedSha256,
+      part: { uploadId: receipt.uploadId, etag: "synthetic-etag" },
+    })).rejects.toBe(failure);
+    expect(h.bucket.resumeMultipartUpload).not.toHaveBeenCalled();
   });
 
   it("hashes through the platform digest stream when the runtime provides one", async () => {

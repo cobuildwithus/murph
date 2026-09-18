@@ -7,6 +7,7 @@ import {
   type Space,
 } from "@spectrum-ts/core";
 import { imessage } from "@spectrum-ts/imessage";
+import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-execution/contracts";
 import {
   MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
@@ -21,11 +22,11 @@ const CANARY_RESET_PATH =
 const CANARY_OUTCOME_PATH =
   "/api/internal/hosted-onboarding/linq/production-canary/outcome";
 const CANARY_REPLY_BUDGET_MS = 20_000;
-const CANARY_REPLY_WAIT_MS = 90_000;
-const CANARY_RESET_TIMEOUT_MS = 300_000;
-// Production checkpoints only after at least 180 seconds of quiet. Observation
-// also allows checkpoint/publication time; it is separate from reply latency.
-const CANARY_OUTCOME_WAIT_MS = 300_000;
+export const CANARY_REPLY_WAIT_MS = 90_000;
+export const CANARY_RESET_TIMEOUT_MS = 300_000;
+// Observe the normal quiet window plus bounded checkpoint/publication time.
+// This budget is independent of the twenty-second reply latency requirement.
+export const CANARY_OUTCOME_WAIT_MS = HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 120_000;
 const CANARY_OUTCOME_POLL_MS = 1_000;
 const CANARY_TURNS = [
   { prompt: "Hey Murph", stage: "welcome" },

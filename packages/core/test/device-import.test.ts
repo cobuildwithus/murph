@@ -2145,6 +2145,137 @@ test("importDeviceBatch retracts omitted facets from a newer bounded authoritati
   assert.equal(tombstone?.lifecycle?.state, "deleted");
 });
 
+test.each([
+  { versioned: false, restoredValue: 98 },
+  { versioned: false, restoredValue: 93 },
+  { versioned: true, restoredValue: 98 },
+  { versioned: true, restoredValue: 93 },
+])("authoritative device days restore after a provider retraction ($versioned, $restoredValue)", async ({ versioned, restoredValue }) => {
+  const vaultRoot = await makeTempDirectory("murph-device-empty-day-recovery");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const identity = {
+    system: "junction",
+    resourceType: "junction-withings-blood-oxygen",
+    resourceId: "synthetic-complete-day",
+  };
+  const facet = "spo2-median";
+  const dayInput = (value: number | null, version: string) => ({
+    vaultRoot,
+    provider: "junction",
+    importedAt: version,
+    evidenceParts: [{
+      role: "synthetic-complete-day", fileName: "day.json", content: { value, version },
+    }],
+    events: value === null ? [] : [{
+      kind: "observation" as const,
+      occurredAt: "2026-05-01T07:00:00.000Z",
+      recordedAt: "2026-05-01T07:00:00.000Z",
+      title: "Blood oxygen median",
+      externalRef: { ...identity, facet, ...(versioned ? { version } : {}) },
+      fields: { metric: "spo2-median", value, unit: "%", observationGrain: "summary" as const },
+    }],
+    authoritativeEventSets: [{
+      ...identity, facetPrefixes: ["spo2"], currentFacets: value === null ? [] : [facet], version,
+    }],
+  });
+  const importDay = (value: number | null, version: string) => importDeviceBatch(dayInput(value, version));
+  const first = await importDay(98, "2026-05-02T08:00:00.000Z");
+  const relativePath = first.eventShardPaths[0];
+  assert.ok(relativePath);
+  const readRows = async () => await readJsonlRecords({ vaultRoot, relativePath }) as EventRecord[];
+  await importDay(93, "2026-05-02T09:00:00.000Z");
+  await importDay(null, "2026-05-02T10:00:00.000Z");
+  const tombstone = collapseEventSpines(await readRows())[0];
+  assert.equal(tombstone?.lifecycle?.state, "deleted");
+  const emptyBytes = await fs.readFile(path.join(vaultRoot, relativePath));
+  // Exact historical deliveries are receipts, not new complete-day updates.
+  await importDay(98, "2026-05-02T08:00:00.000Z");
+  await importDay(93, "2026-05-02T09:00:00.000Z");
+  assert.deepEqual(await fs.readFile(path.join(vaultRoot, relativePath)), emptyBytes);
+  if (versioned) {
+    await importDay(93, "2026-05-02T10:00:00.000Z");
+    await assert.rejects(
+      importDay(98, "2026-05-02T10:00:00.000Z"),
+      (error: unknown) => error instanceof VaultError && error.code === "EVENT_SOURCE_REVISION_CONFLICT",
+    );
+  } else {
+    const noAuthority = dayInput(98, "2026-05-02T10:30:00.000Z");
+    await importDeviceBatch({ ...noAuthority, authoritativeEventSets: [] });
+    for (const mismatch of [
+      { system: "other-provider" }, { resourceType: "other-resource" },
+      { resourceId: "other-day" }, {},
+    ]) {
+      await importDeviceBatch({
+        ...noAuthority,
+        authoritativeEventSets: noAuthority.authoritativeEventSets.map((set) => ({
+          ...set, ...mismatch, currentFacets: [],
+        })),
+      });
+    }
+  }
+  assert.deepEqual(await fs.readFile(path.join(vaultRoot, relativePath)), emptyBytes);
+  const restored = await importDay(restoredValue, "2026-05-02T11:00:00.000Z");
+  const live = collapseEventSpines(await readRows()).filter((record) =>
+    !isDeletedEventLifecycle(record.lifecycle)
+  );
+  assert.equal(live.length, 1);
+  assert.equal(live[0]?.id, first.events[0]?.id);
+  assert.equal(eventObservationValue(live[0]), restoredValue);
+  assert.ok((live[0]?.lifecycle?.revision ?? 1) > (tombstone?.lifecycle?.revision ?? 1));
+  assert.equal(restored.events.length, 1);
+  const current = await findEventByExternalRef({ vaultRoot, ...identity, facet });
+  assert.equal(current?.id, first.events[0]?.id);
+  assert.equal(eventObservationValue(current ?? undefined), restoredValue);
+  assert.equal(current?.lifecycle?.state, live[0]?.lifecycle?.state);
+  const restoredBytes = await fs.readFile(path.join(vaultRoot, relativePath));
+  await importDay(restoredValue, "2026-05-02T11:00:00.000Z");
+  assert.deepEqual(await fs.readFile(path.join(vaultRoot, relativePath)), restoredBytes);
+  await importDay(95, "2026-05-02T12:00:00.000Z");
+  const laterBytes = await fs.readFile(path.join(vaultRoot, relativePath));
+  await importDay(98, "2026-05-02T08:00:00.000Z");
+  await importDay(93, "2026-05-02T09:00:00.000Z");
+  assert.deepEqual(await fs.readFile(path.join(vaultRoot, relativePath)), laterBytes);
+  if (!versioned) {
+    assert.ok(live[0]);
+    await deleteEvent({ vaultRoot, eventId: live[0].id });
+    const memberDeletedBytes = await fs.readFile(path.join(vaultRoot, relativePath));
+    await importDay(null, "2026-05-02T13:00:00.000Z");
+    await importDay(restoredValue, "2026-05-02T14:00:00.000Z");
+    assert.deepEqual(await fs.readFile(path.join(vaultRoot, relativePath)), memberDeletedBytes);
+  }
+});
+
+test.each([false, true])("authoritative recovery does not reuse a member-deleted versioned spine (%s)", async (versioned) => {
+  const vaultRoot = await makeTempDirectory("murph-device-member-deleted-recovery");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const identity = { system: "junction", resourceType: "synthetic-day", resourceId: "day-one" };
+  const importDay = (note: string, version: string, eventVersion: string | null = version) =>
+    importDeviceBatch({
+      vaultRoot, provider: "junction", importedAt: version,
+      events: [{
+        kind: "note", occurredAt: "2026-05-01T07:00:00.000Z", note,
+        externalRef: { ...identity, facet: "daily-note", ...(eventVersion !== null ? { version: eventVersion } : {}) },
+      }],
+      authoritativeEventSets: [{
+        ...identity, version, facetPrefixes: ["daily"], currentFacets: ["daily-note"],
+      }],
+    });
+  const first = await importDay("Original", "2026-05-02T08:00:00.000Z");
+  await importDay("Corrected", "2026-05-02T09:00:00.000Z");
+  const original = first.events[0];
+  const relativePath = first.eventShardPaths[0];
+  assert.ok(original && relativePath);
+  await deleteEvent({ vaultRoot, eventId: original.id });
+  const before = await fs.readFile(path.join(vaultRoot, relativePath));
+  await importDay("Original", "2026-05-02T11:00:00.000Z", versioned ? "2026-05-02T11:00:00.000Z" : null);
+  const rows = await readJsonlRecords({ vaultRoot, relativePath }) as EventRecord[];
+  const deleted = collapseEventSpines(rows).find((record) => record.id === original.id);
+  assert.equal(deleted?.lifecycle?.state, "deleted");
+  if (!versioned) {
+    assert.deepEqual(await fs.readFile(path.join(vaultRoot, relativePath)), before);
+  }
+});
+
 test("authoritative revision admission precedes immutable conflicts and preserves atomic writes", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-authoritative-admission");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });

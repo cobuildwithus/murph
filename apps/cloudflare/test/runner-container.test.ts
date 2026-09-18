@@ -55,11 +55,6 @@ import {
   buildHostedRunnerRedactedErrorJson,
 } from "../src/user-runner/diagnostics.ts";
 
-const RUNNER_CALLBACK_BASE_URL = "https://runner-callback.example.test/";
-const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT =
-  "murph:hosted-container-cpu-watchdog-fingerprint:v1";
-const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME =
-  "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET";
 const EXPECTED_RUNNER_CONTAINER_ENV = {
   ...buildHostedRunnerContainerCaEnv(),
   PORT: "8080",
@@ -148,50 +143,6 @@ describe("RunnerContainer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner").mockResolvedValue({ cutover: "postgres", status: "updated", owner: null });
-  });
-
-  it.each(["managed-snapshot-v1", "old-protocol", "missing"])("probes checkpoint support without starting or checkpointing a process: %s", async protocol => {
-    const nativeFetch = vi.fn(async () => new Response(null, { status: 204,
-      headers: protocol === "missing" ? {} : { "x-runtime-migration-checkpoint-capability": protocol } }));
-    const h = createContainerDouble({ state: { container: { running: true, getTcpPort: () => ({ fetch: nativeFetch }) } } });
-    expect(await h.container.supportsMigrationCheckpoint({ userId: "synthetic_member" })).toBe(protocol === "managed-snapshot-v1" ? "ready" : "unsupported");
-    expect(nativeFetch).toHaveBeenCalledExactlyOnceWith("http://container/internal/workspace-invocation/migration-checkpoint", expect.objectContaining({ method: "GET" }));
-    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
-    expect(h.destroy).not.toHaveBeenCalled();
-    const stopped = createContainerDouble({ platformRunning: false });
-    expect(await stopped.container.supportsMigrationCheckpoint({ userId: "synthetic_member" })).toBe("absent");
-    expect(stopped.containerFetch).not.toHaveBeenCalled();
-  });
-
-  it.each(["accepted", "stale", "absent", "missing"])("requests migration checkpoints without starting or stopping a container: %s", async status => {
-    const nativeFetch = vi.fn(async (_url: string, _init: RequestInit) => new Response(null, { status: 204,
-      headers: status === "missing" ? {} : { "x-runtime-migration-checkpoint-status": status },
-    }));
-    const sdkFetch = vi.fn();
-    const h = createContainerDouble({ containerFetch: sdkFetch,
-      state: { container: { running: true, getTcpPort: () => ({ fetch: nativeFetch }) } },
-    });
-    const request = { userId: "synthetic_member", attemptId: "synthetic_attempt", generation: "7" };
-    expect(await h.container.requestMigrationCheckpoint(request)).toBe(status === "missing" ? "unconfirmed" : status);
-    expect(nativeFetch).toHaveBeenCalledExactlyOnceWith("http://container/internal/workspace-invocation/migration-checkpoint",
-      expect.objectContaining({ method: "POST", body: expect.any(String) }));
-    expect(JSON.parse(String(nativeFetch.mock.calls[0]?.[1].body))).toEqual(request);
-    expect(sdkFetch).not.toHaveBeenCalled();
-    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
-    expect(h.destroy).not.toHaveBeenCalled();
-  });
-
-  it("reports an absent invocation for a stopped process and keeps a lost reply unconfirmed", async () => {
-    const request = { userId: "synthetic_member", attemptId: "synthetic_attempt", generation: "7" };
-    const stopped = createContainerDouble({ platformRunning: false });
-    expect(await stopped.container.requestMigrationCheckpoint(request)).toBe("absent");
-    expect(stopped.containerFetch).not.toHaveBeenCalled();
-    expect(stopped.startAndWaitForPorts).not.toHaveBeenCalled();
-    const lost = createContainerDouble({ platformRunning: true,
-      containerFetch: vi.fn(async () => { throw new Error("synthetic lost checkpoint reply"); }),
-    });
-    expect(await lost.container.requestMigrationCheckpoint(request)).toBe("unconfirmed");
-    expect(lost.destroy).not.toHaveBeenCalled();
   });
 
   it("registers host-specific outbound interception through Cloudflare Containers accessors", () => {
@@ -1581,7 +1532,7 @@ describe("RunnerContainer", () => {
     await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
-  it("does not trust an identity-blind accepted wake when the outer active-operation pointer is missing", async () => {
+  it.each(["default", "inbox_media_retention"] as const)("does not trust an identity-blind accepted %s wake when the outer active-operation pointer is missing", async (processingMode) => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/internal/runtime-wake")) {
@@ -1600,6 +1551,7 @@ describe("RunnerContainer", () => {
     await expect(container.wakeRuntime({
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
+      processingMode,
       userId: "member_123",
     })).resolves.toMatchObject({
       kind: "unknown",
@@ -1957,6 +1909,43 @@ describe("RunnerContainer", () => {
     );
     expect(executeCalls).toHaveLength(1);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("observes a running retention checkpoint without sending a runtime wake", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), { status: 200 });
+        }
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, { status: 204, headers: { "x-runtime-wake-accepted": "1" } });
+        }
+        runnerRequestStarted.resolve();
+        return await runnerResponse.promise;
+      }),
+    });
+    const request = { ...createRunnerRequest(), processingMode: "inbox_media_retention" as const };
+    const invocation = container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 60_000, userId: request.userId });
+    await runnerRequestStarted.promise;
+    try {
+      for (const mismatch of [{ attemptId: "other-attempt" }, { leaseGeneration: "12" }, { processingMode: "default" as const }]) {
+        await expect(container.wakeRuntime({ attemptId: request.attemptId, leaseGeneration: request.leaseGeneration,
+          processingMode: request.processingMode, userId: request.userId, ...mismatch }))
+          .resolves.toMatchObject({ kind: "unknown", reason: "active-child-rejected" });
+      }
+      await expect(container.ensureProcessing({ activeRuntime: {
+        attemptId: request.attemptId, leaseGeneration: request.leaseGeneration,
+        processingMode: request.processingMode, userId: request.userId,
+      }, userId: request.userId })).resolves.toMatchObject({ kind: "accepted", action: "already_running" });
+      // Runtime retention treats a wake as foreground preemption and aborts
+      // its checkpoint. An ordinary same-mode recheck must leave it alone.
+      expect(containerFetch.mock.calls.some(([url]) => String(url).endsWith("/internal/runtime-wake"))).toBe(false);
+    } finally {
+      runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), { status: 200 }));
+      await expect(invocation).resolves.toEqual(createRunnerResult());
+    }
   });
 
   it("reports already_running when the active child records a pending wake", async () => {
@@ -2634,6 +2623,81 @@ describe("RunnerContainer", () => {
       stage: "cold_health_or_finalization",
     });
   });
+
+  it.each(["running", "stopped"] as const)("defers admission while a %s runner is still busy", async (initialStatus) => {
+    let activeJobCount = 1;
+    const containerFetch = vi.fn(async () => new Response(JSON.stringify({
+      ...createRunnerHealthResult(), activeJobCount,
+    }), { headers: { "content-type": "application/json" } }));
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus, containerFetch,
+    });
+    const input = { timeoutMs: 15_000, userId: "member_123" };
+
+    await expect(container.ensureReadyForProcessing(input)).resolves.toEqual({ kind: "cleanup_unsettled" });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Hosted execution container is ready.",
+      details: expect.objectContaining({ runnerBusy: true }),
+    }));
+    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(initialStatus === "stopped" ? 1 : 0);
+    activeJobCount = 0;
+    await expect(container.ensureReadyForProcessing(input)).resolves.toMatchObject({ kind: "ready" });
+    // A busy health observation must not bypass the next real health read.
+    expect(containerFetch).toHaveBeenCalledTimes(2);
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { phase: "ports", expired: true },
+    { phase: "health", expired: true },
+    { phase: "ports", expired: false },
+    { phase: "health", expired: false },
+  ] as const)(
+    "preserves transport failure identity for $phase (deadline expired: $expired)",
+    async ({ phase, expired }) => {
+      const deadline = new AbortController();
+      const deadlineReason = new DOMException("Synthetic readiness deadline", "TimeoutError");
+      const originalTimeout = AbortSignal.timeout;
+      const timeout = vi.spyOn(AbortSignal, "timeout")
+        .mockImplementationOnce(() => deadline.signal)
+        .mockImplementation((ms) => originalTimeout(ms));
+      const transportStarted = createDeferred<void>();
+      const transportFailure = createDeferred<never>();
+      const sdkFailure = new Error("Synthetic SDK cancellation without a typed reason");
+      const rejectOnAbort = (signal: AbortSignal) => {
+        signal.addEventListener("abort", () => transportFailure.reject(sdkFailure), { once: true });
+        transportStarted.resolve(undefined);
+        return transportFailure.promise;
+      };
+      const startAndWaitForPorts = vi.fn(async (input: {
+        cancellationOptions: { abort: AbortSignal };
+      }) => {
+        if (phase === "ports") await rejectOnAbort(input.cancellationOptions.abort);
+      });
+      const containerFetch = vi.fn(async (_url: string, init: { signal: AbortSignal }) =>
+        rejectOnAbort(init.signal));
+      const { container, destroy } = createContainerDouble({
+        initialStatus: "stopped", startAndWaitForPorts, containerFetch,
+      });
+      try {
+        const readiness = container.ensureReadyForProcessing({
+          timeoutMs: 15_000, userId: "member_123",
+        });
+        const failure = expect(readiness).rejects.toBe(expired
+          ? deadlineReason : sdkFailure);
+        await transportStarted.promise;
+        if (expired) deadline.abort(deadlineReason);
+        else transportFailure.reject(sdkFailure);
+        await failure;
+        expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+        expect(containerFetch).toHaveBeenCalledTimes(phase === "health" ? 1 : 0);
+        expect(destroy).not.toHaveBeenCalled();
+      } finally {
+        timeout.mockRestore();
+      }
+    },
+  );
 
   it("starts the readiness deadline before lifecycle-lock admission", async () => {
     const firstDeadline = new AbortController();
@@ -3579,6 +3643,7 @@ describe("RunnerContainer", () => {
       .mockImplementationOnce(() => readinessDeadline.signal)
       .mockImplementation(() => queuedReadinessDeadline.signal);
     const startObserved = createDeferred<void>();
+    const cleanupStateReadStarted = createDeferred<void>();
     const queuedHealthStarted = createDeferred<number>();
     let queuedHealthStartedAt: number | null = null;
     const cleanupStatus = createDeferred<{
@@ -3603,6 +3668,7 @@ describe("RunnerContainer", () => {
         });
       }
       if (stateReads === 2) {
+        cleanupStateReadStarted.resolve(undefined);
         return cleanupStatus.promise;
       }
       return Promise.resolve({
@@ -3665,8 +3731,7 @@ describe("RunnerContainer", () => {
         readyObservedBy: "cold-start-ready",
       });
       readinessDeadline.abort(new DOMException("Timed out", "TimeoutError"));
-      await Promise.resolve();
-      await Promise.resolve();
+      await cleanupStateReadStarted.promise;
       expect(getState).toHaveBeenCalledTimes(2);
       const queuedReadiness = container.ensureReadyForProcessing({
         timeoutMs: 30_000,
@@ -6665,7 +6730,7 @@ describe("RunnerContainer", () => {
     proveFailClosedChildAbortFallback,
   );
 
-  it("retries failed invocation cleanup from the next exact wake", async () => {
+  it.each(["default", "inbox_media_retention"] as const)("retries failed %s invocation cleanup from the next exact wake", async (processingMode) => {
     let destroyAttempts = 0;
     let status: "running" | "stopped" = "running";
     const destroy = vi.fn(async () => {
@@ -6705,7 +6770,7 @@ describe("RunnerContainer", () => {
       getState,
       initialStatus: "running",
     });
-    const request = createRunnerRequest("evt_cleanup_retry_from_exact_wake");
+    const request = { ...createRunnerRequest("evt_cleanup_retry_from_exact_wake"), processingMode };
 
     const invokeError = await container.invoke({
       job: {
@@ -6727,6 +6792,7 @@ describe("RunnerContainer", () => {
     await expect(container.wakeRuntime({
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
+      processingMode,
       userId: "member_123",
     })).resolves.toMatchObject({
       kind: "not-wakeable",
@@ -6817,7 +6883,7 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("ignores health zero until an absent wake settles the exact stop", async () => {
+  it.each(["default", "inbox_media_retention"] as const)("ignores %s health zero until an absent wake settles the exact stop", async (processingMode) => {
     let healthProbeFails = false;
     let status: "running" | "stopped" = "running";
     const containerFetch = vi.fn(async (url: string) => {
@@ -6869,7 +6935,7 @@ describe("RunnerContainer", () => {
       getState,
       initialStatus: "running",
     });
-    const request = createRunnerRequest("evt_response_lost_after_accept");
+    const request = { ...createRunnerRequest("evt_response_lost_after_accept"), processingMode };
 
     await expect(container.invoke({
       job: {
@@ -6926,6 +6992,7 @@ describe("RunnerContainer", () => {
     await expect(container.wakeRuntime({
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
+      processingMode,
       userId: "member_123",
     })).resolves.toMatchObject({
       kind: "not-wakeable",
@@ -10049,6 +10116,54 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledOnce();
     expect(renewActivityTimeout).not.toHaveBeenCalled();
     expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+  });
+
+  it("does not restart a natively stopped container during lifecycle health cleanup", async () => {
+    const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      platformRunning: false,
+    });
+
+    await container.onActivityExpired();
+
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toEqual([]);
+  });
+
+  it("does not restart a container that stops between lifecycle status and health reads", async () => {
+    let platformRunning = true;
+    const startContainer = vi.fn();
+    const health = vi.fn(async () => {
+      // The native request observes stoppedness after the cleanup status read.
+      platformRunning = false;
+      throw new Error("Container is not running");
+    });
+    const sdkFetch = vi.fn(async () => {
+      platformRunning = false;
+      // Model the SDK's automatic restart when its cached status is stale.
+      startContainer();
+      return Response.json(createRunnerHealthResult());
+    });
+    const { container, destroy } = createContainerDouble({
+      initialStatus: "running",
+      containerFetch: sdkFetch,
+      state: {
+        container: {
+          get running() { return platformRunning; },
+          getTcpPort: () => ({ fetch: health }),
+        },
+      },
+    });
+
+    await container.onActivityExpired();
+
+    expect(startContainer).not.toHaveBeenCalled();
+    expect(sdkFetch).not.toHaveBeenCalled();
+    expect(health).toHaveBeenCalledOnce();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(await container.listSchedules("onActivityExpired")).toHaveLength(1);
   });
 
   it("re-arms cleanup when child health is unavailable", async () => {

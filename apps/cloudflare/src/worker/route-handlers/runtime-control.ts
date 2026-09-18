@@ -177,6 +177,9 @@ export async function handleRuntimeEnsureProcessingRoute(
     );
     commandTimeoutMs = readRuntimeEnsureProcessingCommandTimeoutMs(context.request.headers);
     const authorizationKind = readPresentedWorkerRouteAuthorization(context.request);
+    if (ensureRequest.admission && authorizationKind !== "vercel-oidc") {
+      throw new TypeError("Runtime admission may only be supplied by authenticated Web requests.");
+    }
     orchestration = readRuntimeEnsureProcessingOrchestrationDiagnostics(
       context.request.headers,
       cloudflareRouteReceivedAtEpochMs,
