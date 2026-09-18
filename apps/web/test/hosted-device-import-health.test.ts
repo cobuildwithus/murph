@@ -24,12 +24,46 @@ describe("device import progress and efficiency alerts", () => {
   });
 
   it("does not credit work before its checkpoint or an unrelated checkpoint", () => {
-    expect(health([row(20), row(10, { progressed: true }), checkpoint(9, { attemptId: "other" })])
+    expect(health([row(29), row(16, { progressed: true }), checkpoint(9, { attemptId: "other" })])
       .stalled.anomalous).toBe(true);
-    expect(health([row(20), row(10, { progressed: true }), checkpoint(9)])
+    expect(health([row(29), row(16, { progressed: true }), checkpoint(9)])
       .stalled.anomalous).toBe(false);
-    expect(health([row(20), row(10, { progressed: true }), checkpoint(9, { checkpointAccepted: false })])
+    expect(health([row(29), row(16, { progressed: true }), checkpoint(9, { checkpointAccepted: false })])
       .stalled.anomalous).toBe(true);
+  });
+
+  it("allows productive passes to publish before calling an older saved frontier stalled", () => {
+    const rows = [row(25, { progressed: true }), checkpoint(24), row(13),
+      row(5, { progressed: true, attemptId: "fresh" })];
+    for (const due of [false, true]) {
+      expect(health(rows, due).stalled.anomalous).toBe(false);
+    }
+    // Local work has not yet become checkpointed progress.
+    const cycling = health([...rows, ...[4, 3, 2, 1].map(age => row(age, {
+      eventCode: "runner.processing_finished", pending: null, restarted: true,
+    }))]);
+    expect(cycling.cycling.savedProgressPassCount).toBe(0);
+  });
+
+  it("expires publication grace at fifteen minutes without refreshing it on more passes or restarts", () => {
+    const first = row(15, { progressed: true });
+    expect(health([row(29), { ...first, at: new Date(+first.at + 1) }]).stalled.anomalous).toBe(false);
+    expect(health([row(29), first]).stalled.anomalous).toBe(true);
+    expect(health([row(29), first, row(1, { progressed: true })]).stalled.anomalous).toBe(true);
+    expect(health([row(29), first, row(1, { progressed: true, attemptId: "restarted" })])
+      .stalled.anomalous).toBe(true);
+  });
+
+  it("does not grant publication grace from another connection or an unowned pass", () => {
+    for (const patch of [{ connectionKey: "b".repeat(64) }, { attemptId: null }]) {
+      expect(health([row(25), row(11), row(1, { progressed: true, ...patch })])
+        .stalled.anomalous).toBe(true);
+    }
+  });
+
+  it("starts a new publication allowance after matching saved progress", () => {
+    expect(health([row(40, { progressed: true }), row(30), checkpoint(29),
+      row(16), row(2, { progressed: true })]).stalled.anomalous).toBe(false);
   });
 
   it("does not let repeated unchanged checkpoints reset a stall", () => {

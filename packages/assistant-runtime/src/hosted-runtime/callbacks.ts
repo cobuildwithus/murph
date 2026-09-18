@@ -146,6 +146,8 @@ import {
 } from "./provider-fetch.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
+  recordHostedDeliveryCommittedBestEffort,
+  type HostedDeliveryTraceContext,
   type HostedAssistantMilestoneTraceContext,
 } from "./assistant-latency-trace.ts";
 
@@ -2192,6 +2194,7 @@ function createHostedAssistantEmailSendDependency(input: {
 }
 
 export async function drainHostedPreparedAssistantDeliveries(input: {
+  deliveryTraceContext?: HostedDeliveryTraceContext | null;
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   allowPreparedSending?: boolean;
   effectsPort: HostedRuntimeEffectsPort;
@@ -2299,6 +2302,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
       let currentEffectTypingStopRecorded = false;
       try {
         outcome = await deliverHostedPreparedAssistantDelivery({
+          deliveryTraceContext: input.deliveryTraceContext,
           actionApprovalPort: input.actionApprovalPort ?? null,
           wake: input.wake,
           effectsPort: input.effectsPort,
@@ -3305,6 +3309,7 @@ async function confirmHostedAcceptedLinqReactionDelivery(input: {
 }
 
 async function deliverHostedPreparedAssistantDelivery(input: {
+  deliveryTraceContext?: HostedDeliveryTraceContext | null;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   allowPreparedSending: boolean;
   wake: HostedRuntimeEvent;
@@ -4146,6 +4151,10 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         userId: input.userId,
       });
     }
+    recordHostedDeliveryCommittedBestEffort({
+      context: input.deliveryTraceContext,
+      intent: dispatched.intent,
+    });
     const trackedPhoneCallResultSent =
       dispatched.intent.status === "sent"
       && readHostedPhoneCallResultDeliveryFromEffect(

@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Checkpoint-aware operational stall alerts are specified in `agent-docs/RELIABILITY.md`;
+implementation and verification are tracked in
+[`2026-09-18-checkpoint-aware-stall-alerts.md`](exec-plans/completed/2026-09-18-checkpoint-aware-stall-alerts.md).
+
 Completed query rebuild phase telemetry implementation and parent validation are
 recorded in
 [`2026-09-17-query-rebuild-phase-telemetry.md`](exec-plans/completed/2026-09-17-query-rebuild-phase-telemetry.md).

@@ -1,9 +1,18 @@
-import type {
-  HostedIngressLatencySource,
-  HostedRuntimeAssistantMilestone,
+import {
+  HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
+  readHostedIngressLatencySource,
+  type HostedIngressLatencySource,
+  type HostedRuntimeAssistantMilestone,
+  type HostedRuntimeLatencyTraceRequest,
 } from "@murphai/hosted-execution/runtime-control";
 
+import type { AssistantOutboxIntent } from "@murphai/operator-config/assistant-cli-contracts";
+
 import type { HostedRuntimePlatform } from "./platform.ts";
+import {
+  resolveHostedRuntimeCheckpointPublicationExpectedByMs,
+  resolveHostedRuntimeIdleCheckpointDelayMs,
+} from "./checkpoint-publication.ts";
 
 const HOSTED_ASSISTANT_MILESTONE_TRACE_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 
@@ -53,15 +62,7 @@ export function recordHostedAssistantMilestonesBestEffort(input: {
           type: "assistant_milestone" as const,
         },
       };
-      for (const delayMs of HOSTED_ASSISTANT_MILESTONE_TRACE_RETRY_DELAYS_MS) {
-        if (delayMs > 0) await sleep(delayMs);
-        try {
-          const response = await latencyTracePort.record(request);
-          if (response.unmatchedCount === 0) return;
-        } catch {
-          // Transport failures share the same finite retry budget as late staging.
-        }
-      }
+      if (await recordLatencyTraceWithRetries(latencyTracePort, request)) return;
       if (milestone === "linq_typing_accepted" || milestone === "telegram_typing_accepted") {
         console.warn("Hosted typing acceptance telemetry exhausted its retry budget.", {
           source: context.source,
@@ -72,6 +73,67 @@ export function recordHostedAssistantMilestonesBestEffort(input: {
       // Latency traces are diagnostic-only and must not affect runtime progress.
     });
   });
+}
+
+export interface HostedDeliveryTraceContext {
+  latencyTracePort: HostedRuntimePlatform["latencyTracePort"];
+  runtimeAttemptId: string;
+  runnerIdleTtlMs?: number | null;
+  commitTimeoutMs?: number | null;
+}
+
+export function recordHostedDeliveryCommittedBestEffort(input: {
+  context?: HostedDeliveryTraceContext | null;
+  intent: Pick<AssistantOutboxIntent, "answeredMailboxItemIds" | "delivery" | "status" | "sentAt">;
+}): void {
+  const context = input.context;
+  const port = context?.latencyTracePort;
+  if (!context || !port || input.intent.status !== "sent" || !input.intent.delivery) return;
+  const source = readHostedIngressLatencySource(input.intent.delivery.channel);
+  const sentAt = input.intent.sentAt;
+  if (!source || !sentAt || !Number.isFinite(Date.parse(sentAt))) return;
+  const ids = [...new Set(input.intent.answeredMailboxItemIds)];
+  const checkpointPublicationExpectedBy = new Date(
+    resolveHostedRuntimeCheckpointPublicationExpectedByMs({
+      checkpointStartByMs: Date.parse(sentAt)
+        + resolveHostedRuntimeIdleCheckpointDelayMs(context.runnerIdleTtlMs),
+      commitTimeoutMs: context.commitTimeoutMs ?? null,
+    }),
+  ).toISOString();
+  queueMicrotask(() => {
+    void (async () => {
+      for (let offset = 0; offset < ids.length; offset += HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
+        await recordLatencyTraceWithRetries(port, {
+          event: {
+            type: "delivery_committed",
+            mailboxItemIds: ids.slice(offset, offset + HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS),
+            at: sentAt,
+            checkpointPublicationExpectedBy,
+            runtimeAttemptId: context.runtimeAttemptId,
+            source,
+          },
+        });
+      }
+    })().catch(() => {
+      // Completion telemetry must never change delivery or checkpoint ownership.
+    });
+  });
+}
+
+async function recordLatencyTraceWithRetries(
+  port: NonNullable<HostedRuntimePlatform["latencyTracePort"]>,
+  request: HostedRuntimeLatencyTraceRequest,
+): Promise<boolean> {
+  for (const delayMs of HOSTED_ASSISTANT_MILESTONE_TRACE_RETRY_DELAYS_MS) {
+    if (delayMs > 0) await sleep(delayMs);
+    try {
+      const response = await port.record(request);
+      if (response.unmatchedCount === 0) return true;
+    } catch {
+      // Transport failures share the same finite retry budget as late staging.
+    }
+  }
+  return false;
 }
 
 async function sleep(delayMs: number): Promise<void> {

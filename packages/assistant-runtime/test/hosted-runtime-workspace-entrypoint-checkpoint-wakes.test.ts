@@ -641,6 +641,10 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         .map((event) => event.at))]).toEqual([
         "2026-04-27T00:27:00.000Z",
       ]);
+      expect([...new Set(latencyTraceRequests.map(({ event }) => event)
+        .filter((event) => event.type === "runtime_milestone"
+          && event.milestone === "checkpoint_publication_expected_by")
+        .map((event) => event.source))].sort()).toEqual(["email", "linq", "telegram"]);
       assert.deepEqual(
         checkpointRequests.map((request) => [
           request.reason,

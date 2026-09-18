@@ -2311,6 +2311,7 @@ export interface HostedRuntimeIssueExportResponse {
 }
 
 export const HOSTED_INGRESS_LATENCY_SOURCES = [
+  "email",
   "linq",
   "telegram",
 ] as const;
@@ -2351,6 +2352,7 @@ export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "first_codex_output_observed",
   "first_codex_text_observed",
   "terminal_non_reply_committed",
+  "terminal_reply_committed",
 ] as const;
 
 export type HostedRuntimeAssistantMilestone =
@@ -2613,6 +2615,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
     terminalNonReplyCommittedAtEpochMs?: number;
+    terminalReplyCommittedAtEpochMs?: number;
     checkpointPublicationExpectedByEpochMs?: number;
     runtimeLeaseGeneration?: string;
   };
@@ -3006,6 +3009,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
     "terminalNonReplyCommittedAtEpochMs",
+    "terminalReplyCommittedAtEpochMs",
     "checkpointPublicationExpectedByEpochMs",
     "runtimeLeaseGeneration",
   ],
@@ -3535,7 +3539,17 @@ export interface HostedRuntimeLatencyTraceMilestoneEvent {
   type: "runtime_milestone";
 }
 
+export interface HostedRuntimeLatencyTraceDeliveryCommittedEvent {
+  mailboxItemIds: string[];
+  at: string;
+  checkpointPublicationExpectedBy: string;
+  runtimeAttemptId: string;
+  source: HostedIngressLatencySource;
+  type: "delivery_committed";
+}
+
 export type HostedRuntimeLatencyTraceEvent =
+  | HostedRuntimeLatencyTraceDeliveryCommittedEvent
   | HostedRuntimeLatencyTraceAssistantInputStagedEvent
   | HostedRuntimeLatencyTraceAssistantMilestoneEvent
   | HostedRuntimeLatencyTraceProviderStartedEvent
