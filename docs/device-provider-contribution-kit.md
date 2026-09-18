@@ -212,6 +212,7 @@ The adapter should:
 Strong recommendations:
 - Reuse `makeNormalizedDeviceBatch()` and the helpers in `shared-normalization.ts`.
 - Declare bounded `authoritativeEventSets` only for a complete, versioned provider resource snapshot with stable resource and facet identities. Core's existing external-reference reconciliation owns revisions and tombstones for omitted facets; partial responses and unversioned snapshots must not claim authority.
+- A later valid complete snapshot reasserts provider-retracted facets through the same canonical event ID and a revision above the tombstone, including content delivered before an intervening correction. Ordinary unversioned deliveries without matching current-facet authority remain replays; member deletion and source-version protections stay with core.
 - Keep each authoritative resource at or below 514 current facets. This exact bound covers Junction's 512 admitted dated menstrual facts plus its two scalar cycle-length facets; adapters with a smaller composed maximum should keep their own narrower admission cap.
 - A public edit of an imported device event is member-owned (`source: manual`) even when the client supplies or inherits `source: device`. Preserve `externalRef` and `dataOrigin` as attribution; a later provider update or omission must reach core's existing typed conflict instead of overwriting or retracting the member revision.
 - Retain unsupported-but-useful upstream sections as `snapshot-section:*` evidence parts instead of silently discarding them.
