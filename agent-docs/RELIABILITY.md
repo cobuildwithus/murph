@@ -1867,8 +1867,16 @@ to apply after cutover.
   and ECG binding failures retain the existing queued job beyond its initial
   attempt allowance, rechecking after 30 minutes. `validationRetryDelayMs`
   records that policy. Complete-day and ECG binding validation still fail before
-  canonical replacement; no sample is silently dropped, rescaled, or certified
-  as a complete collection. Other jobs can run during the delay. Existing
+  canonical replacement. Numeric-zero blood-oxygen samples, including finite
+  numeric-string aliases, are unusable and skipped; other invalid values and
+  source/day validation still reject. A complete-source-day blood-oxygen response
+  containing any zero publishes neither temporal artifacts/events nor replacement
+  authority for that resource, preserving prior facets without a partial or empty
+  replacement. Sibling resources remain independent, genuinely empty collections
+  retain authoritative-empty semantics, and later valid responses replace normally.
+  Ordinary blood-oxygen aggregates continue to omit zeros. Completing such a job
+  means the response was handled, not that complete temporal coverage was certified.
+  Other jobs can run during the delay. Existing
   disconnect, account-generation, and lease fences remain authoritative; this
   policy does not resurrect terminal history or change other failure codes.
   A persisted matching validation failure also preserves lease-reclaim and
