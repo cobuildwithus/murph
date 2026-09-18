@@ -306,6 +306,19 @@ response, or additional provider error text enters the diagnostic record.
 
 #### Responses WebSocket relay observations
 
+Hosted Codex no longer opens Responses WebSockets: the generated hosted config
+sets `supports_websockets = false`, so production provider traffic is HTTPS
+`POST /v1/responses` egress. The relay and its observations remain for any
+client that still upgrades. Before the change, each hosted WebSocket lived
+inside one Worker outbound-relay invocation. Cloudflare historical logs showed
+roughly twenty such invocations a day ending with an opaque platform
+"internal error" while the socket idled between turns (idle gaps from a few
+seconds to several minutes, no deploy involved), and no close reached the
+container-facing socket. The pinned Codex client only checks its own stream
+state before reuse, so the next turn wrote into the dead socket and waited the
+full stream idle window before native HTTPS fallback; about four to seven
+member turns a day paid that window.
+
 The Worker also writes `runner.provider_egress_diagnostic` records with
 `transportKind: websocket` through the existing runtime-log route. The
 `websocketMilestone` values describe actual relay boundaries:
@@ -474,14 +487,19 @@ proves a responsive transport peer, not inference;
 Murph's Worker relay also separates the client and upstream transport legs.
 
 The current hosted policy uses a provisional 30-second native stream-idle
-timeout for OpenAI, including its HTTPS fallback and operator requests. Child
-requests and streaming compaction inherit the same provider configuration.
-Native Codex also uses this knob for WebSocket sends; it does not replace the
-separate connection and HTTP request budgets.
+timeout for OpenAI, including operator requests. Child requests and streaming
+compaction inherit the same provider configuration. The knob bounds
+stream-read silence; it does not replace the separate connection and HTTP
+request budgets.
 Venice and custom inference retain 90 seconds. `codex.prepare` reports the
-selected provider's idle timeout and request/stream retry limits. Native Codex
-still owns the single WebSocket attempt and HTTPS fallback; request retries,
-Murph cancellation, accepted work, and delivery ownership are unchanged.
+selected provider's idle timeout and request/stream retry limits
+(`codexProviderTransportMode: codex-native-https`). Hosted requests stream over
+HTTPS only with `stream_max_retries = 1`, so native Codex owns exactly one
+replay of a failed stream on a fresh request, the same single recovery the
+earlier WebSocket attempt plus HTTPS fallback provided; request retries, Murph
+cancellation, accepted work, and delivery ownership are unchanged. The
+WebSocket fixtures above keep proving native transport behavior against a
+WebSocket-enabled test config, not the hosted policy.
 
 Local subscription measurements on 2026-09-15 completed eight Terra low turns
 at 90- and 20-second idle settings; the longest provider data gap was 9.377

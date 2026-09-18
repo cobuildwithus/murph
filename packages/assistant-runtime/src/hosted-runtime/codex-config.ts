@@ -96,10 +96,11 @@ const HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT = [
 const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 132_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
-// Hosted runs get one WebSocket attempt, then Codex replays the request over
-// HTTPS. Repeating the full idle window here can outlive the enclosing hosted
-// attempt and make Codex's native transport fallback unreachable.
-const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 0;
+// Hosted turns stream over HTTPS only (see buildHostedCodexProviderTomlLines),
+// so one native stream retry keeps the single replay hosted turns previously
+// received through Codex's WebSocket-to-HTTPS fallback. Two idle windows remain
+// the worst case for one request; Murph adds no second retry owner.
+const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 1;
 // Bound OpenAI data-stream silence, not total reasoning or local tool time.
 // Other providers retain their prior window until separately measured.
 function hostedCodexProviderStreamIdleTimeoutMs(providerId: string): number {
@@ -130,7 +131,7 @@ export function hostedCodexProviderTransportDiagnostics(providerId: string) {
       ? 1 : HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
     codexProviderStreamIdleTimeoutMs: hostedCodexProviderStreamIdleTimeoutMs(providerId),
     codexProviderStreamMaxRetries: HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES,
-    codexProviderTransportMode: "codex-native-provider-transport",
+    codexProviderTransportMode: "codex-native-https",
   } as const;
 }
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
@@ -601,9 +602,13 @@ function buildHostedCodexProviderTomlLines(input: {
           `env_key = ${tomlString(input.provider.envKey)}`,
         ]),
     `wire_api = ${tomlString(input.provider.wireApi)}`,
-    ...(input.provider.supportsWebSockets
-      ? ["supports_websockets = true"]
-      : []),
+    // Every hosted Responses request streams over HTTPS. A hosted WebSocket
+    // lives inside one Worker egress-relay invocation, and the platform can end
+    // that invocation while the socket idles between turns without closing the
+    // container-facing socket. Codex then reused a dead socket and paid the
+    // full stream idle window before its HTTPS fallback (about five member
+    // turns a day in September 2026). HTTPS keeps no connection across turns.
+    "supports_websockets = false",
     `stream_idle_timeout_ms = ${transport.codexProviderStreamIdleTimeoutMs}`,
     `requires_openai_auth = ${input.chatGptAuth ? "true" : "false"}`,
     `request_max_retries = ${transport.codexProviderRequestMaxRetries}`,
