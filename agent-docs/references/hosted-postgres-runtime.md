@@ -47,6 +47,13 @@ retired legacy alarm and run-until-idle HTTP controls are unavailable.
 
 ## Claim, launch, completion, and recovery
 
+Existing compatible owners are woken immediately after Postgres admission. The
+native wake validates the exact attempt and generation; an accepted wake needs
+no separate invocation receipt read. Unaccepted wakes still reconcile completed
+receipts and prove an inactive fence before release. Retiring owners and
+retention work that needs replacement follow the existing recovery path without
+a wake. Unknown wake acknowledgments never authorize replacement by themselves.
+
 The owner row has a monotonically increasing generation and one attempt. Its
 phases are `idle -> starting -> active -> retiring -> idle`. Claim records an
 allocation ID before an external allocation call. Target selection records the
