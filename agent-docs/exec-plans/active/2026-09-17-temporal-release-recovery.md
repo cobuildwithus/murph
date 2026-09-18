@@ -52,7 +52,7 @@ Restore full integration coverage so the reviewed Temporal recovery-sweep respon
 - Local composed E2E proof is unavailable: Docker runner init exits before scenario execution because child-subreaper support is absent. The owned attempt was stopped; full Linux release integration remains mandatory before deployment.
 - Passed: PR #3558 exact-head required public CI and final ReviewGPT; merged.
 - Fresh full integration passes Temporal orchestration but exposes three remaining blockers: managed snapshot identity rejection becomes HTTP 500, the fairness observer requires a retired admission event, and the media fixture's idle period exceeds its completion deadline.
-- Passed: 357 snapshot/outbound and admission-window tests, Cloudflare typecheck, and the complexity guard for the follow-up correction. Final ReviewGPT, exact-head CI, fresh full integration and release admission remain pending.
+- Passed: 357 snapshot/outbound and admission-window tests, Cloudflare typecheck, and the complexity guard for the follow-up correction. PR #3570 passed final ReviewGPT and exact-head CI and merged. Fresh integration passed checkpoint durability and fairness; its media lane reached a later provider-handoff scenario and exposed a one-shot webhook sender that omitted the existing bounded retry contract. Reuse the common signed sender; retain the handoff race and all provider/completion assertions. Fresh full integration and release admission remain pending.
 - Pending: read-only production routing and recovery-sweep outcomes.
 
 ## Review disposition
