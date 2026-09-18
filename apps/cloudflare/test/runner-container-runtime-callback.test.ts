@@ -409,6 +409,10 @@ describe("RunnerContainer internal runtime dispatch", () => {
       status = "running";
     });
     const container = new RunnerContainer({
+      container: {
+        get running() { return status === "running"; },
+        getTcpPort: () => ({ fetch: containerFetch }),
+      },
       storage,
     } as never, {} as never);
     Object.assign(container, {
@@ -544,6 +548,10 @@ function createActivityExpiryContainerDouble(input: {
   });
   let status: "running" | "stopped" = "stopped";
   const container = new RunnerContainer({
+    container: {
+      get running() { return status === "running"; },
+      getTcpPort: () => ({ fetch: containerFetch }),
+    },
     storage,
   } as never, input.environment ?? {});
   Object.assign(container, {
