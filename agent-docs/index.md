@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Web runtime admission implementation and focused proof are recorded in
+[`2026-09-18-web-runtime-admission.md`](exec-plans/completed/2026-09-18-web-runtime-admission.md).
+Consumer-first rollout remains owned by `apps/cloudflare/DEPLOY.md`.
+
 Deferred device webhook transfer and restored duplicate retirement are owned by
 `agent-docs/RELIABILITY.md`; focused mailbox and composed runtime proof are
 indexed in `agent-docs/references/testing-ci-map.md`.

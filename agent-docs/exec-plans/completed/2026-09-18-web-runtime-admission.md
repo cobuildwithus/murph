@@ -1,6 +1,6 @@
 # Admit Web runtime wakes before Cloudflare dispatch
 
-Status: active
+Status: completed
 Created: 2026-09-18
 Updated: 2026-09-18
 
@@ -66,7 +66,11 @@ this protocol floor. No deployment or production mutation is part of this task.
 Consumer proof: 448 Worker/native-container tests, 20 orchestration contract
 tests, and 89 control-client tests. Package and Cloudflare typechecks pass.
 Complexity guard passes with no new debt; unchanged client parser and transport
-hotspots remain outside this change. Web focused proof and typecheck are recorded
-with the producer commit. Two PRs separate the accepting consumer from the Web
+hotspots remain outside this change. Web proof passes: 278 direct-wake, mailbox, handoff, onboarding and Linq
+dispatch tests, plus 10 changelog rendering tests and Web typecheck. Two PRs separate the accepting consumer from the Web
 producer; producer merge is held until the consumer is deployed. Production
-latency improvement is not yet measured. Final ReviewGPT and CI remain pending.
+latency improvement is not yet measured. Consumer PR #3582 and the separate producer PR own final ReviewGPT and CI.
+The parent reviewed the production diff, synthetic tests, authentication and
+fencing boundaries, deployment sequence, and privacy. Product UX: Ready for
+ordered rollout; producer merge remains held until consumer deployment.
+Completed: 2026-09-18

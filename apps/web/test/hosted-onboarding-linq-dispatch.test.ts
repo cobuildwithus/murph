@@ -5,6 +5,8 @@ import {
 } from "@murphai/runtime-state";
 import { HostedBillingStatus, type HostedLinqDailyState, type Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { runtimeAdmission } from "./support/hosted-runtime-admission-fixture";
+import * as runtimeOwnerControl from "@/src/lib/hosted-execution/runtime-owner-control";
 
 import {
   prepareHostedCryptoDomainRootCandidates,
@@ -77,6 +79,7 @@ function buildPreparedDomainRootCandidate(input: {
 
 const mocks = vi.hoisted(() => {
   const state = {
+    getPrisma: vi.fn(),
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
     claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
     readHostedLinqDeliveryProviderDispatchIntentTx: vi.fn(),
@@ -656,9 +659,7 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: vi.fn(() => {
-    throw new Error("Unexpected getPrisma call in hosted-onboarding-linq-dispatch.test.ts");
-  }),
+  getPrisma: mocks.getPrisma,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
@@ -1134,6 +1135,9 @@ async function createDirectPreparationTransitionFixture(input: {
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getPrisma.mockReset().mockImplementation(() => {
+      throw new Error("Unexpected getPrisma call in Linq dispatch test.");
+    });
     mocks.getHostedLinqChatSummary.mockReset().mockResolvedValue({
       handles: [],
       isGroup: false,
@@ -8084,6 +8088,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       userId: memberId,
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
+    mocks.getPrisma.mockReturnValue(prisma);
+    vi.spyOn(runtimeOwnerControl, "executeHostedRuntimeOwnerCommand").mockResolvedValue(runtimeAdmission(memberId));
     const ensureRuntimeProcessing = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
