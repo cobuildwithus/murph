@@ -14,8 +14,10 @@ age of an executed run; this system adds no product-state receipt database.
   revision checks, non-destructive identity ownership, and fixed non-canceling
   concurrency. Manual recovery is restricted to current protected main. iOS
   independently selects and verifies the actual production deployment, including
-  protected-main ancestry, dispatch-time equality, and final exact-deployment
-  verification; a newer controller revision does not block a stable deployment.
+  protected-main ancestry and dispatch-time equality. The Web SHA records the
+  deployment selected at launch, not an assertion that production stays frozen
+  for the entire native journey. Ordinary promotions do not invalidate successful
+  native business assertions; the canary emits no per-commit acceptance status.
 - Linq resolves the actual production alias before its six-hour journey, verifies
   protected-main ancestry and exact deployment, and repeats deployment validation
   after execution. A manual requested SHA must match the deployed revision.

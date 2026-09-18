@@ -17,4 +17,4 @@ Keep production on protected-main commit A, advance main to commit B, and dispat
 
 ## Context
 
-This is CI controller friction. Resolve and verify the deployed revision independently from the trusted controller source, preserve protected-main ancestry and private runner bindings, and recheck the exact deployment after execution.
+This is CI controller friction. Resolve and verify the deployed revision independently from the trusted controller source, preserve protected-main ancestry and private runner bindings, and preserve success when the actual native business assertions complete across ordinary production promotions. A final unchanged-revision requirement recreates false failures for this long-running production health check.
