@@ -42,7 +42,7 @@ async function openImageGateSocket(nativeMemory = false, logStatus?: Promise<num
   const provider = pair[1];
   provider.accept({ allowHalfOpen: true });
   provider.addEventListener("close", (event) => provider.close(event.code, event.reason), { once: true });
-  const diagnostics: Array<{ eventCode: string; redactedJson: Record<string, unknown> }> = [];
+  const diagnostics: Array<{ eventCode: string; level: string; redactedJson: Record<string, unknown> }> = [];
   let subscriptionAllowed = false;
   const subscriptionAccess = vi.fn(async () => Response.json({
     allowed: subscriptionAllowed,
@@ -58,7 +58,7 @@ async function openImageGateSocket(nativeMemory = false, logStatus?: Promise<num
     if (url.pathname === "/api/internal/hosted-runtime/log") {
       const body = parseHostedRuntimeLogRequest(await outgoing.json());
       diagnostics.push(...body.entries.map((entry) => ({
-        eventCode: entry.eventCode, redactedJson: entry.redactedJson ?? {},
+        eventCode: entry.eventCode, level: entry.level, redactedJson: entry.redactedJson ?? {},
       })));
       return Response.json({ ok: true }, { status: logStatus ? await logStatus : 200 });
     }
@@ -124,6 +124,47 @@ test("persists content-free relay milestones through the real Worker egress log 
     clientFrameCount: 1, upstreamSends: 1, upstreamFrameCount: 1, downstreamFrameCount: 1,
     upstreamSendObserved: true, upstreamFrameObserved: true, closeSide: "provider",
     firstUpstreamMessageKind: "response.created",
+  });
+  expect(JSON.stringify(diagnostics)).not.toContain("PRIVATE_");
+});
+
+test.each([
+  { kind: "incomplete generation", closeCode: 1011, expectedLevel: "warn" },
+  { kind: "normal close", closeCode: 1000, expectedLevel: "debug" },
+  { kind: "completed generation", closeCode: 1011, expectedLevel: "debug" },
+  { kind: "prewarm", closeCode: 1011, expectedLevel: "debug" },
+  { kind: "overlapping requests", closeCode: 1011, expectedLevel: "debug" },
+  { kind: "uninspected response", closeCode: 1011, expectedLevel: "debug" },
+  { kind: "no provider frames", closeCode: 1000, expectedLevel: "warn" },
+])("classifies persisted socket closure after $kind", async ({ kind, closeCode, expectedLevel }) => {
+  const { client, provider, diagnostics } = await openImageGateSocket();
+  const request = JSON.stringify({ type: "response.create", generate: kind !== "prewarm" });
+  for (let index = 0; index < (kind === "overlapping requests" ? 2 : 1); index++) {
+    const sent = nextMessage(provider);
+    client.send(request);
+    await sent;
+    await vi.waitFor(() => expect(diagnostics).toHaveLength((index + 1) * 2));
+  }
+  if (kind !== "no provider frames") {
+    const frames = kind === "uninspected response" ? ["PRIVATE_INVALID_JSON"] : [
+      JSON.stringify({ type: "response.created", response: { id: "resp_synthetic_close" } }),
+      JSON.stringify(kind === "completed generation"
+        ? { type: "response.completed", response: { id: "resp_synthetic_close" } }
+        : { type: "response.output_text.delta", delta: "Synthetic output." }),
+    ];
+    for (const frame of frames) {
+      const received = nextMessage(client);
+      provider.send(frame);
+      await expect(received).resolves.toBe(frame);
+    }
+  }
+  const closed = nextClose(client);
+  provider.close(closeCode, "Synthetic close.");
+  await expect(closed).resolves.toMatchObject({ code: closeCode });
+  await vi.waitFor(() => expect(diagnostics.at(-1)?.redactedJson.websocketMilestone).toBe("closed"));
+  expect(diagnostics.at(-1)).toMatchObject({
+    level: expectedLevel,
+    redactedJson: { websocketMilestone: "closed", providerResponseOutcomeKind: "closed", closeCode },
   });
   expect(JSON.stringify(diagnostics)).not.toContain("PRIVATE_");
 });
@@ -593,4 +634,5 @@ test("routes marked upgrades through durable native-memory accounting before del
   client.close(1_000, "done");
   await expect(clientClosed).resolves.toEqual({ code: 1_000, reason: "done" });
   await expect(providerClosed).resolves.toEqual({ code: 1_000, reason: "done" });
+  await Promise.all(waitUntilPromises);
 });

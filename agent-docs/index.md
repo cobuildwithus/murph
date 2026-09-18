@@ -4,6 +4,10 @@ Deferred device webhook transfer and restored duplicate retirement are owned by
 `agent-docs/RELIABILITY.md`; focused mailbox and composed runtime proof are
 indexed in `agent-docs/references/testing-ci-map.md`.
 
+Healthy retention rechecks, observation-only cleanup health, and incomplete
+provider-stream close classification are owned by `apps/cloudflare/README.md`; implementation
+work is tracked in `exec-plans/completed/2026-09-18-retention-proxy-triage.md`.
+
 The completed plain-grant 90-date group-sharing follow-up is recorded in
 [`2026-09-18-group-history-plain-grants.md`](exec-plans/completed/2026-09-18-group-history-plain-grants.md).
 
@@ -44,6 +48,9 @@ Device-sync sweep capacity, backlog-presence telemetry, and the optional
 preflight admission budget are owned by `agent-docs/RELIABILITY.md`; the
 implementation record is
 [`2026-09-15-device-sweep-capacity.md`](exec-plans/completed/2026-09-15-device-sweep-capacity.md).
+
+The completed Temporal release fixture corrections and recovery verification are recorded in
+[`2026-09-17-temporal-release-recovery.md`](exec-plans/completed/2026-09-17-temporal-release-recovery.md).
 
 Empty-source startup batching and Postgres processing summaries are owned by
 `agent-docs/references/hosted-postgres-runtime.md`; warm-wake subdivisions are

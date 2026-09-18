@@ -177,6 +177,17 @@ describe("Postgres runtime orchestration", () => {
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
   });
 
+  it("still preempts retention when foreground work requests processing", async () => {
+    const { source, container, binding } = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(owner({ processingMode: "inbox_media_retention" })))
+      .mockResolvedValue(response(null, "updated"));
+    container.readStandbySlotBinding.mockResolvedValue({ ...binding, state: "retired", claimId: null, userId: null });
+    expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "retry_later" });
+    expect(container.ensureProcessing).not.toHaveBeenCalled();
+    expect(container.retireStandbySlot).toHaveBeenCalledOnce();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["claim", "retire", "release"]);
+  });
+
   it("does not discard authority when a wake acknowledgement is unknown", async () => {
     const { source, container } = harness();
     container.ensureProcessing.mockRejectedValue(new Error("synthetic lost acknowledgment"));
