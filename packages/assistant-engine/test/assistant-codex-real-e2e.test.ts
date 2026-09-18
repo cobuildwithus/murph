@@ -3508,18 +3508,36 @@ describe('real Codex live fixture contracts', () => {
 })
 
 describeRealCodex('real Codex personal archive e2e', () => {
-  it('prepares an original-file workspace ZIP without relocating source files', async () => {
+  it.each([
+    { name: 'an original-file workspace ZIP', includeRuntime: false, explicitRuntime: false },
+    { name: 'a full workspace ZIP including member runtime files', includeRuntime: true, explicitRuntime: true },
+    { name: 'a complete workspace ZIP from a general backup request', includeRuntime: true, explicitRuntime: false },
+  ])('prepares $name without relocating source files', async ({ includeRuntime, explicitRuntime }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-personal-archive-e2e-'))
-    const originals = {
+    const originals: Record<string, string | Buffer> = {
       'notes/reading-list.md': '# Reading list\nA field guide to trees.\n',
       'documents/supply-list.csv': 'item,count\nnotebook,2\n',
       'raw/captures/sketch.txt': 'A synthetic pencil sketch description.\n',
     }
+    if (includeRuntime) {
+      originals['.runtime/operations/assistant/state/status.json'] = JSON.stringify({
+        status: 'idle', lastCompletedTask: 'catalogued a synthetic reading list',
+      })
+      originals['.runtime/operations/assistant/transcripts/fixture.jsonl'] =
+        JSON.stringify({ role: 'user', text: 'Remember that I enjoy field guides.' }) + '\n'
+    }
+    const completeOnly: Record<string, string | Buffer> = includeRuntime ? {
+      '.runtime/credentials/provider.json': JSON.stringify({ apiKey: 'synthetic-export-inclusion-marker' }),
+      '.config/runtime.toml': 'fixture_setting = true\n',
+      'AGENTS.md': '# Synthetic workspace\nNo additional instructions.\n',
+      '.runtime/operations/device-sync/fixture.bin': Buffer.from([0, 255, 17, 128, 0]),
+    } : {}
     const requestedRefs: string[] = []
     let approvalRequests = 0
+    const sendErrors: string[] = []
     try {
-      for (const [ref, contents] of Object.entries(originals)) {
+      for (const [ref, contents] of Object.entries({ ...originals, ...completeOnly })) {
         await mkdir(path.dirname(path.join(workingDirectory, ref)), { recursive: true })
         await writeFile(path.join(workingDirectory, ref), contents)
       }
@@ -3559,12 +3577,19 @@ describeRealCodex('real Codex personal archive e2e', () => {
               toolCallId,
               turnId: 'turn_archive_fixture',
               vault: workingDirectory,
+            }).catch((error: unknown) => {
+              sendErrors.push(String(error).replaceAll(workingDirectory, '<VAULT>'))
+              throw error
             })
           },
         },
         model: config.model,
         modelProvider: config.modelProvider,
-        prompt: 'Back up my reading list and supply list along with the other personal files in this Murph runtime workspace. Make one ZIP attachment with their folders intact.',
+        prompt: includeRuntime
+          ? explicitRuntime
+            ? 'Create a downloadable backup of this whole workspace, including my hidden runtime records and conversation history. Keep the folder layout and leave the originals alone.'
+            : 'Put every file in my workspace into one downloadable ZIP. Preserve the folders and leave the original files unchanged.'
+          : 'Back up my reading list and supply list along with the other personal files in this Murph runtime workspace. Make one ZIP attachment with their folders intact.',
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
         workingDirectory,
@@ -3573,6 +3598,7 @@ describeRealCodex('real Codex personal archive e2e', () => {
         finalMessage: result.finalMessage.replaceAll(workingDirectory, '<VAULT>'),
         sendCalls: requestedRefs.length,
         approvalRequests,
+        sendErrors,
       })}\n`)
       expect(requestedRefs).toHaveLength(1)
       expect(isAssistantGeneratedDeliveryRef(requestedRefs[0] ?? '')).toBe(true)
@@ -3583,13 +3609,19 @@ describeRealCodex('real Codex personal archive e2e', () => {
       expect(attachment).toMatchObject({ kind: 'vault_file', contentType: 'application/zip' })
       if (attachment?.kind !== 'vault_file') throw new Error('Expected one ZIP attachment')
       const inspected = await execFileAsync('python3', ['-c', [
-        'import json, sys, zipfile',
+        'import base64, json, sys, zipfile',
         'with zipfile.ZipFile(sys.argv[1]) as archive:',
-        ' print(json.dumps({name: archive.read(name).decode() for name in archive.namelist() if not name.endswith("/")}))',
+        ' print(json.dumps({name: base64.b64encode(archive.read(name)).decode() for name in archive.namelist() if not name.endswith("/")}))',
       ].join('\n'), path.join(workingDirectory, attachment.ref)])
-      expect(JSON.parse(inspected.stdout)).toEqual(originals)
-      for (const [ref, contents] of Object.entries(originals)) {
-        expect(await readFile(path.join(workingDirectory, ref), 'utf8')).toBe(contents)
+      const archiveFiles: Record<string, string> = JSON.parse(inspected.stdout)
+      const expectedFiles = { ...originals, ...completeOnly }
+      expect(archiveFiles).toEqual(Object.fromEntries(
+        Object.entries(expectedFiles).map(([ref, contents]) => [ref, Buffer.from(contents).toString('base64')]),
+      ))
+      expect(result.finalMessage).not.toMatch(/exclud|omitt|saniti[sz]|redact|left out/iu)
+      expect(result.finalMessage).not.toContain('synthetic-export-inclusion-marker')
+      for (const [ref, contents] of Object.entries(expectedFiles)) {
+        expect(await readFile(path.join(workingDirectory, ref))).toEqual(Buffer.from(contents))
       }
       expect(result.finalMessage).toMatch(/approv/iu)
       expect(result.finalMessage).not.toMatch(/(?:I (?:can|could) help|would you like|shall I)|(?:sent|delivered|attached) (?:it|the (?:zip|file|archive))/iu)
