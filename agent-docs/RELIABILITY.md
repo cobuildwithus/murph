@@ -171,7 +171,7 @@ to apply after cutover.
   the closed reason; do not invoke extra canaries, poll the endpoint, retry, wake
   or refresh to collect evidence.
 - Protected native iOS and Android hosted E2E controllers run staggered every
-  six hours and execute each admitted journey even when the same revision
+  twelve hours and execute each admitted journey even when the same revision
   previously passed. Provider behavior can change independently of source.
   Manual recovery requires `refs/heads/main` and the exact current `main` SHA
   before protected environment work. Native source pins are committed with
@@ -183,9 +183,10 @@ to apply after cutover.
   deployment-status trigger and no arbitrary-branch manual admission. They
   keep controller admission separate from the deployed revision under test.
   iOS selects the current production alias, verifies protected-main ancestry and
-  exact deployment, retains dispatch-time equality, and repeats exact deployment
-  verification after the native journey. Main advancing while production remains
-  stable does not prevent iOS execution. Android still requires the production
+  exact deployment, and retains dispatch-time equality. The Web SHA identifies
+  production at dispatch; ordinary promotions during the long native health
+  journey do not invalidate completed business assertions. The canary is not a
+  per-commit acceptance status. Main advancing does not prevent iOS execution. Android still requires the production
   alias to equal the selected main revision and retries mismatches at the next slot.
 - Protected native Android hosted E2E treats private workflow dispatch as an
   uncertain external effect. A timeout, network failure, ambiguous HTTP

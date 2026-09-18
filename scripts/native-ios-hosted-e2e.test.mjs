@@ -271,16 +271,14 @@ fi
   }
 });
 
-test("iOS workflow tests the verified deployed revision and rejects deployment movement", async () => {
+test("iOS workflow selects the verified deployed revision independently of main", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
   );
   const select = extractWorkflowStepScript(workflow, "Select verified production deployment");
-  const verify = extractWorkflowStepScript(workflow, "Verify exercised production deployment");
   const dispatch = workflow.slice(
     workflow.indexOf("      - name: Verify current production alias and dispatch non-destructive canary"),
-    workflow.indexOf("      - name: Verify exercised production deployment"),
   );
   assert.match(dispatch, /DEPLOYED_SHA: \$\{\{ steps\.production\.outputs\.web_sha \}\}/u);
   assert.match(dispatch, /--web-sha "\$\{DEPLOYED_SHA\}"/u);
@@ -327,8 +325,6 @@ esac
       assert.notEqual(run(select, overrides).status, 0);
       assert.equal(await readFile(output, "utf8"), "");
     }
-    assert.equal(run(verify, { DEPLOYED_SHA: SHA }).status, 0);
-    assert.notEqual(run(verify, { DEPLOYED_SHA: SHA, VERIFIED_SHA: IOS_SHA }).status, 0);
   } finally {
     await rm(dir, { force: true, recursive: true });
   }

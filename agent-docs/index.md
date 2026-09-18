@@ -227,6 +227,9 @@ real-model, and live Stripe proof daily.
 The iOS production-revision canary correction is tracked in
 [`2026-09-18-ios-canary-production.md`](exec-plans/completed/2026-09-18-ios-canary-production.md).
 
+The production-promotion continuity correction for the native iOS health canary
+is recorded in [`2026-09-18-ios-canary-deployment-continuity.md`](exec-plans/completed/2026-09-18-ios-canary-deployment-continuity.md).
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

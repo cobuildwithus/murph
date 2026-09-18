@@ -9,6 +9,9 @@ on:
 # revisions. A successful scheduling job is never reused as provider evidence.
 # Manual recovery stays limited to exact current main; private source pins and
 # protected environments retain their existing authority.
+# The Web SHA identifies production at dispatch. Normal promotions during the
+# native health journey do not invalidate its completed business assertions;
+# this canary publishes no per-commit acceptance status.
 permissions:
   actions: read
   contents: read
@@ -137,17 +140,3 @@ jobs:
             --web-sha "${DEPLOYED_SHA}" \
             --web-base-url "${PRODUCTION_BASE_URL}" \
             --correlation-id "murph-production-${DEPLOYED_SHA}-${{ github.run_id }}-${{ github.run_attempt }}"
-
-      - name: Verify exercised production deployment
-        env:
-          DEPLOYED_SHA: ${{ steps.production.outputs.web_sha }}
-          HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
-          HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
-          HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
-          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.NATIVE_IOS_E2E_VERCEL_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          verified_sha="$(pnpm --dir apps/web exec tsx scripts/verify-current-vercel-production-deployment.ts)"
-          [[ "${verified_sha}" == "${DEPLOYED_SHA}" ]] || { echo "::error::Production changed during the iOS journey."; exit 1; }
-          echo "::notice::native-ios-e2e result=passed journey_executed=true deployed_sha=${verified_sha}"
