@@ -36,7 +36,11 @@ age of an executed run; this system adds no product-state receipt database.
   Each canonical observation allows the shared default runner quiet window plus
   two minutes for publication, currently twelve minutes with at most 720 serial
   one-second polling attempts and a ten-second per-request cap inside that
-  overall deadline. This accommodates the normal ten-minute quiet window before
+  overall deadline. A timed-out read (including its response body) or HTTP 503
+  uses the next existing poll without extending the deadline or repeating a
+  message/reset. Persistent unavailability fails at the deadline; other HTTP
+  errors, malformed evidence, and incorrect goal counts still fail immediately.
+  This accommodates the normal ten-minute quiet window before
   checkpointing and subsequent replica publication. The separate
   send-to-reply and inter-reply budgets remain 20 seconds; canonical observation
   time is excluded. The workflow has a 55-minute cap covering reset, all three
