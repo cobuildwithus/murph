@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,11 +11,8 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
-// Opt-in diagnostic: these assertions describe the defect, not desired behavior.
-// Run with MURPH_REPRO_SNAPSHOT_ENUMERATION=1; replace with regression assertions
-// when correcting the collector's root-wide ENOENT catch.
-describe.skipIf(process.env.MURPH_REPRO_SNAPSHOT_ENUMERATION !== "1")(
-  "snapshot enumeration data-loss reproduction",
+describe(
+  "snapshot enumeration preserves the restored vault",
   () => {
     afterEach(() => {
       vi.doUnmock("node:fs/promises");
@@ -85,7 +82,7 @@ describe.skipIf(process.env.MURPH_REPRO_SNAPSHOT_ENUMERATION !== "1")(
             .toBe("Preserve this synthetic note.\n");
           const vaultFiles = plan.entries.filter((entry) =>
             entry.root === "vault" && entry.kind === "file");
-          expect(vaultFiles).toHaveLength(race ? 0 : 3);
+          expect(vaultFiles).toHaveLength(3);
           expect(plan.entries.filter((entry) =>
             entry.root === "operator-home" && entry.kind === "file")).toHaveLength(3);
 
@@ -134,12 +131,9 @@ describe.skipIf(process.env.MURPH_REPRO_SNAPSHOT_ENUMERATION !== "1")(
               userId,
             },
           });
-          if (race) {
-            await expect(access(metadataPath)).rejects.toMatchObject({ code: "ENOENT" });
-            await expect(access(path.join(vaultRoot, "note.md"))).rejects.toMatchObject({ code: "ENOENT" });
-          } else {
-            expect(await readFile(metadataPath, "utf8")).toBe(metadata);
-          }
+          expect(await readFile(metadataPath, "utf8")).toBe(metadata);
+          expect(await readFile(path.join(vaultRoot, "note.md"), "utf8"))
+            .toBe("Preserve this synthetic note.\n");
           expect(await readFile(path.join(operatorHomeRoot, ".codex-hosted", "memories", "MEMORY.md"), "utf8"))
             .toBe("Synthetic memory\n");
         } finally {
