@@ -1,13 +1,13 @@
-# Privy retirement cleanup and qualification
+# Prepare guarded Privy signup cleanup
 
-Status: active
+Status: completed
 Created: 2026-09-19
 Updated: 2026-09-19
 
 ## Outcome and invariants
 
-Complete authorized preparation and unused-signup cleanup while retaining valid
-sessions and supported native recovery until retirement gates pass. No account
+Prepare the additive operator cleanup endpoint while retaining valid sessions
+and supported native recovery until retirement gates pass. No account
 is inferred to be disposable from missing authentication alone. The existing
 account-deletion service owns suspension, revocation and encrypted cleanup
 receipts; provider credentials remain hosted.
@@ -28,20 +28,19 @@ Ops session is available. Production execution follows reviewed deployment and
 fresh target verification; completion requires canonical absence and cleanup
 receipt outcomes, not merely an HTTP success.
 
-## Tasks
+## Delivered scope and handoff
 
-1. Implement and test the bounded Ops deletion entrypoint and locked eligibility
-   check. Preserve ordinary deletion and retry semantics.
-2. Review, commit and submit the additive cleanup candidate; complete focused
-   tests, Web typecheck, required external review and exact-head CI.
-3. Execute authorized cleanup after deployment and verify canonical/provider
-   outcomes through read-only metadata.
-4. Reconcile retirement PR #3134 with current main and passkey repair, preserving
-   canonical-login proof, established-factor protection and session revocation.
-5. Reconcile native retirement/CI cleanup and diagnose current canary failures;
-   distinguish simulator proof from distributed installed-device qualification.
-6. Refresh rollout ownership and explicitly dispose of obsolete Privy-only
-   browser proof. Keep schema/vendor removal and valid-session revocation gated.
+1. Implemented and tested bounded Ops admission and locked eligibility, preserving
+   ordinary deletion and encrypted cleanup retry semantics.
+2. PR #3589 passed 141 focused cases, Web typecheck, lint and complexity checks.
+   Round 2 full ReviewGPT passed on the corrected candidate. Exact-head CI remains
+   the merge gate and will be checked by this session's completion owner.
+3. No production mutation ran. Targeted execution waits for legacy session expiry,
+   reviewed deployment and a fresh complete predicate check; the durable owner is
+   `docs/hosted-auth-migration.md`.
+4. Broader retirement reconciliation continues in PR #3134 with its own plan.
+   Native SDK setup repair is Android PR #44. Privy-only browser PR #3221 was
+   closed as obsolete without deleting its branch.
 
 ## Product UX and proof
 
@@ -65,8 +64,8 @@ importer during final retirement, after receipt-owned cleanup converges.
 ## Additive cleanup candidate evidence
 
 Focused route, canonical deletion and isolated PostgreSQL admission proof passes
-140 cases, including activation committed while deletion waits on the member
-lock, wrong target generation, restored/protected accounts, returning sessions
+141 cases, including activation committed while deletion waits on the member
+lock, wrong target generation, restored/protected accounts, live sessions with unchanged signup timestamps
 and preservation of the encrypted cleanup receipt. Web typecheck passes.
 Complexity passes after keeping the preparation order in one owner-local helper;
 maximum complexity in the deletion module decreases from 19 to 15. No production
@@ -80,3 +79,9 @@ Round 1 accepted one admission bug: legacy cookie reads do not update
 now refuses every live legacy session under the existing deletion lock. This
 uses existing expiry/revocation authority without new visit tracking. Production
 execution must wait for target-session expiry and repeat every other predicate.
+
+Round 2 found no remaining serious issue. The correction adds only an existing
+session-authority predicate and regression proof; no visit tracking or new
+compatibility state. This plan closes the additive preparation work, not the
+production cleanup or overall retirement.
+Completed: 2026-09-19
