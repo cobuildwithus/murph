@@ -5,6 +5,7 @@ type HostedWebEncryptionModule =
 type PrismaModule = typeof import("@/src/lib/prisma");
 
 const serviceMocks = vi.hoisted(() => ({
+  assertUnusedHostedSignupTx: vi.fn(),
   acquireHostedPrivyPhoneTransferPhoneLocksTx: vi.fn(),
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx: vi.fn(),
   buildHostedPrivySessionState: vi.fn(),
@@ -63,6 +64,10 @@ const serviceMocks = vi.hoisted(() => ({
   prepareHostedPrivyPhoneTransferSourceRetirementTx: vi.fn(),
 
   revokeStravaDeviceSyncAccess: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-privacy/unused-signup", () => ({
+  assertUnusedHostedSignupTx: serviceMocks.assertUnusedHostedSignupTx,
 }));
 
 vi.mock("@/src/lib/prisma", async (importOriginal) => {
@@ -427,6 +432,8 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
 const HOSTED_ACCOUNT_DELETION_ERASURE_STATEMENT_BOUND = 14;
 
 beforeEach(() => {
+  serviceMocks.assertUnusedHostedSignupTx.mockReset();
+  serviceMocks.assertUnusedHostedSignupTx.mockResolvedValue(undefined);
   vi.stubEnv("KERNEL_API_KEY", "");
   serviceMocks.runPrismaInteractiveTransaction.mockReset();
   serviceMocks.runPrismaInteractiveTransaction.mockImplementation(
@@ -794,6 +801,32 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
 });
 
 describe("deleteHostedAccountData", () => {
+  it("refuses changed unused-signup targets before suspension commits or external cleanup", async () => {
+    const changed = new Error("unused signup changed");
+    serviceMocks.assertUnusedHostedSignupTx.mockRejectedValue(changed);
+    const prisma = createHostedAccountDeletionPrismaForTest({ onTransaction: vi.fn() });
+    await expect(deleteHostedAccountData({
+      memberId: "member_123", unusedSignupCreatedAt: new Date("2026-01-01T00:00:00Z"),
+      prisma, request: new Request("https://join.example.test/settings"),
+    })).rejects.toBe(changed);
+    expect(serviceMocks.resumeHostedMemberStripeCustomerClaimForAccountDeletion).not.toHaveBeenCalled();
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).not.toHaveBeenCalled();
+    expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+  });
+
+  it("reuses receipt-owned cleanup after locked unused-signup admission", async () => {
+    const prisma = createHostedAccountDeletionPrismaForTest({ onTransaction: vi.fn() });
+    await expect(deleteHostedAccountData({
+      memberId: "member_123", unusedSignupCreatedAt: new Date("2026-01-01T00:00:00Z"),
+      prisma, request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({ memberId: "member_123" });
+    expect(serviceMocks.assertUnusedHostedSignupTx).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.assertUnusedHostedSignupTx.mock.invocationCallOrder[0]).toBeLessThan(
+      serviceMocks.resumeHostedMemberStripeCustomerClaimForAccountDeletion.mock.invocationCallOrder[0]);
+    expect(serviceMocks.persistHostedAccountDeletionCleanupTx).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.runHostedAccountDeletionCleanup).toHaveBeenCalledTimes(1);
+  });
+
   it("stops before external cleanup when sponsorship cancellation cannot commit", async () => {
     const sponsorshipError = new Error("sponsorship cancellation unavailable");
     const onTransaction = vi.fn();
