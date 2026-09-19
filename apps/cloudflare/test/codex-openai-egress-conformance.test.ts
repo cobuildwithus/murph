@@ -306,7 +306,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
 
       expect(response.status, `${route.method} ${route.pathname}`).toBe(200);
       expect(imageAccessFetch.mock.calls.length, route.feature).toBe(
-        imageAccessCallsBefore + (route.pathname.startsWith("/v1/images/") ? 1 : 0),
+        imageAccessCallsBefore + (route.pathname.startsWith("/v1/images/") || route.transport === "websocket" ? 1 : 0),
       );
       expect(upstreamFetch.mock.calls.length, route.feature)
         .toBe(upstreamCallsBefore + 1);

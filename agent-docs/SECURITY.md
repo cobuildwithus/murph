@@ -1082,9 +1082,13 @@ to apply after cutover.
 - Personal Starter image generation and editing require subscription access
   from the canonical usage gate. A saved payment card alone grants no access.
   The signed, runtime-member-bound Web callback is enforced before Cloudflare
-  Images API egress and native image tools in Responses HTTP/WebSocket frames.
-  Each image rechecks access; ordinary text adds no callback. Missing or
-  unavailable authority fails closed. Normal Pulse or eligible Group signup
+  Images API egress and native image tools in Responses HTTP requests.
+  Opaque Responses WebSockets require image access at handshake; denied or
+  unavailable access returns HTTP 426 for native Codex HTTPS fallback. HTTP
+  images recheck access per request; an admitted socket retains its image
+  eligibility until it closes. Existing container destruction owns consent
+  revocation, and every new handshake revalidates runtime authority. Normal
+  Pulse or eligible Group signup
   owns recovery; existing paid, Family, and group allowances remain authoritative.
   See the [Starter usage owner](product-specs/starter-usage.md#text-entry-and-image-access)
   for billing authority, abuse email signals, and deployment ordering.

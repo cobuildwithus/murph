@@ -76,6 +76,12 @@ retirement are recorded in
 [`2026-09-15-rolling-runtime-cutover.md`](exec-plans/completed/2026-09-15-rolling-runtime-cutover.md).
 The current deployment contract remains in `agent-docs/references/hosted-postgres-runtime.md`.
 
+Hosted Responses WebSocket pass-through, handshake image eligibility, and
+container-owned revocation are documented in `apps/cloudflare/README.md`,
+`agent-docs/SECURITY.md`, and `agent-docs/product-specs/starter-usage.md`.
+Pinned Codex/workerd reuse and fallback proof is indexed in
+`agent-docs/references/testing-ci-map.md`.
+
 ## Purpose
 
 Deferred device hints honor their persisted retry time in wake projection and
