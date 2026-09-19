@@ -887,9 +887,11 @@ function asRootPrisma<T extends object>(tx: T): T & {
 
   const executeRaw = prisma.$executeRaw ?? vi.fn().mockResolvedValue(0);
   const queryRaw = prisma.$queryRaw ?? vi.fn().mockImplementation((
-    _query: TemplateStringsArray,
+    query: TemplateStringsArray,
     ...values: unknown[]
-  ) => Promise.resolve([{ id: values.at(-1) }]));
+  ) => Promise.resolve(query.join("").includes("hosted_runtime_cutover")
+    ? [{ phase: "legacy" }]
+    : [{ id: values.at(-1) }]));
   prisma.$executeRaw = executeRaw;
   prisma.$queryRaw = queryRaw;
   prisma.hostedMember ??= {};

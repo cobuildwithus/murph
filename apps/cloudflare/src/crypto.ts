@@ -10,6 +10,8 @@ export interface EncryptedR2ObjectBodyLike {
   arrayBuffer(): Promise<ArrayBuffer>;
   body?: ReadableStream<Uint8Array>;
   customMetadata?: Record<string, string>;
+  etag?: string;
+  httpEtag?: string;
   key?: string;
   size?: number;
   uploaded?: Date;

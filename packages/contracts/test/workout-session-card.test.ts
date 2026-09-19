@@ -6,6 +6,7 @@ import {
   buildWorkoutSessionAppCardEnvelopeV6,
   compactTableResponseCardV1Schema,
   parseCompactTableAppCardEnvelope,
+  parseWorkoutSessionAppCardEnvelopeV4,
   workoutSessionCardV1Bounds,
   workoutSessionDetailV1Schema,
   workoutSessionSchema,
@@ -854,5 +855,89 @@ describe("workout session compact-table contract", () => {
     expect(compactTableResponseCardV1Schema.safeParse(oversized).success).toBe(
       false,
     );
+  });
+});
+
+describe("workout wire parser edge cases", () => {
+  const envelope = (schemaVersion: 4 | 6, sets: unknown[], unit: unknown = null) => ({
+    schemaVersion,
+    card: {
+      k: "w", v: 1, t: "Synthetic workout", u: null, s: "a", f: null,
+      e: schemaVersion === 6 ? [["Synthetic exercise", unit, sets]] : [["Synthetic exercise", sets]],
+      ...(schemaVersion === 6 ? { b: "a".repeat(64), d: "b".repeat(64) } : {}),
+    },
+  });
+
+  it.each([
+    { result: ["n", null], unit: null, actual: "Logged" },
+    { result: ["r", 0], unit: null, actual: "0 reps" },
+    { result: ["w", 0, 0, null], unit: "k", actual: "0 kg × 0" },
+    { result: ["w", 3, 0, "l"], unit: "k", actual: "0 lb × 3" },
+    { result: ["w", null, 0, null], unit: null, actual: "0" },
+  ])("preserves nullable and zero V6 results: $actual", ({ result, unit, actual }) => {
+    const parsed = parseWorkoutSessionAppCardEnvelopeV4(envelope(6, [["c", null, result]], unit));
+    expect(parsed?.workout.exercises[0]?.sets).toEqual([
+      { status: "completed", target: null, actual },
+    ]);
+    expect(parsed).not.toHaveProperty("b");
+    expect(parsed).not.toHaveProperty("d");
+  });
+
+  it.each([
+    { actual: undefined }, { actual: false }, { actual: "" },
+    { actual: ["n", null] }, { actual: ["r", 0] },
+  ])(
+    "rejects every non-null V6 pending result ($actual)",
+    ({ actual }) => {
+      expect(parseWorkoutSessionAppCardEnvelopeV4(envelope(6, [["p", null, actual]]))).toBeNull();
+    },
+  );
+
+  it("validates V4 ignored actuals before discarding them and keeps version-specific states", () => {
+    const pending = parseWorkoutSessionAppCardEnvelopeV4(envelope(4, [["p", null, "legacy actual"]]));
+    expect(pending?.workout.exercises[0]?.sets[0]).toEqual({
+      status: "pending", target: null, actual: null,
+    });
+    expect(parseWorkoutSessionAppCardEnvelopeV4(envelope(4, [["p", null, false]]))).toBeNull();
+    expect(parseWorkoutSessionAppCardEnvelopeV4(envelope(4, [["c", null, null]]))).toBeNull();
+    const skipped = envelope(4, [["s", null, "legacy actual"]]);
+    skipped.card.s = "c";
+    expect(parseWorkoutSessionAppCardEnvelopeV4(skipped)?.workout.exercises[0]?.sets[0]).toEqual({
+      status: "skipped", target: null, actual: null,
+    });
+    expect(parseWorkoutSessionAppCardEnvelopeV4(envelope(6, [["s", null, null]]))).toBeNull();
+    const completedEditor = envelope(6, [["c", null, ["r", 0]]]);
+    completedEditor.card.s = "c";
+    expect(parseWorkoutSessionAppCardEnvelopeV4(completedEditor)).toBeNull();
+  });
+
+  it("retains short-circuit and repeated-read behavior at tuple boundaries", () => {
+    const reads: string[] = [];
+    const set = ["p", null, null];
+    Object.defineProperty(set, 2, {
+      get() { reads.push("actual"); return null; },
+    });
+    const input = envelope(6, [set]);
+    Object.defineProperty(input, "schemaVersion", {
+      get() { reads.push("version"); return 6; },
+    });
+    expect(parseWorkoutSessionAppCardEnvelopeV4(input)).not.toBeNull();
+    expect(reads).toEqual([
+      "version", "version", "version", // envelope admission
+      "version", "version", "version", // header bindings and state
+      "version", "version", "version", "version", "version", // exercise tuple
+      "version", "version", "actual", "version", "actual", // set tuple and actual
+    ]);
+    const failure = new Error("synthetic later exercise access");
+    const invalid = envelope(6, [["p", null, false]]);
+    Object.defineProperty(invalid.card.e, 1, { get() { throw failure; } });
+    expect(parseWorkoutSessionAppCardEnvelopeV4(invalid)).toBeNull();
+    const changingSets = envelope(6, []);
+    let setReads = 0;
+    Object.defineProperty(changingSets.card.e[0]!, 2, {
+      get() { setReads += 1; return setReads === 1 ? [] : null; },
+    });
+    expect(parseWorkoutSessionAppCardEnvelopeV4(changingSets)).toBeNull();
+    expect(setReads).toBe(2);
   });
 });

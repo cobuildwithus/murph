@@ -1,6 +1,5 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import type { PrismaClient } from "@prisma/client";
@@ -18,12 +17,10 @@ import {
   buildSensitiveActionMessage,
   buildSettingsSensitiveActionBinding,
   consumeSensitiveActionChallengeTx,
-  createSensitiveActionChallenge,
-  type VerifiedSensitiveActionChallenge,
   verifySensitiveActionChallenge,
 } from "./server";
-import { prepareApprovalPasskeyWrite, preserveApprovalPasskeyState, readApprovalPasskeyState } from "./passkey-store";
-import { isSensitiveActionToken, parseSensitiveActionAuthorization } from "./shared";
+import { prepareApprovalPasskeyWrite } from "./passkey-store";
+import { parseSensitiveActionAuthorization } from "./shared";
 import {
   approvalPasskeyRegistrationOptions,
   verifyApprovalPasskeyRegistration,
@@ -33,14 +30,12 @@ import { requireApprovalPasskeyEnrollmentEnabled } from "./passkey-rollout";
 
 interface EnrollmentInput {
   authorization: unknown;
-  initialToken?: unknown;
   prisma: PrismaClient;
   session: HostedAppSession;
 }
 
 async function verifyEnrollmentAuthorization(input: EnrollmentInput) {
   requireApprovalPasskeyEnrollmentEnabled();
-  if (input.initialToken !== undefined) return verifyInitialEnrollmentAuthorization(input);
   const authorization = parseSensitiveActionAuthorization(input.authorization);
   const origin = resolveHostedPublicOrigin();
   if (!authorization || !origin) {
@@ -75,62 +70,6 @@ async function verifyEnrollmentAuthorization(input: EnrollmentInput) {
   };
 }
 
-// Initial setup is available only to a fresh first-party principal with no
-// established approval credential. It cannot replace a factor, authorize another
-// sensitive action, or use a silently exchanged session.
-function requireInitialEnrollmentSession(session: HostedAppSession): void {
-  const authenticatedAt = session.primaryAuthenticatedAt?.getTime();
-  const age = typeof authenticatedAt === "number" ? Date.now() - authenticatedAt : Number.NaN;
-  if (!session.authProof || !Number.isFinite(age) || age < 0 || age > 5 * 60 * 1000) {
-    throw hostedOnboardingError({ code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", httpStatus: 403, message: "Sign in again to set up your first passkey." });
-  }
-}
-
-async function readInitialEnrollmentState(input: Pick<EnrollmentInput, "prisma" | "session">) {
-  requireApprovalPasskeyEnrollmentEnabled();
-  requireInitialEnrollmentSession(input.session);
-  const state = await readApprovalPasskeyState({ memberId: input.session.member.id, prisma: input.prisma });
-  if (state.encrypted !== null || state.credentials.length > 0) {
-    throw hostedOnboardingError({ code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403, message: "Use your existing passkey to approve this change." });
-  }
-  return state;
-}
-
-export async function createInitialApprovalPasskeyRegistrationOptions(input: Pick<EnrollmentInput, "prisma" | "session">) {
-  const state = await readInitialEnrollmentState(input);
-  const origin = resolveHostedPublicOrigin();
-  if (!origin) throw new Error("Hosted approval origin is not configured.");
-  const challenge = await createSensitiveActionChallenge({
-    bindingHash: buildSettingsSensitiveActionBinding({ kind: "approval.passkey.enroll", memberId: input.session.member.id, sessionId: input.session.sessionId }),
-    kind: "approval.passkey.enroll", memberId: input.session.member.id, prisma: input.prisma,
-  });
-  const options = await approvalPasskeyRegistrationOptions({
-    credentials: state.credentials, memberId: input.session.member.id, message: challenge.message, origin,
-  });
-  return { options, token: challenge.token };
-}
-
-async function verifyInitialEnrollmentAuthorization(input: EnrollmentInput) {
-  if (input.authorization !== undefined || !isSensitiveActionToken(input.initialToken)) {
-    throw hostedOnboardingError({ code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403, message: "Start passkey setup again." });
-  }
-  const state = await readInitialEnrollmentState(input);
-  const token = input.initialToken;
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const bindingHash = buildSettingsSensitiveActionBinding({ kind: "approval.passkey.enroll", memberId: input.session.member.id, sessionId: input.session.sessionId });
-  const challenge = await input.prisma.hostedSensitiveActionChallenge.findUnique({ where: { tokenHash } });
-  const origin = resolveHostedPublicOrigin();
-  if (!origin || !challenge || challenge.memberId !== state.memberId || challenge.kind !== "approval.passkey.enroll"
-    || challenge.bindingHash !== bindingHash || challenge.expiresAt <= new Date()) {
-    throw hostedOnboardingError({ code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403, message: "Start passkey setup again." });
-  }
-  const proof: VerifiedSensitiveActionChallenge = {
-    bindingHash, expiresAt: challenge.expiresAt, kind: "approval.passkey.enroll", memberId: state.memberId,
-    tokenHash, passkeys: [], credentialWrite: preserveApprovalPasskeyState(state),
-  };
-  return { proof, state, origin, message: buildSensitiveActionMessage({ bindingHash, expiresAt: challenge.expiresAt, kind: "approval.passkey.enroll", origin, token }) };
-}
-
 export async function createApprovalPasskeyRegistrationOptions(input: EnrollmentInput) {
   const verified = await verifyEnrollmentAuthorization(input);
   return approvalPasskeyRegistrationOptions({
@@ -146,7 +85,6 @@ export async function registerApprovalPasskey(input: EnrollmentInput & {
   response: RegistrationResponseJSON;
 }): Promise<void> {
   // Existing protection requires its approved factor again at completion.
-  // Initial setup instead rechecks fresh primary proof and the absent factor.
   const verified = await verifyEnrollmentAuthorization(input);
   const credential = await verifyApprovalPasskeyRegistration({
     message: verified.message,
@@ -172,9 +110,6 @@ export async function registerApprovalPasskey(input: EnrollmentInput & {
       sessionId: input.session.sessionId,
       authProof: input.session.authProof,
     });
-    if (input.initialToken !== undefined) {
-      requireInitialEnrollmentSession(input.session);
-    }
     await consumeSensitiveActionChallengeTx({
       challenge: { ...verified.proof, credentialWrite: prepared },
       prisma,

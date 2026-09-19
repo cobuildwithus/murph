@@ -423,6 +423,34 @@ describe("hosted orchestration control contracts", () => {
     );
   });
 
+  it("validates Web admission while retaining requests without admission", () => {
+    const admission = {
+      cutover: "postgres" as const, status: "existing" as const,
+      owner: {
+        userId: "test-user", attemptId: "attempt-test", generation: "1", phase: "active" as const,
+        processingMode: "default" as const, allocationId: "allocation-test",
+        runnerContainerName: "runner-test", workspaceVersion: "0",
+        customInferenceEnvelope: null, platformAiUsageAllowed: true,
+        startedAt: "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null,
+        failureCount: 0, lastErrorCode: null,
+      },
+    };
+    const parse = (value: unknown) => parseHostedRuntimeEnsureProcessingRequest({
+      orchestrationAttemptId: "orchestration-test", admission: value,
+    });
+    expect(parse(admission).admission).toEqual(admission);
+    expect(parse({ ...admission, owner: { ...admission.owner, processingMode: "system_mailbox" } }).admission?.status).toBe("existing");
+    expect(parse({ ...admission, status: "claimed", owner: { ...admission.owner, phase: "starting" } }).admission?.status).toBe("claimed");
+    for (const invalid of [
+      { ...admission, cutover: "draining" },
+      { ...admission, owner: null },
+      { ...admission, owner: { ...admission.owner, phase: "idle" } },
+      { ...admission, status: "blocked" },
+      { ...admission, status: "claimed" },
+      { ...admission, status: "claimed", owner: { ...admission.owner, phase: "starting", processingMode: "system_mailbox" } },
+    ]) expect(() => parse(invalid)).toThrow();
+  });
+
   it("parses ensure-processing request and response variants", () => {
     const ensureProcessingRequest = parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",

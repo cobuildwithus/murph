@@ -157,7 +157,11 @@ describe.skipIf(!runPostgresProof)(
       const availableTraceId = `hil_latency_skip_locked_available_${suffix}`;
       const runtimeAttemptId = `runtime_latency_skip_locked_${suffix}`;
       const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const applicationName = `typing_acceptance_lock_${suffix.slice(0, 8)}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({
+        databaseUrl: withPostgresLockOrderProbe(databaseUrl, applicationName), poolMax: 1,
+      });
       let releaseTraceLock!: () => void;
       const traceLockRelease = new Promise<void>((resolve) => {
         releaseTraceLock = resolve;
@@ -360,8 +364,17 @@ describe.skipIf(!runPostgresProof)(
           firstCodexOutputObservedAtEpochMs: assistantMilestoneAt.getTime(),
         });
 
+        // Accepted typing must survive even when this is the caller's final retry.
+        const acceptanceWhileLocked = recordHostedIngressAssistantMilestone({
+          ...assistantInput, milestone: "linq_typing_accepted",
+        });
+        inFlight.push(acceptanceWhileLocked);
+        await waitForPostgresLock({ applicationName, observer });
         releaseTraceLock();
         await blockerPromise;
+        await expect(acceptanceWhileLocked).resolves.toEqual({
+          matchedCount: 1, recorded: true, unmatchedCount: 0,
+        });
 
         await expect(
           recordHostedIngressProviderStarted(batchedProviderInput),
@@ -396,6 +409,7 @@ describe.skipIf(!runPostgresProof)(
           ),
         ).toMatchObject({
           firstCodexOutputObservedAtEpochMs: assistantMilestoneAt.getTime(),
+          linqTypingAcceptedAtEpochMs: assistantMilestoneAt.getTime(),
         });
       } finally {
         releaseTraceLock();
@@ -403,6 +417,7 @@ describe.skipIf(!runPostgresProof)(
         await writer.hostedMember.deleteMany({ where: { id: memberId } });
         await Promise.all([
           blocker.$disconnect(),
+          observer.$disconnect(),
           writer.$disconnect(),
         ]);
       }
@@ -984,9 +999,10 @@ describe.skipIf(!runPostgresProof)(
           suffix,
         });
 
+        // Prisma enforces UTC even when the connection URL requests another zone.
         await expect(observer.$queryRaw<Array<{ timeZone: string }>>`
           SELECT current_setting('TimeZone') AS "timeZone"
-        `).resolves.toEqual([{ timeZone: "Australia/Sydney" }]);
+        `).resolves.toEqual([{ timeZone: "UTC" }]);
 
         const requestedAssistantInputIds = [
           assistantInputIds[1],
@@ -1138,8 +1154,8 @@ describe.skipIf(!runPostgresProof)(
           source: "linq",
         });
 
-        await Promise.all([
-          recordHostedIngressAssistantMilestone({
+        const typingMilestones = [
+          {
             assistantInputIds,
             at: new Date("2026-08-09T12:00:50.000Z"),
             authenticatedUserId: memberId,
@@ -1148,8 +1164,8 @@ describe.skipIf(!runPostgresProof)(
             runtimeAttemptId,
             runtimeLeaseGeneration: "4",
             source: "linq",
-          }),
-          recordHostedIngressAssistantMilestone({
+          },
+          {
             assistantInputIds: [...assistantInputIds].reverse(),
             at: new Date("2026-08-09T12:00:51.000Z"),
             authenticatedUserId: memberId,
@@ -1158,8 +1174,29 @@ describe.skipIf(!runPostgresProof)(
             runtimeAttemptId,
             runtimeLeaseGeneration: "4",
             source: "linq",
-          }),
-        ]);
+          },
+        ] satisfies Parameters<typeof recordHostedIngressAssistantMilestone>[0][];
+        const typingWrites = await Promise.all(typingMilestones.map(async (input) => ({
+          input,
+          result: await recordHostedIngressAssistantMilestone(input),
+        })));
+        for (const { input, result } of typingWrites) {
+          const contendedCount = result.contendedCount ?? 0;
+          expect(result).toEqual({
+            ...(contendedCount > 0 ? { contendedCount } : {}),
+            matchedCount: assistantInputIds.length - contendedCount,
+            recorded: contendedCount < assistantInputIds.length,
+            unmatchedCount: contendedCount,
+          });
+          // SKIP LOCKED reports contention; replay only that milestone after both writers finish.
+          if (contendedCount > 0) {
+            await expect(recordHostedIngressAssistantMilestone(input)).resolves.toEqual({
+              matchedCount: assistantInputIds.length,
+              recorded: true,
+              unmatchedCount: 0,
+            });
+          }
+        }
 
         const ordinaryRows = await observer.hostedIngressLatencyTrace.findMany({
           select: { assistantInputId: true, phaseBreakdownJson: true },

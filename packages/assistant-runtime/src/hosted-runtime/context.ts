@@ -26,15 +26,13 @@ import {
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 import {
   ensureHostedAssistantOperatorDefaults,
+  type HostedAssistantBootstrapResult,
   isHostedAssistantProfileReady,
   resolveActiveHostedAssistantProfile,
   resolveHostedAssistantProviderConfig,
   resolveHostedAssistantOperatorDefaultsState,
 } from "@murphai/operator-config/hosted-assistant-config";
-import {
-  readOperatorConfig,
-  resolveHostedAssistantConfig,
-} from "@murphai/operator-config/operator-config";
+import { readOperatorConfig } from "@murphai/operator-config/operator-config";
 
 import type {
   HostedAssistantRuntimeChannelCapabilities,
@@ -175,6 +173,7 @@ export async function prepareHostedAssistantAutoReplyForWake(
   },
   options: {
     operatorHomeRoot?: string | null;
+    assistantBootstrap?: HostedAssistantBootstrapResult | null;
   } = {},
 ): Promise<HostedAssistantAutoReplyReadinessState> {
   return await bootstrapHostedAssistantRuntimeState(
@@ -183,6 +182,7 @@ export async function prepareHostedAssistantAutoReplyForWake(
     runtimeEnv,
     resolvedConfig,
     {
+      assistantBootstrap: options.assistantBootstrap ?? null,
       enableAssistantChannelReconciliation: false,
       operatorHomeRoot: options.operatorHomeRoot ?? null,
     },
@@ -263,15 +263,18 @@ async function bootstrapHostedAssistantRuntimeState(
     managedAutoReplyChannels?: readonly HostedAssistantRuntimeManagedAutoReplyChannel[];
   },
   options: {
+    assistantBootstrap?: HostedAssistantBootstrapResult | null;
     enableAssistantChannelReconciliation: boolean;
     operatorHomeRoot?: string | null;
   },
 ): Promise<HostedAssistantRuntimeState> {
-  const assistantBootstrap = await ensureHostedAssistantOperatorDefaults({
-    allowMissing: true,
-    env: runtimeEnv,
-    homeDirectory: options.operatorHomeRoot ?? undefined,
-  });
+  const assistantBootstrap = options.assistantBootstrap
+    ? { ...options.assistantBootstrap, seeded: false }
+    : await ensureHostedAssistantOperatorDefaults({
+        allowMissing: true,
+        env: runtimeEnv,
+        homeDirectory: options.operatorHomeRoot ?? undefined,
+      });
   const assistantConfigStatus = normalizeHostedAssistantBootstrapStatus(assistantBootstrap)
 
   emitHostedExecutionStructuredLog({
@@ -420,8 +423,7 @@ export async function readHostedAssistantRuntimeState(input: {
   homeDirectory?: string;
 } = {}): Promise<HostedAssistantRuntimeReadinessState> {
   const operatorConfig = await readOperatorConfig(input.homeDirectory);
-  const hostedAssistantConfig = operatorConfig?.hostedAssistant
-    ?? (await resolveHostedAssistantConfig(input.homeDirectory));
+  const hostedAssistantConfig = operatorConfig?.hostedAssistant ?? null;
   const hostedAssistantState = resolveHostedAssistantOperatorDefaultsState(hostedAssistantConfig);
   const activeProfile = resolveActiveHostedAssistantProfile(hostedAssistantConfig);
   const assistantConfigStatus = operatorConfig?.hostedAssistantInvalid === true
@@ -445,20 +447,19 @@ export async function readHostedAssistantRuntimeState(input: {
 }
 
 export async function readHostedAssistantExecutionDefaultTarget(input: {
+  assistantBootstrap?: HostedAssistantBootstrapResult | null;
   homeDirectory?: string;
   runtimeEnv?: Readonly<Record<string, string | undefined>>;
 } = {}): Promise<AssistantModelTarget | null> {
-  if (input.runtimeEnv) {
-    await ensureHostedAssistantOperatorDefaults({
-      allowMissing: true,
-      env: input.runtimeEnv,
-      homeDirectory: input.homeDirectory,
-    });
-  }
-
-  const operatorConfig = await readOperatorConfig(input.homeDirectory);
-  const hostedAssistantConfig = operatorConfig?.hostedAssistant
-    ?? (await resolveHostedAssistantConfig(input.homeDirectory));
+  const hostedAssistantConfig = input.assistantBootstrap
+    ? input.assistantBootstrap.config
+    : input.runtimeEnv
+      ? (await ensureHostedAssistantOperatorDefaults({
+          allowMissing: true,
+          env: input.runtimeEnv,
+          homeDirectory: input.homeDirectory,
+        })).config
+      : (await readOperatorConfig(input.homeDirectory))?.hostedAssistant ?? null;
 
   const target = createAssistantModelTarget(
     resolveHostedAssistantProviderConfig(hostedAssistantConfig),

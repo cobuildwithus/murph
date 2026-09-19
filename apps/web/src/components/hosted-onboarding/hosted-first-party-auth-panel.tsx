@@ -1,15 +1,20 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { SettingsStatusLine } from "@/src/components/settings/connected-account-card";
+import { Phone } from "lucide-react";
+import { EmailIcon } from "@/src/components/homepage/email-icon";
 import { Button } from "@/src/components/ui/button";
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
-import { SettingsStatusLine } from "@/src/components/settings/connected-account-card";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Spinner } from "@/src/components/ui/spinner";
 import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { requestHostedOnboardingJson } from "./client-api";
 import { declineHostedLaunchConsent, logoutHostedAppSession, verifyHostedAppSession } from "./hosted-app-session-client";
 import { HostedAuthLegalNotice } from "./hosted-auth-shared";
+import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { HostedContactCodeForm } from "./hosted-contact-code-form";
 import { HostedTelegramProofButton } from "./hosted-telegram-proof-button";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
@@ -21,6 +26,8 @@ export interface HostedFirstPartyAuthPanelProps {
   inviteCode?: string | null;
   initialEmailAddress?: string;
   methods: readonly Method[];
+  reauthenticate?: boolean;
+  onReauthenticated?: () => void;
   onCompleted?: (payload: HostedAuthenticationCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
   onViewChange?: (view: HostedFirstPartyAuthPanelView) => void;
@@ -32,15 +39,18 @@ export interface HostedFirstPartyAuthPanelProps {
 
 export function HostedFirstPartyAuthPanel({
   methods, inviteCode, initialEmailAddress, onCompleted, onSignOut, onViewChange,
+  reauthenticate, onReauthenticated,
   requireLaunchConsentOnCompletion = false, showPassiveLegalNotice = false,
-  autoSendPastedPhoneNumber = false, phoneInputAutoFocus = false,
+  autoSendPastedPhoneNumber = false, phoneInputAutoFocus = false, size = "default",
 }: HostedFirstPartyAuthPanelProps) {
+  const request = authRequestContext(reauthenticate, inviteCode);
   const [method, setMethod] = useState<Method>(methods[0] ?? "phone");
   const [step, setStep] = useState<"entry" | "resume" | "consent">("entry");
   const [active, setActive] = useState(false);
   const [pending, setPending] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [telegramError, setTelegramError] = useState<string | null>(null);
   const [completion, setCompletion] = useState<HostedAuthenticationCompletionPayload | null>(null);
   const operation = useRef<AbortController | null>(null);
   const mounted = useRef(true);
@@ -76,8 +86,13 @@ export function HostedFirstPartyAuthPanel({
   }
 
   async function verify(url: "/api/auth/otp/verify" | "/api/auth/telegram/verify", payload: Record<string, unknown>, signal: AbortSignal) {
-    await verifyHostedAppSession({ url, payload: { ...payload, ...signupContext(inviteCode) }, signal });
+    await verifyHostedAppSession({ url, payload: { ...payload, ...request.verify() }, signal });
     if (signal.aborted || !mounted.current) return;
+    if (reauthenticate) {
+      if (!onReauthenticated) throw new Error("Sign-in completed. Please try the request again.");
+      onReauthenticated();
+      return;
+    }
     setStep("resume"); setActive(false);
     await complete();
   }
@@ -107,35 +122,65 @@ export function HostedFirstPartyAuthPanel({
       onAccepted={() => complete()} onDecline={() => void endSession(true)}
       onRequirementChange={(required) => { if (!required) void complete(); }}
       preferredScope="launch.legal" source="homepage-auth-dialog"
-    /> : step === "resume" ? <>
-      <p className="text-sm text-muted-foreground">You’re signed in. Continue to your account.</p>
-      <Button type="button" disabled={pending} onClick={() => void complete()}>{pending ? "Loading your account..." : "Continue"}</Button>
-      <Button type="button" variant="ghost" disabled={pending} onClick={() => void endSession(false)}>Use a different account</Button>
-    </> : <>
-      {method === "telegram" ? <HostedTelegramProofButton key="telegram" purpose="login"
+    /> : step === "resume" ? <HostedAuthCompletionRetry pending={pending} onContinue={() => void complete()} onSignOut={() => void endSession(false)} /> : <>
+      {method === "telegram" ? <HostedTelegramProofButton key="telegram" purpose={request.purpose}
         onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)} />
-        : <HostedContactCodeForm key={method} method={method} autoFocus={phoneInputAutoFocus}
+        : <HostedContactCodeForm key={method} method={method} size={size} autoFocus={method === "email" || phoneInputAutoFocus}
           initialValue={method === "email" ? initialEmailAddress : undefined}
           autoSendPastedPhoneNumber={autoSendPastedPhoneNumber} onActiveChange={setActive}
           onSend={async (value, signal) => {
-            const result = await requestHostedOnboardingJson<{ ok: true }>({ url: "/api/auth/otp/send", payload: { kind: method, value }, signal });
+            const result = await requestHostedOnboardingJson<{ ok: true }>({ url: "/api/auth/otp/send", payload: { kind: method, value, ...request.send }, signal });
             if (result.ok !== true) throw new Error("The code could not be sent. Try again.");
           }}
           onVerify={(value, code, signal) => verify("/api/auth/otp/verify", { kind: method, value, code }, signal)}
         />}
-      {!active ? <div className="flex flex-wrap gap-2">
-        {methods.filter((entry) => entry !== method).map((entry) => <Button key={entry} type="button" variant="outline" className="flex-1" onClick={() => { setMethod(entry); setError(null); }}>
-          {entry === "phone" ? "Use phone" : entry === "email" ? "Use email" : "Use Telegram"}
-        </Button>)}
-      </div> : null}
+      {!active && methods.some((entry) => entry !== method) ? <>
+        <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          OR
+          <span className="h-px flex-1 bg-border" />
+        </div>
+        <SettingsStatusLine message={telegramError} tone="destructive" className="empty:hidden" />
+        <div className="grid grid-cols-2 gap-3 [&>*]:!order-none">
+          {(["telegram", "phone", "email"] as const).filter((entry) => methods.includes(entry) && entry !== method).map((entry) => entry === "telegram" ? <HostedTelegramProofButton
+            key={entry} purpose={request.purpose} label="Telegram" onErrorChange={setTelegramError}
+            onProof={(idToken, signal) => verify("/api/auth/telegram/verify", { idToken }, signal)}
+          /> : <HostedInlineAuthButton
+            key={entry}
+            onClick={() => { setMethod(entry); setError(null); }}
+            icon={entry === "phone" ? <Phone aria-hidden="true" className="h-5 w-5" />
+              : <EmailIcon className="h-5 w-5" />}
+          >
+            {entry === "phone" ? "Phone" : "Email"}
+          </HostedInlineAuthButton>)}
+        </div>
+      </> : null}
       {showPassiveLegalNotice ? <HostedAuthLegalNotice /> : null}
     </>}
-    {error ? <SettingsStatusLine message={error} tone="destructive" /> : null}
+    {error ? <Alert variant="destructive"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
   </div>;
+}
+
+// Reauthentication proves the current member again; it never carries signup context.
+function authRequestContext(reauthenticate: boolean | undefined, inviteCode?: string | null) {
+  if (reauthenticate) return { purpose: "reauthenticate" as const, send: { reauthenticate: true }, verify: () => ({ reauthenticate: true }) };
+  return { purpose: "login" as const, send: {}, verify: () => signupContext(inviteCode) };
 }
 
 function signupContext(inviteCode?: string | null) {
   let timeZone: string | undefined;
   try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { /* The server owns the fallback. */ }
   return { ...(inviteCode ? { inviteCode } : {}), ...(timeZone ? { timeZone } : {}) };
+}
+
+export function HostedAuthCompletionRetry({ pending, onContinue, onSignOut }: {
+  pending: boolean;
+  onContinue: () => void;
+  onSignOut: () => void;
+}) {
+  return <>
+      <p className="text-sm text-muted-foreground">You’re signed in. Continue to your account.</p>
+      <Button type="button" size="xl" className="w-full" aria-busy={pending} disabled={pending} onClick={onContinue}>{pending ? <><Spinner aria-hidden="true" />Loading your account...</> : "Continue"}</Button>
+      <Button type="button" variant="ghost" size="lg" className="w-full text-muted-foreground hover:text-foreground" disabled={pending} onClick={onSignOut}>Use a different account</Button>
+  </>;
 }

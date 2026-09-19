@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
+import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
+import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ContainerProxy } from "./stubs/cloudflare-containers.ts";
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
   buildExaResearchScoutBatchLaneRequest,
@@ -25,7 +28,6 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
-  buildHostedOpenAiCacheDiagnostic,
   handleHostedRunnerCustomInferenceOutbound,
   handleHostedRunnerElevenLabsOutbound,
   handleHostedRunnerExaOutbound,
@@ -409,6 +411,46 @@ function readDiagnosticInputMetric(
   return { bytes: byteCount, count };
 }
 
+const interceptControl = new WeakMap<Readonly<Record<string, unknown>>, {
+  input: Parameters<typeof createInterceptEnv>[0]; owner: HostedRuntimeOwnerSnapshot | null; revoked: boolean;
+}>();
+beforeEach(() => {
+  vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner").mockImplementation(async ({ source, userId, command }) => {
+    const state = interceptControl.get(source);
+    if (!state) throw new Error("Missing synthetic canonical owner.");
+    const { input } = state;
+    if (command.operation === "revoke_ai_usage") {
+      state.revoked = true;
+      await input.revokeActiveRuntimePlatformAiUsage?.({ userId, attemptId: command.attemptId, generation: command.generation });
+      return { cutover: "postgres", status: "updated", owner: state.owner };
+    }
+    let validation: WorkerProviderEgressTokenValidationResult | WorkerProviderEgressCredentialValidationResult;
+    if (command.operation === "authorize_effect") {
+      const owns = input.validateRuntimeWriteFence
+        ? await input.validateRuntimeWriteFence({ userId, attemptId: command.attemptId, generation: command.generation })
+        : state.owner?.attemptId === command.attemptId && state.owner?.generation === command.generation;
+      validation = owns ? { owns: true, userId, attemptId: command.attemptId, leaseGeneration: command.generation, workspaceVersion: state.owner?.workspaceVersion ?? "4" } : { owns: false };
+    } else if (command.operation === "authorize_provider") {
+      validation = command.providerEgressTokenHash !== null
+        ? await input.validateRuntimeProviderEgressToken?.({ userId, providerEgressTokenHash: command.providerEgressTokenHash }) ?? { owns: false }
+        : await input.validateRuntimeProviderEgressCredential?.({ userId, providerKind: command.providerKind, runnerContainerName: command.runnerContainerName ?? "" }) ?? { owns: false };
+    } else throw new Error(`Unexpected synthetic owner command: ${command.operation}`);
+    if (!validation || typeof validation !== "object" || !validation.owns
+      || typeof validation.attemptId !== "string" || typeof validation.leaseGeneration !== "string"
+      || validation.userId !== userId || typeof validation.workspaceVersion !== "string") {
+      return { cutover: "postgres", status: "stale", owner: null };
+    }
+    const customInferenceEnvelope = "customInferenceEnvelope" in validation && typeof validation.customInferenceEnvelope === "string" ? validation.customInferenceEnvelope : null;
+    state.owner = {
+      userId, attemptId: validation.attemptId, generation: validation.leaseGeneration, workspaceVersion: validation.workspaceVersion,
+      runnerContainerName: RUNNER_CONTAINER_NAME, phase: "active", processingMode: "default", allocationId: "synthetic-allocation",
+      customInferenceEnvelope, platformAiUsageAllowed: !state.revoked && validation.platformAiUsageAllowed !== false,
+      startedAt: "2026-09-17T00:00:00.000Z", acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null,
+    };
+    return { cutover: "postgres", status: "authorized", owner: state.owner };
+  });
+});
+
 afterEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
@@ -476,7 +518,7 @@ describe("hostedRunnerIntercept", () => {
       },
     });
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
+      providerEgressTokenHash: string;
       userId: string;
     }): Promise<WorkerProviderEgressTokenValidationResult> => ({
       attemptId: "attempt_provider_egress",
@@ -548,7 +590,7 @@ describe("hostedRunnerIntercept", () => {
     expect(responseText).toContain('"model":"murph-custom-r7"');
     expect(responseText).not.toContain("synthetic-upstream-model");
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
@@ -578,7 +620,7 @@ describe("hostedRunnerIntercept", () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
+      providerEgressTokenHash: string;
       userId: string;
     }): Promise<WorkerProviderEgressTokenValidationResult> => ({
       attemptId: "attempt_provider_egress",
@@ -614,7 +656,7 @@ describe("hostedRunnerIntercept", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "HOSTED_PLATFORM_AI_USAGE_DENIED" },
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.every(([target]) => new URL(readFetchTargetUrl(target)).hostname === "web.example.test")).toBe(true);
   });
 
   it.each([
@@ -844,11 +886,7 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "7",
-      userId: "member_123",
-    });
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -867,7 +905,7 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
-  it("rejects a claimed member that does not own the supplied active write fence", async () => {
+  it("preserves canonical Web rejection of a mismatched member fence", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       fetchedAt: "2026-05-12T00:00:00.000Z",
       workspace: null,
@@ -875,7 +913,7 @@ describe("hostedRunnerIntercept", () => {
       headers: {
         "content-type": "application/json; charset=utf-8",
       },
-      status: 200,
+      status: 401,
     }));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => false);
@@ -893,12 +931,8 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "7",
-      userId: "member_456",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
       "member_456",
     );
@@ -1429,6 +1463,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({ model: "gpt-5.6-terra", input: "Synthetic text turn." }),
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           cookie: "session=user-supplied-cookie",
@@ -1559,8 +1594,66 @@ describe("hostedRunnerIntercept", () => {
     await expect(forwardedRequest.json()).resolves.toEqual(requestBody);
   });
 
+  it.each([
+    { subscriptionAllowed: false, image: true, status: 403 },
+    { subscriptionAllowed: true, image: true, status: 200 },
+    { subscriptionAllowed: false, image: false, status: 200 },
+  ])("checks Responses image access without gating text (subscription=$subscriptionAllowed image=$image)", async ({ subscriptionAllowed, image, status }) => {
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      return url.hostname === "api.openai.com"
+        ? Response.json({ id: "response_synthetic", output: [] })
+        : Response.json({ allowed: subscriptionAllowed, reason: subscriptionAllowed ? "allowed" : "subscription_required" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential();
+    const response = await hostedRunnerIntercept(new Request("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-5.6-terra",
+        input: "Draw a synthetic geometric pattern.",
+        tools: image ? [{ type: "image_generation" }] : [],
+      }),
+    }), createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      validateRuntimeProviderEgressCredential: async (input) => createProviderEgressCredentialValidationResult(input),
+    }), { containerId: "opaque-container-id" });
+    expect(response.status).toBe(status);
+    const upstream = findFetchCall(fetchMock, "api.openai.com");
+    expect(Boolean(upstream)).toBe(status === 200);
+    expect(fetchMock.mock.calls.filter(([target]) => new URL(readFetchTargetUrl(target)).pathname !== "/api/internal/hosted-runtime/log")).toHaveLength(Number(image) + Number(status === 200));
+  });
+
+  it.each(["generations", "edits"])("denies image %s before OpenAI when the subscription gate rejects", async (operation) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ allowed: false, reason: "subscription_required" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await hostedRunnerIntercept(new Request(`https://api.openai.com/v1/images/${operation}`, {
+      method: "POST", headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}` },
+    }), createInterceptEnv({ OPENAI_API_KEY: "openai-worker-secret", validateRuntimeWriteFence: async () => true }), { containerId: "member_123--v-version_1" });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED" } });
+    expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([{}, { allowed: true }, { allowed: false, reason: "usage_unavailable" }])("fails closed on unavailable or incompatible image access responses", async (result) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json(result));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await hostedRunnerIntercept(new Request("https://api.openai.com/v1/images/generations", {
+      method: "POST", headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}` },
+    }), createInterceptEnv({ OPENAI_API_KEY: "openai-worker-secret", validateRuntimeWriteFence: async () => true }), { containerId: "member_123--v-version_1" });
+    expect(response.status).toBe(503);
+    expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
+  });
+
   it("allows OpenAI image generation egress through the existing provider policy", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      return url.pathname.endsWith("/image-generation/access")
+        ? Response.json({ allowed: true, reason: "allowed" })
+        : new Response("ok");
+    });
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
@@ -1594,7 +1687,12 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("rewrites sentinel credentials and forwards multipart bodies to OpenAI image edits", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    const fetchMock = vi.fn<typeof fetch>(async (request) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      return url.pathname.endsWith("/image-generation/access")
+        ? Response.json({ allowed: true, reason: "allowed" })
+        : new Response("ok");
+    });
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
@@ -3143,7 +3241,7 @@ describe("hostedRunnerIntercept", () => {
       throw new Error("OpenAI without authority headers should use provider egress token validation.");
     });
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
+      providerEgressTokenHash: string;
       userId: string;
     }) => createProviderEgressTokenValidationResult(input));
 
@@ -3166,7 +3264,7 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     const forwarded = findFetchCall(fetchMock, "api.openai.com")?.[0];
@@ -3210,6 +3308,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({ model: "gpt-5.6-terra", input: "Synthetic text turn." }),
         headers: {
           authorization: `Bearer ${credential}`,
         },
@@ -4459,6 +4558,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({ model: "gpt-5.6-terra", input: "Synthetic text turn." }),
         headers: {
           authorization: `Bearer ${credential}`,
         },
@@ -4596,9 +4696,9 @@ describe("hostedRunnerIntercept", () => {
           providerBearerCredentialKind: "provider_egress",
           providerRequestAuthorized: false,
           providerEgressAuthMode: "provider_egress_credential",
-          providerEgressRejectReason: "missing_runner_state",
+          providerEgressRejectReason: "write_fence_mismatch",
           writeFenceValidationMode: "provider_egress_credential",
-          writeFenceValidationRejectReason: "missing_runner_state",
+          writeFenceValidationRejectReason: "write_fence_mismatch",
         }),
         message: "Hosted runner provider egress completed.",
       }),
@@ -4619,7 +4719,7 @@ describe("hostedRunnerIntercept", () => {
       validateRuntimeProviderEgressCredential,
     });
 
-    const response = await hostedRunnerIntercept(
+    await expect(hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/models", {
         headers: {
           authorization: `Bearer ${credential}`,
@@ -4628,28 +4728,9 @@ describe("hostedRunnerIntercept", () => {
       }),
       env,
       { containerId: "opaque-container-id" },
-    );
+    )).rejects.toThrow("provider credential validation failed");
 
-    expect(response.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          providerKind: "openai",
-          providerRequestAuthorized: false,
-          providerEgressAuthMode: "provider_egress_credential",
-          providerEgressRejectReason: "provider_egress_credential_validation_error",
-          providerEgressValidationErrorName: "Error",
-          writeFenceValidationErrorName: "Error",
-          writeFenceValidationMode: "provider_egress_credential",
-          writeFenceValidationRejectReason: "provider_egress_credential_validation_error",
-        }),
-        error: expect.objectContaining({
-          message: "provider credential validation failed",
-        }),
-        message: "Hosted runner provider egress completed.",
-      }),
-    );
   });
 
   it("rejects provider credential egress when the signing secret is unavailable", async () => {
@@ -4856,7 +4937,7 @@ describe("hostedRunnerIntercept", () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
+      providerEgressTokenHash: string;
       userId: string;
     }) => createProviderEgressTokenValidationResult(input));
     const env = createInterceptEnv({
@@ -4879,7 +4960,7 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(200);
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
   });
@@ -4888,7 +4969,7 @@ describe("hostedRunnerIntercept", () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
+      providerEgressTokenHash: string;
       userId: string;
     }) => createProviderEgressTokenValidationResult(input));
     const env = createInterceptEnv({
@@ -4911,7 +4992,7 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(200);
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -4921,10 +5002,10 @@ describe("hostedRunnerIntercept", () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
+      providerEgressTokenHash: string;
       userId: string;
     }) =>
-      input.providerEgressToken === "fresh-provider-token"
+      input.providerEgressTokenHash === createHash("sha256").update("fresh-provider-token").digest("hex")
         ? createProviderEgressTokenValidationResult(input)
         : { owns: false, reason: "provider_egress_token_mismatch" } as const
     );
@@ -4948,7 +5029,7 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(401);
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -4958,7 +5039,7 @@ describe("hostedRunnerIntercept", () => {
           providerKind: "openai",
           providerRequestAuthorized: false,
           writeFenceValidationMode: "provider_egress_token",
-          writeFenceValidationRejectReason: "provider_egress_token_mismatch",
+          writeFenceValidationRejectReason: "write_fence_mismatch",
         }),
         message: "Hosted runner provider egress completed.",
       }),
@@ -4974,7 +5055,7 @@ describe("hostedRunnerIntercept", () => {
       },
     );
 
-    const response = await hostedRunnerIntercept(
+    await expect(hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/models", {
         headers: {
           ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
@@ -4987,26 +5068,13 @@ describe("hostedRunnerIntercept", () => {
         validateRuntimeProviderEgressToken,
       }),
       { containerId: "opaque-container-id" },
-    );
+    )).rejects.toThrow("provider token validation failed");
 
-    expect(response.status).toBe(401);
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          providerKind: "openai",
-          providerRequestAuthorized: false,
-          writeFenceValidationErrorName: "Error",
-          writeFenceValidationMode: "provider_egress_token",
-          writeFenceValidationRejectReason: "provider_egress_token_validation_error",
-        }),
-        message: "Hosted runner provider egress completed.",
-      }),
-    );
   });
 
   it("rejects legacy boolean provider-token validation results with a clear diagnostic", async () => {
@@ -5034,7 +5102,7 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(401);
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -5045,7 +5113,7 @@ describe("hostedRunnerIntercept", () => {
           providerRequestAuthorized: false,
           writeFenceMetadataPresent: false,
           writeFenceValidationMode: "provider_egress_token",
-          writeFenceValidationRejectReason: "provider_egress_token_rejected",
+          writeFenceValidationRejectReason: "write_fence_mismatch",
         }),
         message: "Hosted runner provider egress completed.",
       }),
@@ -5900,62 +5968,6 @@ describe("hostedRunnerIntercept", () => {
       .not.toContain(sensitiveThreadId);
   });
 
-  it("groups repeated Codex memory requests with stable keyed fingerprints", async () => {
-    const sharedSessionId = "session-shared-memory-correlation-id";
-    const sharedThreadId = "thread-shared-memory-correlation-id";
-    const firstTurnId = "turn-first-memory-correlation-id";
-    const secondTurnId = "turn-second-memory-correlation-id";
-    const otherThreadId = "thread-other-memory-correlation-id";
-    const requestBytes = TEST_TEXT_ENCODER.encode(JSON.stringify({
-      input: [],
-      model: "gpt-5.6-terra",
-    }));
-    const buildDiagnostic = (input: {
-      threadId: string;
-      turnId: string;
-    }) => buildHostedOpenAiCacheDiagnostic({
-      endpointKind: "responses",
-      fingerprintSecret: "diagnostic-fingerprint-secret",
-      method: "POST",
-      requestBytes,
-      turnMetadataHeader: JSON.stringify({
-        request_kind: "memory",
-        session_id: sharedSessionId,
-        thread_id: input.threadId,
-        turn_id: input.turnId,
-        window_id: `${input.threadId}:1`,
-      }),
-    });
-
-    const first = await buildDiagnostic({
-      threadId: sharedThreadId,
-      turnId: firstTurnId,
-    });
-    const second = await buildDiagnostic({
-      threadId: sharedThreadId,
-      turnId: secondTurnId,
-    });
-    const other = await buildDiagnostic({
-      threadId: otherThreadId,
-      turnId: secondTurnId,
-    });
-
-    expect(first.codexRequestKind).toBe("memory");
-    expect(first.codexSessionFingerprint).toBe(second.codexSessionFingerprint);
-    expect(first.codexThreadFingerprint).toBe(second.codexThreadFingerprint);
-    expect(first.codexThreadFingerprint).not.toBe(other.codexThreadFingerprint);
-    expect(first.codexTurnFingerprint).not.toBe(second.codexTurnFingerprint);
-    for (const diagnostic of [first, second, other]) {
-      parseDiagnosticRuntimeLog(diagnostic);
-    }
-    const serialized = JSON.stringify([first, second, other]);
-    expect(serialized).not.toContain(sharedSessionId);
-    expect(serialized).not.toContain(sharedThreadId);
-    expect(serialized).not.toContain(firstTurnId);
-    expect(serialized).not.toContain(secondTurnId);
-    expect(serialized).not.toContain(otherThreadId);
-  });
-
   it("records OpenAI cache diagnostics under the fence validated by a provider token", async () => {
     const waitUntilPromises: Promise<unknown>[] = [];
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
@@ -5973,7 +5985,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
+      providerEgressTokenHash: string;
       userId: string;
     }) => ({
       ...createProviderEgressTokenValidationResult(input),
@@ -6012,14 +6024,10 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(200);
     await Promise.all(waitUntilPromises);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledOnce();
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_provider_egress",
-      generation: "11",
-      userId: "member_123",
-    });
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
 
@@ -6112,712 +6120,6 @@ describe("hostedRunnerIntercept", () => {
     }));
   });
 
-  it("summarizes OpenAI input shape with bounded metadata", async () => {
-    const largestText = "hello 💚 ".repeat(10);
-    const input = [
-      {
-        content: [{ text: largestText, type: "input_text" }],
-        role: "user",
-        type: "message",
-      },
-      {
-        output: "tool result",
-        role: "assistant",
-        type: "function_call",
-      },
-      {
-        content: "hidden",
-        role: "banana",
-        type: "unexpected_call",
-      },
-      {
-        role: "",
-        type: "  ",
-      },
-      "plain input",
-    ] as const;
-    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: "responses",
-      method: "POST",
-      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
-        input,
-        model: "gpt-5.6-terra",
-      })),
-    });
-
-    expect(diagnostic).toEqual(expect.objectContaining({
-      inputCount: 5,
-      inputItemRoleCounts: [1, 2, 1, 1],
-      inputItemRoleKinds: ["assistant", "missing", "other", "user"],
-      inputItemTypeCounts: [1, 1, 2, 1],
-      inputItemTypeBytes: [
-        testJsonByteLength(input[1]),
-        testJsonByteLength(input[0]),
-        testJsonByteLength(input[3]) + testJsonByteLength(input[4]),
-        testJsonByteLength(input[2]),
-      ],
-      inputItemTypeKinds: ["function_call", "message", "missing", "other"],
-      inputFunctionCallBytes: [testJsonByteLength(input[1])],
-      inputFunctionCallNameCounts: [1],
-      inputFunctionCallNameKinds: ["unknown"],
-      inputLargestItemBytes: testJsonByteLength(input[0]),
-      inputLargestItemIndex: 0,
-      inputLargestItemKinds: ["type:message", "role:user"],
-      inputLargestItemReverseIndex: 4,
-      inputNestedMetricCounts: [2, 1, 13],
-      inputNestedMetricKinds: ["content", "output", "string"],
-      inputNestedMetricBytes: [
-        testJsonByteLength(input[0].content) + testJsonByteLength(input[2].content),
-        testJsonByteLength(input[1].output),
-        [
-          "message",
-          "user",
-          "input_text",
-          largestText,
-          "function_call",
-          "assistant",
-          "tool result",
-          "unexpected_call",
-          "banana",
-          "hidden",
-          "  ",
-          "",
-          "plain input",
-        ].reduce((total, value) => total + testByteLength(value), 0),
-      ],
-      inputTailItemBytes: input.map((item) => testJsonByteLength(item)),
-      inputTailItemContentBytes: [
-        testJsonByteLength(input[0].content),
-        0,
-        testJsonByteLength(input[2].content),
-        0,
-        0,
-      ],
-      inputTailItemCount: 5,
-      inputTailItemFingerprintPresent: false,
-      inputTailItemFunctionNameKinds: ["none", "unknown", "none", "none", "none"],
-      inputTailItemIndexes: [0, 1, 2, 3, 4],
-      inputTailItemOutputBytes: [
-        0,
-        testJsonByteLength(input[1].output),
-        0,
-        0,
-        0,
-      ],
-      inputTailItemReverseIndexes: [4, 3, 2, 1, 0],
-      inputTailItemRoleKinds: ["user", "assistant", "other", "missing", "missing"],
-      inputTailItemStringBytes: [
-        [
-          "message",
-          "user",
-          "input_text",
-          largestText,
-        ].reduce((total, value) => total + testByteLength(value), 0),
-        [
-          "function_call",
-          "assistant",
-          "tool result",
-        ].reduce((total, value) => total + testByteLength(value), 0),
-        [
-          "unexpected_call",
-          "banana",
-          "hidden",
-        ].reduce((total, value) => total + testByteLength(value), 0),
-        [
-          "  ",
-          "",
-        ].reduce((total, value) => total + testByteLength(value), 0),
-        testByteLength("plain input"),
-      ],
-      inputTailItemTypeKinds: ["message", "function_call", "other", "missing", "missing"],
-    }));
-  });
-
-  it("attributes OpenAI function-call-output bytes without raw output or call IDs", async () => {
-    const matchedOutput = {
-      call_id: "call_private_1",
-      output: "synthetic-sensitive-tool-output ".repeat(20),
-      type: "function_call_output",
-    };
-    const unsafeNameOutput = {
-      call_id: "call_private_2",
-      output: {
-        rows: ["small synthetic row"],
-      },
-      type: "function_call_output",
-    };
-    const exactNameOutput = {
-      call_id: "call_private_3",
-      output: "exact-name synthetic output",
-      type: "function_call_output",
-    };
-    const unmatchedOutput = {
-      call_id: "call_private_4",
-      output: "orphan synthetic output",
-      type: "function_call_output",
-    };
-    const input = [
-      {
-        arguments: "synthetic-sensitive-function-arguments",
-        call_id: "call_private_1",
-        name: "local_shell",
-        type: "function_call",
-      },
-      matchedOutput,
-      {
-        arguments: "synthetic-unsafe-function-arguments",
-        call_id: "call_private_2",
-        name: "private/tool-name",
-        type: "function_call",
-      },
-      unsafeNameOutput,
-      {
-        arguments: "synthetic-exact-function-arguments",
-        call_id: "call_private_3",
-        name: "mcp__database_inspection_query",
-        type: "function_call",
-      },
-      exactNameOutput,
-      unmatchedOutput,
-      {
-        content: "synthetic-private-message",
-        role: "user",
-        type: "message",
-      },
-    ] as const;
-
-    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: "responses",
-      method: "POST",
-      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
-        input,
-        model: "gpt-5.6-terra",
-      })),
-    });
-
-    expect(diagnostic).toEqual(expect.objectContaining({
-      inputFunctionCallBytes: [
-        testJsonByteLength(input[0]),
-        testJsonByteLength(input[4]),
-        testJsonByteLength(input[2]),
-      ],
-      inputFunctionCallNameCounts: [1, 1, 1],
-      inputFunctionCallNameKinds: ["local_shell", "mcp__database_inspection_query", "other"],
-      inputFunctionOutputBytes: [
-        testJsonByteLength(matchedOutput.output),
-        testJsonByteLength(exactNameOutput.output),
-        testJsonByteLength(unsafeNameOutput.output),
-        testJsonByteLength(unmatchedOutput.output),
-      ],
-      inputFunctionOutputNameCounts: [1, 1, 1, 1],
-      inputFunctionOutputNameKinds: ["local_shell", "mcp__database_inspection_query", "other", "unknown"],
-      inputLargestFunctionOutputBytes: testJsonByteLength(matchedOutput.output),
-      inputLargestFunctionOutputIndex: 1,
-      inputLargestFunctionOutputNameKind: "local_shell",
-      inputLargestFunctionOutputReverseIndex: 6,
-      inputTailItemFunctionNameKinds: [
-        "local_shell",
-        "local_shell",
-        "other",
-        "other",
-        "mcp__database_inspection_query",
-        "mcp__database_inspection_query",
-        "unknown",
-        "none",
-      ],
-    }));
-    expect(readDiagnosticInputMetric(
-      diagnostic,
-      "function_output.action.command.execution",
-    )).toEqual({ bytes: testJsonByteLength(matchedOutput.output), count: 1 });
-    expect(readDiagnosticInputMetric(
-      diagnostic,
-      "function_output.action.dynamic.tool.call",
-    )).toBeNull();
-    expect(readDiagnosticInputMetric(
-      diagnostic,
-      "function_output.action.mcp.tool.call",
-    )).toEqual({ bytes: testJsonByteLength(exactNameOutput.output), count: 1 });
-    expect(readDiagnosticInputMetric(
-      diagnostic,
-      "function_output.action.other",
-    )).toEqual({
-      bytes: testJsonByteLength(unsafeNameOutput.output)
-        + testJsonByteLength(unmatchedOutput.output),
-      count: 2,
-    });
-    parseDiagnosticRuntimeLog(diagnostic);
-
-    const diagnosticJson = JSON.stringify(diagnostic);
-    expect(readDiagnosticInputMetric(diagnostic, "function_output.repeated")).toBeNull();
-    expect(readDiagnosticInputMetric(diagnostic, "function_output.equivalent")).toBeNull();
-    expect(diagnosticJson).not.toContain("call_private");
-    expect(diagnosticJson).not.toContain("synthetic-sensitive-tool-output");
-    expect(diagnosticJson).not.toContain("synthetic-sensitive-function-arguments");
-    expect(diagnosticJson).not.toContain("synthetic-unsafe-function-arguments");
-    expect(diagnosticJson).not.toContain("synthetic-exact-function-arguments");
-    expect(diagnosticJson).not.toContain("synthetic-private-message");
-    expect(diagnosticJson).not.toContain("private/tool-name");
-  });
-
-  it("counts repeated action identities and exactly equivalent serialized outputs independently", async () => {
-    const repeatedFirst = {
-      call_id: "call_repeat",
-      output: "first repeated-call output",
-      type: "function_call_output",
-    };
-    const repeatedSecond = {
-      call_id: "call_repeat",
-      output: "second repeated-call output",
-      type: "function_call_output",
-    };
-    const equivalentOutput = {
-      status: "waiting",
-      waitMs: 1_000,
-    };
-    const equivalentFirst = {
-      call_id: "call_equivalent_1",
-      output: equivalentOutput,
-      type: "function_call_output",
-    };
-    const equivalentSecond = {
-      call_id: "call_equivalent_2",
-      output: equivalentOutput,
-      type: "function_call_output",
-    };
-    const reorderedOutput = {
-      waitMs: 1_000,
-      status: "waiting",
-    };
-    const reordered = {
-      call_id: "call_reordered",
-      output: reorderedOutput,
-      type: "function_call_output",
-    };
-    const commandOutput = {
-      call_id: "call_command",
-      output: "command output",
-      type: "function_call_output",
-    };
-    const mcpOutput = {
-      call_id: "call_mcp",
-      output: "mcp output",
-      type: "function_call_output",
-    };
-    const overlappingOutput = {
-      state: "shared",
-    };
-    const overlapFirst = {
-      call_id: "call_overlap_a",
-      output: overlappingOutput,
-      type: "function_call_output",
-    };
-    const overlapOther = {
-      call_id: "call_overlap_b",
-      output: "different output for the repeated identity",
-      type: "function_call_output",
-    };
-    const overlapRepeatedEquivalent = {
-      call_id: "call_overlap_b",
-      output: overlappingOutput,
-      type: "function_call_output",
-    };
-    const input = [
-      { call_id: "call_repeat", name: "wait", type: "function_call" },
-      repeatedFirst,
-      repeatedSecond,
-      { call_id: "call_equivalent_1", name: "wait", type: "function_call" },
-      equivalentFirst,
-      { call_id: "call_equivalent_2", name: "wait", type: "function_call" },
-      equivalentSecond,
-      { call_id: "call_reordered", name: "wait", type: "function_call" },
-      reordered,
-      { call_id: "call_command", name: "exec_command", type: "function_call" },
-      commandOutput,
-      { call_id: "call_mcp", name: "mcp__calendar__read", type: "function_call" },
-      mcpOutput,
-      { call_id: "call_overlap_a", name: "wait", type: "function_call" },
-      overlapFirst,
-      { call_id: "call_overlap_b", name: "wait", type: "function_call" },
-      overlapOther,
-      overlapRepeatedEquivalent,
-    ] as const;
-
-    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: "responses",
-      method: "POST",
-      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
-        input,
-        model: "gpt-5.6-terra",
-      })),
-    });
-
-    expect(diagnostic).toEqual(expect.objectContaining({
-      diagnosticVersion: 3,
-    }));
-    expect(readDiagnosticInputMetric(
-      diagnostic,
-      "function_output.action.command.execution",
-    )).toEqual({ bytes: testJsonByteLength(commandOutput.output), count: 1 });
-    expect(readDiagnosticInputMetric(
-      diagnostic,
-      "function_output.action.dynamic.tool.call",
-    )).toEqual({
-      bytes: testJsonByteLength(repeatedFirst.output)
-        + testJsonByteLength(repeatedSecond.output)
-        + testJsonByteLength(equivalentFirst.output)
-        + testJsonByteLength(equivalentSecond.output)
-        + testJsonByteLength(reordered.output)
-        + testJsonByteLength(overlapFirst.output)
-        + testJsonByteLength(overlapOther.output)
-        + testJsonByteLength(overlapRepeatedEquivalent.output),
-      count: 8,
-    });
-    expect(readDiagnosticInputMetric(
-      diagnostic,
-      "function_output.action.mcp.tool.call",
-    )).toEqual({ bytes: testJsonByteLength(mcpOutput.output), count: 1 });
-    expect(readDiagnosticInputMetric(
-      diagnostic,
-      "function_output.repeated",
-    )).toEqual({
-      bytes: testJsonByteLength(repeatedSecond.output)
-        + testJsonByteLength(overlapRepeatedEquivalent.output),
-      count: 2,
-    });
-    expect(readDiagnosticInputMetric(
-      diagnostic,
-      "function_output.equivalent",
-    )).toEqual({
-      bytes: testJsonByteLength(equivalentSecond.output)
-        + testJsonByteLength(overlapRepeatedEquivalent.output),
-      count: 2,
-    });
-    parseDiagnosticRuntimeLog(diagnostic);
-
-    const diagnosticJson = JSON.stringify(diagnostic);
-    expect(diagnosticJson).not.toContain("call_repeat");
-    expect(diagnosticJson).not.toContain("first repeated-call output");
-    expect(diagnosticJson).not.toContain("second repeated-call output");
-    expect(diagnosticJson).not.toContain("command output");
-    expect(diagnosticJson).not.toContain("mcp output");
-    expect(diagnosticJson).not.toContain('"status":"waiting"');
-  });
-
-  it("counts equivalent output reuse when serialization returns to the first call identity", async () => {
-    const sharedOutput = { state: "shared" };
-    const sharedOutputBytes = testJsonByteLength(sharedOutput);
-    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: "responses",
-      method: "POST",
-      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
-        input: [
-          { call_id: "call_a", name: "wait", type: "function_call" },
-          { call_id: "call_a", output: sharedOutput, type: "function_call_output" },
-          { call_id: "call_b", name: "wait", type: "function_call" },
-          { call_id: "call_b", output: sharedOutput, type: "function_call_output" },
-          { call_id: "call_a", output: sharedOutput, type: "function_call_output" },
-        ],
-        model: "gpt-5.6-terra",
-      })),
-    });
-
-    expect(readDiagnosticInputMetric(
-      diagnostic,
-      "function_output.repeated",
-    )).toEqual({ bytes: sharedOutputBytes, count: 1 });
-    expect(readDiagnosticInputMetric(
-      diagnostic,
-      "function_output.equivalent",
-    )).toEqual({ bytes: sharedOutputBytes * 2, count: 2 });
-    parseDiagnosticRuntimeLog(diagnostic);
-
-    const diagnosticJson = JSON.stringify(diagnostic);
-    expect(diagnosticJson).not.toContain("call_a");
-    expect(diagnosticJson).not.toContain("call_b");
-    expect(diagnosticJson).not.toContain('"state":"shared"');
-  });
-
-  it("uses safe deterministic function-call categories for unusual call IDs", async () => {
-    const sensitiveLookingName = ["sk", "live", "SYNTHETIC123"].join("_");
-    const earlyOutput = {
-      call_id: "call_late",
-      output: "early synthetic output",
-      type: "function_call_output",
-    };
-    const sensitiveNameOutput = {
-      call_id: "call_sensitive",
-      output: "sensitive-name synthetic output",
-      type: "function_call_output",
-    };
-    const duplicateOutput = {
-      call_id: "call_duplicate",
-      output: "duplicate synthetic output",
-      type: "function_call_output",
-    };
-    const input = [
-      earlyOutput,
-      {
-        arguments: "late synthetic arguments",
-        call_id: "call_late",
-        name: "exec_command",
-        type: "function_call",
-      },
-      {
-        arguments: "sensitive-name synthetic arguments",
-        call_id: "call_sensitive",
-        name: sensitiveLookingName,
-        type: "function_call",
-      },
-      sensitiveNameOutput,
-      {
-        arguments: "first duplicate synthetic arguments",
-        call_id: "call_duplicate",
-        name: "exec_command",
-        type: "function_call",
-      },
-      {
-        arguments: "second duplicate synthetic arguments",
-        call_id: "call_duplicate",
-        name: "local_shell",
-        type: "function_call",
-      },
-      duplicateOutput,
-    ] as const;
-
-    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: "responses",
-      method: "POST",
-      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
-        input,
-        model: "gpt-5.6-terra",
-      })),
-    });
-
-    expect(diagnostic).toEqual(expect.objectContaining({
-      inputFunctionCallBytes: [
-        testJsonByteLength(input[4]) + testJsonByteLength(input[5]),
-        testJsonByteLength(input[1]),
-        testJsonByteLength(input[2]),
-      ],
-      inputFunctionCallNameCounts: [2, 1, 1],
-      inputFunctionCallNameKinds: ["duplicate", "exec_command", "other"],
-      inputFunctionOutputBytes: [
-        testJsonByteLength(duplicateOutput.output),
-        testJsonByteLength(earlyOutput.output),
-        testJsonByteLength(sensitiveNameOutput.output),
-      ],
-      inputFunctionOutputNameCounts: [1, 1, 1],
-      inputFunctionOutputNameKinds: ["duplicate", "exec_command", "other"],
-      inputTailItemFunctionNameKinds: [
-        "exec_command",
-        "exec_command",
-        "other",
-        "other",
-        "duplicate",
-        "duplicate",
-        "duplicate",
-      ],
-    }));
-    parseDiagnosticRuntimeLog(diagnostic);
-
-    const diagnosticJson = JSON.stringify(diagnostic);
-    expect(diagnosticJson).not.toContain("call_late");
-    expect(diagnosticJson).not.toContain("call_sensitive");
-    expect(diagnosticJson).not.toContain("call_duplicate");
-    expect(diagnosticJson).not.toContain(sensitiveLookingName);
-    expect(diagnosticJson).not.toContain("synthetic output");
-    expect(diagnosticJson).not.toContain("synthetic arguments");
-  });
-
-  it("bounds OpenAI input tail diagnostics to the last eight items", async () => {
-    const input = Array.from({ length: 10 }, (_, index) => ({
-      content: `private-tail-${index}`,
-      role: index % 2 === 0 ? "user" : "assistant",
-      type: "message",
-    }));
-
-    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: "responses",
-      method: "POST",
-      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
-        input,
-        model: "gpt-5.6-terra",
-      })),
-    });
-    const expectedTail = input.slice(2);
-
-    expect(diagnostic).toEqual(expect.objectContaining({
-      inputCount: 10,
-      inputTailItemCount: 8,
-      inputTailItemFingerprintPresent: false,
-      inputTailItemIndexes: [2, 3, 4, 5, 6, 7, 8, 9],
-      inputTailItemOutputBytes: [0, 0, 0, 0, 0, 0, 0, 0],
-      inputTailItemReverseIndexes: [7, 6, 5, 4, 3, 2, 1, 0],
-      inputTailItemRoleKinds: [
-        "user",
-        "assistant",
-        "user",
-        "assistant",
-        "user",
-        "assistant",
-        "user",
-        "assistant",
-      ],
-      inputTailItemTypeKinds: [
-        "message",
-        "message",
-        "message",
-        "message",
-        "message",
-        "message",
-        "message",
-        "message",
-      ],
-    }));
-    expect(diagnostic.inputTailItemBytes).toEqual(
-      expectedTail.map((item) => testJsonByteLength(item)),
-    );
-    expect(diagnostic.inputTailItemContentBytes).toEqual(
-      expectedTail.map((item) => testJsonByteLength(item.content)),
-    );
-    expect(diagnostic.inputTailItemStringBytes).toEqual(
-      expectedTail.map((item) =>
-        testByteLength(item.content) + testByteLength(item.role) + testByteLength(item.type)
-      ),
-    );
-    expect(JSON.stringify(diagnostic)).not.toContain("private-tail-0");
-    expect(JSON.stringify(diagnostic)).not.toContain("private-tail-9");
-  });
-
-  it("keeps maximal OpenAI input classification diagnostics runtime-log safe", async () => {
-    const input = [
-      "computer_call",
-      "computer_call_output",
-      "file_search_call",
-      "function_call",
-      "function_call_output",
-      "image_generation_call",
-      "local_shell_call",
-      "local_shell_call_output",
-      "message",
-      "reasoning",
-      "web_search_call",
-    ].map((type) => ({ role: "user", type }));
-    input.push(
-      { role: "assistant", type: "message" },
-      { role: "developer", type: "message" },
-      { role: "system", type: "message" },
-      { role: "tool", type: "message" },
-      { role: "unknown_role", type: "unknown_type" },
-      { role: "", type: "" },
-    );
-
-    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: "responses",
-      method: "POST",
-      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
-        input,
-        model: "gpt-5.6-terra",
-      })),
-    });
-
-    expect(diagnostic.inputItemTypeKinds).toHaveLength(13);
-    expect(diagnostic.inputItemRoleKinds).toHaveLength(7);
-    parseDiagnosticRuntimeLog(diagnostic);
-  });
-
-  it("bounds OpenAI input shape traversal for deeply nested requests", async () => {
-    const nestedJson = `${"[".repeat(10_000)}"leaf"${"]".repeat(10_000)}`;
-
-    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: "responses",
-      method: "POST",
-      requestBytes: TEST_TEXT_ENCODER.encode(
-        `{"input":[${nestedJson}],"model":"gpt-5.6-terra"}`,
-      ),
-    });
-
-    expect(diagnostic).toEqual(expect.objectContaining({
-      inputCount: 1,
-      inputLargestItemBytes: 0,
-      inputShapeTraversalTruncated: true,
-      jsonValid: true,
-    }));
-    expect(diagnostic.inputBytes).toBeUndefined();
-  });
-
-  it("builds bounded OpenAI cache diagnostics for degraded request bodies", async () => {
-    const smallBody = JSON.stringify({
-      input: "hello",
-      model: "tenant-private-model-123",
-      prompt_cache_key: "cache-namespace-synthetic-1234567890",
-      prompt_cache_retention: "24h",
-    });
-    const smallDiagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: "responses",
-      method: "POST",
-      requestBytes: new TextEncoder().encode(smallBody),
-    });
-
-    expect(smallDiagnostic).toEqual(expect.objectContaining({
-      cacheNamespaceFingerprintPresent: false,
-      cacheNamespacePresent: true,
-      fingerprintKind: "none",
-      inputFingerprintPresent: false,
-      jsonType: "object",
-      jsonValid: true,
-      modelKind: "other",
-      requestFingerprintPresent: false,
-    }));
-    expect(smallDiagnostic.inputItemTypeKinds).toBeUndefined();
-    expect(smallDiagnostic.inputItemRoleKinds).toBeUndefined();
-    expect(smallDiagnostic.inputNestedMetricBytes).toBeUndefined();
-    expect(smallDiagnostic.inputLargestItemBytes).toBeUndefined();
-    expect(JSON.stringify(smallDiagnostic)).not.toContain("tenant-private-model-123");
-    expect(JSON.stringify(smallDiagnostic)).not.toContain("cache-namespace-synthetic");
-
-    const invalidDiagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: "responses",
-      fingerprintSecret: "diagnostic-fingerprint-secret",
-      method: "POST",
-      requestBytes: new TextEncoder().encode("{"),
-    });
-
-    expect(invalidDiagnostic).toEqual(expect.objectContaining({
-      fingerprintKind: "hmac-sha256",
-      jsonType: "invalid",
-      jsonValid: false,
-      requestFingerprintPresent: false,
-    }));
-
-    const tooLargeBody = JSON.stringify({
-      input: "x".repeat(6 * 1024 * 1024),
-      model: "gpt-5.6-terra",
-    });
-    const tooLargeDiagnostic = await buildHostedOpenAiCacheDiagnostic({
-      endpointKind: "responses",
-      fingerprintSecret: "diagnostic-fingerprint-secret",
-      method: "POST",
-      requestBytes: TEST_TEXT_ENCODER.encode(tooLargeBody),
-    });
-
-    expect(tooLargeDiagnostic).toEqual(expect.objectContaining({
-      fingerprintKind: "hmac-sha256",
-      jsonSkippedReasonKind: "too_large",
-      jsonType: "unknown",
-      jsonValid: false,
-      requestFingerprintPresent: false,
-      requestFullFingerprintSkipped: true,
-      requestPrefixLengths: [8 * 1024, 32 * 1024, 128 * 1024],
-    }));
-    expect(tooLargeDiagnostic.requestPrefixFingerprints).toEqual(
-      expect.arrayContaining([expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u)]),
-    );
-    expect(tooLargeDiagnostic.inputType).toBeUndefined();
-    expect(tooLargeDiagnostic.inputNestedMetricBytes).toBeUndefined();
-  });
-
   it.each([
     ["response.completed", "succeeded"],
     ["response.incomplete", "partial"],
@@ -6887,7 +6189,7 @@ describe("hostedRunnerIntercept", () => {
     await expect(response.text()).resolves.toBe(completedEvent);
     const usageCall = fetchMock.mock.calls.find(([request]) => {
       const url = request instanceof Request ? request.url : String(request);
-      return url.endsWith("/api/internal/hosted-execution/usage/record");
+      return new URL(url).pathname === "/api/internal/hosted-execution/usage/record";
     });
     expect(usageCall).toBeDefined();
     const payload = JSON.parse(String(usageCall?.[1]?.body)) as {
@@ -6954,7 +6256,7 @@ describe("hostedRunnerIntercept", () => {
           status: 200,
         });
       }
-      if (url.endsWith("/api/internal/hosted-execution/usage/record")) {
+      if (new URL(url).pathname === "/api/internal/hosted-execution/usage/record") {
         return Response.json({
           platformAiUsageAllowedAfter: true,
           recorded: true,
@@ -6996,7 +6298,7 @@ describe("hostedRunnerIntercept", () => {
     await expect(response.text()).resolves.toBe(completedEvent);
     const usageCall = fetchMock.mock.calls.find(([request]) => {
       const url = request instanceof Request ? request.url : String(request);
-      return url.endsWith("/api/internal/hosted-execution/usage/record");
+      return new URL(url).pathname === "/api/internal/hosted-execution/usage/record";
     });
     expect(usageCall).toBeDefined();
     const payload = JSON.parse(String(usageCall?.[1]?.body)) as {
@@ -7097,7 +6399,7 @@ describe("hostedRunnerIntercept", () => {
     await expect(response.text()).resolves.not.toContain("resp_memory_unmetered");
     expect(fetchMock.mock.calls.some(([request]) => {
       const url = request instanceof Request ? request.url : String(request);
-      return url.endsWith("/api/internal/hosted-execution/usage/record");
+      return new URL(url).pathname === "/api/internal/hosted-execution/usage/record";
     })).toBe(false);
   });
 
@@ -7148,7 +6450,7 @@ describe("hostedRunnerIntercept", () => {
     await expect(response.text()).resolves.toBe(completedEvent);
     expect(fetchMock.mock.calls.some(([request]) => {
       const url = request instanceof Request ? request.url : String(request);
-      return url.endsWith("/api/internal/hosted-execution/usage/record");
+      return new URL(url).pathname === "/api/internal/hosted-execution/usage/record";
     })).toBe(false);
   });
 
@@ -7252,7 +6554,7 @@ describe("hostedRunnerIntercept", () => {
     await expect(response.text()).resolves.toBe(completedEvent);
     expect(fetchMock.mock.calls.some(([request]) => {
       const url = request instanceof Request ? request.url : String(request);
-      return url.endsWith("/api/internal/hosted-execution/usage/record");
+      return new URL(url).pathname === "/api/internal/hosted-execution/usage/record";
     })).toBe(false);
   });
 
@@ -7370,7 +6672,7 @@ describe("hostedRunnerIntercept", () => {
       throw new Error("Mapbox without authority headers should use provider egress token validation.");
     });
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
+      providerEgressTokenHash: string;
       userId: string;
     }) => createProviderEgressTokenValidationResult(input));
 
@@ -7399,7 +6701,7 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
@@ -7440,7 +6742,7 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(401);
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -7827,7 +7129,7 @@ describe("hostedRunnerIntercept", () => {
       throw new Error("Exa without authority headers should use provider egress token validation.");
     });
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
+      providerEgressTokenHash: string;
       userId: string;
     }) => createProviderEgressTokenValidationResult(input));
 
@@ -7852,7 +7154,7 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
@@ -8191,7 +7493,7 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(401);
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -8201,7 +7503,7 @@ describe("hostedRunnerIntercept", () => {
           providerKind: "exa",
           providerRequestAuthorized: false,
           writeFenceValidationMode: "provider_egress_token",
-          writeFenceValidationRejectReason: "provider_egress_token_mismatch",
+          writeFenceValidationRejectReason: "write_fence_mismatch",
         }),
         message: "Hosted runner provider egress completed.",
       }),
@@ -8362,7 +7664,7 @@ describe("hostedRunnerIntercept", () => {
       throw new Error("Linq without authority headers should use provider egress token validation.");
     });
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
+      providerEgressTokenHash: string;
       userId: string;
     }) => createProviderEgressTokenValidationResult(input));
 
@@ -8388,7 +7690,7 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
@@ -9007,7 +8309,7 @@ describe("hostedRunnerIntercept", () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
+      providerEgressTokenHash: string;
       userId: string;
     }) => createProviderEgressTokenValidationResult(input));
     const env = createInterceptEnv({
@@ -9031,7 +8333,7 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(200);
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
@@ -9457,7 +8759,7 @@ describe("hostedRunnerIntercept", () => {
       throw new Error("Telegram without authority headers should use provider egress token validation.");
     });
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
+      providerEgressTokenHash: string;
       userId: string;
     }) => createProviderEgressTokenValidationResult(input));
 
@@ -9482,7 +8784,7 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      providerEgressTokenHash: createHash("sha256").update(PROVIDER_EGRESS_TOKEN).digest("hex"),
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
@@ -9961,7 +9263,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [usageUrl, usageInit] = fetchMock.mock.calls[0] ?? [];
     expect(String(usageUrl)).toBe(
-      "https://web.example.test/api/internal/hosted-execution/usage/record",
+      "https://web.example.test/api/internal/hosted-execution/usage/record?runtimeAuthority=1&runtimeAttempt=attempt_provider_egress_credential&runtimeGeneration=7&runtimeWorkspaceVersion=4",
     );
     expect(usageInit?.method).toBe("POST");
     const usageBody = JSON.parse(String(usageInit?.body)) as {
@@ -10078,7 +9380,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-      "https://web.example.test/api/internal/hosted-execution/usage/record",
+      "https://web.example.test/api/internal/hosted-execution/usage/record?runtimeAuthority=1&runtimeAttempt=attempt_provider_egress_credential&runtimeGeneration=7&runtimeWorkspaceVersion=4",
     );
     expect(revokeActiveRuntimePlatformAiUsage).not.toHaveBeenCalled();
   });
@@ -10575,7 +9877,7 @@ function createInterceptEnv(input: {
     userId: string;
   }) => Promise<boolean>;
   validateRuntimeProviderEgressToken?: (input: {
-    providerEgressToken: string;
+    providerEgressTokenHash: string;
     userId: string;
   }) => Promise<WorkerProviderEgressTokenValidationResult>;
   validateRuntimeProviderEgressCredential?: (input: {
@@ -10585,7 +9887,7 @@ function createInterceptEnv(input: {
   }) => Promise<WorkerProviderEgressCredentialValidationResult>;
   XAI_API_KEY?: string;
 }): RunnerOutboundEnvironmentSource {
-  return {
+  const env: RunnerOutboundEnvironmentSource = {
     ...createHostedExecutionTestEnv(),
     AI: input.AI,
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
@@ -10624,6 +9926,9 @@ function createInterceptEnv(input: {
         readActiveRuntimeUserFence:
           input.readActiveRuntimeUserFence
           ?? (async () => ({ active: false, reason: "no_active_runtime" })),
+        beginRuntimeUsageSettlement: async () => true,
+        finishRuntimeUsageSettlement: async () => {},
+        runtimeUsageSettlementAllowsProviders: async () => true,
         smokeHealth: async () => {
           throw new Error("Runner container smoke should not run in provider egress tests.");
         },
@@ -10645,18 +9950,10 @@ function createInterceptEnv(input: {
     TELEGRAM_FILE_BASE_URL: input.TELEGRAM_FILE_BASE_URL,
     VENICE_API_KEY: input.VENICE_API_KEY,
     XAI_API_KEY: input.XAI_API_KEY,
-    USER_RUNNER: {
-      getByName: () => ({
-        revokeActiveRuntimePlatformAiUsage:
-          input.revokeActiveRuntimePlatformAiUsage ?? (async () => true),
-        validateRuntimeProviderEgressCredential:
-          input.validateRuntimeProviderEgressCredential ?? (async () => ({ owns: false })),
-        validateRuntimeProviderEgressToken:
-          input.validateRuntimeProviderEgressToken ?? (async () => ({ owns: false })),
-        validateRuntimeWriteFence: input.validateRuntimeWriteFence ?? (async () => false),
-      }),
-    },
+    USER_RUNNER: { getByName() { throw new Error("Provider egress must not access the legacy namespace."); } },
   };
+  interceptControl.set(env, { input, owner: null, revoked: false });
+  return env;
 }
 
 function readForwardedRequest(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>): Request {

@@ -173,6 +173,7 @@ test("canonical write lock rejects concurrent acquisition with an active VaultEr
       const lockError = error as {
         code?: string;
         details: {
+          lockState?: unknown;
           metadata?: {
             command?: string;
             host?: string;
@@ -184,6 +185,7 @@ test("canonical write lock rejects concurrent acquisition with an active VaultEr
         message: string;
       };
       assert.equal(lockError.code, "CANONICAL_WRITE_LOCKED");
+      assert.equal(lockError.details.lockState, "active");
       assert.match(lockError.message, /already in progress/u);
       assert.equal(lockError.details.relativePath, CANONICAL_WRITE_LOCK_DIRECTORY);
       assert.equal(lockError.details.metadata?.pid, 4242);
@@ -334,6 +336,7 @@ test("canonical write lock rejects stale held locks with a rich VaultError", asy
       const lockError = error as {
         code?: string;
         details: {
+          lockState?: unknown;
           metadata?: {
             command?: string;
             host?: string;
@@ -345,6 +348,7 @@ test("canonical write lock rejects stale held locks with a rich VaultError", asy
         message: string;
       };
       assert.equal(lockError.code, "CANONICAL_WRITE_LOCKED");
+      assert.equal(lockError.details.lockState, "stale");
       assert.match(lockError.message, /blocked by a stale lock/u);
       assert.match(lockError.message, /Process 1234 is no longer running\./u);
       assert.match(lockError.message, /stale-lock-holder/u);
@@ -405,6 +409,7 @@ test("canonical write lock re-inspects EEXIST failures and either rethrows or re
       const lockError = error as {
         code?: string;
         details: {
+          lockState?: unknown;
           metadata?: {
             command?: string;
             host?: string;
@@ -416,6 +421,7 @@ test("canonical write lock re-inspects EEXIST failures and either rethrows or re
         message: string;
       };
       assert.equal(lockError.code, "CANONICAL_WRITE_LOCKED");
+      assert.equal(lockError.details.lockState, "stale");
       assert.match(lockError.message, /blocked by a stale lock/u);
       assert.match(lockError.message, /stale-eexist-holder/u);
       assert.equal(lockError.details.relativePath, CANONICAL_WRITE_LOCK_DIRECTORY);
@@ -438,4 +444,53 @@ test("canonical write lock re-inspects EEXIST failures and either rethrows or re
       return true;
     },
   );
+});
+
+test("canonical write lock exports active contention classification for a real independent owner", async () => {
+  const vaultRoot = await makeVaultRoot();
+  const {
+    acquireCanonicalWriteLock,
+    inspectCanonicalWriteLock,
+    isActiveCanonicalWriteLockError,
+    VaultError,
+    withCanonicalWriteLockScope,
+  } = await loadCoreIndex();
+  const owner = await acquireCanonicalWriteLock(vaultRoot);
+  try {
+    await assert.rejects(
+      () => withCanonicalWriteLockScope(vaultRoot, async () => {
+        const unexpected = await acquireCanonicalWriteLock(vaultRoot, { timeoutMs: 0 });
+        await unexpected.release();
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof VaultError);
+        assert.equal(error.code, "CANONICAL_WRITE_LOCKED");
+        assert.equal(error.details.lockState, "active");
+        assert.equal(isActiveCanonicalWriteLockError(error), true);
+        return true;
+      },
+    );
+    assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "active");
+  } finally {
+    await owner.release();
+  }
+  assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "unlocked");
+});
+
+test("canonical write lock classification rejects unknown states, prose, pids and non-VaultError lookalikes", async () => {
+  const { isActiveCanonicalWriteLockError, VaultError } = await loadCoreIndex();
+  for (const lockState of [undefined, null, "stale", "unknown", "ACTIVE", true, ["active"], { active: true }]) {
+    const error = new VaultError("CANONICAL_WRITE_LOCKED", "Canonical vault writes are already in progress.", {
+      metadata: { pid: process.pid },
+    });
+    if (lockState !== undefined) error.details.lockState = lockState;
+    assert.equal(isActiveCanonicalWriteLockError(error), false);
+  }
+  assert.equal(isActiveCanonicalWriteLockError(
+    new VaultError("CANONICAL_WRITE_LOCK_REQUIRED", "Synthetic failure.", { lockState: "active" }),
+  ), false);
+  const lookalike = { code: "CANONICAL_WRITE_LOCKED", details: { lockState: "active" } };
+  for (const error of [null, undefined, "CANONICAL_WRITE_LOCKED", lookalike, Object.assign(new Error("Synthetic lock."), lookalike)]) {
+    assert.equal(isActiveCanonicalWriteLockError(error), false);
+  }
 });

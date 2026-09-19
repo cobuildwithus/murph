@@ -2,26 +2,29 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/src/components/ui/button";
-import { Field, FieldGroup, FieldLabel } from "@/src/components/ui/field";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Label } from "@/src/components/ui/label";
+import { Spinner } from "@/src/components/ui/spinner";
 import { Input } from "@/src/components/ui/input";
-import { SettingsStatusLine } from "@/src/components/settings/connected-account-card";
 import { maskPhoneNumber, normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
 import { HostedPhoneEntryStep } from "./hosted-phone-auth-step-views";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "./hosted-phone-country-options";
 import { usePhoneCountryCode } from "./phone-country-code-client-provider";
+import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
 import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 
 // Presentation and in-flight ownership shared by login and credential changes.
 // Each caller retains its own proof, session and canonical mutation endpoints.
 export function HostedContactCodeForm({
-  method, onSend, onVerify, verifyLabel = "Continue", autoSubmit = true,
+  method, onSend, onVerify, verifyLabel, autoSubmit = true,
   onActiveChange, autoSendPastedPhoneNumber = false,
-  autoFocus = false, initialValue = "",
+  autoFocus = false, initialValue = "", size = "default",
 }: {
   method: "email" | "phone";
   onSend: (value: string, signal: AbortSignal) => Promise<void>;
   onVerify: (value: string, code: string, signal: AbortSignal) => Promise<void>;
   verifyLabel?: string;
+  size?: "default" | "compact";
   autoSubmit?: boolean;
   autoSendPastedPhoneNumber?: boolean;
   autoFocus?: boolean;
@@ -65,7 +68,7 @@ export function HostedContactCodeForm({
 
   function send(value = draft, dialCode = country.dialCode) {
     const normalized = sentTo ?? (method === "email" ? value.trim().toLowerCase() : normalizePhoneNumberForCountry(value, dialCode));
-    if (!normalized) { setError("Enter a valid phone number."); return; }
+    if (!normalized) { setError(method === "email" ? "Enter a valid email address." : "Enter a valid phone number."); return; }
     void run("send-code", async (signal) => {
       await onSend(normalized, signal);
       if (signal.aborted) return;
@@ -83,16 +86,20 @@ export function HostedContactCodeForm({
     void run("verify-code", (signal) => onVerify(sentTo, codeRef.current, signal));
   }
 
-  return <div className="flex flex-col gap-4">
+  function resetEntry() {
+    setSentTo(null); setCode(""); codeRef.current = ""; setError(null); onActiveChange?.(false);
+  }
+
+  return <div className="space-y-3">
     {sentTo ? <HostedVerificationCodeStep
-      autoSubmit={autoSubmit} code={code} disabled={pending !== null} pendingAction={pending}
-      description={`We sent the latest code to ${method === "phone" ? maskPhoneNumber(sentTo) : sentTo}.`}
-      primaryActionLabel={verifyLabel} primaryActionPendingLabel="Finishing..."
+      size={size} autoSubmit={autoSubmit} code={code} disabled={pending !== null} pendingAction={pending}
+      description={method === "phone" ? `We texted the latest code to ${maskPhoneNumber(sentTo)}.` : `We emailed a code to ${sentTo}.`}
+      primaryActionLabel={verifyLabel ?? (method === "phone" ? "Verify phone" : "Verify email")} primaryActionPendingLabel={method === "email" ? "Verifying..." : "Finishing..."}
       onCodeChange={(value) => { codeRef.current = value.replace(/\D/gu, "").slice(0, 6); setCode(codeRef.current); }}
       onResendCode={() => send()} onSubmit={verify}
-      secondaryAction={<Button type="button" variant="ghost" disabled={pending !== null} onClick={() => {
-        setSentTo(null); setCode(""); codeRef.current = ""; setError(null); onActiveChange?.(false);
-      }}>Use a different {method === "phone" ? "number" : "email"}</Button>}
+      secondaryAction={method === "phone"
+        ? <HostedUseDifferentNumberButton disabled={pending !== null} pendingAction={pending} size={size === "compact" ? "sm" : "lg"} onClick={resetEntry} />
+        : <Button type="button" variant="ghost" size="lg" className="w-full text-muted-foreground hover:text-foreground" disabled={pending !== null} onClick={resetEntry}>Use another email</Button>}
     /> : method === "phone" ? <HostedPhoneEntryStep
       phoneInputAutoFocus={autoFocus}
       phoneNumber={draft} selectedPhoneCountry={country} phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}
@@ -105,18 +112,17 @@ export function HostedContactCodeForm({
         }
       }}
       onSubmitPhoneEntry={(event) => { event.preventDefault(); send(); }}
-    /> : <form onSubmit={(event) => { event.preventDefault(); send(); }}>
-      <FieldGroup>
-        <Field data-disabled={pending !== null}>
-          <FieldLabel htmlFor={inputId}>Email</FieldLabel>
-          <Input id={inputId} type="email" autoFocus={autoFocus} autoComplete="email" autoCapitalize="none" spellCheck={false}
-            maxLength={320} required value={draft} disabled={pending !== null} onChange={(event) => setDraft(event.target.value)} />
-        </Field>
-        <Button type="submit" disabled={pending !== null || !draft.trim()} aria-busy={pending !== null}>
-          {pending === "send-code" ? "Sending code..." : "Send verification code"}
-        </Button>
-      </FieldGroup>
+    /> : <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); send(); }}>
+      <div className="space-y-3">
+        <Label htmlFor={inputId}>Your email</Label>
+        <Input id={inputId} type="email" inputMode="email" autoFocus={autoFocus} autoComplete="off" autoCapitalize="none" spellCheck={false}
+          data-bwignore="true" placeholder="you@example.com" inputSize="xl" className="w-full border-stone-200 bg-white"
+          maxLength={320} required value={draft} disabled={pending !== null} onChange={(event) => setDraft(event.target.value)} />
+      </div>
+      <Button type="submit" size="xl" className="w-full" disabled={pending !== null} aria-busy={pending !== null}>
+        {pending === "send-code" ? <><Spinner aria-hidden="true" />Sending...</> : "Email me a code"}
+      </Button>
     </form>}
-    {error ? <SettingsStatusLine message={error} tone="destructive" /> : null}
+    {error ? <Alert variant="destructive"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
   </div>;
 }

@@ -49,7 +49,9 @@ const HOSTED_EXECUTION_MAX_DIAGNOSTIC_MESSAGE_LENGTH = 320;
 const HOSTED_EXECUTION_MAX_STACK_PREVIEW_LINES = 3;
 const HOSTED_EXECUTION_MAX_DETAIL_ARRAY_LENGTH = 32;
 const HOSTED_EXECUTION_MAX_DETAIL_DEPTH = 4;
-const HOSTED_EXECUTION_MAX_DETAIL_KEYS = 32;
+// Responses relay observations include completion and close fields after the
+// timing counters. Keep the complete bounded record while retaining redaction.
+const HOSTED_EXECUTION_MAX_DETAIL_KEYS = 64;
 const HOSTED_EXECUTION_MAX_ERROR_PROPERTY_SCAN_DEPTH = 3;
 const HOSTED_EXECUTION_SAFE_CONFIGURATION_MESSAGE_PATTERNS = [
   /^(?:[A-Z][A-Z0-9_]{1,127}|CF_[A-Z0-9_]{1,127}|HOSTED_[A-Z0-9_]{1,127}|DEVICE_SYNC_[A-Z0-9_]{1,127})\s+(?:must be|is)\s+configured(?:\s+for [A-Za-z0-9 ._/-]+)?\.?$/u,

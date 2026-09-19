@@ -94,26 +94,7 @@ function isRawHostedDeviceSyncIdentifierMetadataKey(normalizedKey: string): bool
     || normalizedKey.includes("clientuserid");
 }
 
-function sanitizeHostedConnectionMetadata(
-  value: Record<string, unknown> | null | undefined,
-): Record<string, unknown> {
-  const sanitized = sanitizeStoredDeviceSyncMetadata(value);
-
-  for (const key of Object.keys(sanitized)) {
-    const normalizedKey = normalizeMetadataKey(key);
-    if (
-      normalizedKey.includes("hmacsecret")
-      || normalizedKey.includes("webhooksecret")
-      || isRawHostedDeviceSyncIdentifierMetadataKey(normalizedKey)
-    ) {
-      delete sanitized[key];
-    }
-  }
-
-  return sanitized;
-}
-
-function sanitizeCredentialMetadata(
+function sanitizeHostedMetadata(
   value: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> {
   const sanitized = sanitizeStoredDeviceSyncMetadata(value);
@@ -165,7 +146,7 @@ function sanitizeCredentialSubject(
 }
 
 function buildCredentialMetadata(credential: HostedAccountCredentialInput): Record<string, unknown> {
-  const metadata = sanitizeCredentialMetadata(credential.credentialMetadata ?? {});
+  const metadata = sanitizeHostedMetadata(credential.credentialMetadata ?? {});
 
   if (credential.kind !== "provider_config") {
     return metadata;
@@ -308,17 +289,6 @@ function buildCredentialColumnsFromExisting(
     };
   }
 
-  if (credentialKind === "none") {
-    return {
-      credentialKind,
-      providerConfigKey: null,
-      accessTokenEncrypted: null,
-      refreshTokenEncrypted: null,
-      accessTokenExpiresAt: null,
-      credentialMetadataJson,
-    };
-  }
-
   if (existing?.credential.kind === "oauth_tokens") {
     return {
       credentialKind: "oauth_tokens",
@@ -343,38 +313,13 @@ function buildCredentialColumnsFromExisting(
 function buildClearedCredentialColumnsFromExisting(
   existing: StoredDeviceSyncAccount | null,
 ): ResolvedHostedCredentialColumns {
-  const credentialKind = readStoredCredentialKind(existing);
-  const credentialMetadataJson = stringifyJson(readStoredCredentialMetadata(existing));
-
-  if (credentialKind === "provider_config") {
-    return {
-      credentialKind,
-      providerConfigKey: readStoredProviderConfigKey(existing),
-      accessTokenEncrypted: null,
-      refreshTokenEncrypted: null,
-      accessTokenExpiresAt: null,
-      credentialMetadataJson,
-    };
-  }
-
-  if (credentialKind === "none") {
-    return {
-      credentialKind,
-      providerConfigKey: null,
-      accessTokenEncrypted: null,
-      refreshTokenEncrypted: null,
-      accessTokenExpiresAt: null,
-      credentialMetadataJson,
-    };
-  }
-
+  const columns = buildCredentialColumnsFromExisting(existing);
   return {
-    credentialKind: "none",
-    providerConfigKey: null,
+    ...columns,
+    credentialKind: columns.credentialKind === "provider_config" ? "provider_config" : "none",
     accessTokenEncrypted: null,
     refreshTokenEncrypted: null,
     accessTokenExpiresAt: null,
-    credentialMetadataJson,
   };
 }
 
@@ -596,141 +541,210 @@ export function isReplayedHostedObservedTokenVersion(input: {
     && input.localTokenRevision !== input.hostedObservedTokenRevision;
 }
 
+function resolveHostedHydrationAccount(
+  database: DatabaseSync,
+  input: HostedAccountHydrationInput,
+  hostedConnectionId: string | null,
+): StoredDeviceSyncAccount | null {
+  const existingByHostedConnection = hostedConnectionId
+    ? getAccountByHostedConnectionId(database, hostedConnectionId)
+    : null;
+  const existingByExternalAccount = getAccountByExternalAccount(
+    database,
+    input.connection.provider,
+    input.connection.externalAccountId,
+  );
+  const terminalPrivacyScrub = isTerminalHostedPrivacyScrub(
+    input.connection,
+    hostedConnectionId,
+  );
+  const externalAccountHostedConnectionId = existingByExternalAccount
+    ? getHostedConnectionIdForAccountId(database, existingByExternalAccount.id)
+    : null;
+  const unboundEpochAccounts = terminalPrivacyScrub
+    ? listUnboundAccountsByConnectionEpoch(
+        database,
+        input.connection.provider,
+        input.connection.connectedAt,
+      )
+    : [];
+  if (
+    existingByHostedConnection
+    && existingByHostedConnection.provider !== input.connection.provider
+  ) {
+    throw new TypeError("Hosted device-sync connection cannot change providers.");
+  }
+  if (
+    hostedConnectionId
+    && externalAccountHostedConnectionId
+    && externalAccountHostedConnectionId !== hostedConnectionId
+  ) {
+    throw new TypeError(
+      "Hosted device-sync account is already bound to another hosted connection.",
+    );
+  }
+  const recognizedBoundTerminalFork = Boolean(
+    terminalPrivacyScrub
+    && existingByHostedConnection
+    && existingByExternalAccount
+    && existingByHostedConnection.id !== existingByExternalAccount.id
+    && unboundEpochAccounts.length === 1
+    && unboundEpochAccounts[0]?.id === existingByExternalAccount.id
+  );
+  if (
+    existingByHostedConnection
+    && existingByExternalAccount
+    && existingByHostedConnection.id !== existingByExternalAccount.id
+    && !recognizedBoundTerminalFork
+  ) {
+    throw new TypeError(
+      "Hosted device-sync connection identity conflicts with another local account.",
+    );
+  }
+  if (
+    recognizedBoundTerminalFork
+    && existingByHostedConnection
+    && existingByExternalAccount
+  ) {
+    consolidateLegacyHostedAccount(
+      database,
+      existingByHostedConnection.id,
+      existingByExternalAccount.id,
+    );
+  }
+  let existing = existingByHostedConnection ?? existingByExternalAccount;
+  if (!existing && terminalPrivacyScrub) {
+    if (
+      unboundEpochAccounts.length > 1
+      || unboundEpochAccounts[0]?.externalAccountId.startsWith("opaque:") === true
+    ) {
+      throw new TypeError("Hosted device-sync legacy connection identity is ambiguous.");
+    }
+    existing = unboundEpochAccounts[0] ?? null;
+  }
+  if (existing && terminalPrivacyScrub && !recognizedBoundTerminalFork) {
+    const legacySiblings = unboundEpochAccounts.filter(
+      (account) => account.id !== existing.id,
+    );
+    if (
+      legacySiblings.length > 1
+      || legacySiblings[0]?.externalAccountId.startsWith("opaque:") === true
+    ) {
+      throw new TypeError("Hosted device-sync legacy connection identity is ambiguous.");
+    }
+    if (legacySiblings[0]) {
+      consolidateLegacyHostedAccount(database, existing.id, legacySiblings[0].id);
+    }
+  }
+  return existing;
+}
+
+function planHostedAccountHydration(
+  existing: StoredDeviceSyncAccount | null,
+  input: HostedAccountHydrationInput,
+): ReturnType<typeof resolveHostedAccountHydrationPlan> {
+  const connectionStateStale = isStaleHostedObservedUpdatedAt(
+    existing?.hostedObservedUpdatedAt ?? null,
+    input.hostedObservedUpdatedAt ?? null,
+  );
+  const connectionStateReplayed = isReplayedHostedObservedUpdatedAt({
+    localConnectionRevision: existing?.localConnectionRevision ?? 0,
+    nextObservedUpdatedAt: input.hostedObservedUpdatedAt ?? null,
+    hostedObservedConnectionRevision: existing?.hostedObservedConnectionRevision ?? 0,
+    previousObservedUpdatedAt: existing?.hostedObservedUpdatedAt ?? null,
+  });
+  const tokenStateStale = isStaleHostedObservedTokenVersion(
+    existing?.hostedObservedTokenVersion ?? null,
+    input.hostedObservedTokenVersion ?? null,
+  );
+  const tokenStateReplayed = isReplayedHostedObservedTokenVersion({
+    hostedObservedTokenRevision: existing?.hostedObservedTokenRevision ?? 0,
+    localTokenRevision: existing?.localTokenRevision ?? 0,
+    nextObservedTokenVersion: input.hostedObservedTokenVersion ?? null,
+    previousObservedTokenVersion: existing?.hostedObservedTokenVersion ?? null,
+  });
+  return resolveHostedAccountHydrationPlan({
+    existing,
+    hydration: input,
+    connectionStateReplayed,
+    connectionStateStale,
+    tokenStateReplayed,
+    tokenStateStale,
+  });
+}
+
+function selectHydratedHostedConnection(
+  existing: StoredDeviceSyncAccount | null,
+  connection: HostedAccountHydrationInput["connection"],
+  connectionAccepted: boolean,
+): HostedAccountHydrationInput["connection"] {
+  if (connectionAccepted || !existing) {
+    return connection;
+  }
+
+  return {
+    ...existing,
+    displayName: existing.displayName ?? connection.displayName,
+    setupPhase: existing.setupPhase ?? connection.setupPhase ?? null,
+    setupExpiresAt: existing.setupExpiresAt ?? connection.setupExpiresAt ?? null,
+  };
+}
+
+function resolveHydratedObservationState(
+  existing: StoredDeviceSyncAccount | null,
+  input: HostedAccountHydrationInput,
+  hydrationPlan: ReturnType<typeof resolveHostedAccountHydrationPlan>,
+): Pick<StoredDeviceSyncAccount,
+  | "hostedObservedUpdatedAt"
+  | "hostedObservedConnectionRevision"
+  | "hostedObservedTokenVersion"
+  | "hostedObservedTokenRevision"
+> {
+  const shouldClearTokens = hydrationPlan.tokenPayloadAction === "clear";
+  const hostedObservedUpdatedAt = hydrationPlan.connectionAccepted
+    ? input.hostedObservedUpdatedAt ?? existing?.hostedObservedUpdatedAt ?? null
+    : existing?.hostedObservedUpdatedAt ?? null;
+  const hostedObservedConnectionRevision = hydrationPlan.connectionAccepted
+    && input.advanceHostedObservedConnectionRevision !== false
+    ? existing?.localConnectionRevision ?? 0
+    : existing?.hostedObservedConnectionRevision ?? 0;
+  const hostedObservedTokenVersion = shouldClearTokens
+    ? input.hostedObservedTokenVersion
+    : hydrationPlan.advanceTokenObservation
+      ? input.hostedObservedTokenVersion
+      : existing?.hostedObservedTokenVersion ?? null;
+  const hostedObservedTokenRevision = shouldClearTokens || hydrationPlan.advanceTokenObservation
+    ? existing?.localTokenRevision ?? 0
+    : existing?.hostedObservedTokenRevision ?? 0;
+  return {
+    hostedObservedUpdatedAt,
+    hostedObservedConnectionRevision,
+    hostedObservedTokenVersion,
+    hostedObservedTokenRevision,
+  };
+}
+
 export function hydrateHostedAccount(
   database: DatabaseSync,
   input: HostedAccountHydrationInput,
 ): StoredDeviceSyncAccount | null {
   return withImmediateTransaction(database, () => {
     const hostedConnectionId = normalizeHostedConnectionId(input.hostedConnectionId);
-    const existingByHostedConnection = hostedConnectionId
-      ? getAccountByHostedConnectionId(database, hostedConnectionId)
-      : null;
-    const existingByExternalAccount = getAccountByExternalAccount(
-      database,
-      input.connection.provider,
-      input.connection.externalAccountId,
-    );
-    const terminalPrivacyScrub = isTerminalHostedPrivacyScrub(
-      input.connection,
-      hostedConnectionId,
-    );
-    const externalAccountHostedConnectionId = existingByExternalAccount
-      ? getHostedConnectionIdForAccountId(database, existingByExternalAccount.id)
-      : null;
-    const unboundEpochAccounts = terminalPrivacyScrub
-      ? listUnboundAccountsByConnectionEpoch(
-          database,
-          input.connection.provider,
-          input.connection.connectedAt,
-        )
-      : [];
-    if (
-      existingByHostedConnection
-      && existingByHostedConnection.provider !== input.connection.provider
-    ) {
-      throw new TypeError("Hosted device-sync connection cannot change providers.");
-    }
-    if (
-      hostedConnectionId
-      && externalAccountHostedConnectionId
-      && externalAccountHostedConnectionId !== hostedConnectionId
-    ) {
-      throw new TypeError(
-        "Hosted device-sync account is already bound to another hosted connection.",
-      );
-    }
-    const recognizedBoundTerminalFork = Boolean(
-      terminalPrivacyScrub
-      && existingByHostedConnection
-      && existingByExternalAccount
-      && existingByHostedConnection.id !== existingByExternalAccount.id
-      && unboundEpochAccounts.length === 1
-      && unboundEpochAccounts[0]?.id === existingByExternalAccount.id
-    );
-    if (
-      existingByHostedConnection
-      && existingByExternalAccount
-      && existingByHostedConnection.id !== existingByExternalAccount.id
-      && !recognizedBoundTerminalFork
-    ) {
-      throw new TypeError(
-        "Hosted device-sync connection identity conflicts with another local account.",
-      );
-    }
-    if (
-      recognizedBoundTerminalFork
-      && existingByHostedConnection
-      && existingByExternalAccount
-    ) {
-      consolidateLegacyHostedAccount(
-        database,
-        existingByHostedConnection.id,
-        existingByExternalAccount.id,
-      );
-    }
-    let existing = existingByHostedConnection ?? existingByExternalAccount;
-    if (!existing && terminalPrivacyScrub) {
-      if (
-        unboundEpochAccounts.length > 1
-        || unboundEpochAccounts[0]?.externalAccountId.startsWith("opaque:") === true
-      ) {
-        throw new TypeError("Hosted device-sync legacy connection identity is ambiguous.");
-      }
-      existing = unboundEpochAccounts[0] ?? null;
-    }
-    if (existing && terminalPrivacyScrub && !recognizedBoundTerminalFork) {
-      const legacySiblings = unboundEpochAccounts.filter(
-        (account) => account.id !== existing.id,
-      );
-      if (
-        legacySiblings.length > 1
-        || legacySiblings[0]?.externalAccountId.startsWith("opaque:") === true
-      ) {
-        throw new TypeError("Hosted device-sync legacy connection identity is ambiguous.");
-      }
-      if (legacySiblings[0]) {
-        consolidateLegacyHostedAccount(database, existing.id, legacySiblings[0].id);
-      }
-    }
+    const existing = resolveHostedHydrationAccount(database, input, hostedConnectionId);
 
     if (!existing && getHostedHydrationTokenInput(input) === undefined && input.credential === undefined) {
       return null;
     }
 
-    const connectionStateStale = isStaleHostedObservedUpdatedAt(
-      existing?.hostedObservedUpdatedAt ?? null,
-      input.hostedObservedUpdatedAt ?? null,
-    );
-    const connectionStateReplayed = isReplayedHostedObservedUpdatedAt({
-      localConnectionRevision: existing?.localConnectionRevision ?? 0,
-      nextObservedUpdatedAt: input.hostedObservedUpdatedAt ?? null,
-      hostedObservedConnectionRevision: existing?.hostedObservedConnectionRevision ?? 0,
-      previousObservedUpdatedAt: existing?.hostedObservedUpdatedAt ?? null,
-    });
-    const tokenStateStale = isStaleHostedObservedTokenVersion(
-      existing?.hostedObservedTokenVersion ?? null,
-      input.hostedObservedTokenVersion ?? null,
-    );
-    const tokenStateReplayed = isReplayedHostedObservedTokenVersion({
-      hostedObservedTokenRevision: existing?.hostedObservedTokenRevision ?? 0,
-      localTokenRevision: existing?.localTokenRevision ?? 0,
-      nextObservedTokenVersion: input.hostedObservedTokenVersion ?? null,
-      previousObservedTokenVersion: existing?.hostedObservedTokenVersion ?? null,
-    });
-    const hydrationPlan = resolveHostedAccountHydrationPlan({
-      existing,
-      hydration: input,
-      connectionStateReplayed,
-      connectionStateStale,
-      tokenStateReplayed,
-      tokenStateStale,
-    });
+    const hydrationPlan = planHostedAccountHydration(existing, input);
     const shouldClearTokens = hydrationPlan.tokenPayloadAction === "clear";
-    const connectionUpdatedAt = hydrationPlan.connectionAccepted
-      ? input.connection.updatedAt
-      : existing?.updatedAt ?? input.connection.updatedAt;
-    const rowUpdatedAt = latestIsoTimestamp(existing?.updatedAt ?? null, connectionUpdatedAt)
-      ?? connectionUpdatedAt;
+    const connection = selectHydratedHostedConnection(
+      existing,
+      input.connection,
+      hydrationPlan.connectionAccepted,
+    );
+    const rowUpdatedAt = latestIsoTimestamp(existing?.updatedAt ?? null, connection.updatedAt)
+      ?? connection.updatedAt;
     const inputTokens = getHostedHydrationTokenInput(input);
     const credentialColumns = resolveHydratedHostedAccountCredential({
       acceptNonTokenCredential: hydrationPlan.acceptNonTokenCredential,
@@ -740,47 +754,16 @@ export function hydrateHostedAccount(
       hydration: input,
       inputTokens: hydrationPlan.tokenPayloadAction === "apply_bundle" ? inputTokens : undefined,
     });
-    const hostedObservedUpdatedAt = hydrationPlan.connectionAccepted
-      ? input.hostedObservedUpdatedAt ?? existing?.hostedObservedUpdatedAt ?? null
-      : existing?.hostedObservedUpdatedAt ?? null;
-    const hostedObservedConnectionRevision = hydrationPlan.connectionAccepted
-      && input.advanceHostedObservedConnectionRevision !== false
-      ? existing?.localConnectionRevision ?? 0
-      : existing?.hostedObservedConnectionRevision ?? 0;
-    const hostedObservedTokenVersion = shouldClearTokens
-      ? input.hostedObservedTokenVersion
-      : hydrationPlan.advanceTokenObservation
-        ? input.hostedObservedTokenVersion
-        : existing?.hostedObservedTokenVersion ?? null;
-    const hostedObservedTokenRevision = shouldClearTokens || hydrationPlan.advanceTokenObservation
-      ? existing?.localTokenRevision ?? 0
-      : existing?.hostedObservedTokenRevision ?? 0;
-    const displayName = hydrationPlan.connectionAccepted
-      ? input.connection.displayName
-      : existing?.displayName ?? input.connection.displayName;
-    const status = hydrationPlan.connectionAccepted
-      ? input.connection.status
-      : existing?.status ?? input.connection.status;
-    const setupPhase = hydrationPlan.connectionAccepted
-      ? input.connection.setupPhase ?? null
-      : existing?.setupPhase ?? input.connection.setupPhase ?? null;
-    const setupExpiresAt = hydrationPlan.connectionAccepted
-      ? input.connection.setupExpiresAt ?? null
-      : existing?.setupExpiresAt ?? input.connection.setupExpiresAt ?? null;
-    const scopes = hydrationPlan.connectionAccepted
-      ? input.connection.scopes
-      : existing?.scopes ?? input.connection.scopes;
-    const metadata = sanitizeHostedConnectionMetadata(
-      hydrationPlan.connectionAccepted
-        ? input.connection.metadata
-        : existing?.metadata ?? input.connection.metadata,
-    );
-    const connectedAt = hydrationPlan.connectionAccepted
-      ? input.connection.connectedAt
-      : existing?.connectedAt ?? input.connection.connectedAt;
-    const externalAccountId = hydrationPlan.connectionAccepted
-      ? input.connection.externalAccountId
-      : existing?.externalAccountId ?? input.connection.externalAccountId;
+    const {
+      hostedObservedUpdatedAt,
+      hostedObservedConnectionRevision,
+      hostedObservedTokenVersion,
+      hostedObservedTokenRevision,
+    } = resolveHydratedObservationState(existing, input, hydrationPlan);
+    const { displayName, status, scopes, connectedAt, externalAccountId } = connection;
+    const setupPhase = connection.setupPhase ?? null;
+    const setupExpiresAt = connection.setupExpiresAt ?? null;
+    const metadata = sanitizeHostedMetadata(connection.metadata);
     const disconnectGeneration = existing
       ? hydrationPlan.connectionAccepted && status === "disconnected" && existing.status !== "disconnected"
         ? existing.disconnectGeneration + 1

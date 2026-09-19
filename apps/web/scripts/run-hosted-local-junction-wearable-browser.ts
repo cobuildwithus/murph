@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
+import { createInterface } from "node:readline";
+import type { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -10,6 +12,8 @@ import {
   type Page,
   type Response,
 } from "@playwright/test";
+
+import { writeWearableStage, type WearableStage } from "@murphai/hosted-local-harness/wearable-progress";
 
 import { KernelComputerClient } from "../src/lib/computer-use/kernel-client.ts";
 import {
@@ -24,6 +28,7 @@ import { isHostedLocalProviderChallengeSurface } from "./hosted-local-provider-c
 type WearableSource = "garmin" | "oura" | "whoop";
 
 interface BrowserConfig {
+  awaitCanonicalData: boolean;
   browserChannel: "chrome" | undefined;
   browserTransport: "kernel" | "local";
   disclosureSourceName: "Garmin" | "Oura" | "Whoop";
@@ -107,6 +112,7 @@ const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "MURPH_E2E_GARMIN_PASSWORD",
   "MURPH_E2E_HOSTED_SESSION_COOKIE",
   "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
+  "MURPH_E2E_JUNCTION_WEARABLE_DATA",
   "MURPH_E2E_KERNEL_CLI_PATH",
   "MURPH_E2E_PROVIDER_EMAIL",
   "MURPH_E2E_PROVIDER_BROWSER",
@@ -127,16 +133,28 @@ const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "OURA_CLIENT_SECRET",
 ] as const;
 
-let stage = "configuration";
+let stage: WearableStage = "configuration";
+
 let activePage: Page | null = null;
 let activeConfig: BrowserConfig | null = null;
+let failureDiagnostic: string | null = null;
+
+function setStage(nextStage: WearableStage): void {
+  stage = nextStage;
+  writeWearableStage(nextStage);
+}
+
 
 async function main(): Promise<void> {
+  setStage("configuration");
+  activePage = null;
+  activeConfig = null;
+  failureDiagnostic = null;
   const config = readBrowserConfig(process.env);
   activeConfig = config;
   clearHostedLocalBrowserEnvironment(SENSITIVE_BROWSER_ENVIRONMENT_KEYS);
 
-  stage = "browser_launch";
+  setStage("browser_launch");
   const session = await openBrowserSession(config);
   let failure: unknown;
   let failed = false;
@@ -152,10 +170,9 @@ async function main(): Promise<void> {
     page.setDefaultTimeout(15_000);
     page.setDefaultNavigationTimeout(config.timeoutMs);
 
-    stage = "murph_connect_intent";
     await navigateToHostedLocalStart(page, config, session.kernelTunnel);
 
-    stage = "murph_vital_disclosure";
+    setStage("murph_vital_disclosure");
     await page
       .getByRole("dialog")
       .getByRole("button", {
@@ -164,15 +181,15 @@ async function main(): Promise<void> {
       })
       .click({ timeout: config.timeoutMs });
 
-    stage = "murph_connect_start";
+    setStage("murph_connect_start");
     await page.waitForURL((url) => url.origin !== config.webOrigin, {
       timeout: config.timeoutMs,
     });
 
-    stage = `junction_${config.source}_authorization`;
+    setStage(`junction_${config.source}_authorization`);
     await completeAuthorizationAndRequireCallback(page, config);
 
-    stage = "murph_connected_completion";
+    setStage("murph_connected_completion");
     await page.waitForURL(
       (url) => url.origin === config.webOrigin && url.pathname === "/home",
       { timeout: config.timeoutMs },
@@ -181,24 +198,28 @@ async function main(): Promise<void> {
       timeout: config.timeoutMs,
     });
 
-    stage = "murph_persisted_connect_page";
-    await page.goto(new URL("/connect", config.webBaseUrl).toString(), {
-      waitUntil: "domcontentloaded",
-    });
-    await assertWearableConnectionState(page, config, "connected");
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await assertWearableConnectionState(page, config, "connected");
+    await requirePersistedWearableConnection(page, config);
 
-    stage = "junction_cleanup";
+    if (config.awaitCanonicalData) {
+      setStage("garmin_canonical_data");
+      await waitForCanonicalDataCheck({
+        input: process.stdin,
+        onReady: () => process.stdout.write("MURPH_E2E_GARMIN_CONNECTED=1\n"),
+        timeoutMs: config.timeoutMs + 30_000,
+      });
+    }
+
+    setStage("junction_cleanup");
     await disconnectJunctionAccount(page, config);
 
   } catch (error) {
     failed = true;
     failure = error;
+    failureDiagnostic = formatBrowserFailure(error);
   }
 
   try {
-    stage = failed ? `${stage}_cleanup` : "browser_cleanup";
+    setStage("browser_cleanup");
     await closeBrowserSession(session, config);
   } catch (error) {
     if (!failed) {
@@ -219,6 +240,33 @@ async function main(): Promise<void> {
     provider: "junction",
     source: config.source,
   }));
+}
+
+// Keep the established browser/provider session alive while the parent observes
+// callback-owned ingestion. Only a constant control message crosses this pipe.
+async function waitForCanonicalDataCheck(input: {
+  input: Readable;
+  onReady: () => void;
+  timeoutMs: number;
+}): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const reader = createInterface({ input: input.input });
+    const timer = setTimeout(() => finish(new Error("Garmin canonical data check timed out.")), input.timeoutMs);
+    function finish(error?: Error): void {
+      clearTimeout(timer);
+      reader.removeAllListeners();
+      reader.close();
+      input.input.pause();
+      if (error) reject(error);
+      else resolve();
+    }
+    reader.once("line", (line) => finish(line === "MURPH_E2E_GARMIN_DATA_CHECK_COMPLETE=1"
+      ? undefined
+      : new Error("Garmin canonical data control message was invalid.")));
+    reader.once("close", () => finish(new Error("Garmin canonical data check ended before completion.")));
+    reader.once("error", () => finish(new Error("Garmin canonical data control pipe failed.")));
+    input.onReady();
+  });
 }
 
 async function openBrowserSession(config: BrowserConfig): Promise<BrowserSession> {
@@ -313,12 +361,15 @@ async function closeBrowserSession(
   }
 
   const cleanupErrors: unknown[] = [];
+  writeWearableStage("browser_cookie_cleanup");
   await session.context.clearCookies({
     domain: new URL(config.webBaseUrl).hostname,
   }).catch((error: unknown) => cleanupErrors.push(error));
+  writeWearableStage("browser_tunnel_cleanup");
   await stopKernelTunnel(session.kernelTunnel)
     .catch((error: unknown) => cleanupErrors.push(error));
   try {
+    writeWearableStage("browser_remote_cleanup");
     await session.kernelClient.deleteBrowserByIdOrName(session.kernelSessionId);
   } catch (error) {
     cleanupErrors.push(error);
@@ -421,11 +472,28 @@ async function navigateToHostedLocalStart(
   config: BrowserConfig,
   tunnel: OwnedKernelTunnel | null,
 ): Promise<void> {
-  if (!tunnel) {
-    await page.goto(config.startUrl, { waitUntil: "domcontentloaded" });
-    return;
+  if (tunnel) {
+    setStage("kernel_tunnel_ready");
+    await waitForKernelTunnelReady(page, config, tunnel);
   }
 
+  setStage("murph_connect_intent");
+  try {
+    await page.goto(config.startUrl, {
+      timeout: config.timeoutMs,
+      waitUntil: "domcontentloaded",
+    });
+  } catch {
+    throw new Error("Hosted-local connect navigation did not complete.");
+  }
+}
+
+async function waitForKernelTunnelReady(
+  page: Page,
+  config: BrowserConfig,
+  tunnel: OwnedKernelTunnel,
+): Promise<void> {
+  const healthUrl = new URL("/api/internal/health", config.webBaseUrl).toString();
   const deadline = Date.now() + Math.min(
     config.timeoutMs,
     KERNEL_TUNNEL_SETUP_TIMEOUT_MS,
@@ -440,14 +508,15 @@ async function navigateToHostedLocalStart(
     }
     const remainingMs = deadline - Date.now();
     try {
-      await page.goto(config.startUrl, {
+      const response = await page.goto(healthUrl, {
         timeout: Math.min(5_000, remainingMs),
         waitUntil: "domcontentloaded",
       });
-      return;
+      if (response?.status() === 200 && response.url() === healthUrl) return;
     } catch {
-      await page.waitForTimeout(Math.min(500, Math.max(1, remainingMs)));
+      // Navigation errors can contain URLs. Keep readiness diagnostics fixed.
     }
+    await page.waitForTimeout(Math.min(500, Math.max(1, remainingMs)));
   }
   throw new Error("Kernel reverse tunnel did not reach hosted-local Web in time.");
 }
@@ -679,7 +748,7 @@ async function completeGarminPartnerConsent(
   if (await readAuthorizationActionState(saveAction) !== "enabled") {
     throw new Error("Garmin consent did not expose one enabled Save action.");
   }
-  await clickAuthorizationControl(saveAction);
+  await clickAuthorizationControl(saveAction, page, "garmin_consent_save");
   return true;
 }
 
@@ -872,7 +941,7 @@ async function clickFirstVisibleAction(
         ) {
           continue;
         }
-        await clickAuthorizationControl(control);
+        await clickAuthorizationControl(control, page, `authorization_${role}`);
         return true;
       }
     }
@@ -932,7 +1001,7 @@ async function clickWhoopRenderedGrant(page: Page): Promise<boolean> {
       ) {
         continue;
       }
-      await clickAuthorizationControl(candidate);
+      await clickAuthorizationControl(candidate, page, "whoop_grant");
       return true;
     }
     return false;
@@ -945,14 +1014,19 @@ async function clickWhoopRenderedGrant(page: Page): Promise<boolean> {
 
 async function clickAuthorizationControl(
   control: Pick<Locator, "click">,
+  page: Pick<Page, "url">,
+  action: "garmin_consent_save" | "authorization_button" | "authorization_link" | "whoop_grant",
 ): Promise<void> {
+  const before = safePageLocation(page);
   try {
     await control.click();
   } catch (error) {
     const category = error instanceof Error && error.name === "TimeoutError"
       ? "timeout"
       : "other";
-    throw new Error(`Authorization action failed (${category}).`);
+    throw new Error(
+      `Authorization action failed (${category}); action=${action}; before=${before}; after=${safePageLocation(page)}.`,
+    );
   }
 }
 
@@ -1073,6 +1147,30 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
   ].join(" ");
 }
 
+async function requirePersistedWearableConnection(
+  page: Page,
+  config: BrowserConfig,
+): Promise<void> {
+  for (const phase of ["navigation", "reload"] as const) {
+    setStage(`murph_persisted_connect_${phase}`);
+    const response = phase === "navigation"
+      ? await page.goto(new URL("/connect", config.webBaseUrl).toString(), {
+        waitUntil: "domcontentloaded",
+      })
+      : await page.reload({ waitUntil: "domcontentloaded" });
+    // Chromium can finish navigation on an HTTP error page. Do not replace
+    // that failure with a full connection-state wait or accept stale markup.
+    if (!response?.ok()) {
+      throw new Error(`Persisted connect navigation returned HTTP ${response?.status() ?? "none"}.`);
+    }
+    const url = new URL(page.url());
+    if (url.origin !== config.webOrigin || url.pathname !== "/connect") {
+      throw new Error("Persisted connect navigation left the expected page.");
+    }
+    await assertWearableConnectionState(page, config, "connected");
+  }
+}
+
 async function assertWearableConnectionState(
   page: Page,
   config: BrowserConfig,
@@ -1107,8 +1205,17 @@ async function disconnectJunctionAccount(
   await assertWearableConnectionState(page, config, "idle");
 }
 
+function readCanonicalDataMode(environment: NodeJS.ProcessEnv, source: WearableSource): boolean {
+  const enabled = environment.MURPH_E2E_JUNCTION_WEARABLE_DATA === "1";
+  if (enabled && source !== "garmin") {
+    throw new Error("Canonical wearable data proof requires Garmin.");
+  }
+  return enabled;
+}
+
 function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   const source = requireWearableSource(environment.MURPH_E2E_PROVIDER_SOURCE);
+  const awaitCanonicalData = readCanonicalDataMode(environment, source);
   const label = source === "garmin"
     ? "Garmin"
     : source === "oura"
@@ -1188,6 +1295,7 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   }
 
   return {
+    awaitCanonicalData,
     browserChannel: browserTransport === "local"
         && !headless
         && !manualAuthorizationAllowed
@@ -1232,16 +1340,22 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
 }
 
 export {
+  main as runHostedLocalJunctionBrowserForTest,
+  formatBrowserFailure as formatHostedLocalJunctionBrowserFailureForTest,
+  safePageLocation as readHostedLocalJunctionDiagnosticLocationForTest,
   buildKernelCliEnvironment as buildKernelCliEnvironmentForTest,
   buildKernelTunnelArguments as buildKernelTunnelArgumentsForTest,
   closeBrowserSession as closeHostedLocalJunctionBrowserSessionForTest,
   completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
   completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
   disconnectJunctionAccount as disconnectHostedLocalJunctionAccountForTest,
+  navigateToHostedLocalStart as navigateToHostedLocalJunctionStartForTest,
   openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
+  requirePersistedWearableConnection as requireHostedLocalJunctionPersistedConnectionForTest,
   sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,
   stopKernelTunnel as stopHostedLocalJunctionKernelTunnelForTest,
+  waitForCanonicalDataCheck as waitForHostedLocalJunctionCanonicalDataCheckForTest,
 };
 
 function assertTrustedAuthorizationUrl(
@@ -1296,13 +1410,36 @@ function readOrigin(value: string): string | null {
   }
 }
 
-function safePageLocation(page: Page | null): string {
+function safePageLocation(page: Pick<Page, "url"> | null): string {
   try {
     const url = new URL(page?.url() ?? "");
-    return `${url.origin}${url.pathname}`;
+    if (url.protocol === "chrome-error:") return "browser_error";
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "other";
+    const host = [
+      ...TRUSTED_AUTHORIZATION_DOMAINS,
+      ...PROVIDER_AUTHORIZATION_DOMAINS.garmin,
+      ...PROVIDER_AUTHORIZATION_DOMAINS.oura,
+      ...PROVIDER_AUTHORIZATION_DOMAINS.whoop,
+    ].find((domain) => url.hostname === domain || url.hostname.endsWith(`.${domain}`));
+    if (!host) return "other";
+    const route = host === "garmin.com" && url.pathname === "/partner/oauthConfirm"
+      ? "partner_consent"
+      : "other";
+    return `${host}/${route}`;
   } catch {
     return "unavailable";
   }
+}
+
+function formatBrowserFailure(error: unknown): string {
+  if (failureDiagnostic) return failureDiagnostic;
+  const location = stage.startsWith("kernel_tunnel_ready")
+      || stage.startsWith("murph_connect_intent")
+    ? ""
+    : ` (${safePageLocation(activePage)})`;
+  return `Junction wearable browser E2E failed at ${stage}${location}: ${
+    sanitizeFailure(error, activeConfig)
+  }`;
 }
 
 function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
@@ -1335,11 +1472,7 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   void main().catch((error: unknown) => {
-    process.stderr.write(
-      `Junction wearable browser E2E failed at ${stage} (${safePageLocation(activePage)}): ${
-        sanitizeFailure(error, activeConfig)
-      }\n`,
-    );
+    process.stderr.write(`${formatBrowserFailure(error)}\n`);
     process.exitCode = 1;
   });
 }

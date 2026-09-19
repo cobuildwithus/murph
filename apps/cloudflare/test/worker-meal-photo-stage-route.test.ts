@@ -240,19 +240,7 @@ async function createRouteContext(input: {
     BUNDLES: bucket,
     RUNNER_CONTAINER: createUnusedContainerNamespace(),
     RUNNER_CONTAINER_SMOKE: createUnusedContainerNamespace(),
-    USER_RUNNER: {
-      getByName() {
-        return {
-          async bindUser(userId) {
-            return { userId };
-          },
-          deleteHostedUserData: failUnusedTestDependency,
-          ensureRuntimeProcessingForUser: failUnusedTestDependency,
-          publishHostedPrivateMedia: failUnusedTestDependency,
-          runnerStatus: failUnusedTestDependency,
-        };
-      },
-    },
+
   };
   const context: WorkerRouteContext = {
     env,
@@ -282,19 +270,7 @@ async function createDeleteRouteContext(input: {
       BUNDLES: input.bucket,
       RUNNER_CONTAINER: createUnusedContainerNamespace(),
       RUNNER_CONTAINER_SMOKE: createUnusedContainerNamespace(),
-      USER_RUNNER: {
-        getByName() {
-          return {
-            async bindUser(userId) {
-              return { userId };
-            },
-            deleteHostedUserData: failUnusedTestDependency,
-            ensureRuntimeProcessingForUser: failUnusedTestDependency,
-            publishHostedPrivateMedia: failUnusedTestDependency,
-            runnerStatus: failUnusedTestDependency,
-          };
-        },
-      },
+
     },
     environment: readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
     request,

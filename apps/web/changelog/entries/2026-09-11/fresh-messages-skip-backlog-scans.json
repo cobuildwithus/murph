@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 100,
+  "item": {
+    "id": "fresh-messages-skip-backlog-scans",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "New messages reach Murph sooner",
+    "summary": "Murph can begin work on a newly received message without first checking through older pending messages.",
+    "details": "Earlier responses that need to finish first keep their place, and interrupted conversations remain recoverable.",
+    "relevanceTags": ["messaging", "replies"],
+    "sourcePullRequests": [3320]
+  }
+}

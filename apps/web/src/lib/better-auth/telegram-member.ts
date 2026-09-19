@@ -77,7 +77,7 @@ async function prepareNewTelegramLogin(input: { telegramUserId: string; prisma: 
   const now = new Date();
   const user = {
     id: memberId, name: "", email: `${authLookupKey("user", "member-alias", memberId)}@auth.invalid`,
-    emailVerified: false, credentialsChangedAt: now, createdAt: now, updatedAt: now,
+    emailVerified: false, credentialsChangedAt: null, createdAt: now, updatedAt: now,
   };
   return { memberId, preparedControlRoot: root, commitMember: async (tx) => {
     await lockHostedMemberRow(tx, memberId);

@@ -2,7 +2,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
   createAssistantUsageRecord,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxImportStateBundle,
   createMailboxItem,
@@ -120,7 +120,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 12,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -130,9 +130,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/foreground-direct.bundle.json",
                 size: 640,
               }),
             };
@@ -191,8 +190,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         },
       );
 
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "12"]);
-      assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [13, 13]);
+      assert.deepEqual(readConversationImportedSeqs(fetchRequests), ["0", "12"]);
+      assert.ok(fetchRequests.every((request) => request.limitPerLane === 13));
       assert.deepEqual(
         events.filter((event) => event.startsWith("import:")),
         expectedImportedSeqs.map((seq) => `import:${seq}`),
@@ -268,7 +267,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 12,
             },
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -282,9 +281,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             );
             events.push(`snapshot:${snapshotInput.reason}:${conversationWatermark}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/late-foreground-direct.bundle.json",
                 size: 640,
               }),
             };
@@ -425,7 +423,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -435,9 +433,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "c".repeat(64),
-                key: "users/bundles/member-synthetic/replay-budget.bundle.json",
                 size: 640,
               }),
             };
@@ -492,7 +489,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         },
       );
 
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "2"]);
+      assert.deepEqual(readConversationImportedSeqs(fetchRequests), ["0", "2"]);
       assert.deepEqual(importedSeqs, ["1", "2", "3", "4"]);
       assert.ok(events.includes("snapshot:idle_shutdown:4"));
       assert.equal(result.status, "idle");
@@ -538,7 +535,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_foreground_uncapped",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -548,9 +545,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/foreground-uncapped.bundle.json",
                 size: 640,
               }),
             };
@@ -601,8 +597,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         importedSeqs,
         Array.from({ length: 12 }, (_, index) => String(index + 1)),
       );
-      assert.equal(fetchRequests.length, 12);
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), [
+      assert.ok(fetchRequests.length <= 23, "one system page per foreground wake");
+      assert.deepEqual(readConversationImportedSeqs(fetchRequests), [
         "0",
         ...Array.from({ length: 11 }, (_, index) => String(index + 1)),
       ]);
@@ -642,7 +638,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -652,9 +648,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/foreground-system-churn.bundle.json",
                 size: 640,
               }),
             };
@@ -759,7 +754,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_first_owner_activation",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -769,9 +764,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/first-owner-activation.bundle.json",
                 size: 640,
               }),
             };
@@ -901,7 +895,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_foreground_activation",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -911,9 +905,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/foreground-activation.bundle.json",
                 size: 640,
               }),
             };
@@ -1049,7 +1042,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1059,9 +1052,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/initial-replay-budget.bundle.json",
                 size: 640,
               }),
             };
@@ -1096,9 +1088,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
                 redactedStatus: {
                   hostedMailboxConversationImportedSeq: "250",
                 },
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: bundle.hash,
-                  key: "users/bundles/member-synthetic/initial-replay-budget-before.bundle.json",
                   size: bundle.bytes.byteLength,
                 }),
                 version: "4",
@@ -1187,7 +1178,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
               budget: {
                 maxMailboxItems: 2,
               },
-              idleCheckpointDelayMs: 1,
+              runnerIdleTtlMs: 1,
               leaseGeneration: "9",
               userId: TEST_USER_ID,
               workspaceVersion: input.workspace.version,
@@ -1206,9 +1197,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
               const bundle = createMailboxImportStateBundle(state);
               artifactBytesByHash.set(bundle.hash, bundle.bytes);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: bundle.hash,
-                  key: `users/bundles/member-synthetic/${input.attemptId}.bundle.json`,
                   size: bundle.bytes.byteLength,
                 }),
               };
@@ -1305,7 +1295,10 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
       workspace,
     });
     assert.equal(second.result.status, "budget_exhausted");
-    assert.deepEqual(conversationFetchImportedSeqs(second.fetchRequests), ["2"]);
+    // These fixture snapshots contain only mailbox state, so bootstrap discards
+    // the speculative page and fetches the same authoritative cursor afresh.
+    assert.deepEqual(conversationFetchImportedSeqs(second.fetchRequests), ["2", "2"]);
+    assert.deepEqual(conversationFetches(second.fetchRequests).map((request) => request.limitPerLane), [3, 3]);
     assert.deepEqual(second.importedSeqs, ["3:consumed", "4:consumed"]);
     assert.deepEqual(second.snapshotWatermarks, ["4"]);
     assert.equal(second.state.watermarks.conversation, "4");
@@ -1321,7 +1314,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
       workspace,
     });
     assert.equal(third.result.status, "idle");
-    assert.deepEqual(conversationFetchImportedSeqs(third.fetchRequests), ["4"]);
+    assert.deepEqual(conversationFetchImportedSeqs(third.fetchRequests), ["4", "4"]);
+    assert.deepEqual(conversationFetches(third.fetchRequests).map((request) => request.limitPerLane), [3, 3]);
     assert.deepEqual(third.importedSeqs, ["5:consumed", "6:fresh"]);
     assert.deepEqual(third.snapshotWatermarks, ["6"]);
     assert.equal(third.state.watermarks.conversation, "6");
@@ -1385,7 +1379,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             budget: {
               maxMailboxItems: 2,
             },
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1403,9 +1397,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
               : await readHostedMailboxImportState({ vaultRoot });
             const bundle = createMailboxImportStateBundle(state);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: bundle.hash,
-                key: "users/bundles/member-synthetic/replay-wake-barrier.bundle.json",
                 size: bundle.bytes.byteLength,
               }),
             };
@@ -1488,7 +1481,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_checkpoint_conversation_wake_prepublication",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1526,11 +1519,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
 
             events.push(`snapshot:${checkpointSnapshotCalls}:ready`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(checkpointSnapshotCalls).repeat(64).slice(0, 64),
-                key:
-                  "users/bundles/member-synthetic/"
-                  + `checkpoint-conversation-wake-${checkpointSnapshotCalls}.bundle.json`,
                 size: 640,
               }),
             };
@@ -1663,7 +1653,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_wake_during_checkpoint",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1673,9 +1663,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-wake-during.bundle.json",
                 size: 640,
               }),
             };
@@ -1799,9 +1788,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
                 redactedStatus: {
                   hostedMailboxConversationImportedSeq: "1",
                 },
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: bundle.hash,
-                  key: "users/bundles/member-synthetic/deferred-usage-clean-wake-before.bundle.json",
                   size: bundle.bytes.byteLength,
                 }),
                 version: "4",
@@ -1832,7 +1820,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_deferred_usage_idle_checkpoint",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1843,9 +1831,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
             events.push(`snapshot:${snapshotInput.reason}`);
             const hashPrefix = snapshotInput.reason === "outbox_receipt" ? "b" : "c";
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: hashPrefix.repeat(64),
-                key: `users/bundles/member-synthetic/deferred-usage-${snapshotInput.reason}.bundle.json`,
                 size: 640,
               }),
             };
@@ -1979,7 +1966,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_deferred_usage_previous_invocation",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -1989,9 +1976,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`first.snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "a".repeat(64),
-                key: `users/bundles/member-synthetic/prior-usage-${snapshotInput.reason}.bundle.json`,
                 size: 640,
               }),
             };
@@ -2124,7 +2110,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_deferred_usage_idle_checkpoint_failure",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2134,9 +2120,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "d".repeat(64),
-                key: `users/bundles/member-synthetic/deferred-usage-fail-${snapshotInput.reason}.bundle.json`,
                 size: 640,
               }),
             };
@@ -2255,7 +2240,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_deferred_usage_host_abort",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2265,9 +2250,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "f".repeat(64),
-                key: `users/bundles/member-synthetic/deferred-usage-abort-${snapshotInput.reason}.bundle.json`,
                 size: 640,
               }),
             };
@@ -2793,7 +2777,7 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_pending_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
             workspaceVersion: "4",
@@ -2803,9 +2787,8 @@ describe("hosted workspace runtime entrypoint", () => {test("foreground runtime 
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
-                key: `users/bundles/member-synthetic/runtime-idle-checkpoint-pending-${checkpointRequests.length}.bundle.json`,
                 size: 640,
               }),
             };

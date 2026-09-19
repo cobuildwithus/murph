@@ -254,7 +254,8 @@ function createPrismaStub(): PrismaClient {
       findFirst: vi.fn(async () => ({ containerMemberId: TEST_USER_ID })),
     },
     hostedWorkspace: {
-      upsert: vi.fn(async () => ({ userId: TEST_USER_ID })),
+      findUnique: vi.fn(async () => null),
+      createMany: vi.fn(async () => ({ count: 0 })),
     },
   } as unknown as Prisma.TransactionClient;
   const transaction = vi.fn(async (

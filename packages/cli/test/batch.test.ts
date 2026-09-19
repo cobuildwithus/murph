@@ -743,7 +743,7 @@ test('batch lifts typed child failures through explicit non-JSON formats', async
   }
 })
 
-test('batch rejects setup, interactive, and assistant automation child commands', async () => {
+test('batch rejects setup and assistant automation child commands', async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-blocked-'))
   const vault = path.join(parent, 'vault')
 
@@ -757,15 +757,11 @@ test('batch rejects setup, interactive, and assistant automation child commands'
       '--command',
       '["onboard"]',
       '--command',
-      '["chat"]',
-      '--command',
       '["run"]',
       '--command',
       '["run","--once"]',
       '--command',
       '["--filter-output","--once","run"]',
-      '--command',
-      '["assistant","chat"]',
       '--command',
       '["assistant","run"]',
       '--command',
@@ -787,26 +783,11 @@ test('batch rejects setup, interactive, and assistant automation child commands'
       }>
     }
 
-    assert.equal(result.failed, 10)
-    assert.deepEqual(result.commands.map((command) => command.ok), [
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-    ])
+    assert.equal(result.failed, 8)
+    assert.deepEqual(result.commands.map((command) => command.ok), Array(8).fill(false))
     assert.match(
       result.commands[0]?.error?.message ?? '',
       /cannot run onboarding setup/u,
-    )
-    assert.match(
-      result.commands[1]?.error?.message ?? '',
-      /cannot run interactive assistant chat/u,
     )
     assert.match(
       result.commands[2]?.error?.message ?? '',

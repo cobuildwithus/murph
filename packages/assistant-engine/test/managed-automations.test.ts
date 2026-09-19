@@ -131,6 +131,7 @@ import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
+  buildMurphManagedJournalCalendarWindowInstructions,
   MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
   MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
   MURPH_MANAGED_AUTOMATIONS,
@@ -471,6 +472,58 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.records.has(seeds[1]!.automationId)).toBe(true)
   })
 
+  it('retains an update count when foreground work interrupts the next seed creation', async () => {
+    const firstSeed: MurphManagedAutomationSeed = {
+      automationId: 'automation_reconcile_before_yield',
+      instructions: 'Use the refreshed instructions.',
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      slug: 'reconcile-before-yield',
+      title: 'Refreshed maintenance',
+    }
+    const secondSeed: MurphManagedAutomationSeed = {
+      ...firstSeed,
+      automationId: 'automation_create_after_yield',
+      slug: 'create-after-yield',
+    }
+    managedAutomationMocks.records.set(firstSeed.automationId, {
+      automationId: firstSeed.automationId,
+      schedule: firstSeed.schedule,
+      slug: firstSeed.slug,
+      title: firstSeed.title,
+      continuityPolicy: 'preserve',
+      instructions: 'Previous instructions.',
+      route: defaultRoute,
+      status: 'active',
+      summary: 'Member-owned summary.',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+    })
+    const options = {
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      seeds: [firstSeed, secondSeed],
+      vaultRoot,
+    }
+
+    await expect(applyMurphManagedAutomations({
+      ...options,
+      shouldYield: () => managedAutomationMocks.upsertAutomation.mock.calls.length > 0,
+    })).resolves.toEqual({ created: 0, skipped: 0, updated: 1, yielded: true })
+    expect(managedAutomationMocks.records.has(secondSeed.automationId)).toBe(false)
+    const update = managedAutomationMocks.upsertAutomation.mock.calls[0]?.[0]
+    for (const field of ['activeUntil', 'assistantTargetOverride', 'contextReferences', 'summary']) {
+      expect(update).not.toHaveProperty(field)
+    }
+
+    await expect(applyMurphManagedAutomations(options)).resolves.toEqual({
+      created: 1,
+      skipped: 1,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.records.get(firstSeed.automationId)?.summary)
+      .toBe('Member-owned summary.')
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+  })
+
   it('threads the foreground yield hook through experiment lifecycle preparation', async () => {
     let shouldYieldNow = false
     const shouldYield = vi.fn(() => shouldYieldNow)
@@ -492,7 +545,7 @@ describe('applyMurphManagedAutomations', () => {
       updated: 0,
       yielded: true,
     })
-    expect(managedAutomationMocks.showAutomation).toHaveBeenCalledTimes(2)
+    expect(managedAutomationMocks.showAutomation).toHaveBeenCalledTimes(3)
     expect(managedAutomationMocks.showAutomation).toHaveBeenNthCalledWith(1, {
       automationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ',
       vaultRoot,
@@ -1307,7 +1360,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(patternsUpdateRecord).toMatchObject({
       assistantTargetOverride: {
         model: 'gpt-5.6-luna',
-        reasoningEffort: 'medium',
+        reasoningEffort: 'high',
       },
       schedule: { kind: 'cron', expression: '0 13 * * *' },
       slug: 'personal-patterns-update',
@@ -1328,13 +1381,13 @@ describe('applyMurphManagedAutomations', () => {
       'Grade changes belong in the weekly health insight',
     )
     expect(patternsUpdateRecord?.instructions).toContain(
-      'first digest with at most three grade A-D highlights',
+      'first update with exactly one eligible grade A-D result',
     )
     expect(patternsUpdateRecord?.instructions).toContain(
       'Grade E observations stay quiet',
     )
     expect(patternsUpdateRecord?.instructions).toContain(
-      'combine at most three highlights',
+      'choose exactly one: the strongest or most useful factor-and-outcome result',
     )
     expect(patternsUpdateRecord?.instructions).toContain(
       'Grades are internal selection and ledger metadata; never include letter grades',
@@ -1342,12 +1395,17 @@ describe('applyMurphManagedAutomations', () => {
     expect(patternsUpdateRecord?.instructions).toContain('C/D need a light qualifier')
     expect(patternsUpdateRecord?.instructions).toContain('A qualifier within the finding is enough')
     expect(patternsUpdateRecord?.instructions).toContain('do not turn cases into days')
+    expect(patternsUpdateRecord?.instructions).toContain('Name the comparison baseline and outcome timing')
+    expect(patternsUpdateRecord?.instructions).toContain('include that one number rather than listing both group averages')
     expect(patternsUpdateRecord?.instructions).toContain('Never imply cause')
     expect(patternsUpdateRecord?.instructions).toContain(
-      'end with https://www.withmurph.ai/patterns on its own line',
+      'Do not include a link, refer to the Patterns page, or add a see-the-rest footer',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'check that it contains exactly one finding and no link or Patterns-page invitation',
     )
     expect(patternsUpdateRecord?.instructions).not.toMatch(
-      /State each grade|Always state the grade|available on `\/patterns`|briefly explain that other factors/u,
+      /at most three|three highlights|https?:|plus the link|State each grade|Always state the grade|available on `\/patterns`|briefly explain that other factors/u,
     )
     expect(patternsUpdateRecord?.instructions).toContain(
       'do not rely on a shell environment variable',
@@ -1694,7 +1752,25 @@ describe('applyMurphManagedAutomations', () => {
     ).toBe(false)
   })
 
-  it('defines hosted Journal context passes at 08:00 and 16:00 local time', () => {
+  it('archives the old afternoon pass without changing an existing one-shot follow-up', async () => {
+    const options = { defaultRoute, vaultRoot, runtimeEnv: { [HOSTED_RUNTIME_PROCESS_ENV]: '1' } }
+    await applyMurphManagedAutomations(options)
+    const morning = managedAutomationMocks.records.get(MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID)
+    if (!morning) throw new Error('Missing morning automation')
+    managedAutomationMocks.records.set(MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID, {
+      ...morning, automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+      slug: 'journal-connected-context-afternoon', schedule: { kind: 'dailyLocal', localTime: '16:00' },
+    })
+    const followup = { ...morning, automationId: 'automation_synthetic_followup', slug: 'synthetic-followup',
+      schedule: { kind: 'at' as const, at: '2026-10-03T18:00:00Z' } }
+    managedAutomationMocks.records.set(followup.automationId, followup)
+    await applyMurphManagedAutomations(options)
+    expect(managedAutomationMocks.records.get(MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID)?.status).toBe('archived')
+    expect(managedAutomationMocks.records.get(followup.automationId)).toEqual(followup)
+    expect(managedAutomationMocks.records.get(morning.automationId)?.status).toBe('active')
+  })
+
+  it('defines one hosted morning Journal context pass on Luna high', () => {
     const morning = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) =>
         seed.automationId ===
@@ -1707,15 +1783,98 @@ describe('applyMurphManagedAutomations', () => {
     )
 
     expect(morning).toMatchObject({
+      assistantTargetOverride: {
+        model: 'gpt-5.6-luna',
+        reasoningEffort: 'high',
+      },
       hostedRuntimeOnly: true,
       schedule: { kind: 'dailyLocal', localTime: '08:00' },
       slug: 'journal-connected-context-morning',
     })
-    expect(afternoon).toMatchObject({
-      hostedRuntimeOnly: true,
-      schedule: { kind: 'dailyLocal', localTime: '16:00' },
-      slug: 'journal-connected-context-afternoon',
+    expect(afternoon).toBeUndefined()
+    expect(morning?.instructions).toContain('Do not send a connection announcement or wait for a prior notice')
+    expect(morning?.instructions).toContain('Read eligible active sources in this run while preserving explicit opt-outs')
+    expect(morning?.instructions).not.toContain('connection-notice check')
+  })
+
+  it.each([
+    { label: 'absent override', override: undefined },
+    { label: 'inherited member model', override: null },
+    {
+      label: 'previous explicit model',
+      override: { model: 'gpt-5.6-sol', reasoningEffort: 'high' },
+    },
+  ])('reconciles Journal $label to Luna without changing other jobs or reading member preferences', async ({ override }) => {
+    const options = {
+      defaultRoute,
+      now: new Date('2026-09-01T12:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+        EXA_API_KEY: 'fixture-exa-key',
+      },
+      vaultRoot,
+    }
+    const journalIds = [MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID]
+    const lunaOverride = { model: 'gpt-5.6-luna', reasoningEffort: 'high' }
+
+    await applyMurphManagedAutomations(options)
+    for (const automationId of journalIds) {
+      const record = managedAutomationMocks.records.get(automationId)
+      if (!record) throw new Error('Expected the managed Journal automation')
+      expect(record.assistantTargetOverride).toEqual(lunaOverride)
+      managedAutomationMocks.records.set(automationId, {
+        ...record,
+        assistantTargetOverride: override,
+        route: { ...record.route, deliveryTarget: 'synthetic-existing-journal-thread' },
+      })
+    }
+    // An unrelated user automation must keep inheriting the conversation model.
+    managedAutomationMocks.records.set('automation_synthetic_user_reminder', {
+      automationId: 'automation_synthetic_user_reminder',
+      assistantTargetOverride: null,
+      continuityPolicy: 'preserve',
+      instructions: 'Synthetic contextual reminder.',
+      route: defaultRoute,
+      schedule: { kind: 'dailyLocal', localTime: '10:00' },
+      slug: 'synthetic-user-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['user'],
+      title: 'Synthetic reminder',
     })
+    const expectedRecords = structuredClone(managedAutomationMocks.records)
+    for (const automationId of journalIds) {
+      const record = expectedRecords.get(automationId)
+      if (!record) throw new Error('Expected the managed Journal automation')
+      record.assistantTargetOverride = lunaOverride
+    }
+    managedAutomationMocks.upsertAutomation.mockClear()
+    managedAutomationMocks.patchAutomation.mockClear()
+    managedAutomationMocks.upsertAssistantCronAutomation.mockClear()
+    managedAutomationMocks.applyAssistantSelfDeliveryTargetDefaults.mockClear()
+
+    await expect(applyMurphManagedAutomations(options)).resolves.toMatchObject({
+      created: 0,
+      updated: 1,
+    })
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
+    expect(managedAutomationMocks.upsertAutomation.mock.calls.map(
+      ([input]) => input.automationId,
+    )).toEqual(journalIds)
+    // Includes Patterns, weekly Sol synthesis, inherited-model jobs and all
+    // existing routes, schedules, instructions and statuses, not just models.
+    expect(managedAutomationMocks.records).toEqual(expectedRecords)
+    expect(managedAutomationMocks.patchAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.upsertAssistantCronAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.applyAssistantSelfDeliveryTargetDefaults).not.toHaveBeenCalled()
+
+    managedAutomationMocks.upsertAutomation.mockClear()
+    await expect(applyMurphManagedAutomations(options)).resolves.toMatchObject({
+      created: 0,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.records).toEqual(expectedRecords)
   })
 
   it('creates the hosted overnight memory consolidation automation in hosted runtime', async () => {
@@ -1730,7 +1889,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 8,
+      created: 7,
       skipped: 0,
       updated: 0,
     })
@@ -3346,4 +3505,24 @@ describe('applyMurphManagedAutomations', () => {
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
   })
 
+})
+
+describe('managed Journal calendar read window', () => {
+  it.each([
+    { occurrenceAt: '2026-08-31T08:00:00+02:00', start: '2026-08-31T06:00:00.000Z', end: '2026-09-14T06:00:00.000Z' },
+    { occurrenceAt: '2026-08-31T16:00:00+02:00', start: '2026-08-31T14:00:00.000Z', end: '2026-09-14T14:00:00.000Z' },
+    { occurrenceAt: '2026-10-24T16:00:00+02:00', start: '2026-10-24T14:00:00.000Z', end: '2026-11-07T14:00:00.000Z' },
+  ])('uses elapsed UTC hours across offsets and clock changes: $occurrenceAt', ({ occurrenceAt, start, end }) => {
+    for (const id of [MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID]) {
+      const instructions = buildMurphManagedJournalCalendarWindowInstructions(id, occurrenceAt)
+      expect(instructions).toContain(`timeMin: ${start}`)
+      expect(instructions).toContain(`timeMax: ${end}`)
+    }
+  })
+  it('does not invent a range for another job or missing/invalid occurrence', () => {
+    expect(buildMurphManagedJournalCalendarWindowInstructions('synthetic-reminder', '2026-08-31T06:00:00Z')).toBeNull()
+    for (const occurrence of [null, 'invalid']) {
+      expect(buildMurphManagedJournalCalendarWindowInstructions(MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, occurrence)).toBeNull()
+    }
+  })
 })

@@ -2,7 +2,7 @@
 
 Murph is your personal health assistant.
 
-Install this package to get the main `murph` command and the full local Murph experience: onboarding, vault setup, local assistant chat, inbox capture, parser tooling, and the always-on assistant loop.
+Install this package to get the main `murph` command and the full local Murph experience: onboarding, vault setup, direct local assistant turns, inbox capture, parser tooling, and the always-on assistant loop.
 
 The repo implementation happens to live in `packages/cli`, but that is a maintainer detail. For users, `@murphai/murph` is the installable Murph package.
 
@@ -33,7 +33,7 @@ murph onboard
 Once setup is complete, the main commands are:
 
 ```bash
-murph chat
+murph assistant ask "Summarize my saved health context."
 murph run
 murph status
 ```
@@ -129,11 +129,10 @@ source on the same automation; its activity cursor restarts at the edit time.
 ## What you get
 
 - a file-native health vault with canonical writes owned by `@murphai/core`
-- local assistant chat, runtime automation, status, outbox, canonical memory, and canonical automation commands
+- direct local assistant turns, runtime automation, status, outbox, canonical memory, and canonical automation commands
 - a non-canonical derived knowledge wiki you can upsert and inspect under `derived/knowledge/**`
 - inbox capture, assistant attachment evidence, and parser-driven audio/video transcription through runtime services
 - optional local device sync through the bundled workspace-private `packages/device-syncd` runtime
-- optional local assistant daemon support through the bundled workspace-private `packages/assistantd` daemon
 
 `@murphai/murph` is the installable local Murph product entrypoint. The wider monorepo also contains hosted control and execution apps plus many workspace-private owner packages, but the public npm surface is intentionally small: `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`.
 

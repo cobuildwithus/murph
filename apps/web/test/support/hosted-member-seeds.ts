@@ -352,7 +352,6 @@ interface HostedLinqLineStoreModule {
     providerCreatedAt: Date;
   }): Promise<boolean>;
   upsertHostedLinqLineForPhoneTx(input: {
-    activeMemberLimit?: number | null;
     observedAt: Date;
     phoneNumber: string;
     prisma: unknown;

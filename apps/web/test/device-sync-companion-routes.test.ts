@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
       findUnique: vi.fn(),
     },
     hostedMember: {
+      findFirst: vi.fn(),
       findUnique: vi.fn(),
     },
     label: "test-prisma",
@@ -751,23 +752,10 @@ describe("device sync companion routes", () => {
       expect(mocks.readHostedAuthSession).not.toHaveBeenCalled();
     });
 
-    it("rejects members without active access", async () => {
-      mockVerifiedHostedSession();
-      const suspendedMember = {
-        ...ACTIVE_MEMBER,
-        suspendedAt: new Date("2026-06-01T00:00:00.000Z"),
-      };
-      mocks.readHostedAuthSession.mockResolvedValue({ session: { member: suspendedMember, sessionId: "synthetic-session", proof: {} } });
-      mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
-        accountGroupMemberships: [],
-        billingStatus: suspendedMember.billingStatus,
-        suspendedAt: suspendedMember.suspendedAt,
-        threadContainer: null,
-      });
-
+    it("rejects a session refused by the suspended-member authentication boundary", async () => {
+      mocks.readHostedAuthSession.mockResolvedValue({ session: null });
       const response = await signInTokenRoute.POST(signInTokenRequest({}));
-
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(401);
       expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
     });
 

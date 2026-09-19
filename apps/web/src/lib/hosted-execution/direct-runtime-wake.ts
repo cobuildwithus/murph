@@ -10,23 +10,33 @@ import {
 
 import { readHostedExecutionControlClientIfConfigured } from "./control";
 import { describeHostedExecutionSafeLogErrorCode } from "./logging";
+import { executeHostedRuntimeOwnerCommand } from "./runtime-owner-control";
+import { getPrisma } from "../prisma";
+
+export type HostedDirectRuntimeWakeTiming = CloudflareHostedControlRuntimeEnsureProcessingTiming & {
+  directWakeStartedAtEpochMs: number;
+  directWakeAttemptCount: number;
+  directWakeRetryWaitMs: number;
+};
 
 export type HostedDirectRuntimeWakeSource =
   | "assistant-ask-completion"
   | "assistant-ask-request"
-  | "linq";
+  | "linq"
+  | "telegram";
 
 const HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS = 29_000;
 const HOSTED_DIRECT_RUNTIME_WAKE_COMMAND_TIMEOUT_MS = 25_000;
 const HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS = 2;
 
 /**
- * Starts the payloadless Cloudflare latency hint and always settles. Temporal
- * must accept the durable mailbox signal before a caller invokes this helper.
+ * Starts the control-only Cloudflare latency hint and always settles. Temporal
+ * must own the durable mailbox signal. A caller may overlap its acknowledgement
+ * only after the signal owner has validated access and started the request.
  */
 export function startHostedDirectRuntimeWakeBestEffort(input: {
   onTiming?: (
-    timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
+    timing: HostedDirectRuntimeWakeTiming,
   ) => Promise<void> | void;
   source: HostedDirectRuntimeWakeSource;
   userId: string;
@@ -65,7 +75,7 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
   client: NonNullable<ReturnType<typeof readHostedExecutionControlClientIfConfigured>>;
   input: {
     onTiming?: (
-      timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
+      timing: HostedDirectRuntimeWakeTiming,
     ) => Promise<void> | void;
     source: HostedDirectRuntimeWakeSource;
     userId: string;
@@ -77,9 +87,12 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
   const userId = input.input.userId;
   const wakeSource = input.wakeSource;
   const orchestrationAttemptId = `web-ingress-${randomUUID()}`;
-  const deadlineAtEpochMs = Date.now() + HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS;
+  const directWakeStartedAtEpochMs = Date.now();
+  const deadlineAtEpochMs = directWakeStartedAtEpochMs + HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS;
+  let directWakeAttemptCount = 0;
+  let directWakeRetryWaitMs = 0;
   const signal = AbortSignal.timeout(HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS);
-  let timing: CloudflareHostedControlRuntimeEnsureProcessingTiming | null = null;
+  const timing: { latest: CloudflareHostedControlRuntimeEnsureProcessingTiming | null } = { latest: null };
 
   try {
     for (
@@ -87,6 +100,12 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
       attemptNumber <= HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS;
       attemptNumber += 1
     ) {
+      signal.throwIfAborted();
+      const admission = await executeHostedRuntimeOwnerCommand({
+        prisma: getPrisma(), userId, command: { operation: "claim", processingMode: "default" },
+      });
+      if (admission.cutover !== "postgres" || !admission.owner
+        || (admission.status !== "claimed" && admission.status !== "existing")) return;
       const commandTimeoutMs = Math.min(
         HOSTED_DIRECT_RUNTIME_WAKE_COMMAND_TIMEOUT_MS,
         deadlineAtEpochMs - Date.now()
@@ -104,11 +123,13 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
 
       // Do not persist the previous parsed result if a later attempted request
       // fails before returning a parseable control response.
-      timing = null;
+      timing.latest = null;
+      directWakeAttemptCount = attemptNumber;
       const ensureResult = await client.ensureRuntimeProcessing({
+        admission,
         commandTimeoutMs,
         onTiming: (value) => {
-          timing = value;
+          timing.latest = value;
         },
         orchestrationAttemptId,
         signal,
@@ -166,7 +187,12 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
         retryDelayMs,
         source: wakeSource,
       });
-      await waitForHostedDirectRuntimeWakeRetry(retryDelayMs, signal);
+      const retryWaitStartedAtEpochMs = Date.now();
+      try {
+        await waitForHostedDirectRuntimeWakeRetry(retryDelayMs, signal);
+      } finally {
+        directWakeRetryWaitMs += Math.max(0, Date.now() - retryWaitStartedAtEpochMs);
+      }
     }
   } catch (error) {
     console.warn("Hosted direct ensure wake failed.", {
@@ -175,9 +201,9 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
       source: wakeSource,
     });
   } finally {
-    if (timing && onTiming) {
+    if (timing.latest && onTiming) {
       try {
-        await onTiming(timing);
+        await onTiming({ ...timing.latest, directWakeStartedAtEpochMs, directWakeAttemptCount, directWakeRetryWaitMs });
       } catch (error) {
         console.warn("Hosted direct ensure wake timing callback failed.", {
           errorName: describeHostedExecutionSafeLogErrorCode(error),

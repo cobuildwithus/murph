@@ -525,8 +525,12 @@ export interface HostedLocalAssistantProviderStubState {
 
 export interface HostedLocalAssistantProviderStubRequest {
   body: string;
+  fixtureMatch?: "scoped" | "unscoped" | "none" | "compaction" | "not_applicable";
   method: string;
   observedAtEpochMs?: number;
+  queuedResponseCount?: number;
+  requestKind?: "turn" | "prewarm" | "compaction" | "memory" | "unknown";
+  responseStatus?: number | null;
   url: string;
 }
 
@@ -551,6 +555,23 @@ export function readHostedLocalAssistantProviderToolOutputs(
     )
     .map((item) => readAssistantProviderToolOutputText(item?.output))
     .filter((output): output is string => output !== null);
+}
+
+export function hostedLocalAssistantProviderLatestUserInputContains(
+  request: HostedLocalAssistantProviderStubRequest,
+  text: string,
+): boolean {
+  const input = parseJsonObject(request.body)?.input;
+  if (!Array.isArray(input)) {
+    return false;
+  }
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    const item = input[index];
+    if (isRecord(item) && item.role === "user") {
+      return readAssistantProviderToolOutputText(item.content)?.includes(text) ?? false;
+    }
+  }
+  return false;
 }
 
 export type HostedLocalAssistantProviderStubUsageMode =
@@ -593,9 +614,11 @@ export function buildHostedAssistantNotificationDecisionResponse(input: {
 function dequeueAssistantProviderResponse(input: {
   requestBody?: string;
   requestBodyJson?: unknown;
+  requestRecord: HostedLocalAssistantProviderStubRequest;
   fallbackResponseText?: string | null;
   responseState?: HostedLocalAssistantProviderStubState;
 }): HostedLocalAssistantProviderScriptedResponsePayload | null {
+  input.requestRecord.fixtureMatch = "none";
   const queuedResponses = input.responseState?.queuedResponses;
   if (!queuedResponses || queuedResponses.length === 0) {
     return input.fallbackResponseText ?? null;
@@ -623,6 +646,9 @@ function dequeueAssistantProviderResponse(input: {
     return input.fallbackResponseText ?? null;
   }
 
+  input.requestRecord.fixtureMatch = isScopedAssistantProviderScriptedResponse(scriptedResponse)
+    ? "scoped"
+    : "unscoped";
   return readHostedLocalAssistantProviderResponsePayload(scriptedResponse);
 }
 
@@ -1079,12 +1105,19 @@ export async function startAssistantProviderStubServer(input: {
     }
 
     const body = await readRequestBody(request);
-    const requestRecord = {
+    const requestRecord: HostedLocalAssistantProviderStubRequest = {
       body,
+      fixtureMatch: "not_applicable",
       method: requestMethod,
       observedAtEpochMs,
+      queuedResponseCount: input.responseState?.queuedResponses.length ?? 0,
+      requestKind: readAssistantProviderRequestKind(body, request.headers["x-codex-turn-metadata"]),
+      responseStatus: null,
       url: requestUrl,
-    } satisfies HostedLocalAssistantProviderStubRequest;
+    };
+    response.once("finish", () => {
+      requestRecord.responseStatus = response.statusCode;
+    });
     input.onRequest?.(requestRecord);
     if (process.env.MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB === "1") {
       console.log(
@@ -1112,6 +1145,7 @@ export async function startAssistantProviderStubServer(input: {
         return;
       }
 
+      requestRecord.fixtureMatch = "compaction";
       writeJsonResponse(response, 200, {
         output: [
           {
@@ -1136,6 +1170,7 @@ export async function startAssistantProviderStubServer(input: {
       responseSequence += 1;
       const responseId = `resp_stub_hosted_local_e2e_${responseSequence}`;
       if (isContextCompactionResponsesRequest(bodyJson)) {
+        requestRecord.fixtureMatch = "compaction";
         const usage = buildAssistantProviderStubUsage({
           body,
           responseText: hostedLocalContextCompactionSummary,
@@ -1172,6 +1207,7 @@ export async function startAssistantProviderStubServer(input: {
         fallbackResponseText: input.fallbackResponseText,
         requestBody: body,
         requestBodyJson: bodyJson,
+        requestRecord,
         responseState: input.responseState,
       });
       if (!scriptedResponse) {
@@ -1285,6 +1321,7 @@ export async function startAssistantProviderStubServer(input: {
         fallbackResponseText: input.fallbackResponseText,
         requestBody: body,
         requestBodyJson: bodyJson,
+        requestRecord,
         responseState: input.responseState,
       });
       if (!scriptedResponse) {
@@ -1657,6 +1694,21 @@ function readAssistantProviderToolOutputText(value: unknown): string | null {
     .map((item) => isRecord(item) ? item.text : null)
     .filter((text): text is string => typeof text === "string");
   return textItems.length > 0 ? textItems.join("\n") : null;
+}
+
+function readAssistantProviderRequestKind(
+  body: string,
+  header: string | string[] | undefined,
+): NonNullable<HostedLocalAssistantProviderStubRequest["requestKind"]> {
+  const metadata = parseJsonObject(body)?.client_metadata;
+  const turnMetadata = isRecord(metadata) ? metadata["x-codex-turn-metadata"] : null;
+  for (const value of [turnMetadata, header]) {
+    const kind = typeof value === "string" ? parseJsonObject(value)?.request_kind : null;
+    if (kind === "turn" || kind === "prewarm" || kind === "compaction" || kind === "memory") {
+      return kind;
+    }
+  }
+  return "unknown";
 }
 
 function isContextCompactionResponsesRequest(value: Record<string, unknown>): boolean {

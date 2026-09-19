@@ -66,6 +66,7 @@ import {
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   appendHostedScheduledDeviceSyncWakeEnvelopeTx,
   prepareHostedMailboxItemAppendCrypto,
+  runWithPreparedHostedMailboxItemAppendCrypto,
   type AppendHostedMailboxItemResult,
   type PreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
@@ -1964,8 +1965,6 @@ async function prepareHostedWebhookSourceObservation(input: {
           || current.provider !== input.provider
           || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
           || current.connectedAt.toISOString() !== input.account.connectedAt
-          || current.providerApplicationId !== null
-          || current.providerApplicationRevision !== null
         ) {
           await completeHostedWebhookTraceTx(input, tx);
           return { kind: "terminal" };
@@ -2567,40 +2566,69 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
     traceId: input.traceId ?? null,
     userId: input.userId,
   });
-  const appendResult = await persistHostedDeviceSyncWake({
-    appendMailbox: (tx) => appendHostedScheduledDeviceSyncWakeEnvelopeTx({
-      envelope: wake,
-      tx,
+  const appendResult = await runWithPreparedHostedMailboxItemAppendCrypto({
+    prisma,
+    userId: input.userId,
+    append: (prepared) => persistHostedDeviceSyncWake({
+      appendMailbox: (tx) => runWithHostedDomainRootProviderCallsDisabled(() =>
+        appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+          envelope: wake,
+          prepared,
+          tx,
+        })
+      ),
+      healthDataConnectionId: input.connectionId,
+      healthDataUserId: input.userId,
+      signalFailureMode: "throw",
+      // The first append owns the direct Temporal handoff. A later recovery
+      // bucket can encounter the same durable schedule tuple while its imported
+      // runtime work is still pending; the shared mailbox-handoff sweep recovers
+      // only a never-imported first signal, while imported work keeps its own
+      // persisted retry owner.
+      startWorkflowOnDuplicate: false,
+      wake,
+      store,
+      persist: async (tx) => {
+        // The sweep selected this tuple before crypto preparation and may now
+        // be behind a checkpoint publication. Both owners hold this connection lock.
+        const current = await tx.$queryRaw<Array<{ current: number }>>`
+          SELECT 1 AS current FROM device_connection
+          WHERE id = ${input.connectionId} AND user_id = ${input.userId}
+            AND provider = ${input.provider} AND status = 'active'
+            AND connected_at = ${new Date(input.expectedConnectedAt)}
+            AND next_reconcile_at = ${new Date(input.nextReconcileAt)}
+            AND next_reconcile_at <= NOW() AT TIME ZONE 'UTC'
+        `;
+        if (current.length === 0) throw deviceSyncError({
+          code: "SCHEDULED_RECONCILE_SUPERSEDED", httpStatus: 409, retryable: false,
+          message: "The selected device schedule is no longer current.",
+        });
+      },
+      complete: async () => {
+        await store.createSignal({
+          userId: input.userId,
+          connectionId: input.connectionId,
+          provider: input.provider,
+          kind: "reconcile_due",
+          occurredAt: hint.occurredAt ?? null,
+          traceId: normalizeNullableString(hint.traceId),
+          eventType: null,
+          resourceCategory: null,
+          reason: null,
+          nextReconcileAt: hint.nextReconcileAt ?? null,
+          revokeWarning: null,
+          createdAt: input.createdAt,
+        });
+      },
     }),
-    healthDataConnectionId: input.connectionId,
-    healthDataUserId: input.userId,
-    signalFailureMode: "throw",
-    // The first append owns the direct Temporal handoff. A later recovery
-    // bucket can encounter the same durable schedule tuple while its imported
-    // runtime work is still pending; the shared mailbox-handoff sweep recovers
-    // only a never-imported first signal, while imported work keeps its own
-    // persisted retry owner.
-    startWorkflowOnDuplicate: false,
-    wake,
-    store,
-    persist: async () => {},
-    complete: async () => {
-      await store.createSignal({
-        userId: input.userId,
-        connectionId: input.connectionId,
-        provider: input.provider,
-        kind: "reconcile_due",
-        occurredAt: hint.occurredAt ?? null,
-        traceId: normalizeNullableString(hint.traceId),
-        eventType: null,
-        resourceCategory: null,
-        reason: null,
-        nextReconcileAt: hint.nextReconcileAt ?? null,
-        revokeWarning: null,
-        createdAt: input.createdAt,
-      });
-    },
+  }).catch((error: unknown) => {
+    if (isDeviceSyncError(error) && error.code === "SCHEDULED_RECONCILE_SUPERSEDED") return null;
+    throw error;
   });
+  if (!appendResult) return {
+    reason: "schedule_superseded", wakeAccepted: false, wakeAppended: false,
+    wakeDuplicate: false, wakeInserted: false,
+  };
   const wakeAccepted = appendResult.inserted
     || (appendResult.duplicate && !appendResult.dedupeConflict);
 
@@ -3251,8 +3279,6 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     select: {
       connectedAt: true,
       provider: true,
-      providerApplicationId: true,
-      providerApplicationRevision: true,
       setupExpiresAt: true,
       setupPhase: true,
       status: true,
@@ -3265,19 +3291,6 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     || current.provider !== input.provider
     || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
     || current.connectedAt.toISOString() !== input.expectedConnectedAt
-  ) {
-    await completeHostedWebhookTraceTx(input, tx);
-    return { kind: "completed" };
-  }
-  // The hosted webhook endpoint authenticates only the shared/operator
-  // provider application. A provider-account row may have been rebound to
-  // a private application after the webhook's initial account lookup, so
-  // the durable admission owner must reject that stale authority while it
-  // holds the connection lock. Private connections continue through their
-  // scheduled reconciliation path until private webhook ownership exists.
-  if (
-    current.providerApplicationId !== null
-    || current.providerApplicationRevision !== null
   ) {
     await completeHostedWebhookTraceTx(input, tx);
     return { kind: "completed" };
@@ -3942,11 +3955,15 @@ function buildHostedWebhookDirtyResources(input: {
     const payloadSourceProviderSlug = readHostedDirtyResourceString(
       payload.sourceProviderSlug,
     );
+    // The provider's own job identity rides along so the runtime enqueues a
+    // re-sent webhook onto the job or continuation already carrying that key.
+    const providerDedupeKey = readHostedDirtyResourceString(job.dedupeKey);
     resources.push({
       count: 1,
       ...buildHostedWebhookDirtyResourceTiming(input),
       jobKind: job.kind,
       payload: readHostedDirtyResourcePayload(payload),
+      ...(providerDedupeKey ? { providerDedupeKey } : {}),
       resource: readHostedDirtyResourceString(payload.resource),
       resourceCategory: readHostedDirtyResourceString(payload.resourceCategory),
       // This field participates in resource execution identity and can be

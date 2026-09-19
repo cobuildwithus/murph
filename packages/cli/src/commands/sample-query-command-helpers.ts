@@ -2,7 +2,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { VAULT_LAYOUT } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { summarizeSampleSeries } from '@murphai/importers/sample-series-summary'
+import { summarizeSampleSeries } from '@murphai/health-metrics'
 import {
   applyLimit,
   isMissingPathError,

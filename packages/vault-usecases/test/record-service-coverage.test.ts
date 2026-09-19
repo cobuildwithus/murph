@@ -37,11 +37,6 @@ import {
 import { computeClearedTopLevelFields, applyRecordPatch } from "../src/usecases/record-mutations.ts";
 import {
   dailyFoodTimeSchema,
-  buildDailyFoodCronExpression,
-  buildDailyFoodCronJobName,
-  buildDailyFoodCronPrompt,
-  buildDailyFoodSchedule,
-  renderAutoLoggedFoodMealNote,
   slugifyFoodLookup,
 } from "../src/usecases/food-autolog.ts";
 import {
@@ -556,32 +551,9 @@ describe("record patching and duration helpers", () => {
     assert.throws(() => validateDurationMinutes(MAX_DURATION_MINUTES + 1), VaultCliError);
   });
 
-  test("food autolog helpers keep their output format stable", () => {
+  test("daily food time and lookup slug retain their format", () => {
     assert.equal(dailyFoodTimeSchema.parse("07:05"), "07:05");
     assert.equal(slugifyFoodLookup("  Acai Bowl!  "), "acai-bowl");
-    assert.equal(buildDailyFoodCronExpression("07:05"), "5 7 * * *");
-    assert.deepEqual(buildDailyFoodSchedule("07:05"), {
-      kind: "dailyLocal",
-      localTime: "07:05",
-    });
-    assert.equal(buildDailyFoodCronJobName("acai-bowl"), "food-daily:acai-bowl");
-    assert.equal(buildDailyFoodCronPrompt("Acai Bowl"), 'Auto-log recurring food "Acai Bowl" as a note-only meal.');
-    assert.equal(
-      renderAutoLoggedFoodMealNote({
-        title: "Acai Bowl",
-        summary: "Sweet and cold.",
-        serving: "1 bowl",
-        ingredients: ["açaí", "banana", "", 1, "granola"],
-        note: "Keep it simple.",
-      }),
-      [
-        "Acai Bowl",
-        "Sweet and cold.",
-        "Serving: 1 bowl",
-        "Ingredients:\n- açaí\n- banana\n- granola",
-        "Keep it simple.",
-      ].join("\n\n"),
-    );
   });
 });
 
@@ -1865,6 +1837,13 @@ describe("record service seams", () => {
     });
     const anchoredMetricPointFilters: unknown[] = [];
     const anchoredMetricQuery = {
+      readExperimentQuerySource: vi.fn(async () => ({
+        readModel: journalQuery.readVault(),
+        listMetricPoints: (filtersList: readonly unknown[]) => {
+          anchoredMetricPointFilters.push(...filtersList);
+          return [];
+        },
+      })),
       readVault: vi.fn(async () => journalQuery.readVault()),
       lookupEntityById: vi.fn(() => anchoredExperiment),
       resolveCanonicalEntityInFamily: vi.fn(async () => anchoredExperiment),

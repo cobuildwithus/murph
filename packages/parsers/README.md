@@ -29,6 +29,17 @@ This package consumes attachment-level parse jobs from the inbox runtime, select
   `createParsedInboxPipeline(...)` processes a capture and immediately drains any newly enqueued attachment jobs
   `runInboxDaemonWithParsers(...)` backfills parser jobs on startup and keeps future captures auto-drained
 
+A bounded owner can use `service.prepareOnce(capture/attachment filters)` to
+claim one existing job synchronously and overlap only its artifact reading and
+parser work. The returned handle's non-rejecting `ready` promise includes scratch
+cleanup. Its memoized `complete()` publishes and finalizes through the same
+attempt-CAS owner as `drainOnce`; stale attempts clean up only their own output.
+The caller must bound the number of live handles and complete every claimed handle,
+in publication order, before closing the runtime, including on failure or caller
+cancellation. This API does not take a cooperative abort signal or own a queue,
+retry loop, or durable state. Serial `drain`/`drainOnce` retain their existing
+behavior. A parser failure is finalized only by completion, not by `ready`.
+
 This keeps parsing additive to `@murphai/inboxd`: canonical inbox evidence remains under inbox ownership, while parser outputs stay rebuildable under `derived/inbox/**`.
 
 ## Toolchain config and discovery

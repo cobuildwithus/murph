@@ -19,6 +19,131 @@ const STRONG_HEADER = [
 ].join(",");
 
 describe("planWorkoutCsvImport", () => {
+  test.each([
+    { column: "Reps", value: "0", expected: { reps: 0 } },
+    { column: "Weight", value: "0", expected: undefined },
+    { column: "Weight Unit", value: "kg", expected: undefined },
+    { column: "Seconds", value: "0", expected: undefined },
+    { column: "Seconds", value: "0.1", expected: { durationSeconds: 0 } },
+    { column: "Distance", value: "0", expected: undefined },
+    { column: "RPE", value: "0", expected: { rpe: 0 } },
+    { column: "Bodyweight", value: "0", expected: { bodyweightKg: 0 } },
+    { column: "Assistance", value: "0", expected: { assistanceKg: 0 } },
+    { column: "Added Weight", value: "0", expected: { addedWeightKg: 0 } },
+    { column: "Reps", value: "", expected: undefined },
+    { column: "Weight", value: "10 kg", expected: { weight: 10, weightUnit: "kg" } },
+    { column: "Distance", value: "1 km", expected: { distanceMeters: 1000 } },
+    { column: "Bodyweight", value: "10 kg", expected: { bodyweightKg: 10 } },
+    { column: "Assistance", value: "10 kg", expected: { assistanceKg: 10 } },
+    { column: "Added Weight", value: "10 kg", expected: { addedWeightKg: 10 } },
+  ])("preserves sparse set shape for $column=$value", ({ column, value, expected }) => {
+    const plan = planWorkoutCsvImport({
+      text: [
+        `Workout Name,Date,Exercise Name,${column}`,
+        `Morning,2026-03-12 07:00:00,Press,${value}`,
+      ].join("\n"),
+      timeZone: "UTC",
+      source: "hevy",
+    });
+
+    assert.equal(plan.importable, true);
+    assert.equal(plan.requiresWeightUnit, false);
+    assert.equal(plan.requiresDistanceUnit, false);
+    assert.deepEqual(
+      plan.sessions[0]?.workout.exercises.flatMap((exercise) => exercise.sets),
+      expected === undefined ? [] : [{ order: 1, type: "normal", ...expected }],
+    );
+  });
+
+  test.each(["Reps", "Weight", "Distance", "Bodyweight", "Assistance", "Added Weight"])(
+    "rejects malformed or negative %s before checking units",
+    (column) => {
+      for (const value of ["invalid", "-1"]) {
+        const plan = planWorkoutCsvImport({
+          text: [
+            `Workout Name,Date,Exercise Name,Weight Unit,${column}`,
+            `Morning,2026-03-12 07:00:00,Press,kg,${value}`,
+          ].join("\n"),
+          timeZone: "UTC",
+          source: "hevy",
+          weightUnit: "lb",
+        });
+        assert.equal(plan.importable, false);
+        assert.deepEqual(plan.sessions, []);
+        assert.deepEqual(plan.skipReasons, [{ reason: "invalid numeric set value", count: 1 }]);
+      }
+    },
+  );
+
+  test("preserves conflict precedence and the phase that records unitless warnings", () => {
+    const fixtures = [
+      {
+        columns: "Weight Kg,Weight Unit,Bodyweight Kg",
+        values: "10 lb,kg,20 lb",
+        reason: "weight units conflict within CSV metadata",
+        requiresWeightUnit: false,
+      },
+      {
+        columns: "Weight,Bodyweight Kg",
+        values: "10 kg,20 lb",
+        weightUnit: "lb" as const,
+        reason: "explicit weight unit conflicts with CSV metadata",
+        requiresWeightUnit: false,
+      },
+      {
+        columns: "Weight,Bodyweight Kg",
+        values: "10,20 lb",
+        reason: "weight units conflict within CSV metadata",
+        requiresWeightUnit: true,
+      },
+      {
+        columns: "Bodyweight Kg,Assistance Kg",
+        values: "20,10 lb",
+        weightUnit: "lb" as const,
+        reason: "weight units conflict within CSV metadata",
+        requiresWeightUnit: false,
+      },
+      {
+        columns: "Bodyweight,Assistance Kg",
+        values: "20,10 lb",
+        reason: "weight units conflict within CSV metadata",
+        requiresWeightUnit: false,
+      },
+      {
+        columns: "Bodyweight,Distance",
+        values: "20,1 km",
+        distanceUnit: "mi" as const,
+        reason: "explicit distance unit conflicts with CSV metadata",
+        requiresWeightUnit: true,
+      },
+      {
+        columns: "Weight,Bodyweight Kg,RPE",
+        values: "10,20 lb,11",
+        reason: "invalid numeric set value",
+        requiresWeightUnit: false,
+      },
+    ];
+    for (const fixture of fixtures) {
+      const plan = planWorkoutCsvImport({
+        text: [
+          `Workout Name,Date,Exercise Name,${fixture.columns}`,
+          `Morning,2026-03-12 07:00:00,Press,${fixture.values}`,
+        ].join("\n"),
+        timeZone: "UTC",
+        source: "hevy",
+        weightUnit: fixture.weightUnit,
+        distanceUnit: fixture.distanceUnit,
+      });
+
+      assert.equal(plan.importable, false, fixture.columns);
+      assert.equal(plan.skippedRowCount, 1, fixture.columns);
+      assert.deepEqual(plan.sessions, [], fixture.columns);
+      assert.deepEqual(plan.skipReasons, [{ reason: fixture.reason, count: 1 }], fixture.columns);
+      assert.equal(plan.requiresWeightUnit, fixture.requiresWeightUnit, fixture.columns);
+      assert.equal(plan.requiresDistanceUnit, false, fixture.columns);
+    }
+  });
+
   test("maps Strong rows in the vault timezone and preserves set tags and notes", () => {
     const plan = planWorkoutCsvImport({
       text: [
@@ -542,6 +667,150 @@ describe("planWorkoutCsvImport", () => {
     assert.equal(plan.sessions[0]?.workout.exercises[0]?.sets.length, 1);
     assert.match(plan.warnings.join(" "), /rest-timer metadata/u);
   });
+
+  test("recovers duration without leaking a later end-time conflict into the projected session", () => {
+    const header = "Workout Name,Date,Start Time,End Time,Duration,Exercise Name,Set Order,Distance Km,Seconds,Workout Notes,Exercise Notes,Group";
+    const invalidDuration = "Circuit,2026-05-02,07:00:00,08:00:00,30h,Run,4,0.25,60,,,";
+    const validDuration = "Circuit,2026-05-02,07:00:00,08:00:00,20m,Run,7,0.75,180,,,";
+    const conflictingEnd = "Circuit,2026-05-02,07:00:00,08:15:00,45m,Sprint,1,99,600,Rejected session,Rejected exercise,rejected";
+    const laterMetadata = "Circuit,2026-05-02,07:00:00,08:00:00,10m,Run,0,0,30,Accepted session,Accepted exercise,accepted";
+    const build = (rows: readonly string[]) => planWorkoutCsvImport({
+      text: [header, ...rows].join("\n"),
+      source: "hevy",
+      timeZone: "UTC",
+    });
+
+    const initial = build([invalidDuration]);
+    assert.equal(initial.sessions[0]?.durationMinutes, undefined);
+    assert.match(initial.warnings.join(" "), /duration\(s\) were invalid/u);
+
+    const recovered = build([invalidDuration, validDuration, laterMetadata]);
+    assert.equal(recovered.importable, true);
+    assert.deepEqual(recovered.warnings, []);
+    assert.equal(recovered.sessions[0]?.durationMinutes, 20);
+    assert.equal(recovered.sessions[0]?.workout.endedAt, "2026-05-02T08:00:00.000Z");
+    assert.equal(recovered.sessions[0]?.distanceKm, 1);
+    assert.equal(recovered.sessions[0]?.note, "Accepted session");
+    assert.equal(recovered.sessions[0]?.workout.sessionNote, "Accepted session");
+    assert.deepEqual(recovered.sessions[0]?.workout.exercises, [{
+      name: "Run",
+      order: 1,
+      groupId: "accepted",
+      note: "Accepted exercise",
+      sets: [
+        { order: 4, type: "normal", durationSeconds: 60, distanceMeters: 250 },
+        { order: 7, type: "normal", durationSeconds: 180, distanceMeters: 750 },
+        { order: 3, type: "normal", durationSeconds: 30 },
+      ],
+      mode: "cardio",
+    }]);
+
+    assert.deepEqual(build([invalidDuration, validDuration, conflictingEnd, laterMetadata]), {
+      ...recovered,
+      rowCount: 4,
+      skippedRowCount: 1,
+      skipReasons: [{ reason: "conflicting workout end times", count: 1 }],
+      importable: false,
+      warnings: ["1 row(s) could not be mapped safely; structured import is blocked."],
+    });
+  });
+
+  test.each(["strong", "hevy"] as const)(
+    "preserves interleaved sessions, empty blocks and set precedence for %s",
+    (source) => {
+      const header = [
+        "Workout Name", "Date", "Start Time", "Duration", "Workout Notes", "Exercise Name", "Group",
+        source === "strong" ? "Notes" : "Exercise Notes",
+        "Set Order", "Set Type", "Warmup", "Dropset", "Failure", "Reps", "Weight", "Seconds", "RPE",
+        "Bodyweight", "Assistance", "Added Weight",
+      ].join(",");
+      const later = ["Later", "2026-05-03", "18:00:00", "20m", "Later session"];
+      const earlier = ["Earlier", "2026-05-03", "07:00:00", "", ""];
+      const laterRows = [
+        ["Later", "2026-05-03", "18:00:00", "40m", "First session", "Press", "first", "First exercise", "9", "normal", "yes", "yes", "yes", "", "", "", "", "", "", ""].join(","),
+        [...later, "Press", "ignored", "Ignored exercise", "2", "failure", "yes", "yes", "yes", "0", "10 lb", "", "", "", "", ""].join(","),
+        [...later, "Press", "ignored", "Ignored exercise", "W", "normal", "yes", "yes", "yes", "1", "5 kg", "0.1", "", "", "", ""].join(","),
+        [...later, "Gap", "gap", "Empty block", "9", "normal", "", "", "", "", "", "", "", "", "", ""].join(","),
+        [...later, "Press", "return", "Return exercise", "F", "normal", "", "", "yes", "3", "1 kg", "", "", "", "", ""].join(","),
+        [...later, "Press", "ignored", "Ignored return", "0", "normal", "", "", "", "2", "0", "", "0", "", "", ""].join(","),
+      ] as const;
+      const earlierRows = [
+        [...earlier, "Plank", "", "", "9", "normal", "", "", "", "", "", "60", "", "", "", ""].join(","),
+        ["Earlier", "2026-05-03", "07:00:00", "", "Earlier session", "Plank", "timed", "Timed exercise", "D", "normal", "", "yes", "yes", "", "", "", "", "0", "0", "0"].join(","),
+      ] as const;
+      const build = (rows: readonly string[]) => planWorkoutCsvImport({
+        text: [header, ...rows].join("\n"),
+        source,
+        timeZone: "UTC",
+      });
+      const plan = build([
+        laterRows[0], earlierRows[0], laterRows[1], earlierRows[1], ...laterRows.slice(2),
+      ]);
+
+      assert.deepEqual(plan, build([...laterRows, ...earlierRows]));
+      assert.equal(plan.importable, true);
+      assert.equal(plan.rowCount, 8);
+      assert.equal(plan.estimatedWorkouts, 2);
+      assert.deepEqual(plan.warnings, []);
+      assert.deepEqual(plan.sessions.map((session) => ({
+        title: session.title,
+        durationMinutes: session.durationMinutes,
+        note: session.note,
+        endedAt: session.workout.endedAt,
+        exercises: session.workout.exercises,
+      })), [
+        {
+          title: "Later",
+          durationMinutes: 40,
+          note: "First session",
+          endedAt: "2026-05-03T18:40:00.000Z",
+          exercises: [
+            {
+              name: "Press",
+              order: 1,
+              groupId: "first",
+              note: "First exercise",
+              sets: [
+                { order: source === "strong" ? 1 : 2, type: source === "strong" ? "normal" : "failure", reps: 0, weight: 10, weightUnit: "lb" },
+                { order: 2, type: "warmup", reps: 1, weight: 5, weightUnit: "kg", durationSeconds: 0 },
+              ],
+              mode: "weight_reps",
+              unitOverride: "lb",
+            },
+            {
+              name: "Press",
+              order: 3,
+              groupId: "return",
+              note: "Return exercise",
+              sets: [
+                { order: 1, type: "failure", reps: 3, weight: 1, weightUnit: "kg" },
+                { order: 2, type: "normal", reps: 2, rpe: 0 },
+              ],
+              mode: "weight_reps",
+              unitOverride: "kg",
+            },
+          ],
+        },
+        {
+          title: "Earlier",
+          durationMinutes: undefined,
+          note: "Earlier session",
+          endedAt: undefined,
+          exercises: [{
+            name: "Plank",
+            order: 1,
+            groupId: "timed",
+            note: "Timed exercise",
+            sets: [
+              { order: source === "strong" ? 1 : 9, type: "normal", durationSeconds: 60 },
+              { order: 2, type: "dropset", bodyweightKg: 0, assistanceKg: 0, addedWeightKg: 0 },
+            ],
+            mode: "assisted_bodyweight",
+          }],
+        },
+      ]);
+    },
+  );
 
   test("keeps source identities private and preserves repeated exercise blocks", () => {
     const plan = planWorkoutCsvImport({

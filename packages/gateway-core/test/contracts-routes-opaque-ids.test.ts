@@ -6,11 +6,9 @@ import { test } from 'vitest'
 import {
   gatewayConversationSchema,
   gatewayListConversationsInputSchema,
-  gatewayPollEventsResultSchema,
   gatewayRespondToPermissionInputSchema,
   gatewaySendMessageResultSchema,
   gatewaySendMessageInputSchema,
-  gatewayWaitForEventsInputSchema,
 } from '../src/contracts.ts'
 import {
   createGatewayInvalidRuntimeIdError,
@@ -112,31 +110,12 @@ test('gateway contract schemas apply their current defaults', () => {
     search: null,
   })
 
-  assert.deepEqual(gatewayPollEventsResultSchema.parse({ nextCursor: 0 }), {
-    events: [],
-    live: true,
-    nextCursor: 0,
-  })
-
   assert.deepEqual(gatewaySendMessageResultSchema.parse({ sessionKey: 'session_123' }), {
     delivery: null,
     messageId: null,
     queued: false,
     sessionKey: 'session_123',
   })
-
-  assert.deepEqual(
-    gatewayWaitForEventsInputSchema.parse({
-      kinds: ['message.created'],
-    }),
-    {
-      cursor: 0,
-      kinds: ['message.created'],
-      limit: 50,
-      sessionKey: null,
-      timeoutMs: 30_000,
-    },
-  )
 
   assert.deepEqual(
     gatewaySendMessageInputSchema.parse({

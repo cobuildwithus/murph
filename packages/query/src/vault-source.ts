@@ -150,6 +150,17 @@ export async function readVaultSourceTolerant(
   };
 }
 
+/** Read only strict, default-visible experiments in canonical entity order. */
+export async function readBrowserVaultReplicaExperiments(
+  vaultRoot: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<CanonicalEntity[]> {
+  options.signal?.throwIfAborted();
+  const experiments = await readExperimentEntities(vaultRoot, "strict", options.signal);
+  options.signal?.throwIfAborted();
+  return experiments.filter(isDefaultProjectedQueryEntity);
+}
+
 /**
  * Read one canonical family directly from its source owner without consulting
  * or rebuilding the shared query projection.

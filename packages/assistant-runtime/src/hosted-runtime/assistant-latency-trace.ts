@@ -1,11 +1,14 @@
 import type {
   HostedIngressLatencySource,
   HostedRuntimeAssistantMilestone,
+  HostedRuntimeLatencyTraceRequest,
 } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedRuntimePlatform } from "./platform.ts";
 
-const HOSTED_ASSISTANT_MILESTONE_TRACE_RETRY_DELAYS_MS = [250, 1_000] as const;
+// Keep completion/deadline dependencies in the delivery-only module so shared
+// channel tracing does not add chunks to the runner boot graph.
+const HOSTED_ASSISTANT_MILESTONE_TRACE_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 
 export interface HostedAssistantMilestoneTraceContext {
   assistantInputIds: readonly string[];
@@ -53,18 +56,33 @@ export function recordHostedAssistantMilestonesBestEffort(input: {
           type: "assistant_milestone" as const,
         },
       };
-      let response = await latencyTracePort.record(request);
-      for (const delayMs of HOSTED_ASSISTANT_MILESTONE_TRACE_RETRY_DELAYS_MS) {
-        if (response.unmatchedCount === 0) {
-          return;
-        }
-        await sleep(delayMs);
-        response = await latencyTracePort.record(request);
+      if (await recordLatencyTraceWithRetries(latencyTracePort, request)) return;
+      if (milestone === "linq_typing_accepted" || milestone === "telegram_typing_accepted") {
+        console.warn("Hosted typing acceptance telemetry exhausted its retry budget.", {
+          source: context.source,
+          inputCount: assistantInputIds.length,
+        });
       }
     })).catch(() => {
       // Latency traces are diagnostic-only and must not affect runtime progress.
     });
   });
+}
+
+export async function recordLatencyTraceWithRetries(
+  port: NonNullable<HostedRuntimePlatform["latencyTracePort"]>,
+  request: HostedRuntimeLatencyTraceRequest,
+): Promise<boolean> {
+  for (const delayMs of HOSTED_ASSISTANT_MILESTONE_TRACE_RETRY_DELAYS_MS) {
+    if (delayMs > 0) await sleep(delayMs);
+    try {
+      const response = await port.record(request);
+      if (response.unmatchedCount === 0) return true;
+    } catch {
+      // Transport failures share the same finite retry budget as late staging.
+    }
+  }
+  return false;
 }
 
 async function sleep(delayMs: number): Promise<void> {

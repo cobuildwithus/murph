@@ -133,7 +133,7 @@ export interface SetupCliOptions {
   wizard?: SetupWizardRunner
 }
 
-export type SetupPostLaunchAction = 'assistant-chat' | 'assistant-run' | null
+export type SetupPostLaunchAction = 'assistant-run' | null
 
 export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
   const commandName = options.commandName ?? 'vault-cli'
@@ -394,7 +394,7 @@ export function resolveSetupPostLaunchAction(
     (channel) => channel.autoReply && channel.configured,
   )
     ? 'assistant-run'
-    : 'assistant-chat'
+    : null
 }
 
 export function shouldAutoLaunchAssistantAfterSetup(
@@ -516,12 +516,10 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     })
   }
 
-  commands.push(
-    {
-      command: 'assistant chat',
-      description: 'Open the local assistant chat against the default vault.',
-    },
-  )
+  commands.push({
+    command: 'assistant ask "Summarize my saved health context."',
+    description: 'Run one local assistant turn against the default vault.',
+  })
 
   for (const wearable of listSetupReadyWearables(result)) {
     commands.push({

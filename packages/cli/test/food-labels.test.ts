@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, expect, it, vi } from 'vitest'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { foodLabelResponse } from './fixtures/food-label-response.ts'
 
 import {
   foodLabelSearchItemSchema,
@@ -375,26 +376,19 @@ describe('searchFoodLabels', () => {
   })
 
   it('calls the internal foods API with the hosted provider credential', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      items: [
-        {
-          id: 'fdc:2259794',
-          dataOrigin: 'usda_branded',
-          dataOriginId: '2259794',
-          name: 'Plain Greek Yogurt',
-          brand: 'Example Dairy',
-          upc: '012345678905',
-          offMarket: false,
-          label: yogurtLabel,
-          contaminantSummary: yogurtContaminantSummary,
-        },
-      ],
-    }), {
-      headers: {
-        'content-type': 'application/json; charset=utf-8',
+    const fetchMock = vi.fn<typeof fetch>(async () => foodLabelResponse([
+      {
+        id: 'fdc:2259794',
+        dataOrigin: 'usda_branded',
+        dataOriginId: '2259794',
+        name: 'Plain Greek Yogurt',
+        brand: 'Example Dairy',
+        upc: '012345678905',
+        offMarket: false,
+        label: yogurtLabel,
+        contaminantSummary: yogurtContaminantSummary,
       },
-      status: 200,
-    }))
+    ]))
 
     const result = await searchFoodLabels(
       {

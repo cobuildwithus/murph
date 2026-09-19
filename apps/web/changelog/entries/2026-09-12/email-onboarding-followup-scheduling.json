@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 0,
+  "item": {
+    "id": "email-onboarding-followup-scheduling",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable email onboarding follow-ups",
+    "summary": "Fixed a scheduling error that could prevent onboarding follow-ups in private email conversations.",
+    "details": "The original onboarding window still applies, and completed onboarding stays closed.",
+    "relevanceTags": ["email", "onboarding", "reliability"],
+    "sourcePullRequests": [3367]
+  }
+}

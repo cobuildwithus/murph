@@ -35,6 +35,13 @@ import {
   validateVault,
 } from "../src/index.ts";
 import { parseRawImportManifest } from "../src/operations/raw-manifests.ts";
+import * as rawArtifactIntegrity from "../src/raw-artifact-integrity.ts";
+import {
+  acquireCanonicalWriteLock,
+  CANONICAL_WRITE_LOCK_DIRECTORY,
+  CANONICAL_WRITE_LOCK_METADATA_PATH,
+  inspectCanonicalWriteLock,
+} from "../src/operations/canonical-write-lock.ts";
 
 const IMPORT_ID = "xfm_FKXWJ9CRVED58RA9QVF2QHA1WE";
 const IMPORTED_AT = "2026-05-01T00:00:00.000Z";
@@ -960,7 +967,7 @@ test("dense raw pruning skips manifest scans when the deadline is already exhaus
     });
 
     assert.equal(result.mutated, false);
-    assert.equal(result.hasMore, false);
+    assert.equal(result.hasMore, true);
     assert.equal(result.tombstonedDenseRawArtifactCount, 0);
     assert.equal(
       readFile.mock.calls.some(([file]) => String(file).endsWith("manifest.json")),
@@ -974,6 +981,122 @@ test("dense raw pruning skips manifest scans when the deadline is already exhaus
     await fs.readFile(path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json"), "utf8"),
     /sampleValues/u,
   );
+});
+
+test.each([1, 1_000])("bounded dense raw cleanup defers behind a canonical writer (deadline %i ms)", async (deadlineMs) => {
+  const vaultRoot = await createRawArtifactFixture({
+    denseRole: "junction-timeseries-heartrate",
+    denseSampleValues: Array.from({ length: 512 }, (_, index) => index),
+  });
+  const artifactPath = path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json");
+  const manifestPath = path.join(vaultRoot, RAW_DIRECTORY, "manifest.json");
+  const artifactBefore = await fs.readFile(artifactPath);
+  const manifestBefore = await fs.readFile(manifestPath);
+  const lock = await acquireCanonicalWriteLock(vaultRoot);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const pruning = pruneWearableDenseRawTimeseries({ deadlineMs, now: REPAIR_NOW, vaultRoot });
+  try {
+    // Real timers and a real directory lock. The owner is not released to make
+    // this assertion pass; the cleanup operation itself must settle first.
+    const settledBeforeRelease = await Promise.race([
+      pruning.then(() => true),
+      new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), 250); }),
+    ]);
+    assert.equal(settledBeforeRelease, true);
+    const result = await pruning;
+    assert.equal(result.hasMore, true);
+    assert.equal(result.mutated, false);
+    assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "active");
+    assert.deepEqual(await fs.readFile(artifactPath), artifactBefore);
+    assert.deepEqual(await fs.readFile(manifestPath), manifestBefore);
+    await lock.release();
+    // Deferral must not lose cleanup or leave a waiting mutation behind.
+    const resumed = await pruneWearableDenseRawTimeseries({
+      deadlineMs: 5_000, now: REPAIR_NOW, vaultRoot,
+    });
+    assert.equal(resumed.tombstonedDenseRawArtifactCount, 1);
+    await assertManifestArtifactMatchesFile(vaultRoot, "01-provider-timeseries-heart-rate.json");
+    assert.equal((await validateVault({ vaultRoot })).valid, true);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    await lock.release();
+    // Even the failing old implementation is joined before fixture removal.
+    try {
+      await pruning;
+    } finally {
+      await fs.rm(vaultRoot, { force: true, recursive: true });
+    }
+  }
+});
+
+test.each(["manifest", "second candidate"] as const)("dense raw cleanup observes foreground yield during the %s read", async (boundary) => {
+  const vaultRoot = await createRawArtifactFixture({
+    denseRole: "junction-timeseries-heartrate",
+    denseSampleValues: Array.from({ length: 512 }, (_, index) => index),
+  });
+  if (boundary === "second candidate") await addSecondDenseRawArtifact(vaultRoot);
+  const manifestPath = path.join(vaultRoot, RAW_DIRECTORY, "manifest.json");
+  const artifactPath = path.join(vaultRoot, RAW_DIRECTORY, "01-provider-timeseries-heart-rate.json");
+  const yieldPath = boundary === "manifest"
+    ? manifestPath
+    : path.join(vaultRoot, RAW_DIRECTORY, "04-provider-timeseries-steps.json");
+  const manifestBefore = await fs.readFile(manifestPath);
+  const artifactBefore = await fs.readFile(artifactPath);
+  let foregroundPending = false;
+  const originalReadFile = fs.readFile.bind(fs);
+  const readFile = vi.spyOn(fs, "readFile").mockImplementation((async (...args: Parameters<typeof fs.readFile>) => {
+    const result = await originalReadFile(...args);
+    if (String(args[0]) === yieldPath) foregroundPending = true;
+    return result;
+  }) as typeof fs.readFile);
+  const originalHashFile = rawArtifactIntegrity.statAndHashVaultFileInterruptible;
+  const hashFile = vi.spyOn(rawArtifactIntegrity, "statAndHashVaultFileInterruptible")
+    .mockImplementation(async (...args) => {
+      const result = await originalHashFile(...args);
+      if (path.join(args[0], args[1]) === yieldPath) foregroundPending = true;
+      return result;
+    });
+  try {
+    const result = await pruneWearableDenseRawTimeseries({
+      now: REPAIR_NOW,
+      shouldYield: () => foregroundPending,
+      vaultRoot,
+    });
+    assert.equal(foregroundPending, true);
+    assert.equal(result.hasMore, true);
+    assert.equal(result.mutated, false);
+    assert.deepEqual(result.touchedPaths, []);
+    assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "unlocked");
+    assert.deepEqual(await originalReadFile(manifestPath), manifestBefore);
+    assert.deepEqual(await originalReadFile(artifactPath), artifactBefore);
+  } finally {
+    readFile.mockRestore();
+    hashFile.mockRestore();
+    await fs.rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("opportunistic cleanup never reclaims an uncertain foreign canonical writer", async () => {
+  const vaultRoot = await createRawArtifactFixture();
+  const lockPath = path.join(vaultRoot, CANONICAL_WRITE_LOCK_DIRECTORY);
+  const metadataPath = path.join(vaultRoot, CANONICAL_WRITE_LOCK_METADATA_PATH);
+  const metadata = JSON.stringify({
+    command: "synthetic-foreign-writer",
+    host: "synthetic-foreign-host",
+    pid: 4242,
+    startedAt: REPAIR_NOW.toISOString(),
+  });
+  await fs.mkdir(lockPath, { recursive: true });
+  await fs.writeFile(metadataPath, metadata);
+  try {
+    const result = await pruneWearableDenseRawTimeseries({ deadlineMs: 5_000, now: REPAIR_NOW, vaultRoot });
+    assert.equal(result.hasMore, true);
+    assert.equal(result.mutated, false);
+    assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "active");
+    assert.equal(await fs.readFile(metadataPath, "utf8"), metadata);
+  } finally {
+    await fs.rm(vaultRoot, { force: true, recursive: true });
+  }
 });
 
 test("dense raw pruning reports interrupted proof without tombstoning", async () => {

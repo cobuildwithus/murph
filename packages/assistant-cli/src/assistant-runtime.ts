@@ -44,7 +44,6 @@ export {
   setAssistantCronJobEnabled,
 } from './assistant/cron.js'
 export type {
-  AssistantChatInput,
   AssistantMessageInput,
 } from './assistant/service.js'
 export type {
@@ -87,12 +86,6 @@ export {
   listAssistantOutboxIntents,
   shouldDispatchAssistantOutboxIntent,
 } from './assistant/outbox.js'
-export async function runAssistantChat(
-  input: import('./assistant/service.js').AssistantChatInput,
-): Promise<import('@murphai/operator-config/assistant-cli-contracts').AssistantChatResult> {
-  const { runAssistantChatWithInk } = await import('./assistant-chat-ink.js')
-  return runAssistantChatWithInk(input)
-}
 
 export {
   runAssistantDoctor,

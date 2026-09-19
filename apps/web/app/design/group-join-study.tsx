@@ -25,7 +25,7 @@ const DESIGN_ACTIVITY_SCOPE: HostedVaultShareProjectionScope = {
 
 const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   {
-    description: "Shares 7 days of deep sleep minutes and recorded times by source.",
+    description: "Shares 90 days of deep sleep minutes and recorded times by source.",
     label: "Deep sleep",
     legacyProjectionScope: { projectionKind: "deep-sleep-days.v0" },
     projectionScope: { projectionKind: "deep-sleep-sources-days.v1" },
@@ -34,7 +34,7 @@ const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description: "Shares 7 days of REM sleep minutes and recorded times by source.",
+    description: "Shares 90 days of REM sleep minutes and recorded times by source.",
     label: "REM sleep",
     legacyProjectionScope: { projectionKind: "rem-sleep-days.v0" },
     projectionScope: { projectionKind: "rem-sleep-sources-days.v1" },
@@ -46,7 +46,7 @@ const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
 
 const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   {
-    description: "Shares 7 days of active minutes by source.",
+    description: "Shares 90 days of active minutes by source.",
     label: "Activity minutes",
     projectionScope: DESIGN_ACTIVITY_SCOPE,
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey(DESIGN_ACTIVITY_SCOPE),
@@ -55,7 +55,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   // The four gram-macro scopes render as a single "Daily macros" card; dietary
   // calories stay a separate "Daily calories" card.
   {
-    description: "Shares 7 days of meal protein totals, including imports, with Murph as the source.",
+    description: "Shares 90 days of meal protein totals, including imports, with Murph as the source.",
     label: "Daily protein",
     projectionScope: { projectionKind: "protein-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -63,7 +63,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description: "Shares 7 days of meal carbohydrate totals, including imports, with Murph as the source.",
+    description: "Shares 90 days of meal carbohydrate totals, including imports, with Murph as the source.",
     label: "Daily carbs",
     projectionScope: { projectionKind: "carbs-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -71,7 +71,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description: "Shares 7 days of meal fat totals, including imports, with Murph as the source.",
+    description: "Shares 90 days of meal fat totals, including imports, with Murph as the source.",
     label: "Daily fat",
     projectionScope: { projectionKind: "fat-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -79,7 +79,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description: "Shares 7 days of meal fiber totals, including imports, with Murph as the source.",
+    description: "Shares 90 days of meal fiber totals, including imports, with Murph as the source.",
     label: "Daily fiber",
     projectionScope: { projectionKind: "fiber-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -87,7 +87,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description: "Shares 7 days of meal calorie totals, including imports, with Murph as the source.",
+    description: "Shares 90 days of meal calorie totals, including imports, with Murph as the source.",
     label: "Daily calories",
     projectionScope: { projectionKind: "calories-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -123,6 +123,24 @@ export function GroupJoinStudy({
       id="group-join"
       inert
     >
+      <GroupJoinVariant
+        caption="An existing activity permission now shares 90 days automatically and remains selected. Unchecking it stops sharing."
+        title="History · existing permission"
+      >
+        <GroupJoinPageMock alreadyActiveMember designState="group-join-history-existing">
+          <GroupJoinAcceptForm
+            activeVaultShareProjectionScopes={[DESIGN_ACTIVITY_SCOPE]}
+            alreadyActiveMember
+            expectedMembershipId="membership_design"
+            groupName={DESIGN_GROUP_NAME}
+            joinCode={DESIGN_JOIN_CODE}
+            permissions={comprehensivePermissions.filter(({ projectionScope }) => projectionScope.projectionKind === "activity-days.v0")}
+            postJoinContactOption={null}
+            postJoinDestination="/home"
+          />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
       <GroupJoinVariant
         caption="Deep sleep is one exact consent choice that includes source names, each source's recorded time, and every available value across both stored scope versions."
         title="Sleep sources · exact consent"
@@ -196,7 +214,7 @@ export function GroupJoinStudy({
       </GroupJoinVariant>
 
       <GroupJoinVariant
-        caption="A new member sees every available sharing choice selected, including the exact seven-day window for recent activity distance and session counts. They can clear optional sharing in one action and re-enable exact choices before joining. Nothing is shared until they join."
+        caption="A new member sees every available sharing choice selected, including the exact 90-day window for recent activity distance and session counts. They can clear optional sharing in one action and re-enable exact choices before joining. Nothing is shared until they join."
         title="New invitee · comprehensive default"
       >
         <GroupJoinPageMock
@@ -217,7 +235,7 @@ export function GroupJoinStudy({
       </GroupJoinVariant>
 
       <GroupJoinVariant
-        caption="Selector-based activity choices name the same seven-day history window as every other recent-data permission, so approval is informed before sharing starts."
+        caption="Selector-based activity choices name the same 90-day history window as every other recent-data permission, so approval is informed before sharing starts."
         title="Recent activity · exact consent window"
       >
         <GroupJoinPageMock

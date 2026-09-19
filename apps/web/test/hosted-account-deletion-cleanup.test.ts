@@ -36,6 +36,7 @@ vi.mock("@/src/lib/hosted-runtime-log/store", () => ({
 }));
 
 import {
+  HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS,
   drainHostedAccountDeletionCleanupBatch,
   persistHostedAccountDeletionCleanupTx,
   prepareHostedAccountDeletionCleanup,
@@ -687,6 +688,49 @@ describe("hosted account deletion cleanup", () => {
     });
     expect(store.row?.nextAttemptAt.getTime()).toBeGreaterThan(now.getTime());
     expect(prepared.id).toBe(store.row?.id);
+  });
+
+  it.each([
+    { delayMs: 6_000, cleanupPending: false },
+    { delayMs: 8_000, cleanupPending: true },
+  ])("settles cleanup after $delayMs ms with pending=$cleanupPending", async ({
+    delayMs,
+    cleanupPending,
+  }) => {
+    vi.useFakeTimers();
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const prepared = await createCleanup(store, now);
+    mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(
+      () => new Promise((resolve) => {
+        setTimeout(() => resolve(makeCloudflareDeletionResult({ deleted: true })), delayMs);
+      }),
+    );
+
+    const run = runHostedAccountDeletionCleanup({
+      attemptTimeoutMs: HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS,
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    });
+    await vi.advanceTimersByTimeAsync(delayMs);
+
+    await expect(run).resolves.toMatchObject({ cleanupPending });
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
+      context: "account-deletion-cleanup",
+      signal: expect.any(AbortSignal),
+      timeoutMs: 8_000,
+      userId: "member_1",
+    });
+    if (cleanupPending) {
+      expect(store.row).toMatchObject({
+        cloudflareCompletedAt: null,
+        lastErrorCode: "ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT",
+        leaseToken: null,
+      });
+    } else {
+      expect(store.row).toBeNull();
+    }
   });
 
   it("returns a pending receipt when external targets exceed the attempt budget", async () => {

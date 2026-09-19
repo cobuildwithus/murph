@@ -1,6 +1,7 @@
 ---
 title: 'Worker version smoke expires before edge propagation converges'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3092'
 ---
 
 ## Expected Behavior

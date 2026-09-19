@@ -14,11 +14,18 @@ export const TEMPORAL_COMPATIBILITY_MODE = "temporal_compatibility";
 export const HOSTED_RELEASE_ADMISSION_MODE = "release_admission";
 export const HOSTED_RELEASE_SCOPE_NONE = "none";
 export const HOSTED_RELEASE_SCOPE_FOREGROUND = "foreground_priority";
+export const HOSTED_RELEASE_SCOPE_PRODUCTION_CORE = "production_core";
+const PRODUCTION_CORE_LANES = [
+  "linq-delivery",
+  "linq-scheduled-reminder",
+  "hosted-web-browser-smoke",
+  "foreground-reply-priority",
+  "foreground-checkpoint-ordering",
+];
 
 const GITHUB_API_VERSION = "2026-03-10";
 const HTTP_TIMEOUT_MS = 30_000;
 export const TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS = 58 * 60_000;
-export const TEMPORAL_COMPATIBILITY_RUN_TIMEOUT_MS = 40 * 60_000;
 const CANCEL_GRACE_MS = 2 * 60_000;
 export const TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS = 6 * 60_000;
 const POLL_MS = 15_000;
@@ -404,6 +411,7 @@ function inspectPrivateProofJob(raw, { ids, privateSha, runId }) {
     ["reader", /^Temporal compatibility reader \[sha=([0-9a-f]{40})\]$/u],
     ["attestation", /^Temporal compatibility attestation \[proof=([0-9a-f]{64})\]$/u],
     ["hosted-release", /^Hosted release attestation \[proof=([0-9a-f]{64})\]$/u],
+    ["hosted-core", /^Hosted production core proof \/ ([a-z-]+) \/ ([0-9a-f]{64})$/u],
   ];
   for (const [kind, pattern] of patterns) {
     const match = pattern.exec(name);
@@ -411,9 +419,15 @@ function inspectPrivateProofJob(raw, { ids, privateSha, runId }) {
     if (raw.status !== "completed" || raw.conclusion !== "success") {
       throw new Error("Private compatibility proof job did not complete successfully.");
     }
-    return { kind, value: match[1] };
+    return kind === "hosted-core"
+      ? { kind, lane: match[1], value: match[2] }
+      : { kind, value: match[1] };
   }
-  if (name.startsWith("Temporal compatibility") || name.startsWith("Hosted release")) {
+  if (
+    name.startsWith("Temporal compatibility")
+    || name.startsWith("Hosted release")
+    || name.startsWith("Hosted production core")
+  ) {
     throw new Error("Private compatibility run returned a malformed proof job.");
   }
   return null;
@@ -421,13 +435,14 @@ function inspectPrivateProofJob(raw, { ids, privateSha, runId }) {
 
 function verifyHostedReleaseAttestation({
   attestations,
+  coreProofs,
   expectedTemporalTargetDigest,
   privateSha,
   publicSha,
   releaseScope,
 }) {
   if (releaseScope === HOSTED_RELEASE_SCOPE_NONE) {
-    if (attestations.length !== 0) {
+    if (attestations.length !== 0 || coreProofs.length !== 0) {
       throw new Error("Unexpected hosted release attestation was returned.");
     }
     return;
@@ -443,6 +458,25 @@ function verifyHostedReleaseAttestation({
   });
   if (attestations[0] !== expected) {
     throw new Error("Hosted release attestation does not bind the requested proof.");
+  }
+  verifyProductionCoreProofs(coreProofs, { expectedDigest: expected, releaseScope });
+}
+
+function verifyProductionCoreProofs(proofs, { expectedDigest, releaseScope }) {
+  if (releaseScope !== HOSTED_RELEASE_SCOPE_PRODUCTION_CORE) {
+    if (proofs.length !== 0) {
+      throw new Error("Unexpected hosted production core proof was returned.");
+    }
+    return;
+  }
+  const remaining = new Set(PRODUCTION_CORE_LANES);
+  for (const proof of proofs) {
+    if (!remaining.delete(proof.lane) || proof.value !== expectedDigest) {
+      throw new Error("Hosted production core proof has a duplicate, unknown, or mismatched lane.");
+    }
+  }
+  if (remaining.size !== 0) {
+    throw new Error("Hosted production core proof omitted a required lane.");
   }
 }
 
@@ -463,11 +497,13 @@ export function inspectAttestationJobs(jobs, {
   const readers = [];
   const attestations = [];
   const hostedReleaseAttestations = [];
+  const coreProofs = [];
   for (const raw of jobs) {
     const job = inspectPrivateProofJob(raw, { ids, privateSha, runId });
     if (job?.kind === "reader") readers.push(job.value);
     if (job?.kind === "attestation") attestations.push(job.value);
     if (job?.kind === "hosted-release") hostedReleaseAttestations.push(job.value);
+    if (job?.kind === "hosted-core") coreProofs.push(job);
   }
   if (attestations.length !== 1) {
     throw new Error("Private compatibility run must return exactly one attestation job.");
@@ -490,6 +526,7 @@ export function inspectAttestationJobs(jobs, {
   }
   verifyHostedReleaseAttestation({
     attestations: hostedReleaseAttestations,
+    coreProofs,
     expectedTemporalTargetDigest,
     privateSha,
     publicSha,
@@ -519,20 +556,33 @@ export function inspectJobPage(raw) {
   return raw.jobs;
 }
 
-export async function listAllRunJobs({ runId, token }) {
+export async function listAllRunJobs({ runId, token, ...timing }) {
   return inspectJobPage(await fetchJson(
     `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${runId}/jobs?filter=latest&per_page=${PAGE_SIZE}&page=1`,
     { headers: githubHeaders(token) },
     "private compatibility job lookup",
+    timing,
   ));
 }
 
-async function resolvePrivateMain({ encodedPrivateRepository, token }) {
+async function resolvePrivateMain({ encodedPrivateRepository, token, ...timing }) {
   return inspectPrivateMainRef(await fetchJson(
     `https://api.github.com/repos/${encodedPrivateRepository}/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`,
     { headers: githubHeaders(token) },
     "private main lookup",
+    timing,
   ));
+}
+
+// A later merge does not change the candidate that produced these fixtures.
+// Compare immutable SHAs and require an exact ancestor, never arbitrary PR code.
+export function inspectPublicCandidateAncestry(comparison, candidateSha) {
+  assertSha(candidateSha, "public candidate SHA");
+  if (comparison?.status !== "ahead"
+    || comparison.base_commit?.sha !== candidateSha
+    || comparison.merge_base_commit?.sha !== candidateSha) {
+    throw new Error("Public deployment candidate is not in protected branch history.");
+  }
 }
 
 export async function runTemporalCompatibility({
@@ -562,15 +612,22 @@ export async function runTemporalCompatibility({
     throw new Error("Pull request number must be a positive integer.");
   }
   const tokenDeadline = now() + TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS;
+  // Queue, setup and execution share the remaining credential budget. Reserve
+  // six minutes for either final proof reads (at most four 30-second calls) or
+  // cancellation (two 30-second calls plus two two-minute terminal waits).
+  const deadline = tokenDeadline - TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS;
+  const timing = { deadline: tokenDeadline, now };
   const encodedPrivateRepository = encodeRepository(TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY);
   const privateSha = await resolvePrivateMain({
     encodedPrivateRepository,
     token: privateToken,
+    ...timing,
   });
   const workflowId = inspectPrivateWorkflow(await fetchJson(
     `https://api.github.com/repos/${encodedPrivateRepository}/actions/workflows/${encodeURIComponent(TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW)}`,
     { headers: githubHeaders(privateToken) },
     "private compatibility workflow lookup",
+    timing,
   ));
   const encodedPublicRepository = encodeRepository(publicRepository);
   const revalidatePublicTarget = async () => {
@@ -579,9 +636,15 @@ export async function runTemporalCompatibility({
         `https://api.github.com/repos/${encodedPublicRepository}/git/ref/heads/${expectedBaseRef.split("/").map(encodeURIComponent).join("/")}`,
         { headers: githubHeaders(publicToken) },
         "public deployment branch revalidation",
+        timing,
       ), expectedBaseRef);
       if (currentSha !== publicSha) {
-        throw new Error("Public deployment branch changed during Temporal compatibility proof.");
+        inspectPublicCandidateAncestry(await fetchJson(
+          `https://api.github.com/repos/${encodedPublicRepository}/compare/${publicSha}...${currentSha}`,
+          { headers: githubHeaders(publicToken) },
+          "public deployment candidate ancestry",
+          timing,
+        ), publicSha);
       }
       return;
     }
@@ -589,6 +652,7 @@ export async function runTemporalCompatibility({
       `https://api.github.com/repos/${encodedPublicRepository}/pulls/${prNumber}`,
       { headers: githubHeaders(publicToken) },
       "public pull request revalidation",
+      timing,
     ), {
       expectedBaseRef,
       expectedSha: publicSha,
@@ -598,7 +662,7 @@ export async function runTemporalCompatibility({
   };
   await revalidatePublicTarget();
 
-  if (now() >= tokenDeadline - TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS - HTTP_TIMEOUT_MS) {
+  if (now() >= deadline - HTTP_TIMEOUT_MS) {
     throw new Error("Private GitHub token budget was exhausted before dispatch.");
   }
 
@@ -622,15 +686,12 @@ export async function runTemporalCompatibility({
       method: "POST",
     },
     "private compatibility workflow dispatch",
+    timing,
   ));
 
   let terminal = false;
   let runVisible = false;
   try {
-    const deadline = Math.min(
-      now() + TEMPORAL_COMPATIBILITY_RUN_TIMEOUT_MS,
-      tokenDeadline - TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS,
-    );
     while (now() < deadline) {
       const run = inspectPrivateRun(await readPrivateRun(runId, privateToken, {
         deadline,
@@ -648,7 +709,7 @@ export async function runTemporalCompatibility({
         if (run.conclusion !== "success") {
           throw new Error(`Private compatibility run completed with ${run.conclusion || "no conclusion"}.`);
         }
-        const proof = inspectAttestationJobs(await listAllRunJobs({ runId, token: privateToken }), {
+        const proof = inspectAttestationJobs(await listAllRunJobs({ runId, token: privateToken, ...timing }), {
           expectedTemporalTargetDigest,
           releaseScope,
           privateSha,
@@ -661,10 +722,12 @@ export async function runTemporalCompatibility({
         const currentPrivateSha = await resolvePrivateMain({
           encodedPrivateRepository,
           token: privateToken,
+          ...timing,
         });
         if (currentPrivateSha !== privateSha) {
           throw new Error("Private main changed during Temporal compatibility proof.");
         }
+        remainingHttpTimeout(timing, "private compatibility finalization");
         console.log(`::notice::temporal-compatibility result=success readers=${proof.readerCount} digest=${proof.digest}`);
         return proof;
       }
@@ -676,6 +739,7 @@ export async function runTemporalCompatibility({
     if (!terminal) {
       try {
         await cancelAcceptedRun({
+          deadline: tokenDeadline,
           privateSha,
           now,
           runId,
@@ -697,6 +761,7 @@ export async function runTemporalCompatibility({
 export async function cancelAcceptedRun({
   privateSha,
   now = Date.now,
+  deadline = now() + TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS,
   runId,
   sleepFn = sleep,
   token,
@@ -709,11 +774,13 @@ export async function cancelAcceptedRun({
       runId,
       "cancel",
       token,
+      { deadline, now },
     );
   } catch {
     ordinaryCancelFailed = true;
   }
   if (!ordinaryCancelFailed && await waitForTerminal({
+    deadline,
     privateSha,
     now,
     runId,
@@ -727,8 +794,10 @@ export async function cancelAcceptedRun({
     runId,
     "force-cancel",
     token,
+    { deadline, now },
   );
   if (!await waitForTerminal({
+    deadline,
     privateSha,
     now,
     runId,
@@ -742,6 +811,7 @@ export async function cancelAcceptedRun({
 }
 
 async function waitForTerminal({
+  deadline: tokenDeadline,
   privateSha,
   now,
   runId,
@@ -750,7 +820,7 @@ async function waitForTerminal({
   token,
   workflowId,
 }) {
-  const deadline = now() + timeoutMs;
+  const deadline = Math.min(tokenDeadline, now() + timeoutMs);
   while (now() < deadline) {
     let run;
     try {
@@ -787,7 +857,7 @@ async function readPrivateRun(runId, token, {
         `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${runId}`,
         { headers: githubHeaders(token) },
         "private compatibility run lookup",
-        Math.min(HTTP_TIMEOUT_MS, remainingMs),
+        { deadline, now },
       );
     } catch (error) {
       if (
@@ -803,14 +873,14 @@ async function readPrivateRun(runId, token, {
   throw new Error("Private compatibility run visibility retry was exhausted.");
 }
 
-async function postRunControl(repository, runId, operation, token) {
+async function postRunControl(repository, runId, operation, token, timing) {
   const encodedRepository = encodeRepository(repository);
   const response = await fetch(
     `https://api.github.com/repos/${encodedRepository}/actions/runs/${runId}/${operation}`,
     {
       headers: githubHeaders(token),
       method: "POST",
-      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+      signal: AbortSignal.timeout(remainingHttpTimeout(timing, `private compatibility ${operation}`)),
     },
   );
   if (response.status !== 202 && response.status !== 409) {
@@ -818,6 +888,7 @@ async function postRunControl(repository, runId, operation, token) {
     throw new Error(`Private compatibility ${operation} failed with HTTP ${response.status}.`);
   }
   await response.body?.cancel().catch(() => undefined);
+  remainingHttpTimeout(timing, `private compatibility ${operation}`);
 }
 
 async function runSelectCommand() {
@@ -873,7 +944,7 @@ async function runMainCompatibilityCommand(args) {
     dispatchMode: HOSTED_RELEASE_ADMISSION_MODE,
     expectedBaseRef: requiredEnv("EXPECTED_BASE_REF"),
     expectedTemporalTargetDigest: requiredEnv("TEMPORAL_PRODUCTION_TARGET_DIGEST"),
-    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    releaseScope: HOSTED_RELEASE_SCOPE_PRODUCTION_CORE,
     privateToken,
     producerDigest: producer.digest,
     producerFixtures: producer.serialized,
@@ -894,17 +965,31 @@ async function main(argv) {
   throw new Error("Expected select, run, or run-main.");
 }
 
-async function fetchJson(url, init, label, timeoutMs = HTTP_TIMEOUT_MS) {
-  const response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+function remainingHttpTimeout({ deadline = Number.POSITIVE_INFINITY, now = Date.now } = {}, label) {
+  const remainingMs = deadline - now();
+  if (remainingMs <= 0) throw new Error(`${label} exceeded its timing budget.`);
+  return Math.min(HTTP_TIMEOUT_MS, remainingMs);
+}
+
+async function fetchJson(url, init, label, timing) {
+  const response = await fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(remainingHttpTimeout(timing, label)),
+  });
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
     throw new HttpStatusError(label, response.status);
   }
+  let body;
   try {
-    return await response.json();
+    body = await response.json();
   } catch {
     throw new Error(`${label} returned invalid JSON.`);
   }
+  // Include body consumption and reject a late result even if an abort timer
+  // could not run promptly (for example, while the process was suspended).
+  remainingHttpTimeout(timing, label);
+  return body;
 }
 
 class HttpStatusError extends Error {
@@ -964,8 +1049,9 @@ function assertHostedReleaseScope(value, { allowNone = true } = {}) {
     ? [
         HOSTED_RELEASE_SCOPE_NONE,
         HOSTED_RELEASE_SCOPE_FOREGROUND,
+        HOSTED_RELEASE_SCOPE_PRODUCTION_CORE,
       ]
-    : [HOSTED_RELEASE_SCOPE_FOREGROUND];
+    : [HOSTED_RELEASE_SCOPE_FOREGROUND, HOSTED_RELEASE_SCOPE_PRODUCTION_CORE];
   if (!allowed.includes(value)) {
     throw new Error("Hosted release scope is invalid.");
   }
@@ -978,7 +1064,7 @@ function assertDispatchMode(mode, releaseScope) {
     && releaseScope === HOSTED_RELEASE_SCOPE_NONE
   ) || (
     mode === HOSTED_RELEASE_ADMISSION_MODE
-    && releaseScope === HOSTED_RELEASE_SCOPE_FOREGROUND
+    && releaseScope !== HOSTED_RELEASE_SCOPE_NONE
   );
   if (!valid) {
     throw new Error("Compatibility dispatch mode and hosted release scope do not match.");

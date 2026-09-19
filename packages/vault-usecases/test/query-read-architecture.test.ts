@@ -13,7 +13,6 @@ const allowedFullVaultReaders = new Map<string, number>([
   ["packages/vault-usecases/src/usecases/experiment-journal-vault.ts", 1],
   ["packages/vault-usecases/src/usecases/integrated-services.ts", 1],
   ["packages/vault-usecases/src/usecases/measurement-read.ts", 2],
-  ["packages/vault-usecases/src/usecases/workout-live-state.ts", 1],
 ]);
 
 const narrowReaderContracts = new Map<string, readonly string[]>([
@@ -60,6 +59,20 @@ const forbiddenExactReaderCalls = [
   "loadProjectedVaultSource(",
   "searchVaultRuntime(",
 ] as const;
+
+test("vault usecases read reminder provenance through the injected outbox owner", async () => {
+  const sourceFiles = await walkTypeScriptFiles(
+    path.join(repositoryRoot, "packages", "vault-usecases", "src"),
+  );
+  for (const sourcePath of sourceFiles) {
+    const source = await readFile(sourcePath, "utf8");
+    assert.doesNotMatch(
+      source,
+      /\b(?:resolveAssistantStatePaths|outboxDirectory)\b|@murphai\/assistant-engine/u,
+      `${path.relative(repositoryRoot, sourcePath)} must not reach into assistant-owned outbox storage or reverse the package dependency.`,
+    );
+  }
+});
 
 test("full-vault query hydration remains confined to aggregate and derived owners", async () => {
   const sourceFiles = await Promise.all([

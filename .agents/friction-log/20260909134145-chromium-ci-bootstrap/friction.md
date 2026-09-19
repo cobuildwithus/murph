@@ -1,6 +1,7 @@
 ---
 title: 'Chromium CI bootstrap fails on an unrelated Chrome package index'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3112'
 ---
 
 ## Expected Behavior

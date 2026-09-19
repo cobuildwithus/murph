@@ -1,3 +1,4 @@
+import { beginHostedRuntimeUsageSettlement } from "../runtime-usage-settlement.ts";
 import { type readHostedExecutionEnvironment } from "../env.ts";
 import {
   jsonError,
@@ -24,9 +25,7 @@ import {
   parseHostedVaultShareEffectDeadlineAtEpochMs,
 } from "@murphai/hosted-execution/vault-share";
 import {
-  HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
-  HOSTED_RUNTIME_USAGE_RECORD_PATH,
-  HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+  HOSTED_RUNTIME_USAGE_RECORD_PATH
 } from "@murphai/hosted-execution/routes";
 import {
   createAssistantUsageReportingUserId,
@@ -38,15 +37,14 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
-  applyRunnerRuntimeUsageSettlement,
-  requireRunnerRuntimeWriteFenceWrite,
-  requireRunnerRuntimeWriteFenceWorkspaceWrite,
-  RunnerRuntimeWriteFenceError,
-  type RunnerRuntimeWriteFenceWriteAuthority,
-  writeRunnerRuntimeWriteFenceHeaders,
+  requireRunnerRuntimeWriteFenceHeaders, RunnerRuntimeWriteFenceError,
+  type RunnerRuntimeWriteFenceHeaders,
+  writeRunnerRuntimeWriteFenceHeaders
 } from "./write-fence.ts";
 import {
+  addRunnerMailboxCryptoContextRequest,
   handleRunnerMailboxPayloadDecodeRequest,
+  decodeRunnerMailboxFetchResponse,
 } from "./mailbox-payload-decode.ts";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
@@ -95,6 +93,8 @@ export async function handleRunnerWebControlRequest(input: {
     return methodNotAllowed();
   }
 
+  const requestMethod = input.request.method;
+
   if (input.url.pathname === HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH) {
     emitHostedExecutionStructuredLog({
       component: "runner",
@@ -129,19 +129,12 @@ export async function handleRunnerWebControlRequest(input: {
     return notFound();
   }
 
-  const isCheckpointRequest = input.url.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
-    && input.request.method === "POST";
-  const isUsageRecordRequest = input.url.pathname === HOSTED_RUNTIME_USAGE_RECORD_PATH
-    && input.request.method === "POST";
-  const isBrowserVaultReplicaPublishRequest =
-    input.url.pathname === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
-    && input.request.method === "POST";
-  const isDeviceSyncRuntimeSnapshotRequest =
-    input.url.pathname === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
-    && input.request.method === "POST";
-  const isVaultShareDeliveryRequest =
-    policy.operation === "vault_share_deliver"
-    && input.request.method === "POST";
+  // The allowlist above already proved each operation's HTTP method.
+  const isCheckpointRequest = policy.operation === "workspace_checkpoint";
+  const isUsageRecordRequest = policy.operation === "usage_recording";
+  const isBrowserVaultReplicaPublishRequest = policy.operation === "browser_vault_replica_publish";
+  const isDeviceSyncRuntimeSnapshotRequest = policy.operation === "device_sync_runtime_snapshot";
+  const isVaultShareDeliveryRequest = policy.operation === "vault_share_deliver";
   const vaultShareEffectDeadlineAtEpochMs = isVaultShareDeliveryRequest
     ? parseHostedVaultShareEffectDeadlineAtEpochMs(
       input.request.headers.get(HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER),
@@ -153,21 +146,9 @@ export async function handleRunnerWebControlRequest(input: {
     || policy.operation === "clinical_records_read_run"
     || policy.operation === "clinical_records_record_outcome"
   ) && input.request.method === "POST";
-  let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+  let writeAuthority: RunnerRuntimeWriteFenceHeaders;
   try {
-    writeAuthority = await (
-      isBrowserVaultReplicaPublishRequest
-        ? requireRunnerRuntimeWriteFenceWorkspaceWrite({
-          env: input.env,
-          request: input.request,
-          userId: input.userId,
-        })
-        : requireRunnerRuntimeWriteFenceWrite({
-          env: input.env,
-          request: input.request,
-          userId: input.userId,
-        })
-    );
+    writeAuthority = requireRunnerRuntimeWriteFenceHeaders(input.request);
   } catch (error) {
     if (error instanceof RunnerRuntimeWriteFenceError) {
       return unauthorized();
@@ -185,6 +166,12 @@ export async function handleRunnerWebControlRequest(input: {
       env: input.env,
       includeDeviceSyncCredentialMaterial: isDeviceSyncRuntimeSnapshotRequest,
       path: input.url.pathname,
+      userId: input.userId,
+    });
+    body = addRunnerMailboxCryptoContextRequest({
+      body,
+      environment: input.environment,
+      mailboxFetch: policy.operation === "mailbox_fetch",
       userId: input.userId,
     });
   } catch (error) {
@@ -235,9 +222,9 @@ export async function handleRunnerWebControlRequest(input: {
       String(vaultShareEffectDeadlineAtEpochMs),
     );
   }
-  let response: Response;
-  try {
-    response = await fetchHostedExecutionWebControlPlaneResponse({
+  const response = await forwardWithRuntimeUsageSettlement({
+    env: input.env, userId: input.userId, writeAuthority, body, usageRecord: isUsageRecordRequest,
+    forward: () => fetchHostedExecutionWebControlPlaneResponse({
       ...(input.environment.hostedWebAllowHttpHosts
         ? { allowHttpHosts: input.environment.hostedWebAllowHttpHosts }
         : {}),
@@ -245,7 +232,7 @@ export async function handleRunnerWebControlRequest(input: {
       body,
       boundUserId: input.userId,
       callbackSigning: input.environment.webCallbackSigning,
-      method: input.request.method,
+      method: requestMethod,
       path: input.url.pathname,
       search: input.url.search || null,
       headers: forwardHeaders,
@@ -262,26 +249,8 @@ export async function handleRunnerWebControlRequest(input: {
           ) - Date.now(),
         )
         : input.environment.webControlTimeoutMs,
-    });
-  } catch (error) {
-    if (isUsageRecordRequest) {
-      await applyRunnerRuntimeUsageSettlement({
-        env: input.env,
-        settlement: null,
-        userId: input.userId,
-        writeAuthority,
-      });
-    }
-    throw error;
-  }
-  if (isUsageRecordRequest) {
-    await revokeRuntimePlatformAiUsageUnlessAllowed({
-      env: input.env,
-      response,
-      userId: input.userId,
-      writeAuthority,
-    });
-  }
+    }),
+  });
   const responseBodyMetadata = response.ok || isClinicalRecordsRequest
     ? {}
     : await readHostedRunnerSafeResponseBodyMetadata(response.clone());
@@ -313,6 +282,11 @@ export async function handleRunnerWebControlRequest(input: {
     }
   }
 
+  if (response.ok && policy.operation === "mailbox_fetch"
+    && body && JSON.parse(body).decodeInlinePayloads === true) {
+    return decodeRunnerMailboxFetchResponse({ ...input, response });
+  }
+
   if (!isVaultShareDeliveryRequest) {
     return response;
   }
@@ -325,29 +299,29 @@ export async function handleRunnerWebControlRequest(input: {
   });
 }
 
-async function revokeRuntimePlatformAiUsageUnlessAllowed(input: {
-  env: RunnerOutboundEnvironmentSource;
-  response: Response;
-  userId: string;
-  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
-}): Promise<void> {
-  let settlement: ReturnType<typeof parseHostedRuntimeUsageRecordResponse> | null = null;
-  if (input.response.ok) {
-    try {
-      settlement = parseHostedRuntimeUsageRecordResponse(
-        await input.response.clone().json(),
-      );
-    } catch {
-      // Invalid settlement responses fail closed for the active invocation.
-    }
+async function forwardWithRuntimeUsageSettlement(input: {
+  env: RunnerOutboundEnvironmentSource; userId: string; writeAuthority: RunnerRuntimeWriteFenceHeaders;
+  body: string | undefined; usageRecord: boolean; forward: () => Promise<Response>;
+}): Promise<Response> {
+  if (!input.usageRecord) return input.forward();
+  const payload: unknown = JSON.parse(input.body ?? "{}");
+  if (!isHostedRunnerRecord(payload) || typeof payload.usage.usageId !== "string") return jsonError("Usage identity is required.", 400);
+  const receipt = await beginHostedRuntimeUsageSettlement({ env: input.env, userId: input.userId,
+    authority: input.writeAuthority, reportId: payload.usage.usageId });
+  let response: Response;
+  try {
+    response = await input.forward();
+  } catch (error) {
+    await receipt.finish(null);
+    throw error;
   }
-
-  await applyRunnerRuntimeUsageSettlement({
-    env: input.env,
-    settlement,
-    userId: input.userId,
-    writeAuthority: input.writeAuthority,
-  });
+  let allowed: boolean | null = null;
+  if (response.ok) {
+    try { allowed = parseHostedRuntimeUsageRecordResponse(await response.clone().json()).platformAiUsageAllowedAfter; }
+    catch { /* Keep the durable pending receipt. */ }
+  }
+  await receipt.finish(allowed);
+  return response;
 }
 
 function requireHostedVaultShareSettlementDeadlineAtEpochMs(
@@ -361,7 +335,7 @@ function requireHostedVaultShareSettlementDeadlineAtEpochMs(
 }
 
 function createRunnerRuntimeWriteFenceForwardHeaders(
-  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority,
+  writeAuthority: RunnerRuntimeWriteFenceHeaders,
   workspaceVersion: string | null,
 ): Headers {
   const headers = new Headers();

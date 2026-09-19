@@ -21,6 +21,11 @@ import {
   type HostedWorkspaceRuntimeRestoreResult,
 } from "./hosted-runtime/workspace-restore.ts";
 
+import {
+  prefetchHostedWorkspaceMailbox,
+  type HostedMailboxPrefixPrefetch,
+} from "./hosted-runtime/mailbox-prefetch.ts";
+
 export class HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError extends Error {
   readonly actualWorkspaceVersion: string | null;
   readonly expectedWorkspaceVersion: string;
@@ -37,6 +42,7 @@ export class HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError extends Erro
 }
 
 export interface HostedWorkspaceRestorePreparationResult {
+  initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
   restored: HostedWorkspaceRuntimeRestoreResult;
   workspaceRead: HostedWorkspaceReadResponse;
   workspaceRestoreDoneAt: string;
@@ -57,7 +63,7 @@ export interface HostedWorkspaceRestorePreparation {
 
 export type HostedWorkspaceRestorePreparationPlatform =
   HostedWorkspaceRuntimeRestorePlatform
-  & Pick<HostedRuntimePlatform, "workspacePort">;
+  & Pick<HostedRuntimePlatform, "workspacePort" | "mailboxPort">;
 
 export interface StartHostedWorkspaceRestorePreparationInput {
   job: HostedAssistantWorkspaceRuntimeJobInput;
@@ -174,6 +180,13 @@ export function startHostedWorkspaceRestorePreparation(
         });
       }
 
+      const initialMailboxPrefetch = prefetchHostedWorkspaceMailbox({
+        mailboxPort: input.platform.mailboxPort,
+        request: input.job.request,
+        signal,
+        workspace: workspaceRead.workspace,
+      });
+
       phaseLogger.emit({
         input: input.job,
         requestId,
@@ -191,7 +204,6 @@ export function startHostedWorkspaceRestorePreparation(
       const workspaceRestoreDoneAt = new Date().toISOString();
       phaseLogger.emit({
         details: {
-          materializedArtifactPathCount: restored.materializedArtifactPaths.size,
           restoreMode: restored.mode,
           restoreWasCold: restored.restoreWasCold,
         },
@@ -203,6 +215,9 @@ export function startHostedWorkspaceRestorePreparation(
       assertPreparationNotAborted();
 
       return {
+        initialMailboxPrefetch: restored.canonicalWriteReceiptRecoveryFailed
+          ? null
+          : initialMailboxPrefetch,
         restored,
         workspaceRead,
         workspaceRestoreDoneAt,

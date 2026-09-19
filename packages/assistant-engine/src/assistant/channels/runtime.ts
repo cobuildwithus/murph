@@ -817,6 +817,7 @@ export async function sendLinqMessage(
             card,
             chatId: target,
             idempotencyKey,
+            companionMessage: input.message,
           },
           {
             env,
@@ -1212,6 +1213,7 @@ export async function startAssistantChannelActivitySession(input: {
   }
 
   return {
+    isActive: () => !stopped && !linkedStopSignal.signal.aborted && refreshFailure === null,
     ...(afterMessageRefreshMs === null
       ? {}
       : {

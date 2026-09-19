@@ -3,6 +3,7 @@ import {
   createConnectionSource,
   createEmptyJunctionBackfillProvider,
   createJob,
+  createJobFromInput,
   createJunctionJobContext,
   createJunctionProvider,
   createJunctionSvixWebhook,
@@ -808,6 +809,179 @@ test("Junction webhook jobs dedupe by resource window instead of Svix trace", as
   assert.equal(first.jobs[0]?.dedupeKey, second.jobs[0]?.dedupeKey);
 });
 
+test("Junction historical pull completions dedupe by the declared range across receipt times", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const parseCompletion = async (input: {
+    endDate: string;
+    messageId: string;
+    now: string;
+    timestamp: string;
+  }) => {
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "historical.data.steps.created",
+        user_id: "junction-user-1",
+        client_user_id: "murph_blinded",
+        data: {
+          user_id: "junction-user-1",
+          start_date: "2026-03-05",
+          end_date: input.endDate,
+          is_final: true,
+          provider: "apple_health_kit",
+        },
+      },
+      messageId: input.messageId,
+      timestamp: input.timestamp,
+    });
+    return requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: input.now,
+    });
+  };
+
+  const first = await parseCompletion({
+    endDate: "2026-04-03",
+    messageId: "msg_history_steps_first",
+    now: "2026-04-03T10:00:00.000Z",
+    timestamp: "1775210400",
+  });
+  const resent = await parseCompletion({
+    endDate: "2026-04-03",
+    messageId: "msg_history_steps_resent",
+    now: "2026-04-03T11:00:00.000Z",
+    timestamp: "1775214000",
+  });
+  const nextPull = await parseCompletion({
+    endDate: "2026-04-04",
+    messageId: "msg_history_steps_next_pull",
+    now: "2026-04-04T10:00:00.000Z",
+    timestamp: "1775296800",
+  });
+
+  assert.equal(first.jobs.length, 1);
+  assert.equal(first.jobs[0]?.kind, "resource");
+  assert.equal(first.jobs[0]?.payload?.windowStart, "2026-03-05T00:00:00.000Z");
+  // The fetch window still stops at receipt time...
+  assert.equal(first.jobs[0]?.payload?.windowEnd, "2026-04-03T10:00:00.000Z");
+  assert.equal(resent.jobs[0]?.payload?.windowEnd, "2026-04-03T11:00:00.000Z");
+  // ...while the job identity is the range Junction declared.
+  assert.equal(typeof first.jobs[0]?.dedupeKey, "string");
+  assert.equal(resent.jobs[0]?.dedupeKey, first.jobs[0]?.dedupeKey);
+  assert.notEqual(nextPull.jobs[0]?.dedupeKey, first.jobs[0]?.dedupeKey);
+});
+
+test("A re-sent Junction historical pull completion joins the continuation already walking its range", async () => {
+  const historicalEvent = "historical.data.floors_climbed.created";
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { floors_climbed: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/floors_climbed/grouped") {
+      const dayKey = requireValue(url.searchParams.get("start_date"), "history start date");
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              end: `${dayKey}T10:00:00.000Z`,
+              start: `${dayKey}T09:00:00.000Z`,
+              unit: "count",
+              value: 1,
+            }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["floors_climbed"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const parseCompletion = async (input: { messageId: string; now: string; timestamp: string }) => {
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: historicalEvent,
+        user_id: "junction-user-1",
+        client_user_id: "murph_blinded",
+        data: {
+          user_id: "junction-user-1",
+          start_date: "2026-02-22",
+          end_date: "2026-04-03",
+          is_final: true,
+          provider: "garmin",
+        },
+      },
+      messageId: input.messageId,
+      timestamp: input.timestamp,
+    });
+    return requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: input.now,
+    });
+  };
+
+  const first = await parseCompletion({
+    messageId: "msg_history_floors_first",
+    now: "2026-04-03T10:00:00.000Z",
+    timestamp: "1775210400",
+  });
+  const firstJob = requireValue(first.jobs[0], "Completion should prepare a resource walk.");
+  assert.equal(typeof firstJob.dedupeKey, "string");
+
+  const source = {
+    ...createConnectionSource({
+      firstSeenAt: "2025-01-01T00:00:00.000Z",
+      resourceAvailabilitySummary: { floors_climbed: true },
+    }),
+    resourceCount: 1,
+  };
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: [source] }),
+      connectionSourceAdmissionMode: "listed_only",
+      importSnapshot: async () => ({ canonicalEventCount: 1, durableDeliveryAccepted: true }),
+      now: "2026-04-03T10:00:00.000Z",
+    }),
+    createJobFromInput(firstJob),
+  );
+  const continuations = (result.scheduledJobs ?? []).filter((job) =>
+    job.kind === "resource"
+    && job.payload?.eventType === historicalEvent
+    && job.payload?.calendarRefreshDay === undefined
+  );
+  assert.equal(continuations.length, 1);
+  const continuation = requireValue(continuations[0], "Bounded history should continue.");
+  assert.notEqual(continuation.payload?.windowStart, firstJob.payload?.windowStart);
+  assert.equal(continuation.dedupeKey, firstJob.dedupeKey);
+
+  const resent = await parseCompletion({
+    messageId: "msg_history_floors_resent",
+    now: "2026-04-03T11:00:00.000Z",
+    timestamp: "1775214000",
+  });
+  assert.equal(resent.jobs[0]?.dedupeKey, continuation.dedupeKey);
+});
+
 test.each([
   {
     data: {
@@ -1497,7 +1671,9 @@ test("Junction polling updates source projection and imports bounded summary/tim
     }),
   );
 
+  assert.equal(typeof result.metadataPatch?.junctionTemporalSweepV1, "string");
   assert.deepEqual(result.metadataPatch, {
+    junctionTemporalSweepV1: result.metadataPatch?.junctionTemporalSweepV1,
     junctionHistoricalBackfillStatus: "coverage_v3_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
@@ -2178,6 +2354,19 @@ test("Junction polling skips optional unavailable resource collections", async (
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
+  const temporalChildren = initialResult.scheduledJobs?.filter((job) =>
+    job.payload?.temporalAuthorityTimeZone
+  ) ?? [];
+  for (const child of temporalChildren.filter((job) =>
+    job.payload?.windowStart === temporalChildren[0]?.payload?.windowStart
+  )) {
+    const execution = executeJunctionJob(provider, context, createJobFromInput(child));
+    if (child.payload?.resource === "stress_level") {
+      await assert.rejects(execution);
+    } else {
+      await execution;
+    }
+  }
   const result = await executeFullJobTimeseriesContinuations({
     context,
     initialResult,
@@ -2247,11 +2436,12 @@ test("Junction polling skips optional unavailable resource collections", async (
     ],
   );
   assert.deepEqual(result.metadataPatch, {
+    junctionTemporalSweepV1: initialResult.metadataPatch?.junctionTemporalSweepV1,
     junctionProfileSummaryCheckedAt: "2026-04-04T00:00:00.000Z",
     junctionProfileSummaryNormalizationRevision: 2,
-    junctionSkippedResourceTotal: 13,
+    junctionSkippedResourceTotal: 12,
     junctionSkippedSummaryTotal: 5,
-    junctionSkippedTimeseriesTotal: 8,
+    junctionSkippedTimeseriesTotal: 7,
     junctionSkippedResourceJobCount: 1,
     junctionSkippedResourceLastAt: "2026-04-04T00:00:00.000Z",
     junctionSkippedResourceLast: "timeseries.stress_level.422.unsupported",

@@ -1,6 +1,7 @@
 ---
 title: 'Narrowed shared fetch rules leave origin main stale during merge preparation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3119'
 ---
 
 ## Expected Behavior

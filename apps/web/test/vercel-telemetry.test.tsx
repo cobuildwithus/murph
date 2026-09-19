@@ -178,6 +178,7 @@ test("VercelTelemetry does not mount outside the explicit page allowlist", () =>
     "/settings/accounts",
     "/settings/accounts?companion=ios#security",
     "/screenshots/home",
+    "/screenshots/channel-connection",
     "/unknown/private-segment",
   ]) {
     mocks.pathname = pathname;
@@ -563,7 +564,7 @@ function listStaticPagePathnames(
       ({ path }) =>
         // Synthetic screenshots and account-security settings deliberately
         // stay outside the vendor allowlist.
-        path !== "app/screenshots/page.tsx"
+        !path.startsWith("app/screenshots/")
         && path !== "app/settings/accounts/page.tsx"
         && (path === "app/page.tsx" || path.endsWith("/page.tsx")),
     )

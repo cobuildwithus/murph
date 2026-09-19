@@ -52,6 +52,18 @@ const mocks = vi.hoisted(() => ({
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
 }));
 
+// The row fixtures do not execute Prisma relation filters. Preserve their
+// state-based access decisions; the PostgreSQL proof covers the boolean query.
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>();
+  return {
+    ...actual,
+    readActiveHostedMemberAccess: async (
+      input: Parameters<typeof actual.readActiveHostedMemberAccess>[0],
+    ) => await actual.readActiveHostedMemberAccessState(input) !== null,
+  };
+});
+
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("@/src/lib/hosted-crypto/domain-root-store")
@@ -809,6 +821,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       tx: prisma,
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
@@ -1762,6 +1775,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       }),
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
@@ -1950,6 +1964,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
 
       expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+        onSignalStarted: expect.any(Function),
         abortSignal: expect.any(AbortSignal),
         expectedUserId: "member_123",
         mailboxItemId: "mailbox_evt_123",
@@ -2024,7 +2039,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("does not count or wake duplicate active-member Linq event ids", async () => {
+  it("repairs duplicate active-member Linq wakes without recounting or appending input", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -2059,6 +2074,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
@@ -2068,7 +2084,12 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma,
       timeoutMs: expect.any(Number),
     });
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledOnce();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+    });
   });
 
   it("dedupes active-member Linq replays after preflight and before route mutation", async () => {
@@ -2111,6 +2132,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      onSignalStarted: expect.any(Function),
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
@@ -2230,7 +2252,6 @@ function createPrismaStub() {
           }
         }
         return [{
-          activeMemberLimit: null,
           assignmentWeight: 1,
           maxNewConversationsPerDay: null,
           phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),

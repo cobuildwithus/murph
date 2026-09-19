@@ -2,14 +2,16 @@ name: Native iOS Hosted E2E
 
 on:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 */12 * * *"
   workflow_dispatch:
 
-# This trusted default-branch controller spends native-runner capacity only
-# when the latest completed schedule is not a success for current protected main.
-# A failed canary remains eligible at the next slot. Manual recovery is limited
-# to the exact current main SHA; reruns retry that revision. Source pins live in
-# protected main.
+# Every twelve-hour admission executes the provider journey, including unchanged
+# revisions. A successful scheduling job is never reused as provider evidence.
+# Manual recovery stays limited to exact current main; private source pins and
+# protected environments retain their existing authority.
+# The Web SHA identifies production at dispatch. Normal promotions during the
+# native health journey do not invalidate its completed business assertions;
+# this canary publishes no per-commit acceptance status.
 permissions:
   actions: read
   contents: read
@@ -20,14 +22,14 @@ concurrency:
 
 jobs:
   select-main:
-    name: Select changed protected main
+    name: Select protected main for live proof
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       should_run: ${{ steps.select.outputs.should_run }}
       web_sha: ${{ steps.select.outputs.web_sha }}
     steps:
-      - name: Compare main with the latest completed scheduled outcome
+      - name: Validate protected main canary admission
         id: select
         env:
           CURRENT_SHA: ${{ github.sha }}
@@ -48,26 +50,7 @@ jobs:
             echo "::error::Unsupported native iOS controller event."
             exit 1
           fi
-          previous_sha=""
-          previous_conclusion=""
-          if [[ "${RUN_ATTEMPT}" == 1 ]]; then
-            previous_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/native-ios-hosted-e2e.yml/runs?event=schedule&status=completed&per_page=1" --jq '.workflow_runs[0] // {}')"
-            previous_sha="$(jq -r '.head_sha // ""' <<< "${previous_run}")"
-            previous_status="$(jq -r '.status // ""' <<< "${previous_run}")"
-            previous_conclusion="$(jq -r '.conclusion // ""' <<< "${previous_run}")"
-            if [[ -n "${previous_sha}" ]]; then
-              [[ "${previous_sha}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Latest completed native iOS schedule did not expose an exact SHA."; exit 1; }
-              [[ "${previous_status}" == completed ]] || { echo "::error::Latest native iOS schedule was not completed."; exit 1; }
-              [[ "${previous_conclusion}" =~ ^(action_required|cancelled|failure|neutral|skipped|stale|startup_failure|success|timed_out)$ ]] || { echo "::error::Latest native iOS schedule had an invalid conclusion."; exit 1; }
-            elif [[ "${previous_run}" != "{}" ]]; then
-              echo "::error::Latest native iOS schedule was malformed."
-              exit 1
-            fi
-          fi
           should_run=true
-          if [[ "${RUN_ATTEMPT}" == 1 && "${previous_sha}" == "${CURRENT_SHA}" && "${previous_conclusion}" == success ]]; then
-            should_run=false
-          fi
           {
             echo "should_run=${should_run}"
             echo "web_sha=${CURRENT_SHA}"
@@ -110,6 +93,23 @@ jobs:
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           git merge-base --is-ancestor "${DEPLOYED_SHA}" origin/main || { echo "::error::Production canary refuses a revision outside main history."; exit 1; }
 
+      - name: Select verified production deployment
+        id: production
+        env:
+          HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
+          HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
+          HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
+          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.NATIVE_IOS_E2E_VERCEL_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          production_sha="$(pnpm --dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts)"
+          [[ "${production_sha}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Production alias did not resolve to an exact SHA."; exit 1; }
+          git merge-base --is-ancestor "${production_sha}" origin/main || { echo "::error::Production deployment is outside protected main history."; exit 1; }
+          verified_sha="$(DEPLOYED_SHA="${production_sha}" pnpm --dir apps/web exec tsx scripts/verify-current-vercel-production-deployment.ts)"
+          [[ "${verified_sha}" == "${production_sha}" ]] || { echo "::error::Exact production verification returned a different revision."; exit 1; }
+          echo "web_sha=${production_sha}" >> "${GITHUB_OUTPUT}"
+
       - name: Mint private iOS workflow token
         id: ios-app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -123,7 +123,7 @@ jobs:
 
       - name: Verify current production alias and dispatch non-destructive canary
         env:
-          DEPLOYED_SHA: ${{ needs.select-main.outputs.web_sha }}
+          DEPLOYED_SHA: ${{ steps.production.outputs.web_sha }}
           HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}

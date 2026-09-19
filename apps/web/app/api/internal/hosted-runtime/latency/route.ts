@@ -1,3 +1,5 @@
+import { after } from "next/server";
+
 import {
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
@@ -15,14 +17,17 @@ import {
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   recordHostedIngressAssistantMilestone,
+  recordHostedIngressDeliveryCommitted,
   recordHostedIngressAssistantInputStaged,
   recordHostedIngressProviderStarted,
   recordHostedIngressRuntimeMilestone,
 } from "@/src/lib/hosted-runtime-latency/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { reportHostedRuntimeTypingAlerts } from "@/src/lib/hosted-runtime-latency/typing-alert-monitor";
 import { isRecord } from "@/src/lib/primitives";
 
 const LATENCY_EVENT_METADATA = {
+  delivery_committed: "hosted_ingress_delivery_committed",
   assistant_input_staged: "hosted_ingress_assistant_input_staged",
   assistant_milestone: "hosted_ingress_assistant_milestone_set_based",
   provider_started: "hosted_ingress_provider_started_set_based",
@@ -42,7 +47,14 @@ export const POST = withJsonError(async (request: Request) => {
   const runtimeAttemptId = writeFence.attemptId;
 
   try {
-    const result = traceRequest.event.type === "assistant_input_staged"
+    const result = traceRequest.event.type === "delivery_committed"
+      ? await recordHostedIngressDeliveryCommitted({
+          ...traceRequest.event,
+          authenticatedUserId,
+          runtimeAttemptId,
+          runtimeLeaseGeneration: writeFence.leaseGeneration,
+        })
+      : traceRequest.event.type === "assistant_input_staged"
       ? await recordHostedIngressAssistantInputStaged({
         assistantInputId: traceRequest.event.assistantInputId,
         at: traceRequest.event.at,
@@ -118,6 +130,20 @@ export const POST = withJsonError(async (request: Request) => {
       });
     }
 
+    if (result.recorded && traceRequest.event.source !== "email" && (
+      traceRequest.event.type === "assistant_input_staged"
+      || (traceRequest.event.type === "assistant_milestone" && (
+        traceRequest.event.milestone === "linq_typing_accepted"
+        || traceRequest.event.milestone === "telegram_typing_accepted"
+      ))
+    )) {
+      const event = traceRequest.event;
+      after(() => reportHostedRuntimeTypingAlerts({
+        userId: authenticatedUserId,
+        assistantInputIds: event.type === "assistant_input_staged"
+          ? [event.assistantInputId] : event.assistantInputIds,
+      }));
+    }
     return jsonOk(parseHostedRuntimeLatencyTraceResponse(result));
   } catch (error) {
     const codes = readLatencyPersistenceErrorCodes(error);

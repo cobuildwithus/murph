@@ -34,8 +34,16 @@ const mocks = vi.hoisted(() => ({
   requestHostedStarterUsageEnrollment: vi.fn(),
   requestHostedBillingCheckout: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
+  loginMethodProps: null as Record<string, unknown> | null,
   hostedAuthProps: null as Record<string, unknown> | null,
   useHostedInviteStatusRefresh: vi.fn(),
+}));
+
+vi.mock("@/src/components/settings/hosted-login-method-dialog", () => ({
+  HostedLoginMethodEditor: function HostedLoginMethodEditor(props: Record<string, unknown>) {
+    mocks.loginMethodProps = props;
+    return createElement("div", { "data-login-method-editor": props.method, "data-presentation": props.presentation }, "Connect account");
+  },
 }));
 
 vi.mock("next/navigation", () => ({
@@ -99,6 +107,7 @@ vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.hostedAuthProps = null;
+  mocks.loginMethodProps = null;
 });
 
 test("JoinInviteSignOutButtonIsland preserves the invite URL while switching accounts", async () => {
@@ -590,13 +599,11 @@ test("JoinInviteStatusRefreshIsland surfaces refresh failures with a retry actio
   await cleanup();
 });
 
-test("messaging setup opens the shared account controls without signing out", async () => {
-  const { cleanup, container, window } = await renderClientComponent(createElement(JoinInviteMessagingSetupIsland));
-  expect(container.querySelector('a[href="/settings/accounts"]')?.textContent).toBe("Connect a messaging account");
-  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
-  const refresh = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("I’ve connected"));
-  await act(async () => { refresh!.dispatchEvent(new window.Event("click", { bubbles: true })); });
-  expect(mocks.refresh).toHaveBeenCalledOnce();
+test("messaging setup mounts both editors inline without an extra dialog or Settings detour", async () => {
+  const { cleanup, container } = await renderClientComponent(createElement(JoinInviteMessagingSetupIsland), { requireButton: false });
+  expect(container.querySelector('a[href="/settings/accounts"]')).toBeNull();
+  expect(container.querySelector('[data-login-method-editor="phone"]')?.getAttribute("data-presentation")).toBe("inline");
+  expect(container.querySelector('[data-login-method-editor="telegram"]')?.getAttribute("data-presentation")).toBe("inline");
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   await cleanup();
 });
@@ -883,3 +890,16 @@ function findButtonByText(container: Element, pattern: RegExp): HTMLButtonElemen
   expect(button).toBeTruthy();
   return button as HTMLButtonElement;
 }
+
+
+test("messaging configuration failures show product guidance instead of internal setup instructions", async () => {
+  mocks.requestHostedStarterUsageEnrollment.mockRejectedValue(new HostedOnboardingApiError({
+    code: "LINQ_CONVERSATION_PHONE_REQUIRED", message: "Internal routing configuration details.",
+  }));
+  const { cleanup, container } = await renderClientComponent(createElement(JoinInviteStarterUsageIsland, { inviteCode: "invite-code" }), { requireButton: false });
+  await act(async () => { await Promise.resolve(); });
+  expect(container.textContent).toContain("Murph’s messaging connection is not ready yet");
+  expect(container.textContent).not.toContain("Internal routing configuration details");
+  expect(container.querySelector("a[href^='mailto:']")).toBeTruthy();
+  await cleanup();
+});

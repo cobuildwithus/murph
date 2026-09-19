@@ -1,5 +1,8 @@
 import {
   activityKindAliasGroups,
+  sleepSessionTypeSchema,
+  sleepSessionStateSchema,
+  type SleepSessionEventRecord,
   isStrictIsoDate,
   normalizeIanaTimeZone,
   isStrictIsoDateTime,
@@ -18,6 +21,7 @@ import {
 import {
   HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
@@ -29,6 +33,7 @@ import {
 export {
   HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
@@ -85,6 +90,7 @@ const HOSTED_VAULT_SHARE_DAY_MAX_MINUTES = 24 * 60;
 const HOSTED_VAULT_SHARE_DAY_MAX_DISTANCE_METERS = 1_000_000;
 const HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS = 100;
 const HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
+
 export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM =
   "deferredProjectionWork";
 export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION = "v1";
@@ -434,9 +440,7 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES =
 
 export const HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES =
   Object.freeze(uniqueHostedVaultShareProjectionScopeList([
-    ...HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS.map((projectionKind) => ({
-      projectionKind,
-    })),
+    ...HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS.map((projectionKind) => ({ projectionKind })),
     ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   ] satisfies HostedVaultShareProjectionScope[]));
 
@@ -539,6 +543,8 @@ export const HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH = 80;
 export const HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND = "workout";
 
 export interface HostedVaultShareDailyMetricData {
+  sleepType?: SleepSessionEventRecord["sleepType"];
+  sleepState?: SleepSessionEventRecord["sleepState"];
   date: string;
   metricKey: string;
   metricSemantics?: typeof HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS;
@@ -747,6 +753,8 @@ export interface HostedVaultShareDeliveryRecord {
 }
 
 export interface HostedVaultShareDeliverRequest {
+  /** Canonical member timezone, encrypted with the snapshot; not a shared profile field. */
+  memberTimeZone?: string;
   /**
    * Opaque digest of the active share generations resolved immediately before
    * the runtime begins reading this scope. Web accepts delivery only while the
@@ -835,15 +843,16 @@ export function getHostedVaultShareDailyMetricProjectionSpec(
 export function getHostedVaultShareProjectionMaxRecords(
   projectionScope: HostedVaultShareProjectionScope,
 ): number {
+  const sourceDateLimit = HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
   if (isHostedVaultShareActivitySelectorProjectionKind(projectionScope.projectionKind)) {
-    return HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+    return sourceDateLimit;
   }
   if (
     projectionScope.projectionKind === "sleep-times.v0"
     || projectionScope.projectionKind === "workout-days.v0"
     || projectionScope.projectionKind === "heart-rate-zones-days.v0"
   ) {
-    return HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+    return sourceDateLimit;
   }
   const spec = getHostedVaultShareDailyMetricProjectionSpec(
     projectionScope.projectionKind,
@@ -851,9 +860,11 @@ export function getHostedVaultShareProjectionMaxRecords(
   if (
     spec?.source.kind === "metric-series"
   ) {
-    return HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS;
+    return sourceDateLimit;
   }
-  return HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS;
+  return isHostedVaultShareRecentDateProjectionKind(projectionScope.projectionKind)
+    ? HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS
+    : HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS;
 }
 
 function parseHostedVaultShareProjectionKind(
@@ -936,6 +947,56 @@ export function buildHostedVaultShareProjectionScopeKey(
   }
 }
 
+/** Exact metric authority first, then the pre-existing sleep v1 -> v0 adapter. */
+export function hostedVaultShareReadAuthorityScopes(
+  requested: HostedVaultShareProjectionScope,
+): HostedVaultShareProjectionScope[] {
+  const sourceAwareKind = requested.projectionKind === "deep-sleep-days.v0"
+    ? "deep-sleep-sources-days.v1"
+    : requested.projectionKind === "rem-sleep-days.v0"
+      ? "rem-sleep-sources-days.v1" : null;
+  return sourceAwareKind
+    ? [requested, { projectionKind: sourceAwareKind }]
+    : [requested];
+}
+
+/** Civil-date arithmetic, including DST and both sides of the date line. */
+export function hostedVaultShareHistoryDateWindow(input: {
+  historyDays: 7 | 90;
+  nowMs?: number;
+  timeZone: string;
+}): { from: string; through: string } {
+  const timeZone = normalizeIanaTimeZone(input.timeZone);
+  if (!timeZone) throw new TypeError("Vault share member timezone is invalid.");
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit", month: "2-digit", timeZone, year: "numeric",
+  }).formatToParts(new Date(input.nowMs ?? Date.now()));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value;
+  const through = `${part("year")}-${part("month")}-${part("day")}`;
+  const from = new Date(Date.parse(`${through}T12:00:00.000Z`) - (input.historyDays - 1) * 86_400_000)
+    .toISOString().slice(0, 10);
+  return { from, through };
+}
+
+/** Clip retained projections or a shorter reporting window; metric authority is separate. */
+export function filterHostedVaultShareHistoryRecords(input: {
+  records: readonly HostedVaultShareDeliveryRecord[];
+  scope: HostedVaultShareProjectionScope;
+  timeZone: string;
+  nowMs?: number;
+  requestedHistoryDays?: 7 | 90;
+}): HostedVaultShareDeliveryRecord[] {
+  if (!isHostedVaultShareRecentDateProjectionKind(input.scope.projectionKind)) {
+    return [...input.records];
+  }
+  const historyDays = input.requestedHistoryDays ?? HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS;
+  const { from, through } = hostedVaultShareHistoryDateWindow({ ...input, historyDays });
+  return input.records.filter((record) => {
+    const date = record.occurredAt.slice(0, 10);
+    return date >= from && date <= through;
+  });
+}
+
 export function parseHostedVaultShareProjectionScopeKey(
   value: unknown,
   label: string,
@@ -965,6 +1026,8 @@ export function parseHostedVaultShareProjectionScope(
     scope.projectionKind,
     `${label} projectionKind`,
   );
+
+  assertObjectKeys(scope, label, ["projectionKind", "selector"]);
 
   if (projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND) {
     const selector = requireObject(scope.selector, `${label} selector`);
@@ -1601,6 +1664,8 @@ function parseHostedVaultShareDailyMetricData(
         "provisional",
         "sources",
         "sourcesDisagree",
+        "sleepType",
+        "sleepState",
         "unit",
         "value",
       ],
@@ -1651,9 +1716,27 @@ function parseHostedVaultShareDailyMetricData(
     metricKey,
     ...(metricSemantics === undefined ? {} : { metricSemantics }),
     ...(sourceTaggedSleepStage ? { recordedAt } : {}),
+    ...parseHostedVaultShareSleepClassification(data, spec.metricKey),
     ...sourceAwareData,
     unit,
     value: valueNumber,
+  };
+}
+
+/** Selected-session qualifiers share the canonical enums and only accompany sleep metrics. */
+export function parseHostedVaultShareSleepClassification(
+  context: Record<string, unknown> | undefined,
+  metricKey: string,
+): Pick<HostedVaultShareDailyMetricData, "sleepType" | "sleepState"> {
+  const sleepType = sleepSessionTypeSchema.optional().parse(context?.sleepType);
+  const sleepState = sleepSessionStateSchema.optional().parse(context?.sleepState);
+  const sleepMetric = ["total-sleep-minutes", "deep-sleep-minutes", "rem-sleep-minutes"].includes(metricKey);
+  if (!sleepMetric && (sleepType !== undefined || sleepState !== undefined)) {
+    throw new TypeError(`Vault share ${metricKey} does not accept sleep classification.`);
+  }
+  return {
+    ...(sleepType === undefined ? {} : { sleepType }),
+    ...(sleepState === undefined ? {} : { sleepState }),
   };
 }
 
@@ -2305,6 +2388,13 @@ export function parseHostedVaultShareDeliverRequest(
   value: unknown,
 ): HostedVaultShareDeliverRequest {
   const request = requireObject(value, "Vault share deliver request");
+  const memberTimeZone = request.memberTimeZone === undefined
+    ? undefined
+    : normalizeIanaTimeZone(requireString(request.memberTimeZone, "Vault share member timezone"));
+  if (memberTimeZone === null) throw new TypeError("Vault share member timezone is invalid.");
+  if (new TextEncoder().encode(JSON.stringify(request)).byteLength > HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES) {
+    throw new TypeError("Vault share complete projection exceeds the byte limit.");
+  }
   const sourceWorkspaceVersion = requireHostedVaultShareSourceWorkspaceVersion(
     request.sourceWorkspaceVersion,
   );
@@ -2343,6 +2433,37 @@ export function parseHostedVaultShareDeliverRequest(
   const parsedRecords = records.map((record) =>
     parseHostedVaultShareDeliveryRecord(record, projectionScope)
   );
+  assertHostedVaultSharePublicSourceCapacity(parsedRecords);
+  if (projectionKind === "workouts.v0") {
+    let calendarClosedThroughDate: string | undefined;
+    for (const record of parsedRecords) {
+      if (!("workouts" in record.data)) {
+        throw new TypeError("Vault share workouts record data is invalid.");
+      }
+      if (
+        calendarClosedThroughDate !== undefined
+        && record.data.calendarClosedThroughDate !== calendarClosedThroughDate
+      ) {
+        throw new TypeError(
+          "Vault share workouts records must use one calendarClosedThroughDate.",
+        );
+      }
+      calendarClosedThroughDate = record.data.calendarClosedThroughDate;
+    }
+  }
+
+  return {
+    ...(memberTimeZone ? { memberTimeZone } : {}),
+    expectedGenerationToken,
+    ...(projectionMode ? { projectionMode } : {}),
+    projectionKind,
+    projectionScope,
+    records: parsedRecords,
+    sourceWorkspaceVersion,
+  };
+}
+
+function assertHostedVaultSharePublicSourceCapacity(parsedRecords: readonly HostedVaultShareDeliveryRecord[]): void {
   const publicSources = new Set<string>();
   for (const record of parsedRecords) {
     if (record.source) {
@@ -2368,32 +2489,6 @@ export function parseHostedVaultShareDeliverRequest(
       `Vault share deliver request must contain at most ${HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES} public sources.`,
     );
   }
-  if (projectionKind === "workouts.v0") {
-    let calendarClosedThroughDate: string | undefined;
-    for (const record of parsedRecords) {
-      if (!("workouts" in record.data)) {
-        throw new TypeError("Vault share workouts record data is invalid.");
-      }
-      if (
-        calendarClosedThroughDate !== undefined
-        && record.data.calendarClosedThroughDate !== calendarClosedThroughDate
-      ) {
-        throw new TypeError(
-          "Vault share workouts records must use one calendarClosedThroughDate.",
-        );
-      }
-      calendarClosedThroughDate = record.data.calendarClosedThroughDate;
-    }
-  }
-
-  return {
-    expectedGenerationToken,
-    ...(projectionMode ? { projectionMode } : {}),
-    projectionKind,
-    projectionScope,
-    records: parsedRecords,
-    sourceWorkspaceVersion,
-  };
 }
 
 function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): string {
@@ -2447,6 +2542,9 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
         record.projectionKinds,
         "Vault share active projection kinds response projectionKinds",
       );
+  if (projectionKinds.length > HOSTED_VAULT_SHARE_PROJECTION_KINDS.length) {
+    throw new TypeError("Vault share active projection kinds response has too many kinds.");
+  }
   const uniqueProjectionKinds: HostedVaultShareProjectionKind[] = [];
 
   for (const projectionKind of projectionKinds) {
@@ -2469,6 +2567,9 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
         record.projectionScopes,
         "Vault share active projection kinds response projectionScopes",
       );
+  if (scopeValues.length > HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.length) {
+    throw new TypeError("Vault share active projection kinds response has too many scopes.");
+  }
   const uniqueProjectionScopes: HostedVaultShareProjectionScope[] = [];
   const uniqueScopeKeys = new Set<string>();
 

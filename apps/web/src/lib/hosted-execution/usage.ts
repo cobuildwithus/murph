@@ -12,6 +12,11 @@ import type {
 
 import { getPrisma } from "../prisma";
 import {
+  requireHostedRuntimeCallbackTx,
+  revokeHostedRuntimeAiUsageTx,
+  type HostedRuntimeIdentity,
+} from "./runtime-owner";
+import {
   accountHostedAiUsageForAllowanceTx,
   settleHostedAiUsageForAllowanceTx,
   type HostedAiUsageLimitNoticeCandidate,
@@ -112,6 +117,7 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   accountAllowance?: boolean;
   noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   prisma?: PrismaClient;
+  runtimeIdentity?: HostedRuntimeIdentity | null;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageWithAllowanceResult> {
@@ -159,6 +165,7 @@ export async function recordHostedRetellPhoneCallUsageTx(input: {
 async function recordHostedAiUsageRecordsForAccounting(input: {
   accountAllowance?: boolean;
   prisma?: HostedAiUsageClient;
+  runtimeIdentity?: HostedRuntimeIdentity | null;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageAccountingResult> {
@@ -171,6 +178,12 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
     const settlement = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+      if (input.runtimeIdentity !== undefined) {
+        if (input.runtimeIdentity !== null && input.runtimeIdentity.userId !== memberId) {
+          throw new TypeError("Hosted runtime usage member does not match its authority.");
+        }
+        await requireHostedRuntimeCallbackTx(tx, memberId, input.runtimeIdentity);
+      }
       await persistHostedAiUsageRecordTx({
         memberId,
         record,
@@ -178,11 +191,15 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
       });
 
       if (input.accountAllowance === true) {
-        return settleHostedAiUsageForAllowanceTx({
+        const settlement = await settleHostedAiUsageForAllowanceTx({
           memberId,
           record,
           tx,
         });
+        if (input.runtimeIdentity && settlement.platformAiUsageAllowedAfter !== true) {
+          await revokeHostedRuntimeAiUsageTx(tx, input.runtimeIdentity);
+        }
+        return settlement;
       }
 
       return null;

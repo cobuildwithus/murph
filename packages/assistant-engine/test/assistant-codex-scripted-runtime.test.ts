@@ -3960,7 +3960,6 @@ text(result.output);
           developerInstructions,
           dynamicTools: tools,
           env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
-          excludeResumeTurns: true,
           groupConversation,
           prompt,
         })
@@ -4252,7 +4251,27 @@ text(result.output);
       .find((tool) => tool.name === 'automation')
     expect(automationSearchTool).not.toBeUndefined()
     const automationParameters = readRecord(automationSearchTool?.parameters)
-    const automationProperties = readRecord(automationParameters?.properties)
+    const automationSaveContract = Array.isArray(automationParameters?.oneOf)
+      ? automationParameters.oneOf.map(readRecord).find((branch) => {
+          // Native discovery normalizes const to a single-value enum.
+          const action = readRecord(readRecord(branch?.properties)?.action)
+          return Array.isArray(action?.enum)
+            && action.enum.length === 1 && action.enum[0] === 'save'
+        })
+      : null
+    expect(automationSaveContract).toBeTruthy()
+    expect(readRecord(automationSaveContract?.properties)?.contextReferences)
+      .toMatchObject({ type: 'array' })
+    // Codex shortens deep native parameters too; the complete description is authoritative.
+    const canonicalSchema = readRecord(readVisibleCanonicalSchema(
+      typeof automationSearchTool?.description === 'string' ? automationSearchTool.description : '',
+    ))
+    expect(canonicalSchema).toEqual(MURPH_AUTOMATION_TOOL.inputSchema)
+    const canonicalSaveContract = Array.isArray(canonicalSchema?.oneOf)
+      ? canonicalSchema.oneOf.map(readRecord).find((branch) =>
+          readRecord(readRecord(branch?.properties)?.action)?.const === 'save')
+      : null
+    const automationProperties = readRecord(canonicalSaveContract?.properties)
     const contextReferences = readRecord(
       automationProperties?.contextReferences,
     )
@@ -7414,7 +7433,10 @@ if (!tool) {
     ] as const
     const completeNutritionCard = cards[2]
 
-    for (const card of cards) {
+    for (const card of [...cards, {
+      ...completeNutritionCard,
+      goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null },
+    }]) {
       const scenario = await prepareScriptedTurnScenario()
       scenario.stub.captureProviderRequestDiagnostics()
       scenario.stub.queue(
@@ -7476,16 +7498,6 @@ if (!tool) {
           proteinGrams: { total: 70, mealCount: 2 },
           carbsGrams: { total: 80, mealCount: 2 },
           fatGrams: { total: 30, mealCount: 2 },
-        },
-      },
-      {
-        ...completeNutritionCard,
-        goals: {
-          calories: null,
-          proteinGrams: null,
-          carbsGrams: null,
-          fatGrams: null,
-          fiberGrams: null,
         },
       },
       ...([

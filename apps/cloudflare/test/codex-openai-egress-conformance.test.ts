@@ -1,3 +1,4 @@
+import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRuntime, settledNativeRuntime } from "./postgres-owner-fixtures.ts";
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
@@ -5,6 +6,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+
+import { HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH } from "@murphai/hosted-execution/routes";
 
 import { executeCodexAppServerTurn } from "@murphai/assistant-engine/assistant-codex";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -271,9 +274,19 @@ describe("pinned Codex OpenAI egress conformance", () => {
       validateRuntimeProviderEgressCredential,
     });
     const upstreamFetch = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", upstreamFetch);
+    const imageAccessFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({ allowed: true, reason: "allowed" })
+    );
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (request, init) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      if (url.pathname === "/api/internal/hosted-runtime/log") return Response.json({ accepted: true });
+      return url.pathname === HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH
+        ? imageAccessFetch(request, init)
+        : upstreamFetch(request, init);
+    }));
 
     for (const route of PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes) {
+      const imageAccessCallsBefore = imageAccessFetch.mock.calls.length;
       const upstreamCallsBefore = upstreamFetch.mock.calls.length;
       const validationsBefore = validateRuntimeProviderEgressCredential.mock.calls.length;
       const response = await hostedRunnerIntercept(
@@ -292,6 +305,9 @@ describe("pinned Codex OpenAI egress conformance", () => {
       }
 
       expect(response.status, `${route.method} ${route.pathname}`).toBe(200);
+      expect(imageAccessFetch.mock.calls.length, route.feature).toBe(
+        imageAccessCallsBefore + (route.pathname.startsWith("/v1/images/") ? 1 : 0),
+      );
       expect(upstreamFetch.mock.calls.length, route.feature)
         .toBe(upstreamCallsBefore + 1);
       expect(validateRuntimeProviderEgressCredential.mock.calls.length, route.feature)
@@ -347,6 +363,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
       const request = input instanceof Request
         ? input.clone()
         : new Request(input, init);
+      if (new URL(request.url).pathname === "/api/internal/hosted-runtime/log") return Response.json({ accepted: true });
       forwardedRequests.push({
         body: await request.clone().text(),
         headers: new Headers(request.headers),
@@ -635,20 +652,19 @@ function createOpenAiInterceptEnv(input: {
   }) => Promise<WorkerProviderEgressCredentialValidationResult>
     | WorkerProviderEgressCredentialValidationResult;
 }): RunnerOutboundEnvironmentSource {
+  mockPostgresOwnerCommand(async ({ userId, command }) => {
+    if (command.operation !== "authorize_provider" || !command.runnerContainerName) throw new Error("Unexpected owner operation.");
+    const result = await input.validateRuntimeProviderEgressCredential({ userId, providerKind: command.providerKind, runnerContainerName: command.runnerContainerName });
+    return { cutover: "postgres", status: result.owns ? "authorized" : "stale", owner: result.owns ? createPostgresTestOwner({ userId, attemptId: result.attemptId, generation: result.leaseGeneration, workspaceVersion: result.workspaceVersion, runnerContainerName: command.runnerContainerName }) : null };
+  });
   return {
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
       PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
     OPENAI_API_KEY: "openai-worker-secret",
-    USER_RUNNER: {
-      getByName: () => ({
-        validateRuntimeProviderEgressCredential: async (validationInput) =>
-          await input.validateRuntimeProviderEgressCredential(validationInput),
-        validateRuntimeProviderEgressToken: async () => ({ owns: false }),
-        validateRuntimeWriteFence: async () => false,
-      }),
-    },
+    USER_RUNNER: forbiddenLegacyRuntime,
+    RUNNER_CONTAINER: { getByName: () => settledNativeRuntime },
   };
 }
 

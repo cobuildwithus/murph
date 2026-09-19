@@ -1,4 +1,4 @@
-import { isHostedRunnerImageTransition, readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName, readHostedRunnerDeployment } from "./hosted-runner-release.ts";
+import { readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName, readHostedRunnerDeployment } from "./hosted-runner-release.ts";
 import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
@@ -83,6 +83,8 @@ export interface HostedRunnerSlotLifecycle {
     timeoutMs: number;
   }): Promise<{
     prepared: true;
+    /** Additive attestation; older Workers may omit it. Deploy smoke requires it. */
+    runnerImage?: { bundleFingerprint: string; sourceFingerprint: string };
     releaseId: string;
     region: HostedRunnerRegion;
     slotName: string;
@@ -193,8 +195,6 @@ export function readHostedStandbyMode(
 export function readHostedStandbyTarget(
   source: Readonly<Record<string, unknown>>,
 ): number {
-  // Mixed images serve bound members, but never advertise pristine warm inventory.
-  if (isHostedRunnerImageTransition(source)) return 0;
   const raw = source.HOSTED_EXECUTION_STANDBY_TARGET;
   if (raw === undefined || (typeof raw === "string" && raw.trim() === "")) {
     return 2;
@@ -302,11 +302,15 @@ export function readHostedStandbySlotReleaseId(value: string): string | null {
 
 export function isHostedRunnerSlotName(value: unknown): boolean {
   return typeof value === "string"
-    && /^runner--v-[A-Za-z0-9_-]{1,128}--[a-f0-9]{32}$/u.test(value);
+    && /^runner(?:-small)?--v-[A-Za-z0-9_-]{1,128}--[a-f0-9]{32}$/u.test(value);
+}
+
+export function isHostedSmallRunnerSlotName(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith("runner-small--v-") && isHostedRunnerSlotName(value);
 }
 
 export function readHostedRunnerSlotReleaseId(value: string): string | null {
-  const match = /^runner--v-([A-Za-z0-9_-]{1,128})--[a-f0-9]{32}$/u.exec(value);
+  const match = /^runner(?:-small)?--v-([A-Za-z0-9_-]{1,128})--[a-f0-9]{32}$/u.exec(value);
   return match?.[1] ?? null;
 }
 
@@ -356,6 +360,7 @@ function isRunnerBindingRecord(value: unknown): value is Record<string, unknown>
 export function createHostedRunnerContainerNamespaceRouter(input: {
   exactUser: HostedExecutionContainerNamespaceLike | null;
   next?: HostedExecutionContainerNamespaceLike | null;
+  small?: HostedExecutionContainerNamespaceLike | null;
   standby: HostedStandbyRunnerContainerNamespaceLike | null;
 }): HostedExecutionContainerNamespaceLike | null {
   const runner = input.exactUser;
@@ -365,6 +370,10 @@ export function createHostedRunnerContainerNamespaceRouter(input: {
 
   return {
     getByName(name: string) {
+      if (isHostedSmallRunnerSlotName(name)) {
+        if (!input.small) throw new Error("Hosted small runner container binding is unavailable.");
+        return input.small.getByName(name);
+      }
       if (readHostedRunnerBankFromName(name) === "next") {
         if (!input.next) throw new Error("Hosted next runner container binding is unavailable.");
         return input.next.getByName(name);

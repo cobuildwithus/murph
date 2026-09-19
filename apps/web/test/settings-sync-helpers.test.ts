@@ -1,50 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
-
-const mocks = vi.hoisted(() => ({
-  requestHostedOnboardingJson: vi.fn(),
-}));
-
-vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
-  HostedOnboardingApiError: class HostedOnboardingApiError extends Error {
-    readonly code: string | null;
-    readonly retryable: boolean;
-
-    constructor(input: { code: string | null; message: string; retryable?: boolean }) {
-      super(input.message);
-      this.code = input.code;
-      this.retryable = input.retryable ?? false;
-    }
-  },
-  requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
-}));
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  readJsonErrorDetails,
   retrySyncOperation,
 } from "@/src/components/settings/hosted-settings-sync-helpers";
 
 describe("hosted settings sync helpers", () => {
-  it("extracts nested JSON error details only when the payload shape is valid", () => {
-    expect(readJsonErrorDetails(null)).toEqual({
-      code: null,
-      message: null,
-    });
-    expect(readJsonErrorDetails({
-      error: "bad-shape",
-    })).toEqual({
-      code: null,
-      message: null,
-    });
-    expect(readJsonErrorDetails({
-      error: {
-        code: "HOSTED_SYNC_UNAVAILABLE",
-        message: "Hosted sync unavailable right now.",
-      },
-    })).toEqual({
-      code: "HOSTED_SYNC_UNAVAILABLE",
-      message: "Hosted sync unavailable right now.",
-    });
-  });
+  afterEach(() => vi.unstubAllGlobals());
 
   it("reuses the provided sleep implementation across retry delays", async () => {
     const sleepImpl = vi.fn(async () => {});

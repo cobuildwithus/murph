@@ -537,6 +537,48 @@ describe("hosted crypto Google KMS integrity transport", () => {
 });
 
 describe("hosted crypto Google KMS aborts and redacted errors", () => {
+  it.each([249, 250])("logs first-attempt provider timing only for slow responses (%i ms)", async (elapsedMs) => {
+    let now = 1_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const responsePlaintext = new Uint8Array([4, 5, 6]);
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      decrypt: async () => {
+        now += elapsedMs;
+        return {
+          plaintext: responsePlaintext,
+          plaintextCrc32c: crc32c(responsePlaintext),
+          usedPrimary: true,
+        };
+      },
+    })).client;
+    await expect(client.decrypt({
+      additionalAuthenticatedData: "synthetic-private-context",
+      ciphertext: Buffer.from([1, 2, 3]).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    })).resolves.toEqual({ plaintext: new Uint8Array([4, 5, 6]) });
+    if (elapsedMs < 250) {
+      expect(info).not.toHaveBeenCalled();
+    } else {
+      expect(info).toHaveBeenCalledExactlyOnceWith(
+        "Hosted Google Cloud KMS slow provider response received.",
+        expect.objectContaining({
+          attempt: 1,
+          attemptElapsedMs: elapsedMs,
+          completionStage: "kms_rpc",
+          operation: "decrypt",
+          outcome: "provider_response_received",
+          sdkInitializeElapsedMs: expect.any(Number),
+          kmsRpcElapsedMs: expect.any(Number),
+          stsExchangeElapsedMs: expect.any(Number),
+          serviceAccountImpersonationElapsedMs: expect.any(Number),
+        }),
+      );
+      expect(JSON.stringify(info.mock.calls)).not.toMatch(/projects\/|synthetic-private-context|ya29\.|AQID/u);
+    }
+    expectAllZero(responsePlaintext);
+  });
+
   it.each([
     { code: 4, reason: "DEADLINE_EXCEEDED" },
     { code: 14, reason: "UNAVAILABLE" },

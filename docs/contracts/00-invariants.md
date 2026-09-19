@@ -6,6 +6,19 @@ tunable numeric settings, incident history, and rollout case law belong in
 owner docs and executable tests. A fixed numeric floor appears here only when
 it has been explicitly elevated to a cross-cutting invariant.
 
+## Hosted runtime authority cutover
+
+- Exactly one durable owner admits a member's runtime effects. After Postgres
+  activation, runtime attempt/generation validation and canonical Web mutations
+  share one transaction; workspace CAS version is a separate freshness check.
+- An uncertain native launch or stop retains its exact allocation and target.
+  Elapsed time can request reconciliation, never prove stoppedness.
+- Upload and cleanup obligations survive member deletion. A pending multipart
+  write requires exact completion/abort proof before cleanup can pass it.
+- The migration gate is monotonic: legacy, draining, Postgres. Frozen legacy
+  state exports resources and generation high-water, never active authority.
+  See `agent-docs/references/hosted-postgres-runtime.md` for the finite cutover.
+
 ## Admission Test
 
 - A baseline invariant must protect a recurring cross-cutting failure class or
@@ -205,8 +218,16 @@ it has been explicitly elevated to a cross-cutting invariant.
 - A detached assistant read may overlap foreground work only in a separate
   one-shot process with OS-enforced read-only roots and no write, tool-network,
   route, delivery, or recursion authority. The resident foreground assistant
-  remains the sole model-authored canonical-content writer and sender. The
-  runtime must abort, await, and prove exit of the exact owned child before
+  remains the sole model with direct canonical-write and sender authority.
+  The host's deterministic clinical enrichment apply may persist schema-validated,
+  frozen read-only proposals through the canonical writer with host-derived
+  source identity and provenance, bounded overlap checks, and readback before
+  progress. Derived clinical facts retain their attested source parent revision:
+  authoritative parent changes retire older owned extraction facets, and stale
+  queued proposals cannot recreate them. These checks share the canonical
+  writer index and run before writes. This grants no mutation or effect
+  authority to the read-only child.
+  The runtime must abort, await, and prove exit of the exact owned child before
   checkpoint release, workspace replacement, fence loss, shutdown, or
   invocation return.
 - A foreground prerequisite is a named current fact, not a generic lane or
@@ -220,7 +241,10 @@ it has been explicitly elevated to a cross-cutting invariant.
   fabricate or force conflicting canonical state to make recovery appear clean.
 - Routine hosted workspace snapshot publication is idle-only and interruptible.
   After the latest durably accepted conversation message, routine checkpoint
-  construction has a hard 180-second minimum quiet window. Internal assistant,
+  construction normally waits for the shared runner idle duration (ten minutes
+  by default). An observed consented-member Ask deferred by its admission gate
+  advances the existing checkpoint deadline after foreground work, so waiting
+  does not consume the request's ten-minute validity. Internal assistant,
   maintenance, retention, cleanup, projection, and scheduled wakes must not
   shorten it. Only the exact assistant retry or follow-up wake projected
   directly by the current foreground assistant phase may run as foreground
@@ -238,8 +262,15 @@ it has been explicitly elevated to a cross-cutting invariant.
   barrier; generic non-idempotent provider work remains excluded until routine
   checkpointing. Generic notifications and unrelated pending outbox work remain
   excluded. Inherited, committed, durability-gated, and shutdown-time wakes do
-  not otherwise use this exception. If the hot pass dirties state, the full
-  quiet window starts again. An actual host termination may use the separate
+  not otherwise use this exception. Newly accepted foreground-priority work
+  starts the full quiet window again; generic progress, cleanup-only work and
+  empty internal probes do not. After publication, dirty post-checkpoint effects
+  use the spent window while preserving all required save-before-effect and
+  follow-up-save barriers. Conversation warmth is independently bounded by ten
+  minutes from the latest accepted inbound user's original server receipt, not
+  by checkpoint or invocation completion. Expiry cannot interrupt accepted work
+  or bypass the exact owner, durable recovery, and stop fences. An actual host
+  termination may use the separate
   last-chance durability path, but durably staged foreground work still wins.
   Current-turn durability barriers may run only for facts the current reply or
   effect consumes. Before provider start, that is limited to accepted-input and
@@ -490,11 +521,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   the irreversible-effect boundary. Later authority loss takes a typed durable
   disposition rather than retroactively erasing accepted work or spawning
   repair machinery. Invocation configuration remains a separate lifecycle
-  responsibility: a warm provider-specific invocation checks the saved provider
-  at provider entry to recover missed settings-change wakes. A mismatch hands
-  accepted work to a fresh invocation without consuming or rejecting it; an
-  unavailable settings read retains the work for retry. This check does not
-  reauthorize the accepted inputs.
+  responsibility: a warm provider-specific invocation observes the saved route
+  through normal work reads before provider entry; inference settings changes
+  alone do not schedule execution. A mismatch hands accepted work to a fresh
+  invocation without consuming or rejecting it; an unavailable read retains
+  the work for retry. This check does not reauthorize the accepted inputs.
 - When provider target identity and audience privacy are coupled, one live
   owner resolves the effective target and audience class atomically before
   model work. Persisted routes, snapshots, and legacy markers are hints, never
@@ -532,7 +563,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   user or automation turn. It runs as isolated output-only formatting with no
   conversation history, private context, resume mutation, tools, network, or
   delegated work. Provider, webhook, and other external values remain
-  untrusted data, and the platform alone owns final delivery.
+  untrusted data, and the platform alone owns final delivery. The canonical
+  direct channel-connection greeting is a narrow context exception: exact
+  hosted-member/channel/destination validation permits bounded committed
+  direct-private transcript excerpts, with all output-only capability and
+  delivery restrictions preserved. Group and unknown audiences are excluded.
   Its restrictive configuration belongs to a fresh ephemeral thread on the
   resident App Server. It must not change provider process launch identity,
   replace the resident process, or persist a resumable notification thread.

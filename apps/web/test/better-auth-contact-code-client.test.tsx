@@ -78,3 +78,9 @@ test("delivery failure keeps entry available for a deliberate retry", async () =
   await sendEmail();
   expect(mocks.code).not.toBeNull();
 });
+
+
+test("compact invite verification retains its size and method-specific actions", async () => {
+  await render({ size: "compact" }); await sendEmail();
+  expect(mocks.code).toMatchObject({ size: "compact", primaryActionLabel: "Verify email", primaryActionPendingLabel: "Verifying..." });
+});

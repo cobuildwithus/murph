@@ -1,5 +1,3 @@
-import { createHmac } from "node:crypto";
-
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
@@ -9,6 +7,7 @@ import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
+  postHostedLocalLinqWebhook,
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
   type ObservedLinqRequest,
@@ -136,13 +135,14 @@ export async function startHostedLocalLinqEgressScenario(input: {
     requireScenario().queueAssistantResponses([turnInput.expectedReplyText], {
       matchInputContains: turnInput.text,
     });
-    const webhookResponse = await postSignedLinqWebhook({
+    const webhookResponse = await postHostedLocalLinqWebhook({
       event: buildHostedLinqInboundEvent(userId, chatId, {
         eventId: `evt_${turnInput.eventSuffix}_${userId}`,
         messageId: `msg_${turnInput.eventSuffix}_${userId}`,
         text: turnInput.text,
       }),
-      scenario: requireScenario(),
+      secret: linqWebhookSecret,
+      webBaseUrl: requireScenario().harness.webBaseUrl,
     });
     if (webhookResponse.status !== 202) {
       throw new Error(`Expected Linq webhook append to return 202, got ${webhookResponse.status}: ${await webhookResponse.text()}`);
@@ -249,25 +249,4 @@ function buildActivationWake(memberId: string) {
     memberId,
     occurredAt: new Date().toISOString(),
   });
-}
-
-async function postSignedLinqWebhook(input: {
-  event: Record<string, unknown>;
-  scenario: HostedLocalFullStackScenario;
-}): Promise<Response> {
-  const rawBody = JSON.stringify(input.event);
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  return await fetch(`${input.scenario.harness.webBaseUrl}/api/hosted-onboarding/linq/webhook`, {
-    body: rawBody,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "x-webhook-signature": signLinqWebhook(linqWebhookSecret, rawBody, timestamp),
-      "x-webhook-timestamp": timestamp,
-    },
-    method: "POST",
-  });
-}
-
-function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
-  return `sha256=${createHmac("sha256", secret).update(`${timestamp}.${payload}`).digest("hex")}`;
 }

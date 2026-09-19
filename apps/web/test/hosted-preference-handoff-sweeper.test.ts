@@ -19,6 +19,41 @@ import {
 } from "@/src/lib/hosted-orchestration/preference-handoff-sweeper";
 
 describe("hosted preference handoff sweeper", () => {
+  it("spreads individual handoffs without spending their timeout on jitter", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(0);
+    try {
+      const starts: number[] = [];
+      const candidates = Array.from({ length: 250 }, (_, index) => ({
+        userId: `synthetic-member-${index}`,
+        mailboxItemId: `synthetic-mailbox-${index}`,
+      }));
+      const requestHandoff = vi.fn(async () => {
+        starts.push(performance.now());
+        return { signalAccepted: true as const, workflowId: "synthetic-workflow" };
+      });
+      const sweep = runHostedPreferenceHandoffSweeper({
+        handoffTimeoutMs: 1,
+        handoffLimit: 250,
+        hasActiveAccess: vi.fn(async () => true),
+        logger: buildLogger(), requestHandoff, store: buildStore(candidates),
+      });
+      await vi.runAllTimersAsync();
+      expect(await sweep).toMatchObject({ handoffAccepted: 250, handoffFailed: 0 });
+      expect(new Set(starts).size).toBeGreaterThan(230);
+      expect(Math.max(...starts) - Math.min(...starts)).toBeGreaterThan(3_000);
+      expect(Math.max(...starts)).toBeLessThanOrEqual(5_000);
+      for (const candidate of candidates) {
+        expect(requestHandoff).toHaveBeenCalledWith({
+          abortSignal: expect.any(AbortSignal), expectedUserId: candidate.userId,
+          mailboxItemId: candidate.mailboxItemId,
+        });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("signals a pending preference row without logging its owner or item id", async () => {
     const logger = buildLogger();
     const requestHandoff = vi.fn(async () => ({

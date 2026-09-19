@@ -1,5 +1,5 @@
 import "server-only";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import * as z from "@murphai/contracts/zod-runtime";
 import { prepareHostedDomainRootForWeb, revalidatePreparedHostedDomainRootForWebTx } from "../hosted-crypto/domain-root-store";
@@ -70,14 +70,36 @@ export async function readHostedLoginMethods(prisma: PrismaClient, memberId: str
   return { user, account, methods };
 }
 
+// First messaging setup after email login requires proof of the new channel.
+// Any approval row (including unreadable state) keeps the established boundary.
+export async function readHostedInitialMessagingSetupAllowed(prisma: Client, session: HostedAppSession,
+  current: Awaited<ReturnType<typeof readHostedLoginMethods>>) {
+  if (!session.authProof || !current.methods.email || current.methods.phone
+    || current.methods.telegram) return false;
+  const [identity, approval] = await Promise.all([
+    prisma.hostedMemberIdentity.findUnique({ where: { memberId: session.member.id }, select: {
+      phoneNumberEncrypted: true, phoneLookupKey: true, phoneNumberVerifiedAt: true,
+    } }),
+    prisma.hostedMemberApprovalCredentials.findUnique({ where: { memberId: session.member.id }, select: { memberId: true } }),
+  ]);
+  return identity !== null && identity.phoneNumberEncrypted === null
+    && identity.phoneLookupKey === null && identity.phoneNumberVerifiedAt === null && approval === null;
+}
+
+function assertInitialMessagingSetupFresh(session: HostedAppSession) {
+  const age = Date.now() - (session.primaryAuthenticatedAt?.getTime() ?? Number.NaN);
+  if (!Number.isFinite(age) || age < 0 || age > 5 * 60_000) throw hostedOnboardingError({
+    code: "AUTH_FRESH_LOGIN_REQUIRED", httpStatus: 403, message: "Sign in again before connecting a messaging account.",
+  });
+}
+
 export function credentialRecordOptions(prisma: PrismaClient) {
   return hostedBetterAuthOptions({ ...requireHostedBetterAuthConfig(), prisma, delivery: {
     email: async () => { throw new Error("Credential record operations cannot send codes."); },
-    sms: async () => { throw new Error("Credential record operations cannot send codes."); },
   } });
 }
 
-async function readCanonicalCredentialIdentity(prisma: PrismaClient, memberId: string, methods: Awaited<ReturnType<typeof readHostedLoginMethods>>["methods"]) {
+export async function readCanonicalCredentialIdentity(prisma: PrismaClient, memberId: string, methods: Awaited<ReturnType<typeof readHostedLoginMethods>>["methods"]) {
   const [identity, email, routing] = await Promise.all([
     readHostedMemberIdentity({ memberId, prisma }), readHostedMemberEmailAuthorization({ memberId, prisma }), readHostedMemberRoutingState({ memberId, prisma }),
   ]);
@@ -103,20 +125,23 @@ export async function prepareHostedCredentialChange(input: {
     throw hostedOnboardingError({ code: "LINKED_ACCOUNT_LAST_SIGN_IN", httpStatus: 409, message: "Add another sign-in method before removing this one." });
   }
   await assertCredentialTargetAvailable(prisma, memberId, change);
+  const initialMessagingSetup = (change.method === "phone" || change.method === "telegram") && change.operation === "set" && change.expectedIdentity === null
+    && await readHostedInitialMessagingSetupAllowed(prisma, session, current);
+  if (initialMessagingSetup) assertInitialMessagingSetupFresh(session);
   const bindingHash = hostedCredentialChangeBinding({ change, memberId, sessionId: session.sessionId });
   const proof = input.authorization === undefined ? null : await verifySensitiveActionChallenge({
     authorization: input.authorization, bindingHash, kind: HOSTED_CREDENTIAL_CHANGE_KIND,
     memberId, prisma,
   });
   const root = await prepareHostedDomainRootForWeb({ domain: "control", prepareMissing: false, prisma, userId: memberId, reason: "hosted-auth.credential-change" });
-  const channelCrypto = proof && await readActiveHostedMemberAccess({ memberId, prisma })
+  const channelCrypto = (proof || initialMessagingSetup) && await readActiveHostedMemberAccess({ memberId, prisma })
     ? await prepareHostedMailboxItemAppendCrypto({ userId: memberId, prisma }) : null;
-  if (proof) await readHostedMemberSnapshot({ memberId, prisma });
+  if (proof || initialMessagingSetup) await readHostedMemberSnapshot({ memberId, prisma });
   const replyAlias = change.method === "email" && change.value ? await prepareHostedMemberVerifiedEmailReplyAlias({
     address: change.value, memberId, prisma, ...(change.expectedIdentity ? { afterRemoval: true } : {}),
   }) : undefined;
   const revoked = change.expectedIdentity !== null;
-  return { current, bindingHash, async lockAndRevalidate(tx: Prisma.TransactionClient) {
+  return { current, bindingHash, initialMessagingSetup, async lockAndRevalidate(tx: Prisma.TransactionClient) {
     const method = change.method;
     const contacts = method === "telegram" ? [] : [change.expectedIdentity, change.value]
       .flatMap((value) => { const contact = value ? createHostedLinqParticipantContact({ kind: method, value }) : null; return contact ? [contact] : []; })
@@ -129,10 +154,14 @@ export async function prepareHostedCredentialChange(input: {
     const user = await adapter.findOne<AuthRecord>({ model: "user", where: [{ field: "id", value: memberId }] });
     const accounts = await adapter.findMany<AuthRecord>({ model: "account", where: [{ field: "userId", value: memberId }], limit: 2 });
     if (JSON.stringify(user) !== JSON.stringify(current.user) || JSON.stringify(accounts) !== JSON.stringify(current.account ? [current.account] : [])) throw changedIdentity();
+    if (initialMessagingSetup) {
+      assertInitialMessagingSetupFresh(session);
+      if (!await readHostedInitialMessagingSetupAllowed(tx, session, current)) throw changedIdentity();
+    }
     await assertCredentialTargetAvailable(tx, memberId, change);
   }, async commit(tx: Prisma.TransactionClient) {
-    if (!proof) throw invalidChange();
-    await consumeSensitiveActionChallengeTx({ challenge: proof, prisma: tx });
+    if (!proof && !initialMessagingSetup) throw invalidChange();
+    if (proof) await consumeSensitiveActionChallengeTx({ challenge: proof, prisma: tx });
     if (change.expectedIdentity) await removeHostedMemberLinkedAccountProjectionTx({
       expectedIdentity: change.expectedIdentity, memberId, method: change.method, prisma: tx,
     });
@@ -150,7 +179,7 @@ export async function prepareHostedCredentialChange(input: {
       if (current.account) await adapter.delete({ model: "account", where: [{ field: "id", value: current.account.id }] });
       if (change.value) {
         await upsertHostedMemberTelegramRoutingBindingTx({ memberId, telegramUserId: change.value, prisma: tx });
-        await adapter.create({ model: "account", data: { id: randomUUID(), userId: memberId, providerId: "telegram", accountId: change.value, createdAt: now, updatedAt: now } });
+        await adapter.create({ model: "account", data: { userId: memberId, providerId: "telegram", accountId: change.value, createdAt: now, updatedAt: now } });
       }
     }
     const fields = change.method === "email" ? {

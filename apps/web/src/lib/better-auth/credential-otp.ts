@@ -11,6 +11,8 @@ import type { prepareHostedCredentialChange, HostedCredentialChange } from "./cr
 import { requireHostedBetterAuthConfig } from "./config";
 import { lockHostedAuthOtpTx } from "./otp-store";
 import { sendHostedAuthOtp } from "./send-otp";
+import { prepareHostedAuthSmsOtp, verifyHostedAuthSmsOtpTx } from "./sms-otp";
+import { hostedAuthSmsVerification } from "./twilio-verify";
 import { classifyHostedBrowserCredential, hostedAuthCookieName } from "./transport";
 
 type Prepared = Awaited<ReturnType<typeof prepareHostedCredentialChange>>;
@@ -40,7 +42,7 @@ export async function sendHostedCredentialOtp(input: Input & { delivery: HostedA
     const contact = createHostedLinqParticipantContact({ kind: "phone", value: input.change.value });
     if (!contact) throw invalidCode();
     await input.prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(() => input.prepared.lockAndRevalidate(tx)), { maxWait: 5_000, timeout: 10_000 });
-    await sendHostedAuthOtp({ ...config, prisma: input.prisma, contact, delivery: input.delivery });
+    await sendHostedAuthOtp({ ...config, prisma: input.prisma, contact, delivery: input.delivery, smsVerification: hostedAuthSmsVerification(input.request.signal) });
     return;
   }
   const code = await input.prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
@@ -56,7 +58,6 @@ export async function sendHostedCredentialOtp(input: Input & { delivery: HostedA
           if (delivery.address !== input.change.value || code || !/^\d{6}$/u.test(delivery.code)) throw invalidCode();
           code = delivery.code;
         },
-        sms: async () => { throw invalidCode(); },
       },
     });
     await auth.api.requestEmailChangeEmailOTP({ headers: credentialEmailHeaders(input.request), body: { newEmail: input.change.value! } });
@@ -68,6 +69,10 @@ export async function sendHostedCredentialOtp(input: Input & { delivery: HostedA
 
 export async function commitHostedCredentialOtp(input: Input & { code: string }) {
   const identifier = otpIdentifier(input);
+  const verificationId = input.change.method === "phone" ? await prepareHostedAuthSmsOtp({
+    prisma: input.prisma, phoneNumber: identifier, code: input.code,
+    verification: hostedAuthSmsVerification(input.request.signal),
+  }) : null;
   const outcome = await input.prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
     await lockHostedAuthOtpTx(tx, identifier);
     await input.prepared.lockAndRevalidate(tx);
@@ -83,7 +88,13 @@ export async function commitHostedCredentialOtp(input: Input & { code: string })
     const auth = createHostedBetterAuth({
       ...requireHostedBetterAuthConfig(), prisma: input.prisma, credentialEmailChange: true,
       database: (options: BetterAuthOptions) => hostedAuthTransactionAdapter(input.prisma, tx, options),
-      delivery: { email: async () => { throw invalidCode(); }, sms: async () => { throw invalidCode(); } },
+      delivery: { email: async () => { throw invalidCode(); } },
+      verifyPhoneOtp: async ({ phoneNumber, code }) => verificationId !== null
+        && phoneNumber === identifier && code === input.code
+        && verifyHostedAuthSmsOtpTx({
+          adapter: hostedAuthTransactionAdapter(input.prisma, tx, {}),
+          phoneNumber, code, verificationId,
+        }),
       hooks: { user: { update: { before: async (user) => {
         if (input.change.method !== "email" || user.email !== input.change.value || user.emailVerified !== true) throw invalidCode();
         await commit();

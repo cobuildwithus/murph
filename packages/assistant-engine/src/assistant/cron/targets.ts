@@ -30,6 +30,7 @@ export async function resolveAssistantCronTargetDefaults<
       identityId: input.identityId,
       participantId: input.participantId,
       threadId: input.threadId,
+      threadIsDirect: input.threadIsDirect,
       deliveryTarget: input.deliveryTarget,
     },
     {

@@ -1,6 +1,7 @@
 import {
   HostedBillingStatus,
   Prisma,
+  type HostedAiUsagePeriod,
   type PrismaClient,
 } from "@prisma/client";
 import {
@@ -60,6 +61,7 @@ import {
 import {
   type HostedMemberPersonAccessState,
   hostedMemberPersonAccessSelect,
+  hasActiveHostedThreadContainerAccessWithParticipants,
   readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
@@ -1509,113 +1511,122 @@ async function resolveHostedAiUsageGateWithPolicy(input: {
   });
 }
 
+export const hostedAiUsageMemberSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
+  billingRef: {
+    select: {
+      currentBillingPhase: true,
+      currentBillingPlanCode: true,
+      currentCheckoutOffer: true,
+      currentPeriodEnd: true,
+      currentPeriodStart: true,
+      stripeSubscriptionLookupKey: true,
+      usagePlanTransitionAt: true,
+      usagePlanTransitionFromCode: true,
+      usagePlanTransitionKind: true,
+      usagePlanTransitionToCode: true,
+    },
+  },
+  threadContainer: {
+    select: {
+      monthlyUsageLimitUsdMicros: true,
+      owner: {
+        select: hostedMemberPersonAccessSelect,
+      },
+    },
+  },
+  billingStatus: true,
+  suspendedAt: true,
+  usageCreditBalanceUsdMicros: true,
+  usageCreditLedgerVersion: true,
+});
+
+export type HostedAiUsageMemberState = Prisma.HostedMemberGetPayload<{
+  select: typeof hostedAiUsageMemberSelect;
+}>;
+
 export async function readHostedAiUsageGate(input: {
   memberId: string;
+  memberState?: HostedAiUsageMemberState;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
 }): Promise<HostedAiUsageGateDecisionWithSource> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
-  return runHostedAiUsageAllowanceTransaction(prisma, async (tx) => {
-    const memberState = await tx.hostedMember.findUnique({
-      where: {
-        id: input.memberId,
-      },
-      select: {
-        billingRef: {
-          select: {
-            currentBillingPhase: true,
-            currentBillingPlanCode: true,
-            currentCheckoutOffer: true,
-            currentPeriodEnd: true,
-            currentPeriodStart: true,
-            stripeSubscriptionLookupKey: true,
-            usagePlanTransitionAt: true,
-            usagePlanTransitionFromCode: true,
-            usagePlanTransitionKind: true,
-            usagePlanTransitionToCode: true,
-          },
-        },
-        threadContainer: {
-          select: {
-            monthlyUsageLimitUsdMicros: true,
-            owner: {
-              select: hostedMemberPersonAccessSelect,
-            },
-          },
-        },
-        billingStatus: true,
-        suspendedAt: true,
-        usageCreditBalanceUsdMicros: true,
-        usageCreditLedgerVersion: true,
-      },
-    });
+  // A read-committed wrapper adds no shared snapshot or lock to these reads.
+  // Caller-owned transactions remain intact; denial confirmation owns writes.
+  const memberState = input.memberState ?? await prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: hostedAiUsageMemberSelect,
+  });
 
-    if (!memberState) {
-      throw new TypeError("Hosted AI usage allowance member does not exist.");
-    }
-    const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
+  if (!memberState) {
+    throw new TypeError("Hosted AI usage allowance member does not exist.");
+  }
+  const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
 
-    const allowanceAccess = memberState.suspendedAt === null
-      ? await resolveHostedAiUsageAllowanceBillingRefForMember({
-          billingRef: memberState.billingRef,
-          billingStatus: memberState.billingStatus,
-          memberId: input.memberId,
-          tx,
-        })
-      : {
-          billingRef: memberState.billingRef,
-          familyAccessActive: false,
-        };
-    const allowanceBillingRef = allowanceAccess.billingRef;
-    const familyAccessActive = allowanceAccess.familyAccessActive;
-    const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
-      container: memberState,
-      containerMemberId: input.memberId,
-      now,
-      threadContainer: memberState.threadContainer,
-      tx,
-    });
-
-    // Thread-container members are synthetic (`not_started` own billing):
-    // their access is decided by the container branch of the allowance-period
-    // resolver below. Only non-container members are denied on their own
-    // billing here; suspension always fails closed.
-    if (
-      memberState.suspendedAt !== null ||
-      (
-        !memberState.threadContainer &&
-        memberState.billingStatus !== HostedBillingStatus.active &&
-        !familyAccessActive
-      )
-    ) {
-      return resolveHostedAiUsageInactiveGateDecision({
-        at: now,
-        billingRef: allowanceBillingRef,
+  const allowanceAccess = memberState.suspendedAt === null
+    ? await resolveHostedAiUsageAllowanceBillingRefForMember({
+        billingRef: memberState.billingRef,
         billingStatus: memberState.billingStatus,
         memberId: input.memberId,
-        suspendedAt: memberState.suspendedAt,
-        threadContainer: memberState.threadContainer,
-        threadContainerAccessActive,
-        ...usageCreditProjection,
-      });
-    }
+        tx: prisma,
+      })
+    : {
+        billingRef: memberState.billingRef,
+        familyAccessActive: false,
+      };
+  const allowanceBillingRef = allowanceAccess.billingRef;
+  const familyAccessActive = allowanceAccess.familyAccessActive;
+  const threadContainerAccessActive = memberState.threadContainer
+    ? await hasActiveHostedThreadContainerAccessWithParticipants({
+        container: memberState,
+        containerMemberId: input.memberId,
+        now,
+        owner: memberState.threadContainer.owner,
+        prisma,
+      })
+    : null;
 
-    const period = await readHostedAiUsageAllowancePeriodTx({
+  // Thread-container members are synthetic (`not_started` own billing):
+  // their access is decided by the container branch of the allowance-period
+  // resolver below. Only non-container members are denied on their own
+  // billing here; suspension always fails closed.
+  if (
+    memberState.suspendedAt !== null ||
+    (
+      !memberState.threadContainer &&
+      memberState.billingStatus !== HostedBillingStatus.active &&
+      !familyAccessActive
+    )
+  ) {
+    return resolveHostedAiUsageInactiveGateDecision({
       at: now,
       billingRef: allowanceBillingRef,
+      billingStatus: memberState.billingStatus,
       memberId: input.memberId,
+      suspendedAt: memberState.suspendedAt,
       threadContainer: memberState.threadContainer,
       threadContainerAccessActive,
-      tx,
       ...usageCreditProjection,
     });
+  }
 
-    return buildHostedAiUsageGateDecision({
-      memberId: input.memberId,
-      period,
-    });
+  const period = await readHostedAiUsageAllowancePeriodTx({
+    at: now,
+    billingRef: allowanceBillingRef,
+    memberId: input.memberId,
+    threadContainer: memberState.threadContainer,
+    threadContainerAccessActive,
+    tx: prisma,
+    ...usageCreditProjection,
+  });
+
+  return buildHostedAiUsageGateDecision({
+    memberId: input.memberId,
+    period,
   });
 }
 
@@ -1677,6 +1688,7 @@ export async function readHostedAiUsageGateSnapshots(input: {
 // ensure-creates the period inside the spend transaction as the backstop.
 export async function checkHostedAiUsageGate(input: {
   memberId: string;
+  memberState?: HostedAiUsageMemberState;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
 }): Promise<HostedAiUsageGateDecisionWithSource> {
@@ -1685,7 +1697,11 @@ export async function checkHostedAiUsageGate(input: {
     return decision;
   }
 
-  return resolveHostedAiUsageGate(input);
+  return resolveHostedAiUsageGate({
+    memberId: input.memberId,
+    now: input.now,
+    prisma: input.prisma,
+  });
 }
 
 function resolveHostedAiUsageInactiveGateDecision(input: {
@@ -1909,31 +1925,32 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     },
     skipDuplicates: true,
   });
-  await lockHostedAiUsageAllowancePeriodTx({
-    memberId: input.memberId,
-    periodStart: resolved.periodStart,
-    tx: input.tx,
-  });
-
-  const current = await input.tx.hostedAiUsagePeriod.findUniqueOrThrow({
-    where: {
-      memberId_periodStart: {
-        memberId: input.memberId,
-        periodStart: resolved.periodStart,
-      },
-    },
-    select: {
-      billingPlanCode: true,
-      blockedAt: true,
-      highestBillingPlanCode: true,
-      lastUsageAt: true,
-      limitUsdMicros: true,
-      periodEnd: true,
-      periodStart: true,
-      planResetAt: true,
-      spentUsdMicros: true,
-    },
-  });
+  // Creation above and the enclosing member lock guarantee one period row.
+  const [current] = await input.tx.$queryRaw<[Pick<
+    HostedAiUsagePeriod,
+    | "billingPlanCode"
+    | "blockedAt"
+    | "highestBillingPlanCode"
+    | "limitUsdMicros"
+    | "periodEnd"
+    | "periodStart"
+    | "planResetAt"
+    | "spentUsdMicros"
+  >]>`
+    SELECT
+      "billing_plan_code" AS "billingPlanCode",
+      "blocked_at" AS "blockedAt",
+      "highest_billing_plan_code" AS "highestBillingPlanCode",
+      "limit_usd_micros" AS "limitUsdMicros",
+      "period_end" AS "periodEnd",
+      "period_start" AS "periodStart",
+      "plan_reset_at" AS "planResetAt",
+      "spent_usd_micros" AS "spentUsdMicros"
+    FROM "hosted_ai_usage_period"
+    WHERE "member_id" = ${input.memberId}
+      AND "period_start" = ${resolved.periodStart}
+    FOR UPDATE
+  `;
 
   const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
     ?? resolved.billingPlanCode;
@@ -2594,20 +2611,6 @@ function normalizeHostedAiUsageCreditProjection(input: {
     usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros ?? 0n,
     usageCreditLedgerVersion: input.usageCreditLedgerVersion ?? 0n,
   };
-}
-
-async function lockHostedAiUsageAllowancePeriodTx(input: {
-  memberId: string;
-  periodStart: Date;
-  tx: Prisma.TransactionClient;
-}): Promise<void> {
-  await input.tx.$queryRaw`
-    SELECT 1
-    FROM "hosted_ai_usage_period"
-    WHERE "member_id" = ${input.memberId}
-      AND "period_start" = ${input.periodStart}
-    FOR UPDATE
-  `;
 }
 
 async function lockHostedAiUsageAllowanceBeneficiaryTx(input: {

@@ -54,7 +54,6 @@ import {
 } from '../src/assistant/codex-base-instructions.ts'
 import {
   DEFAULT_CODEX_MODEL_CAPABILITIES,
-  DEFAULT_CODEX_MODELS,
   createCatalogModel,
 } from '../src/assistant/providers/catalog.ts'
 import {
@@ -73,7 +72,6 @@ import {
   prepareHostedCodexAssistantProcess,
   resolveCodexAssistantCapabilities,
   resolveCodexAssistantLabel,
-  resolveCodexStaticModels,
   resolveCodexAssistantTargetCapabilities,
 } from '../src/assistant/codex-runtime.ts'
 import {
@@ -3768,9 +3766,6 @@ describe('Codex assistant registry helpers', () => {
       supportsRichUserMessageContent: true,
     })
 
-    expect(resolveCodexStaticModels({ provider: 'codex-cli' })).toEqual(
-      DEFAULT_CODEX_MODELS,
-    )
   })
 
   it('merges progress activity labels into successful delegated execution attempts', async () => {

@@ -9,6 +9,8 @@ this synthetic workload.
 From the repository root, after the normal frozen dependency install:
 
 ```sh
+node scripts/run-typescript.mjs package --project packages/core/bench/tsconfig.json --pretty false
+
 apps/cloudflare/node_modules/.bin/esbuild packages/core/bench/device-import.ts \
   --bundle --platform=node --format=esm --target=node24 \
   --tsconfig=tsconfig.base.json \
@@ -16,21 +18,31 @@ apps/cloudflare/node_modules/.bin/esbuild packages/core/bench/device-import.ts \
   --banner:js='import { createRequire } from "node:module"; const require = createRequire(import.meta.url);'
 
 docker run --rm --platform linux/amd64 --network none \
-  --cpus 1 --memory 6g --pids-limit 128 --user 0 \
+  --cpus 1 --memory 3g --memory-swap 3g --pids-limit 128 --user 0 \
   --mount "type=bind,src=$PWD/.artifacts/container-cpu,dst=/bench,readonly" \
   --entrypoint node \
-  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.151.0 \
+  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4 \
   /bench/import.mjs
 ```
 
-Repeat at `--cpus 2`. Keep the harness, image, memory, event count, filesystem,
-and profiler settings identical when comparing source revisions. Run containers
+Repeat at `--cpus 2 --memory 6g --memory-swap 6g` for the shape comparison,
+or retain 6 GiB at both CPU quotas to isolate CPU allocation.
+Keep the harness, image, event count, filesystem,
+and profiler settings identical when comparing source revisions, and keep the
+memory allocation fixed for that comparison. Run containers
 sequentially; do not mix profiling runs with unprofiled timing results. For a
 profile, remove `readonly` from the benchmark mount and add
 `-e MURPH_BENCH_PROFILE=/bench/import.cpuprofile`. Do not commit that artifact.
 Optional inputs are `MURPH_BENCH_EVENTS` (default 8,000, range 12–50,000) and
 `MURPH_BENCH_TIME_ZONES` (default `UTC`; comma-separated zones alternate by
 event). For example, `UTC,America/Chicago` exercises mixed-timezone history.
+Set `MURPH_BENCH_SIGNAL=1` to include the live cancellation signal used by device
+sync, including cooperative event-loop yields. With a large seeded history,
+`MURPH_BENCH_ABORT_AFTER_MS=100` also checks timer-driven cancellation, unchanged
+seed ledger bytes, lock release, and successful retry/replay. It fails if the
+import finishes before the timer; use a history large enough to exercise the
+scan. Cancellation timings separate timer dispatch delay from abort-to-release
+latency. This synthetic timer does not measure hosted message admission.
 
 The harness reports process-to-module-ready time, initial import, a new batch,
 a disjoint session-cache hit, replay, and correction. It asserts replay is not
@@ -43,8 +55,8 @@ listening port, full runtime hydration, or first useful invocation.
 
 Baseline source: `0a1616a9e2e7`. Both builds used this same harness; the candidate
 only added bounded result reuse to `normalizeIanaTimeZone`. Three alternating,
-unprofiled runs used 8,000 UTC events and the pinned AMD64 image above on an ARM
-Docker host. These are emulated relative measurements, not production latency
+unprofiled runs used 8,000 UTC events and the historical
+`node24.14.1-codex0.151.0` AMD64 base on an ARM Docker host. These are emulated relative measurements, not production latency
 predictions. Host contention was visible across experiment rounds; three local
 runs do not establish production non-regression at the smaller quota.
 
@@ -161,3 +173,9 @@ provider timeout. Configuration and non-audio hydration avoid that module graph;
 the first actual audio request still pays its load cost. Deterministic coverage
 proves both the unloaded and real-SDK request paths, including existing provider
 error, abort, and timeout behavior.
+
+## CPU and memory sizing
+
+See [the September 2026 sizing investigation](container-sizing.md) for paired
+2-vCPU / 6-GiB and 1-vCPU / 3-GiB Docker measurements, resource counters,
+foreground-path profiling, and remaining hosted validation requirements.

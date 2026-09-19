@@ -10,6 +10,8 @@ import { isSensitiveActionKind, isSensitiveActionToken, isSettingsSensitiveActio
 import { approvalPasskeyAuthenticationOptions } from "@/src/lib/sensitive-actions/webauthn";
 import { hostedCredentialChangeBinding, parseHostedCredentialChange } from "@/src/lib/better-auth/credential-change";
 
+import { isInitialApprovalEnrollmentEligible } from "@/src/lib/sensitive-actions/initial-passkey-enrollment";
+
 export const POST = withJsonError(async (request: Request) => {
   const { body, prisma, session } = await readApprovalPasskeyRequest(request);
   if (!isSensitiveActionToken(body.token)) throw unavailable();
@@ -31,10 +33,13 @@ export const POST = withJsonError(async (request: Request) => {
       : null;
   if (bindingHash !== challenge.bindingHash) throw unavailable();
   const state = await readApprovalPasskeyState({ memberId: session.member.id, prisma });
-  if (state.credentials.length === 0) throw hostedOnboardingError({
-    code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403,
-    message: "Set up a passkey in account settings before approving this action.",
-  });
+  if (state.credentials.length === 0) {
+    if (!await isInitialApprovalEnrollmentEligible(prisma, session)) throw hostedOnboardingError({
+      code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403,
+      message: "Set up a passkey in account settings before approving this action.",
+    });
+    return jsonOk({ method: "initial" });
+  }
   return jsonOk({
     method: "passkey",
     options: await approvalPasskeyAuthenticationOptions({

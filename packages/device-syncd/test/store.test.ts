@@ -3741,6 +3741,53 @@ test("device sync store wakes expired final-attempt leases and dead-letters them
   }
 });
 
+test.each([
+  ["blood_oxygen", "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"],
+  ["electrocardiogram_voltage", "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE"],
+])("device sync store retains %s validation work through repeated lease expiry", async (resource, code) => {
+  const tempDir = await makeTempDirectory("murph-validation-lease-recovery");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+  const now = "2026-04-07T00:00:00.000Z";
+  try {
+    const account = store.upsertAccount({
+      provider: "junction", externalAccountId: "synthetic-validation-lease", displayName: "Junction",
+      scopes: [], credential: { kind: "provider_config", providerConfigKey: "junction" }, connectedAt: now,
+    });
+    const input = { accountId: account.id, provider: "junction", kind: "resource", maxAttempts: 1,
+      availableAt: now, dedupeKey: "synthetic-validation-window",
+      payload: { resource, sourceProviderSlug: "withings", windowStart: now, windowEnd: "2026-04-08T00:00:00.000Z" } };
+    const job = store.enqueueJob(input);
+    assert.equal(store.claimDueJob("worker-a", now, 60_000)?.id, job.id);
+    store.failJobIfOwned(job.id, "worker-a", now, code, "Synthetic validation failure.",
+      "2026-04-07T00:30:00.000Z", true, true);
+    assert.equal(store.claimDueJob("worker-b", "2026-04-07T00:30:00.000Z", 60_000)?.id, job.id);
+    for (const minute of [31, 32, 33]) {
+      assert.equal(store.enqueueJob(input).id, job.id, "expired retained work must keep its dedupe owner");
+      const reclaimed = store.claimDueJob("worker-c", `2026-04-07T00:${minute}:00.000Z`, 60_000);
+      assert.equal(reclaimed?.id, job.id);
+      assert.equal(reclaimed?.lastErrorCode, code);
+      assert.deepEqual(reclaimed?.payload, job.payload);
+      assert.equal(store.completeJobIfOwned(job.id, "worker-b", `2026-04-07T00:${minute}:00.000Z`), false);
+    }
+    assert.equal(store.completeJobIfOwned(job.id, "worker-c", "2026-04-07T00:33:01.000Z"), true);
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
+    const fresh = store.enqueueJob({ ...input, dedupeKey: "synthetic-no-validation-failure" });
+    assert.equal(store.claimDueJob("worker-d", "2026-04-07T01:00:00.000Z", 60_000)?.id, fresh.id);
+    assert.equal(store.claimDueJob("worker-e", "2026-04-07T01:01:00.000Z", 60_000), null);
+    assert.equal(store.getJobById(fresh.id)?.status, "dead", "ordinary lease exhaustion remains bounded");
+    const disconnect = store.enqueueJob({ ...input, dedupeKey: "synthetic-disconnect" });
+    store.claimDueJob("worker-f", "2026-04-07T02:00:00.000Z", 60_000);
+    store.failJobIfOwned(disconnect.id, "worker-f", "2026-04-07T02:00:00.000Z", code,
+      "Synthetic validation failure.", "2026-04-07T02:30:00.000Z", true, true);
+    store.markPendingJobsDeadForAccount(account.id, "2026-04-07T02:01:00.000Z",
+      "ACCOUNT_DISCONNECTED", "Disconnected.");
+    assert.equal(store.getJobById(disconnect.id)?.status, "dead", "validation retries still require account authority");
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("device sync store reclaims an expired retained companion lease on the same row past its attempt fence", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-companion-lease");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
@@ -4115,7 +4162,7 @@ test("device sync store reuses queued jobs with the same dedupe key", async () =
   }
 });
 
-test("device sync store requeues completed Junction temporal days after restart and drains newer backlog first", async () => {
+test.each(["succeeded", "dead"] as const)("device sync store requeues %s Junction temporal days after restart and drains newer backlog first", async (terminalStatus) => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-requeue");
   const databasePath = path.join(tempDir, "state.sqlite");
   let store = new SqliteDeviceSyncStore(databasePath);
@@ -4138,6 +4185,7 @@ test("device sync store requeues completed Junction temporal days after restart 
       availableAt: "2026-04-06T00:00:00.000Z",
       dedupeKey: "junction-temporal-authority:completed",
       kind: "resource",
+      maxAttempts: 1,
       payload: {
         resource: "blood_oxygen",
         resourceCategory: "timeseries",
@@ -4153,10 +4201,25 @@ test("device sync store requeues completed Junction temporal days after restart 
       store.claimDueJob("worker-before-restart", "2026-04-06T00:00:00.000Z", 60_000)?.id,
       completed.id,
     );
-    store.completeJob(completed.id, "2026-04-06T00:00:01.000Z");
+    if (terminalStatus === "succeeded") {
+      store.completeJob(completed.id, "2026-04-06T00:00:01.000Z");
+    } else {
+      const failure = store.failJobIfOwned(
+        completed.id,
+        "worker-before-restart",
+        "2026-04-06T00:00:01.000Z",
+        "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+        "Synthetic invalid complete day.",
+        null,
+        true,
+      );
+      assert.equal(failure?.disposition, "dead");
+      assert.equal(failure.remainingAttempts, 0);
+    }
     store.close();
 
     store = new SqliteDeviceSyncStore(databasePath);
+    assert.equal(store.claimDueJob("worker-after-restart", "2026-04-06T01:00:00.000Z", 60_000), null);
     const enqueueRepeatedDay = () => store.enqueueJob({
       accountId: account.id,
       availableAt: "2026-04-06T01:00:00.000Z",
@@ -4176,6 +4239,8 @@ test("device sync store requeues completed Junction temporal days after restart 
     const repeated = enqueueRepeatedDay();
     assert.notEqual(repeated.id, completed.id);
     assert.equal(repeated.status, "queued");
+    assert.equal(repeated.attempts, 0);
+    assert.ok(repeated.maxAttempts > 0);
     assert.equal(enqueueRepeatedDay().id, repeated.id);
     assert.equal(
       store.claimDueJob("worker-repeated", "2026-04-06T01:00:00.000Z", 60_000)?.id,

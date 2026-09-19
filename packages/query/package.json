@@ -32,11 +32,6 @@
       "import": "./dist/browser-experiments.js",
       "default": "./dist/browser-experiments.js"
     },
-    "./browser-murph-age": {
-      "types": "./dist/browser-murph-age.d.ts",
-      "import": "./dist/browser-murph-age.js",
-      "default": "./dist/browser-murph-age.js"
-    },
     "./browser-overview": {
       "types": "./dist/browser-overview.d.ts",
       "import": "./dist/browser-overview.js",
@@ -71,11 +66,6 @@
       "types": "./dist/query-visibility.d.ts",
       "import": "./dist/query-visibility.js",
       "default": "./dist/query-visibility.js"
-    },
-    "./murph-age": {
-      "types": "./dist/murph-age.d.ts",
-      "import": "./dist/murph-age.js",
-      "default": "./dist/murph-age.js"
     }
   },
   "files": [

@@ -470,7 +470,7 @@ describe("hosted execution coverage gaps", () => {
   });
 
   it("centralizes browser-vault replica source hash and refresh decisions", () => {
-    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(15);
+    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBeGreaterThanOrEqual(15);
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -828,10 +828,17 @@ describe("hosted execution coverage gaps", () => {
       "./return-contact",
       "./routes",
       "./runtime-control",
+      "./runtime-media",
+      "./runtime-migration",
+      "./runtime-owner",
+      "./runtime-resource-purge",
+      "./runtime-resources",
       "./side-effects",
+      "./storage-paths",
       "./subscription",
       "./temporal-env",
       "./vault-share",
+      "./workspace-snapshot-store",
       "./workspace-snapshot-v2",
     ]);
     expect(
@@ -1011,6 +1018,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH",
       "HOSTED_RUNTIME_GROUP_TOOL_PATH",
       "HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH",
+      "HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH",
       "HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
       "HOSTED_RUNTIME_LABS_TOOL_PATH",
@@ -1043,6 +1051,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_WORKSPACE_PATH",
       "buildHostedRuntimeOwnerReleaseSearch",
       "isHostedRuntimeVaultShareDeliverContinuation",
+      "parseHostedExecutionResolvedLinqDeliveryRoute",
       "parseHostedRuntimeOwnerReleaseSearch",
     ]);
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(

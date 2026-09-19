@@ -1,4 +1,6 @@
+import { types } from 'node:util'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { AssistantHostedDeviceToolRequest } from '../assistant/execution-context.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import type {
   MurphDynamicToolExecutionResult,
@@ -10,6 +12,69 @@ export interface ToolFailureDiagnostic {
   failureStage: 'admission' | 'execution' | 'result' | 'validation' | 'delivery'
   failureReason: ToolFailureReason
   errorCategory?: ToolErrorCategory
+  deviceAction?: AssistantHostedDeviceToolRequest['action']
+  deviceErrorCode?: DeviceToolFailureCode
+  deviceHttpStatus?: number
+}
+
+// Exactly the source-owned codes recognized by the device adapter, not a
+// provider catalogue. The diagnostic records evidence, not retry authority.
+const DEVICE_FAILURE_CODES = [
+  'device_connect_provider_unavailable',
+  'device_reconcile_unavailable',
+  'ACCOUNT_DISCONNECTED',
+  'ACCOUNT_REAUTHORIZATION_REQUIRED',
+  'CONNECTION_NOT_FOUND',
+  'RECONCILE_WAKE_NOT_ACCEPTED',
+  'HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE',
+  'HOSTED_DEVICE_CONNECT_PERSONAL_MEMBER_REQUIRED',
+  'HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED',
+  'HOSTED_DEVICE_CONNECT_LINK_INVALID_MESSAGING_RETURN_TARGET',
+  'INVALID_REQUEST',
+] as const
+
+type DeviceToolFailureCode = typeof DEVICE_FAILURE_CODES[number]
+
+/** Add private evidence only at the device adapter's existing caught failure. */
+export function withDeviceToolFailureDetails(
+  result: MurphDynamicToolExecutionResult,
+  action: AssistantHostedDeviceToolRequest['action'],
+  error: unknown,
+): MurphDynamicToolExecutionResult {
+  if (result.rpcResult.success || !result.failureDiagnostic) return result
+  return {
+    ...result,
+    failureDiagnostic: {
+      ...result.failureDiagnostic,
+      // The caller supplies the already parsed request action, never raw args.
+      deviceAction: action,
+      ...readDeviceFailureErrorDetails(error),
+    },
+  }
+}
+
+function readDeviceFailureErrorDetails(error: unknown): Pick<
+  ToolFailureDiagnostic, 'deviceErrorCode' | 'deviceHttpStatus'
+> {
+  // Descriptor reads on a Proxy can execute traps even inside try/catch.
+  // Reject it before inspection; do not walk prototypes, contexts or causes.
+  if (typeof error !== 'object' || error === null || types.isProxy(error)) return {}
+  try {
+    const read = (key: 'code' | 'status' | 'statusCode'): unknown => {
+      const descriptor = Object.getOwnPropertyDescriptor(error, key)
+      return descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined
+    }
+    const code = read('code')
+    const deviceErrorCode = DEVICE_FAILURE_CODES.find((known) => known === code)
+    const status = read('status') ?? read('statusCode')
+    return {
+      ...(deviceErrorCode === undefined ? {} : { deviceErrorCode }),
+      ...(typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599
+        ? { deviceHttpStatus: status } : {}),
+    }
+  } catch {
+    return {}
+  }
 }
 
 export type ToolFailureReason =
@@ -67,10 +132,21 @@ const ERROR_CATEGORIES = new Map<string, ToolErrorCategory>([
   ['VAULT_INVALID_INPUT', 'invalid_input'],
   ['invalid_option', 'invalid_input'],
   ['invalid_payload', 'invalid_input'],
+  ['research_scout_invalid_batch_payload', 'invalid_input'],
+  ['research_scout_invalid_window', 'invalid_input'],
+  ['research_exa_token_missing', 'unavailable'],
   ['invalid_path', 'invalid_input'],
   ['not_found', 'not_found'],
+  ['exercise_not_found', 'not_found'],
+  ['exercise_catalog_unavailable', 'unavailable'],
+  ['exercise_catalog_invalid', 'invalid_result'],
+  ['memory_not_found', 'not_found'],
+  ['memory_document_invalid', 'invalid_result'],
   ['automation_not_found', 'not_found'],
   ['knowledge_page_not_found', 'not_found'],
+  ['knowledge_source_unreadable', 'unavailable'],
+  ['knowledge_invalid_source_path', 'invalid_input'],
+  ['knowledge_invalid_library_slug', 'invalid_input'],
   ['ENOENT', 'not_found'],
   ['conflict', 'conflict'],
   ['knowledge_page_conflict', 'conflict'],

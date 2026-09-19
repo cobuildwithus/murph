@@ -1,7 +1,7 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -68,7 +68,7 @@ test.each([
     const job = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
       request: {
         attemptId: 'attempt_synthetic_hot_provider_probe',
-        idleCheckpointDelayMs: 500,
+        runnerIdleTtlMs: 500,
         leaseGeneration: '7',
         userId: TEST_USER_ID,
         workspaceVersion: '0',
@@ -81,9 +81,8 @@ test.each([
             vault: vaultRoot,
           }))?.projection.status ?? null;
         }
-        return { snapshotRef: createBundleRef({
+        return { snapshotRef: createSnapshotFixtureRef({
           hash: 'f'.repeat(64),
-          key: 'users/bundles/member-synthetic/hot-provider-probe.bundle.json',
           size: 512,
         }) };
       },

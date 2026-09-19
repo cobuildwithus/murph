@@ -153,9 +153,8 @@ async function runLivePrefixScenario(options: {
   Object.assign(plan.conversationPolicy.audience, {
     actorId: session.binding.actorId,
     channel,
-    effectiveThreadIsDirect: direct,
-    explicitTarget: null,
     threadIsDirect: direct,
+    explicitTarget: null,
   })
   const events = await Promise.all([1, 2, 3].map((ordinal) =>
     upsertAssistantInputEvent({

@@ -39,7 +39,6 @@ export async function commitHostedAuthSession(input: {
       generateId: () => randomUUID(),
       delivery: {
         email: async () => { throw new Error("Session issuance cannot send codes."); },
-        sms: async () => { throw new Error("Session issuance cannot send codes."); },
       },
     });
     const auth = betterAuth({ ...options, plugins: [...options.plugins, issuer] });

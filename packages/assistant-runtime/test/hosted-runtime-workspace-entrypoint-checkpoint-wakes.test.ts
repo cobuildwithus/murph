@@ -1,7 +1,7 @@
 import {
   TEST_NOW,
   TEST_USER_ID,
-  createBundleRef,
+  createSnapshotFixtureRef,
   createDeferred,
   createMailboxItem,
   createMailboxPort,
@@ -90,7 +90,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_durable_effect_success",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -100,9 +100,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: "e".repeat(64),
-                key: "users/bundles/member-synthetic/durable-effect-success.bundle.json",
                 size: 512,
               }),
             };
@@ -147,6 +146,81 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
     }
   });
 
+  test.each(["caught-up", "incomplete", "unknown"] as const)("classifies %s empty projection wakes before completing checkpointed work", async (coverage) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-ready-completion-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let assistantPasses = 0;
+    let scopeReads = 0;
+    const mailboxPort = createMailboxPort({ events, items: [] });
+    const durableEffect = vi.fn(async () => {
+      events.push("completion");
+      return { requiresFollowUpCheckpoint: true };
+    });
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: { runnerIdleTtlMs: 1 },
+      }), {
+        vaultRoot,
+        runtimeWakeSignal,
+        async importItem() { return { status: "imported" }; },
+        async createCheckpointSnapshot() {
+          assert.ok(checkpointRequests.length < 4, "Ready completion was starved by empty wake checkpoint churn.");
+          return { snapshotRef: createSnapshotFixtureRef({ hash: "a".repeat(64), size: 512 }) };
+        },
+        platform: createPlatform({
+          mailboxPort: {
+            ...mailboxPort,
+            async fetch(request) {
+              const response = await mailboxPort.fetch(request);
+              if (scopeReads === 1 && coverage !== "caught-up") {
+                return {
+                  ...response,
+                  maxSeqByLane: coverage === "unknown" ? [] : response.maxSeqByLane.map((entry) => ({
+                    ...entry, maxSeq: entry.lane === "conversation" ? "1" : entry.maxSeq,
+                  })),
+                };
+              }
+              return response;
+            },
+          },
+          workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState() }),
+          vaultSharePort: {
+            async listActiveProjectionScopes() {
+              scopeReads += 1;
+              if (coverage === "caught-up" || scopeReads === 1) runtimeWakeSignal.notify();
+              await new Promise((resolve) => setTimeout(resolve, 10));
+              return { projectionKinds: [], projectionScopes: [] };
+            },
+            async deliver() { return { status: "delivered" }; },
+          },
+        }),
+        async runAssistantPhase() {
+          assistantPasses += 1;
+          return {
+            progressed: true,
+            checkpointReason: "assistant_runtime_commit",
+            nextWakeAt: new Date().toISOString(),
+            nextWakeReason: "device-sync.reconcile",
+            ...(assistantPasses === 1 ? {
+              afterCheckpoint: async () => ({
+                checkpointReason: "system_mailbox_receipt",
+                afterDurableCheckpoint: durableEffect,
+              }),
+            } : {}),
+          };
+        },
+      });
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.equal(assistantPasses, coverage === "caught-up" ? 1 : 2);
+      assert.ok(events.indexOf("workspace.checkpoint") < events.indexOf("completion"));
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("checkpoint-gated due projected wakes wait for the idle delay before service", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -175,7 +249,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_durable_effect_external_wake",
-              idleCheckpointDelayMs: 180_000,
+              runnerIdleTtlMs: 180_000,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -186,9 +260,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               firstCheckpointStartedAtMs ??= Date.now();
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: "f".repeat(64),
-                  key: "users/bundles/member-synthetic/durable-effect-external-wake.bundle.json",
                   size: 512,
                 }),
               };
@@ -287,12 +360,12 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
     }
   });
 
-  test("round1: durable-effect wake survives a due-assistant service pass that reschedules", async () => {
+  test("durable-effect wake survives rescheduled assistant service without another quiet window", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 1;
+    const runnerIdleTtlMs = 1;
     const dueAssistantWakeAt = TEST_NOW;
     const durableWakeAt = "2026-04-27T00:02:00.000Z";
     const replacementWakeAt = new Date(Date.parse(TEST_NOW) + 1).toISOString();
@@ -320,7 +393,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_round1_durable_wake_survives_reschedule",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -331,11 +404,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `round1-durable-wake-survives-reschedule-${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -402,10 +472,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
 
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-      await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
       await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
       const result = await resultPromise;
 
@@ -429,11 +497,11 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
     }
   });
 
-  test("round3: later durable wake still waits after due assistant service", async () => {
+  test("later durable wake survives due assistant service without restarting the spent quiet window", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 180_000;
+    const runnerIdleTtlMs = 180_000;
     const dueAssistantWakeAt = TEST_NOW;
     const durableWakeAt = "2026-04-27T00:02:00.000Z";
     const replacementWakeAt = "2026-04-27T00:10:00.000Z";
@@ -462,7 +530,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_round3_hot_work_durable_reconcile_waits",
-              idleCheckpointDelayMs,
+              runnerIdleTtlMs,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -473,11 +541,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               checkpointStartedAtMs.push(Date.now());
               events.push(`snapshot:${snapshotInput.reason}:${checkpointStartedAtMs.length}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: `${checkpointStartedAtMs.length}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `round3-hot-work-durable-reconcile-${checkpointStartedAtMs.length}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -557,21 +622,15 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
 
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-      await waitForFakeTimerScheduled(() => events.join(","));
-
-      assert.equal(checkpointRequests.length, 2, events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
-      assert.equal(checkpointRequests.length, 2, events.join(","));
-      await vi.advanceTimersByTimeAsync(1);
       const result = await resultPromise;
 
       assert.equal(durableEffect.mock.calls.length, 1);
       assert.deepEqual(checkpointStartedAtMs, [
-        Date.parse(TEST_NOW) + idleCheckpointDelayMs,
-        Date.parse(TEST_NOW) + idleCheckpointDelayMs,
-        Date.parse(TEST_NOW) + idleCheckpointDelayMs * 2,
+        Date.parse(TEST_NOW) + runnerIdleTtlMs,
+        Date.parse(TEST_NOW) + runnerIdleTtlMs,
+        Date.parse(TEST_NOW) + runnerIdleTtlMs,
       ]);
       expect([...new Set(latencyTraceRequests
         .map((request) => request.event)
@@ -581,8 +640,11 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         )
         .map((event) => event.at))]).toEqual([
         "2026-04-27T00:27:00.000Z",
-        "2026-04-27T00:30:00.000Z",
       ]);
+      expect([...new Set(latencyTraceRequests.map(({ event }) => event)
+        .filter((event) => event.type === "runtime_milestone"
+          && event.milestone === "checkpoint_publication_expected_by")
+        .map((event) => event.source))].sort()).toEqual(["email", "linq", "telegram"]);
       assert.deepEqual(
         checkpointRequests.map((request) => [
           request.reason,
@@ -653,7 +715,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_effects_blocked_due_wake",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -664,9 +726,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             snapshotCount += 1;
             events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(snapshotCount).repeat(64),
-                key: `users/bundles/member-synthetic/effects-blocked-due-wake-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -846,7 +907,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_effects_blocked_dirty_wake",
-              idleCheckpointDelayMs: 25,
+              runnerIdleTtlMs: 25,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -857,11 +918,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key:
-                    `users/bundles/member-synthetic/effects-blocked-dirty-wake-`
-                    + `${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1018,7 +1076,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_competing_effects_blocked_wake",
-              idleCheckpointDelayMs: 25,
+              runnerIdleTtlMs: 25,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1029,11 +1087,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key:
-                    `users/bundles/member-synthetic/competing-effects-blocked-wake-`
-                    + `${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1171,7 +1226,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_checkpoint_gated_dirty_wake",
-              idleCheckpointDelayMs: 25,
+              runnerIdleTtlMs: 25,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1182,11 +1237,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key:
-                    `users/bundles/member-synthetic/checkpoint-gated-dirty-wake-`
-                    + `${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1328,7 +1380,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_durable_effect_follow_up_due_wake",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1339,9 +1391,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             snapshotCount += 1;
             events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(snapshotCount).repeat(64),
-                key: `users/bundles/member-synthetic/durable-effect-follow-up-due-wake-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -1458,7 +1509,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_follow_up_fresh_due_wake",
-              idleCheckpointDelayMs: 25,
+              runnerIdleTtlMs: 25,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1469,11 +1520,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key:
-                    `users/bundles/member-synthetic/follow-up-fresh-due-wake-`
-                    + `${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1620,7 +1668,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_follow_up_preempted_replacement_wake",
-              idleCheckpointDelayMs: 25,
+              runnerIdleTtlMs: 25,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -1631,9 +1679,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key: `users/bundles/member-synthetic/follow-up-preempted-replacement-wake-${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -1750,7 +1797,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_projected_follow_up_due_wake",
-            idleCheckpointDelayMs: 25,
+            runnerIdleTtlMs: 25,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1761,9 +1808,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             snapshotCount += 1;
             events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(snapshotCount).repeat(64),
-                key: `users/bundles/member-synthetic/projected-follow-up-due-wake-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -1870,7 +1916,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_checkpoint_blocked_due_wake",
-            idleCheckpointDelayMs: 1,
+            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -1881,9 +1927,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
             snapshotCount += 1;
             events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
             return {
-              snapshotRef: createBundleRef({
+              snapshotRef: createSnapshotFixtureRef({
                 hash: String(snapshotCount).repeat(64),
-                key: `users/bundles/member-synthetic/checkpoint-blocked-due-wake-${snapshotCount}.bundle.json`,
                 size: 512,
               }),
             };
@@ -1995,7 +2040,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_replaced_plain_due_wake",
-              idleCheckpointDelayMs: 25,
+              runnerIdleTtlMs: 25,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -2006,9 +2051,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
               snapshotCount += 1;
               events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
               return {
-                snapshotRef: createBundleRef({
+                snapshotRef: createSnapshotFixtureRef({
                   hash: String(snapshotCount).repeat(64),
-                  key: `users/bundles/member-synthetic/replaced-plain-due-wake-${snapshotCount}.bundle.json`,
                   size: 512,
                 }),
               };
@@ -2092,7 +2136,8 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
         ]),
         [
           ["idle_shutdown", "0", mintedWakeAt, "assistant"],
-          ["idle_shutdown", "1", null, null],
+          ["idle_shutdown", "1", replacementWakeAt, "assistant"],
+          ["idle_shutdown", "2", null, null],
         ],
       );
       assert.ok(
@@ -2105,11 +2150,15 @@ describe("hosted workspace runtime entrypoint", () => {test("runs deferred durab
       );
       assert.ok(
         requireEventIndex(events, "assistant:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown:2"),
+      );
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown:2")
           < requireEventIndex(events, "assistant:3"),
       );
       assert.ok(
         requireEventIndex(events, "assistant:3")
-          < requireEventIndex(events, "snapshot:idle_shutdown:2"),
+          < requireEventIndex(events, "snapshot:idle_shutdown:3"),
       );
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);

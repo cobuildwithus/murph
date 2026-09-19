@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-11",
+  "order": 100,
+  "item": {
+    "id": "faster-replies-after-idle",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Faster starts after a quiet stretch",
+    "summary": "Murph now finishes session cleanup before your next message arrives, reducing the wait to start a fresh reply.",
+    "details": "Your saved context is still restored before Murph responds. Recovery checks remain in place when a session has not shut down cleanly.",
+    "relevanceTags": [
+      "messaging",
+      "replies"
+    ],
+    "sourcePullRequests": [
+      3338
+    ]
+  }
+}

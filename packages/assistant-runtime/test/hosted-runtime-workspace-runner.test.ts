@@ -1,4 +1,18 @@
+import {
+  createPlatform as createV2SnapshotFixturePlatform,
+  createSnapshotFixtureRef,
+} from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import assert from "node:assert/strict";
+import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
+import * as assistantEngine from "@murphai/assistant-engine";
+import { runHostedAssistantAutomationLane } from "../src/hosted-runtime/maintenance.ts";
+import { createHostedWorkspaceSystemWork } from "../src/hosted-runtime/workspace-system-work.ts";
+import type { HostedWorkspaceRunnerInput, HostedWorkspaceDurableCheckpointEffect } from "../src/hosted-runtime/workspace-runner.ts";
+import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
+import * as systemMailbox from "../src/hosted-runtime/system-mailbox.ts";
+import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
+import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform.ts";
+import type { HostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -8,6 +22,7 @@ import path from "node:path";
 import {
   sha256HostedBundleHex,
   snapshotHostedBundleRoots,
+  restoreHostedBundleRoots,
 } from "@murphai/runtime-state/node";
 import {
   resolveAssistantStatePaths,
@@ -22,6 +37,7 @@ import {
   readAssistantContextSnapshotState,
   saveAssistantAutomationState,
   upsertAssistantInputEvent,
+  type InboxCaptureAttachmentLike,
 } from "@murphai/assistant-engine";
 import {
   hasPendingAssistantAutoReplyInput,
@@ -51,6 +67,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
+  buildHostedExecutionRuntimeTimerWake,
   sanitizeHostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
@@ -60,8 +77,10 @@ import {
 import {
   applyCanonicalWriteBatch,
   initializeVault,
+  isActiveCanonicalWriteLockError,
 } from "@murphai/core";
 import { describe, expect, test, vi } from "vitest";
+import { persistCanonicalInboxCapture } from "@murphai/inboxd";
 
 import {
   HostedMailboxImportCheckpointConflictError,
@@ -100,6 +119,10 @@ import {
   writeHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
+import {
+  drainHostedProviderCleanupAfterCommit,
+  recordHostedProviderCleanupBeforeCommit,
+} from "../src/hosted-runtime/provider-cleanup.ts";
 import {
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
@@ -405,6 +428,23 @@ describe("foreground checkpoint lease diagnostics", () => {
 });
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
+  test("keeps a newly staged receipt when an older metadata publication finishes", async () => {
+    const builder = createHostedWorkspaceCheckpointRequestBuilder({
+      attemptId: "attempt_synthetic_publication", expectedWorkspaceVersion: "0",
+      leaseGeneration: "1", snapshotRef: null,
+    });
+    const earlierStatus = { hostedCanonicalWriteReceiptLogSha256: "a".repeat(64) };
+    builder.recordCheckpoint({ checkpointed: true, workspace: createWorkspaceState({ version: "1", redactedStatus: earlierStatus }) });
+    const metadataResponse = createDeferred<HostedWorkspaceCheckpointResponse>();
+    const publication = metadataResponse.promise.then((response) => builder.recordCheckpoint(response));
+    const stagedStatus = { hostedCanonicalWriteReceiptLogSha256: "b".repeat(64) };
+    builder.recordRedactedStatus(stagedStatus);
+    metadataResponse.resolve({ checkpointed: true, workspace: createWorkspaceState({ version: "2", redactedStatus: earlierStatus }) });
+    await publication;
+    assert.equal(builder.latestWorkspace()?.version, "2");
+    assert.equal(builder.readRedactedStatus()?.hostedCanonicalWriteReceiptLogSha256, stagedStatus.hostedCanonicalWriteReceiptLogSha256);
+  });
+
   test("carries two initial conversation inputs through singleton foreground reruns before checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-initial-input-tail-"));
     const olderItem = createMailboxItem({
@@ -3323,9 +3363,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
       assert.ok(baseBundle);
       const baseHash = sha256HostedBundleHex(baseBundle);
-      const snapshotRef = createBundleRef({
+      const snapshotRef = createSnapshotFixtureRef({
         hash: baseHash,
-        key: `cloudflare-workspace-base/${baseHash}.bundle`,
         size: baseBundle.byteLength,
       });
       const artifactGetCalls: string[] = [];
@@ -3343,10 +3382,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
-        platform: createPlatform({
-          artifactBytesByHash,
-          artifactGetCalls,
-          mailboxPort,
+        platform: createV2SnapshotFixturePlatform({
+          artifactBytesByHash, artifactGetCalls, mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         vaultRoot,
@@ -3390,10 +3427,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       artifactGetCalls.length = 0;
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
-        platform: createPlatform({
-          artifactBytesByHash,
-          artifactGetCalls,
-          mailboxPort,
+        platform: createV2SnapshotFixturePlatform({
+          artifactBytesByHash, artifactGetCalls, mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         vaultRoot,
@@ -5239,6 +5274,392 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test.each([
+    { source: "telegram", image: true, fail: false },
+    { source: "telegram", image: true, fail: true },
+    { source: "linq", image: false, fail: false },
+    { source: "linq", image: false, fail: true },
+  ] as const)(
+    "starts the assistant before $source attachment backup (image=$image, fail=$fail)",
+    async ({ source, image, fail }) => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-attachment-start-"));
+      const uploadStarted = createDeferred<void>();
+      const uploadRelease = createDeferred<void>();
+      const assistantStarted = createDeferred<void>();
+      let followupCommitted = false;
+      const tracked: Promise<void>[] = [];
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const { mailboxPort } = createMailboxPort({ items: [createMailboxItem()] });
+      const bytes = image
+        ? Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cGfoAAAAASUVORK5CYII=", "base64")
+        : Buffer.from("Synthetic attachment contents\n");
+      let preparedBytes: Buffer | null = null;
+      let mediaUploadCount = 0;
+      const artifacts = new Map<string, Uint8Array>();
+      const holdUpload = async () => {
+        uploadStarted.resolve();
+        await uploadRelease.promise;
+        if (fail) throw new Error("Synthetic backup unavailable");
+      };
+      let attachmentPath: string | null = null;
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      await initializeVault({ vaultRoot, title: "Synthetic attachment vault", timezone: "UTC", createdAt: new Date(TEST_NOW) });
+      const platform = {
+        ...createPlatform({
+          artifactBytesByHash: artifacts,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+          async artifactPut(artifact) {
+            await holdUpload();
+            artifacts.set(artifact.sha256, artifact.bytes);
+          },
+        }),
+        mediaStore: {
+          async get() { return null; },
+          async put() { mediaUploadCount += 1; await holdUpload(); },
+        },
+      };
+      const operation = runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_attachment_start",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
+          attemptId: "attempt_synthetic_attachment_start",
+          checkpointRequests,
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          const capture = await persistCanonicalInboxCapture({
+            vaultRoot,
+            captureId: "cap_synthetic_attachment_start",
+            eventId: "evt_01JQ8PWXP5A68SQM1W0GYM41V4",
+            storedAt: TEST_NOW,
+            input: {
+              source,
+              externalId: "synthetic_attachment_message",
+              thread: { id: "synthetic_thread", isDirect: true },
+              actor: { isSelf: false },
+              occurredAt: TEST_NOW,
+              receivedAt: TEST_NOW,
+              text: "Read this attachment.",
+              attachments: [{
+                kind: image ? "image" : "document",
+                mime: image ? "image/png" : "text/plain",
+                fileName: image ? "sample.png" : "sample.txt",
+                data: bytes,
+              }],
+              raw: {},
+            },
+          });
+          attachmentPath = capture.stored.attachments[0]?.storedPath ?? null;
+          assert.ok(attachmentPath);
+          preparedBytes = await readFile(path.join(vaultRoot, attachmentPath));
+          if (image) {
+            assert.match(attachmentPath, /\.webp$/);
+            assert.equal(preparedBytes.subarray(8, 12).toString(), "WEBP");
+          } else {
+            assert.deepEqual(preparedBytes, bytes);
+          }
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform,
+        requestId: "request_synthetic_attachment_start",
+        trackLocalWorkspaceMutationCompletion(completion) {
+          if (completion) tracked.push(completion);
+        },
+        async runAssistantPhase() {
+          assert.ok(attachmentPath);
+          assert.deepEqual(await readFile(path.join(vaultRoot, attachmentPath)), preparedBytes);
+          assistantStarted.resolve();
+          if (fail) {
+            await uploadRelease.promise;
+          } else {
+            await applyCanonicalWriteBatch({
+              vaultRoot,
+              operationType: "synthetic_attachment_followup",
+              summary: "Save a synthetic attachment follow-up.",
+              audit: { action: "document_import", commandName: "test.followup", summary: "Save a synthetic note." },
+              textWrites: [{ relativePath: "bank/ordered-followup.md", content: "Follow-up\n" }],
+            });
+            followupCommitted = true;
+          }
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+      try {
+        await withTestTimeout(uploadStarted.promise, 5_000);
+        // The old importer cannot reach this boundary until uploadRelease.
+        await withTestTimeout(assistantStarted.promise, 5_000);
+        assert.equal(followupCommitted, false);
+        uploadRelease.resolve();
+        await operation;
+        await Promise.all(tracked);
+        assert.ok(attachmentPath);
+        assert.deepEqual(await readFile(path.join(vaultRoot, attachmentPath)), preparedBytes);
+        assert.equal(mediaUploadCount, image ? 1 : 0);
+        assert.equal(warn.mock.calls.some((call) => JSON.stringify(call).includes("persist inbox attachment backup")), fail);
+        if (!fail) {
+          assert.equal(followupCommitted, true);
+          assert.equal((await readHostedCanonicalWriteReceiptLog({
+            artifactStore: platform.artifactStore,
+            status: checkpointRequests.at(-1)?.redactedStatus,
+          })).entryCount, 2);
+          assert.ok([...artifacts.values()].some((value) =>
+            Buffer.from(value).toString().includes('"inbox_capture_persist"')
+          ));
+        }
+        // A failed best-effort backup must release canonical ownership.
+        await applyCanonicalWriteBatch({
+          vaultRoot,
+          operationType: "synthetic_followup",
+          summary: "Save a synthetic follow-up note.",
+          audit: { action: "document_import", commandName: "test.followup", summary: "Save a synthetic note." },
+          textWrites: [{ relativePath: "bank/followup.md", content: "Follow-up\n" }],
+        });
+      } finally {
+        uploadRelease.resolve();
+        await operation.catch(() => undefined);
+        await Promise.all(tracked);
+        warn.mockRestore();
+        await rm(vaultRoot, { force: true, recursive: true });
+      }
+    },
+  );
+
+  test("keeps the next attachment pending when its commit times out behind an outstanding backup", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-attachment-contention-"));
+    const uploadRelease = createDeferred<void>();
+    const secondCaptureStarted = createDeferred<void>();
+    let secondCaptureSettled = false;
+    let secondCaptureError: unknown = null;
+    const tracked: Promise<void>[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const artifacts = new Map<string, Uint8Array>();
+    const captureAttempts = new Map<number, number>();
+    const attachmentPaths = new Map<number, string>();
+    const storedAttachments = new Map<string, readonly InboxCaptureAttachmentLike[]>();
+    const assistantPhases: number[] = [];
+    let ledgerPath: string | null = null;
+    const bytesFor = (ordinal: number) => Buffer.from(`Synthetic attachment ${ordinal}\n`);
+    const wakeFor = (ordinal: 1 | 2): HostedExecutionConversationMessageWake => ({
+      ...createRunnerConversationWake(),
+      eventId: `evt_synthetic_runner_contention_${ordinal}`,
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_synthetic_runner_contention",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: `msg_synthetic_runner_contention_${ordinal}`,
+          parts: [
+            { type: "text", value: `Read attachment ${ordinal}.` },
+            {
+              attachmentId: `att_synthetic_runner_contention_${ordinal}`,
+              fileName: `sample-${ordinal}.txt`,
+              mimeType: "text/plain",
+              size: bytesFor(ordinal).byteLength,
+              type: "media",
+              url: `https://cdn.example.test/sample-${ordinal}.txt`,
+            },
+          ],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const wakes = { 1: wakeFor(1), 2: wakeFor(2) } as const;
+    const { mailboxPort } = createMailboxPort({
+      items: [1, 2].map((ordinal) => createMailboxItem({
+        dedupeKey: `evt_synthetic_runner_contention_${ordinal}`,
+        id: `mailbox_item_runner_contention_${ordinal}`,
+        laneSeq: String(ordinal),
+      })),
+    });
+    await initializeVault({ vaultRoot, title: "Synthetic contention vault", timezone: "UTC", createdAt: new Date(TEST_NOW) });
+    const platform = createPlatform({
+      artifactBytesByHash: artifacts,
+      logRequests,
+      mailboxPort,
+      workspacePort: createWorkspacePort({ checkpointRequests }),
+      async artifactPut(artifact) {
+        await uploadRelease.promise;
+        artifacts.set(artifact.sha256, artifact.bytes);
+      },
+    });
+    const conversationImportItem = createHostedConversationMailboxImportItem({
+      decodePayload: {
+        async decode(input) {
+          return { status: "decoded", wake: input.itemRef.id.endsWith("_1") ? wakes[1] : wakes[2] };
+        },
+      },
+      async importConversationWake({ wake }) {
+        const ordinal = wake.eventId.endsWith("_1") ? 1 : 2;
+        captureAttempts.set(ordinal, (captureAttempts.get(ordinal) ?? 0) + 1);
+        if (ordinal === 2) secondCaptureStarted.resolve();
+        const captureId = `cap_synthetic_runner_contention_${ordinal}`;
+        try {
+          const capture = await persistCanonicalInboxCapture({
+            vaultRoot,
+            captureId,
+            eventId: ordinal === 1 ? "evt_01JQ8PWXP5A68SQM1W0GYM41V4" : "evt_01JQ8PWXP5A68SQM1W0GYM41V5",
+            storedAt: TEST_NOW,
+            input: {
+              source: "linq",
+              externalId: `synthetic_contention_message_${ordinal}`,
+              thread: { id: "synthetic_thread", isDirect: true },
+              actor: { isSelf: false },
+              occurredAt: TEST_NOW,
+              receivedAt: TEST_NOW,
+              text: `Read attachment ${ordinal}.`,
+              attachments: [{
+                kind: "document",
+                mime: "text/plain",
+                fileName: `sample-${ordinal}.txt`,
+                data: bytesFor(ordinal),
+              }],
+              raw: {},
+            },
+          });
+          ledgerPath = capture.capture.relativePath;
+          storedAttachments.set(captureId, capture.stored.attachments);
+          attachmentPaths.set(ordinal, capture.stored.attachments[0]?.storedPath ?? "");
+          return { captureId, metrics: { nextWakeAt: null, parserProcessed: 0 } };
+        } catch (error) {
+          if (ordinal === 2) secondCaptureError = error;
+          throw error;
+        } finally {
+          if (ordinal === 2) secondCaptureSettled = true;
+        }
+      },
+      async loadAttachmentEvidenceCapture(input) {
+        return { attachments: storedAttachments.get(input.captureId) ?? [], captureId: input.captureId };
+      },
+      async prepareWakeContext() {},
+      runtime: createConversationRuntime(),
+      vaultRoot,
+    });
+    const run = (ordinal: 1 | 2) => runHostedWorkspaceUntilIdleOrBudget({
+      checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        attemptId: `attempt_synthetic_contention_${ordinal}`,
+        expectedWorkspaceVersion: "0",
+        leaseGeneration: "1",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        snapshotRef: null,
+      }),
+      checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
+        attemptId: `attempt_synthetic_contention_${ordinal}`,
+        checkpointRequests,
+        expectedWorkspaceVersion: "0",
+        leaseGeneration: "1",
+      }),
+      expectedUserId: TEST_USER_ID,
+      importItem: (item) => conversationImportItem(item),
+      limitPerLane: 10,
+      platform,
+      requestId: `request_synthetic_contention_${ordinal}`,
+      trackLocalWorkspaceMutationCompletion(completion) {
+        if (completion) tracked.push(completion);
+      },
+      async runAssistantPhase() {
+        assistantPhases.push(ordinal);
+        const attachmentPath = attachmentPaths.get(ordinal);
+        assert.ok(attachmentPath);
+        assert.deepEqual(await readFile(path.join(vaultRoot, attachmentPath)), bytesFor(ordinal));
+        uploadRelease.resolve();
+        return { progressed: false };
+      },
+      vaultRoot,
+      workspace: null,
+      now: () => TEST_NOW,
+    });
+    const eventFor = async (ordinal: number) => {
+      const listed = await listAssistantInputEvents({ vault: vaultRoot });
+      const event = listed.events.find((candidate) =>
+        candidate.content.attachmentDescriptors[0]?.fileName === `sample-${ordinal}.txt`
+      );
+      assert.ok(event);
+      return event;
+    };
+    try {
+      const firstOperation = run(1);
+      await withTestTimeout(secondCaptureStarted.promise, 5_000);
+      // The first backup still owns the canonical lock. Its commit deadline is
+      // 30 seconds of wall clock; advance only Date so the real lock loop gives
+      // up while its retry timers keep running.
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+      while (!secondCaptureSettled) {
+        vi.setSystemTime(Date.now() + 31_000);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      vi.useRealTimers();
+      assert.equal(isActiveCanonicalWriteLockError(secondCaptureError), true);
+      const first = await withTestTimeout(firstOperation, 10_000);
+      await Promise.all(tracked.splice(0));
+
+      assert.deepEqual(assistantPhases, [1]);
+      assert.equal(first.latestMailboxImport.state.watermarks.conversation, "1");
+      const importLog = logRequests.flatMap((request) => request.entries)
+        .find((entry) => entry.eventCode === "mailbox.imported");
+      assert.ok(importLog);
+      assert.equal(importLog.redactedJson?.fetchedCount, 2);
+      assert.equal(importLog.redactedJson?.importedCount, 1);
+      assert.equal(importLog.redactedJson?.conversationSeqEnd, "1");
+      assert.deepEqual(importLog.redactedJson?.blockCodes, [
+        "conversation-import.canonical-write-busy",
+      ]);
+      assert.equal(importLog.redactedJson?.retryableBlockedCount, 1);
+      assert.deepEqual([captureAttempts.get(1), captureAttempts.get(2)], [1, 1]);
+      const firstEvent = await eventFor(1);
+      assert.equal(firstEvent.projection.status, "succeeded");
+      assert.equal(firstEvent.attachmentEvidence.status, "available");
+      const pendingEvent = await eventFor(2);
+      assert.equal(pendingEvent.projection.status, "pending");
+      assert.notEqual(pendingEvent.attachmentEvidence.status, "failed");
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [firstEvent.inputId]);
+      assert.ok(ledgerPath);
+      const ledgerAfterBlock = await readFile(path.join(vaultRoot, ledgerPath), "utf8");
+      assert.equal(ledgerAfterBlock.includes("cap_synthetic_runner_contention_2"), false);
+
+      const second = await withTestTimeout(run(2), 10_000);
+      await Promise.all(tracked.splice(0));
+
+      assert.deepEqual(assistantPhases, [1, 2]);
+      assert.equal(second.latestMailboxImport.state.watermarks.conversation, "2");
+      assert.deepEqual(second.latestMailboxImport.importResult.blocked, []);
+      assert.deepEqual([captureAttempts.get(1), captureAttempts.get(2)], [1, 2]);
+      const retriedEvent = await eventFor(2);
+      assert.equal(retriedEvent.inputId, pendingEvent.inputId);
+      assert.equal(retriedEvent.projection.status, "succeeded");
+      assert.equal(retriedEvent.projection.captureId, "cap_synthetic_runner_contention_2");
+      assert.equal(retriedEvent.attachmentEvidence.status, "available");
+      assert.deepEqual(
+        await readHostedPendingAssistantInputIds({ vaultRoot }),
+        [firstEvent.inputId, retriedEvent.inputId],
+      );
+      const ledger = (await readFile(path.join(vaultRoot, ledgerPath), "utf8")).split("\n").filter(Boolean);
+      assert.equal(ledger.filter((line) => line.includes("cap_synthetic_runner_contention_1")).length, 1);
+      assert.equal(ledger.filter((line) => line.includes("cap_synthetic_runner_contention_2")).length, 1);
+    } finally {
+      vi.useRealTimers();
+      uploadRelease.resolve();
+      await Promise.all(tracked).catch(() => undefined);
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("runs staged mailbox projection effects before assistant input sampling without an extra checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
@@ -6435,7 +6856,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           await withTestTimeout(projectionStartedPromise, 1_000);
           assert.equal(projectionFinished, false);
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          // Establish delivery cancellation before releasing the projection;
+          // its terminal failure must not race the retryable-stop assertion.
+          const deliveryPrepared = input.prepareAutoReplyDelivery?.();
           releaseProjection();
+          await deliveryPrepared;
           await waitForCondition(() => projectionFinished);
           return {
             checkpointReason: "canonical_runtime_commit",
@@ -6682,7 +7107,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("runtime wake interrupts post-checkpoint background maintenance after late assistant input import", async () => {
+  test("runtime wake interrupts an in-flight provider cleanup request after late assistant input import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -6751,6 +7176,37 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           return {
             afterCheckpointKeepsForegroundImportLoop: true,
             afterCheckpoint: async () => {
+              await recordHostedProviderCleanupBeforeCommit({
+                checkpoint: { nextWakeAt: null },
+                linqMessageIds: ["linq_cleanup_held"],
+                vaultRoot,
+              });
+              const deleteStarted = createDeferred<void>();
+              const providerFetch = vi.fn<typeof fetch>(async (resource, init) => {
+                const request = new Request(resource, init);
+                assert.equal(request.method, "DELETE");
+                return await new Promise<Response>((_resolve, reject) => {
+                  const abort = () => reject(request.signal.reason);
+                  if (request.signal.aborted) abort();
+                  else request.signal.addEventListener("abort", abort, { once: true });
+                  deleteStarted.resolve();
+                });
+              });
+              const cleanup = drainHostedProviderCleanupAfterCommit({
+                checkpoint: { nextWakeAt: null },
+                env: { LINQ_API_TOKEN: "test-token" },
+                fetchImplementation: providerFetch,
+                shouldYield: input.shouldYieldBackgroundMaintenance,
+                signal: input.backgroundMaintenanceSignal,
+                vaultRoot,
+                wake: buildHostedExecutionRuntimeTimerWake({
+                  eventId: "evt_synthetic_cleanup_handoff",
+                  occurredAt: TEST_NOW,
+                  triggerKind: "runtime_timer",
+                  userId: TEST_USER_ID,
+                }),
+              });
+              await deleteStarted.promise;
               items.push(createMailboxItem({
                 id: "mailbox_item_runner_after_checkpoint_yield_late",
                 laneSeq: "2",
@@ -6762,6 +7218,17 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 input.shouldYieldBackgroundMaintenance?.() === true
               );
               assert.equal(input.backgroundMaintenanceSignal?.aborted, false);
+              const cleanupResult = await cleanup;
+              assert.equal(cleanupResult.deletedLinqMessageCount, 0);
+              assert.equal(cleanupResult.failedLinqMessageCount, 0);
+              assert.ok(cleanupResult.nextWakeAt);
+              assert.equal(providerFetch.mock.calls.length, 1);
+              const retainedCleanup = JSON.parse(await readFile(path.join(
+                resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+                "hosted-provider-cleanup.json",
+              ), "utf8"));
+              assert.deepEqual(retainedCleanup.linqMessageIds, ["linq_cleanup_held"]);
+              assert.equal(retainedCleanup.checkpoint.nextWakeAt, cleanupResult.nextWakeAt);
               yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
               return {
                 checkpointReason: "assistant_runtime_commit",
@@ -9179,6 +9646,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       stageAssistantInputEvent: async () => ({
         attachmentDescriptorCount: 1,
         attachmentEvidenceRequired: true,
+        receivedAt: "2026-04-26T00:00:00.000Z",
         async enqueuePendingReply() {},
         inputId: "ain_00000000000000000000000000000000",
         async recordAttachmentEvidence() {
@@ -11357,4 +11825,603 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error("Timed out waiting for hosted workspace runner condition.");
+}
+
+// This composes the real workspace runner and automation lane, mailbox owner,
+// WHOOP provider, importer, WriteBatch/receipt persistence, and query. The engine
+// pass is a held model stand-in and device HTTP is synthetic. Cross-process projection coherence is a separate query
+// owner requirement: these reads intentionally start after the commit settles.
+describe("foreground device ingestion", () => {
+  test.each(["foreground", "empty", "failed"] as const)("preserves a wake consumed alongside independent completion (%s)", async (scenario) => {
+    const fixture = await createForegroundDeviceFixture();
+    const completion = createDeferred<void>();
+    const wakeSignal = createCoalescingRuntimeWakeSignal();
+    const onWake = vi.fn(async () => scenario === "foreground");
+    const owner = createHostedWorkspaceSystemWork({
+      preparation: fixture.ownerInput,
+      runnerInput: {
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_completion_race", expectedWorkspaceVersion: "0",
+          leaseGeneration: "1", nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() { throw new Error("Completion race does not import mailbox items."); },
+        limitPerLane: 1,
+        platform: fixture.platform,
+        requestId: "request_synthetic_completion_race",
+        vaultRoot: fixture.vaultRoot,
+        workspace: fixture.workspace,
+      },
+      onCompleted() { throw new Error("Completion race does not prepare new work."); },
+      onFailure(error) { throw error; },
+      settleOwnedMutations: () => completion.promise,
+    });
+    try {
+      const waiting = owner.waitForCompletion(wakeSignal, onWake);
+      const failure = new Error("Synthetic independent completion failure.");
+      if (scenario === "failed") completion.reject(failure);
+      else completion.resolve();
+      wakeSignal.notify({ notifiedAtEpochMs: Date.parse(TEST_NOW), requestedProcessingMode: "default" });
+      if (scenario === "failed") {
+        await assert.rejects(waiting, (error) => error === failure);
+        assert.equal(onWake.mock.calls.length, 0);
+        assert.equal(wakeSignal.consumePending()?.requestedProcessingMode, "default");
+      } else {
+        assert.equal(await waiting, scenario === "foreground");
+        assert.equal(onWake.mock.calls.length, 1);
+        assert.equal(wakeSignal.consumePending(), null);
+      }
+    } finally {
+      completion.resolve();
+      await fixture.cleanup();
+    }
+  });
+
+  test("preserves live receipt capacity throughout a system-work pass", async () => {
+    const fixture = await createForegroundDeviceFixture();
+    let receiptCapacityReached = false;
+    const yieldStates: boolean[] = [];
+    const preparation = vi.spyOn(systemMailbox, "prepareHostedSystemMailboxItemForCheckpoint")
+      .mockImplementation(async (input) => {
+        yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+        receiptCapacityReached = true;
+        yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+        receiptCapacityReached = false;
+        yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+        return null;
+      });
+    try {
+      const tracked: Promise<void>[] = [];
+      const owner = createHostedWorkspaceSystemWork({
+        preparation: fixture.ownerInput,
+        runnerInput: {
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: "attempt_synthetic_system_capacity", expectedWorkspaceVersion: "0",
+            leaseGeneration: "1", nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          async importItem() { throw new Error("No mailbox import in capacity proof."); },
+          limitPerLane: 1,
+          platform: fixture.platform,
+          requestId: "request_synthetic_system_capacity",
+          shouldYieldBackgroundMaintenance: () => receiptCapacityReached,
+          trackLocalWorkspaceMutationCompletion: (completion) => {
+            if (completion) tracked.push(completion);
+          },
+          vaultRoot: fixture.vaultRoot,
+          workspace: fixture.workspace,
+        },
+        onCompleted() { throw new Error("No prepared item in capacity proof."); },
+        onFailure(error) { throw error; },
+        settleOwnedMutations: async () => { await Promise.all(tracked); },
+      });
+      owner.resume();
+      owner.kick(["run-device-sync-wake"]);
+      await owner.waitForCompletion(null, async () => false);
+      assert.deepEqual(yieldStates, [false, true, false]);
+      receiptCapacityReached = true;
+      owner.kick(["run-device-sync-wake"]);
+      await owner.waitForCompletion(null, async () => false);
+      assert.equal(preparation.mock.calls.length, 1);
+    } finally {
+      preparation.mockRestore();
+      await fixture.cleanup();
+    }
+  });
+
+  test("retains an independent device receipt when vault-share publication fails", async () => {
+    const fixture = await createForegroundDeviceFixture();
+    try {
+      fixture.stageDeviceWake();
+      await fixture.run(async () => {
+        await waitForCondition(() => fixture.effects.length > 0, 5_000);
+        return { progressed: false };
+      });
+      const effect = fixture.effects[0];
+      assert.ok(effect);
+      const completion = await effect({ vaultShareProjectionResult: { outcome: "error" } });
+      assert.equal(fixture.acks.length, 0);
+      const pending = (await readHostedSystemMailboxState(fixture.vaultRoot)).pending;
+      const retained = pending.find((item) => item.itemId === "device_concurrent");
+      assert.equal(retained?.status, "recording");
+      assert.equal(retained?.lastErrorCode, "HOSTED_VAULT_SHARE_PROJECTION_FAILED");
+      assert.equal(completion?.nextWakeAt, retained?.nextAttemptAt);
+      assert.ok(completion?.requiresFollowUpCheckpoint);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test("imports newly staged device data while the model is held and preserves one receipt chain", async () => {
+    const fixture = await createForegroundDeviceFixture();
+    const modelStarted = createDeferred<void>();
+    const writeAfterImport = createDeferred<void>();
+    const afterWrite = createDeferred<void>();
+    const modelRelease = createDeferred<void>();
+    const providerRelease = createDeferred<void>();
+    let modelFinished = false;
+    fixture.holdProvider = async () => await providerRelease.promise;
+    const heldModel = vi.spyOn(assistantEngine, "runAssistantAutomationPass").mockImplementationOnce(async (
+      pass: Parameters<typeof assistantEngine.runAssistantAutomationPass>[0],
+    ): ReturnType<typeof assistantEngine.runAssistantAutomationPass> => {
+      await fixture.foregroundWrite("before");
+      await pass.onProviderRequestStarted?.({
+        assistantInputIds: [], providerRequestOrdinal: 0,
+        source: "linq", startedAt: TEST_NOW,
+      });
+      modelStarted.resolve();
+      await writeAfterImport.promise;
+      await fixture.foregroundWrite("after");
+      afterWrite.resolve();
+      await modelRelease.promise;
+      modelFinished = true;
+      return {
+        cronProcessed: 0, currentTurnDeliveryIntentIds: [], nextWakeAt: null,
+        outboxAttempted: 0, progressed: true,
+        replies: { considered: 1, failed: 0, nextWakeAt: null, replied: 1, skipped: 0 },
+        routing: { considered: 0, failed: 0, nextWakeAt: null, noAction: 0, routed: 0, skipped: 0 },
+      };
+    });
+    const run = fixture.run(async (phase) => {
+      await runHostedAssistantAutomationLane({
+        assistantRuntimeState: {
+          assistantActiveProfileId: null, assistantActiveProfileManagedBy: null,
+          assistantActiveProfileReady: true, assistantConfigInvalid: false,
+          assistantConfigPresent: true, assistantConfigStatus: "hosted-env",
+          assistantConfigured: true, assistantProvider: "codex-cli",
+        },
+        executionContext: { hosted: { memberId: TEST_USER_ID, userEnvKeys: [] } },
+        onProviderRequestStarted: phase.onProviderRequestStarted,
+        requestId: "request_synthetic_held_model", runtime: fixture.ownerInput.runtime,
+        signal: fixture.authority.signal, vaultRoot: fixture.vaultRoot,
+        wake: { eventId: "evt_synthetic_held_model", kind: "runtime.timer",
+          occurredAt: TEST_NOW, triggerKind: "runtime_timer", userId: TEST_USER_ID },
+      });
+      await phase.prepareAutoReplyDelivery?.();
+      return { checkpointReason: "assistant_runtime_commit", progressed: true };
+    });
+    try {
+      await withTestTimeout(modelStarted.promise, 5_000);
+      fixture.stageConversation();
+      fixture.stageDeviceWake();
+      await withTestTimeout(fixture.providerStarted.promise, 5_000);
+      // Foreground admission is independent of a held device provider request.
+      fixture.stageConversation();
+      await waitForCondition(() => fixture.conversationImports === 2, 5_000);
+      assert.equal(fixture.providerAborted, false);
+      providerRelease.resolve();
+      await waitForCondition(() => fixture.effects.length > 0, 5_000);
+      writeAfterImport.resolve();
+      await afterWrite.promise;
+      await rebuildQueryProjection(fixture.vaultRoot);
+      const points = await listMetricPoints(fixture.vaultRoot, { limit: null });
+      assert.ok(points.some((point) => point.metricKey === "readiness-score"));
+      assert.equal(modelFinished, false);
+      assert.equal(fixture.acks.length, 0);
+      const log = await readHostedCanonicalWriteReceiptLog({
+        artifactStore: fixture.platform.artifactStore,
+        status: fixture.workspace.redactedStatus,
+      });
+      assert.ok(log.entryCount >= 3);
+      // A separate previousStatus would drop a predecessor in this interleave.
+      assert.deepEqual([...new Set(fixture.receiptCounts)],
+        Array.from({ length: log.entryCount }, (_, index) => index + 1));
+      modelRelease.resolve();
+      const result = await run;
+      assert.equal(fixture.acks.length, 0);
+      assert.equal(fixture.effects.length, 1);
+      assert.equal(result.runtimeStateDirty, true);
+      const pending = (await readHostedSystemMailboxState(fixture.vaultRoot)).pending;
+      assert.ok(pending.some((item) => item.itemId === "device_concurrent" && item.status === "recording"));
+      // Lose the local workspace after snapshot but before ack, then restore
+      // those exact bytes. Recovery must not refetch or reimport the device data.
+      const snapshot = await snapshotHostedBundleRoots({
+        kind: "vault", roots: [{ root: fixture.vaultRoot, rootKey: "vault" }],
+      });
+      assert.ok(snapshot);
+      await rm(fixture.vaultRoot, { recursive: true, force: true });
+      await restoreHostedBundleRoots({
+        bytes: snapshot, expectedKind: "vault", roots: { vault: fixture.vaultRoot },
+      });
+      const fetchCount = fixture.providerFetches;
+      fixture.effects.splice(0);
+      await fixture.owner?.recover(["run-environment-interview"]);
+      assert.equal(fixture.effects.length, 0);
+      await fixture.owner?.recover();
+      assert.equal(fixture.providerFetches, fetchCount);
+      assert.equal(fixture.acks.length, 0);
+      fixture.newerDirtyRevision = true;
+      for (const effect of fixture.effects.splice(0)) await effect();
+      assert.equal(fixture.acks.length, 1);
+      assert.equal(fixture.acks[0]?.processedRevision, "7");
+      assert.deepEqual(fixture.acks[0]?.processedDirtyPayloadIds, ["payload_concurrent"]);
+      assert.ok((await readHostedSystemMailboxState(fixture.vaultRoot)).pending.some(
+        (item) => item.routeAction === "run-device-sync-wake",
+      ));
+    } finally {
+      fixture.authority.abort();
+      providerRelease.resolve();
+      writeAfterImport.resolve();
+      modelRelease.resolve();
+      await run.catch(() => undefined);
+      heldModel.mockRestore();
+      await fixture.cleanup();
+    }
+  });
+
+  test("keeps system staging alive after the conversation budget is full without admitting another input", async () => {
+    const fixture = await createForegroundDeviceFixture(1);
+    const modelStarted = createDeferred<void>();
+    const modelRelease = createDeferred<void>();
+    fixture.stageConversation();
+    const run = fixture.run(async (phase) => {
+      assert.equal(phase.initialAssistantInputBatch?.assistantInputIds.length, 1);
+      phase.onProviderRequestStarted?.();
+      modelStarted.resolve();
+      await modelRelease.promise;
+      await phase.prepareAutoReplyDelivery?.();
+      return { progressed: false };
+    });
+    try {
+      await withTestTimeout(modelStarted.promise, 5_000);
+      fixture.stageConversation();
+      fixture.stageDeviceWake();
+      await waitForCondition(() => fixture.effects.length > 0, 5_000);
+      await rebuildQueryProjection(fixture.vaultRoot);
+      assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some(
+        (point) => point.metricKey === "readiness-score",
+      ));
+      assert.equal(fixture.conversationImports, 1);
+      assert.equal(fixture.acks.length, 0);
+      modelRelease.resolve();
+      await withTestTimeout(run, 5_000);
+    } finally {
+      fixture.authority.abort();
+      modelRelease.resolve();
+      await run.catch(() => undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  test.each(["request", "body"] as const)(
+    "keeps a stalled provider %s through delivery and settles it at the workspace boundary",
+    async (stall: "request" | "body") => {
+      const fixture = await createForegroundDeviceFixture();
+      const modelRelease = createDeferred<void>();
+      const modelStarted = createDeferred<void>();
+      let delivered = false;
+      const awaitAbort = async (signal: AbortSignal) => await new Promise<void>((_resolve, reject) => {
+        const abort = () => { fixture.providerAborted = true; reject(signal.reason); };
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+      });
+      fixture.holdProvider = stall === "request" ? awaitAbort : null;
+      fixture.holdBody = stall === "body";
+      const run = fixture.run(async (phase) => {
+        phase.onProviderRequestStarted?.();
+        modelStarted.resolve();
+        await modelRelease.promise;
+        await phase.prepareAutoReplyDelivery?.();
+        delivered = true;
+        return { progressed: false };
+      });
+      try {
+        await withTestTimeout(modelStarted.promise, 5_000);
+        fixture.stageDeviceWake();
+        await withTestTimeout(fixture.providerStarted.promise, 5_000);
+        fixture.stageConversation();
+        await withTestTimeout(fixture.conversationStaged.promise, 5_000);
+        assert.equal(fixture.providerAborted, false);
+        assert.equal(delivered, false);
+        modelRelease.resolve();
+        await withTestTimeout(run, 2_000);
+        assert.equal(delivered, true);
+        assert.equal(fixture.providerAborted, false);
+        await fixture.owner?.quiesce();
+        assert.equal(fixture.providerAborted, true);
+        await Promise.all(fixture.tracked);
+        const writesAtReturn = fixture.receiptCounts.length;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        assert.equal(fixture.receiptCounts.length, writesAtReturn);
+        assert.equal(fixture.acks.length, 0);
+        assert.equal(fixture.peakProviderRequests, 1);
+      } finally {
+        fixture.authority.abort();
+        modelRelease.resolve();
+        await run.catch(() => undefined);
+        await fixture.cleanup();
+      }
+    },
+  );
+
+  test("rolls back a device commit rejected by the authority checkpoint", async () => {
+    const fixture = await createForegroundDeviceFixture();
+    const modelStarted = createDeferred<void>();
+    const modelRelease = createDeferred<void>();
+    const receiptRelease = createDeferred<void>();
+    const receiptStarted = createDeferred<void>();
+    fixture.beforeDeviceCheckpoint = async () => {
+      receiptStarted.resolve();
+      await receiptRelease.promise;
+    };
+    const run = fixture.run(async (phase) => {
+      phase.onProviderRequestStarted?.();
+      modelStarted.resolve();
+      await modelRelease.promise;
+      return { progressed: false };
+    });
+    try {
+      await withTestTimeout(modelStarted.promise, 5_000);
+      fixture.stageDeviceWake();
+      await withTestTimeout(receiptStarted.promise, 5_000);
+      fixture.authority.abort(new Error("Synthetic lease lost"));
+      receiptRelease.resolve();
+      modelRelease.resolve();
+      await run.catch(() => undefined);
+      await Promise.allSettled(fixture.tracked);
+      await rebuildQueryProjection(fixture.vaultRoot);
+      assert.equal((await listMetricPoints(fixture.vaultRoot, { limit: null })).some(
+        (point) => point.metricKey === "readiness-score",
+      ), false);
+      assert.equal(fixture.acks.length, 0);
+    } finally {
+      receiptRelease.resolve();
+      modelRelease.resolve();
+      await run.catch(() => undefined);
+      await fixture.cleanup();
+    }
+  });
+});
+
+async function createForegroundDeviceFixture(limitPerLane = 10) {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "synthetic-concurrent-device-"));
+  await initializeVault({ createdAt: TEST_NOW, vaultRoot, timezone: "UTC" });
+  const authority = new AbortController();
+  const items: HostedMailboxItem[] = [];
+  const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+  const artifacts = new Map<string, Uint8Array>();
+  const acks: Parameters<HostedRuntimeDeviceSyncPort["ackDirtyStateProcessed"]>[0][] = [];
+  const tracked: Promise<void>[] = [];
+  const receiptCounts: number[] = [];
+  const providerStarted = createDeferred<void>();
+  const conversationStaged = createDeferred<void>();
+  const wake: HostedExecutionDeviceSyncWake = {
+    connectionId: "connection_concurrent",
+    eventId: "device-sync.wake:concurrent",
+    expectedConnectedAt: TEST_NOW,
+    hint: { reason: "dirty" },
+    kind: "device-sync.wake",
+    occurredAt: TEST_NOW,
+    provider: "whoop",
+    reason: "webhook_hint",
+    userId: TEST_USER_ID,
+  };
+  const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+    async createConnectLink() { throw new Error("No connection creation in ingestion"); },
+    async applyUpdates(request) {
+      return { appliedAt: TEST_NOW, userId: TEST_USER_ID, updates: request.updates.map((update) => ({
+        connection: null, connectionId: update.connectionId, status: "updated" as const,
+        tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
+      })) };
+    },
+    async fetchSnapshot() {
+      return {
+        connections: [{
+          connection: {
+            accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
+            connectedAt: TEST_NOW, createdAt: TEST_NOW, updatedAt: TEST_NOW,
+            displayName: "Synthetic device", externalAccountId: "synthetic_device",
+            id: "connection_concurrent", metadata: {}, provider: "whoop",
+            scopes: ["offline", "read:sleep", "read:recovery"], status: "active",
+          },
+          credential: { kind: "oauth_tokens", tokenBundle: {
+            accessToken: "synthetic-token", refreshToken: "synthetic-refresh",
+            accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
+            keyVersion: "synthetic", tokenVersion: 1,
+          } },
+          localState: {
+            lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+            lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+            nextReconcileAt: "2099-01-01T00:00:00.000Z",
+          },
+          sources: [],
+        }],
+        generatedAt: TEST_NOW, userId: TEST_USER_ID,
+      };
+    },
+    async fetchDirtyStates() {
+      return {
+        hasMore: false, nextWakeAt: null, userId: TEST_USER_ID,
+        items: [{
+          connectionId: "connection_concurrent", dirtyRevision: "7", processedRevision: "0",
+          dirtyResources: [{ count: 1, dirtyPayloadId: "payload_concurrent", jobKind: "resource",
+            payload: { resourceType: "recovery", resourceId: "sleep_concurrent" },
+            resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
+            windowEnd: null, windowStart: null }],
+          eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop",
+          resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
+          userId: TEST_USER_ID, windowEnd: null, windowStart: null,
+        }],
+      };
+    },
+    async ackDirtyStateProcessed(request) {
+      acks.push(request);
+      return {
+        connectionId: request.connectionId,
+        dirtyRevision: fixture.newerDirtyRevision ? "8" : request.processedRevision,
+        processedRevision: request.processedRevision, recorded: true,
+        stillDirty: fixture.newerDirtyRevision, nextWakeAt: fixture.newerDirtyRevision ? TEST_NOW : null,
+        userId: TEST_USER_ID,
+      };
+    },
+  };
+  const platform = {
+    ...createPlatform({
+      artifactBytesByHash: artifacts,
+      artifactPut: async (artifact) => { artifacts.set(artifact.sha256, artifact.bytes); },
+      mailboxPort: createMailboxPort({ items }).mailboxPort,
+      workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+    }),
+    deviceSyncPort,
+  };
+  const ownerInput: Parameters<typeof createHostedWorkspaceSystemWork>[0]["preparation"] = {
+    now: () => TEST_NOW,
+    operatorHomeRoot: path.join(vaultRoot, ".runtime", "synthetic-operator"),
+    runtime: {
+      commitTimeoutMs: null, forwardedEnv: {}, platform, platformEnv: {}, userEnv: {},
+      resolvedConfig: {
+        channelCapabilities: { emailSendReady: false, telegramBotConfigured: false },
+        deviceSync: {
+          providerConfigs: { whoop: { baseUrl: "https://whoop.example.test", clientId: "synthetic-client", clientSecret: "synthetic-secret" } },
+          publicBaseUrl: "https://sync.example.test", secret: "synthetic-device-secret",
+        },
+      },
+    },
+    runtimeEnv: {}, signal: authority.signal, vaultRoot,
+  };
+  const effects: HostedWorkspaceDurableCheckpointEffect[] = [];
+  const fixture = {
+    acks, authority, conversationStaged, effects, ownerInput, platform, providerStarted,
+    owner: null as ReturnType<typeof createHostedWorkspaceSystemWork> | null,
+    receiptCounts, tracked, vaultRoot,
+    workspace: createWorkspaceState(),
+    newerDirtyRevision: false, providerAborted: false, conversationImports: 0,
+    providerFetches: 0, activeProviderRequests: 0, peakProviderRequests: 0,
+    holdBody: false,
+    holdProvider: null as ((signal: AbortSignal) => Promise<void>) | null,
+    beforeDeviceCheckpoint: null as (() => Promise<void>) | null,
+    stageDeviceWake() {
+      items.push(createMailboxItem({ id: "device_concurrent", kind: "device-sync.wake",
+        dedupeKey: wake.eventId, lane: "system", laneSeq: "1" }));
+      runtimeWakeSignal.notify();
+    },
+    stageConversation() {
+      const seq = String(items.filter((item) => item.lane === "conversation").length + 1);
+      items.push(createMailboxItem({ id: `conversation_concurrent_${seq}`, laneSeq: seq }));
+      runtimeWakeSignal.notify();
+    },
+    async foregroundWrite(label: string) {
+      await applyCanonicalWriteBatch({
+        audit: { action: "device_import", commandName: "test.concurrentForeground", summary: "Synthetic foreground write" },
+        operationType: "synthetic_foreground_write", summary: label,
+        textWrites: [{ content: `${label}\n`, overwrite: true, relativePath: `bank/synthetic-${label}.md` }],
+        vaultRoot,
+      });
+    },
+    run(runAssistantPhase: NonNullable<Parameters<typeof runHostedWorkspaceUntilIdleOrBudget>[0]["runAssistantPhase"]>) {
+      const runnerInput: HostedWorkspaceRunnerInput = {
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_concurrent_device", expectedWorkspaceVersion: fixture.workspace.version,
+          leaseGeneration: "1", nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
+        }),
+        async checkpointRuntimeRedactedStatus(input) {
+          const log = await readHostedCanonicalWriteReceiptLog({
+            artifactStore: platform.artifactStore, status: input.redactedStatus,
+          });
+          const lastEntry = log.entries.at(-1);
+          const lastReceiptBytes = lastEntry ? artifacts.get(lastEntry.sha256) : null;
+          const lastReceipt = lastReceiptBytes
+            ? JSON.parse(new TextDecoder().decode(lastReceiptBytes)) as { operationType?: string }
+            : null;
+          if (lastReceipt?.operationType === "device_batch_import") {
+            await fixture.beforeDeviceCheckpoint?.();
+          }
+          authority.signal.throwIfAborted();
+          fixture.workspace = createWorkspaceState({
+            redactedStatus: input.redactedStatus,
+            version: String(BigInt(fixture.workspace.version) + 1n),
+          });
+          if (log.entryCount > 0) receiptCounts.push(log.entryCount);
+          return { checkpointed: true, workspace: fixture.workspace };
+        },
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          if (item.item.lane === "system") {
+            await enqueueHostedSystemMailboxItem({ item, vaultRoot, wake });
+          } else {
+            const staged = await upsertAssistantInputEvent({
+              event: createStoredAssistantInputEventForMailboxItem(item.item, "Synthetic concurrent foreground input"),
+              vault: vaultRoot,
+            });
+            await enqueueHostedPendingAssistantInputId({ inputId: staged.inputId, vaultRoot });
+            fixture.conversationImports += 1;
+            conversationStaged.resolve();
+            return { assistantInputId: staged.inputId, status: "imported" };
+          }
+          return { status: "imported" };
+        },
+        kickSystemWork: () => fixture.owner?.kick(),
+        limitPerLane, now: () => TEST_NOW, platform, requestId: "request_concurrent_device",
+        runAssistantPhase, runtimeWakeSignal, signal: authority.signal,
+        trackLocalWorkspaceMutationCompletion: (completion) => { if (completion) tracked.push(completion); },
+        vaultRoot, workspace: fixture.workspace,
+      };
+      fixture.owner = createHostedWorkspaceSystemWork({
+        preparation: ownerInput, runnerInput,
+        onCompleted(completion) {
+          if (completion.afterDurableCheckpoint) effects.push(...(typeof completion.afterDurableCheckpoint === "function"
+            ? [completion.afterDurableCheckpoint] : completion.afterDurableCheckpoint));
+        },
+        onFailure(error) { if (!authority.signal.aborted) throw error; },
+        settleOwnedMutations: async () => { await Promise.allSettled(tracked); },
+      });
+      fixture.owner.resume();
+      return runHostedWorkspaceUntilIdleOrBudget(runnerInput);
+    },
+    async cleanup() {
+      authority.abort();
+      await fixture.owner?.quiesce();
+      vi.unstubAllGlobals();
+      await rm(vaultRoot, { recursive: true, force: true });
+    },
+  };
+  vi.stubGlobal("fetch", async (request: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof request === "string" ? request : request instanceof URL ? request.href : request.url);
+    assert.equal(url.hostname, "whoop.example.test");
+    assert.ok(init?.signal);
+    fixture.providerFetches += 1;
+    fixture.activeProviderRequests += 1;
+    fixture.peakProviderRequests = Math.max(fixture.peakProviderRequests, fixture.activeProviderRequests);
+    providerStarted.resolve();
+    try {
+      await fixture.holdProvider?.(init.signal);
+      if (fixture.holdBody) {
+        const signal = init.signal;
+        return new Response(new ReadableStream({
+          start(controller) {
+            const abort = () => { fixture.providerAborted = true; controller.error(signal.reason); };
+            if (signal.aborted) abort();
+            else signal.addEventListener("abort", abort, { once: true });
+          },
+        }));
+      }
+      const response = url.pathname.endsWith("/recovery")
+        ? { sleep_id: "sleep_concurrent", updated_at: TEST_NOW, score: { recovery_score: 72, resting_heart_rate: 54 } }
+        : { id: "sleep_concurrent", cycle_id: "cycle_concurrent", start: "2026-04-24T22:00:00.000Z", end: "2026-04-25T06:00:00.000Z", updated_at: TEST_NOW };
+      return new Response(JSON.stringify(response), { headers: { "content-type": "application/json" } });
+    } finally {
+      fixture.activeProviderRequests -= 1;
+    }
+  });
+  return fixture;
 }

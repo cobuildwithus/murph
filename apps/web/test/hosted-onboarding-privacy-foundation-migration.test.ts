@@ -87,7 +87,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'assistantVoiceCausalSeq BigInt? @map("assistant_voice_causal_seq")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
-    "deviceProviderApplications DeviceProviderApplication[]",
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
     'groupCurrentSenderClarificationsAsTarget HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")',
@@ -1196,6 +1195,24 @@ describe("hosted Prisma baseline migration", () => {
       "20260909210000_hosted_approval_credentials",
       "20260909220000_hosted_auth_records",
       "20260910040000_approval_recovery_key",
+      "20260910190000_message_typing_latency_alerts",
+      "20260911143000_checkpoint_runtime_recheck_receipt",
+      "20260915151000_hosted_runtime_owner",
+      "20260915183000_hosted_runtime_resources",
+      "20260915223000_hosted_runtime_legacy_import",
+      "20260915224500_hosted_runtime_upload_recovery",
+      "20260915230000_hosted_runtime_media_registration",
+      "20260915234500_hosted_runtime_member_cutover",
+      "20260915234600_hosted_runtime_rolling_campaign",
+      "20260915234700_hosted_runtime_managed_snapshots",
+      "20260915234800_hosted_runtime_creation_barrier",
+      "20260916044500_hosted_runtime_member_enrollment",
+      "20260916050000_hosted_runtime_deleted_member_enrollment",
+      "20260916053000_hosted_runtime_late_sources",
+      "20260916060000_hosted_runtime_release_compatibility",
+      "20260916063000_hosted_runtime_cleanup_enrollment",
+      "20260917033000_managed_snapshot_encrypted_md5",
+      "20260917160000_clinical_daily_sync",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
@@ -2482,7 +2499,6 @@ describe("hosted Prisma baseline migration", () => {
     expect(schema).not.toContain("model LinqRecipientBinding");
     expect(schema).not.toContain("model LinqWebhookEvent");
   });
-
 
   it("keeps legacy Linq delivery health blocking until the post-drain lane", () => {
     const schema = readFileSync(

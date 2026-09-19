@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-10",
+  "order": 120,
+  "item": {
+    "id": "message-fetch-without-decode-roundtrip",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "One fewer wait before message processing",
+    "summary": "Ordinary conversation messages skip an extra setup round trip before Murph processes them.",
+    "details": "Message encryption and current access checks stay in place. Large message payloads keep their existing loading path.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      3201
+    ]
+  }
+}

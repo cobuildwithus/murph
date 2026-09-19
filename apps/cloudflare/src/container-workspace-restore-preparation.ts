@@ -25,6 +25,7 @@ import {
 import {
   createCloudflareMediaStore,
 } from "./runtime-platform/media-store.ts";
+import { createHostedWebMailboxPort } from "./runtime-platform/mailbox-port.ts";
 import {
   createHostedWebRuntimeLogPort,
 } from "./runtime-platform/log-port.ts";
@@ -103,6 +104,12 @@ export async function prepareHostedContainerWorkspaceRestore(input: {
       workspaceCheckpointBridge,
     }),
     logPort: createHostedWebRuntimeLogPort({
+      boundUserId: input.job.request.userId,
+      fetchImpl: internalFetch,
+      timeoutMs,
+      transport,
+    }),
+    mailboxPort: createHostedWebMailboxPort({
       boundUserId: input.job.request.userId,
       fetchImpl: internalFetch,
       timeoutMs,

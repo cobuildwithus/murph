@@ -18,6 +18,7 @@ const EXPENSIVE_WORKFLOWS = new Map([
     "release-package-coverage-linux",
     "release-web-build-linux",
     "release-web-tests-linux",
+    "release-web-postgres-linux",
     "release-cloudflare-verification-linux",
     "production-runner-bundle-budget-linux",
     "release-fixture-coverage-linux",
@@ -213,11 +214,23 @@ function inspectHostSupportReleaseGraph(source) {
     /package_dirs="\$\(node scripts\/release-verification-plan\.mjs --package-dirs "\$\{\{ matrix\.shard \}\}"\)"/u,
   );
   assert.match(packageCoverage, /if \[\[ -z "\$package_dirs" \]\]/u);
-  assert.match(packageCoverage, /if: \$\{\{ matrix\.shard == 'cli' \}\}/u);
+  assert.match(
+    packageCoverage,
+    /if: \$\{\{ matrix\.shard == 'cli' \}\}\n        run: pnpm --dir packages\/cli exec tsx scripts\/verify-package-shape\.ts/u,
+  );
   assert.equal(
     countOccurrences(packageCoverage, "if: ${{ matrix.shard == 'cli' }}"),
-    2,
-    "only the singleton CLI shard may prepare the runtime and package-shape proof",
+    1,
+    "only the singleton CLI shard may run the package-shape proof",
+  );
+  assert.match(
+    packageCoverage,
+    /if: \$\{\{ matrix\.shard == 'cli' \|\| matrix\.shard == 'assistant-engine' \}\}\n        run: pnpm build:test-runtime:prepared/u,
+  );
+  assert.equal(
+    countOccurrences(packageCoverage, "if: ${{ matrix.shard == 'cli' || matrix.shard == 'assistant-engine' }}"),
+    1,
+    "CLI and assistant-engine shards must prepare their built runtime artifacts",
   );
   assert.doesNotMatch(packageCoverage, /verify:package-boundary/u);
 
@@ -232,10 +245,12 @@ function inspectHostSupportReleaseGraph(source) {
 
   const webBuild = jobBlock(source, "release-web-build-linux");
   const webTests = jobBlock(source, "release-web-tests-linux");
+  const webPostgres = jobBlock(source, "release-web-postgres-linux");
   const cloudflare = jobBlock(source, "release-cloudflare-verification-linux");
   for (const [jobName, job] of [
     ["release-web-build-linux", webBuild],
     ["release-web-tests-linux", webTests],
+    ["release-web-postgres-linux", webPostgres],
     ["release-cloudflare-verification-linux", cloudflare],
   ]) {
     assert.match(job, /^    runs-on: ubuntu-24\.04$/mu);
@@ -281,6 +296,34 @@ function inspectHostSupportReleaseGraph(source) {
   );
   assert.match(webTests, /^        run: pnpm --dir apps\/web verify$/mu);
 
+  assert.deepEqual(jobNeeds(webPostgres, "release-web-postgres-linux"), [
+    "markdown-docs-scope",
+  ]);
+  assert.match(webPostgres, /^      fail-fast: false$/mu);
+  assert.match(webPostgres, /^      max-parallel: 4$/mu);
+  assert.match(webPostgres, /^      matrix:\n        shard: \[1, 2, 3, 4\]$/mu);
+  assert.match(webPostgres, /^        image: public\.ecr\.aws\/docker\/library\/postgres:17$/mu);
+  assert.match(webPostgres, /^          POSTGRES_DB: murph_test_gate$/mu);
+  assert.match(webPostgres, /--health-cmd "pg_isready -U postgres -d murph_test_gate"/u);
+  assert.match(webPostgres, /^          - 5432:5432$/mu);
+  assert.match(
+    webPostgres,
+    /^      DATABASE_URL: postgresql:\/\/postgres:postgres@127\.0\.0\.1:5432\/murph_test_gate$/mu,
+  );
+  const postgresCommands = [
+    "pnpm --dir apps/web prisma:generate",
+    "pnpm --dir apps/web prisma:migrate:deploy",
+    "node scripts/run-postgres-tests.mjs --shard ${{ matrix.shard }}/4",
+  ];
+  let previousCommandIndex = webPostgres.indexOf("run: pnpm install --frozen-lockfile");
+  for (const command of postgresCommands) {
+    assert.match(webPostgres, new RegExp(`^        run: ${escapeRegExp(command)}$`, "mu"));
+    const commandIndex = webPostgres.indexOf(`run: ${command}`);
+    assert.ok(commandIndex > previousCommandIndex, "PostgreSQL proof must generate clients and apply migrations before execution");
+    previousCommandIndex = commandIndex;
+  }
+  assert.doesNotMatch(webPostgres, /prisma db push|continue-on-error|secrets\./u);
+
   assert.deepEqual(jobNeeds(cloudflare, "release-cloudflare-verification-linux"), [
     "markdown-docs-scope",
   ]);
@@ -315,6 +358,7 @@ function inspectHostSupportReleaseGraph(source) {
     "release-package-coverage-linux",
     "release-web-build-linux",
     "release-web-tests-linux",
+    "release-web-postgres-linux",
     "release-cloudflare-verification-linux",
     "release-fixture-coverage-linux",
     "production-runner-bundle-budget-linux",
@@ -322,6 +366,7 @@ function inspectHostSupportReleaseGraph(source) {
   assert.match(releaseChecks, /PLAN_RESULT: \$\{\{ needs\.release-verification-plan-linux\.result \}\}/u);
   assert.match(releaseChecks, /WEB_BUILD_RESULT: \$\{\{ needs\.release-web-build-linux\.result \}\}/u);
   assert.match(releaseChecks, /WEB_TEST_RESULT: \$\{\{ needs\.release-web-tests-linux\.result \}\}/u);
+  assert.match(releaseChecks, /WEB_POSTGRES_RESULT: \$\{\{ needs\.release-web-postgres-linux\.result \}\}/u);
   assert.match(releaseChecks, /CLOUDFLARE_RESULT: \$\{\{ needs\.release-cloudflare-verification-linux\.result \}\}/u);
   for (const resultName of [
     "PLAN_RESULT",
@@ -329,6 +374,7 @@ function inspectHostSupportReleaseGraph(source) {
     "PACKAGE_RESULT",
     "WEB_BUILD_RESULT",
     "WEB_TEST_RESULT",
+    "WEB_POSTGRES_RESULT",
     "CLOUDFLARE_RESULT",
     "FIXTURE_RESULT",
     "BUNDLE_RESULT",
@@ -378,6 +424,7 @@ test("runtime-heavy jobs skip only an affirmative trusted Markdown result", asyn
     "release-package-coverage-linux",
     "release-web-build-linux",
     "release-web-tests-linux",
+    "release-web-postgres-linux",
     "release-cloudflare-verification-linux",
     "production-runner-bundle-budget-linux",
     "release-fixture-coverage-linux",
@@ -443,9 +490,52 @@ test("Host Support consumes one exhaustive plan and isolates app owners", async 
   inspectHostSupportReleaseGraph(host);
 });
 
+function inspectForegroundPriorityGate(source) {
+  const build = jobBlock(source, "release-build-typecheck-linux");
+  const step = build.match(
+    /      - name: Gate foreground priority across runtime transitions\n(?<body>(?:(?!      - (?:name|uses):)[\s\S])*)/u,
+  )?.groups?.body;
+  assert.ok(step, "The required build must run the foreground transition contract.");
+  assert.doesNotMatch(step, /^        (?:if|continue-on-error):/mu,
+    "The transition contract cannot be skipped or allowed to fail.");
+  assert.match(step, /^        timeout-minutes: 5$/mu);
+  assert.match(step,
+    /run: >-\n          pnpm --dir packages\/assistant-runtime test\n          test\/hosted-runtime-promoted-foreground-priority\.test\.ts\n/u);
+  assert.ok(build.indexOf("Gate foreground priority") < build.indexOf("name: Clean workspace build"),
+    "Detect priority inversions before the broad build.");
+}
+
+test("required release proof rejects a missing or softened foreground transition gate", async () => {
+  const host = await workflow("host-support.yml");
+  inspectForegroundPriorityGate(host);
+  for (const replacement of [
+    "Removed foreground transition gate",
+    "Gate foreground priority across runtime transitions\n        if: false",
+    "Gate foreground priority across runtime transitions\n        continue-on-error: true",
+  ]) {
+    assert.throws(() => inspectForegroundPriorityGate(host.replace(
+      "Gate foreground priority across runtime transitions", replacement,
+    )));
+  }
+});
+
 test("Host Support graph drift cannot skip, duplicate, overlap, or de-aggregate an owner", async () => {
   const host = await workflow("host-support.yml");
   const mutations = [
+    host.replace(
+      "if: ${{ matrix.shard == 'cli' || matrix.shard == 'assistant-engine' }}",
+      "if: ${{ matrix.shard == 'cli' }}",
+    ),
+    host.replace(
+      "run: pnpm build:test-runtime:prepared",
+      "run: swapped-runtime-command",
+    ).replace(
+      "run: pnpm --dir packages/cli exec tsx scripts/verify-package-shape.ts",
+      "run: pnpm build:test-runtime:prepared",
+    ).replace(
+      "run: swapped-runtime-command",
+      "run: pnpm --dir packages/cli exec tsx scripts/verify-package-shape.ts",
+    ),
     host.replace(
       "needs.release-verification-plan-linux.outputs.package_matrix",
       "needs.release-verification-plan-linux.outputs.hosted_web_test_matrix",
@@ -481,6 +571,22 @@ test("Host Support graph drift cannot skip, duplicate, overlap, or de-aggregate 
 
   for (const mutation of mutations) {
     assert.notEqual(mutation, host, "every graph mutation must alter the workflow fixture");
+    assert.throws(() => inspectHostSupportReleaseGraph(mutation));
+  }
+});
+
+test("Host Support rejects missing PostgreSQL proof or a disconnected result", async () => {
+  const host = await workflow("host-support.yml");
+  const postgresJob = jobBlock(host, "release-web-postgres-linux");
+  for (const mutation of [
+    host.replace(`  release-web-postgres-linux:\n${postgresJob}`, ""),
+    host.replace("      - release-web-postgres-linux\n", ""),
+    host.replace("needs.release-web-postgres-linux.result", "needs.release-web-tests-linux.result"),
+    host.replaceAll(' "$WEB_POSTGRES_RESULT"', ""),
+    host.replace("node scripts/run-postgres-tests.mjs --shard ${{ matrix.shard }}/4", "echo skipped PostgreSQL proof"),
+    host.replace("pnpm --dir apps/web prisma:migrate:deploy", "pnpm --dir apps/web exec prisma db push"),
+  ]) {
+    assert.notEqual(mutation, host, "every PostgreSQL mutation must alter the workflow fixture");
     assert.throws(() => inspectHostSupportReleaseGraph(mutation));
   }
 });
@@ -592,6 +698,7 @@ test("Release checks accepts exactly docs-proof or full-shard receipts", async (
     "PACKAGE_RESULT",
     "WEB_BUILD_RESULT",
     "WEB_TEST_RESULT",
+    "WEB_POSTGRES_RESULT",
     "CLOUDFLARE_RESULT",
     "FIXTURE_RESULT",
     "BUNDLE_RESULT",
@@ -609,6 +716,7 @@ test("Release checks accepts exactly docs-proof or full-shard receipts", async (
     SCOPE_RESULT: "success",
     WEB_BUILD_RESULT: "skipped",
     WEB_TEST_RESULT: "skipped",
+    WEB_POSTGRES_RESULT: "skipped",
   };
   assert.equal(runWorkflowStep(source, "Check release proof mode", docsProof).status, 0);
   for (const resultName of releaseResultNames) {
@@ -649,6 +757,16 @@ test("Release checks accepts exactly docs-proof or full-shard receipts", async (
     ...full,
     PLAN_RESULT: "failure",
   }).status, 1);
+  for (const result of ["failure", "cancelled", ""]) {
+    assert.equal(runWorkflowStep(source, "Check release proof mode", {
+      ...docsProof,
+      WEB_POSTGRES_RESULT: result,
+    }).status, 1, `docs mode must reject PostgreSQL result ${JSON.stringify(result)}`);
+    assert.equal(runWorkflowStep(source, "Check release proof mode", {
+      ...full,
+      WEB_POSTGRES_RESULT: result,
+    }).status, 1, `full mode must reject PostgreSQL result ${JSON.stringify(result)}`);
+  }
 });
 
 test("required Stripe boundary accepts docs-only skipped and full proof modes", async () => {
@@ -674,6 +792,14 @@ test("required Stripe boundary accepts docs-only skipped and full proof modes", 
   assert.equal(runWorkflowStep(source, "Enforce hermetic proof and event-scoped live result", {
     ...base,
     EVENT_NAME: "push",
+    HERMETIC_RESULT: "success",
+    LIVE_RESULT: "skipped",
+    MARKDOWN_ONLY: "",
+    SCOPE_RESULT: "skipped",
+  }).status, 0);
+  assert.equal(runWorkflowStep(source, "Enforce hermetic proof and event-scoped live result", {
+    ...base,
+    EVENT_NAME: "schedule",
     HERMETIC_RESULT: "success",
     LIVE_RESULT: "success",
     MARKDOWN_ONLY: "",
@@ -975,7 +1101,7 @@ test("operator docs preserve the bounded Host Support release graph", async () =
   assert.match(runtimeOperations, /Web and Cloudflare never execute in the same job or runner/u);
 });
 
-test("operator docs preserve the ready-only exact-head lifecycle and native canary recovery", async () => {
+test("operator docs preserve the ready-only exact-head lifecycle and native canary cadence", async () => {
   const documents = await Promise.all([
     readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
     readFile(path.join(REPO_ROOT, "agent-docs", "references", "testing-ci-map.md"), "utf8"),
@@ -986,9 +1112,7 @@ test("operator docs preserve the ready-only exact-head lifecycle and native cana
     assert.match(document, /synchronize[\s\S]{0,240}draft/u);
     assert.match(document, /exact head|exact-head/u);
     assert.match(document, /production canar/u);
-    assert.match(document, /six-hour/u);
-    assert.match(document, /latest completed\s+scheduled (?:outcome|run)/u);
-    assert.match(document, /explicit rerun/u);
+    assert.match(document, /twelve-hour/u);
     assert.doesNotMatch(
       document,
       /native-ios-hosted-e2e-retry\.mjs|--failure-code (?:android_workflow_rerun|xcodebuild_failed)/u,
@@ -1138,3 +1262,18 @@ function listedPullRequest({
     state: "open",
   };
 }
+
+test("required main proof survives later merges while PR proof still supersedes", async () => {
+  for (const name of REQUIRED_OWNER_JOBS.keys()) {
+    const source = await workflow(name);
+    assert.match(source, /group: .*github\.event\.pull_request\.number \|\| github\.sha/u,
+      `${name} must bind main proof to the candidate SHA`);
+  }
+  const stripe = await workflow("hosted-stripe-billing.yml");
+  assert.match(jobBlock(stripe, "live-stripe-browser"), /queue: max/u,
+    "shared sandbox serialization must not discard pending candidate proof");
+  const admission = await workflow("temporal-web-deployment-admission.yml");
+  assert.match(admission, /group: temporal-web-deployment-admission/u);
+  assert.match(admission, /cancel-in-progress: false/u);
+  assert.doesNotMatch(admission, /queue: max/u, "retain only the latest pending candidate");
+});

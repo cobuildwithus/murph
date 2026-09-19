@@ -749,3 +749,132 @@ test("bounded feature identity requires workout ids and conflicts fail closed", 
     })),
   ), /feature cardinality/u);
 });
+
+test.each([
+  ["distanceMeters", 0, Number.MAX_VALUE],
+  ["averageHeartRate", 20, 300],
+  ["maxHeartRate", 20, 300],
+  ["firstHalfAverageHeartRate", 20, 300],
+  ["secondHalfAverageHeartRate", 20, 300],
+  ["averageCadence", 0, 400],
+  ["maxCadence", 0, 400],
+  ["averagePower", 0, 5_000],
+  ["maxPower", 0, 5_000],
+  ["averageSpeed", 0, 150],
+  ["maxSpeed", 0, 150],
+] as const)("workout %s preserves optional numeric bounds and input shapes", (field, minimum, maximum) => {
+  const featureWith = (value: unknown) => workoutFeature({
+    averageHeartRate: undefined,
+    maxHeartRate: undefined,
+    [field]: value,
+  });
+  for (const value of [undefined, minimum, maximum, String(minimum), String(maximum)]) {
+    const feature = featureWith(value);
+    assert.deepEqual(resolveJunctionBoundedFeatureRecords("workout_stream", [feature]), [feature]);
+  }
+  for (const value of [null, "", "invalid", true, [], {}, Number.NaN, Infinity, -Infinity, minimum - 1, maximum * 2]) {
+    assert.throws(
+      () => resolveJunctionBoundedFeatureRecords("workout_stream", [featureWith(value)]),
+      { name: "TypeError", message: "Junction workout_stream feature was invalid." },
+    );
+  }
+  const explicitUndefined = featureWith(undefined);
+  explicitUndefined[field] = undefined;
+  assert.throws(
+    () => resolveJunctionBoundedFeatureRecords("workout_stream", [explicitUndefined]),
+    { name: "TypeError", message: "Junction workout_stream feature was invalid." },
+  );
+});
+
+test.each([
+  ["averageHeartRate", "maxHeartRate", 20],
+  ["averageCadence", "maxCadence", 0],
+  ["averagePower", "maxPower", 0],
+  ["averageSpeed", "maxSpeed", 0],
+] as const)("workout %s and %s preserve ordering only when both exist", (average, maximum, minimum) => {
+  for (const [averageValue, maximumValue] of [
+    [undefined, minimum], [minimum, undefined], [undefined, undefined],
+    [minimum, minimum], [minimum, minimum + 1], [String(minimum), String(minimum + 1)],
+  ]) {
+    const feature = workoutFeature({ [average]: averageValue, [maximum]: maximumValue });
+    assert.deepEqual(resolveJunctionBoundedFeatureRecords("workout_stream", [feature]), [feature]);
+  }
+  for (const [averageValue, maximumValue] of [[minimum + 1, minimum], [String(minimum + 1), String(minimum)]]) {
+    assert.throws(
+      () => resolveJunctionBoundedFeatureRecords("workout_stream", [workoutFeature({
+        [average]: averageValue, [maximum]: maximumValue,
+      })]),
+      { name: "TypeError", message: "Junction workout_stream feature was invalid." },
+    );
+  }
+});
+
+test.each([
+  "durationSeconds", "voltageMin", "voltageMax", "voltageMean", "voltageRms", "leadCount",
+] as const)("ECG %s remains required and accepts finite numeric strings", (field) => {
+  const feature = ecgFeature();
+  feature[field] = String(feature[field]);
+  assert.deepEqual(resolveJunctionBoundedFeatureRecords("electrocardiogram_voltage", [feature]), [feature]);
+  for (const value of [undefined, null, "", "invalid", true, Number.NaN, Infinity, -Infinity]) {
+    assert.throws(
+      () => resolveJunctionBoundedFeatureRecords("electrocardiogram_voltage", [ecgFeature({ [field]: value })]),
+      { name: "TypeError", message: "Junction electrocardiogram_voltage feature was invalid." },
+    );
+  }
+});
+
+test("ECG range, ordering, and lead constraints preserve inclusive boundaries", () => {
+  for (const overrides of [
+    { voltageMean: -0.4 }, { voltageMean: 0.5 }, { voltageRms: 0 },
+    { voltageMin: 0, voltageMean: 0, voltageMax: 0 }, { durationSeconds: 0 },
+    { voltageMin: "2", voltageMean: "9", voltageMax: "10" },
+  ]) {
+    const feature = ecgFeature(overrides);
+    assert.deepEqual(resolveJunctionBoundedFeatureRecords("electrocardiogram_voltage", [feature]), [feature]);
+  }
+  for (const overrides of [
+    { voltageMin: 0.6 }, { voltageMean: -0.401 }, { voltageMean: 0.501 },
+    { voltageRms: -0.001 }, { leadCount: 0 }, { leadCount: 1.5 },
+    { leadCount: Number.MAX_SAFE_INTEGER + 1 }, { voltageUnit: "" }, { durationSeconds: -1 },
+  ]) {
+    assert.throws(
+      () => resolveJunctionBoundedFeatureRecords("electrocardiogram_voltage", [ecgFeature(overrides)]),
+      { name: "TypeError", message: "Junction electrocardiogram_voltage feature was invalid." },
+    );
+  }
+});
+
+test("bounded feature errors precede split errors and then stable identity conflicts", () => {
+  const conflicting = workoutFeature({ workoutId: "different-workout", splits: [{}] });
+  assert.throws(
+    () => resolveJunctionBoundedFeatureRecords("workout_stream", [{ ...conflicting, averagePower: -1 }]),
+    { name: "TypeError", message: "Junction workout_stream feature was invalid." },
+  );
+  assert.throws(
+    () => resolveJunctionBoundedFeatureRecords("workout_stream", [conflicting]),
+    { name: "TypeError", message: "Junction workout split 1 was invalid." },
+  );
+  assert.throws(
+    () => resolveJunctionBoundedFeatureRecords("workout_stream", [{ ...conflicting, splits: [] }]),
+    { name: "TypeError", message: "Junction feature contained conflicting stable identifiers." },
+  );
+  assert.throws(
+    () => resolveJunctionBoundedFeatureRecords("electrocardiogram_voltage", [ecgFeature({
+      recordingId: "different-recording", voltageMean: 1,
+    })]),
+    { name: "TypeError", message: "Junction electrocardiogram_voltage feature was invalid." },
+  );
+});
+
+test("workout duration stays required with an inclusive zero lower bound", () => {
+  for (const durationSeconds of [0, "0", "1800"]) {
+    const feature = workoutFeature({ durationSeconds });
+    assert.deepEqual(resolveJunctionBoundedFeatureRecords("workout_stream", [feature]), [feature]);
+  }
+  for (const durationSeconds of [undefined, null, "", Number.NaN, Infinity, -Infinity, -1]) {
+    assert.throws(
+      () => resolveJunctionBoundedFeatureRecords("workout_stream", [workoutFeature({ durationSeconds })]),
+      { name: "TypeError", message: "Junction workout_stream feature was invalid." },
+    );
+  }
+});

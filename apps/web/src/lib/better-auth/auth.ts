@@ -9,7 +9,6 @@ import { hostedAuthCookieName } from "./transport";
 
 export interface HostedAuthDelivery {
   email(input: { address: string; code: string }): Promise<void>;
-  sms(input: { phoneNumber: string; code: string }): Promise<void>;
 }
 
 // Instances are private to the hosted authentication owner. Do not expose the
@@ -23,6 +22,7 @@ export function hostedBetterAuthOptions(input: {
   generateId?: (input: { model: string }) => string;
   primaryAuthenticatedAt?: Date;
   credentialEmailChange?: true;
+  verifyPhoneOtp?: (input: { phoneNumber: string; code: string }) => Promise<boolean>;
   prisma: PrismaClient;
   secret: string;
 }) {
@@ -57,17 +57,6 @@ export function hostedBetterAuthOptions(input: {
     rateLimit: { enabled: true, customStorage: hostedAuthRateLimitStorage(input.prisma) },
     databaseHooks: {
       ...input.hooks,
-      user: {
-        ...input.hooks?.user,
-        create: {
-          ...input.hooks?.user?.create,
-          async before(user, context) {
-            const prepared = await input.hooks?.user?.create?.before?.(user, context);
-            if (prepared === false) return false;
-            return { data: { ...user, credentialsChangedAt: new Date(), ...(prepared && typeof prepared === "object" ? prepared.data : {}) } };
-          },
-        },
-      },
       session: {
         ...input.hooks?.session,
         create: {
@@ -98,7 +87,10 @@ export function hostedBetterAuthOptions(input: {
       phoneNumber({
         otpLength: 6, expiresIn: 300, allowedAttempts: 3,
         phoneNumberValidator: (value) => /^\+[1-9]\d{6,14}$/u.test(value),
-        sendOTP: ({ phoneNumber: value, code }) => input.delivery.sms({ phoneNumber: value, code }),
+        // The route owner starts Verify outside transactions and supplies only
+        // locally revalidated provider approval to the final commit.
+        sendOTP: async () => { throw new Error("Use the hosted SMS challenge owner."); },
+        verifyOTP: input.verifyPhoneOtp ?? (async () => false),
         signUpOnVerification: {
           getTempEmail: (value) => `${authLookupKey("user", "phone-alias", value)}@auth.invalid`,
           getTempName: () => "",

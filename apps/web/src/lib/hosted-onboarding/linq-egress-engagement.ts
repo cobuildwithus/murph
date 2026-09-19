@@ -1,3 +1,4 @@
+import { isHostedMemberSignupWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import type {
@@ -11,6 +12,10 @@ import {
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
+import {
+  HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS,
+  hasHostedLinqInboundWithinDays,
+} from "./linq-daily-state";
 import {
   hostedOnboardingError,
 } from "./errors";
@@ -46,6 +51,7 @@ import {
 import {
   buildHostedMailboxLiveItemWhere,
   decodeHostedMailboxStoredPayload,
+  hasHostedMailboxAutomationEngagementSince,
   resolveHostedMailboxPayloadRef,
 } from "../hosted-mailbox/store";
 
@@ -56,7 +62,6 @@ export type HostedLinqRuntimeEgressAssertionResult = {
   sourceEventId?: string;
 };
 
-const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 const HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT = 100;
 
 const HOSTED_LINQ_DIRECT_INBOUND_MAILBOX_ITEM_SELECT = {
@@ -84,7 +89,7 @@ export async function resolveHostedLinqEgressPolicyForRuntime(input: {
   prisma: HostedLinqEngagementClient;
   target: string | null;
   targetKind?: string | null;
-}): Promise<{ policy: HostedLinqEgressPolicyResult }> {
+}): Promise<{ policy: HostedLinqEgressPolicyResult; service: string | null }> {
   const targetKind = input.targetKind?.trim() ?? "";
   const newConversation = targetKind === "participant";
   const chatHealth = newConversation
@@ -119,6 +124,7 @@ export async function resolveHostedLinqEgressPolicyForRuntime(input: {
       });
 
   return {
+    service: chatHealth?.service ?? null,
     policy: evaluateHostedLinqEgressPolicy({
       chatHealthStatus: chatHealth?.providerStatus ?? null,
       lineDeliveryHealthStatus: line?.healthStatus ?? null,
@@ -128,6 +134,42 @@ export async function resolveHostedLinqEgressPolicyForRuntime(input: {
       newConversation,
     }),
   };
+}
+
+// Called only after Web resolves the exact Linq route. Other channels never
+// consult this policy, and replies proven against accepted ingress bypass it.
+export async function isHostedLinqProactivityPaused(input: {
+  answeredMailboxItemIds: readonly string[];
+  authority: HostedLinqRuntimeEgressAssertionResult;
+  memberId: string;
+  now: Date;
+  prisma: HostedLinqEngagementClient;
+  replyToMessageId: string | null;
+  service: string | null;
+}): Promise<boolean> {
+  const service = input.service?.trim().toLowerCase();
+  if (service === "sms" || service === "rcs") return false;
+  const route = input.authority.resolvedRoute;
+  if (input.authority.sourceEventId || route.targetKind === "participant") {
+    return false;
+  }
+  if (await hasHostedLinqInboundWithinDays(input)) return false;
+  if (await hasHostedMailboxAutomationEngagementSince({
+    prisma: input.prisma,
+    since: new Date(input.now.getTime()
+      - HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000),
+    userId: input.memberId,
+  })) return false;
+  // Group authority is resolved without decoding a reply. Only on a would-be
+  // pause, prove any exact reply against ingress instead of a lagging daily row.
+  return route.threadIsDirect || !await readMatchingPersistedHostedLinqInbound({
+    answeredMailboxItemIds: input.answeredMailboxItemIds,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    replyToMessageId: input.replyToMessageId,
+    target: route.target,
+    threadIsDirect: false,
+  });
 }
 
 export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
@@ -229,7 +271,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     };
   }
 
-  const persistedDirectInbound = await readMatchingPersistedHostedLinqDirectInbound({
+  const persistedDirectInbound = await readMatchingPersistedHostedLinqInbound({
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     memberId: input.memberId,
     prisma: input.prisma,
@@ -283,12 +325,13 @@ interface MatchingPersistedHostedLinqDirectInbound {
   target: string;
 }
 
-async function readMatchingPersistedHostedLinqDirectInbound(input: {
+async function readMatchingPersistedHostedLinqInbound(input: {
   answeredMailboxItemIds: readonly string[];
   memberId: string;
   prisma: HostedLinqEngagementClient;
   replyToMessageId?: string | null;
   target: string | null;
+  threadIsDirect?: boolean;
 }): Promise<MatchingPersistedHostedLinqDirectInbound | null> {
   const target = normalizeNullable(input.target);
   const requestReplyToMessageId = normalizeNullable(input.replyToMessageId);
@@ -312,7 +355,7 @@ async function readMatchingPersistedHostedLinqDirectInbound(input: {
     });
 
     for (const item of candidates) {
-      const matched = await readMatchingPersistedHostedLinqDirectInboundMailboxItem({
+      const matched = await readMatchingPersistedHostedLinqInboundMailboxItem({
         item,
         memberId: input.memberId,
         payloadCiphertext:
@@ -320,6 +363,7 @@ async function readMatchingPersistedHostedLinqDirectInbound(input: {
         prisma: input.prisma,
         replyToMessageId: requestReplyToMessageId,
         target,
+        threadIsDirect: input.threadIsDirect ?? true,
       });
       if (matched) {
         return matched;
@@ -330,13 +374,14 @@ async function readMatchingPersistedHostedLinqDirectInbound(input: {
   });
 }
 
-async function readMatchingPersistedHostedLinqDirectInboundMailboxItem(input: {
+async function readMatchingPersistedHostedLinqInboundMailboxItem(input: {
   item: HostedLinqDirectInboundMailboxItem;
   memberId: string;
   payloadCiphertext: string | null;
   prisma: HostedLinqEngagementClient;
   replyToMessageId: string;
   target: string;
+  threadIsDirect: boolean;
 }): Promise<MatchingPersistedHostedLinqDirectInbound | null> {
   const item = input.item;
   if (
@@ -372,7 +417,7 @@ async function readMatchingPersistedHostedLinqDirectInboundMailboxItem(input: {
     || wake.occurredAt !== item.occurredAt.toISOString()
     || wake.message.channel !== "linq"
     || wake.message.linqMessage.isFromMe !== false
-    || wake.message.linqMessage.threadIsDirect !== true
+    || wake.message.linqMessage.threadIsDirect !== input.threadIsDirect
     || wake.message.linqMessage.chatId !== input.target
     || wake.message.linqMessage.messageId !== input.replyToMessageId
   ) {
@@ -1007,8 +1052,7 @@ function isHostedLinqSignupWelcomeFirstContact(input: {
   idempotencyKey?: string | null;
   memberId: string;
 }): boolean {
-  return normalizeNullable(input.idempotencyKey)
-    === `${HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX}${input.memberId}`;
+  return isHostedMemberSignupWelcomeDeliveryIdentity(input.idempotencyKey, input.memberId);
 }
 
 function normalizeNullable(value: string | null | undefined): string | null {

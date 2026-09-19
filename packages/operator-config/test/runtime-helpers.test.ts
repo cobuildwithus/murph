@@ -295,11 +295,13 @@ test('startTelegramTypingSession stops a pending refresh request cleanly', async
     },
   )
 
+  assert.equal(handle.isActive?.(), true)
   await vi.advanceTimersByTimeAsync(4_000)
   assert.equal(fetchImplementation.mock.calls.length, 2)
   assert.equal(seenSignals[1]?.aborted, false)
 
   await handle.stop()
+  assert.equal(handle.isActive?.(), false)
 
   assert.equal(seenSignals[1]?.aborted, true)
 })
@@ -1155,8 +1157,10 @@ test('startTelegramTypingSession rethrows background refresh failures on stop', 
     },
   )
 
+  assert.equal(handle.isActive?.(), true)
   await vi.advanceTimersByTimeAsync(4_000)
 
+  assert.equal(handle.isActive?.(), false)
   await assert.rejects(
     () => handle.stop(),
     (error) =>

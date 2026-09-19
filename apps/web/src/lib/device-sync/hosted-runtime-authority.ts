@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import {
   isDeviceSyncDisconnectInProgress,
@@ -12,9 +12,6 @@ import {
 import type {
   PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
-import type {
-  SerializableConfiguredDeviceSyncProviderConfigs,
-} from "@murphai/device-syncd/config";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
@@ -92,11 +89,6 @@ import {
   normalizeHostedDeviceSyncLifecycleStatus,
 } from "./prisma-store/connection-records";
 import { toPrismaJsonObject } from "./prisma-store/prisma-json";
-import {
-  isDeviceProviderApplicationError,
-  isMemberOwnedDeviceProviderApplicationProvider,
-  resolveDeviceProviderApplication,
-} from "./provider-applications";
 import { normalizeNullableString } from "./shared";
 
 type HostedRuntimeConnectionSnapshot = HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
@@ -235,20 +227,12 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     );
   });
 
-  const providerApplicationRuntime = await resolveHostedRuntimeProviderApplications({
-    includeCredentialMaterial: parsed.includeCredentialMaterial,
-    prisma: controlPlane.store.prisma,
-    records,
-    userId: input.trustedUserId,
-  });
-
   const tokenConnectionIds = new Set<string>();
   if (parsed.includeCredentialMaterial) {
     for (const record of records as HostedConnectionRecord[]) {
       if (
         record.credentialKind === "oauth_tokens"
         && record.status === "active"
-        && !providerApplicationRuntime.blockedConnectionIds.has(record.id)
         && !hasHostedRuntimeRefreshLeaseForTokenVersion(record, record.tokenVersion)
       ) {
         tokenConnectionIds.add(record.id);
@@ -296,8 +280,6 @@ export async function readHostedDeviceSyncRuntimeState(input: {
       material?.tokenBundle ?? null,
       visibleSources.map(toHostedRuntimeConnectionSourceSnapshot),
       {
-        forceReauthorizationRequired:
-          providerApplicationRuntime.blockedConnectionIds.has(record.id),
         includeCredentialMaterial: parsed.includeCredentialMaterial,
       },
     ));
@@ -315,9 +297,6 @@ export async function readHostedDeviceSyncRuntimeState(input: {
           id: pageRecords.at(-1)!.id,
         }
       : null,
-    ...(Object.keys(providerApplicationRuntime.providerConfigs).length > 0
-      ? { providerConfigs: providerApplicationRuntime.providerConfigs }
-      : {}),
     userId: input.trustedUserId,
   };
 }
@@ -418,12 +397,6 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           : null;
         const preparedSecretAuthorityMismatch = !secretAuthorityCurrent;
         const sources = await controlPlane.store.listConnectionSources(record.id, tx);
-        const providerApplicationBindingCurrent =
-          await isHostedProviderApplicationBindingCurrent({
-            record,
-            tx,
-            userId: input.trustedUserId,
-          });
         const preparedTokenRootCurrent = secretAuthorityCurrent
           && preparedConnection.tokenWrite?.rootKeyId
           ? await lockAndReadActiveHostedDomainRootKeyIdTx({
@@ -438,8 +411,6 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           durableExternalAccountId,
           sources.map(toHostedRuntimeConnectionSourceSnapshot),
           {
-            forceReauthorizationRequired:
-              !providerApplicationBindingCurrent,
             includeCredentialMaterial: secretAuthorityCurrent,
           },
         );
@@ -457,26 +428,18 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           provider: record.provider,
           updates: update.sources ?? [],
         });
-        const pendingDirtyBlocksFitbitTerminalProjection =
-          resolvedSourceUpdates.toApply.some((source) =>
-            isHostedRuntimeFitbitMigrationTerminalSourceUpdate({
-              currentSources: sources,
-              pendingSourceUpdates: resolvedSourceUpdates.toApply,
-              provider: record.provider,
-              source,
-            })
-          )
+        const fitbitTerminalSourceUpdates = findHostedRuntimeFitbitTerminalSourceUpdates({
+          currentSources: sources,
+          pendingSourceUpdates: resolvedSourceUpdates.toApply,
+          provider: record.provider,
+        });
+        const pendingDirtyBlocksFitbitTerminalProjection = fitbitTerminalSourceUpdates.size > 0
           && await controlPlane.store.hasPendingDirtyConnection(record.id, tx);
         const sourceUpdates = pendingDirtyBlocksFitbitTerminalProjection
           ? {
               ...resolvedSourceUpdates,
               toApply: resolvedSourceUpdates.toApply.filter((source) =>
-                !isHostedRuntimeFitbitMigrationTerminalSourceUpdate({
-                  currentSources: sources,
-                  pendingSourceUpdates: resolvedSourceUpdates.toApply,
-                  provider: record.provider,
-                  source,
-                })
+                !fitbitTerminalSourceUpdates.has(source)
               ),
             }
           : resolvedSourceUpdates;
@@ -506,9 +469,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         const connectionEpochMismatch = connectionWriteRequested
           && baseline.connection.connectedAt !== update.observedConnectedAt;
         const baselineTokenVersion = getHostedRuntimeOAuthTokenBundle(baseline.credential)?.tokenVersion ?? null;
-        const tokenVersionMismatch = hostedRuntimeCredentialMutationRequiresTokenFence(update)
+        const tokenVersionMismatch = credentialMutationRequested
           && baselineTokenVersion !== update.observedTokenVersion;
-        const tokenRefreshLeaseConflict = hostedRuntimeCredentialMutationRequiresTokenFence(update)
+        const tokenRefreshLeaseConflict = credentialMutationRequested
           && hasHostedRuntimeRefreshLeaseForTokenVersion(record, baselineTokenVersion);
         const preparedTokenWriteMissing = update.credential?.kind === "oauth_tokens"
           && !preparedConnection.tokenWrite;
@@ -516,7 +479,6 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           (connectionWriteRequested && preparedSecretAuthorityMismatch)
           || !preparedTokenRootCurrent
           || preparedTokenWriteMissing
-          || !providerApplicationBindingCurrent
           || disconnectInProgress
           || preparedConnectionEpochMismatch
           || connectionEpochMismatch
@@ -526,9 +488,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           || (stateMutationRequested && sourceVersionMismatch)
           || historicalMetadataResolution?.rejected === true
           || historicalResetStateMismatch;
-        const credentialUpdate = update.credential === undefined
-          ? undefined
-          : resolveHostedRuntimeCredentialUpdate(update.credential);
+        const credentialUpdate = update.credential;
         if (
           credentialUpdate
           && (credentialUpdate.kind !== "oauth_tokens" || secretAuthorityCurrent)
@@ -540,91 +500,18 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           });
         }
         const nextAccount = buildPublicConnectionFromRuntimeSnapshot(baseline);
-        let tokenBundleToPersist: HostedExecutionDeviceSyncRuntimeTokenBundle | null | undefined;
-        let tokenBundlePersistenceRequested = false;
-        let credentialToPersist:
-          | Exclude<
-            HostedExecutionDeviceSyncRuntimeCredentialSnapshot,
-            { kind: "oauth_tokens" } | { kind: "oauth_tokens_redacted" }
-          >
-          | undefined;
-
-        if (!versionMismatch && update.connection) {
-          if (Object.prototype.hasOwnProperty.call(update.connection, "displayName")) {
-            nextAccount.displayName = update.connection.displayName ?? null;
-          }
-          if (Object.prototype.hasOwnProperty.call(update.connection, "metadata")) {
-            nextAccount.metadata = historicalMetadataResolution?.metadata
-              ?? sanitizeStoredDeviceSyncMetadata(update.connection.metadata ?? {});
-          }
-          if (Object.prototype.hasOwnProperty.call(update.connection, "scopes")) {
-            nextAccount.scopes = [...(update.connection.scopes ?? [])];
-          }
-          if (Object.prototype.hasOwnProperty.call(update.connection, "status") && update.connection.status) {
-            nextAccount.status = normalizeHostedDeviceSyncLifecycleStatus(update.connection.status);
-          }
-          if (Object.prototype.hasOwnProperty.call(update.connection, "setupExpiresAt")) {
-            nextAccount.setupExpiresAt = update.connection.setupExpiresAt ?? null;
-          }
-          if (Object.prototype.hasOwnProperty.call(update.connection, "setupPhase")) {
-            nextAccount.setupPhase = update.connection.setupPhase ?? null;
-          }
+        if (!versionMismatch) {
+          applyHostedRuntimeAccountPatch(nextAccount, update, historicalMetadataResolution?.metadata);
         }
-
-        if (!versionMismatch && update.localState) {
-          if (update.localState.clearError) {
-            nextAccount.lastErrorCode = null;
-            nextAccount.lastErrorMessage = null;
-          }
-
-          for (const field of [
-            "lastErrorCode",
-            "lastErrorMessage",
-            "lastSyncCompletedAt",
-            "lastSyncErrorAt",
-            "lastSyncStartedAt",
-            "lastWebhookAt",
-            "nextReconcileAt",
-          ] as const) {
-            if (Object.prototype.hasOwnProperty.call(update.localState, field)) {
-              nextAccount[field] = update.localState[field] ?? null;
-            }
-          }
-        }
-
-        let tokenUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["tokenUpdate"];
-        if (versionMismatch && update.credential !== undefined) {
-          tokenUpdate = "skipped_version_mismatch";
-        } else if (update.credential !== undefined) {
-          if (!credentialUpdate) {
-            throw new TypeError("Hosted device-sync runtime credential update was not parsed.");
-          }
-
-          if (credentialUpdate.kind === "oauth_tokens") {
-            if ("clearTokens" in credentialUpdate) {
-              tokenBundleToPersist = null;
-              tokenBundlePersistenceRequested = true;
-              nextAccount.accessTokenExpiresAt = null;
-              tokenUpdate = getHostedRuntimeOAuthTokenBundle(baseline.credential) ? "cleared" : "missing";
-            } else {
-              tokenBundleToPersist = {
-                ...credentialUpdate.tokenBundle,
-                tokenVersion: computeNextHostedTokenVersion(
-                  getHostedRuntimeOAuthTokenBundle(baseline.credential),
-                  credentialUpdate.tokenBundle,
-                ),
-              };
-              tokenBundlePersistenceRequested = true;
-              nextAccount.accessTokenExpiresAt = tokenBundleToPersist.accessTokenExpiresAt;
-              tokenUpdate = "applied";
-            }
-          } else {
-            credentialToPersist = credentialUpdate;
-            nextAccount.accessTokenExpiresAt = null;
-            tokenUpdate = getHostedRuntimeOAuthTokenBundle(baseline.credential) ? "cleared" : "missing";
-          }
-        } else {
-          tokenUpdate = getHostedRuntimeOAuthTokenBundle(baseline.credential) ? "unchanged" : "missing";
+        const credentialPlan = planHostedRuntimeCredentialWrite({
+          baseline: baseline.credential,
+          credential: credentialUpdate,
+          versionMismatch,
+        });
+        if (credentialPlan.write) {
+          nextAccount.accessTokenExpiresAt = credentialPlan.write.kind === "oauth_tokens"
+            ? credentialPlan.write.tokenBundle?.accessTokenExpiresAt ?? null
+            : null;
         }
 
         const writeUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["writeUpdate"] =
@@ -643,50 +530,26 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           for (const source of sourceUpdates.toApply) {
             await controlPlane.store.upsertConnectionSource({
               connectionId: update.connectionId,
-              sourceInstanceKey: source.sourceInstanceKey,
-              sourceProviderSlug: source.sourceProviderSlug,
-              ...(Object.prototype.hasOwnProperty.call(source, "displayName")
-                ? { displayName: source.displayName ?? null }
-                : {}),
-              status: source.status,
-              ...(source.lifecycleEpoch === undefined
-                ? {}
-                : { lifecycleEpoch: source.lifecycleEpoch }),
-              ...(Object.prototype.hasOwnProperty.call(source, "resourceAvailabilitySummary")
-                ? { resourceAvailabilitySummary: source.resourceAvailabilitySummary ?? null }
-                : {}),
-              ...(Object.prototype.hasOwnProperty.call(source, "lastErrorCode")
-                ? { lastErrorCode: source.lastErrorCode ?? null }
-                : {}),
-              ...(Object.prototype.hasOwnProperty.call(source, "lastErrorMessage")
-                ? { lastErrorMessage: source.lastErrorMessage ?? null }
-                : {}),
-              ...(Object.prototype.hasOwnProperty.call(source, "firstSeenAt")
-                ? { firstSeenAt: source.firstSeenAt ?? null }
-                : {}),
-              ...(Object.prototype.hasOwnProperty.call(source, "lastDataAt")
-                ? { lastDataAt: source.lastDataAt ?? null }
-                : {}),
-              lastSeenAt: source.lastSeenAt,
+              ...buildHostedRuntimeSourceWrite(source),
               tx,
             });
           }
         }
 
-        if (!versionMismatch && credentialToPersist) {
+        if (credentialPlan.write && credentialPlan.write.kind !== "oauth_tokens") {
           writtenRecord = await persistHostedRuntimeCredentialSnapshot({
             connectionId: update.connectionId,
-            credential: credentialToPersist,
+            credential: credentialPlan.write,
             tx,
           });
-        } else if (!versionMismatch && tokenBundlePersistenceRequested) {
+        } else if (credentialPlan.write?.kind === "oauth_tokens") {
           const preparedTokenWrite = preparedConnection.tokenWrite;
           if (!preparedTokenWrite) {
             throw new TypeError("Hosted device-sync runtime apply token write was not prepared.");
           }
           assertHostedRuntimePreparedTokenWriteMatches({
             prepared: preparedTokenWrite,
-            tokenBundle: tokenBundleToPersist ?? null,
+            tokenBundle: credentialPlan.write.tokenBundle,
           });
           writtenRecord = await controlPlane.store.persistPreparedRuntimeApplyTokenWrite({
             prepared: preparedTokenWrite,
@@ -703,14 +566,12 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
               durableExternalAccountId,
               [],
               {
-                forceReauthorizationRequired:
-                  !providerApplicationBindingCurrent,
                 includeCredentialMaterial: false,
               },
             ).connection,
             connectionId: update.connectionId,
             status: "updated",
-            tokenUpdate,
+            tokenUpdate: credentialPlan.tokenUpdate,
             writeUpdate,
           } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry,
           noticeCandidates: resolveHostedRuntimeSourceDeliveryStallNoticeCandidates({
@@ -829,24 +690,16 @@ async function prepareHostedRuntimeApplyConnections(input: {
         [],
         { includeCredentialMaterial: true },
       );
-      const credential = resolveHostedRuntimeCredentialUpdate(update.credential);
-      if (credential.kind !== "oauth_tokens") {
-        throw new TypeError("Hosted device-sync runtime apply token preparation received a non-token credential.");
-      }
+      const credential = update.credential;
       validateHostedRuntimeCredentialMutation({
         baseline,
         credential,
         provider: connection.record.provider,
       });
-      const tokenBundle = "clearTokens" in credential
-        ? null
-        : {
-            ...credential.tokenBundle,
-            tokenVersion: computeNextHostedTokenVersion(
-              getHostedRuntimeOAuthTokenBundle(baseline.credential),
-              credential.tokenBundle,
-            ),
-          };
+      const tokenBundle = resolveHostedRuntimeNextTokenBundle(
+        getHostedRuntimeOAuthTokenBundle(baseline.credential),
+        credential,
+      );
       return [{
         externalAccountId: connection.secretMaterial.externalAccountId,
         record: connection.record,
@@ -1094,156 +947,6 @@ async function hasPendingHostedDeviceSyncDirtyWorkAfterStagedAcks(input: {
   return pending.items.length > 0 || pending.hasMore;
 }
 
-async function isHostedProviderApplicationBindingCurrent(input: {
-  record: HostedRuntimeConnectionRecord;
-  tx: HostedPrismaTransactionClient | PrismaClient;
-  userId: string;
-}): Promise<boolean> {
-  const applicationId = normalizeNullableString(
-    input.record.providerApplicationId,
-  );
-  const revision = input.record.providerApplicationRevision ?? null;
-  if (!applicationId && revision === null) {
-    return true;
-  }
-  if (
-    !applicationId
-    || revision === null
-    || !isMemberOwnedDeviceProviderApplicationProvider(input.record.provider)
-  ) {
-    return false;
-  }
-
-  const application = await input.tx.deviceProviderApplication.findFirst({
-    select: { id: true },
-    where: {
-      id: applicationId,
-      memberId: input.userId,
-      provider: input.record.provider,
-      revision,
-    },
-  });
-  return application !== null;
-}
-
-interface HostedRuntimeProviderApplicationResolution {
-  blockedConnectionIds: Set<string>;
-  providerConfigs: SerializableConfiguredDeviceSyncProviderConfigs;
-}
-
-async function resolveHostedRuntimeProviderApplications(input: {
-  includeCredentialMaterial: boolean;
-  prisma: PrismaClient;
-  records: readonly HostedRuntimeConnectionRecord[];
-  userId: string;
-}): Promise<HostedRuntimeProviderApplicationResolution> {
-  const blockedConnectionIds = new Set<string>();
-  const providerConfigs: SerializableConfiguredDeviceSyncProviderConfigs = {};
-  const providerIdentity = new Map<
-    string,
-    { connectionIds: string[]; identity: string | null }
-  >();
-  const redactedBindingCurrent = new Map<string, boolean>();
-  const resolvedApplications = new Map<
-    string,
-    Awaited<ReturnType<typeof resolveDeviceProviderApplication>> | null
-  >();
-
-  // Resolve distinct bindings sequentially to avoid turning one runtime
-  // snapshot into a burst of secure-box/KMS and database reads. Connections
-  // that share the same exact binding reuse its authority decision. No secret
-  // or decryption error is logged.
-  for (const record of input.records) {
-    if (record.status !== "active") {
-      continue;
-    }
-    const applicationId = normalizeNullableString(
-      record.providerApplicationId,
-    );
-    const revision = record.providerApplicationRevision ?? null;
-    if (!applicationId && revision === null) {
-      continue;
-    }
-    if (!applicationId || revision === null) {
-      blockedConnectionIds.add(record.id);
-      continue;
-    }
-    const bindingKey = `${record.provider}\n${applicationId}\n${revision}`;
-
-    if (!input.includeCredentialMaterial) {
-      let isCurrent = redactedBindingCurrent.get(bindingKey);
-      if (isCurrent === undefined) {
-        isCurrent = await isHostedProviderApplicationBindingCurrent({
-          record,
-          tx: input.prisma,
-          userId: input.userId,
-        });
-        redactedBindingCurrent.set(bindingKey, isCurrent);
-      }
-      if (!isCurrent) {
-        blockedConnectionIds.add(record.id);
-      }
-      continue;
-    }
-
-    let application = resolvedApplications.get(bindingKey);
-    if (application === undefined) {
-      try {
-        application = await resolveDeviceProviderApplication({
-          applicationId,
-          expectedRevision: revision,
-          memberId: input.userId,
-          prisma: input.prisma,
-          provider: record.provider,
-        });
-      } catch (error) {
-        if (!isDeviceProviderApplicationError(error)) {
-          throw error;
-        }
-        application = null;
-      }
-      resolvedApplications.set(bindingKey, application);
-    }
-    if (!application) {
-      blockedConnectionIds.add(record.id);
-      continue;
-    }
-
-    const config = application.providerConfigs[application.provider];
-    if (!config) {
-      blockedConnectionIds.add(record.id);
-      continue;
-    }
-
-    const identity = `${application.applicationId}:r${application.revision}`;
-    const existing = providerIdentity.get(application.provider);
-    if (existing?.identity === null) {
-      existing.connectionIds.push(record.id);
-      blockedConnectionIds.add(record.id);
-      continue;
-    }
-    if (existing && existing.identity !== identity) {
-      for (const connectionId of existing.connectionIds) {
-        blockedConnectionIds.add(connectionId);
-      }
-      providerIdentity.set(application.provider, {
-        connectionIds: [...existing.connectionIds, record.id],
-        identity: null,
-      });
-      delete providerConfigs[application.provider];
-      continue;
-    }
-
-    providerIdentity.set(application.provider, {
-      connectionIds: [...(existing?.connectionIds ?? []), record.id],
-      identity,
-    });
-    providerConfigs[application.provider] = config as never;
-  }
-
-  return { blockedConnectionIds, providerConfigs };
-}
-
 function mapHostedDeviceSyncDirtyStateResponse(
   dirty: HostedDeviceSyncDirtyConnectionRecord,
   trustedUserId: string,
@@ -1270,7 +973,6 @@ function buildHostedRuntimeConnectionSnapshot(
   fallbackExternalAccountId: string | null = null,
   sources: HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot[] = [],
   options: {
-    forceReauthorizationRequired?: boolean;
     includeCredentialMaterial: boolean;
   } = {
     includeCredentialMaterial: false,
@@ -1303,7 +1005,6 @@ function buildHostedRuntimeProjectedConnectionSnapshot(
   tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null,
   sources: HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot[],
   options: {
-    forceReauthorizationRequired?: boolean;
     includeCredentialMaterial: boolean;
   },
 ): HostedRuntimeConnectionSnapshot {
@@ -1325,13 +1026,11 @@ function buildHostedRuntimeConnectionSnapshotFromMaterial(
   storedTokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null,
   sources: HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot[],
   options: {
-    forceReauthorizationRequired?: boolean;
     includeCredentialMaterial: boolean;
   },
 ): HostedRuntimeConnectionSnapshot {
   const withholdRuntimeTokenMaterial =
-    options.forceReauthorizationRequired === true
-    || (
+    (
       mappedRecord.credentialKind === "oauth_tokens"
       && (
         !storedTokenBundle
@@ -1361,9 +1060,7 @@ function buildHostedRuntimeConnectionSnapshotFromMaterial(
       scopes: [...publicConnection.scopes],
       setupExpiresAt: publicConnection.setupExpiresAt ?? null,
       setupPhase: publicConnection.setupPhase ?? null,
-      status: options.forceReauthorizationRequired
-        ? "reauthorization_required"
-        : publicConnection.status,
+      status: publicConnection.status,
       updatedAt: publicConnection.updatedAt,
     },
     localState: {
@@ -1677,20 +1374,47 @@ function omitHostedRuntimeSourceFirstSeenAt(
   return next;
 }
 
-function isHostedRuntimeFitbitMigrationTerminalSourceUpdate(input: {
+function findHostedRuntimeFitbitTerminalSourceUpdates(input: {
   currentSources: readonly HostedDeviceConnectionSource[];
-  pendingSourceUpdates: readonly HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate[];
+  pendingSourceUpdates: readonly HostedRuntimeConnectionSourceWrite[];
   provider: string;
-  source: HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate;
-}): boolean {
-  return input.provider.trim().toLowerCase() === "junction"
-    && normalizeJunctionProviderSlug(input.source.sourceProviderSlug)
-      === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
-    && isGoogleHealthFitbitMigrationLegacyTerminal(input.source)
-    && [...input.currentSources, ...input.pendingSourceUpdates].some((source) =>
-      normalizeJunctionProviderSlug(source.sourceProviderSlug)
-        === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
-    );
+}): ReadonlySet<HostedRuntimeConnectionSourceWrite> {
+  if (
+    input.provider.trim().toLowerCase() !== "junction"
+    || ![...input.currentSources, ...input.pendingSourceUpdates].some((source) =>
+      normalizeJunctionProviderSlug(source.sourceProviderSlug) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    )
+  ) {
+    return new Set();
+  }
+  return new Set(input.pendingSourceUpdates.filter((source) =>
+    normalizeJunctionProviderSlug(source.sourceProviderSlug) === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    && isGoogleHealthFitbitMigrationLegacyTerminal(source)
+  ));
+}
+
+function buildHostedRuntimeSourceWrite(source: HostedRuntimeConnectionSourceWrite) {
+  const optionalFields: Pick<HostedRuntimeConnectionSourceWrite,
+    "displayName" | "lastErrorCode" | "lastErrorMessage" | "firstSeenAt" | "lastDataAt"
+  > = {};
+  for (const field of [
+    "displayName", "lastErrorCode", "lastErrorMessage", "firstSeenAt", "lastDataAt",
+  ] as const) {
+    if (Object.prototype.hasOwnProperty.call(source, field)) {
+      optionalFields[field] = source[field] ?? null;
+    }
+  }
+  return {
+    sourceInstanceKey: source.sourceInstanceKey,
+    sourceProviderSlug: source.sourceProviderSlug,
+    status: source.status,
+    ...optionalFields,
+    ...(source.lifecycleEpoch === undefined ? {} : { lifecycleEpoch: source.lifecycleEpoch }),
+    ...(Object.prototype.hasOwnProperty.call(source, "resourceAvailabilitySummary")
+      ? { resourceAvailabilitySummary: source.resourceAvailabilitySummary ?? null }
+      : {}),
+    lastSeenAt: source.lastSeenAt,
+  };
 }
 
 function normalizeHostedRuntimeSourceUpdateForProvider(input: {
@@ -1901,20 +1625,95 @@ function getHostedRuntimeOAuthTokenBundle(
   return credential.kind === "oauth_tokens" ? credential.tokenBundle : null;
 }
 
-function hostedRuntimeCredentialMutationRequiresTokenFence(
-  update: HostedExecutionDeviceSyncRuntimeConnectionUpdate,
-): boolean {
-  return update.credential !== undefined;
+function resolveHostedRuntimeNextTokenBundle(
+  current: HostedExecutionDeviceSyncRuntimeTokenBundle | null,
+  credential: Extract<HostedExecutionDeviceSyncRuntimeCredentialUpdate, { kind: "oauth_tokens" }>,
+): HostedExecutionDeviceSyncRuntimeTokenBundle | null {
+  if ("clearTokens" in credential) {
+    return null;
+  }
+  return {
+    ...credential.tokenBundle,
+    tokenVersion: computeNextHostedTokenVersion(current, credential.tokenBundle),
+  };
 }
 
-function resolveHostedRuntimeCredentialUpdate(
-  credential: HostedExecutionDeviceSyncRuntimeCredentialUpdate,
-): HostedExecutionDeviceSyncRuntimeCredentialUpdate {
-  if (credential.kind === "oauth_tokens" && "clearTokens" in credential) {
-    return credential;
+// This plan only derives a write after the existing live authority fences pass.
+// A missing write means no mutation; an OAuth write with a null bundle clears it.
+function planHostedRuntimeCredentialWrite(input: {
+  baseline: HostedExecutionDeviceSyncRuntimeCredentialSnapshot;
+  credential: HostedExecutionDeviceSyncRuntimeCredentialUpdate | undefined;
+  versionMismatch: boolean;
+}): {
+  tokenUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["tokenUpdate"];
+  write?:
+    | Exclude<HostedExecutionDeviceSyncRuntimeCredentialSnapshot, { kind: "oauth_tokens" | "oauth_tokens_redacted" }>
+    | { kind: "oauth_tokens"; tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null };
+} {
+  const current = getHostedRuntimeOAuthTokenBundle(input.baseline);
+  const { credential } = input;
+  if (!credential) {
+    return { tokenUpdate: current ? "unchanged" : "missing" };
   }
+  if (input.versionMismatch) {
+    return { tokenUpdate: "skipped_version_mismatch" };
+  }
+  if (credential.kind !== "oauth_tokens") {
+    return { tokenUpdate: current ? "cleared" : "missing", write: credential };
+  }
+  const tokenBundle = resolveHostedRuntimeNextTokenBundle(current, credential);
+  return {
+    tokenUpdate: tokenBundle ? "applied" : current ? "cleared" : "missing",
+    write: { kind: "oauth_tokens", tokenBundle },
+  };
+}
 
-  return credential;
+function applyHostedRuntimeAccountPatch(
+  account: PublicDeviceSyncAccount,
+  update: HostedExecutionDeviceSyncRuntimeConnectionUpdate,
+  historicalMetadata: Record<string, unknown> | undefined,
+): void {
+  const { connection, localState } = update;
+  if (connection) {
+    for (const field of ["displayName", "setupExpiresAt"] as const) {
+      if (Object.prototype.hasOwnProperty.call(connection, field)) {
+        account[field] = connection[field] ?? null;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(connection, "metadata")) {
+      account.metadata = historicalMetadata
+        ?? sanitizeStoredDeviceSyncMetadata(connection.metadata ?? {});
+    }
+    if (Object.prototype.hasOwnProperty.call(connection, "scopes")) {
+      account.scopes = [...(connection.scopes ?? [])];
+    }
+    if (Object.prototype.hasOwnProperty.call(connection, "status") && connection.status) {
+      account.status = normalizeHostedDeviceSyncLifecycleStatus(connection.status);
+    }
+    if (Object.prototype.hasOwnProperty.call(connection, "setupPhase")) {
+      account.setupPhase = connection.setupPhase ?? null;
+    }
+  }
+  if (!localState) {
+    return;
+  }
+  if (localState.clearError) {
+    account.lastErrorCode = null;
+    account.lastErrorMessage = null;
+  }
+  for (const field of [
+    "lastErrorCode",
+    "lastErrorMessage",
+    "lastSyncCompletedAt",
+    "lastSyncErrorAt",
+    "lastSyncStartedAt",
+    "lastWebhookAt",
+    "nextReconcileAt",
+  ] as const) {
+    if (Object.prototype.hasOwnProperty.call(localState, field)) {
+      account[field] = localState[field] ?? null;
+    }
+  }
 }
 
 function validateHostedRuntimeCredentialMutation(input: {

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import process from "node:process";
 
+import { assertHostedLocalVitestSelection } from "./e2e-test-selection.ts";
+
 import {
   removeHostedLocalWebAuthorityFromProcessEnvironment,
   sanitizeHostedLocalGenericEnvironment,
@@ -43,6 +45,8 @@ const JUNCTION_WEARABLE_LIVE_ENV_KEYS = [
   "MURPH_E2E_JUNCTION_GARMIN_MEMBER_ID",
   "MURPH_E2E_JUNCTION_OURA_MEMBER_ID",
   "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
+  "MURPH_E2E_JUNCTION_WEARABLE_DATA",
+  "MURPH_E2E_JUNCTION_WEARABLE_DATA_RECEIPT",
   "MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID",
   "MURPH_E2E_KERNEL_CLI_PATH",
   "MURPH_E2E_OURA_EMAIL",
@@ -112,9 +116,11 @@ export type HostedLocalE2eScenarioName =
   | "linq-webhook"
   | "linq-webhook-audio"
   | "runner-warm-reuse"
+  | "postgres-runtime-warm-reuse"
   | "snapshot-publication-fallback"
   | "snapshot-stress"
   | "stripe-billing-browser-matrix"
+  | "stale-deferred-replay"
   | "stuck-invocation-recovery"
   | "timezone-injection"
   | "usage-limit-ambiguous-send"
@@ -349,6 +355,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
     name: "linq-scheduled-reminder",
     dedicatedVitestProcess: true,
+    vitestProcessTestNamePatterns: [
+      "^hosted local Linq scheduled reminder (e2e preserves the scheduled image reminder|timing helpers)",
+      "^hosted local Linq scheduled reminder e2e delivers a due reminder",
+      "^hosted local Linq scheduled reminder e2e delivers a scheduled nutrition card",
+    ],
   },
   {
     dedicatedVitestProcess: true,
@@ -377,6 +388,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-linq-same-wake-batching-e2e.test.ts",
     name: "linq-same-wake-batching",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-postgres-runtime-e2e.test.ts",
+    manualOnly: true,
+    name: "postgres-runtime-warm-reuse",
+    vitestProcessTestNamePatterns: ["empty Postgres: cold reply and warm typing", "rolling migration: cold reply and warm typing"],
   },
   {
     file: "apps/cloudflare/test/hosted-local-runner-warm-auth-recovery-e2e.test.ts",
@@ -470,6 +487,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
       "^hosted local foreground reply priority e2e",
       "^hosted local foreground checkpoint ordering e2e",
     ],
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-stale-deferred-replay-e2e.test.ts",
+    name: "stale-deferred-replay",
+    testControls: true,
   },
 ] as const;
 
@@ -668,6 +690,18 @@ export async function runHostedLocalE2eSuite(
           scenarios,
         });
       });
+      if (liveWearableEnvironment.vitestEnvOverlay[JUNCTION_WEARABLE_LIVE_ENV] === "1") {
+        suiteEnv.NEXT_DIST_DIR_MODE = "smoke";
+        await runAdmittedStep(async () => {
+          await runForegroundCommand({
+            args: ["--dir", "apps/web", "build:hosted-local"],
+            command: "pnpm",
+            cwd: hostedLocalHarnessRepoRoot,
+            env: suiteEnv,
+            label: "Hosted local wearable production Web preparation",
+          });
+        });
+      }
       await runAdmittedStep(async () => {
         await runHostedLocalVitest({
           assertWorkAdmission,
@@ -938,6 +972,19 @@ async function runHostedLocalVitestForScenarios(input: {
   const testNamePatterns = input.scenarios.length === 1
     ? input.scenarios[0]?.vitestProcessTestNamePatterns ?? [null]
     : [null];
+
+  const scenario = input.scenarios.length === 1 ? input.scenarios[0] : undefined;
+  if (scenario?.vitestProcessTestNamePatterns) {
+    await assertHostedLocalVitestSelection({
+      config: "apps/cloudflare/vitest.e2e.config.ts",
+      cwd: hostedLocalHarnessRepoRoot,
+      env: buildHostedLocalVitestScenarioEnv(input),
+      files: [scenario.file],
+      // Shard admission still validates the complete registry partition.
+      patterns: resolveHostedLocalE2eScenarios(scenario.name)[0]?.vitestProcessTestNamePatterns
+        ?? scenario.vitestProcessTestNamePatterns,
+    });
+  }
 
   for (let index = 0; index < testNamePatterns.length; index += 1) {
     const testNamePattern = testNamePatterns[index] ?? null;

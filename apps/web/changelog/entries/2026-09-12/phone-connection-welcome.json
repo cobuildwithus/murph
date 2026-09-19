@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-12",
+  "order": 100,
+  "item": {
+    "id": "phone-connection-welcome",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Pick up with Murph on a new channel",
+    "summary": "Connect email or phone and Murph greets you there, using your conversation context once you have started chatting.",
+    "details": "Before your first message, each connected channel gets the welcome. Later connections get a brief greeting without restarting onboarding. Setup retries avoid duplicate outreach, email connections can recover a failed save, and contact buttons show the right next step. Your text number remains available when outbound welcome capacity is full.",
+    "relevanceTags": [
+      "onboarding",
+      "imessage"
+    ],
+    "sourcePullRequests": [3374]
+  }
+}

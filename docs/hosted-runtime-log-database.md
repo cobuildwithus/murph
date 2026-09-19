@@ -43,6 +43,183 @@ The isolated database does not store the raw hosted member id and has no
 cross-database foreign key. Attempt ids and other existing redacted operational
 correlation fields retain their current contract and limits.
 
+### Device import connection ownership
+
+`device-sync.pass_finished.deviceSyncConnectionKey` is a SHA-256 hex digest of
+`["device-sync-connection-v1", memberId, hostedConnectionId]`. It is stable across
+attempts for one connection and distinct across members and connections. The
+pass logs null when its wake has no hosted connection identity; raw connection
+and member identifiers never enter this field. Existing bounded log transport,
+parsing and retention apply, with no schema migration.
+
+Queue observations describe only the pass's connection. The import alert reader
+validates this optional digest and evaluates each connection separately, then
+aggregates distinct runtimes. Missing or malformed ownership does not authorize
+recovery of any identified connection. An accepted checkpoint credits only passes
+from its matching attempt; another connection's empty queue or progress cannot
+reset a stalled connection. The Web reader may deploy first and ignores legacy
+unkeyed passes until the additive runner producer is deployed.
+
+### Device import no-op counts
+
+`device-sync.pass_finished` includes whole-pass persistence outcome counts:
+`deviceSyncImportAppliedCount`, `deviceSyncImportNoopCount`,
+`deviceSyncImportFailedCount`, and `deviceSyncImportUnknownCount`.
+The matching `deviceSyncCompleteSourceDayImport*Count` fields count only
+imports supplied with complete-source-day authority, including imports inside
+reconciliation jobs. These subset counts measure the oxygen/stress temporal
+feature rereads; they are not all initial historical backfill work.
+
+An explicit importer `applied: false` is a no-op. Explicit `true` means
+persistence changed, which can include evidence-only writes rather than new
+health facts. A rejected import is failed even if its job later recovers; a
+resolved result without a boolean `applied` is unknown. Jobs that perform no
+import contribute zero counts. Job completion, provider response record counts,
+and returned canonical event counts cannot establish a persistence no-op.
+
+Counts aggregate every retained diagnostic before the existing slowest-job
+sample. The service buffer covers at least the hosted pass job limit.
+Compute the classified success no-op rate as `noop / (noop + applied)`, and
+report failed and unknown counts alongside it. Use the complete-source-day
+fields for that subset; do not sum them into the overall counts again.
+The sampled `deviceSyncJobTimingSummaries` remain timing evidence, not a
+rate denominator. These additions use the existing shallow scalar log contract
+and existing best-effort event; no extra callback, health payload, source id,
+window date, or durable scheduling state is added. Old log rows lack the fields
+and must be excluded from the measured cohort rather than treated as zeros.
+
+### Ensure-processing summaries
+
+`runner.processing_finished` is one best-effort summary per completed
+`HostedUserRunner.ensureRuntimeProcessingForUser` call, including denied,
+queued-out, uncertain, accepted, and thrown outcomes. It is not a poll trace,
+mailbox admission, runtime health proof, or recovery signal. Only the existing
+`runner.accepted_attempt_failed` event requests failure recovery through this
+callback. No schema migration or new durable state is required.
+
+The existing invocation log owner sends the signed callback in a caught,
+detached promise. `HostedUserRunner` passes that promise to its existing
+`state.waitUntil` owner; neither the request nor its response cancellation is
+awaited by processing control. Response cancellation is initiated with owned
+rejection handling but is not awaited by the telemetry task either. A rejected
+HTTP log write emits only `runtimeLogWriteStatus` in the existing Workers logger,
+never response content. Transport failures, rejections, and scheduling failures
+cannot replace the control result. Delivery remains best-effort.
+
+Correlation uses `orchestrationAttemptFingerprint`, `commandStartedAtEpochMs`,
+and the typed runtime attempt/generation columns when known. The fingerprint is
+lowercase hex SHA-256 of UTF-8 `murph.runtime-processing-attempt.v1`, one NUL byte,
+and the complete caller-selected orchestration attempt id. No syntax-based
+exception permits a plaintext id: the private producer could use a member id.
+Hashing runs only on detached telemetry; a hash failure omits the fingerprint,
+never falls back to the input. This is pseudonymous correlation, not anonymity
+against guessing a low-entropy input. It adds no key, secret or configuration.
+
+Repeated commands can reuse an orchestration id, so retain command start and
+runtime attempt/generation. Detached writes may arrive out of order. On a fence
+change, transport and liveness observations for the superseded target are
+deleted rather than carried into the later one. `wakeAttemptId` and
+`wakeLeaseGeneration`, when present, belong to the last observed fence, as do
+the typed columns. A new fence with an older reply lacking optional metadata
+must not inherit the prior fence's observations. This summary is not a history
+of every target visited during convergence.
+
+Finite `runtimeProcessingStage` values are `consent_queue`, `state_bind`,
+`state_read`, `admission`, `active_wake`, `liveness`, and `fresh_start`.
+`runtimeProcessingOutcome` preserves the public result kind or `threw`;
+`runtimeProcessingAction` is present only for accepted results.
+`activeWakeRpcDispatchedAtEpochMs` marks invocation of the child RPC by the
+caller, not child receipt. `activeWakeRpcOutcome` is `returned`, `caller_timeout`,
+or `rpc_error`. `returned` is not acceptance: it can include a child-reported
+timeout. `caller_timeout` uses the existing command-budget timeout classifier;
+an already-expired budget can prevent dispatch altogether. These fields do not
+cancel the child, suppress late accepted work, or reinterpret the final result.
+`runtimeProcessingRetryAtEpochMs` preserves the actual returned retry time; it
+does not show when the external scheduler will next run.
+`runtimeProcessingRetryReason` preserves the existing retry taxonomy, with
+`admission_denied` for authoritative denial. `runtimeLivenessOutcome` and its
+optional finite reason distinguish exact-active, inactive, mismatch, and
+indeterminate observations. A local exact-active pointer is not a fresh TCP
+health check. No exception text is added by this event.
+
+`wakeStage` is one of `admission`, `dispatch`, `drain`, `acknowledgement`,
+`legacy_health`, or `exiting_owner`. It and the transport timestamps are
+optional across revisions, closed-picked RPC metadata, not control inputs.
+Updated RunnerContainer responses always include observations; no request flag
+is needed. The authoritative ensure-processing response JSON is unchanged.
+The existing TCP handler adds numeric receipt and acceptance timing headers, which are relayed
+without logging any arbitrary headers. Receipt precedes request-body parsing;
+acceptance follows the wake decision. `wakePending=true` means the entrypoint
+retained a wake before callback readiness, **not** that the runtime consumer
+was notified. `wakeAccepted=true` describes headers; a later drain failure can
+still produce `retry_later`. The final outcome must always be read with it.
+
+Use the existing foreground latency milestones (`runtimeWakeNotifiedAtEpochMs`,
+`foregroundWaitResolvedAtEpochMs`, and import/delivery phases) for work after
+notification. Coalescing can retain the earliest notification and first
+orchestration context; do not assume one notification row per ensure attempt.
+
+Deploy the Web parser/event allowlist before emitting this event from Workers.
+Older Web versions reject unknown event codes; older Container/Node revisions
+omit optional metadata. Control results are unchanged under those skews. If an
+RPC loses the caller's deadline race, its transport observations never return
+to this summary: missing fields mean **unobserved**, not “not dispatched” or
+“not received.” A reset or an unbounded await can prevent a final summary
+altogether. This instrumentation does not claim to distinguish SDK readiness
+from platform TCP scheduling inside a request that never returns.
+
+Example bounded SQL (epoch fields are nullable; do not coerce absence to zero):
+
+```sql
+WITH attempts AS (
+  SELECT at, attempt_id, lease_generation, redacted_json AS d
+  FROM hosted_runtime_log
+  WHERE at >= :window_start AND at < :window_end
+    AND event_code = 'runner.processing_finished'
+  ORDER BY at DESC
+  LIMIT 200
+)
+SELECT at, attempt_id, lease_generation,
+  d->>'orchestrationAttemptFingerprint' AS orchestration_attempt_fingerprint,
+  d->>'commandStartedAtEpochMs' AS command_started_epoch_ms,
+  d->>'runtimeProcessingOutcome' AS outcome,
+  d->>'runtimeProcessingAction' AS action,
+  d->>'runtimeProcessingRetryReason' AS retry_reason,
+  d->>'runtimeProcessingRetryAtEpochMs' AS retry_at_epoch_ms,
+  d->>'runtimeProcessingRetryStage' AS retry_stage,
+  d->>'runtimeProcessingStage' AS final_stage,
+  d->>'activeWakeRpcOutcome' AS caller_rpc_outcome,
+  d->>'activeWakeRpcDispatchedAtEpochMs' AS caller_rpc_dispatched_epoch_ms,
+  d->>'wakeStage' AS transport_stage,
+  d->>'wakeStatus' AS response_status,
+  d->>'wakeAccepted' AS accepted_flag,
+  d->>'wakePending' AS pending_flag,
+  d->>'wakeSignalAborted' AS signal_aborted,
+  d->>'runtimeLivenessOutcome' AS liveness,
+  d->>'runtimeLivenessReason' AS liveness_reason,
+  (d->>'userRunnerEnteredAtEpochMs')::bigint
+    - (d->>'cloudflareRouteReceivedAtEpochMs')::bigint AS route_to_runner_ms,
+  (d->>'runtimeConsentLockAcquiredAtEpochMs')::bigint
+    - (d->>'userRunnerEnteredAtEpochMs')::bigint AS consent_queue_ms,
+  (d->>'activeWakeFinishedAtEpochMs')::bigint
+    - (d->>'activeWakeStartedAtEpochMs')::bigint AS active_rpc_ms,
+  (d->>'wakeResponseAtEpochMs')::bigint
+    - (d->>'wakeDispatchAtEpochMs')::bigint AS transport_to_response_ms,
+  (d->>'wakeDrainFinishedAtEpochMs')::bigint
+    - (d->>'wakeResponseAtEpochMs')::bigint AS drain_ms,
+  (d->>'wakeHandlerAcceptedAtEpochMs')::bigint
+    - (d->>'wakeHandlerReceivedAtEpochMs')::bigint AS handler_to_accept_ms
+FROM attempts
+ORDER BY at, orchestration_attempt_fingerprint;
+```
+
+The transport interval includes the SDK's state/readiness work and TCP fetch,
+not just network time. Constructor timestamps can predate a warm request.
+Compare same-owner differences first; Worker, Durable Object, Node, Temporal,
+and Web epoch differences require clock-skew allowance. The SQL completion
+window should include the command budget beyond the ingress window. Do not
+export raw JSON or subject identifiers just to investigate a latency span.
+
 ### Provider request diagnostics
 
 `runner.provider_egress_diagnostic` is the bounded provider-request trace for
@@ -100,6 +277,231 @@ as `low`, `medium`, `high`, `xhigh`, or `null`. The value is captured after
 conversation and turn-scoped automation overrides resolve and is the normalized
 value passed to the Codex provider attempt. Raw provider configuration, prompts,
 messages, credentials, and paths remain excluded.
+
+### Warm Codex transport diagnostics
+
+The existing `codex.transport_diagnostics` provider trace includes
+`codexTransportScope` (`turn`, `thread`, or `unscoped`),
+`codexTransportElapsedMs` since the current provider turn request,
+`codexTransportProviderRequestOrdinal`, `codexTransportWarmReused`, and the
+content-free `codexTransportTurnCorrelation` shared with action and completion
+timing. Together with fallback, idle-timeout and retry classifications, these
+distinguish transport recovery from the encompassing model-turn duration.
+Elapsed time is measured when the notification is observed, not when buffered
+logs are persisted; it is not an upstream response-header measurement.
+
+Native fallback warnings contain a thread ID without a turn ID. Reused sessions
+observe only recognized transport warnings from the exact bound thread after
+the current turn-start notification. They emit sanitized metadata while still
+discarding raw warning text and all unscoped output, requests and completion.
+The scope describes identifiers carried by the notification; the correlation
+describes the active turn at observation time. A delayed thread-scoped warning
+cannot be attributed conclusively to that turn or an earlier WebSocket frame. POST egress
+diagnostics do not observe WebSocket frames, and absence of a warning is not
+proof that no recovery occurred. `codexTransportTimeoutPhase` distinguishes
+`websocket-send`, `websocket-read`, and `http-read` when native warning text
+identifies the operation; missing or unknown phases are omitted by the runtime
+projection. No endpoint, raw thread or turn ID, prompt,
+response, or additional provider error text enters the diagnostic record.
+
+#### Responses WebSocket relay observations
+
+The Worker also writes `runner.provider_egress_diagnostic` records with
+`transportKind: websocket` through the existing runtime-log route. The
+`websocketMilestone` values describe actual relay boundaries:
+`client_received`, `upstream_sent`, first `upstream_received`, first
+`downstream_sent`, `response_received`, `response_forwarded`, and one observed
+`closed` or `failed` event. First-frame observations reset after each forwarded
+client frame. A later acknowledgement, first semantic output, or terminal event
+emits one receive/forward pair; further token frames update constant-size state
+without emitting per-token records. When the first frame is itself a milestone,
+it shares the existing first-frame record.
+
+Each connection gets a random `websocketConnectionCorrelation`. Counts include
+`clientFrameCount`, `upstreamSends`, `upstreamFrameCount`, and
+`downstreamFrameCount`. `activeClientMessageOrdinal` identifies the most recently
+forwarded client frame; `observedClientMessageOrdinal` on receipt can describe
+a newer frame still awaiting admission. `requestElapsedMs` starts at receipt of
+the latest forwarded frame, `upstreamSendElapsedMs` measures its admission/relay
+delay, and `firstUpstreamElapsedMs` and `firstDownstreamElapsedMs` measure the
+next receive and forward boundaries. `upstreamIdleMs` and `downstreamIdleMs`
+measure connection-wide time since the last data frame on each boundary.
+
+Every existing milestone includes numeric `acceptedPendingBytes` and
+`acceptedPendingMessageCount` from the relay's shared client/provider reservation
+counters, connection-local `acceptedPendingHighWaterBytes` and
+`acceptedPendingHighWaterMessageCount`, and the existing limits as
+`pendingLimitBytes` and `pendingLimitMessageCount`. High-water values advance only on successful
+reservation and survive draining and request reuse. Receive milestones run before
+reservation, so they exclude the arriving frame; send milestones run before
+release, so they include the frame being forwarded. Rejected frames never enter
+these values. A close or failure can still observe outstanding reservations.
+These measure accepted queued/in-flight work, including authorization or usage
+persistence waits, not JavaScript heap, socket buffers, or total isolate memory.
+The two high-water values are independent peaks, not necessarily simultaneous.
+
+The six scalars are additive under `diagnosticVersion: 1`; the unchanged runtime
+log parser accepts their `Bytes`/`Count` metadata names, as do older readers using
+that same policy. Readers with stricter schemas need separate compatibility
+verification. Older records without the fields remain valid; absence is unknown,
+not zero. No extra events or writes are emitted. A lost tail or platform memory
+termination may leave no final/high-water observation; low values in the last
+surviving record cannot rule out a later backlog peak or other memory pressure.
+
+`firstUpstreamMessageKind` contains only a fixed event-type allowlist or
+`other`, `invalid_json`, `too_large`, or `binary`. Only the first frame is
+parsed for this field, with a 65,536-character limit. No raw frames, arbitrary
+event types, provider IDs, or close reasons enter the records. Close observations
+contain only side, numeric code, and a fixed failure phase. A provider close can
+be observed before queued downstream forwarding finishes; existing relay drain
+ordering remains authoritative.
+
+Interpret these as connection observations, not model-health or exact-request
+proof. A forwarded request followed by no upstream frames supports upstream
+silence; a received frame without its corresponding forward supports relay
+delay. Unsolicited metadata and overlapping frames can weaken attribution.
+A valid, associated `response.created` establishes an acknowledgement, not
+continued inference progress. The runtime-log attempt/fence belongs to the socket upgrade
+and may precede later turns on a reused socket; it must not be treated as the
+current turn ID. Existing write-fence validation is preserved.
+
+`responseMilestone` is `acknowledged`, `progress`, or `terminal` for an observed
+response lifecycle boundary. `responseAcknowledged` requires `response.created`
+with a bounded response ID; metadata alone cannot set it. Lifecycle inspection
+parses text frames up to 65,536 characters and request frames up to 6 MiB.
+Malformed, binary, and oversized frames still pass through the relay and set
+`responseInspectionIncomplete`; missing evidence is never a health verdict.
+
+`responseRequestKind` distinguishes generation and `generate: false` prewarm.
+`responseClientMessageOrdinal` binds captured receive and forward observations
+to a forwarded request, even when forwarding is queued. Only a single outstanding
+recognized request permits `responseAssociationKind: single-request`. Overlap,
+unknown requests, or conflicting response IDs make subsequent attribution
+ambiguous for that socket. Response IDs are used only in memory and never logged.
+
+`responseAcknowledgementElapsedMs`, `responseFirstProgressElapsedMs`, and
+`responseTerminalElapsedMs` start at upstream send. `responseProgressIdleMs`
+measures time since the last recognized output event; `responseMaxFrameGapMs`
+tracks the largest observed data-frame gap, including send to first frame.
+`responseTerminalKind` uses a fixed terminal-event allowlist.
+`responseForwardElapsedMs` measures a captured milestone's receive-to-send delay.
+These fields distinguish acknowledgement, output, and forwarding; silence can
+still mean healthy reasoning, provider queuing, or a stalled stream.
+
+The request's `client_metadata.turn_id` supplies `codexTurnCorrelation` using the
+existing 48-bit SHA-256 correlation convention. It joins native
+`codexTimingTurnCorrelation` within the same runtime context. It is a diagnostic
+join hint, not an authority key; several provider requests can share a turn.
+The socket correlation and request ordinal retain the finer relay scope.
+
+Native `provider-output-received` and `assistant-output-received` timing records
+observe accepted, current-turn assistant/reasoning output or tool activity at
+Murph's app-server consumer. At most two extra records are emitted per turn.
+`codexTimingReceiptKind` is `assistant`, `reasoning`, or `tool`;
+`codexTimingFirstProviderReceiptElapsedMs`,
+`codexTimingFirstAssistantReceiptElapsedMs`,
+`codexTimingLastProviderReceiptElapsedMs`, and `codexTimingProviderReceiptCount`
+also appear on turn completion. These timings start at the local `turn/start`
+write, unlike relay timings. Reused-turn scope checks run before receipt tracking.
+Tool activity includes native tool execution events; the count is native events,
+not provider frames. Pinned Codex discards the response ID from its internal
+created event, so these records cannot prove delivery of a particular raw
+`response.created` frame. A downstream send alone is not native receipt.
+
+The additions are optional diagnostics: older readers drop new receipt stages
+and ignore new fields, and newer readers accept older records. Deploy the runtime
+projection before producers for complete visibility; mixed versions and rollback
+can lose diagnostics without changing responses or transport behavior.
+
+Persistence is best effort: at most four log writes are in flight per connection,
+with no diagnostic queue or awaited write on the forwarding path. Structured
+Worker logs retain the observation even when the durable write is skipped.
+`runtimeLogScheduled` and cumulative `droppedRecords` expose local admission
+and failed writes on subsequent observations, without guaranteeing persistence.
+Failures and closes after a send with no upstream frame receive warning
+retention; ordinary milestones remain debug. Missing rows are missing evidence.
+
+#### Stall reproduction and recovery design
+
+The credential-free `assistant-codex-websocket-stall.test.ts` fixture runs the
+pinned Codex 0.153.4 binary against a local WebSocket/SSE provider. After a
+successful warm turn, the provider keeps the socket open, receives a pong, and
+sends no response data. The full 90-second test measured 90,006 ms from stalled
+request to the single native HTTPS fallback. A five-second native idle setting
+measured 5,021 ms; an explicit close with the 90-second setting measured 116 ms.
+Each case completed the answer and the next resumed turn, which stayed on HTTPS.
+This proves the synthetic failure mechanism, not the cause of an earlier
+production incident.
+
+A separate credential-free local experiment runs the same pinned binary against
+healthy scripted responses that acknowledge immediately, stay quiet for 22 seconds,
+and then finish. It changes only the fixture's idle setting:
+
+| Local scenario | Idle setting | Result |
+| --- | --- | --- |
+| Healthy 22-second response silence | 90 seconds | Completed in 22,673 ms; no fallback |
+| Healthy 22-second response silence on both attempts | 20 seconds | WebSocket and HTTPS attempts timed out; failed after 40,493 ms |
+| Murph tool taking 22 seconds through native Codex | 20 seconds | Completed in 22,899 ms; no fallback |
+
+Reproduce with `MURPH_RUN_CODEX_TIMEOUT_SAFETY=1 pnpm exec vitest run --config
+vitest.config.ts --no-coverage test/assistant-codex-idle-timeout-safety.test.ts`
+from `packages/assistant-engine`. The default lane runs shorter versions of all
+three cases. These use a local scripted provider, not production or live OpenAI.
+They assert actual native timeout/fallback, successful tool execution, and the
+wire-to-consumer turn correlation. The tool case offers the registered Murph
+progress tool with a local-only delivery callback. It checks exactly one invocation,
+at least 22 seconds of actual callback work, and completion before the provider
+continues. This avoids relying on OS-dependent native shell-tool notifications;
+no message or external request is sent by the callback.
+
+The 20-second setting can interrupt healthy generation and its HTTPS replacement.
+Long local tool execution occurs outside the response-stream idle wait and is
+not itself interrupted by that setting. This proves a concrete unsafe case for
+lowering the limit; it does not measure real provider silence frequency or prove
+90 seconds is universally safe. An idle deadline bounds stream-read silence,
+not total latency across HTTP setup, retries, tools, or continuing response events.
+
+A test-only alternative closes the socket after five seconds without its first
+upstream data frame; the same native fallback began at 5,010 ms while native idle
+remained 90 seconds. A separate healthy case emitted `response.created`
+promptly, waited one second for text, and completed without fallback despite a
+500 ms prototype deadline. This alternative preserves acknowledged quiet
+reasoning, but any first frame cancels it: it cannot recover a post-acknowledgement
+stall or establish model progress. It is not a complete replacement for the idle
+deadline. A post-acknowledgement stall fixture confirms native idle recovery
+still fires after the first-frame guard has been cancelled. Ping/pong similarly
+proves a responsive transport peer, not inference;
+Murph's Worker relay also separates the client and upstream transport legs.
+
+The current hosted policy uses a provisional 30-second native stream-idle
+timeout for OpenAI, including its HTTPS fallback and operator requests. Child
+requests and streaming compaction inherit the same provider configuration.
+Native Codex also uses this knob for WebSocket sends; it does not replace the
+separate connection and HTTP request budgets.
+Venice and custom inference retain 90 seconds. `codex.prepare` reports the
+selected provider's idle timeout and request/stream retry limits. Native Codex
+still owns the single WebSocket attempt and HTTPS fallback; request retries,
+Murph cancellation, accepted work, and delivery ownership are unchanged.
+
+Local subscription measurements on 2026-09-15 completed eight Terra low turns
+at 90- and 20-second idle settings; the longest provider data gap was 9.377
+seconds. Sol high and extra-high stress runs stayed active through local test
+budgets with maximum gaps of 11.576 and 12.847 seconds, but did not finish an
+answer. No 90-second silence was reproduced. These selected WebSocket samples
+do not establish production latency tails, live HTTPS fallback behavior, or the
+cause of the original delayed reply. Genuine provider silence over 30 seconds
+can interrupt useful work; continuing events reset the idle wait, while local
+tool work occurs outside it. This is not a total reply deadline.
+
+The opt-in `MURPH_RUN_CODEX_30S_PROOF=1` cases in the two fixture files above
+exercise the full 30-second setting: silence before/after acknowledgement or partial text,
+22-second quiet completion, reasoning events and local tools spanning 35
+seconds, continuation recovery after a completed tool, and a resumed next turn.
+Routine CI runs short native equivalents and checks the rendered hosted config.
+Rollout needs fresh-process config adoption; mixed old/new containers retain
+their respective native windows without a wire or persisted-state change.
+Observe selected timeout, acknowledgement/forwarding gaps, native timeout phase,
+fallback frequency, and terminal failures through the existing diagnostics.
 
 ### Web-control preflight rejection attribution
 
@@ -238,6 +640,26 @@ ORDER BY
 Return only those aggregates. Never return `subject_key` values or raw JSON.
 If natural traffic produces no recurrence, report zero events; do not generate
 production traffic to exercise the telemetry.
+
+### Temporary outbound crypto pending-join diagnostic
+
+Question: do Worker requests canceled as hung during outbound crypto resolution
+join another request's pending load? `runner-outbound/shared.ts` synchronously
+emits `Hosted runner outbound crypto context joined pending load.` through the
+existing structured logger (`component: runner`, `phase: wake.running`) only
+immediately before awaiting a valid existing pending promise. Details contain
+only `domain` (`runtime` or `ingress`) and integer `pendingAgeMs` clamped to
+0..30000, derived from the entry's expiry and existing TTL. Volume is at most
+one event per joining invocation, with no leader or resolved-cache-hit events.
+No keys, identifiers, URLs, envelopes, payloads, raw errors, or key material are
+logged; no network I/O, state, or crypto/cache behavior is added or changed.
+The runtime owner decides removal after one seven-day observation window, or
+earlier after sufficient incident capture. Query natural traffic in that
+window: correlate this exact event with existing artifact crypto-stage logs
+and platform hung outcomes through native Worker request IDs **in memory only**;
+return only aggregate counts by join-event presence, domain, last observed
+crypto stage, and hung outcome. Never persist or export IDs or raw records.
+Correlation is not proof of causation; absence in lossy logs is inconclusive.
 
 ### Foreground checkpoint lease drift diagnostics
 
@@ -609,15 +1031,16 @@ exclusive partition:
 | `post-dispatch` | Middleware completion to action completion, including output/filtering/formatting performed there. Not pure serialization and not a guarantee of OS stream flush. |
 | `teardown` | The existing entrypoint warm-Codex cleanup; recursive batch actions do not perform this cleanup. |
 | `unattributed` | Action elapsed when no dispatch boundary was reached. It is not zero-cost setup or a guessed command phase. |
-| `query-freshness` | Shared `ensureFreshQueryProjection`, including its nested phases/rechecks. Applies across query callers/CLI families. |
+| `query-freshness` | Shared `ensureFreshQueryProjection` or the wearable-only fresh-row read, including nested phases/rechecks. Applies across query callers/CLI families. |
 | `query-manifest` / `query-status` | Each existing canonical manifest scan / projection-status read, including rechecks. |
-| `query-rebuild` / `query-wait` | Existing single-flight leader rebuild / follower's wait for that same promise. Only the leader owns rebuild time. |
+| `query-rebuild` / `query-wait` | Existing stale-reader rebuild / canonical write-lock acquisition. A reader rechecks after acquiring the lock; only actual rebuilding gets `query-rebuild`. |
 
 Nested scope summaries must not be added to their inclusive parents. Concurrent
 or overlapping named spans can overlap in time; repeated rechecks increase phase
 `count`, not command `calls`. Remaining dispatch time is **unattributed work**:
-for example stored-row reads, composition or other handler work. This patch does
-not distinguish database, provider, query execution or serialization subphases.
+for example stored-row reads, composition or other handler work. Rebuild
+subphases below distinguish existing derivation and publication owners, not
+provider/network work, query execution or output serialization.
 CPU timing is intentionally omitted: process-wide CPU deltas would mix concurrent
 invocations and single-flight owners, not reliably distinguish one caller's waits.
 
@@ -647,9 +1070,9 @@ and children rejected before entering the CLI have no invented command timing.
 Legacy batch output, counts, lengths, durations and failure handling are unchanged.
 
 Bounds are source-owned: 32 distinct command/outcome entries per report/active
-window; 11 fixed phase names; 64 started scoped spans per invocation (plus fixed
-lifecycle samples); at most 8,192 bytes per complete UDP envelope (including the
-ephemeral key/ticks) and 256 received packets per window. The 8 KiB cap is below
+window; 17 fixed phase names (the original 11 plus six rebuild names); 64 started
+scoped spans per invocation (plus fixed lifecycle samples); at most 8,192 bytes
+per complete UDP envelope (including the ephemeral key/ticks) and 256 received packets per window. The 8 KiB cap is below
 the supported macOS 9 KiB UDP datagram limit; no host setting or permission is
 changed. The sender trims before sending, and the receiver rejects envelopes
 over that same cap. No per-call list is retained. Known omitted/overflowed calls increment
@@ -695,6 +1118,445 @@ For the final bucket, the observed maximum supplies a finite upper bound on the
 retained sample. Histograms merge by summing corresponding counts; never compute
 per-call percentiles from per-profile averages. Truncation/loss means even those
 bounds describe the retained samples, not the complete population.
+
+### Query rebuild subphases (reader-before-producer)
+
+`packages/query/src/projection/rebuild.ts` adds only six fixed names to the
+existing `runtime-state/cli-timing` enum. The portable consumer must admit these
+names before the producer runs. Schema `murph.cli-timing.v1`, monotonic integer
+microseconds, eight histogram buckets, command/outcome identity, failure fields,
+32-command / 64-scoped-span caps, UDP 8,192-byte and HTTP 16,384-byte ceilings,
+whole-command trimming and disabled-scope no-op behavior are unchanged. No entity
+counts, IDs, paths, arguments, content, result values or error text are added.
+The enum length itself owns the exact 17-entry per-command shape bound; no
+transport limit is widened to accommodate the extra phases.
+
+| New phase | Existing operation measured |
+| --- | --- |
+| `query-source-read` | Await the strict canonical snapshot read, including its parsing/validation; not reset or the separate manifest scan. |
+| `query-wearable-dataset` | `collectWearableDataset`; wearable-only also includes the inline `createVaultReadModel` argument. Full rebuild's prior read-model assembly remains residual. |
+| `query-metric-projection` | Full rebuild's global metric projection, daily sample/metric outputs and canonical metric-target extraction. Absent from wearable-only rebuilds. |
+| `query-wearable-summary` | Derive/encode stored wearable summary rows. Absent when full rebuild reuses an already-fresh wearable generation. |
+| `query-search-documents` | Full rebuild's search-visibility filter and canonical/sample-summary document construction. No SQLite work. Absent from wearable-only rebuilds. |
+| `query-publication` | Database opening and its schema/migration setup, the existing immediate transaction (deletes, inserts, manifests and metadata), and database close. Full rebuild's result-object construction is also inside this interval. This is **not transaction-only timing**. |
+
+Synchronous work uses finally-balanced `startCliPhase`, without an added
+await/yield, helper pipeline or changed operation ordering. The existing async
+strict read uses `timeCliPhase`. Publication's outer timing `finally` encloses
+the unchanged open / transaction / close ownership: failed opens finish the
+span; transaction failure still rolls back before close; close failure still
+propagates, even after a successful commit. No canonical locking, freshness,
+transaction, result or exception policy changes.
+
+These phases are not an exhaustive partition. Full rebuild's existing canonical
+lock entry, unsupported-projection reset, internal manifest scan, default entity
+filter/read-model construction and wearable-freshness check are outside the six.
+The reset and freshness check can themselves open/read/close SQLite databases;
+that work must not be attributed to `query-publication`. Wearable-only reset is
+also residual. Instrumented outer manifest/status/lock scopes retain their old
+boundaries. Stored-row capture and public composition remain outside the rebuild
+subphases. The explicit public `rebuildQueryProjection` path emits its subphases
+but has no newly invented outer `query-rebuild`; stale query callers retain their
+existing parent span. Fresh reads and reused summaries have **absent**, not zero,
+rebuild samples. Do not subtract maxima/percentile intervals or mix unequal
+sample populations to manufacture a residual measurement.
+
+The unchanged eleven-phase `normalizeCommandTiming` rejects a command with more
+than eleven phase entries **or any unknown phase**, and `normalizeCliTiming`
+then rejects the entire optional timing object. It does not selectively preserve
+old CLI histograms within that object. Mixed-version safety means the existing
+usage parser independently drops `cliTiming` while preserving legacy native tool
+calls, durations, failures, output characters/bytes, provider requests and token
+accounting. CLI `total` histograms in the rejected object are unavailable too.
+History-backed `query-rebuild-timing-compatibility.test.ts` executes the actual
+pre-admission portable and usage readers for both profile versions; old producers
+remain accepted by the new reader. Do not depend on mixed-version dropping for
+observability: deploy and verify all consuming artifacts before producers.
+
+**Deployment is blocked, not observation-ready.** Parent verified that the
+protected private deployment workflow resolves only public `main` and exposes
+no candidate source-SHA/ref input. An isolated unmerged telemetry deployment
+therefore requires separately reviewed protected candidate-revision deployment
+support, or separately authorized merge plus normal release. This telemetry
+patch authorizes neither option, changes no workflow and claims no deployment.
+After the authorized route exists, verify the deployed reader artifacts first,
+then producer artifacts and naturally generated end-to-end phase admission.
+Only **after verified production deployment** start the **24-hour preliminary**
+window and **72-hour baseline** window. Candidate creation, staging or an older
+telemetry rollout does not start those clocks.
+
+Inspect bounded validated initial-provider, first-attempt summaries from natural
+traffic, grouped by command/outcome and fixed phase. Track retained sample counts,
+coverage/drop counters, sums, maxima and the existing histogram intervals. A
+completed failing operation can contribute a sample; interrupted/unreceived or
+hard-killed work cannot contribute a fabricated completion. The absence of a
+phase does not disprove a slow/hung path. Do not inspect member content, command
+arguments/results or issue synthetic production calls for this investigation.
+
+The public rebuild tests use the existing synthetic source-health fixture and
+real `rebuildQueryProjection`, `searchVaultRuntime` and
+`summarizeWearableSourceHealthRuntime` entrypoints. They compare enabled/disabled
+outputs and freshness, assert finite private-safe samples and finally/lock/SQLite
+failure cleanup. Existing sender/receiver, terminating-process, assembled CLI and
+HTTP-budget tests remain applicable: the exact timing scope/module/transport is
+unchanged; only its enum and query-operation spans expand. The maximum-shape
+transport tests iterate the enum and retain complete admitted phase summaries.
+No real-Codex prompt, reply, routing, result channel or tool invocation changes;
+this diagnostic-only addition does not require a new paid model replay to prove
+its wire contract. Existing end-to-end transport evidence is not proof this
+candidate has been built or deployed.
+
+An opt-in local measurement reuses that fixture (no new benchmark harness):
+
+```bash
+MURPH_QUERY_REBUILD_PHASE_MEASURE=1 pnpm --dir packages/query test \
+  test/wearable-source-health-query.test.ts -t 'synthetic rebuild phase measurement'
+```
+
+It deletes only its temporary synthetic projection, runs seven rotated
+cold-projection enabled/disabled pairs per public operation after warmup, and
+prints the seven raw disabled/enabled wall-time samples and matched
+enabled-minus-disabled differences in microseconds, numeric medians/deltas,
+fixed phase histograms and a worst-tick synthetic envelope byte size. The sink
+stays in memory and the timing endpoint is
+explicitly cleared/restored. Fixture Date is fixed for result parity; durations
+still use the real monotonic clock. It checks the six/four executed subphases,
+unchanged results, zero dropped spans and unchanged packet budget. This bounds
+instrumentation cardinality/bytes and records observed local overhead, **not a
+universal latency bound or production speedup**. Transport cost is covered
+separately by the existing integration tests.
+
+### Private device failure evidence
+
+Caught device-handler failures may add three optional scalars to the existing
+`ToolFailureDiagnostic` classification row: `deviceAction` is the parsed
+`list_accounts | connect | reconcile | configure_no_data_outreach` action;
+`deviceErrorCode` is exact membership in `DEVICE_FAILURE_CODES` in
+`packages/assistant-engine/src/assistant-codex/tool-failure-diagnostics.ts` (the
+11 codes already recognized by the device adapter); `deviceHttpStatus` is an
+integer from 100 through 599, read from own `status`, or own `statusCode` only
+when `status` is nullish. Unknown codes and absent/invalid statuses are omitted,
+not suppressed failures. A status does not establish an external cause, override
+a local unsupported-selection code, or authorize a retry.
+
+Only this caught-device boundary emits the fields. Capture rejects proxies
+before descriptor reads and never invokes accessors, follows prototypes, reads
+contexts/causes/bodies/payloads, or retains errors, names, prose, providers,
+identifiers, arguments or results. The existing issue-input, reporting and
+sanitizer path retains the scalars without schema or cap changes (at most eight
+classification detail keys here, within the existing 24-key cap). Old/missing
+fields remain valid. RPCs, prompts, tool schemas, completion counters and
+success/admission telemetry are unchanged; classification rows are not another
+completed-call denominator.
+
+For the next authorized review, query at most 200 device classification failures
+in one fixed 24-hour window, grouped only by these fields and the existing
+reason/category. Keep missing/unknown evidence unresolved and completion counts
+separate. Propose a behavior correction only after at least two matching
+action/code observations and a deterministic reproduction at the responsible
+owner; telemetry alone does not establish the original cause.
+
+### Finite CLI failure counts (optional, same timing identity)
+
+Each non-successful invocation from a new producer contributes at most one
+`failures: [{ code, stage, count, validation? }]` observation inside its existing
+command/outcome entry. For example, a synthetic `experiment session log` throw
+with code `invalid_payload` and context stage `validation` produces that exact
+pair with count 1. A successful invocation has no failure fields. An observed
+nonzero exit without original error detail contributes `unknown / unknown`, not
+an apparent success. EPIPE keeps its existing `unknown` outcome; it is not
+reclassified as a product failure.
+
+The sole portable vocabulary, validation and merge owner is
+`packages/runtime-state/src/cli-timing.ts`. Codes and stages use exact finite
+membership, never pattern-admitted provider strings. It admits the actionable
+CLI/knowledge codes, fixed validation types and selected Node/transport codes;
+other values collapse to `unknown`. Capture reads only own data properties for
+`code`, `context.stage`, direct `stage`, and (when code is absent) three exact
+validation type names. It does not call getters, enumerate objects, inspect
+messages, arguments or result output, follow prototypes/causes, or retain original
+errors or contexts. The optional schema detail below reads only bounded own
+`publicIssues` data at that same original-error seam. Code-only observations are
+diagnostic hints, not authorization or a claim that a reported stage is independently verified. Existing dynamic-tool
+finite stage/reason/category diagnostics remain separate.
+
+Memory read diagnostics admit exactly `memory_not_found` and
+`memory_document_invalid`, both emitted by the existing CLI owner at `read`.
+The assistant's existing `tool-failure-diagnostics.ts` category map classifies
+these as `not_found` and `invalid_result`, respectively: a missing record is
+not invalid input, and an unreadable canonical document is invalid stored state,
+not proof of a caller argument defect. Other memory codes (including
+`memory_persistence_invalid`), arbitrary strings, and prefix/suffix/lookalike
+variants remain `unknown`. This only classifies existing errors; it does not
+change output, exit status, model-visible recovery guidance, reads, writes or
+retries. Messages, source paths, record ids and values never enter this vocabulary.
+
+Knowledge source diagnostics additionally admit exactly
+`knowledge_source_unreadable` (`unavailable`), `knowledge_invalid_source_path`
+(`invalid_input`), and `knowledge_invalid_library_slug` (`invalid_input`). These
+are existing service errors, not new validation or source behavior. Unreadable
+source does not prove corruption; invalid source/library references do not
+establish why the caller supplied them. No stage is inferred when absent.
+Unfamiliar codes and lookalikes still normalize to `unknown`.
+
+Research scout diagnostics admit exactly `research_scout_invalid_batch_payload`
+and `research_scout_invalid_window` (private category `invalid_input`), plus
+`research_exa_token_missing` (private category `unavailable`, for missing runtime
+configuration). The command/parser and client already own these errors. Invalid
+compact lanes, a reversed window and an empty injected environment are distinct
+synthetic rejection cases; retaining their codes establishes no production
+behavioral cause. Their existing errors supply no stage: timing retains `unknown`
+and shell readback
+omits the stage. Do not add stages to public errors, infer them from codes, change
+model/RPC text or retry guidance, or expand provider-code catalogs. Unknown codes
+and lookalikes remain `unknown`; no arguments, paths, tokens, payloads or error
+messages enter this telemetry. The same consumer-first order below applies.
+
+#### Optional schema-validation detail
+
+For `VALIDATION_ERROR` only, `validation: { field, code, missing? }` is one finite
+selected issue, never another failure observation. `cliTimingValidationFailure`
+in the portable owner selects the first admissible issue within the first **8**
+own array entries. It reads `publicIssues` on the original error, `fieldErrors`
+in the assistant's existing complete **16 KiB** error envelope, or `validation`
+on the timing wire. All reads use own data descriptors; getters, prototypes,
+causes, iterators and arbitrary nested paths are not consulted. Only exact full
+static field names are admitted:
+
+- `automation list`: limit, status (only these two options from `packages/cli/src/commands/automation.ts`).
+- `food search-labels`: query, limit.
+- `knowledge upsert`: body, slug, title, pageType, status, clearLibraryLinks,
+  relatedSlug, librarySlug, sourcePath.
+- `knowledge append-section`: slug, heading, body, title, position, sourcePath.
+
+Issue codes use the closed standard vocabulary in `CliValidationDiagnostic`;
+`missing` is retained only when explicitly boolean. Absent is not false, and
+neither is inferred from a message, expected/received type or value. Array paths,
+indices, prefixes, substrings, lookalikes and unknown/malformed details are
+omitted. No original path, message, value, argument or source object is retained.
+The assistant requires positive registered-command attribution and adds only
+`vaultCliValidationField`, `vaultCliValidationCode`, and optional boolean
+`vaultCliValidationMissing` to existing issue metadata. Success has no diagnostic.
+The producer never parses stdout or argv; command attribution and categories
+otherwise remain unchanged. Synthetic probes establish information loss, **not**
+the behavioral root cause of actual member argument errors.
+
+The existing Incur error bridge observes ordinary handler throws **before** its
+public error projection can discard typed fields. Dispatch and invocation
+catches provide a fallback only: first observation wins, with no per-catch
+increment and no cross-invocation error-object cache. Recursive batch children
+retain their own scopes; the container is not an additional failure sample.
+Stop-on-error and the existing rejection of nested batch before child entry are
+unchanged. An unentered child has no invented diagnostic.
+
+There are at most **8 failure variants per command/outcome**, within the existing
+32-command limit. Identity is code/stage plus optional validation field/code/missing,
+including absence versus explicit false. Additional distinct variants increment
+optional `droppedFailures` by their observation count; retained variants still aggregate.
+`sum(failures.count) + droppedFailures <= calls`. These are safe positive counts
+(or a safe nonnegative drop count), not extra CLI calls. Malformed optional
+failure details are removed independently, retaining valid timing and usage.
+Malformed optional validation alone never removes valid code/stage/count evidence.
+Unknown future codes/stages normalize to constants; identical normalized variants
+coalesce. Old entries without these fields remain unchanged, including mixed
+old/new merges: missing old detail is **not** backfilled with fabricated unknown
+observations. Counts can therefore cover fewer than the entry's error calls.
+
+Existing UDP/HTTP fitting still removes whole command entries and charges their
+calls to `droppedCalls`; it does not reinterpret `droppedFailures` or split a
+command into duplicate identities. Whole-entry omission also loses that entry's
+failure details. The 8 KiB envelope, 16 KiB complete usage body, packet budget,
+retention, clocks, outcomes and all legacy accounting are unchanged. There is no
+new stream, collector, marker, DB field/table, retry, awaited operation or
+model-visible output. Without the existing timing transport, capture is inert.
+
+**Coverage limits:** Incur 0.5.1's `internal/command.ts` puts `Parser.parse`
+for resolved command arguments/options and command-level environment validation
+inside the middleware chain. Murph's `patches/incur@0.5.1.patch` at base
+`4949045492c` preserves that ordering and maps both `Errors.ValidationError` and
+`Errors.ParseError` to `VALIDATION_ERROR / validation`; the repository's
+`incur-smoke.test.ts` also checks this recovery contract. Capture uses those
+exact type names when no code is available, not the unpatched upstream
+ParseError fallback. A direct ZodError maps to `invalid_payload / validation`,
+matching the CLI projection. Qualify with the real-entry tests against the
+installed patched dependency, not upstream source alone.
+Global/configuration parsing, CLI-level environment and vars validation, and
+routing can precede middleware; some failures expose only an exit or reach the invocation
+fallback without a resolved path (`other`). Returned `c.error(...)` sentinels
+are not throws. Stream-consumption errors are handled outside the suspended
+middleware chain. Those paths may provide only an unknown observation, or no
+completion at all. Later asynchronous failures, hard kills and lost datagrams
+retain the existing missingness. No output parsing or additional Incur runtime
+hook is introduced to fill those gaps.
+
+**Compatible rollout:** admit this optional extension in downstream Web/hosted
+usage parsers, usage-body fitting and the engine receiver/profile consumer
+before updating CLI producers. They all use the portable normalizer; no second
+schema tree or new bundler ownership is needed. Older timing-aware consumers
+accept the same command/outcome identity and strip the new fields, preserving
+calls/phases and usage accounting. Older producers remain readable unchanged.
+A producer-first or consumer rollback loses detail, not billing validity. The
+history-backed test uses `MURPH_CLI_FAILURE_COMPAT_BASE=4949045492c` to load both
+actual pre-change owners; the older `MURPH_CLI_TIMING_COMPAT_BASE` test remains a
+separate, pre-timing rollout proof.
+
+Additional failure codes on the same `murph.cli-timing.v1` schema, including the
+two memory read codes, three knowledge source codes and three research codes,
+and optional validation detail also roll out **reader before writer**: first
+update the portable normalizer in downstream Web/hosted usage and engine/profile consumers
+and the assistant category reader, then update CLI producers. Warm older
+failure-aware readers normalize unfamiliar codes to `unknown`, discard unknown
+validation metadata and coalesce equal code/stage pairs while retaining command
+identity, outcomes, calls, phases and report counts. New readers still accept old
+reports without failure details and cannot recover classifications already collapsed by old writers. A reader
+rollback loses diagnostic specificity, not valid timing or usage accounting;
+no protocol bump or coordinated pause is needed. The history-backed runtime-state
+test uses `MURPH_CLI_MEMORY_FAILURE_COMPAT_BASE` to load the actual pre-admission
+portable reader; it must be run with the base named in the active rollout plan,
+not replaced with a copy of the old parser or a current-reader round trip.
+The research equivalent uses `MURPH_CLI_RESEARCH_FAILURE_COMPAT_BASE` with the
+pre-admission base in its active plan. Runtime-state and profile tests load the
+actual old portable and hosted readers, checking coalescing to `unknown`, mixed
+old/new reports, absent evidence and unchanged counts/tokens.
+
+The `automation list` field extension follows that same consumer-first order.
+Deploy the portable reader in Web/hosted usage, engine/profile and assistant
+completion consumers before CLI producers. Older readers omit its `validation`
+detail but keep `VALIDATION_ERROR`, stage, counts, outcomes and phases; newer
+readers cannot recover detail discarded by older producers or consumers. There
+is no backward recovery or backfill. Run the actual old-reader test with
+`MURPH_CLI_AUTOMATION_VALIDATION_COMPAT_BASE=5189dace0ad608208702a12ece4f95e76b619e59`.
+The shared subprocess fixture checks invalid limit/status and a nearby valid
+list with no provider calls or filesystem changes, plus byte-identical output
+and exits with timing disabled/enabled. No prompt, schema or dynamic-tool change
+is implied by these synthetic probes.
+
+### Bounded failure-frequency inspection and decision threshold
+
+Run on the **primary usage database** after compatible consumers and producers
+are present. This query caps input at 10,000 usage rows over 72 hours and output
+at 50 finite command/code/stage groups. It uses existing turn IDs only internally
+for aggregation; no IDs or private content are returned. Sum validation variants
+within each command summary before taking the maximum count per turn/code/stage
+to avoid adding repeated provider-request/profile snapshots;
+`observed_failures_lower_bound` is conservative, not an exact all-attempt total.
+A row-cap hit requires a narrower fixed window before making coverage claims.
+
+```sql
+WITH rows AS MATERIALIZED (
+  SELECT turn_id, turn_profile_json -> 'cliTiming' AS t
+  FROM hosted_ai_usage
+  WHERE provider = 'codex-cli'
+    AND occurred_at >= (now() AT TIME ZONE 'UTC') - interval '72 hours'
+    AND occurred_at < (now() AT TIME ZONE 'UTC')
+  ORDER BY occurred_at DESC
+  LIMIT 10000
+), commands AS (
+  SELECT turn_id, c
+  FROM rows
+  CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
+  WHERE t ->> 'schema' = 'murph.cli-timing.v1'
+    AND c ->> 'command' IN ('experiment session log', 'knowledge upsert', 'other')
+    AND c ->> 'outcome' = 'error'
+), per_turn AS (
+  SELECT turn_id, c ->> 'command' AS command,
+         f.code, f.stage, max(f.observations) AS observations
+  FROM commands
+  CROSS JOIN LATERAL (
+    SELECT e ->> 'code' AS code, e ->> 'stage' AS stage,
+           sum((e ->> 'count')::numeric) AS observations
+    FROM jsonb_array_elements(c -> 'failures') e
+    GROUP BY e ->> 'code', e ->> 'stage'
+  ) f
+  GROUP BY turn_id, c ->> 'command', f.code, f.stage
+)
+SELECT command, code, stage, count(*) AS independent_turns,
+       sum(observations) AS observed_failures_lower_bound,
+       (code <> 'unknown' AND count(*) >= 2) AS investigate,
+       (SELECT count(*) = 10000 FROM rows) AS input_row_cap_hit
+FROM per_turn
+GROUP BY command, code, stage
+ORDER BY independent_turns DESC, observed_failures_lower_bound DESC, command, code, stage
+LIMIT 50;
+```
+
+Investigate an implementation change only when the **same finite command/code/
+stage failure occurs in at least two independent turns**, then reproduce that
+specific path synthetically. One noisy loop is one turn, however high its count.
+Unknowns are a coverage signal, not evidence for a particular product fix. Check
+rollout version, absent diagnostics, `droppedFailures`, `droppedCalls` and
+transport completeness before treating frequencies as representative. This
+telemetry does not by itself establish bad input, missing ownership, a conflict,
+or a product defect; do not presume or repair experiment behavior from it.
+
+Failure-extension regression coverage additionally includes real shell/entry
+fake handlers and real Incur errors over loopback, first-observation dedup,
+private/hostile properties, mixed successes/errors/stages, current usage parsing,
+actual old-reader skew, usage-body fitting and Web persisted normalization. These
+are synthetic local tests; no real-model journey or production destination is
+needed for this extension's unchanged output contract.
+
+#### Automation-list validation inspection (including singletons)
+
+For `automation list / VALIDATION_ERROR / validation`, **any newly attributed
+event warrants inspection, including one event in one turn**; the two-turn
+implementation-investigation threshold above does not gate this inspection.
+Attribution is not an automatic behavior or prompt change. Reproduce the exact
+attributed path synthetically and establish its cause before proposing one.
+This extension does not classify connected-app result-size failures, missing
+knowledge reads, other food/knowledge/meal errors, generic shell exits or unknown
+event/automation outcomes.
+
+After consumer/producer convergence, run this read-only query on the primary
+usage database for a fixed natural-traffic window. Bind `:window_start_utc` and
+`:window_end_utc` to UTC timestamps (use consecutive 12-hour windows for a
+comparison). It returns only bounded metadata, keeps absent validation visible,
+and uses turn IDs only internally to avoid summing repeated profile snapshots.
+A 10,000-row cap hit requires a narrower window; counts are observed lower bounds,
+not complete attempt totals. Check missing reports and drop counters separately.
+
+```sql
+WITH rows AS MATERIALIZED (
+  SELECT turn_id, turn_profile_json -> 'cliTiming' AS t
+  FROM hosted_ai_usage
+  WHERE provider = 'codex-cli'
+    AND occurred_at >= :window_start_utc
+    AND occurred_at < :window_end_utc
+  ORDER BY occurred_at DESC
+  LIMIT 10000
+), commands AS (
+  SELECT turn_id, c
+  FROM rows
+  CROSS JOIN LATERAL jsonb_array_elements(t -> 'commands') c
+  WHERE t ->> 'schema' = 'murph.cli-timing.v1'
+    AND c ->> 'command' = 'automation list'
+    AND c ->> 'outcome' = 'error'
+), per_turn AS (
+  SELECT turn_id, f.field, f.issue_code, f.missing,
+         max(f.observations) AS observations
+  FROM commands
+  CROSS JOIN LATERAL (
+    SELECT e -> 'validation' ->> 'field' AS field,
+           e -> 'validation' ->> 'code' AS issue_code,
+           e -> 'validation' ->> 'missing' AS missing,
+           sum((e ->> 'count')::numeric) AS observations
+    FROM jsonb_array_elements(c -> 'failures') e
+    WHERE e ->> 'code' = 'VALIDATION_ERROR'
+      AND e ->> 'stage' = 'validation'
+    GROUP BY e -> 'validation' ->> 'field', e -> 'validation' ->> 'code',
+             e -> 'validation' ->> 'missing'
+  ) f
+  GROUP BY turn_id, f.field, f.issue_code, f.missing
+)
+SELECT field, issue_code, missing, count(*) AS independent_turns,
+       sum(observations) AS observed_failures_lower_bound,
+       (field IN ('limit', 'status')) IS TRUE AS inspect,
+       (SELECT count(*) = 10000 FROM rows) AS input_row_cap_hit
+FROM per_turn
+GROUP BY field, issue_code, missing
+ORDER BY independent_turns DESC, field, issue_code, missing
+LIMIT 50;
+```
 
 ### Bounded latest-72h / prior-72h inspection
 
@@ -747,7 +1609,9 @@ rows AS MATERIALIZED (
   FROM commands CROSS JOIN LATERAL jsonb_array_elements(c -> 'phases') p
   WHERE p ->> 'phase' IN ('total', 'setup', 'dispatch', 'post-dispatch',
     'teardown', 'unattributed', 'query-freshness', 'query-manifest',
-    'query-status', 'query-rebuild', 'query-wait')
+    'query-status', 'query-rebuild', 'query-wait', 'query-source-read',
+    'query-wearable-dataset', 'query-metric-projection', 'query-wearable-summary',
+    'query-search-documents', 'query-publication')
 ), totals AS (
   SELECT period, command, outcome, p ->> 'phase' AS phase,
          sum((p ->> 'count')::numeric) AS phase_samples,
@@ -815,7 +1679,8 @@ The gate uses the pinned real Codex binary and a synthetic local Responses
 provider, `buildHostedCodexConfigToml`, the unchanged `murph-member-workspace`
 profile and production shell allowlist, with only the synthetic vault as a
 workspace root. `MURPH_HOSTED_CLI_TIMING_CLI_BIN` optionally selects an absolute
-path to the freshly packaged `@murphai/murph` **`dist/bin.js`**. Without it, the
+path to the freshly packaged `@murphai/murph` **`dist/bin.js`**, or the fully
+assembled runner's **`.bundle/bin.js`**. Without it, the
 test uses the checkout's `packages/cli/dist/bin.js`; this works only when that
 layout is already readable by the profile. The test checks the built entry and
 package name, but does not establish artifact freshness from the path: prepare
@@ -890,9 +1755,13 @@ built `wearables latest` invocation reaches the real query owner and must expose
 No query calls are added to non-query commands. A nonempty session, unchanged
 session on continuation, and native `warm-reused` traces are required.
 
-Passing this gate establishes built CLI -> hosted shell -> Codex raw diagnostic
-transport; the engine profile test composes it with the actual extractor -> hosted
-normalization boundary. Separate startup cases distinguish no native event from
+Passing this gate establishes the selected artifact -> hosted shell -> Codex raw
+diagnostic transport; a source or `dist/bin.js` run does **not** establish
+`.bundle/bin.js` parity. In bundled mode, a third, telemetry-disabled child runs
+the installed sibling `dist/bin.js` in the same shell/profile. All three children
+must complete successfully with identical per-stream bytes; only the enabled
+bundled child may contribute the single report. The engine profile test composes
+this with the actual extractor -> hosted normalization boundary. Separate startup cases distinguish no native event from
 an actual native RPC error and retain the latter. Their receiver fixture mirrors
 the one-shot production close contract: catch and finally can both finish cleanup,
 but only the first can return a diagnostic. Empty startup failures remain empty;
@@ -904,6 +1773,99 @@ in the repository. Run that explicit gate from the active plan. A current-parser
 roundtrip of field-stripped data is only legacy-shape proof, not mixed-version
 proof. Ordinary runs without the base variable explicitly skip this additional
 history-dependent case.
+
+#### Bundled timing-owner prerequisite and artifact parity
+
+The CLI's literal lazy import of
+`@murphai/runtime-state/node/cli-timing` and query's variable native runtime import
+must reach the same installed timing owner. Inlining that leaf into the CLI while
+query loads the installed package creates separate `AsyncLocalStorage` instances:
+lifecycle scopes can survive while `query-freshness`, `query-manifest` and
+`query-status` disappear. The shared runner esbuild policy keeps **only that exact
+stateful subpath** external; both bundle input guards reject accidental inlining
+of its installed implementation. The leaf resolves its relative timing catalog
+from the same installed package for CLI and native query callers. Other
+runtime-state entrypoints remain bundleable; no process-global registry is added.
+The CLI import remains lazy. Entry, static-closure and total-output guards are
+unchanged and must pass on the actual assembled candidate.
+
+Old missing query phases mean **unknown**, not zero query cost or a query-free
+command. Lifecycle coverage, a successful command and zero dropped-span counters
+do not prove that the old split owner observed query work; this loss occurs before
+span admission. Do not reconstruct absent durations or treat pre-fix absence as a
+performance baseline. The correction restores existing bounded numeric/enum
+spans to the existing report and transport, without changing collectors, fields,
+caps, loss/unknown semantics, native errors, cancellation or CLI results.
+
+The runner bundle test stages a synthetic successful read through a native
+variable import and copies the candidate's built **public timing exports**, not
+an alternative timing implementation. Its esbuild negative control removes only
+the timing external: it must retain lifecycle phases and lose all three query
+phases. The corrected path calls `bundleInstalledVaultCliBinary`, then executes
+`.bundle/bin.js` and both retargeted wrappers. Enabled reports must contain the
+query phases and remain valid under the existing private-safe normalizer; all
+successful output/exit results must match `dist/bin.js`, including telemetry off.
+Relative-import bypass cases exercise both shared forbidden-input guards.
+This isolates module ownership, not the real query implementation or transport;
+the assembled hosted gate above owns that composed proof.
+
+Use the repository's supported Node (at least 24.14.1), pinned pnpm 10.33.0,
+installed candidate dependencies and pinned Codex binary. Build the public timing
+exports before running the synthetic bundle tests; missing exports are a hard
+fixture failure, not a skip or a source-loader fallback. From the repository root:
+
+```sh
+pnpm --filter @murphai/runtime-state build
+pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage \
+  apps/cloudflare/test/runner-bundle-cli-bundle.test.ts \
+  apps/cloudflare/test/runner-bundle-entrypoint-bundle.test.ts
+pnpm --dir apps/cloudflare typecheck
+pnpm --dir packages/assistant-runtime typecheck
+```
+
+For the actual production artifact proof, use canonical Linux x86_64 assembly
+without skip flags or budget overrides, then copy the **entire installed runner
+tree**, including retained package payloads, into an already permitted temporary
+root. Do not substitute a separately built CLI, incomplete file copy, new source
+loader, symlink back to an unreadable checkout, or broader filesystem grant:
+
+```sh
+set -eu
+pnpm --dir apps/cloudflare runner:bundle
+export MURPH_CLI_TIMING_ARTIFACT_ROOT="$(mktemp -d)"
+cp -R apps/cloudflare/.deploy/runner-bundle "$MURPH_CLI_TIMING_ARTIFACT_ROOT/installed"
+export MURPH_HOSTED_CLI_TIMING_CLI_BIN="$MURPH_CLI_TIMING_ARTIFACT_ROOT/installed/node_modules/@murphai/murph/.bundle/bin.js"
+MURPH_RUN_HOSTED_CLI_TIMING_E2E=1 \
+  pnpm --dir packages/assistant-runtime exec vitest run \
+  --config vitest.config.ts --no-coverage \
+  test/hosted-runtime-codex-config.test.ts -t 'shared CLI timing'
+```
+
+The assembly output above is the default deploy-directory location; use the
+actual assembly output when an existing deploy-directory override is active.
+Preserve the installed candidate package tree during the copy and remove the
+owned temporary root after validation. The real successful `wearables latest`
+read must expose all three query phases through the existing hosted diagnostic
+pipeline. `goal list` and `family list` must remain query-phase-free; cold and warm
+session evidence, native failures and telemetry-disabled no-op checks remain
+mandatory. Source query-concurrency tests and an unbundled hosted run are useful
+separate evidence, never substitutes for this assembled-artifact gate.
+
+This is a packaging-only correction using an already deployed vocabulary. The
+original consumer-first rollout rule still applies to introduction of shared CLI
+timing, but this correction requires no new consumer schema, database migration
+or coordinated protocol transition. Rebuild the runner with its matching installed
+packages and use the normal parent-owned rollout. Mixed old/new runners remain
+wire-compatible; older runners may still omit query spans. Do not use the new
+CLI bundle with a different or missing installed timing package.
+
+After parent validation and deployment, measure **72 hours of normal traffic**
+using the bounded aggregate inspection above. Record rollout coverage separately
+from duration, missingness and existing drop/loss indicators; compare the latest
+72-hour and preceding 72-hour windows only where coverage supports comparison.
+Do not add identifiers to reports, replay production payloads, generate probe
+traffic, or infer an optimization from newly visible spans. No production
+measurements or rollout results are established by this implementation handoff.
 
 For source-resolution and startup-loading corrections, run the focused guards
 from the repository root before the existing built hosted proof:
@@ -958,3 +1920,14 @@ validation must run repository tests/typechecks/builds, the actual complexity
 guard and the built hosted lane on supported Node/pnpm and pinned Codex versions
 before promotion. This telemetry patch does not authorize merging, deployment,
 or bypassing the protected public-main release contract.
+
+### Reply skip reasons
+
+Assistant `input.reply-skipped` events populate the existing `safeDetails` field
+on `assistant.automation_detail` with `reply_skip:<reason>`. The engine maps exact
+static reasons to bounded codes such as `channel_disabled`, `self_authored`,
+`already_handled`, `unattested_reaction`, `empty_input`, `intentional_no_reply`,
+`provider_usage_limit`, and `incomplete_terminal_evidence`. Unknown or dynamic
+reasons yield only `reply_skip:unclassified`; unrestricted event details and
+provider error text are never copied into this diagnostic. These codes describe
+an existing skip or deferral and do not change retry, reply, or alert decisions.

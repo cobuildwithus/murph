@@ -587,7 +587,7 @@ beforeEach(() => {
   });
   mocks.prepareHostedProviderCleanupPlan.mockImplementation(async (input: {
     deferred: boolean;
-    idleCheckpointDelayMs?: number | null;
+    runnerIdleTtlMs?: number | null;
     initialCheckpoint?: { nextWakeAt?: string | null } | null;
     nowMs: number;
     terminalCleanupMessageIds?: readonly string[] | null;
@@ -599,7 +599,7 @@ beforeEach(() => {
         const queuedCheckpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
           checkpoint: {
             nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-              idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+              runnerIdleTtlMs: input.runnerIdleTtlMs,
               nowMs: input.nowMs,
             }),
           },
@@ -626,7 +626,7 @@ beforeEach(() => {
         const rearmedCheckpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
           checkpoint: {
             nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-              idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+              runnerIdleTtlMs: input.runnerIdleTtlMs,
               nowMs: input.nowMs,
             }),
           },
@@ -657,7 +657,7 @@ beforeEach(() => {
       checkpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
         checkpoint: {
           nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            runnerIdleTtlMs: input.runnerIdleTtlMs,
             nowMs: input.nowMs,
           }),
         },
@@ -707,7 +707,7 @@ beforeEach(() => {
     stillDirty: false,
   });
   mocks.recordHostedProviderCleanupAfterDelivery.mockImplementation(async (input: {
-    idleCheckpointDelayMs?: number | null;
+    runnerIdleTtlMs?: number | null;
     nowMs: number;
     outcomes: readonly HostedAssistantDeliveryOutcome[];
     vaultRoot: string;
@@ -723,7 +723,7 @@ beforeEach(() => {
     const checkpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
       checkpoint: {
         nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-          idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+          runnerIdleTtlMs: input.runnerIdleTtlMs,
           nowMs: input.nowMs,
         }),
       },
@@ -774,7 +774,7 @@ beforeEach(() => {
     if (!Number.isFinite(nextWakeMs) || nextWakeMs <= input.nowMs) {
       return input.deferDueOrInvalid
         ? mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            runnerIdleTtlMs: input.runnerIdleTtlMs,
             nowMs: input.nowMs,
           })
         : null;
@@ -1255,7 +1255,6 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantInputId"];
   deviceSyncMessagingReturnTarget?:
     HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncMessagingReturnTarget"];
-  deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
   initialAssistantInputBatch?: HostedWorkspaceRuntimeAssistantPhaseInput["initialAssistantInputBatch"];
   latestAssistantInputBatch?: HostedWorkspaceRuntimeAssistantPhaseInput["latestAssistantInputBatch"];
@@ -1324,7 +1323,6 @@ function createPhaseInput(input: {
       input.clearAssistantAutomationScheduleChanged,
     currentAssistantInputId: input.currentAssistantInputId,
     deviceSyncMessagingReturnTarget: input.deviceSyncMessagingReturnTarget,
-    deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
     initialAssistantInputBatch: input.initialAssistantInputBatch,
     latestAssistantInputBatch: input.latestAssistantInputBatch,
     initialMailboxImport: {

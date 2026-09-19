@@ -13,6 +13,7 @@ export const SENSITIVE_ACTION_KINDS = [
   ...SETTINGS_SENSITIVE_ACTION_KINDS,
   "account.credential.change",
   "approval.passkey.recover",
+  "approval.passkey.initial-enrollment",
   "assistant.action.approve",
 ] as const;
 

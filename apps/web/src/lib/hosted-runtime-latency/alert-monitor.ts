@@ -561,11 +561,15 @@ export function summarizeHostedRuntimeLatencyRows(input: {
   };
 }
 
-function readHostedRuntimeTerminalNonReplyCommittedAt(value: unknown): Date | null {
+export function readHostedRuntimeTerminalNonReplyCommittedAt(value: unknown): Date | null {
   return readHostedRuntimeAssistantEpochDate(
     value,
     "terminalNonReplyCommittedAtEpochMs",
   );
+}
+
+export function readHostedRuntimeTerminalReplyCommittedAt(value: unknown): Date | null {
+  return readHostedRuntimeAssistantEpochDate(value, "terminalReplyCommittedAtEpochMs");
 }
 
 function readHostedRuntimeProgressUpdateAcceptedAt(value: unknown): Date | null {
@@ -575,7 +579,7 @@ function readHostedRuntimeProgressUpdateAcceptedAt(value: unknown): Date | null 
   );
 }
 
-function readHostedRuntimeCheckpointPublicationExpectedBy(
+export function readHostedRuntimeCheckpointPublicationExpectedBy(
   value: unknown,
 ): Date | null {
   return readHostedRuntimeAssistantEpochDate(
@@ -589,7 +593,8 @@ function readHostedRuntimeAssistantEpochDate(
   leaf:
     | "checkpointPublicationExpectedByEpochMs"
     | "progressUpdateAcceptedAtEpochMs"
-    | "terminalNonReplyCommittedAtEpochMs",
+    | "terminalNonReplyCommittedAtEpochMs"
+    | "terminalReplyCommittedAtEpochMs",
 ): Date | null {
   if (!isHostedRuntimeLatencyPhaseRecord(value)) {
     return null;

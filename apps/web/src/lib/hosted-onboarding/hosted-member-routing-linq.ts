@@ -31,6 +31,56 @@ import {
   hasUnresolvedHostedLinqProviderDispatchForChatTx,
 } from "./linq-delivery-store";
 
+// The verified identity writer holds the member lock. Retire only the old
+// phone's conversation authority; the member keeps their assigned Murph line.
+export async function reconcileHostedMemberLinqPhoneBindingsTx(input: {
+  memberId: string;
+  previousIdentity: { phoneNumber: string | null; phoneNumberVerifiedAt: Date | null } | null;
+  nextPhone: { number: string } | null;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const previous = input.previousIdentity;
+  if (!input.nextPhone || !previous?.phoneNumberVerifiedAt || !previous.phoneNumber
+    || previous.phoneNumber === input.nextPhone.number) return;
+
+  const lookupKeys = createHostedPhoneLookupKeyReadCandidates(previous.phoneNumber);
+  await acquireHostedMemberHomeLinqRouteLockTx(input);
+  await input.prisma.hostedMemberRouting.updateMany({
+    where: {
+      memberId: input.memberId,
+      OR: [
+        { linqParticipantContactKind: null },
+        { linqParticipantContactKind: "phone", linqParticipantContactLookupKey: { in: lookupKeys } },
+      ],
+    },
+    data: {
+      linqChatIdEncrypted: null,
+      linqChatLookupKey: null,
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
+    },
+  });
+  await input.prisma.hostedMemberRouting.updateMany({
+    where: {
+      memberId: input.memberId,
+      OR: [
+        { pendingLinqParticipantContactKind: null },
+        { pendingLinqParticipantContactKind: "phone", pendingLinqParticipantContactLookupKey: { in: lookupKeys } },
+      ],
+    },
+    data: {
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+    },
+  });
+}
+
 export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
   enforceProviderDispatchFence?: boolean;
   linqChatId: string;

@@ -40,12 +40,12 @@ export async function changeHostedTelegramCredential(request: Request, operation
     const change = operation === "prepare" ? parseHostedCredentialChange({
       method: "telegram", operation: "set", expectedIdentity: current.methods.telegram, value: proof.verified.telegramUserId,
     }) : parseHostedCredentialChange(body.change);
-    if (change.method !== "telegram" || change.operation !== "set" || change.value !== proof.verified.telegramUserId
-      || (operation === "verify" && body.authorization === undefined)) throw invalidRequest();
+    if (change.method !== "telegram" || change.operation !== "set" || change.value !== proof.verified.telegramUserId) throw invalidRequest();
     const prepared = await prepareHostedCredentialChange({ change, request, session, prisma,
       ...(operation === "verify" ? { authorization: body.authorization } : {}),
     });
-    if (operation === "prepare") return jsonOk({ change, challenge: await createSensitiveActionChallenge({
+    if (operation === "verify" && body.authorization === undefined && !prepared.initialMessagingSetup) throw invalidRequest();
+    if (operation === "prepare") return jsonOk({ change, challenge: prepared.initialMessagingSetup ? null : await createSensitiveActionChallenge({
       bindingHash: prepared.bindingHash, kind: HOSTED_CREDENTIAL_CHANGE_KIND, memberId: session.member.id, prisma,
     }) });
     const dispatch = await prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {

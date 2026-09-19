@@ -34,6 +34,7 @@ import {
   resolveExperimentAdherenceTargets,
   resolveEffectiveExperimentLinkedEventMissingPolicy,
   resolveInterventionSessionLocalDate,
+  type AdherenceSessionCounts,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
 } from "./experiment-adherence.ts";
@@ -823,56 +824,18 @@ function buildAdherenceCalendarFromContext(
 
 function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentProgressSummary["adherence"] {
   const targets = resolveAdherenceTargets(context);
-  const rollupTarget = resolveExperimentAdherenceRollupTarget(targets);
-  const hasAmbiguousTargets = targets.length > 1 && !rollupTarget;
+  const progressTarget = resolveExperimentAdherenceRollupTarget(targets);
+  const hasAmbiguousTargets = targets.length > 1 && !progressTarget;
   const targetSessions =
-    rollupTarget?.rollup?.targetCompletions ??
+    progressTarget?.rollup?.targetCompletions ??
     (hasAmbiguousTargets ? null : context.frontmatter.runPlan?.targetSessions ?? null);
   const minimumUsefulSessions =
-    rollupTarget?.rollup?.minimumUsefulCompletions ??
+    progressTarget?.rollup?.minimumUsefulCompletions ??
     (hasAmbiguousTargets ? null : context.frontmatter.runPlan?.minimumUsefulSessions ?? null);
-  const progressTarget = hasAmbiguousTargets ? null : rollupTarget ?? targets[0] ?? null;
   const adherenceCalendar = buildAdherenceCalendarFromContext(context);
-  const rollupCells = progressTarget?.calendar && rollupTarget && adherenceCalendar
-    ? adherenceCalendar.cells.filter((cell) => cell.targetId === rollupTarget.targetId)
-    : null;
-  const progressObservations = progressTarget
-    ? buildAdherenceObservations(context, [progressTarget])
-    : [];
-  const progressCells = progressTarget?.calendar
-    ? rollupCells ?? adherenceCalendar?.cells ?? []
-    : [];
-  const occurrenceCounts =
-    progressTarget?.calendar && progressTarget.evidence.kind === "linkedEventCount"
-      ? countCalendarAdherenceSessions({
-          asOf: context.asOf,
-          cells: progressCells,
-          observations: progressObservations,
-          target: progressTarget,
-        })
-      : null;
-  const progressCounts = occurrenceCounts ??
-    (progressTarget && !progressTarget.calendar
-      ? countCompletedAdherenceSessions({
-          asOfDate: context.asOf,
-          observations: progressObservations,
-          target: progressTarget,
-          windows: buildWindowSummary(context.frontmatter),
-        })
-      : null);
-  const confidenceCounts = !hasAmbiguousTargets && progressTarget?.calendar
-    ? occurrenceCounts ?? countAdherenceConfidenceSessions({
-        cells: progressCells,
-        observations: progressObservations,
-      })
-    : progressCounts ?? {
-        sensedSessions: 0,
-        confirmedSessions: 0,
-        assumedSessions: 0,
-      };
-
-  const countedLoggedEvidenceIds = occurrenceCounts
-    ? new Set(occurrenceCounts.loggedEvidenceIds)
+  const counts = countProgressAdherence(context, progressTarget, adherenceCalendar);
+  const countedLoggedEvidenceIds = counts.loggedEvidenceIds
+    ? new Set(counts.loggedEvidenceIds)
     : null;
   const sessionEventIds = context.events
     .filter(isCompletedSessionEvent)
@@ -882,36 +845,15 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
     )
     .map((event) => event.entityId);
 
-  let completedSessions = 0;
-  let partialSessions = 0;
-  if (!hasAmbiguousTargets) {
-    if (occurrenceCounts) {
-      completedSessions = occurrenceCounts.completedSessions;
-      partialSessions = occurrenceCounts.partialSessions;
-    } else if (progressTarget?.calendar) {
-      completedSessions = progressCells.filter(
-        (cell) => cell.status === "satisfied" || cell.status === "assumed",
-      ).length;
-      partialSessions = progressCells.filter((cell) => cell.status === "partial").length;
-    } else {
-      completedSessions = progressCounts?.completedSessions ?? 0;
-      partialSessions = progressCounts?.partialSessions ?? 0;
-    }
-  }
-
+  const { completedSessions, partialSessions } = counts;
   const loggedSessions = completedSessions + partialSessions;
   const expectedSessionsByNow = hasAmbiguousTargets
     ? null
-    : occurrenceCounts
-      ? occurrenceCounts.expectedSessionsByNow
-      : progressTarget?.calendar && adherenceCalendar
-        ? (rollupCells ?? adherenceCalendar.cells)
-            .filter((cell) => cell.status !== "scheduled").length
-        : computeExpectedSessionsByNow(
-            context.frontmatter,
-            context.asOf,
-            targetSessions,
-          );
+    : counts.expectedSessionsByNow ?? computeExpectedSessionsByNow(
+        context.frontmatter,
+        context.asOf,
+        targetSessions,
+      );
   const evidence = buildProgressAdherenceEvidence(progressTarget);
 
   let status: ExperimentAdherenceStatus = "unknown";
@@ -946,17 +888,63 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
     status,
     targetSessions,
   };
-  if (confidenceCounts.sensedSessions > 0) {
-    summary.sensedSessions = confidenceCounts.sensedSessions;
+  if (counts.sensedSessions > 0) {
+    summary.sensedSessions = counts.sensedSessions;
   }
-  if (confidenceCounts.confirmedSessions > 0) {
-    summary.confirmedSessions = confidenceCounts.confirmedSessions;
+  if (counts.confirmedSessions > 0) {
+    summary.confirmedSessions = counts.confirmedSessions;
   }
-  if (confidenceCounts.assumedSessions > 0) {
-    summary.assumedSessions = confidenceCounts.assumedSessions;
+  if (counts.assumedSessions > 0) {
+    summary.assumedSessions = counts.assumedSessions;
   }
 
   return summary;
+}
+
+interface ExperimentProgressAdherenceCounts extends Pick<
+  AdherenceSessionCounts,
+  "completedSessions" | "partialSessions" | "sensedSessions" | "confirmedSessions" | "assumedSessions"
+> {
+  expectedSessionsByNow?: number;
+  loggedEvidenceIds?: readonly string[];
+}
+
+function countProgressAdherence(
+  context: ExperimentSummaryContext,
+  target: QueryExperimentAdherenceTarget | null,
+  calendar: ExperimentAdherenceCalendarResult | null,
+): ExperimentProgressAdherenceCounts {
+  const observations = target ? buildAdherenceObservations(context, [target]) : [];
+  if (!target?.calendar) {
+    return countCompletedAdherenceSessions({
+      asOfDate: context.asOf,
+      observations,
+      target,
+      windows: buildWindowSummary(context.frontmatter),
+    });
+  }
+
+  const progressCells = (calendar?.cells ?? [])
+    .filter((cell) => cell.targetId === target.targetId);
+  if (target.evidence.kind === "linkedEventCount") {
+    return countCalendarAdherenceSessions({
+      asOf: context.asOf,
+      cells: progressCells,
+      observations,
+      target,
+    });
+  }
+
+  return {
+    ...countAdherenceConfidenceSessions({ cells: progressCells, observations }),
+    completedSessions: progressCells.filter(
+      (cell) => cell.status === "satisfied" || cell.status === "assumed",
+    ).length,
+    partialSessions: progressCells.filter((cell) => cell.status === "partial").length,
+    expectedSessionsByNow: calendar
+      ? progressCells.filter((cell) => cell.status !== "scheduled").length
+      : undefined,
+  };
 }
 
 function buildProgressAdherenceEvidence(
@@ -1081,6 +1069,8 @@ function buildCoverageSummary(input: {
   const wearableProviders = normalizeDataCoverageProviderList(
     [...input.summariesByDate.values()].flatMap((summary) => summary?.providers ?? []),
   );
+  const isReviewPhase =
+    input.progressPhase === "review_due" || input.progressPhase === "completed";
 
   if (primaryOutcome?.kind === "structured_review") {
     const evidence = summarizeExperimentOutcomeEvidencePlan(
@@ -1091,43 +1081,73 @@ function buildCoverageSummary(input: {
         observedThrough: input.asOf,
       },
     );
-    const primaryMetricDaysAvailable =
-      evidence.baseline.observedCount + evidence.followup.observedCount;
-    const status: ExperimentCoverageStatus =
-      evidence.reviewReady &&
-        (input.progressPhase === "review_due" || input.progressPhase === "completed")
-        ? "ready_for_review"
-        : primaryMetricDaysAvailable > 0
-          ? "partial"
-          : "insufficient";
-
     return {
       activityProviders,
-      baselineDaysAvailable: evidence.baseline.observedCount,
-      interventionDaysAvailable: evidence.followup.observedCount,
-      primaryBiomarkerKey: primaryOutcome.key,
-      primaryMetricDaysAvailable,
-      status,
+      ...buildStructuredReviewCoverage(primaryOutcome.key, evidence, isReviewPhase),
       wearableProviders,
     };
   }
 
+  const metricCoverage = summarizeNumericMetricCoverage(input, isReviewPhase);
+  return {
+    activityProviders,
+    baselineDaysAvailable: input.baselineDaysAvailable,
+    interventionDaysAvailable: input.interventionDaysAvailable,
+    primaryBiomarkerKey: primaryOutcome?.key ?? input.primarySignal?.biomarkerKey ?? null,
+    ...metricCoverage,
+    wearableProviders,
+  };
+}
+
+function buildStructuredReviewCoverage(
+  primaryBiomarkerKey: string,
+  evidence: ExperimentOutcomeEvidencePlanSummary,
+  isReviewPhase: boolean,
+): Omit<ExperimentProgressSummary["dataCoverage"], "activityProviders" | "wearableProviders"> {
   const primaryMetricDaysAvailable =
-    (input.primarySignal?.baselineDayCount ?? 0) +
-    (input.primarySignal?.interventionDayCount ?? 0);
+    evidence.baseline.observedCount + evidence.followup.observedCount;
+  const status: ExperimentCoverageStatus =
+    evidence.reviewReady && isReviewPhase
+      ? "ready_for_review"
+      : primaryMetricDaysAvailable > 0
+        ? "partial"
+        : "insufficient";
+
+  return {
+    baselineDaysAvailable: evidence.baseline.observedCount,
+    interventionDaysAvailable: evidence.followup.observedCount,
+    primaryBiomarkerKey,
+    primaryMetricDaysAvailable,
+    status,
+  };
+}
+
+function summarizeNumericMetricCoverage(
+  input: {
+    frontmatter: ExperimentFrontmatter;
+    primarySignal: ExperimentMetricResult | null;
+    signals: readonly ExperimentMetricResult[];
+    summariesByDate: Map<string, WearableDaySummary | null>;
+  },
+  isReviewPhase: boolean,
+): Pick<
+  ExperimentProgressSummary["dataCoverage"],
+  "primaryMetricDaysAvailable" | "status"
+> {
+  const baselineDayCount = input.primarySignal?.baselineDayCount ?? 0;
+  const interventionDayCount = input.primarySignal?.interventionDayCount ?? 0;
+  const primaryMetricDaysAvailable = baselineDayCount + interventionDayCount;
   const anySignalMetricData = input.signals.some(
     (signal) => signal.baselineDayCount + signal.interventionDayCount > 0,
   );
   const anyWearableSummaryData = [...input.summariesByDate.values()].some(
     (summary) => summary !== null && summary.providers.length > 0,
   );
-  let status: ExperimentCoverageStatus = "insufficient";
-
   const hasCompleteMetricWindow = hasAnalysisMetricWindow(input.frontmatter);
-  const hasPointMeasurementData =
-    hasObservedPrimaryPointMeasurementWindow(input.frontmatter) &&
-    (input.primarySignal?.baselineDayCount ?? 0) >= 1 &&
-    (input.primarySignal?.interventionDayCount ?? 0) >= 1;
+  const minimumReviewDays = hasObservedPrimaryPointMeasurementWindow(input.frontmatter)
+    ? 1
+    : 3;
+  let status: ExperimentCoverageStatus;
 
   if (
     input.primarySignal !== null &&
@@ -1139,20 +1159,12 @@ function buildCoverageSummary(input: {
   ) {
     status = "no_wearable_data";
   } else if (
-    hasPointMeasurementData &&
-    (input.progressPhase === "review_due" || input.progressPhase === "completed")
+    isReviewPhase &&
+    baselineDayCount >= minimumReviewDays &&
+    interventionDayCount >= minimumReviewDays
   ) {
     status = "ready_for_review";
-  } else if (
-    (input.progressPhase === "review_due" || input.progressPhase === "completed") &&
-    (input.primarySignal?.baselineDayCount ?? 0) >= 3 &&
-    (input.primarySignal?.interventionDayCount ?? 0) >= 3
-  ) {
-    status = "ready_for_review";
-  } else if (
-    (input.primarySignal?.baselineDayCount ?? 0) >= 3 &&
-    (input.primarySignal?.interventionDayCount ?? 0) >= 2
-  ) {
+  } else if (baselineDayCount >= 3 && interventionDayCount >= 2) {
     status = "sufficient_for_progress";
   } else if (primaryMetricDaysAvailable > 0 || anySignalMetricData) {
     status = "partial";
@@ -1160,15 +1172,7 @@ function buildCoverageSummary(input: {
     status = "insufficient";
   }
 
-  return {
-    activityProviders,
-    baselineDaysAvailable: input.baselineDaysAvailable,
-    interventionDaysAvailable: input.interventionDaysAvailable,
-    primaryBiomarkerKey: primaryOutcome?.key ?? input.primarySignal?.biomarkerKey ?? null,
-    primaryMetricDaysAvailable,
-    status,
-    wearableProviders,
-  };
+  return { primaryMetricDaysAvailable, status };
 }
 
 function buildActivityProviderCoverage(vault: VaultReadModel, asOf: string): string[] {

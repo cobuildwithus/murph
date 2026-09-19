@@ -39,11 +39,11 @@ export function ActionApprovalCard({
     setError(null);
     setSubmission("approving");
     try {
-      const challenge = await requestHostedOnboardingJson<SensitiveActionChallengeResponse>({
+      const getChallenge = () => requestHostedOnboardingJson<SensitiveActionChallengeResponse>({
         method: "POST",
         url: `${endpointBase}/challenge`,
       });
-      const signed = await authorization.signChallenge(challenge);
+      const signed = await authorization.signChallenge(await getChallenge(), undefined, getChallenge);
       await submitDecision({
         authorization: signed,
         decision: "approved",

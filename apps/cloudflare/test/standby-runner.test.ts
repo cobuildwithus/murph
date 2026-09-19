@@ -1,3 +1,7 @@
+import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
+import type { HostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
+import { SmallRunnerContainer } from "../src/standby-runner-container.js";
+import { RunnerSlotBindingStore } from "../src/runner-slot-binding.js";
 import assert from "node:assert/strict";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
@@ -40,8 +44,14 @@ const RELEASE_ID = "release_1";
 const BUNDLE_FINGERPRINT = "bundle-fingerprint";
 const SOURCE_FINGERPRINT = "source-fingerprint";
 const CLAIMED_AT_MS = Date.UTC(2026, 7, 31, 12);
+const ACTIVE_IMAGE = { bank: "primary", id: RELEASE_ID, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
+const CANDIDATE_IMAGE = { ...ACTIVE_IMAGE, bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64), image: `registry.example.test/runner@sha256:${"e".repeat(64)}` };
+const TRANSITION_ENV = {
+  HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active: ACTIVE_IMAGE, candidate: CANDIDATE_IMAGE, previous: null }),
+};
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -87,7 +97,147 @@ describe("hosted standby contract", () => {
   });
 });
 
+describe("retained small namespace", () => {
+  const slotName = `runner-small--v-${RELEASE_ID}--${"a".repeat(32)}`;
+  const owner = { claimId: "standby-claim-12345678-1234-4123-8123-123456789abc", userId: "member_retained" };
+  const identity = { slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
+
+  it("rejects fresh preparation and binding without starting a container", async () => {
+    const h = createStandbyContainerHarness({ containerClass: SmallRunnerContainer, slotName });
+    await expect(h.container.prepareStandbySlot({ ...identity, timeoutMs: 1000 })).rejects.toThrow("drain-only");
+    await expect(h.container.bindStandbySlot({ ...identity, ...owner })).rejects.toThrow("drain-only");
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(h.codexPreflight).not.toHaveBeenCalled();
+  });
+
+  it("preserves the exact persisted binding and retires it through the existing owner", async () => {
+    const h = createStandbyContainerHarness({ containerClass: SmallRunnerContainer, slotName, bound: owner });
+    await expect(h.container.bindStandbySlot({ ...identity, ...owner })).resolves.toMatchObject({ bound: true });
+    await expect(h.container.bindStandbySlot({ ...identity, ...owner, userId: "member_other" })).rejects.toThrow("another claim");
+    await expect(h.container.retireStandbySlot({ target: { slotName, userId: owner.userId } })).resolves.toEqual({ retired: true });
+    await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({ state: "retired", userId: null });
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("withdraws an unbound pending target and fences a late bind", async () => {
+    const h = createStandbyContainerHarness({ containerClass: SmallRunnerContainer, slotName });
+    await expect(h.container.retireStandbySlot({ target: { slotName, userId: owner.userId } })).resolves.toEqual({ retired: true });
+    await expect(h.container.bindStandbySlot({ ...identity, ...owner })).rejects.toThrow("drain-only");
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("routes persisted names only to their original namespace and allocates ordinary names", () => {
+    const small = createSlotStub(slotName), regular = createSlotStub("regular");
+    const exactGet = vi.fn(() => regular), smallGet = vi.fn(() => small);
+    const router = createHostedRunnerContainerNamespaceRouter({ exactUser: { getByName: exactGet }, small: { getByName: smallGet }, standby: null })!;
+    expect(router.getByName(slotName)).toBe(small);
+    expect(exactGet).not.toHaveBeenCalled();
+    expect(router.getByName(createHostedRunnerSlotName(RELEASE_ID))).toBe(regular);
+    const missing = createHostedRunnerContainerNamespaceRouter({ exactUser: { getByName: exactGet }, standby: null })!;
+    expect(() => missing.getByName(slotName)).toThrow("binding is unavailable");
+    expect(exactGet).toHaveBeenCalledOnce();
+  });
+});
+
 describe("RunnerContainer slot lifecycle", () => {
+  it.each([["active", ACTIVE_IMAGE], ["candidate", CANDIDATE_IMAGE]] as const)(
+    "prepares the exact %s image through both health gates and keeps one-time member binding",
+    async (_name, image) => {
+      const h = createStandbyContainerHarness({
+        environment: TRANSITION_ENV,
+        healthOverrides: () => ({ runnerBundle: image }),
+      });
+      const prepare = { releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION, slotName: h.slotName, timeoutMs: 75_000 };
+      await expect(h.container.prepareStandbySlot(prepare)).resolves.toMatchObject({ prepared: true, runnerImage: { bundleFingerprint: image.bundleFingerprint, sourceFingerprint: image.sourceFingerprint } });
+      expect(h.codexPreflight).toHaveBeenCalledOnce();
+      expect(h.destroy).not.toHaveBeenCalled();
+      expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+      await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({ state: "unbound", userId: null });
+      const binding = { ...prepare, claimId: createHostedStandbyClaimId(), userId: "member_transition" };
+      await expect(h.container.bindStandbySlot(binding)).resolves.toMatchObject({ bound: true });
+      await expect(h.container.bindStandbySlot(binding)).resolves.toMatchObject({ bound: true });
+      await expect(h.container.bindStandbySlot({ ...binding, claimId: createHostedStandbyClaimId(), userId: "member_other" }))
+        .rejects.toThrow("already bound to another claim");
+      await expect(h.container.ensureReadyForProcessing({ userId: "member_other", timeoutMs: 1_000 }))
+        .rejects.toThrow("not bound to the runtime user");
+      await expect(h.container.prepareStandbySlot(prepare)).rejects.toThrow("not eligible");
+    },
+  );
+
+  it.each([
+    ["old bundle/new source", { bundleFingerprint: ACTIVE_IMAGE.bundleFingerprint, sourceFingerprint: CANDIDATE_IMAGE.sourceFingerprint }],
+    ["new bundle/old source", { bundleFingerprint: CANDIDATE_IMAGE.bundleFingerprint, sourceFingerprint: ACTIVE_IMAGE.sourceFingerprint }],
+    ["unknown pair", { bundleFingerprint: "8".repeat(64), sourceFingerprint: "9".repeat(64) }],
+    ["missing bundle", { sourceFingerprint: CANDIDATE_IMAGE.sourceFingerprint }],
+    ["missing source", { bundleFingerprint: CANDIDATE_IMAGE.bundleFingerprint }],
+    ["missing image", undefined],
+  ])("rejects %s in the final pristine proof even after ordinary health passed", async (_name, runnerBundle) => {
+    const h = createStandbyContainerHarness({
+      environment: TRANSITION_ENV, preflightReady: true,
+      healthOverrides: (read) => ({ runnerBundle: read === 1 ? CANDIDATE_IMAGE : runnerBundle }),
+    });
+    await expect(h.container.prepareStandbySlot({ releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
+      slotName: h.slotName, timeoutMs: 75_000 }))
+      .rejects.toThrow("pristine readiness proof: runner_image_fingerprints");
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["active_job_count", { activeJobCount: 1 }],
+    ["poisoned", { poisoned: true }],
+    ["workspace_invocation_accepted_count", { workspaceInvocationAcceptedCount: 1 }],
+    ["heavy_runtime_hydration_status", { heavyRuntimeHydrationStatus: "pending" }],
+    ["hosted_runtime_architecture_version", { hostedRuntimeArchitectureVersion: "other" }],
+    ["hosted_worker_release_id", { hostedWorkerReleaseId: "other" }],
+    ["codex_shell_preflight_status", { codexShellPreflightStatus: "failed" }],
+    ["codex_shell_preflight_completed_at", { codexShellPreflightCompletedAtEpochMs: null }],
+  ] as const)("preserves the %s pristine gate during a transition", async (check, health) => {
+    const h = createStandbyContainerHarness({
+      environment: TRANSITION_ENV, preflightReady: true,
+      healthOverrides: (read) => ({ runnerBundle: ACTIVE_IMAGE, ...(read === 1 ? {} : health) }),
+    });
+    await expect(h.container.prepareStandbySlot({ releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
+      slotName: h.slotName, timeoutMs: 75_000 })).rejects.toThrow(check);
+  });
+
+  it.each([undefined, "", " "])("requires configured fingerprints even when the health pair is absent (%s)", async (missing) => {
+    const h = createStandbyContainerHarness({
+      environment: { HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: missing, HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: missing },
+      preflightReady: true, healthOverrides: () => ({ runnerBundle: undefined }),
+    });
+    await expect(h.container.prepareStandbySlot({ releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
+      slotName: h.slotName, timeoutMs: 75_000 })).rejects.toThrow("is required for hosted standby readiness");
+  });
+
+  it("reproves an unbound slot on the candidate image after native stop without changing its allocation identity", async () => {
+    let image = ACTIVE_IMAGE;
+    const h = createStandbyContainerHarness({ environment: TRANSITION_ENV, healthOverrides: () => ({ runnerBundle: image }) });
+    const input = { releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION, slotName: h.slotName, timeoutMs: 75_000 };
+    await h.container.prepareStandbySlot(input);
+    image = CANDIDATE_IMAGE;
+    h.setNativeStatus("stopped");
+    h.setPreflightReady(false);
+    h.container.onStop({ exitCode: 0, reason: "exit" });
+    await expect(h.container.prepareStandbySlot(input)).resolves.toMatchObject({ prepared: true, slotName: h.slotName });
+    expect(h.startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(h.codexPreflight).toHaveBeenCalledTimes(2);
+    expect(h.destroy).not.toHaveBeenCalled();
+    await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({ state: "unbound", userId: null, releaseId: RELEASE_ID });
+  });
+
+  it("keeps the previous bank drain-only even when its image is valid", async () => {
+    const active = { ...CANDIDATE_IMAGE, bank: "next", id: "next-active" };
+    const h = createStandbyContainerHarness({ environment: {
+      HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active, candidate: null, previous: ACTIVE_IMAGE }),
+    }, healthOverrides: () => ({ runnerBundle: ACTIVE_IMAGE }) });
+    await expect(h.container.prepareStandbySlot({ releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
+      slotName: h.slotName, timeoutMs: 75_000 })).rejects.toThrow("Previous runner inventory is drain-only");
+    await expect(h.container.bindStandbySlot({ releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION,
+      slotName: h.slotName, claimId: createHostedStandbyClaimId(), userId: "member_previous" }))
+      .rejects.toThrow("Only the active runner release");
+    expect(h.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
   it("uses SIGTERM for the hosted-local shutdown checkpoint control", async () => {
     const stop = vi.fn(async () => undefined);
     const container: HostedLocalTestStandbyRunnerContainer = Object.create(
@@ -127,6 +277,7 @@ describe("RunnerContainer slot lifecycle", () => {
 
     expect(prepared).toEqual({
       prepared: true,
+      runnerImage: { bundleFingerprint: BUNDLE_FINGERPRINT, sourceFingerprint: SOURCE_FINGERPRINT },
       releaseId: RELEASE_ID,
       region: HOSTED_RUNNER_REGION,
       slotName,
@@ -162,6 +313,14 @@ describe("RunnerContainer slot lifecycle", () => {
       userId: "member_456",
     })).rejects.toThrow("not bound to the runtime user");
     await expect(harness.container.ensureProcessing({
+      userId: "member_456",
+    })).rejects.toThrow("not bound to the runtime user");
+    await expect(harness.container.ensureProcessing({
+      activeRuntime: {
+        attemptId: "attempt_wrong_member_wake",
+        leaseGeneration: "1",
+        userId: "member_456",
+      },
       userId: "member_456",
     })).rejects.toThrow("not bound to the runtime user");
     await expect(harness.container.onRuntimeCompletionRecorded({
@@ -292,6 +451,122 @@ describe("RunnerContainer slot lifecycle", () => {
     expect(harness.destroy).not.toHaveBeenCalled();
   });
 
+  it("retires a stopped member slot before asynchronously clearing its assignment", async () => {
+    const notification = createDeferred<HostedRuntimeOwnerResponse>();
+    const recordRunnerContainerRetired = vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner")
+      .mockImplementation(() => notification.promise);
+    const h = createStandbyContainerHarness();
+    const input = { claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID,
+      region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" };
+    await h.container.bindStandbySlot(input);
+
+    // An unresolved callback must not hold the slot lifecycle lock.
+    await h.container.onActivityExpired();
+    expect(h.destroy).toHaveBeenCalledOnce();
+    await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({
+      state: "retired", userId: null, claimId: null,
+    });
+    expect(recordRunnerContainerRetired).toHaveBeenCalledWith({
+      source: expect.any(Object), userId: "member_123",
+      command: { operation: "target_retired", runnerContainerName: h.slotName },
+    });
+    await expect(h.container.bindStandbySlot(input)).rejects.toThrow("cannot be rebound");
+    notification.resolve({ cutover: "postgres", status: "updated", owner: null });
+    await h.flushWaitUntil();
+  });
+
+  it("keeps stopped-slot recovery cheap when the retirement notification fails", async () => {
+    const recordRunnerContainerRetired = vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner")
+      .mockRejectedValue(new Error("unavailable"));
+    const h = createStandbyContainerHarness();
+    await h.container.bindStandbySlot({ claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID,
+      region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" });
+    await h.container.onActivityExpired();
+    await h.flushWaitUntil();
+    expect(recordRunnerContainerRetired).toHaveBeenCalledOnce();
+    const nativeRead = vi.spyOn(h.container, "getState").mockClear().mockRejectedValue(new Error("slow native lookup"));
+    await expect(h.container.resolveRetainedStandbySlot({ currentReleaseId: RELEASE_ID,
+      region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" }))
+      .resolves.toMatchObject({ state: "retired" });
+    expect(nativeRead).not.toHaveBeenCalled();
+    expect(h.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("does not publish retirement after an unconfirmed native stop", async () => {
+    const recordRunnerContainerRetired = vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner")
+      .mockResolvedValue({ cutover: "postgres", status: "updated", owner: null });
+    const h = createStandbyContainerHarness({
+      destroy: async () => { throw new Error("platform unavailable"); },
+    });
+    await h.container.bindStandbySlot({ claimId: createHostedStandbyClaimId(), releaseId: RELEASE_ID,
+      region: HOSTED_RUNNER_REGION, slotName: h.slotName, userId: "member_123" });
+    await h.container.onActivityExpired();
+    await h.flushWaitUntil();
+    expect(recordRunnerContainerRetired).not.toHaveBeenCalled();
+    await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({ state: "bound" });
+  });
+
+  for (const prepared of [false, true]) {
+    it(`retires a reserved unbound target with its allocation claim (prepared=${prepared})`, async () => {
+      const h = createStandbyContainerHarness();
+      const identity = { releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION, slotName: h.slotName };
+      const owner = { claimId: createHostedStandbyClaimId(), userId: "member_reserved" };
+      if (prepared) await h.container.prepareStandbySlot({ ...identity, timeoutMs: 20_000 });
+
+      await expect(h.container.retireStandbySlot({
+        claimId: owner.claimId, target: { slotName: h.slotName, userId: owner.userId },
+      })).resolves.toEqual({ retired: true });
+      await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({
+        state: "retired", claimId: null, userId: null,
+      });
+      await expect(h.container.bindStandbySlot({ ...identity, ...owner })).rejects.toThrow("cannot be rebound");
+      expect(h.destroy).toHaveBeenCalledOnce();
+    });
+  }
+
+  it("retries claimed unbound retirement after an uncertain stop without admitting a late bind", async () => {
+    const destroy = vi.fn().mockRejectedValueOnce(new Error("platform unavailable")).mockResolvedValue(undefined);
+    const h = createStandbyContainerHarness({ destroy });
+    const owner = { claimId: createHostedStandbyClaimId(), userId: "member_reserved" };
+    const request = { claimId: owner.claimId, target: { slotName: h.slotName, userId: owner.userId } };
+    await expect(h.container.retireStandbySlot(request)).rejects.toThrow("failed to destroy cleanly");
+    await expect(h.container.readStandbySlotBinding()).resolves.toMatchObject({
+      state: "retiring", claimId: null, userId: null,
+    });
+    await expect(h.container.bindStandbySlot({
+      ...owner, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION, slotName: h.slotName,
+    })).rejects.toThrow("cannot be rebound");
+    await expect(h.container.retireStandbySlot(request)).resolves.toEqual({ retired: true });
+    expect(destroy).toHaveBeenCalledTimes(2);
+  });
+
+  it("still rejects claim-only retirement of an unbound slot", async () => {
+    const h = createStandbyContainerHarness();
+    await h.container.prepareStandbySlot({
+      releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION, slotName: h.slotName, timeoutMs: 20_000,
+    });
+    await expect(h.container.retireStandbySlot({ claimId: createHostedStandbyClaimId() }))
+      .rejects.toThrow("unbound retirement must not assert a claim");
+    expect(h.destroy).not.toHaveBeenCalled();
+  });
+
+  it("preserves target and bound claim authority for claimed retirement", async () => {
+    const owner = { claimId: createHostedStandbyClaimId(), userId: "member_bound" };
+    const h = createStandbyContainerHarness({ bound: owner });
+    const target = { slotName: h.slotName, userId: owner.userId };
+    await expect(h.container.retireStandbySlot({
+      claimId: createHostedStandbyClaimId(), target,
+    })).rejects.toThrow("claim did not match");
+    await expect(h.container.retireStandbySlot({
+      claimId: owner.claimId, target: { ...target, userId: "member_other" },
+    })).rejects.toThrow("belongs to another member");
+    await expect(h.container.retireStandbySlot({
+      claimId: owner.claimId, target: { ...target, slotName: createHostedRunnerSlotName(RELEASE_ID) },
+    })).rejects.toThrow("does not match the addressed Durable Object");
+    expect(h.destroy).not.toHaveBeenCalled();
+    await expect(h.container.retireStandbySlot({ claimId: owner.claimId, target })).resolves.toEqual({ retired: true });
+  });
+
   it("keeps retryable unbound retirement member-free", async () => {
     const destroy = vi.fn()
       .mockRejectedValueOnce(new Error("platform unavailable"))
@@ -351,7 +626,7 @@ describe("RunnerContainer slot lifecycle", () => {
 });
 
 describe("StandbyRunnerCoordinatorDurableObject", () => {
-  it("drains unbound inventory during an image transition while preserving exact claim replay", async () => {
+  it("keeps transition inventory claimable and refillable through promotion with exact claim replay", async () => {
     const h = createCoordinatorHarness({ target: "2" });
     h.ensure();
     await h.flush();
@@ -360,19 +635,67 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     expect(claimed.outcome).toBe("claimed");
     await h.flush();
     const prepared = prepareCount(h);
-    const active = { bank: "primary", id: RELEASE_ID, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
-    const candidate = { ...active, bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64), image: `registry.example.test/runner@sha256:${"e".repeat(64)}` };
-    h.environment.HOSTED_EXECUTION_RUNNER_DEPLOYMENT = JSON.stringify({ active, candidate, previous: null });
-    expect(h.claim(claimId)).toEqual(claimed);
-    expect(h.claim()).toEqual({ outcome: "no_ready_slot" });
-    await h.flush();
-    expect(prepareCount(h)).toBe(prepared);
-    expect(h.coordinator.readStandbyCoordinatorState().readySlotNames).toEqual([]);
-    h.environment.HOSTED_EXECUTION_RUNNER_DEPLOYMENT = JSON.stringify({ active: candidate, candidate: null, previous: null });
+    const readyBefore = h.coordinator.readStandbyCoordinatorState().readySlotNames;
+    Object.assign(h.environment, TRANSITION_ENV);
     h.ensure();
     await h.flush();
-    expect(h.coordinator.readStandbyCoordinatorState().readySlotNames).toHaveLength(2);
+    expect(h.coordinator.readStandbyCoordinatorState().readySlotNames).toEqual(readyBefore);
+    expect(prepareCount(h)).toBe(prepared);
     expect(h.claim(claimId)).toEqual(claimed);
+    expect(h.claim().outcome).toBe("claimed");
+    await h.flush();
+    expect(prepareCount(h)).toBe(prepared + 1);
+    const readyDuring = h.coordinator.readStandbyCoordinatorState().readySlotNames;
+    expect(readyDuring).toHaveLength(2);
+    h.environment.HOSTED_EXECUTION_RUNNER_DEPLOYMENT = JSON.stringify({ active: CANDIDATE_IMAGE, candidate: null, previous: null });
+    h.ensure();
+    await h.flush();
+    expect(h.coordinator.readStandbyCoordinatorState().readySlotNames).toEqual(readyDuring);
+    expect(prepareCount(h)).toBe(prepared + 1);
+    expect(h.claim(claimId)).toEqual(claimed);
+    await h.flush();
+    for (const slot of h.slots.values()) expect(slot.retireStandbySlot).not.toHaveBeenCalled();
+  });
+
+  it("fills transition inventory through real pristine preparation of both admitted images", async () => {
+    const pending: Promise<unknown>[] = [];
+    const state = createDurableObjectState(new DatabaseSync(":memory:"), pending);
+    const slots = new Map<string, ReturnType<typeof createStandbyContainerHarness>>();
+    const environment = {
+      ...TRANSITION_ENV, HOSTED_EXECUTION_STANDBY_MODE: "allocate", HOSTED_EXECUTION_STANDBY_TARGET: "2",
+      RUNNER_CONTAINER: { getByName(slotName: string) {
+        let slot = slots.get(slotName);
+        if (!slot) {
+          const image = slots.size % 2 === 0 ? ACTIVE_IMAGE : CANDIDATE_IMAGE;
+          slot = createStandbyContainerHarness({ slotName, environment: TRANSITION_ENV,
+            healthOverrides: () => ({ runnerBundle: image }) });
+          slots.set(slotName, slot);
+        }
+        return slot.container;
+      } },
+    };
+    const coordinator = new StandbyRunnerCoordinatorDurableObject(state, environment);
+    const identity = { releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
+    coordinator.ensureReadyStandby(identity);
+    await flushBackgroundWork(pending);
+    expect(coordinator.readStandbyCoordinatorState().readySlotNames).toHaveLength(2);
+    expect(slots.size).toBe(2);
+    const claimId = createHostedStandbyClaimId();
+    const request = { ...identity, claimId, deadlineAtEpochMs: Date.now() + 1_000 };
+    const claimed = coordinator.claimReadyStandby(request);
+    expect(claimed.outcome).toBe("claimed");
+    if (claimed.outcome !== "claimed") throw new Error("Expected a ready transition slot.");
+    await environment.RUNNER_CONTAINER.getByName(claimed.slotName).bindStandbySlot({
+      ...identity, claimId, slotName: claimed.slotName, userId: "member_transition",
+    });
+    expect(coordinator.claimReadyStandby(request)).toEqual(claimed);
+    await flushBackgroundWork(pending);
+    expect(coordinator.readStandbyCoordinatorState().readySlotNames).toHaveLength(2);
+    expect(slots.size).toBe(3);
+    for (const slot of slots.values()) {
+      expect(slot.codexPreflight).toHaveBeenCalledOnce();
+      expect(slot.destroy).not.toHaveBeenCalled();
+    }
   });
 
   it("warms a candidate without making it claimable, then reuses that inventory on promotion", async () => {
@@ -1225,31 +1548,62 @@ function seedLegacyCoordinator(db: DatabaseSync, ready: string, pending: string,
 }
 
 function createStandbyContainerHarness(input: {
+  containerClass?: typeof RunnerContainer;
+  bound?: { claimId: string; userId: string };
   destroy?: () => Promise<void>;
   nativeStatus?: string;
   environment?: Record<string, unknown>;
   healthRegion?: string;
+  healthOverrides?: (read: number) => Record<string, unknown>;
   preflightReady?: boolean;
+  slotName?: string;
 } = {}) {
   const db = new DatabaseSync(":memory:");
-  const state = createDurableObjectState(db, []);
+  const pending: Promise<unknown>[] = [];
+  const state = createDurableObjectState(db, pending);
   let preflightReady = input.preflightReady ?? false;
+  let healthReadCount = 0;
   let nativeStatus = input.nativeStatus ?? "running";
   const codexPreflight = vi.fn(async () => {
     preflightReady = true;
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   });
-  const slotName = createHostedRunnerSlotName(RELEASE_ID);
-  const container = new RunnerContainer({
-    ...state,
-    id: { name: slotName },
-    container: { get running() { return nativeStatus !== "stopped"; } },
-  }, {
+  const slotName = input.slotName ?? createHostedRunnerSlotName(RELEASE_ID);
+  const environment: Record<string, unknown> = {
     CF_VERSION_METADATA: { id: RELEASE_ID },
     HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: BUNDLE_FINGERPRINT,
     HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: SOURCE_FINGERPRINT,
     ...input.environment,
+  };
+  if (input.bound) {
+    const store = new RunnerSlotBindingStore(state.storage.sql!);
+    const identity = { slotName, releaseId: RELEASE_ID, region: HOSTED_RUNNER_REGION };
+    store.initialize(identity);
+    store.bind({ ...identity, ...input.bound });
+  }
+  const containerFetch = vi.fn(async (url: string) => {
+    if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+      return await codexPreflight();
+    }
+    if (url.endsWith("/health")) {
+      return new Response(JSON.stringify({
+        ...createStandbyHealth(preflightReady, input.healthRegion),
+        ...input.healthOverrides?.(++healthReadCount),
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    }
+    throw new Error(`Unexpected container URL: ${url}`);
   });
+  const container = new (input.containerClass ?? RunnerContainer)({
+    ...state,
+    id: { name: slotName },
+    container: {
+      get running() { return nativeStatus !== "stopped"; },
+      getTcpPort: () => ({ fetch: containerFetch }),
+    },
+  }, environment);
   const platformDestroy = input.destroy;
   const destroy = vi.fn(async () => {
     await platformDestroy?.();
@@ -1260,21 +1614,7 @@ function createStandbyContainerHarness(input: {
   });
   const renewActivityTimeout = vi.fn();
   Object.assign(container, {
-    containerFetch: vi.fn(async (url: string) => {
-      if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
-        return await codexPreflight();
-      }
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify(createStandbyHealth(
-          preflightReady,
-          input.healthRegion,
-        )), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
-        });
-      }
-      throw new Error(`Unexpected container URL: ${url}`);
-    }),
+    containerFetch,
     destroy,
     getState: vi.fn(async () => ({
       lastChange: Date.now(),
@@ -1284,13 +1624,16 @@ function createStandbyContainerHarness(input: {
     startAndWaitForPorts,
   });
   return {
+    async flushWaitUntil() { await Promise.all(pending.splice(0)); },
     codexPreflight,
     container,
+    environment,
     destroy,
     renewActivityTimeout,
     setNativeStatus(status: string) {
       nativeStatus = status;
     },
+    setPreflightReady(ready: boolean) { preflightReady = ready; },
     slotName,
     startAndWaitForPorts,
   };

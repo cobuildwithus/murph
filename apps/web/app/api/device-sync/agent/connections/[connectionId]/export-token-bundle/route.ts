@@ -1,4 +1,4 @@
-import { createHostedDeviceSyncProviderAuthorityAgentSessionService } from "@/src/lib/device-sync/agent-session-provider-authority-service";
+import { createHostedDeviceSyncAgentSessionService } from "@/src/lib/device-sync/agent-session-service";
 import {
   jsonOk,
   postOnlyJson,
@@ -14,7 +14,7 @@ export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ connectionId: string }> },
 ) => {
-  const agentSessions = createHostedDeviceSyncProviderAuthorityAgentSessionService(request);
+  const agentSessions = createHostedDeviceSyncAgentSessionService(request);
   const session = await agentSessions.requireAgentSession();
   const connectionId = await resolveDecodedRouteParam(context.params, "connectionId");
   const { connection, tokenBundle } = await agentSessions.exportTokenBundle(session, connectionId);

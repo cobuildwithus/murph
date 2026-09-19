@@ -67,7 +67,6 @@
     "@modelcontextprotocol/server": "2.0.0-alpha.4",
     "@murphai/assistant-cli": "workspace:*",
     "@murphai/assistant-engine": "workspace:*",
-    "@murphai/assistantd": "workspace:*",
     "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
@@ -132,7 +131,6 @@
   "bundleDependencies": [
     "@murphai/assistant-cli",
     "@murphai/assistant-engine",
-    "@murphai/assistantd",
     "@murphai/clinical-records",
     "@murphai/core",
     "@murphai/device-syncd",

@@ -194,6 +194,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   reconcile: {
     payload: {
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      reconcileProof: stringJobField({ includeInHostedHint: true }),
       summaryPhaseComplete: booleanJobField({ includeInHostedHint: true }),
       summaryResourceCursor: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
@@ -221,6 +222,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       historicalBackfill: booleanJobField({ includeInHostedHint: true }),
       historicalBackfillVersion: numberJobField({ includeInHostedHint: true }),
       historicalProviderRecordsSeen: booleanJobField({ includeInHostedHint: true }),
+      historicalPullPending: booleanJobField({ includeInHostedHint: true }),
       historicalRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       historicalUnresolvedProviderRecordIdentitiesJson: stringJobField({ includeInHostedHint: true }),
       historicalUnresolvedProviderRecordCount: numberJobField({ includeInHostedHint: true }),

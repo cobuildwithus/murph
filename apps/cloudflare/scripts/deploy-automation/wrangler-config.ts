@@ -12,7 +12,8 @@ const DEFAULT_DEPLOY_ROOT = path.resolve(
   "..",
   "..",
 );
-const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 300;
+// Connection age is not the checkpoint deadline; SIGTERM draining protects accepted work.
+const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
 const DEPLOY_SMOKE_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
 const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100] as const;
 const DEVICE_WEBHOOK_QUEUE_SUFFIX = "device-webhooks";
@@ -120,13 +121,15 @@ export function buildHostedWranglerDeployConfig(
         rolloutActiveGracePeriodSeconds:
           RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
+      // Existing native resources are retained by stageHostedRunnerRelease.
+      // This declaration never provisions or rolls out the retired experiment.
+      buildRunnerContainerConfig({
+        className: "SmallRunnerContainer", maxInstances: 0,
+        rolloutActiveGracePeriodSeconds: RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
+      }),
     ],
     durable_objects: {
       bindings: [
-        {
-          name: "USER_RUNNER",
-          class_name: "UserRunnerDurableObject",
-        },
         {
           name: "DATABASE_HEALTH_MONITOR",
           class_name: "DatabaseHealthDurableObject",
@@ -159,6 +162,7 @@ export function buildHostedWranglerDeployConfig(
           name: "STANDBY_RUNNER_CONTAINER",
           class_name: "StandbyRunnerContainer",
         },
+        { name: "SMALL_RUNNER_CONTAINER", class_name: "SmallRunnerContainer" },
       ],
     },
     version_metadata: {
@@ -200,6 +204,8 @@ export function buildHostedWranglerDeployConfig(
         tag: "v8",
         new_sqlite_classes: ["NextRunnerContainer"],
       },
+      { tag: "v9", new_sqlite_classes: ["SmallRunnerContainer"] },
+      { tag: "v10", deleted_classes: ["UserRunnerDurableObject"] },
     ],
     triggers: {
       crons: ["*/5 * * * *"],

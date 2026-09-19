@@ -789,6 +789,40 @@ describe("meal photo companion routes", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
   });
 
+  it("returns a canonical conflict receipt and re-signals only the original mailbox item", async () => {
+    const captureReceipt = {
+      captureId: CAPTURE_ID,
+      capturedAt: "2026-07-01T12:00:00.000Z",
+    };
+    mocks.appendHostedMealPhotoMailboxEnvelopeTx.mockResolvedValueOnce({
+      claimedMealPhotoKey: "meal-photo-key",
+      captureReceipt,
+      dedupeConflict: true,
+      duplicate: true,
+      item: { id: "mailbox_existing" },
+    });
+    mocks.readHostedMailboxWakeAfterDedupeLockTx.mockResolvedValueOnce(
+      buildMealPhotoWake("canonical-meal-photo-key"),
+    );
+    const response = await photosRoute.POST(new Request(
+      "https://app.example.test/photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: { code: "MEAL_PHOTO_DEDUPE_CONFLICT", details: { captureReceipt } },
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledExactlyOnceWith({
+      expectedUserId: MEMBER_ID,
+      mailboxItemId: "mailbox_existing",
+    });
+    expect(mocks.deleteMealPhoto).toHaveBeenCalledExactlyOnceWith({
+      mealPhotoKey: "meal-photo-key",
+      userId: MEMBER_ID,
+    });
+  });
+
   it("deletes staging when final authority revalidation fails", async () => {
     mocks.assertCurrentMealPhotoCaptureEnrollmentTx.mockRejectedValueOnce(
       new Error("authorization changed"),

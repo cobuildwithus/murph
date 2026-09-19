@@ -5,7 +5,7 @@ import {
 } from "node:http";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -153,13 +153,6 @@ function createTestHostedWorkspaceRestorePreparation(): HostedWorkspaceRestorePr
 
 function createTestHostedWorkspaceRestorePreparer() {
   return vi.fn(async () => createTestHostedWorkspaceRestorePreparation());
-}
-
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object.`);
-  }
-  return value as Record<string, unknown>;
 }
 
 beforeEach(() => {
@@ -630,130 +623,89 @@ describe("startHostedContainerEntrypoint", () => {
     expect(eagerHydrationOffset).toBeGreaterThan(listenOffset);
   });
 
-  it("publishes settled conversation warmth in health", async () => {
-    mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
-      options.onConversationActivityObserved?.();
-      return buildWorkspaceRunnerResult();
-    });
-    const server = await startHostedContainerEntrypoint({ port: 0 });
-    servers.push(server);
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-    }
-
-    await sendHostedContainerJsonRequest({
-      body: JSON.stringify(buildWorkspaceJobBody()),
-      path: "/internal/workspace-invocation",
-      port: address.port,
-    });
-
-    const health = await sendHostedContainerGetRequest({
-      path: "/health",
-      port: address.port,
-    });
-    const healthJson = requireRecord(health.json, "health response");
-    const completedAtEpochMs = healthJson
-      .conversationWarmActivityCompletedAtEpochMs;
-    expect(Number.isSafeInteger(completedAtEpochMs)).toBe(true);
-    expect(healthJson).toMatchObject({
-      conversationWarmActivityCompletedAtEpochMs: completedAtEpochMs,
-    });
-
-    await sendHostedContainerJsonRequest({
-      body: JSON.stringify(buildWorkspaceJobBody()),
-      path: "/internal/workspace-invocation",
-      port: address.port,
-    });
-    const healthAfterMaintenance = await sendHostedContainerGetRequest({
-      path: "/health",
-      port: address.port,
-    });
-    expect(healthAfterMaintenance.json).toMatchObject({
-      conversationWarmActivityCompletedAtEpochMs: completedAtEpochMs,
-    });
-  });
-
-  it("starts conversation warmth when the observed invocation settles", async () => {
+  it.each([false, true])("publishes receipt warmth before housekeeping settles (failure=%s)", async (fail) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
-      const observedAtEpochMs = Date.parse("2026-07-22T13:00:00.000Z");
-      const settledAtEpochMs = observedAtEpochMs + 300_000;
-      const activityObserved = createDeferred();
-      const releaseInvocation = createDeferred();
+      const receivedAtEpochMs = Date.parse("2026-07-22T13:00:00.000Z");
+      vi.setSystemTime(receivedAtEpochMs + 120_000);
+      const observed = createDeferred();
+      const release = createDeferred();
       mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
-        options.onConversationActivityObserved?.();
-        activityObserved.resolve();
-        await releaseInvocation.promise;
+        options.onConversationActivityObserved?.(receivedAtEpochMs);
+        // Replays, unknown evidence and provider-future timestamps cannot mint
+        // a later lease at observation or when the invocation settles.
+        for (const receipt of [receivedAtEpochMs, receivedAtEpochMs - 1, NaN, -1, Date.now() + 1]) {
+          options.onConversationActivityObserved?.(receipt);
+        }
+        observed.resolve();
+        await release.promise;
+        if (fail) throw new Error("synthetic checkpoint failure");
         return buildWorkspaceRunnerResult();
       });
-      vi.setSystemTime(observedAtEpochMs);
       const server = await startHostedContainerEntrypoint({ port: 0 });
       servers.push(server);
       const address = server.address();
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-      }
-
-      const invocationPromise = sendHostedContainerJsonRequest({
+      if (!address || typeof address === "string") throw new Error("Expected a TCP port.");
+      const invocation = sendHostedContainerJsonRequest({
         body: JSON.stringify(buildWorkspaceJobBody()),
         path: "/internal/workspace-invocation",
         port: address.port,
       });
-      await activityObserved.promise;
-
-      const healthWhileRunning = await sendHostedContainerGetRequest({
-        path: "/health",
-        port: address.port,
-      });
-      expect(healthWhileRunning.json).toMatchObject({
-        activeJobCount: 1,
-        conversationWarmActivityCompletedAtEpochMs: null,
-      });
-
-      vi.setSystemTime(settledAtEpochMs);
-      releaseInvocation.resolve();
-      await invocationPromise;
-
-      const healthAfterSettlement = await sendHostedContainerGetRequest({
-        path: "/health",
-        port: address.port,
-      });
-      expect(healthAfterSettlement.json).toMatchObject({
-        activeJobCount: 0,
-        conversationWarmActivityCompletedAtEpochMs: settledAtEpochMs,
-      });
+      await observed.promise;
+      expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+        .toMatchObject({
+          activeJobCount: 1,
+          conversationActivityReceivedAtEpochMs: receivedAtEpochMs,
+          conversationWarmActivityCompletedAtEpochMs: receivedAtEpochMs,
+        });
+      vi.setSystemTime(receivedAtEpochMs + 900_000);
+      release.resolve();
+      expect((await invocation).status).toBe(fail ? 500 : 200);
+      expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+        .toMatchObject({ activeJobCount: 0, conversationActivityReceivedAtEpochMs: receivedAtEpochMs });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("settles conversation warmth when the invocation fails after observation", async () => {
-    mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
-      options.onConversationActivityObserved?.();
-      throw new Error("synthetic invocation failure");
-    });
-    const server = await startHostedContainerEntrypoint({ port: 0 });
-    servers.push(server);
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+  it("only a newer admitted receipt extends warmth; maintenance and process replacement do not", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const firstReceipt = Date.parse("2026-07-22T13:00:00.000Z");
+      vi.setSystemTime(firstReceipt);
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP port.");
+      for (const [receipt, expected] of [
+        [firstReceipt, firstReceipt],
+        [null, firstReceipt],
+        [firstReceipt, firstReceipt],
+        [firstReceipt + 599_999, firstReceipt + 599_999],
+        [firstReceipt, firstReceipt + 599_999],
+      ] as const) {
+        vi.setSystemTime(firstReceipt + 599_999);
+        mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
+          if (receipt !== null) options.onConversationActivityObserved?.(receipt);
+          return buildWorkspaceRunnerResult();
+        });
+        await sendHostedContainerJsonRequest({
+          body: JSON.stringify(buildWorkspaceJobBody()),
+          path: "/internal/workspace-invocation",
+          port: address.port,
+        });
+        expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+          .toMatchObject({ conversationActivityReceivedAtEpochMs: expected });
+      }
+      const replacement = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(replacement);
+      const replacementAddress = replacement.address();
+      if (!replacementAddress || typeof replacementAddress === "string") throw new Error("Expected a TCP port.");
+      expect((await sendHostedContainerGetRequest({ path: "/health", port: replacementAddress.port })).json)
+        .toMatchObject({ activeJobCount: 0, conversationActivityReceivedAtEpochMs: null });
+    } finally {
+      vi.useRealTimers();
     }
-
-    const invocation = await sendHostedContainerJsonRequest({
-      body: JSON.stringify(buildWorkspaceJobBody()),
-      path: "/internal/workspace-invocation",
-      port: address.port,
-    });
-    expect(invocation.status).toBe(500);
-    const health = await sendHostedContainerGetRequest({
-      path: "/health",
-      port: address.port,
-    });
-    const healthJson = requireRecord(health.json, "health response");
-    expect(Number.isSafeInteger(
-      healthJson.conversationWarmActivityCompletedAtEpochMs,
-    )).toBe(true);
   });
 
   it("drains deferred usage completions before clean shutdown exit", async () => {
@@ -909,7 +861,9 @@ describe("startHostedContainerEntrypoint", () => {
     await invocationReady.promise;
     expect(observedRuntime.shutdownSignal?.aborted).toBe(false);
     process.emit("SIGTERM", "SIGTERM");
+    process.emit("SIGTERM", "SIGTERM");
     expect(observedRuntime.shutdownSignal?.aborted).toBe(true);
+    expect(exit).not.toHaveBeenCalled();
 
     const lateWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       body: JSON.stringify({
@@ -922,6 +876,7 @@ describe("startHostedContainerEntrypoint", () => {
       },
       method: "POST",
     });
+    expect(exit).not.toHaveBeenCalled();
     releaseInvocation.resolve();
     const invocationResponse = await invocation;
 
@@ -1157,6 +1112,12 @@ describe("startHostedContainerEntrypoint", () => {
     expect(pendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(pendingWake.headers.get("x-runtime-wake-identity-checked")).toBe("1");
     expect(pendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
+    expect(pendingWake.headers.get("x-runtime-wake-received-at-ms")).toBe(String(pendingWakeAcceptedAtEpochMs));
+    expect(pendingWake.headers.get("x-runtime-wake-accepted-at-ms")).toBe(String(pendingWakeAcceptedAtEpochMs));
+    expect(firstWake.headers.get("x-runtime-wake-received-at-ms")).toBe(String(firstWakeAcceptedAtEpochMs));
+    expect(firstWake.headers.get("x-runtime-wake-accepted-at-ms")).toBe(String(firstWakeAcceptedAtEpochMs));
+    expect(firstWake.headers.get("x-runtime-wake-pending")).toBeNull();
+    expect(idleWake.headers.get("x-runtime-wake-accepted-at-ms")).toBeNull();
     expect(secondPendingWake.status).toBe(204);
     expect(secondPendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(secondPendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
@@ -1206,6 +1167,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: null,
           workspacePendingAttemptId: null,
         },
@@ -1217,6 +1180,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: true,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: null,
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
@@ -1228,6 +1193,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: true,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: null,
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
@@ -1239,6 +1206,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: "attempt_evt_runtime_wake_ready",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
@@ -1250,6 +1219,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: "attempt_evt_runtime_wake_ready",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
@@ -1417,6 +1388,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_disconnected",
         },
@@ -1428,6 +1401,8 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeAbsent: false,
           runtimeWakeMismatch: false,
           runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
           workspacePendingAttemptId: "attempt_evt_runtime_wake_disconnected",
         },

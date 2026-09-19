@@ -82,6 +82,90 @@ const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS = 5_000;
+const HOSTED_CONTAINER_REQUEST_KINDS = new Map([
+  [HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH, "codex-shell-smoke"],
+  [HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH, "live-model-smoke"],
+  [HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH, "direct-r2-smoke"],
+  ["/internal/workspace-invocation", "workspace-invocation"],
+  [HOSTED_CONTAINER_WORKSPACE_INVOCATION_ABORT_PATH, "workspace-invocation-abort"],
+]);
+
+function writeHostedRuntimeWakeResponse(
+  response: ServerResponse,
+  { accepted, absent, mismatch, pending, identityPresent }: {
+    accepted: boolean;
+    absent: boolean;
+    mismatch: boolean;
+    pending: boolean;
+    identityPresent: boolean;
+  },
+): void {
+  if (accepted) {
+    response.setHeader("x-runtime-wake-accepted-at-ms", String(Date.now()));
+    response.setHeader("x-runtime-wake-accepted", "1");
+  } else {
+    response.setHeader("x-runtime-wake-accepted", "0");
+  }
+  if (identityPresent && accepted && !mismatch) {
+    response.setHeader("x-runtime-wake-identity-checked", "1");
+  }
+  if (pending) {
+    response.setHeader("x-runtime-wake-pending", "1");
+  }
+  if (absent) {
+    response.setHeader("x-runtime-wake-absent", "1");
+  }
+  if (mismatch) {
+    response.setHeader("x-runtime-wake-mismatch", "1");
+  }
+  response.statusCode = 204;
+  response.end();
+}
+
+async function runHostedLiveModelSmokeRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  signal: AbortSignal,
+  hydrateHeavyRuntime: () => Promise<HostedContainerHeavyRuntime>,
+): Promise<void> {
+  discardUnreadRequestBody(request);
+  let heavyRuntime: HostedContainerHeavyRuntime | null = null;
+  try {
+    heavyRuntime = await hydrateHeavyRuntime();
+    const result = await heavyRuntime.runLiveModelTurnSmoke({
+      model: heavyRuntime.deployLiveModelTurnSmokeModel,
+      signal: signal,
+    });
+    writeJsonResponse(response, 200, {
+      liveModelTurn: result,
+      ok: true,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      error,
+      level: "error",
+      message: "Hosted container entrypoint failed the live model turn smoke.",
+      phase: "failed",
+      userId: null,
+    });
+    if (signal.aborted || response.destroyed) {
+      return;
+    }
+    // Live-turn smoke diagnostics carry locally constructed labels plus
+    // capped, redacted Codex stdout/stderr excerpts so CI can show the
+    // provider-side reason without dumping raw JSONL or credentials.
+    writeJsonResponse(response, 500, {
+      error: "Hosted live model turn smoke failed.",
+      ok: false,
+      smokeErrorMessage: heavyRuntime
+        ? heavyRuntime.buildLiveModelTurnSmokeSafeText(
+            error instanceof Error ? error.message : String(error),
+          )
+        : "Hosted live model turn smoke failed before runtime hydration.",
+    });
+  }
+}
 
 interface HostedContainerProcessApi {
   readFile(path: string, encoding: BufferEncoding): Promise<string>;
@@ -287,7 +371,7 @@ export async function startHostedContainerEntrypoint(input: {
   };
   let activeHostedRunnerJobCount = 0;
   let workspaceInvocationAcceptedCount = 0;
-  let conversationWarmActivityCompletedAtEpochMs: number | null = null;
+  let conversationActivityReceivedAtEpochMs: number | null = null;
   let activeRuntimeWake: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
   let activeRuntimeWakeLeaseGeneration: string | null = null;
@@ -329,8 +413,6 @@ export async function startHostedContainerEntrypoint(input: {
     // endpoint below.
     const invocationAbort = new AbortController();
     let claimedRunnerSlot = false;
-    let conversationActivityObservedForInvocation = false;
-    let conversationActivitySettled = false;
     let workspaceRestorePreparation: Promise<HostedWorkspaceRestorePreparation> | null = null;
     let runtimeWakeForRequest: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
@@ -345,16 +427,6 @@ export async function startHostedContainerEntrypoint(input: {
       leaseGeneration: string | null;
       userId: string;
     } | null = null;
-    const settleConversationActivity = () => {
-      if (conversationActivitySettled) {
-        return;
-      }
-      conversationActivitySettled = true;
-      if (conversationActivityObservedForInvocation) {
-        conversationWarmActivityCompletedAtEpochMs = Date.now();
-      }
-    };
-
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
 
@@ -366,7 +438,10 @@ export async function startHostedContainerEntrypoint(input: {
           codexShellPreflightCompletedAtEpochMs,
           codexShellPreflightStatus,
           cloudflareRegion,
-          conversationWarmActivityCompletedAtEpochMs,
+          conversationActivityReceivedAtEpochMs,
+          // Rollout-only wire alias for the preceding Worker. Never a second
+          // clock: even old consumers see receipt time, not completion time.
+          conversationWarmActivityCompletedAtEpochMs: conversationActivityReceivedAtEpochMs,
           heavyRuntimeHydrationCompletedAtEpochMs,
           heavyRuntimeHydrationStatus,
           hostedRuntimeArchitectureVersion:
@@ -400,6 +475,8 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
+        const wakeReceivedAtEpochMs = Date.now();
+        response.setHeader("x-runtime-wake-received-at-ms", String(wakeReceivedAtEpochMs));
         const rejectRuntimeWakeAfterShutdown = (): boolean => {
           if (!containerShutdownController.signal.aborted) {
             return false;
@@ -526,6 +603,8 @@ export async function startHostedContainerEntrypoint(input: {
             runtimeWakeAbsent: absent,
             runtimeWakeMismatch: mismatch,
             runtimeWakePending: pending,
+            runtimeWakeReceivedAtEpochMs: wakeReceivedAtEpochMs,
+            runtimeWakeHandledAtEpochMs: Date.now(),
             workspaceAttemptId: activeRuntimeWakeAttemptId,
             workspacePendingAttemptId: activeRuntimeWakePendingAttemptId,
           },
@@ -533,49 +612,23 @@ export async function startHostedContainerEntrypoint(input: {
           phase: "wake.running",
           userId: null,
         });
-        if (accepted) {
-          response.setHeader("x-runtime-wake-accepted", "1");
-        } else {
-          response.setHeader("x-runtime-wake-accepted", "0");
-        }
-        if (wakeRequest && accepted && !mismatch) {
-          response.setHeader("x-runtime-wake-identity-checked", "1");
-        }
-        if (pending) {
-          response.setHeader("x-runtime-wake-pending", "1");
-        }
-        if (absent) {
-          response.setHeader("x-runtime-wake-absent", "1");
-        }
-        if (mismatch) {
-          response.setHeader("x-runtime-wake-mismatch", "1");
-        }
-        response.statusCode = 204;
-        response.end();
+        writeHostedRuntimeWakeResponse(response, {
+          accepted,
+          absent,
+          mismatch,
+          pending,
+          identityPresent: wakeRequest !== null,
+        });
         return;
       }
 
-      const isCodexShellSmokeRequest =
-        request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH;
-      const isLiveModelTurnSmokeRequest =
-        request.method === "POST"
-        && requestUrl.pathname === HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH;
-      const isDirectR2PresignedPutSmokeRequest =
-        request.method === "POST"
-        && requestUrl.pathname === HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH;
-      const isWorkspaceInvocationRequest =
-        request.method === "POST" && requestUrl.pathname === "/internal/workspace-invocation";
-      const isWorkspaceInvocationAbortRequest =
-        request.method === "POST"
-        && requestUrl.pathname === HOSTED_CONTAINER_WORKSPACE_INVOCATION_ABORT_PATH;
+      const requestKind = request.method === "POST" ? HOSTED_CONTAINER_REQUEST_KINDS.get(requestUrl.pathname) : undefined;
+      const isCodexShellSmokeRequest = requestKind === "codex-shell-smoke";
+      const isLiveModelTurnSmokeRequest = requestKind === "live-model-smoke";
+      const isDirectR2PresignedPutSmokeRequest = requestKind === "direct-r2-smoke";
+      const isWorkspaceInvocationAbortRequest = requestKind === "workspace-invocation-abort";
 
-      if (
-        !isWorkspaceInvocationRequest
-        && !isWorkspaceInvocationAbortRequest
-        && !isCodexShellSmokeRequest
-        && !isLiveModelTurnSmokeRequest
-        && !isDirectR2PresignedPutSmokeRequest
-      ) {
+      if (requestKind === undefined) {
         discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
@@ -717,43 +770,12 @@ export async function startHostedContainerEntrypoint(input: {
         }
         activeHostedRunnerJobCount += 1;
         claimedRunnerSlot = true;
-        discardUnreadRequestBody(request);
-        let heavyRuntime: HostedContainerHeavyRuntime | null = null;
-        try {
-          heavyRuntime = await hydrateHeavyRuntime();
-          const result = await heavyRuntime.runLiveModelTurnSmoke({
-            model: heavyRuntime.deployLiveModelTurnSmokeModel,
-            signal: requestAbort.signal,
-          });
-          writeJsonResponse(response, 200, {
-            liveModelTurn: result,
-            ok: true,
-          });
-        } catch (error) {
-          emitHostedExecutionStructuredLog({
-            component: "container",
-            error,
-            level: "error",
-            message: "Hosted container entrypoint failed the live model turn smoke.",
-            phase: "failed",
-            userId: null,
-          });
-          if (requestAbort.signal.aborted || response.destroyed) {
-            return;
-          }
-          // Live-turn smoke diagnostics carry locally constructed labels plus
-          // capped, redacted Codex stdout/stderr excerpts so CI can show the
-          // provider-side reason without dumping raw JSONL or credentials.
-          writeJsonResponse(response, 500, {
-            error: "Hosted live model turn smoke failed.",
-            ok: false,
-            smokeErrorMessage: heavyRuntime
-              ? heavyRuntime.buildLiveModelTurnSmokeSafeText(
-                  error instanceof Error ? error.message : String(error),
-                )
-              : "Hosted live model turn smoke failed before runtime hydration.",
-          });
-        }
+        await runHostedLiveModelSmokeRequest(
+          request,
+          response,
+          requestAbort.signal,
+          hydrateHeavyRuntime,
+        );
         return;
       }
 
@@ -891,8 +913,14 @@ export async function startHostedContainerEntrypoint(input: {
       );
 
       const result = await heavyRuntime.runWorkspaceInvocation(job, {
-        onConversationActivityObserved() {
-          conversationActivityObservedForInvocation = true;
+        onConversationActivityObserved(receivedAtEpochMs) {
+          if (Number.isSafeInteger(receivedAtEpochMs)
+            && receivedAtEpochMs >= 0 && receivedAtEpochMs <= Date.now()) {
+            conversationActivityReceivedAtEpochMs = Math.max(
+              conversationActivityReceivedAtEpochMs ?? receivedAtEpochMs,
+              receivedAtEpochMs,
+            );
+          }
         },
         onRuntimeWakeReady(sendWake) {
           activeRuntimeWake = sendWake;
@@ -952,11 +980,8 @@ export async function startHostedContainerEntrypoint(input: {
       completedInvocation = { job, result };
 
       if (requestAbort.signal.aborted || response.destroyed) {
-        settleConversationActivity();
         return;
       }
-
-      settleConversationActivity();
 
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -972,9 +997,6 @@ export async function startHostedContainerEntrypoint(input: {
       response.end(JSON.stringify(result));
     } catch (caughtError) {
       let error = caughtError;
-      if (job) {
-        settleConversationActivity();
-      }
       const responseUnavailable = requestAbort.signal.aborted || response.destroyed;
 
       if (
@@ -1014,9 +1036,6 @@ export async function startHostedContainerEntrypoint(input: {
       const classified = classifyRunnerJobError(error);
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
-      if (job) {
-        settleConversationActivity();
-      }
       stopActiveJobDiagnostics?.();
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
         activeRuntimeWake = null;
@@ -1042,13 +1061,15 @@ export async function startHostedContainerEntrypoint(input: {
       ) {
         activeWorkspaceInvocationAbort = null;
       }
-      if (claimedRunnerSlot) {
-        activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
-      }
       requestAbort.cleanup();
       await recordHostedContainerRuntimeCompletionIfPresent(
         completedInvocation,
       );
+      // A checkpoint control response must not let shutdown exit while the
+      // completed invocation's durable completion callback is still settling.
+      if (claimedRunnerSlot) {
+        activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
+      }
       maybeExitAfterContainerShutdownDrain();
     }
   });

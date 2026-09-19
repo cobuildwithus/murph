@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { isObjectRecord } from "./deploy-automation/shared.ts";
 
-/** The deployed renderer's explicit native configuration, shared by identity and admission. */
 export function runnerApplicationSpecification(container: Record<string, unknown>, logsEnabled: boolean) {
   const image = container.image;
   const size = container.instance_type;

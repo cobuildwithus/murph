@@ -416,7 +416,7 @@ test.each([
   });
 
   expect(rendered.reload).toHaveBeenCalledTimes(1);
-  expect(rendered.container.textContent).not.toContain("Where do you get care?");
+  expect(rendered.container.textContent).not.toContain("Find your hospital or clinic");
   expect(rendered.window.location.href).toBe(
     "https://app.example.test/records/connect",
   );
@@ -454,7 +454,7 @@ test.each([
   cleanupRender = reloaded.cleanup;
 
   await vi.waitFor(() => {
-    expect(reloaded.container.textContent).toContain("Where do you get care?");
+    expect(reloaded.container.textContent).toContain("Find your hospital or clinic");
   });
   expect(reloaded.container.textContent).not.toContain("Consent required");
   expect(submittedBeforeReload).toEqual(submittedScopes);

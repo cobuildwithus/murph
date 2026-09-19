@@ -25,8 +25,8 @@ export default async function RecordsConnectPage({
     : resolvedSearchParams.launch;
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-8">
-      <div className="space-y-6">
+    <div className="flex w-full min-w-0 flex-col gap-10">
+      <div className="flex flex-col gap-6">
         <Link
           href="/records"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
@@ -36,7 +36,7 @@ export default async function RecordsConnectPage({
         </Link>
         <PageHeader
           title="Connect medical records"
-          description="Sign in on your portal’s website to allow a one-time import of available labs, reports, medications, allergies, and other chart records. Recent history is limited; some records are kept only as source evidence."
+          description="Bring your available lab results, medications, and other medical records into Murph with a one-time import."
         />
       </div>
       <RecordsConnectClient

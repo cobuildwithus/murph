@@ -17,7 +17,7 @@ import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { createTestRootKey, MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
-  requireRunnerRuntimeWriteFenceWrite: vi.fn(),
+  requireRunnerRuntimeWriteFence: vi.fn(),
   resolveRunnerOutboundUserCryptoContext: vi.fn(),
 }));
 
@@ -38,14 +38,14 @@ vi.mock("../src/runner-outbound/write-fence.ts", async () => {
   >("../src/runner-outbound/write-fence.ts");
   return {
     ...actual,
-    requireRunnerRuntimeWriteFenceWrite:
-      mocks.requireRunnerRuntimeWriteFenceWrite,
+    requireRunnerRuntimeWriteFence:
+      mocks.requireRunnerRuntimeWriteFence,
   };
 });
 
 describe("runner meal-photo effects routes", () => {
   beforeEach(() => {
-    mocks.requireRunnerRuntimeWriteFenceWrite.mockReset();
+    mocks.requireRunnerRuntimeWriteFence.mockReset();
     mocks.resolveRunnerOutboundUserCryptoContext.mockReset();
   });
 
@@ -76,7 +76,7 @@ describe("runner meal-photo effects routes", () => {
         },
       },
     };
-    mocks.requireRunnerRuntimeWriteFenceWrite.mockResolvedValue({
+    mocks.requireRunnerRuntimeWriteFence.mockResolvedValue({
       attemptId: "attempt_1",
       generation: "1",
       workspaceVersion: "1",
@@ -117,12 +117,12 @@ describe("runner meal-photo effects routes", () => {
       expect(deleteResponse.status).toBe(204);
     }
 
-    expect(mocks.requireRunnerRuntimeWriteFenceWrite).toHaveBeenCalledTimes(3);
-    expect(mocks.requireRunnerRuntimeWriteFenceWrite).toHaveBeenNthCalledWith(
+    expect(mocks.requireRunnerRuntimeWriteFence).toHaveBeenCalledTimes(3);
+    expect(mocks.requireRunnerRuntimeWriteFence).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ request: expect.objectContaining({ method: "GET" }), userId }),
     );
-    expect(mocks.requireRunnerRuntimeWriteFenceWrite).toHaveBeenNthCalledWith(
+    expect(mocks.requireRunnerRuntimeWriteFence).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ request: expect.objectContaining({ method: "DELETE" }), userId }),
     );
@@ -142,7 +142,7 @@ describe("runner meal-photo effects routes", () => {
         },
       },
     };
-    mocks.requireRunnerRuntimeWriteFenceWrite.mockRejectedValueOnce(
+    mocks.requireRunnerRuntimeWriteFence.mockRejectedValueOnce(
       new RunnerRuntimeWriteFenceError(),
     );
     const url = `http://results.worker/meal-photos/${"a".repeat(40)}`;

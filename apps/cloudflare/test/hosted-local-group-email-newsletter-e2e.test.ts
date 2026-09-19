@@ -81,7 +81,7 @@ describe("hosted local group email newsletter e2e", () => {
     });
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
-        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: [
           ownerPhone,
           missingEmailPhone,

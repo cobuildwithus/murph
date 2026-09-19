@@ -302,7 +302,6 @@ const hostedAccountGroupInviteSelect =
 
 const hostedAccountGroupBillingRefSelect =
   Prisma.validator<Prisma.HostedAccountGroupBillingRefSelect>()({
-    billedSeatCount: true,
     checkoutAttemptId: true,
     checkoutCreatedAt: true,
     checkoutSeatCount: true,
@@ -326,7 +325,6 @@ const hostedFamilyOwnerDraftSelect =
   Prisma.validator<Prisma.HostedAccountGroupSelect>()({
     billingRef: {
       select: {
-        billedSeatCount: true,
         checkoutAttemptId: true,
         checkoutCreatedAt: true,
         checkoutSeatCount: true,
@@ -6530,34 +6528,15 @@ export function buildHostedFamilyInviteAcceptedNotification(input: {
   };
 }
 
-async function readHostedFamilyBilledSeatCountTx(input: {
-  groupId: string;
-  tx: HostedOnboardingReadClient;
-}): Promise<number | null> {
-  const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
-    select: {
-      billedSeatCount: true,
-    },
-    where: {
-      groupId: input.groupId,
-    },
-  });
-
-  return billingRef?.billedSeatCount ?? null;
-}
-
 async function readHostedFamilyPlanCapacitiesTx(input: {
   groupId: string;
   tx: HostedOnboardingReadClient;
 }): Promise<HostedFamilyPlanCapacities | null> {
-  const [rows, legacySeatCount] = await Promise.all([
-    input.tx.hostedAccountGroupPlanCapacity.findMany({
-      select: { billedQuantity: true, planCode: true },
-      where: { groupId: input.groupId },
-    }),
-    readHostedFamilyBilledSeatCountTx(input),
-  ]);
-  return readHostedFamilyPlanCapacities(rows, legacySeatCount);
+  const rows = await input.tx.hostedAccountGroupPlanCapacity.findMany({
+    select: { billedQuantity: true, planCode: true },
+    where: { groupId: input.groupId },
+  });
+  return readHostedFamilyPlanCapacities(rows);
 }
 
 async function replaceHostedFamilyPlanCapacitiesTx(input: {
@@ -7032,7 +7011,6 @@ function classifyHostedFamilyOwnerDraft(
     || billingRef.stripeSubscriptionLookupKey
     || billingRef.stripeSubscriptionItemIdEncrypted
     || billingRef.stripeSubscriptionItemLookupKey
-    || billingRef.billedSeatCount != null
     || billingRef.currentBillingPhase
     || billingRef.currentPeriodStart
     || billingRef.currentPeriodEnd
@@ -7645,7 +7623,6 @@ async function projectHostedAccountGroupBillingRefSnapshot(
   ]);
 
   return {
-    billedSeatCount: billingRef.billedSeatCount,
     checkoutAttemptId: billingRef.checkoutAttemptId,
     checkoutCreatedAt: billingRef.checkoutCreatedAt,
     checkoutSeatCount: billingRef.checkoutSeatCount,

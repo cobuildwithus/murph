@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostedExecutionAssistantAskResult } from "@murphai/hosted-execution";
 
 import * as secureBox from "@/src/lib/hosted-crypto/secure-box";
-import { listHostedOperatorTasks } from "@/src/lib/hosted-ops/operator-task";
+import { listHostedOperatorTasks, resolveHostedOperatorTaskStatus } from "@/src/lib/hosted-ops/operator-task";
 
 const now = new Date("2026-09-05T12:00:00.000Z");
 const cutoff = new Date("2026-09-03T12:00:00.000Z");
@@ -59,6 +59,18 @@ describe("operator task result read retention", () => {
       where: { requestedByMemberId: "operator_synthetic" },
     });
     expect(views[1]).toMatchObject({ completedAt: cutoff.toISOString(), status: "completed" });
-    expect(views[4]).toMatchObject({ completedAt: null, status: "running" });
+    expect(views[4]).toMatchObject({ completedAt: null, status: "failed" });
+  });
+});
+
+describe("operator task request expiry", () => {
+  it.each(["queued", "running"])("derives expired %s state without changing the audit row", (status) => {
+    const task = { status, expiresAt: now };
+    expect(resolveHostedOperatorTaskStatus(task, new Date(now.getTime() - 1))).toBe(status);
+    expect(resolveHostedOperatorTaskStatus(task, now)).toBe("failed");
+    expect(task.status).toBe(status);
+  });
+  it.each(["completed", "failed", "accepted"])("preserves %s state after the diagnostic request window", (status) => {
+    expect(resolveHostedOperatorTaskStatus({ status, expiresAt: cutoff }, now)).toBe(status);
   });
 });

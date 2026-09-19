@@ -156,7 +156,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
     markHostedLinqDeliverySendFailedTx: vi.fn(actual.markHostedLinqDeliverySendFailedTx),
     readHostedLinqDeliveryProviderDispatchIntentTx: vi.fn().mockResolvedValue(null),
     readHostedLinqDeliveryProviderDispatchIntentsTx: vi.fn().mockResolvedValue([]),
-    recordHostedLinqDeliveryAttemptTx: vi.fn(actual.recordHostedLinqDeliveryAttemptTx),
     resolveHostedLinqInviteSignupDispatchEffectIdTx: vi.fn(
       async (input: { effectId: string }) => input.effectId,
     ),
@@ -211,7 +210,6 @@ import {
   markHostedLinqDeliverySendFailedTx,
   readHostedLinqDeliveryProviderDispatchIntentTx,
   readHostedLinqDeliveryProviderDispatchIntentsTx,
-  recordHostedLinqDeliveryAttemptTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   startAuthorizedHostedAiUsageLimitNoticeDispatchTx as startHostedAiUsageLimitNoticeDispatchTx,
@@ -340,7 +338,6 @@ describe("hosted Linq webhook transport", () => {
         reservation: {
           assignedAt: new Date("2026-03-26T12:00:00.000Z"),
           line: {
-            activeMemberLimit: null,
             assignmentWeight: 100,
             maxNewConversationsPerDay: null,
             phoneNumber: "+15550100042",
@@ -354,7 +351,6 @@ describe("hosted Linq webhook transport", () => {
       });
     transportBoundaryMocks.listHostedLinqHealthyProactiveLines.mockResolvedValue([
       {
-        activeMemberLimit: null,
         assignmentWeight: 100,
         maxNewConversationsPerDay: null,
         phoneNumber: "+15550100042",
@@ -2176,7 +2172,6 @@ describe("hosted Linq webhook transport", () => {
 
     expect(startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledOnce();
     expect(requireHostedOnboardingLinqConfig).toHaveBeenCalledOnce();
-    expect(recordHostedLinqDeliveryAttemptTx).not.toHaveBeenCalled();
     expect(markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
 

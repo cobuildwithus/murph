@@ -67,16 +67,7 @@ const hostedWebPackageJson = JSON.parse(
 ) as {
   scripts?: Record<string, string>
 }
-const auditZipEntryListMaxBufferBytes = 16 * 1024 * 1024
-
-function expectCoverageAdmissionRule(content: string): void {
-  expect(content).toMatch(
-    /tests,\s+fixtures,\s+or\s+direct-proof\s+infrastructure\s+are\s+a\s+primary\s+PR\s+outcome/u,
-  )
-  expect(content).toMatch(
-    /changed\s+behavior\s+makes\s+a\s+material\s+proof\s+claim\s+that\s+ordinary\s+focused\s+owner\s+tests\s+cannot\s+establish\s+at\s+a\s+stable\s+boundary/u,
-  )
-}
+const auditOutputMaxBufferBytes = 16 * 1024 * 1024
 
 type BrowserCommand = {
   listPollCount: number
@@ -144,7 +135,6 @@ type ReviewGptIdleDraftCleaner = {
 type ReviewGptAssistantSnapshot = {
   afterLastUserMessage?: boolean
   hasCopyButton?: boolean
-  modelConfirmationText?: string
   modelSlug?: string
   precedingUserMessageSignature?: string
   signature: string
@@ -651,7 +641,7 @@ function loadReviewGptOpenTargetHarness(
   const minimumMarkedResponseMs = moduleRecord.exports.__minimumMarkedResponseMsTest
   const modelAttestationTurnNonce = moduleRecord.exports.__modelAttestationTurnNonceTest
   const modelAttestationForSnapshot = moduleRecord.exports.__modelAttestationForSnapshotTest
-  const modelConfirmationFailure = moduleRecord.exports.modelConfirmationFailure
+  const responseModelFailure = moduleRecord.exports.responseModelFailure
   const prepareRuntimeConfig = moduleRecord.exports.__prepareRuntimeConfigTest
   const removeModelVerificationEvidenceFile = moduleRecord.exports.__removeModelVerificationEvidenceFileTest
   const selectAssistantResponseCandidate = moduleRecord.exports.selectAssistantResponseCandidate
@@ -672,7 +662,7 @@ function loadReviewGptOpenTargetHarness(
     typeof minimumMarkedResponseMs !== 'number' ||
     typeof modelAttestationTurnNonce !== 'string' ||
     typeof modelAttestationForSnapshot !== 'function' ||
-    typeof modelConfirmationFailure !== 'function' ||
+    typeof responseModelFailure !== 'function' ||
     typeof prepareRuntimeConfig !== 'function' ||
     typeof removeModelVerificationEvidenceFile !== 'function' ||
     typeof selectAssistantResponseCandidate !== 'function' ||
@@ -761,24 +751,18 @@ function loadReviewGptOpenTargetHarness(
       snapshot: ReviewGptAssistantSnapshot,
       includeEvidence = false,
       committedUserTurnSignature = '',
-      generationElapsedMs = 0,
     ) => Reflect.apply(modelAttestationForSnapshot, undefined, [
       targetModel,
       snapshot,
       includeEvidence,
       committedUserTurnSignature,
-      generationElapsedMs,
     ]) as ModelAttestationResult,
-    modelConfirmationFailure: (
+    responseModelFailure: (
       targetModel: string,
-      responseText: string,
       responseModelSlug = '',
-      generationElapsedMs = 0,
-    ) => String(Reflect.apply(modelConfirmationFailure, undefined, [
+    ) => String(Reflect.apply(responseModelFailure, undefined, [
       targetModel,
-      responseText,
       responseModelSlug,
-      generationElapsedMs,
     ])),
     prepareRuntimeConfig: () => {
       Reflect.apply(prepareRuntimeConfig, undefined, [])
@@ -880,16 +864,6 @@ function loadReviewGptOpenTargetHarness(
   }
 }
 
-type ReviewGptDomTestNode = {
-  childNodes: ReviewGptDomTestNode[]
-  computedStyle?: { display?: string; visibility?: string }
-  getAttribute?: (name: string) => string | null
-  hidden?: boolean
-  nodeType: number
-  nodeValue?: string
-  tagName?: string
-}
-
 type ReviewGptModelPickerTarget = {
   desiredVersion: string
   wantsInstant: boolean
@@ -960,51 +934,6 @@ const reviewGptDomSnapshotModule = createRequire(import.meta.url)(
     desiredChatId?: string
     desiredOrigin?: string
   }) => string
-  extractModelConfirmationText: (
-    node: ReviewGptDomTestNode,
-    getComputedStyleValue?: (
-      node: ReviewGptDomTestNode,
-    ) => { display?: string; visibility?: string } | undefined,
-  ) => string
-}
-
-function reviewGptDomText(value: string): ReviewGptDomTestNode {
-  return {
-    childNodes: [],
-    nodeType: 3,
-    nodeValue: value,
-  }
-}
-
-function reviewGptDomElement(
-  tagName: string,
-  childNodes: ReviewGptDomTestNode[],
-  options: {
-    attributes?: Record<string, string>
-    display?: string
-    hidden?: boolean
-    visibility?: string
-  } = {},
-): ReviewGptDomTestNode {
-  const attributes = options.attributes ?? {}
-  return {
-    childNodes,
-    computedStyle: {
-      display: options.display ?? 'inline',
-      visibility: options.visibility ?? 'visible',
-    },
-    getAttribute: (name) => attributes[name] ?? null,
-    hidden: options.hidden,
-    nodeType: 1,
-    tagName,
-  }
-}
-
-function extractReviewGptModelConfirmationText(node: ReviewGptDomTestNode) {
-  return reviewGptDomSnapshotModule.extractModelConfirmationText(
-    node,
-    (current) => current.computedStyle,
-  )
 }
 
 function runNodeScript(...args: string[]) {
@@ -1062,6 +991,7 @@ exec "$(cobuild_repo_tool_bin cobuild-package-audit-context)" "$@"`,
       cwd: repoRoot,
       encoding: 'utf8',
       env: withoutNodeV8Coverage(),
+      maxBuffer: auditOutputMaxBufferBytes,
     },
   )
 }
@@ -1075,6 +1005,7 @@ function createAuditZip(scriptName: string, prefix: string) {
       cwd: repoRoot,
       encoding: 'utf8',
       env: withoutNodeV8Coverage(),
+      maxBuffer: auditOutputMaxBufferBytes,
     },
   )
   const result =
@@ -1101,7 +1032,7 @@ function listZipEntries(zipPath: string) {
     cwd: repoRoot,
     encoding: 'utf8',
     env: withoutNodeV8Coverage(),
-    maxBuffer: auditZipEntryListMaxBufferBytes,
+    maxBuffer: auditOutputMaxBufferBytes,
   })
     .split(/\r?\n/u)
     .map((entry) => entry.trim())
@@ -1357,7 +1288,7 @@ describe('monorepo release flow coverage audit', () => {
       'review_gpt_reject_repository_policy_overrides "$@"',
     )
     expect(reviewGptPrHeadPreflight).toContain(
-      '--minimum-marked-response-time 270s \\\n    "$@"',
+      '--minimum-marked-response-time 180s \\\n    "$@"',
     )
     expect(reviewGptPrHeadPreflight).not.toContain(
       'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=',
@@ -1375,13 +1306,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.145')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.147')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.145'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.147'"])
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1],
@@ -1399,11 +1330,12 @@ describe('monorepo release flow coverage audit', () => {
       [
         "'@cloudflare/containers@0.3.7': patches/@cloudflare__containers@0.3.7.patch",
         "'@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch",
-        "'@cobuild/review-gpt@0.5.145': patches/@cobuild__review-gpt@0.5.145.patch",
+        "'@cobuild/review-gpt@0.5.147': patches/@cobuild__review-gpt@0.5.147.patch",
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'incur@0.5.1: patches/incur@0.5.1.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
         'wrangler@4.90.0: patches/wrangler@4.90.0.patch',
+        'wrangler@4.93.0: patches/wrangler@4.93.0.patch',
       ],
     )
     expect(repoToolsPatch).toContain('tracked_files=()')
@@ -1411,7 +1343,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(repoToolsPatch).toContain('add -u -- "${tracked_files[@]}"')
     expect(repoToolsPatch).toContain('add -A -- "${untracked_files[@]}"')
     expect(
-      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.145.patch')),
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.147.patch')),
     ).toBe(true)
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.142.patch')),
@@ -1589,18 +1521,15 @@ describe('monorepo release flow coverage audit', () => {
         solTarget,
       ),
     ).toBe(false)
-    expect(reviewGptDriver).toContain(
-      'const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = 5 * 60 * 1000;',
-    )
+    expect(reviewGptDriver).not.toContain('MODEL_CONFIRMATION')
+    expect(reviewGptDriver).not.toMatch(/Page\.bringToFront|Target\.activateTarget/u)
     expect(reviewGptDriver).toContain("status: 'response-too-fast'")
     expect(reviewGptDriver).toContain('markedResponseDurationFailure({')
-    expect(reviewGptDriver).toContain('acceptsTimedUnknown')
     expect(reviewGptReadme).toContain(
-      'require exactly one unfenced, unquoted `MODEL_CONFIRMATION` line',
+      'ReviewGPT does not ask the assistant to identify itself',
     )
-    expect(reviewGptReadme).toContain('the exact turn committed by this run')
+    expect(reviewGptReadme).toContain('the exact user turn committed by this run')
     expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
-    expect(reviewGptReadme).toContain('after at least 5 minutes of observed generation')
     expect(reviewGptReadme).toContain(
       'A marked concrete-model response may complete before the trust threshold only when the same snapshot exposes compatible concrete platform-model metadata',
     )
@@ -1682,7 +1611,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(tooFastGuardInvocationStart).toBeGreaterThan(tooFastGuardEnd)
     expect(tooFastGuardInvocationStart).toBeLessThan(completedArtifactWriteStart)
-    expect(reviewGptDriver).toContain('process.exit(1);')
+    expect(reviewGptDriver).toContain("process.exit(error?.code === 'REVIEW_GPT_RATE_LIMITED' ? 75 : 1);")
     expect(reviewGptDriver).toContain(
       [
         '  let ws = initialConnection.ws;',
@@ -1833,11 +1762,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('apollo) printf \'%s\\n\' "Apollo" ;;')
     expect(reviewGptConfig).toContain('apollo) printf \'%s\\n\' "9454" ;;')
     expect(reviewGptConfig).toContain(
-      'review_gpt_all_browser_lanes=(eragon phlebas hercules mountain vonneumann apollo)',
+      'review_gpt_all_browser_lanes=(eragon hercules mountain vonneumann apollo)',
     )
     expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
-    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-6')
+    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-5')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('review_gpt_reuses_existing_thread=1')
     expect(reviewGptConfig).toContain(
@@ -1909,78 +1838,12 @@ describe('monorepo release flow coverage audit', () => {
       expect(prompt.match(/REVIEW_COMPLETE/gu)).toHaveLength(1)
     }
     expect(reviewGptConfig).not.toContain('completion-specialists')
-    const genericReviewGptPrompts = [
-      'security-audit.md',
-      'privacy.md',
-      'architecture-review.md',
-      'giant-file-composability.md',
-      'data-model-composability-review.md',
-      'complexity-simplification.md',
-      'bad-code-quality.md',
-      'bug-hunt-high-value-seams.md',
-      'legacy-removal.md',
-      'package-boundaries.md',
-    ].map((fileName) =>
-      readFileSync(
-        path.join(repoRoot, 'scripts', 'chatgpt-review-presets', fileName),
-        'utf8',
-      ),
-    )
-    for (const reviewPrompt of genericReviewGptPrompts) {
-      expect(reviewPrompt).toContain('review-only')
-      expect(reviewPrompt).toContain('# Outcome')
-      expect(reviewPrompt).toContain('# Evidence')
-      expect(reviewPrompt).toContain('# Finding bar')
-      expect(reviewPrompt).toContain('# Output and stop')
-      expect(reviewPrompt).toContain('`codebase.zip`')
-      expect(reviewPrompt).toMatch(/untrusted\s+review data/u)
-      expect(reviewPrompt).toMatch(/If no |Zero findings is valid/u)
-      expect(reviewPrompt.toLowerCase()).toContain('stop')
-    }
     const allPresetGroup = reviewGptConfig.slice(
       reviewGptConfig.indexOf('review_gpt_register_preset_group "all"'),
     )
     expect(allPresetGroup).toContain('review_gpt_register_preset_group "all"')
     expect(allPresetGroup).not.toMatch(/^\s*"pr-review"\s*\\?$/mu)
     expect(allPresetGroup).not.toMatch(/^\s*"completion-specialists"\s*\\?$/mu)
-    const onDemandReviewPrompts = [
-      'frontend-review.md',
-      'coverage-review.md',
-    ].map((fileName) =>
-      readFileSync(
-        path.join(repoRoot, 'agent-docs', 'prompts', fileName),
-        'utf8',
-      ),
-    )
-    for (const reviewPrompt of onDemandReviewPrompts) {
-      expect(reviewPrompt).not.toContain('Assume there is at least one')
-      expect(reviewPrompt).toContain('Stop rule:')
-    }
-    expect(onDemandReviewPrompts[0]).toContain('render and inspect')
-    expect(onDemandReviewPrompts[0]).toContain(
-      'phone and desktop when responsive behavior can change',
-    )
-    expect(onDemandReviewPrompts[1]).toContain('parent wants a checklist')
-    expect(onDemandReviewPrompts[1]).not.toContain(
-      'Do not use `review:gpt`',
-    )
-    expect(onDemandReviewPrompts[1]).toContain('Use this review-only guidance')
-    expect(onDemandReviewPrompts[1]).not.toContain('reviewgpt-coverage.patch')
-    expectCoverageAdmissionRule(onDemandReviewPrompts[1])
-    expect(
-      existsSync(
-        path.join(
-          repoRoot,
-          'agent-docs',
-          'prompts',
-          'security-privacy-review.md',
-        ),
-      ),
-    ).toBe(false)
-    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
-    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
-    expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
-    expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
   })
 
   it("keeps ReviewGPT's patched Incur MCP transport compatible with its pinned server", async () => {
@@ -2167,7 +2030,7 @@ describe('monorepo release flow coverage audit', () => {
         'Idle draft cleanup: close hidden, inactive unsent drafts after 1800000ms',
       )
       expect(defaultResult.stdout).toContain(
-        'Minimum marked response time: 270000ms',
+        'Minimum marked response time: 180000ms',
       )
 
       writeHarnessFile(
@@ -2181,7 +2044,7 @@ describe('monorepo release flow coverage audit', () => {
         'Response capture: enabled (7654321ms timeout)',
       )
       expect(localResult.stdout).toContain(
-        'Minimum marked response time: 270000ms',
+        'Minimum marked response time: 180000ms',
       )
 
       writeHarnessFile(
@@ -2197,7 +2060,7 @@ describe('monorepo release flow coverage audit', () => {
       const callbackResult = runRepositoryDry()
       expect(callbackResult.status, callbackResult.stderr).toBe(0)
       expect(callbackResult.stdout).toContain(
-        'Minimum marked response time: 270000ms',
+        'Minimum marked response time: 180000ms',
       )
 
       const weakConfigPath = path.join(harnessRoot, 'weak-review-gpt.sh')
@@ -2428,7 +2291,7 @@ printf '%s|%s|%s|%s|%s\n' \
       )
 
       rmSync(path.join(localConfigRoot, 'murph', 'review-gpt.conf'))
-      for (const lane of ['Eragon', 'Phlebas', 'Hercules', 'Mountain']) {
+      for (const lane of ['Eragon', 'Hercules', 'Mountain']) {
         writeHarnessFile(
           harnessRoot,
           `Library/Application Support/MurphReviewGPT/${lane}/SingletonLock`,
@@ -2454,7 +2317,7 @@ printf '%s|%s|%s|%s|%s\n' \
         defaultDisplayMode,
       ] = defaultResult.stdout.trim().split('|')
       expect(['vonneumann', 'apollo']).toContain(defaultLane)
-      expect(defaultLaneCount).toBe('6')
+      expect(defaultLaneCount).toBe('5')
       expect(defaultBrowser).toBe(
         '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
       )
@@ -2474,13 +2337,13 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(mainResult.status, mainResult.stderr).toBe(0)
       expect(mainResult.stdout.trim()).toBe(
-        'main|6|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+        'main|5|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=5\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=4\n',
       )
       const optedInResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
@@ -2494,7 +2357,7 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(optedInResult.status, optedInResult.stderr).toBe(0)
       expect(optedInResult.stdout.trim()).toBe(
-        'vonneumann|5|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+        'vonneumann|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
       writeHarnessFile(
@@ -2505,9 +2368,9 @@ printf '%s|%s|%s|%s|%s\n' \
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=6\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=5\n',
       )
-      const sixLaneResult = spawnSync('bash', ['-c', configHarness], {
+      const fiveLaneResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
         encoding: 'utf8',
         env: {
@@ -2517,15 +2380,15 @@ printf '%s|%s|%s|%s|%s\n' \
           XDG_CONFIG_HOME: localConfigRoot,
         },
       })
-      expect(sixLaneResult.status, sixLaneResult.stderr).toBe(0)
-      expect(sixLaneResult.stdout.trim()).toBe(
-        'apollo|6|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+      expect(fiveLaneResult.status, fiveLaneResult.stderr).toBe(0)
+      expect(fiveLaneResult.stdout.trim()).toBe(
+        'apollo|5|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=7\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=6\n',
       )
       const invalidLaneCountResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
@@ -2539,12 +2402,12 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(invalidLaneCountResult.status).not.toBe(0)
       expect(invalidLaneCountResult.stderr).toContain(
-        'REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 6',
+        'REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 5',
       )
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=6\n',
+        'REVIEW_GPT_BROWSER_LANE_COUNT=5\n',
       )
 
       const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
@@ -2588,7 +2451,7 @@ printf '%s|%s|%s|%s|%s\n' \
         env: {
           ...cleanBrowserPreferenceEnv(),
           HOME: harnessRoot,
-          MURPH_REVIEW_GPT_BROWSER_LANE: 'phlebas',
+          MURPH_REVIEW_GPT_BROWSER_LANE: 'hercules',
           REPO_ROOT: repoRoot,
           REVIEW_GPT_REVIEW_PHASE: 'final',
           REVIEW_GPT_ROUND_NUMBER: '3',
@@ -2637,7 +2500,7 @@ printf '%s|%s|%s|%s|%s\n' \
             ...cleanBrowserPreferenceEnv(),
             HOME: harnessRoot,
             REPO_ROOT: repoRoot,
-            REVIEW_GPT_BROWSER_LANE: 'phlebas',
+            REVIEW_GPT_BROWSER_LANE: 'hercules',
             REVIEW_GPT_REVIEW_PHASE: 'final',
             REVIEW_GPT_ROUND_NUMBER: '3',
             REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
@@ -2647,7 +2510,7 @@ printf '%s|%s|%s|%s|%s\n' \
       )
       expect(existingThreadResult.status, existingThreadResult.stderr).toBe(0)
       expect(existingThreadResult.stdout.trim().split('\n').at(-2)).toMatch(
-        /^phlebas\|/u,
+        /^hercules\|/u,
       )
       expect(existingThreadResult.stdout.trim().split('\n').at(-1)).toBe(
         'https://chatgpt.com/c/fallback-thread',
@@ -2656,7 +2519,7 @@ printf '%s|%s|%s|%s|%s\n' \
       const correctionPresetHarness = `${configHarness}
 printf '%s|%s|%s|%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_selected_browser_display" "$review_gpt_selected_browser_port" "$managed_browser_user_data_dir" "$review_gpt_pr_review_prompt_file"
 review_gpt_managed_ports=()
-for review_gpt_lane in main eragon phlebas hercules mountain vonneumann apollo; do
+for review_gpt_lane in main eragon hercules mountain vonneumann apollo; do
   review_gpt_managed_ports+=("$(review_gpt_browser_lane_port "$review_gpt_lane")")
 done
 printf '%s\n' "\${review_gpt_managed_ports[*]}"
@@ -2699,7 +2562,6 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
       expect(managedPorts).toEqual([
         '9452',
         '9448',
-        '9442',
         '9444',
         '9450',
         '9446',
@@ -2788,24 +2650,6 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true })
     }
-  })
-
-  it('keeps Product UX decisions parent-owned without a specialist audit', () => {
-    const frontendReview = readFileSync(
-      path.join(repoRoot, 'agent-docs', 'prompts', 'frontend-review.md'),
-      'utf8',
-    )
-
-    expect(frontendReview).toMatch(
-      /do not duplicate subjective product-taste findings or\s+decide the copy, state selection, action count, or whether an element exists/u,
-    )
-    expect(frontendReview).toContain(
-      'visual treatment that obscures or conflicts with the declared hierarchy',
-    )
-    expect(frontendReview).not.toContain('unrelated rendered elements')
-    expect(frontendReview).toContain(
-      'Meaning-preserving tiny static-copy corrections',
-    )
   })
 
   it('keeps delayed targets alive until discovery and closes only failed discoveries', async () => {
@@ -2991,125 +2835,12 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     ).rejects.toThrow('Browser CDP socket closed unexpectedly')
   })
 
-  it('extracts model confirmation only from visible standalone rendered lines', () => {
-    const modelClassifier = loadReviewGptOpenTargetHarness(1)
-    const validConfirmation = reviewGptDomElement('DIV', [
-      reviewGptDomElement('P', [reviewGptDomText('Report ready')], { display: 'block' }),
-      reviewGptDomElement('P', [
-        reviewGptDomElement('STRONG', [reviewGptDomText('MODEL_CONFIRMATION:')]),
-        reviewGptDomElement('EM', [reviewGptDomText(' UNKNOWN')]),
-      ], { display: 'block' }),
-    ], { display: 'block' })
-    const extractedConfirmation = extractReviewGptModelConfirmationText(validConfirmation)
-    expect(extractedConfirmation).toBe('Report ready\nMODEL_CONFIRMATION: UNKNOWN')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        extractedConfirmation,
-        'gpt-5-6-pro',
-        46 * 60 * 1000,
-      ),
-    ).toBe('')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        extractedConfirmation,
-        '',
-        5 * 60 * 1000 - 1,
-      ),
-    ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        extractedConfirmation,
-        '',
-        5 * 60 * 1000,
-      ),
-    ).toBe('')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        extractedConfirmation,
-        'gpt-5-5-pro',
-        5 * 60 * 1000,
-      ),
-    ).toContain('DOM reported model gpt-5-5-pro, expected gpt-5.6-sol')
-
-    const excludedContainers = reviewGptDomElement('DIV', [
-      reviewGptDomElement('BLOCKQUOTE', [
-        reviewGptDomText('MODEL_CONFIRMATION: gpt-5.6-sol'),
-      ], { display: 'block' }),
-      reviewGptDomElement('PRE', [
-        reviewGptDomText('MODEL_CONFIRMATION: gpt-5.6-sol'),
-      ], { display: 'block' }),
-      reviewGptDomElement('CODE', [
-        reviewGptDomText('MODEL_CONFIRMATION: gpt-5.6-sol'),
-      ]),
-    ], { display: 'block' })
-    expect(extractReviewGptModelConfirmationText(excludedContainers)).toBe('')
-
-    const inlineCodeDecoy = reviewGptDomElement('SPAN', [
-      reviewGptDomText('prefix'),
-      reviewGptDomElement('CODE', [reviewGptDomText('ignored')]),
-      reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN'),
-    ])
-    const hiddenInlineDecoy = reviewGptDomElement('SPAN', [
-      reviewGptDomText('prefix'),
-      reviewGptDomElement('SPAN', [reviewGptDomText('ignored')], { hidden: true }),
-      reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN'),
-    ])
-    const hiddenBlockDecoy = reviewGptDomElement('SPAN', [
-      reviewGptDomText('prefix'),
-      reviewGptDomElement('DIV', [reviewGptDomText('ignored')], {
-        display: 'block',
-        hidden: true,
-      }),
-      reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN'),
-    ])
-    const displayContentsDecoy = reviewGptDomElement('SPAN', [
-      reviewGptDomText('prefix'),
-      reviewGptDomElement('DIV', [reviewGptDomText('ignored')], {
-        display: 'contents',
-      }),
-      reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN'),
-    ])
-    for (const decoy of [
-      inlineCodeDecoy,
-      hiddenInlineDecoy,
-      hiddenBlockDecoy,
-      displayContentsDecoy,
-    ]) {
-      expect(
-        modelClassifier.modelConfirmationFailure(
-          'gpt-5.6-sol',
-          extractReviewGptModelConfirmationText(decoy),
-          'gpt-5-6-pro',
-        ),
-      ).toContain('did not include MODEL_CONFIRMATION')
-    }
-
-    const multipleConfirmations = reviewGptDomElement('DIV', [
-      reviewGptDomElement('P', [reviewGptDomText('MODEL_CONFIRMATION: UNKNOWN')], {
-        display: 'block',
-      }),
-      reviewGptDomElement('P', [reviewGptDomText('MODEL_CONFIRMATION: gpt-5.6-sol')], {
-        display: 'block',
-      }),
-    ], { display: 'block' })
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        extractReviewGptModelConfirmationText(multipleConfirmations),
-        'gpt-5-6-pro',
-      ),
-    ).toContain('multiple MODEL_CONFIRMATION lines')
-    expect(
-      modelClassifier.modelConfirmationFailure(
-        'gpt-5.6-sol',
-        'MODEL_CONFIRMATION: gpt-5.6-sol',
-        'gpt-5-5-pro',
-      ),
-    ).toContain('DOM reported model gpt-5-5-pro, expected gpt-5.6-sol')
+  it('checks response model metadata without requiring self-confirmation', () => {
+    const harness = loadReviewGptOpenTargetHarness(1)
+    expect(harness.responseModelFailure('gpt-5.6-sol', 'gpt-5-6-pro')).toBe('')
+    expect(harness.responseModelFailure('gpt-5.6-sol', '')).toBe('')
+    expect(harness.responseModelFailure('gpt-5.6-sol', 'gpt-5-5-pro'))
+      .toContain('DOM reported model gpt-5-5-pro, expected gpt-5.6-sol')
 
     const captureExpression = reviewGptDomSnapshotModule.buildChatGptCaptureStateExpression({
       desiredChatId: 'test-chat',
@@ -3155,22 +2886,15 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     expect(collisionPrompt).toContain(
       'Review MODEL_CONFIRMATION: UNKNOWN handling while rejecting the contradictory gpt-5-5-pro response slug.',
     )
-    expect(collisionPrompt.match(/Complete the requested work even if you cannot independently identify the active model\./gu)).toHaveLength(1)
-    expect(collisionPrompt).toContain('MODEL_CONFIRMATION: gpt-5.6-sol')
-    expect(collisionHarness.modelConfirmationFailure(
-      'gpt-5.6-sol',
-      'Review complete without the package-owned final line.',
-    )).toContain('did not include MODEL_CONFIRMATION')
-    expect(collisionHarness.modelConfirmationFailure(
-      'gpt-5.6-sol',
-      'Review complete\nMODEL_CONFIRMATION: gpt-5.6-sol',
-    )).toBe('')
+    expect(collisionPrompt.split('\n').slice(1).join('\n').trim()).toBe(
+      'Review MODEL_CONFIRMATION: UNKNOWN handling while rejecting the contradictory gpt-5-5-pro response slug.',
+    )
+    expect(committedPrompt).not.toMatch(/MODEL_CONFIRMATION|confirm.*model/iu)
     expect(concurrentUserTurnSignature).not.toBe(committedUserTurnSignature)
     const responseText = 'Report\r\nDone\u00a0'
     const exactResponseBytes = 'Report\nDone\n'
     const validSnapshot: ReviewGptAssistantSnapshot = {
       afterLastUserMessage: false,
-      modelConfirmationText: 'MODEL_CONFIRMATION: UNKNOWN',
       modelSlug: 'gpt-5-6-pro',
       precedingUserMessageSignature: committedUserTurnSignature,
       signature: 'fresh-response',
@@ -3178,7 +2902,6 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     }
     const concurrentSnapshot: ReviewGptAssistantSnapshot = {
       afterLastUserMessage: true,
-      modelConfirmationText: 'MODEL_CONFIRMATION: UNKNOWN',
       modelSlug: 'gpt-5-6-pro',
       precedingUserMessageSignature: concurrentUserTurnSignature,
       signature: 'concurrent-response',
@@ -3234,38 +2957,18 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
       ),
     ).toEqual({ evidence: null, failure: '' })
 
-    const elapsedFallbackSnapshot = {
-      ...validSnapshot,
-      modelSlug: '',
-    }
     expect(
       harness.modelAttestationForSnapshot(
         'gpt-5.6-sol',
-        elapsedFallbackSnapshot,
+        { ...validSnapshot, modelSlug: '' },
         true,
         committedUserTurnSignature,
-        5 * 60 * 1000 - 1,
-      ),
-    ).toMatchObject({ evidence: null, failure: expect.stringContaining('confirmed model UNKNOWN') })
-    expect(
-      harness.modelAttestationForSnapshot(
-        'gpt-5.6-sol',
-        elapsedFallbackSnapshot,
-        true,
-        committedUserTurnSignature,
-        5 * 60 * 1000,
       ),
     ).toEqual({ evidence: null, failure: '' })
 
     for (const invalidSnapshot of [
       concurrentSnapshot,
-      { ...validSnapshot, modelConfirmationText: '' },
       { ...validSnapshot, modelSlug: 'gpt-5-5-pro' },
-      {
-        ...validSnapshot,
-        modelConfirmationText: 'MODEL_CONFIRMATION: gpt-5.6-sol',
-        modelSlug: 'gpt-5-5-pro',
-      },
     ]) {
       const invalidAttestation = harness.modelAttestationForSnapshot(
         'gpt-5.6-sol',
@@ -3315,20 +3018,20 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     ).toBe('')
 
     const configuredHarness = loadReviewGptOpenTargetHarness(1, undefined, {
-      minimumMarkedResponseMs: 270_000,
+      minimumMarkedResponseMs: 180_000,
     })
     expect(
       configuredHarness.markedResponseDurationFailure(
         'gpt-5.6-sol',
         'ROUND_OUTCOME:',
-        269_999,
+        179_999,
       ),
-    ).toContain('below the 270s minimum')
+    ).toContain('below the 3m minimum')
     expect(
       configuredHarness.markedResponseDurationFailure(
         'gpt-5.6-sol',
         'ROUND_OUTCOME:',
-        270_000,
+        180_000,
       ),
     ).toBe('')
     expect(() =>
@@ -4107,6 +3810,9 @@ case "$*" in
   *".headRefOid"*) printf '%s\\n' "$TEST_HEAD_SHA" ;;
   *".body"*)
     printf 'ReviewGPT first-reviewed head: %s\\n' "$TEST_FIRST_SHA"
+    if [[ -n "\${TEST_PRIOR_INVALID_HEAD:-}" ]]; then
+      printf 'Invalid initial attempt: head %s; capture validation failed. No substantive review.\\n' "$TEST_PRIOR_INVALID_HEAD"
+    fi
     case "\${TEST_CONTEXT_SENSITIVITY:-routine}" in
       missing) ;;
       duplicate)
@@ -4193,18 +3899,8 @@ printf 'ZIP: %s (%s bytes)\n' \
       writeHarnessFile(harnessRoot, 'package.json', '{"name":"review-harness"}\n')
       writeHarnessFile(
         harnessRoot,
-        'agent-docs/prompts/prompt-review.md',
-        'prompt lens\n',
-      )
-      writeHarnessFile(
-        harnessRoot,
-        'agent-docs/prompts/frontend-review.md',
-        'frontend lens\n',
-      )
-      writeHarnessFile(
-        harnessRoot,
-        'agent-docs/prompts/coverage-review.md',
-        'coverage lens\n',
+        'agent-docs/prompts/seam-audits/README.md',
+        'on-demand seam audit guidance\n',
       )
       writeHarnessFile(harnessRoot, 'agent-docs/FRONTEND.md', 'frontend workflow\n')
       writeHarnessFile(
@@ -4362,6 +4058,41 @@ printf 'ZIP: %s (%s bytes)\n' \
         ),
       ).toBe('review-gpt-pr-context/rendered-evidence/01-desktop.png\n')
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const firstValidAttempt = invokePackager('first-valid-attempt-new-head', currentHead, {
+        TEST_PRIOR_INVALID_HEAD: firstHead,
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: currentHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+        REVIEW_GPT_ROUND_NUMBER: '1',
+        TEST_RECORDED_FIRST_HEAD: currentHead,
+      })
+      expect(firstValidAttempt.result.status, firstValidAttempt.result.stderr).toBe(0)
+      const firstValidMetadata = JSON.parse(execFileSync(
+        'unzip',
+        ['-p', firstValidAttempt.zipPath, 'review-gpt-pr-context/review-round.json'],
+        { encoding: 'utf8' },
+      )) as Record<string, unknown>
+      expect(firstValidMetadata).toMatchObject({
+        roundNumber: 1,
+        reviewScope: 'full',
+        contextMode: 'full_snapshot',
+        firstReviewedHead: currentHead,
+        contextAnchorHead: currentHead,
+        currentReviewedHead: currentHead,
+        previousReviewedHead: null,
+      })
+      expect(execFileSync(
+        'unzip',
+        ['-p', firstValidAttempt.zipPath, 'review-gpt-pr-context/pr-body.md'],
+        { encoding: 'utf8' },
+      )).toContain(`Invalid initial attempt: head ${firstHead}; capture validation failed.`)
+      for (const delta of ['since-first-reviewed-head.diff', 'since-previous-reviewed-head.diff']) {
+        expect(execFileSync(
+          'unzip',
+          ['-p', firstValidAttempt.zipPath, `review-gpt-pr-context/${delta}`],
+          { encoding: 'utf8' },
+        )).toBe('')
+      }
 
       const roundTwo = invokePackager('round-two', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
@@ -4800,6 +4531,18 @@ printf 'ZIP: %s (%s bytes)\n' \
       const leanEntries = listZipEntries(leanBundle.zipPath)
       const fullEntries = listZipEntries(fullBundle.zipPath)
 
+      for (const relativePath of [
+        '.github/native-hosted-e2e-controller.json',
+        '.github/pull_request_template.md',
+        '.agents/skills/verify-murph-assistant/SKILL.md',
+      ]) {
+        for (const bundle of [leanBundle, fullBundle]) {
+          expect(listZipEntries(bundle.zipPath)).toContain(relativePath)
+          expect(execFileSync('unzip', ['-p', bundle.zipPath, relativePath]))
+            .toEqual(readFileSync(path.join(repoRoot, relativePath)))
+        }
+      }
+
       expect(leanEntries).toContain('agent-docs/operations/verification-and-runtime.md')
       expect(leanEntries).toContain('agent-docs/operations/pr-reviewgpt-loop.md')
       expect(leanEntries).toContain('agent-docs/product-specs/repo.md')
@@ -4817,7 +4560,7 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(leanEntries).toContain('docs/contracts/00-invariants.md')
       expect(leanEntries).not.toContain('agent-docs/generated/doc-inventory.md')
       expect(leanEntries).not.toContain('agent-docs/exec-plans/completed/README.md')
-      expect(leanEntries).not.toContain('agent-docs/prompts/coverage-review.md')
+      expect(leanEntries).not.toContain('agent-docs/prompts/seam-audits/README.md')
       expect(leanEntries).not.toContain('packages/cli/test/release-script-coverage-audit.test.ts')
       expect(leanEntries).not.toContain('apps/web/test/device-sync-http.test.ts')
       expect(leanEntries).not.toContain('docs/device-sync-hosted-control-plane.md')
@@ -4835,7 +4578,7 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(fullEntries).toContain('docs/device-sync-hosted-control-plane.md')
       expect(fullEntries).toContain('.github/workflows/release.yml')
       expect(fullEntries).toContain('agent-docs/exec-plans/completed/README.md')
-      expect(fullEntries).toContain('agent-docs/prompts/coverage-review.md')
+      expect(fullEntries).toContain('agent-docs/prompts/seam-audits/README.md')
       expect(fullEntries).toContain('agent-docs/references/hosted-runtime-protocol.md')
       expect(fullEntries).toContain('PRODUCT.md')
       expect(fullEntries).toContain('DESIGN.md')
@@ -5206,7 +4949,6 @@ exit 1
       bundledWorkspaceDependencies: expect.arrayContaining([
         '@murphai/assistant-cli',
         '@murphai/assistant-engine',
-        '@murphai/assistantd',
         '@murphai/clinical-records',
         '@murphai/core',
         '@murphai/device-syncd',

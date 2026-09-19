@@ -30,6 +30,7 @@ import { lockHostedMemberRow, type HostedOnboardingReadClient } from "./shared";
 
 export {
   acquireHostedMemberHomeLinqRouteLockTx,
+  reconcileHostedMemberLinqPhoneBindingsTx,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   demoteHostedMemberLinqGroupChatBindingsTx,
   finalizeHostedMemberActivationLinqRouteTx,

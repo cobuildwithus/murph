@@ -5,12 +5,17 @@ import {
 } from "../src/contracts.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "../src/runtime-control.ts";
-import { HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS } from "../src/vault-share.ts";
+
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+} from "../src/vault-share.ts";
 
 import {
   parseHostedExecutionDirectRoute,
@@ -2886,7 +2891,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           projections: [{
             ...projection,
             records: Array.from(
-              { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS + 1 },
+              { length: 720 + 1 },
               (_, index) => {
                 const date = new Date(Date.UTC(2026, 0, index + 1))
                   .toISOString()
@@ -2902,7 +2907,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           }],
         }],
       },
-    })).toThrow(new RegExp(`at most ${HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS}`, "u"));
+    })).toThrow(/at most 720/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "read_shared",
       result: {
@@ -3920,9 +3925,26 @@ describe("parseHostedRuntimeGroupEmailEffect", () => {
   });
 
   it("bounds group email participants and per-participant authorization snapshots", () => {
+    const authorizedShares = HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES
+      .filter((scope) => scope.projectionKind !== "group-email.v0")
+      .map((scope, index) => ({
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(scope),
+        shareId: `share_${index}`,
+      }));
+    expect(authorizedShares).toHaveLength(99);
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
+      result: {
+        authorizationProof: AUTHORIZATION_PROOF,
+        groupId: "group_123",
+        missingEmailParticipants: [],
+        participants: [{ ...PARTICIPANT, authorizedShares }],
+        status: "ok",
+      },
+    })).toMatchObject({ result: { participants: [{ authorizedShares }] } });
     const participant = {
       ...PARTICIPANT,
-      authorizedShares: Array.from({ length: 101 }, (_, index) => ({
+      authorizedShares: Array.from({ length: HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX + 1 }, (_, index) => ({
         projectionScopeKey: "steps-days.v0",
         shareId: `share_${index}`,
       })),
@@ -3936,7 +3958,7 @@ describe("parseHostedRuntimeGroupEmailEffect", () => {
         participants: [participant],
         status: "ok",
       },
-    })).toThrow(/authorizedShares must contain at most 100 entries/u);
+    })).toThrow(new RegExp(`authorizedShares must contain at most ${HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX} entries`, "u"));
 
     expect(() => parseHostedRuntimeGroupEmailEffectResponse({
       action: "prepare_email",

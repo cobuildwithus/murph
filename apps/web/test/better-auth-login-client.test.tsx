@@ -132,6 +132,15 @@ test("an unconfirmed login does not use a pre-existing session or fall back to a
   expect(rendered!.container.textContent).not.toContain("You’re signed in");
 });
 
+test("offers the Telegram proof button directly beside phone entry", async () => {
+  await render();
+  expect(mocks.contact!.method).toBe("phone");
+  expect(mocks.telegram).toMatchObject({ purpose: "login", label: "Telegram" });
+  await act(async () => { await mocks.telegram!.onProof("synthetic-id-token", new AbortController().signal); });
+  expect(mocks.request.mock.calls.map(([input]) => input.url)).toEqual(["/api/auth/telegram/verify", "/api/auth/complete"]);
+  expect(mocks.completed).toHaveBeenCalledOnce();
+});
+
 test("Telegram signs in through the same consent and product completion owner", async () => {
   await render({ methods: ["telegram"] });
   expect(mocks.telegram!.purpose).toBe("login");
@@ -171,4 +180,57 @@ test.each(["phone", "telegram"] as const)("clears the previous vault at %s login
   expect(mocks.reloaded).toHaveBeenCalledOnce();
   expect(mocks.completed).not.toHaveBeenCalled();
   expect(mocks.logout).not.toHaveBeenCalled();
+});
+
+
+test("places a Telegram failure above both alternative buttons and clears it on retry", async () => {
+  await render();
+  await act(async () => { mocks.telegram!.onErrorChange?.("Synthetic Telegram failure"); });
+  const alert = rendered!.container.querySelector('[role="alert"]');
+  expect(alert?.textContent).toBe("Synthetic Telegram failure");
+  expect(alert?.nextElementSibling?.textContent).toContain("Continue with Telegram");
+  expect(alert?.nextElementSibling?.textContent).toContain("Email");
+  await act(async () => { mocks.telegram!.onErrorChange?.(null); });
+  expect(rendered!.container.querySelector('[role="alert"]')?.textContent).toBe("");
+});
+
+
+test.each(["phone", "email", "telegram"] as const)("bound %s reauthentication resumes inline without signup context or account bootstrap", async (method) => {
+  const resumed = vi.fn();
+  await render({ methods: [method], reauthenticate: true, onReauthenticated: resumed, inviteCode: "must-not-be-sent" });
+  const signal = new AbortController().signal;
+  if (method === "telegram") {
+    expect(mocks.telegram!.purpose).toBe("reauthenticate");
+    await act(async () => { await mocks.telegram!.onProof("synthetic-id-token", signal); });
+    expect(mocks.request).toHaveBeenCalledWith(expect.objectContaining({
+      url: "/api/auth/telegram/verify", payload: { idToken: "synthetic-id-token", reauthenticate: true },
+    }));
+  } else {
+    const value = method === "email" ? "bound@example.test" : "+12025550127";
+    await act(async () => { await mocks.contact!.onSend(value, signal); });
+    expect(mocks.request).toHaveBeenLastCalledWith(expect.objectContaining({
+      url: "/api/auth/otp/send", payload: { kind: method, value, reauthenticate: true },
+    }));
+    await act(async () => { await mocks.contact!.onVerify(value, "123456", signal); });
+    expect(mocks.request).toHaveBeenLastCalledWith(expect.objectContaining({
+      url: "/api/auth/otp/verify", payload: { kind: method, value, code: "123456", reauthenticate: true },
+    }));
+  }
+  expect(resumed).toHaveBeenCalledOnce();
+  expect(mocks.request.mock.calls.some(([input]) => input.url.endsWith("/complete"))).toBe(false);
+  expect(mocks.completed).not.toHaveBeenCalled();
+  expect(mocks.navigate).not.toHaveBeenCalled();
+});
+
+test("closing bound reauthentication discards late primary-proof completion", async () => {
+  const resumed = vi.fn();
+  let finish!: (value: { ok: true; memberId: string }) => void;
+  mocks.request.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  await render({ reauthenticate: true, onReauthenticated: resumed });
+  let pending!: Promise<void>;
+  await act(async () => { pending = mocks.contact!.onVerify("+12025550127", "123456", new AbortController().signal); });
+  await rendered!.cleanup(); rendered = null;
+  await act(async () => { finish({ ok: true, memberId: "synthetic-member" }); await pending; });
+  expect(resumed).not.toHaveBeenCalled();
+  expect(mocks.completed).not.toHaveBeenCalled();
 });

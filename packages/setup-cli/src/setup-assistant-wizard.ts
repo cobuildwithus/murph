@@ -59,14 +59,6 @@ interface SetupWizardAssistantProviderOption {
   title: string
 }
 
-interface SetupWizardAssistantMethodOption {
-  badges?: readonly SetupWizardInlineBadge[]
-  description: string
-  detail?: string
-  method: SetupWizardAssistantMethod
-  title: string
-}
-
 export interface SetupWizardResolvedAssistantSelection {
   detail: string
   methodLabel: string | null
@@ -198,17 +190,6 @@ export function findSetupAssistantWizardProviderIndex(
   return index >= 0 ? index : 0
 }
 
-export function findSetupWizardAssistantMethodIndex(
-  provider: SetupWizardAssistantProvider,
-  method: SetupWizardAssistantMethod,
-): number {
-  const resolvedMethod = resolveSetupWizardAssistantMethodForProvider({
-    currentMethod: method,
-    provider,
-  })
-  return resolvedMethod === 'codex-local' ? 1 : 0
-}
-
 export function normalizeSetupAssistantWizardProvider(
   provider: SetupWizardAssistantProvider,
 ): SetupWizardAssistantProvider {
@@ -264,12 +245,6 @@ export function inferSetupWizardAssistantMethod(input: {
     : 'codex-cloud'
 }
 
-export function doesSetupWizardAssistantProviderRequireMethod(
-  _provider: SetupWizardAssistantProvider,
-): boolean {
-  return false
-}
-
 export function resolveSetupWizardAssistantMethodForProvider(input: {
   currentMethod: SetupWizardAssistantMethod
   provider: SetupWizardAssistantProvider
@@ -286,12 +261,6 @@ export function resolveSetupWizardAssistantMethodForProvider(input: {
         ? (input.provider as LocalSetupCodexProviderId)
         : 'codex-cloud'
   }
-}
-
-export function listSetupWizardAssistantMethodOptions(
-  _provider: SetupWizardAssistantProvider,
-): readonly SetupWizardAssistantMethodOption[] {
-  return []
 }
 
 export function resolveSetupWizardAssistantSelection(input: {
@@ -374,19 +343,6 @@ export function buildSetupWizardAssistantProviderBadges(input: {
   }
 
   return badges
-}
-
-export function buildSetupWizardAssistantMethodBadges(input: {
-  currentMethod: SetupWizardAssistantMethod
-  method: SetupWizardAssistantMethod
-  optionBadges?: readonly SetupWizardInlineBadge[]
-}): SetupWizardInlineBadge[] {
-  return [
-    ...(input.optionBadges ? [...input.optionBadges] : []),
-    ...(input.currentMethod === input.method
-      ? ([{ label: 'current', tone: 'accent' }] as const)
-      : []),
-  ]
 }
 
 export async function runSetupAssistantWizard(

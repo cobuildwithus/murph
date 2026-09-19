@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   resolveCodexCommandFamily,
+  resolveCodexCommandAttribution,
 } from '../src/assistant-codex/command-family.ts'
 
 describe('Codex command family classification', () => {
@@ -133,5 +134,44 @@ describe('Codex command family classification', () => {
       commandLabel,
       source: 'display',
     })).toBe('command')
+  })
+})
+
+describe('finite command attribution explanations', () => {
+  it.each([
+    [null, 'missing_command', undefined], ['', 'missing_command', undefined],
+    [`vault-cli ${'x'.repeat(4096)}`, 'oversized_command', undefined],
+    ['vault-cli exercise list | head', 'shell_syntax', undefined],
+    ['vault-cli exercise list && false', 'shell_syntax', undefined],
+    ['vault-cli exercise show "unterminated', 'shell_syntax', undefined],
+    ['vault-cli exercise show "$(SYNTHETIC_SECRET_TOKEN)"', 'shell_syntax', undefined],
+    ['SYNTHETIC_SECRET_TOKEN exercise list', 'unrecognized_executable', undefined],
+    ['/SYNTHETIC_PRIVATE_PATH/vault-cli exercise list', 'unrecognized_executable', undefined],
+    ['vault-cli SYNTHETIC_HEALTH_HISTORY', 'unrecognized_cli_path', undefined],
+    ['vault-cli --format json exercise list', 'unrecognized_cli_path', undefined],
+    ['vault-cli --config "exercise list" food search-labels oats', 'unrecognized_cli_path', undefined],
+    ['vault-cli "exercise" list', 'unrecognized_cli_path', undefined],
+    ['vault-cli exercise list --query "SYNTHETIC_HEALTH_HISTORY | literal"', 'recognized', 'exercise list'],
+    ["bash -lc 'vault-cli food search-labels \"SYNTHETIC_SECRET_TOKEN\"'", 'recognized', 'food search-labels'],
+    ['vault-cli workout exercise add SYNTHETIC_HEALTH_HISTORY', 'recognized', 'workout exercise add'],
+    ['vault-cli knowledge index rebuild', 'recognized', 'knowledge index rebuild'],
+    ['bash -lc "rg SYNTHETIC_HEALTH_HISTORY"', 'recognized', undefined],
+    ['vault-cli memory forget SYNTHETIC_HEALTH_HISTORY', 'recognized', 'memory forget'],
+    ['vault-cli batch --command \'["exercise","list"]\'', 'recognized', 'batch'],
+  ] as const)('explains attribution without copying %j', (commandLabel, reason, command) => {
+    const result = resolveCodexCommandAttribution({ commandLabel })
+    expect(result.commandAttribution).toBe(reason)
+    expect(result.vaultCliCommand).toBe(command)
+    expect(result.vaultCli).toBe(command !== undefined || reason === 'unrecognized_cli_path')
+    for (const sentinel of ['SYNTHETIC_SECRET_TOKEN', 'SYNTHETIC_HEALTH_HISTORY', 'SYNTHETIC_PRIVATE_PATH']) {
+      expect(JSON.stringify(result)).not.toContain(sentinel)
+    }
+  })
+
+  it('retains the exact lexical bound and does not parse an option value as a command', () => {
+    const prefix = 'vault-cli exercise list --query '
+    const commandLabel = prefix + 'x'.repeat(4096 - prefix.length)
+    expect(resolveCodexCommandAttribution({ commandLabel }).vaultCliCommand).toBe('exercise list')
+    expect(resolveCodexCommandAttribution({ commandLabel: commandLabel + 'x' }).commandAttribution).toBe('oversized_command')
   })
 })

@@ -111,13 +111,22 @@ describe("action approval page", () => {
     });
   });
 
-  it("renders a pending decision without an eager factor read", async () => {
-    const approval = { approvalId: "haa_test", status: "pending" };
-    mocks.readHostedActionApproval.mockResolvedValue(approval);
+  it.each([false, true])("never loads the legacy boundary for an approval (migrated=%s)", async (migrated) => {
+    mocks.requireActiveHostedAppSession.mockResolvedValue({ member: { id: "member_test" }, privyUserId: "did:privy:synthetic" });
+    mocks.readHostedActionApproval.mockResolvedValue({ approvalId: "haa_test", status: "pending" });
+    mocks.readApprovalPasskeyState.mockResolvedValue({ credentials: migrated ? [{ id: "synthetic" }] : [] });
+    const view = await actionApprovalPage.default({ params: Promise.resolve({ approvalId: "haa_test" }) });
+    expect(view.props).not.toHaveProperty("legacyApprovalRequired");
+    expect(view.props.approval).toEqual({ approvalId: "haa_test", status: "pending" });
+    expect(mocks.readApprovalPasskeyState).not.toHaveBeenCalled();
+  });
+
+  it("keeps the decision card available during an optional factor read outage", async () => {
+    mocks.readHostedActionApproval.mockResolvedValue({ approvalId: "haa_test", status: "pending" });
     mocks.readApprovalPasskeyState.mockRejectedValue(new Error("storage unavailable"));
     const view = await actionApprovalPage.default({ params: Promise.resolve({ approvalId: "haa_test" }) });
-    expect(view.props.approval).toEqual(approval);
-    expect(mocks.readApprovalPasskeyState).not.toHaveBeenCalled();
+    expect(view.props).not.toHaveProperty("legacyApprovalRequired");
+    expect(view.props.approval).toEqual({ approvalId: "haa_test", status: "pending" });
   });
 
   it("shows the recovery reply when contact resolution is unavailable", async () => {

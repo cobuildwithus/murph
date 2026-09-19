@@ -8,9 +8,6 @@ import {
 } from "@murphai/contracts/browser-vault";
 import type {
   OverviewExperiment,
-  OverviewExperimentSummary,
-  OverviewJournalEntry,
-  OverviewMetric,
   OverviewWeeklySampleSummary,
 } from "../overview.ts";
 import type {
@@ -553,12 +550,3 @@ export type BrowserVaultLabsCapableQueryClient =
   | BrowserVaultLabsQueryClient
   | BrowserVaultInteractiveQueryClient
   | BrowserVaultQueryClient;
-
-export interface BrowserVaultOverviewView {
-  experimentSummary: OverviewExperimentSummary;
-  metrics: OverviewMetric[];
-  personalPatterns: PersonalPatternReport;
-  recentJournals: OverviewJournalEntry[];
-  trackedExperiments: OverviewExperiment[];
-  weeklySampleSummaries: OverviewWeeklySampleSummary[];
-}

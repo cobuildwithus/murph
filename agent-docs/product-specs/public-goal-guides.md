@@ -1,6 +1,6 @@
 # Public Goal Guides
 
-Last verified: 2026-09-09
+Last verified: 2026-09-14
 
 ## Current State
 
@@ -47,8 +47,11 @@ The public library has seven stable categories:
 7. Life stages
 
 Each guide represents one outcome a person can recognize and ask for. Titles
-stay short and literal. Scientific limits, measurement caveats, and population
-specifics belong in the article, not in a parenthetical title clause.
+stay short, literal, and specific to the topic. Medical-topic titles can describe
+understanding information, tracking observations, or following an existing care
+plan; their summaries, goal phrases, and chat drafts carry the same request.
+Scientific limits, measurement caveats, and population specifics belong in the
+article, not in a parenthetical title clause.
 
 Use `parentGoalKey` only for an honest outcome hierarchy, such as joint-specific
 mobility guides under `Improve my mobility`. Category membership remains the

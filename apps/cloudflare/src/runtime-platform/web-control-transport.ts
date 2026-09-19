@@ -134,6 +134,15 @@ export class HostedWebControlPlaneResponseError extends Error {
   }
 }
 
+class HostedWebControlPlaneIncompleteSnapshotResponseError extends Error {
+  readonly code = "HOSTED_WEB_CONTROL_INCOMPLETE_SNAPSHOT_RESPONSE" as const;
+
+  constructor(description: string) {
+    super(`${description} returned an incomplete snapshot response.`);
+    this.name = "HostedWebControlPlaneIncompleteSnapshotResponseError";
+  }
+}
+
 class HostedWebControlPlaneSensitiveResponseInvalidJsonError extends Error {
   readonly code = "HOSTED_WEB_CONTROL_SENSITIVE_RESPONSE_INVALID_JSON" as const;
 
@@ -510,6 +519,9 @@ function decodeHostedWebControlPlaneResponseJson({
     try {
       payload = JSON.parse(text);
     } catch (error) {
+      const snapshotDetails = snapshotBodyMetrics
+        ? describeHostedSnapshotResponseBody(response, snapshotBodyMetrics.bytesRead, "invalid_json")
+        : undefined;
       emitHostedExecutionStructuredLog({
         component: "hosted.runtime.control-plane",
         details: {
@@ -519,15 +531,20 @@ function decodeHostedWebControlPlaneResponseJson({
             includeSafeErrorText: false,
           }),
           responseStatus: response.status,
-          ...(snapshotBodyMetrics
-            ? describeHostedSnapshotResponseBody(response, snapshotBodyMetrics.bytesRead, "invalid_json")
-            : { responseBodyBytes: new TextEncoder().encode(text).byteLength }),
+          ...(snapshotDetails ?? { responseBodyBytes: new TextEncoder().encode(text).byteLength }),
         },
         level: "warn",
         message: "Hosted runtime control-plane response returned invalid JSON.",
         phase: "runtime.starting",
         userId: input.boundUserId,
       });
+      if (
+        response.ok
+        && snapshotDetails
+        && (snapshotDetails.responseExpectedBodyBytes ?? 0) > snapshotDetails.responseBodyBytes
+      ) {
+        throw new HostedWebControlPlaneIncompleteSnapshotResponseError(input.description);
+      }
       if (input.sensitiveResponseBody) {
         throw new HostedWebControlPlaneSensitiveResponseInvalidJsonError(
           input.description,
@@ -538,24 +555,33 @@ function decodeHostedWebControlPlaneResponseJson({
   }
 
   if (snapshotBodyMetrics && !readHostedWebControlPlaneRecord(payload)) {
-    // Observe only; the existing snapshot parser still owns rejection and error identity.
+    const snapshotDetails = describeHostedSnapshotResponseBody(
+      response,
+      snapshotBodyMetrics.bytesRead,
+      empty ? "empty" : payload === null ? "null" : Array.isArray(payload) ? "array" : "scalar",
+    );
     emitHostedExecutionStructuredLog({
       component: "hosted.runtime.control-plane",
       details: {
         ...requestLogDetails,
         durationMs: Date.now() - requestStartedAt,
         responseStatus: response.status,
-        ...describeHostedSnapshotResponseBody(
-          response,
-          snapshotBodyMetrics.bytesRead,
-          empty ? "empty" : payload === null ? "null" : Array.isArray(payload) ? "array" : "scalar",
-        ),
+        ...snapshotDetails,
       },
       level: "warn",
       message: "Hosted runtime device-sync snapshot response returned invalid top-level shape.",
       phase: "runtime.starting",
       userId: input.boundUserId,
     });
+    // Reclassify only an already-rejected empty body. Valid JSON, including
+    // nonobjects and schema failures, stays with the existing snapshot parser.
+    if (
+      response.ok
+      && empty
+      && (snapshotDetails.responseExpectedBodyBytes ?? 0) > snapshotDetails.responseBodyBytes
+    ) {
+      throw new HostedWebControlPlaneIncompleteSnapshotResponseError(input.description);
+    }
   }
   return payload;
 }
@@ -565,7 +591,10 @@ function describeHostedSnapshotResponseBody(
   response: Response,
   responseBodyBytes: number,
   responseBodyShape: "empty" | "invalid_json" | "null" | "array" | "scalar",
-): HostedExecutionStructuredLogDetails {
+): HostedExecutionStructuredLogDetails & {
+  responseBodyBytes: number;
+  responseExpectedBodyBytes?: number;
+} {
   const { headers } = response;
   const marker = headers.get(HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_BYTES_HEADER);
   const expectedBytes = marker !== null && /^(?:0|[1-9]\d{0,15})$/u.test(marker)
@@ -654,6 +683,9 @@ export async function readHostedWebControlPlaneResponseText(input: {
 }
 
 function isRetryableHostedWebControlExactReplayError(error: unknown): boolean {
+  if (error instanceof HostedWebControlPlaneIncompleteSnapshotResponseError) {
+    return true;
+  }
   if (error instanceof HostedWebControlPlaneResponseError) {
     return error.status >= 500 && error.status <= 599;
   }

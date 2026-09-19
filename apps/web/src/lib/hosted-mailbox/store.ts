@@ -22,6 +22,10 @@ import {
   createHostedMailboxAssistantInputId,
   readHostedConversationAssistantIdentifierSecret,
 } from "@murphai/hosted-execution/assistant-identifiers";
+import {
+  HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+  HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES,
+} from "@murphai/hosted-execution/orchestration-control";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import type {
   HostedExecutionConversationMessageWake,
@@ -847,21 +851,71 @@ export async function appendHostedMailboxEnvelopeTx(input: {
  */
 export async function appendHostedScheduledDeviceSyncWakeEnvelopeTx(input: {
   envelope: HostedExecutionDeviceSyncWake;
+  prepared: PreparedHostedMailboxItemAppendCrypto;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedScheduledDeviceSyncWakeResult> {
-  const result = await appendHostedMailboxEnvelopeInternalTx({
+  let result = await appendHostedMailboxEnvelopeInternalTx({
     acceptRuntimeOwnedRetiredDuplicate:
       isHostedScheduledDeviceSyncWakeV3(input.envelope),
-    encryption: { mode: "legacy-transaction" },
+    encryption: { mode: "prepared-root", prepared: input.prepared },
     envelope: input.envelope,
     tx: input.tx,
   });
+
+  if (result.duplicate && !result.dedupeConflict && isHostedScheduledDeviceSyncWakeV3(input.envelope)) {
+    const recoveryFrontier = await readHostedScheduledDeviceSyncRecoveryFrontierTx({
+      envelope: input.envelope,
+      item: result.item,
+      tx: input.tx,
+    });
+    if (recoveryFrontier !== null) {
+      // The original dedupe lock stays held through this successor append.
+      // Consumed history is immutable; the frontier gives recovery one identity.
+      result = await appendHostedMailboxEnvelopeInternalTx({
+        encryption: { mode: "prepared-root", prepared: input.prepared },
+        envelope: {
+          ...input.envelope,
+          eventId: `${input.envelope.eventId}:consumed-recovery:${recoveryFrontier}`,
+        },
+        tx: input.tx,
+      });
+    }
+  }
 
   return {
     ...result,
     runtimeOwnedRetiredDuplicate:
       result.runtimeOwnedRetiredDuplicate === true,
   };
+}
+
+async function readHostedScheduledDeviceSyncRecoveryFrontierTx(input: {
+  envelope: HostedExecutionDeviceSyncWake;
+  item: HostedMailboxItem;
+  tx: HostedMailboxMutationTx;
+}): Promise<string | null> {
+  const rows = await input.tx.$queryRaw<Array<{ frontier: string }>>`
+    SELECT counters.consumed_seq::text AS frontier
+    FROM hosted_mailbox_lane_counter counters
+    JOIN hosted_workspace workspace ON workspace.user_id = counters.user_id
+    JOIN device_connection connection ON connection.user_id = counters.user_id
+    WHERE counters.user_id = ${input.envelope.userId}
+      AND counters.lane = 'system'
+      AND counters.consumed_seq = counters.next_seq - 1
+      AND counters.consumed_seq >= ${BigInt(input.item.laneSeq)}
+      AND workspace.redacted_status_json->>'hostedMailboxSystemHandledThroughSeq' = counters.consumed_seq::text
+      AND workspace.redacted_status_json->>'hostedMailboxSystemImportedSeq' = counters.consumed_seq::text
+      AND COALESCE(workspace.redacted_status_json->'hostedMailboxSystemFirstPendingSeq', 'null'::jsonb) = 'null'::jsonb
+      AND COALESCE(workspace.redacted_status_json->'hostedMailboxSystemDeviceSyncContinuationSeqs', '[]'::jsonb) = '[]'::jsonb
+      AND (workspace.next_wake_at IS NULL OR workspace.next_wake_at <= NOW() AT TIME ZONE 'UTC')
+      AND connection.id = ${input.envelope.connectionId}
+      AND connection.provider = ${input.envelope.provider}
+      AND connection.status = 'active'
+      AND connection.connected_at = ${new Date(input.envelope.expectedConnectedAt!)}
+      AND connection.next_reconcile_at = ${new Date(input.envelope.hint!.nextReconcileAt!)}
+      AND connection.next_reconcile_at <= NOW() AT TIME ZONE 'UTC'
+  `;
+  return rows[0]?.frontier ?? null;
 }
 
 /**
@@ -922,11 +976,7 @@ export async function prepareHostedMailboxEnvelopeAppend(input: {
     : null;
   const reserved = await input.prisma.$transaction(async (tx) => {
     await assertHostedMailboxEnvelopeWorkspaceTargetTx({ envelope, tx });
-    await tx.hostedWorkspace.upsert({
-      create: { userId: envelope.userId },
-      update: {},
-      where: { userId: envelope.userId },
-    });
+    await ensureHostedMailboxWorkspaceTx({ tx, userId: envelope.userId });
     await acquireHostedMailboxDedupeAppendLockTx({
       dedupeKey: envelope.eventId,
       tx,
@@ -1151,15 +1201,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
     envelope,
     tx: input.tx,
   });
-  await input.tx.hostedWorkspace.upsert({
-    create: {
-      userId: envelope.userId,
-    },
-    update: {},
-    where: {
-      userId: envelope.userId,
-    },
-  });
+  await ensureHostedMailboxWorkspaceTx({ tx: input.tx, userId: envelope.userId });
   const encodedPayload = serializeHostedMailboxPayload(envelope);
   const lane = resolveHostedMailboxLaneForKind(envelope.kind);
   const assistantInputLookupKey = envelope.kind === "conversation.message"
@@ -1203,7 +1245,10 @@ export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
   envelope: HostedExecutionMealPhotoCapturedWake;
   prepared: PreparedHostedMailboxItemAppendCrypto;
   tx: HostedMailboxMutationTx;
-}): Promise<AppendHostedMailboxItemResult & { claimedMealPhotoKey: string }> {
+}): Promise<AppendHostedMailboxItemResult & {
+  claimedMealPhotoKey: string;
+  captureReceipt?: { captureId: string; capturedAt: string };
+}> {
   await acquireHostedMailboxDedupeAppendLockTx({
     dedupeKey: input.envelope.eventId,
     tx: input.tx,
@@ -1226,6 +1271,19 @@ export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
   return {
     ...appended,
     claimedMealPhotoKey: canonicalEnvelope.mealPhoto.mealPhotoKey,
+    // A retry may render an edited version of a photo whose first response was
+    // lost. Preserve strict payload binding, but let its authenticated owner
+    // recover the original acceptance without replacing or re-enqueuing it.
+    ...(appended.dedupeConflict
+      && existing?.kind === "meal-photo.captured"
+      && existing.userId === input.envelope.userId
+      && existing.eventId === input.envelope.eventId
+      && existing.mealPhoto.captureId === input.envelope.mealPhoto.captureId
+      ? { captureReceipt: {
+        captureId: existing.mealPhoto.captureId,
+        capturedAt: existing.mealPhoto.capturedAt,
+      } }
+      : {}),
   };
 }
 
@@ -1290,6 +1348,25 @@ function hasSameMealPhotoCapture(
     && existing.mealPhoto.captureId === requested.mealPhoto.captureId
     && existing.mealPhoto.capturedAt === requested.mealPhoto.capturedAt
     && existing.mealPhoto.sha256 === requested.mealPhoto.sha256;
+}
+
+async function ensureHostedMailboxWorkspaceTx(input: {
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<void> {
+  // An empty-update upsert issues three reads. Read only existence, and avoid
+  // an insert on the warm path: even ON CONFLICT DO NOTHING can wait behind a
+  // concurrent checkpoint update to an existing row.
+  const existing = await input.tx.hostedWorkspace.findUnique({
+    select: { userId: true },
+    where: { userId: input.userId },
+  });
+  if (!existing) {
+    await input.tx.hostedWorkspace.createMany({
+      data: [{ userId: input.userId }],
+      skipDuplicates: true,
+    });
+  }
 }
 
 async function assertHostedMailboxEnvelopeWorkspaceTargetTx(input: {
@@ -1816,6 +1893,7 @@ export async function readHostedMailboxMaxSeqByLane(input: {
 export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
   afterSeq: bigint | number | string;
   at: Date;
+  modelFreeOnly?: true;
   prisma?: HostedMailboxStoreClient;
   userId: string;
 }): Promise<{
@@ -1840,6 +1918,23 @@ export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
     },
     where: {
       ...buildHostedMailboxLiveItemWhere(input.at),
+      ...(input.modelFreeOnly
+        ? {
+            AND: [{
+              OR: [
+                { kind: { in: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS.filter(
+                  (kind) => kind !== "assistant.notification.requested",
+                ) } },
+                ...HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES.map(
+                  (prefix) => ({
+                    kind: "assistant.notification.requested",
+                    dedupeKey: { startsWith: prefix, not: prefix },
+                  }),
+                ),
+              ],
+            }],
+          }
+        : {}),
       lane: "system",
       laneSeq: {
         gt: afterSeq,
@@ -2030,11 +2125,9 @@ export async function readHostedMailboxWakeByDedupeKey(input: {
   }
   const payload = item.payloadRef
     ? await readHostedMailboxPayload({
-        dedupeKey: item.dedupeKey,
-        mailboxItemId: item.id,
+        item,
         payloadRef: item.payloadRef,
         prisma,
-        userId: item.userId,
       })
     : null;
   const decoded = await decodeHostedMailboxStoredPayload({
@@ -2355,11 +2448,9 @@ export async function readHostedMailboxWakeByItemId(input: {
   }
   const payload = item.payloadRef
     ? await readHostedMailboxPayload({
-        dedupeKey: item.dedupeKey,
-        mailboxItemId: item.id,
+        item,
         payloadRef: item.payloadRef,
         prisma,
-        userId: item.userId,
       })
     : null;
   const decoded = await decodeHostedMailboxStoredPayload({
@@ -2663,12 +2754,9 @@ export async function readHostedMailboxRecentLiveConversationItemIds(input: {
 }
 
 export async function fetchHostedMailboxPayload(input: {
-  dedupeKey: string;
-  mailboxItemId: string;
+  item: HostedMailboxItemRecord | null;
   payloadRef?: string | null;
   prisma?: HostedMailboxStoreClient;
-  requestId: string;
-  userId: string;
 }): Promise<HostedMailboxPayloadFetchResponse> {
   const payloadResult = await readHostedMailboxPayloadAvailability(input);
 
@@ -2685,45 +2773,25 @@ export async function fetchHostedMailboxPayload(input: {
 }
 
 export async function readHostedMailboxPayload(input: {
-  dedupeKey: string;
-  mailboxItemId: string;
+  item: HostedMailboxItemRecord;
   payloadRef?: string | null;
   prisma?: HostedMailboxStoreClient;
-  requestId?: string;
-  userId: string;
 }): Promise<HostedMailboxPayloadRecord | null> {
   return (await readHostedMailboxPayloadAvailability(input)).payload;
 }
 
 async function readHostedMailboxPayloadAvailability(input: {
-  dedupeKey: string;
-  mailboxItemId: string;
+  item: HostedMailboxItemRecord | null;
   payloadRef?: string | null;
   prisma?: HostedMailboxStoreClient;
-  requestId?: string;
-  userId: string;
 }): Promise<{
   payload: HostedMailboxPayloadRecord | null;
   retryable: boolean;
   unavailableCode: "expired" | "not_found";
 }> {
-  const prisma = input.prisma ?? getPrisma();
-  const userId = requireNonEmptyString(input.userId, "Hosted mailbox payload userId");
-  const mailboxItemId = requireNonEmptyString(
-    input.mailboxItemId,
-    "Hosted mailbox payload mailboxItemId",
-  );
-  const dedupeKey = requireNonEmptyString(
-    input.dedupeKey,
-    "Hosted mailbox payload dedupeKey",
-  );
+  const item = input.item;
   const payloadRef = normalizeNullableString(input.payloadRef);
-
-  if (input.requestId !== undefined) {
-    requireNonEmptyString(input.requestId, "Hosted mailbox payload requestId");
-  }
-
-  if (payloadRef && resolveHostedMailboxPayloadRef(payloadRef) !== mailboxItemId) {
+  if (!item || (payloadRef && resolveHostedMailboxPayloadRef(payloadRef) !== item.id)) {
     return {
       payload: null,
       retryable: false,
@@ -2732,23 +2800,10 @@ async function readHostedMailboxPayloadAvailability(input: {
   }
 
   const fetchedAt = new Date();
-  const item = await prisma.hostedMailboxItem.findFirst({
-    where: {
-      dedupeKey,
-      id: mailboxItemId,
-      userId,
-    },
-  });
-
-  if (!item) {
-    return {
-      payload: null,
-      retryable: false,
-      unavailableCode: "not_found",
-    };
-  }
-
-  if (isHostedMailboxItemExpired(item, fetchedAt)) {
+  if (isHostedMailboxItemExpired({
+    createdAt: new Date(item.createdAt),
+    expiresAt: item.expiresAt ? new Date(item.expiresAt) : null,
+  }, fetchedAt)) {
     return {
       payload: null,
       retryable: false,
@@ -2756,11 +2811,12 @@ async function readHostedMailboxPayloadAvailability(input: {
     };
   }
 
+  const prisma = input.prisma ?? getPrisma();
   const row = await prisma.hostedMailboxPayload.findFirst({
     where: {
       mailboxItem: buildHostedMailboxLiveItemWhere(fetchedAt),
-      mailboxItemId,
-      userId,
+      mailboxItemId: item.id,
+      userId: item.userId,
     },
   });
 
@@ -3047,7 +3103,7 @@ async function allocateHostedMailboxCausalSeqTx(input: {
   return rows[0].seq;
 }
 
-async function acquireHostedMailboxCausalAppendLockTx(input: {
+export async function acquireHostedMailboxCausalAppendLockTx(input: {
   tx: HostedMailboxMutationTx;
   userId: string;
 }): Promise<void> {

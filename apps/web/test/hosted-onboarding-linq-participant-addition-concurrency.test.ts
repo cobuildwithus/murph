@@ -1589,7 +1589,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           const activeDirectRoute = directRoute;
           const originalMessageId = `message_direct_original_${randomUUID()}`;
           const originalEvent = buildRoutedDirectMessageEvent({
-            createdAt: "2026-08-09T12:00:00.000Z",
+            createdAt: new Date(Date.now() - 60_000).toISOString(),
             eventId: `event_direct_original_${randomUUID()}`,
             messageId: originalMessageId,
             participantPhone: activeDirectRoute.participantPhone,
@@ -1611,7 +1611,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           });
 
           const editEvent = buildRoutedGroupMessageEditedEvent({
-            createdAt: "2026-08-09T12:01:00.000Z",
+            createdAt: new Date().toISOString(),
             eventId: `event_direct_edit_${randomUUID()}`,
             messageId: originalMessageId,
             participantPhone: activeDirectRoute.participantPhone,

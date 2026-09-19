@@ -72,7 +72,7 @@ for (const viewport of VIEWPORTS) {
     }
 
     const emptyStudy = page.locator("#growth-recent-member-retention-empty");
-    await expect(emptyStudy).toContainText("No real member signups yet.");
+    await expect(emptyStudy).toContainText("No real member accounts yet.");
 
     // The isolated proof route runs through the Next.js development server.
     // Wait for its transient compiler indicator so it cannot cover the study.

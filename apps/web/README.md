@@ -87,6 +87,11 @@ canonical owner of hosted product facts.
 
 ## Reconciliation-facts failure observability
 
+The success record's diagnostic `status` is `blocked` when access is blocked,
+`work_pending` when mailbox lag or any projected workspace wake is due, and
+`idle` otherwise. Wake comparisons use the same request clock as reconciliation.
+This metadata-only summary does not drive scheduling or usage admission.
+
 The Web-owned reconciliation-facts route emits one additional failure-only
 Vercel record with the fixed message
 `Hosted runtime reconciliation facts failed.` and schema
@@ -133,6 +138,14 @@ Missing legacy grants remain compatible within those current artifacts; they
 are not a reason to restore pre-consent readers.
 
 ## Browser-vault dashboard loading
+
+Signed-out visits to the shared `(dashboard)` route group automatically open
+the existing auth dialog once per pathname. Dismissing it keeps the page usable;
+visiting another dashboard page prompts again. Successful sign-in resumes the
+current path, query, and anchor when the member's stage allows dashboard access.
+Signed-in and authentication-unavailable states do not trigger the prompt.
+The root auth provider derives this scope from Next's selected layout segment,
+so dashboard pages do not maintain separate route lists or dialog owners.
 
 Browser-vault dashboard sessions and public-homepage preparation read only the
 published replica ref and workspace version. Refresh orchestration is imported
@@ -526,9 +539,11 @@ The hosted Prisma schema keeps ownership sharp and nested:
   a zero default so existing receipts and old-Web inserts remain compatible;
   after the cursor-aware Web is live and prior functions drain, the contract
   lane rejects any unexpected null before setting `NOT NULL`. Immediate
-  cleanup uses one five-second shared target deadline plus a small
+  cleanup uses one eight-second shared target deadline plus a small
   receipt-settlement margin; hourly retries use a fifteen-second shared target
-  deadline and four-receipt concurrency. Cloudflare is
+  deadline and four-receipt concurrency. Cloudflare deadline expiry logs
+  informational cleanup-pending metadata and retains its error code and retry
+  receipt; other runner deletion failures remain error logs. Cloudflare is
   terminal only when the capability-bearing Worker explicitly confirms
   `deleteAllCompleted`, so a legacy response cannot erase retry ownership.
 
@@ -708,7 +723,7 @@ Required for live Labs discovery:
 
 This is the same canonical Junction credential used by hosted device sync.
 Labs discovery keeps the key server-only, targets the code-owned production US
-origin, and serves authenticated `POST /api/labs` plus signed
+origin, and serves signed
 `POST /api/internal/hosted-execution/labs/tool` through one stateless service.
 No catalog, query, or ZIP is persisted.
 
@@ -820,7 +835,7 @@ set, then prefers records with a reported package size, then keeps the existing
 relevance order. It does not claim sales or usage popularity. Supplement
 searches retain their existing ranking path. Food retrieval admits at
 most 250 literal exact-name rows and 10,000 GIN full-text matches before
-similarity scoring, canonical-key deduplication, and window sorting. When the
+similarity scoring and canonical-key deduplication. When the
 GIN set reaches that cap and may be truncated, one GiST branch admits up to
 10,000 strict-word-nearest names to recover stronger full-text candidates. An
 unsaturated GIN set is already exhaustive and skips that whole-catalog scan.
@@ -830,8 +845,12 @@ matches ahead of ineligible names before the cap. The bounded admissions
 preserve representative choice and canonical diversity across the established
 5,000-row boundary and ineligible-neighbor fixtures. Ranking is deterministic
 within the admitted set; it is intentionally not an exhaustive whole-catalog
-ranking. Exact IDs and UPCs continue to use direct lookup
-paths. On `foods_api_failed` failures from private food lookup, including exact
+ranking. After deduplication and any evidence, popularity, or comparison filters,
+food-name searches apply the complete deterministic order and LIMIT/OFFSET before
+computing the internal delivery ordinal. Numbering only the selected page permits
+top-N selection; the same order is retained after label and exact-record evidence
+joins, including on nonzero-offset pages. Exact IDs and UPCs continue to use direct
+lookup paths. On `foods_api_failed` failures from private food lookup, including exact
 ID/UPC dispatch and ranked search, the existing safe structured log adds only
 the closed `failureStage` value `search_rows` or `contaminant_summary`;
 PostgreSQL error codes remain in the existing safe error fields, and SQL/query
@@ -964,10 +983,6 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
 - `HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS` for local `pnpm dev` or hosted-local runs only. Set this in local env when a development tunnel shares real Linq credentials so non-allowlisted inbound senders are accepted and ignored before mailbox append or assistant wake. Do not set it in production.
-- `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` only while an
-  older rollback build may still populate the deprecated
-  `HostedLinqLine.activeMemberLimit` column; current weighted assignment does
-  not read it
 - `RETELL_API_KEY`, `RETELL_FROM_NUMBER`, `RETELL_AGENT_ID`,
   `RETELL_AGENT_DATA_STORAGE_SETTING=basic_attributes_only`, and optional
   `RETELL_AGENT_VERSION` enable hosted Retell phone calls, signed `ask_murph`
@@ -1476,9 +1491,7 @@ with a compatible build. No production activation or rollback is implied by a PR
   `payment_notification_email_sent_at` column before or with the Web build.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
-- Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep
-  `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` only for an
-  older rollback build; current weighted assignment does not read it.
+- Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`.
 - Set `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET` to the same value used by the
   trusted auth edge that signs browser assertions for lower-level device-sync
   bridge routes.
@@ -1539,6 +1552,12 @@ exercise the same signed assertion contract.
   worker-owned runtime state.
 
 ## Prisma
+
+The usage allowance owner creates a missing period idempotently, then reads its
+fields with `SELECT … FOR UPDATE` in the same transaction. Period acquisition
+uses two database statements, including when the period already exists. The
+beneficiary-before-period lock order and all billing/settlement decisions remain
+owned by the existing allowance transaction.
 
 Generate the client and apply migrations with Prisma:
 
@@ -1644,9 +1663,13 @@ The backfill decrypts only through the existing thread-delivery-route owner,
 emits aggregate counts only, and updates rows with an optimistic authority
 check. Do not run `--apply` before the final alias proof and prior-function
 drain, do not treat a dry-run as readiness, and do not drop the legacy
-`HostedLinqLine.activeMemberLimit` column in the same rollout. The complete
-assignment and deployment contract is in
-`docs/hosted-linq-db-home-lines-migration.md`.
+physical `hosted_linq_line.active_member_limit` column in the same rollout.
+Current application code and generated Prisma clients omit that retired field;
+the nullable physical column remains for older Web builds and operator scripts.
+A separate contract cleanup must establish the replacement rollback floor and
+prove old HTTP requests, deployment-pinned Workflows, and operator CLI
+invocations have drained before dropping it. The complete assignment and
+deployment contract is in `docs/hosted-linq-db-home-lines-migration.md`.
 
 New routed Linq and Telegram groups materialize their ordinary unnamed hosted
 group and route-owner membership inside the canonical route transaction. The
@@ -1701,24 +1724,34 @@ and database pressure. Connection failure logs expose only fixed
 operation/source labels, retry attempt and disposition, the configured pool
 limit, and numeric pre-attempt and post-failure pool counts.
 
-That module permits one jittered retry only for ambiguous transient failures
-that prove the database did no work. A `pool_checkout_timeout` means the
-statement never reached Postgres. A `connection_establishment_timeout` means
-the driver failed while opening the physical connection. A
-`transaction_start_timeout` is Prisma's
-`P2028` raised before it invokes the transaction callback. When the local pool
-is already full or has waiters, either failure is returned immediately as
-backpressure instead of re-entering the same queue. `P2028` also covers
-transactions that opened and later expired; the wrapper tracks callback entry
-and never replays a transaction that may have run. Failures that may have
-reached Postgres, such as closed connections, TLS faults, or an unreachable
-host, are reported and rethrown untouched.
+That module permits one jittered retry when replay cannot duplicate an effect.
+A `pool_checkout_timeout` means the statement never reached Postgres. A
+`connection_establishment_timeout` means the driver failed while opening the
+physical connection. A `transaction_start_timeout` is Prisma's `P2028` raised
+before it invokes the transaction callback. Closed connections, including pg's
+plain `Connection terminated unexpectedly` error, also permit one retry for
+standalone model reads or interactive transaction setup before callback entry.
+The model-read allowlist excludes raw SQL, which may have effects even through a
+query API. The existing public transaction wrapper carries an async scope so
+reads inside interactive or batch transactions do not independently retry a
+closed connection or escape their transaction's failure boundary. Batch
+transactions and potentially dispatched writes do not replay disconnects.
+
+When the local pool is already full or has waiters, failures return immediately
+as backpressure instead of re-entering the same queue. The wrapper tracks
+callback entry and never replays an interactive transaction that may have run,
+including a failure during commit. TLS faults, unreachable hosts, and unrelated
+errors remain terminal. Diagnostics use the existing bounded error traversal
+and fixed category labels without recording error messages or connection fields.
 
 Pool pressure is reported before it becomes a failure. `Hosted web database pool
 pressure.` logs the same total, idle, and waiting counts when the pool is full
-before the prospective first waiter queues, or whenever later callers are
-already waiting with no idle connection. It is rate limited to once per ten
-seconds per pool; a pool with idle capacity logs nothing. `Hosted web database slow transaction
+at an actual pool checkout before the prospective first waiter queues, or
+whenever later callers are already waiting with no idle connection. Statements
+using an acquired transaction connection do not request another checkout and
+therefore do not emit pressure warnings merely because the pool is full. Sampling
+is rate limited to once per ten seconds per pool; a pool with idle capacity logs
+nothing. `Hosted web database slow transaction
 acquisition.` measures only the wait before an interactive callback begins,
 while `Hosted web database slow transaction callback.` measures callback wall
 time and reports the effective transaction timeout without claiming the
@@ -1899,12 +1932,91 @@ legacy columns remain nullable in this rollout; remove them only in a later
 contract migration after the zero-row proof and the prior Vercel function
 window has drained.
 
+### Hosted legacy phone-call deletion
+
+The authenticated synchronous Ops operation at
+`POST /api/ops/phone-calls/legacy-plaintext` is the reviewed hosted execution
+owner for explicitly retired legacy call records. It reuses the active Ops
+session allowlist, same-origin mutation check, Web database connection, and
+existing Retell deletion runtime. It has no approved local execution path
+against production and needs no crypto unwrap, new credentials, or Workflow.
+Adding this capability does not execute it or authorize a deployment.
+
+The selection is deliberately narrower than all plaintext storage: at least
+one non-null legacy JSON value, both ciphertext columns SQL-null, no originating
+session, and no scheduled-call request key. At most eight rows can be selected.
+Every selected row must have a terminal completed, needs-user, or failed status,
+no pending provider cleanup, no pending or ambiguous delivery state, and no
+unconsumed result or stop-settled mailbox item. Unknown Telegram delivery state
+blocks deletion. The service selects operational metadata only and never loads
+the private JSON or ciphertext. Usage records and billing ledgers are retained.
+
+Before the operation, the execution owner must deploy this capability and its
+notification-append existence checks, prove the exact production alias commit,
+and drain prior Vercel function invocations. Deployment-pinned phone-call
+Workflows are a separate obligation: prove no selected call has an active
+start, result, or notification/reconciliation execution on an older deployment;
+elapsed function lifetime alone is insufficient. Preserve the encrypted-only
+writer rollback floor and do not admit or replay pre-session call-start work
+during the operation. Current calls have originating-session authority and
+scheduled calls retain their request-key ownership.
+
+From an authenticated allowlisted Ops browser session on the production origin,
+send a same-origin POST with JSON body `{}` for the default dry run. The response
+contains mode, counts (`selectedRows`, `providerRows`, `deletedRows`,
+and `failedRows`), and a bounded `failureCode` enum. Review that bounded selection before sending a separate POST
+with `{"mode":"apply","expectedRows":<reviewed count>}`; never derive an apply
+count automatically from a fresh read. An omitted apply count, out-of-range
+count, unknown request field, changed selection count, or unresolved row blocks
+provider work. Both requests use the existing session cookie; no operator
+secret or production database URL is copied into a local command.
+
+Apply freezes the selected row identities and versions in memory, revalidates
+each before provider work, deletes the exact provider object through the
+existing Retell runtime, then rechecks eligibility and deletes by compare-and-set.
+Keep the configured Retell key in the same workspace as the retained provider
+references: a missing-object response proves absence only in that workspace.
+External work runs outside transactions under a 45-second operation deadline;
+the synchronous route has a 60-second budget. Notification append and final
+deletion acquire the member lock before phone-row work. This prevents a stale
+callback from creating mailbox work after the row is gone.
+
+Apply can complete earlier rows before a later provider failure or conflict.
+A nonzero `failedRows` or `deletedRows < selectedRows` is an incomplete result:
+stop, use `failureCode` to distinguish provider cleanup, row revalidation, or
+deadline failure, inspect the hosted drain boundary, and run a new dry run before
+choosing a new expected count. The failed row and provider reference remain
+retry ownership, including after provider success followed by a local conflict.
+Do not log identifiers, provider error bodies, or row contents.
+
+A final zero selection is necessary but is not proof that every legacy JSON
+value is gone: the selector intentionally excludes ciphertext-bearing,
+current-session, and scheduled rows. Before the dependent reader-removal PR,
+the hosted execution owner must separately prove zero non-null `brief_json`
+or `result_json` values across the entire phone table, excluding JSON null,
+and retain that check as a predeploy guard. Keep readers and nullable columns
+throughout this capability rollout. Remove columns only after the later
+encrypted-only reader deployment and its complete prior-function/Workflow drain.
+
 ## Production build memory guard
 
 The hosted web production build must keep fitting Vercel's Standard build
 machine: 4 vCPUs, 8 GB RAM, and 32 GB disk. The CI guard currently observes the
 production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
+
+The Vercel entrypoint runs the initial Web typecheck with one checker through
+`MURPH_TSC_WEB_CHECKERS=1`. Automatic checker parallelism exhausted the Standard
+build machine before the Next build began; the limit retains the full check.
+
+The final Next compilation also sets `GOMEMLIMIT=1GiB` for Workflow's Go-based
+esbuild services, which can remain resident in both the Next parent and its
+Webpack worker. Node's V8 heap limits do not cover these services. This is a
+[Go GC soft target](https://go.dev/doc/gc-guide#Memory_limit), not a process RSS
+or container limit. Keep it on the Next compilation command: applying the same
+target to the whole package build would also constrain the much larger native
+TypeScript source check. Route type generation and the separate TypeScript
+compatibility check retain their existing environment and heap budgets.
 
 The production runner first performs route type generation and an explicit
 app-local generated-contract TypeScript check with a 6 GiB limit. It marks
@@ -2096,7 +2208,33 @@ The Vercel Git integration is the only production deployment owner. Every
 commit pushed to `main` creates one managed production candidate; no
 repository ignore command may suppress that candidate. The candidate remains
 off the production domains until its configured Deployment Checks, including
-`Temporal Web production admission`, pass for that exact current commit.
+`Temporal Web production admission`, pass for that exact candidate commit. Required main checks retain independent
+SHA-scoped proof. Web admission finishes its active candidate and keeps only the
+newest waiting run, using GitHub's existing concurrency group. Public main may
+advance during proof: both controllers require the tested SHA to remain an
+ancestor of the observed protected-main tip. Private main and live Temporal
+reader/routing/target freshness remain required. Vercel's managed Git integration
+continues to own production ordering and promotion; admission never promotes an
+artifact itself. Deploy the private ancestry-aware consumer before this public
+controller. Verify one candidate reaches production while a later merge is still
+being checked, then verify a delayed older check cannot replace a newer release.
+
+Admission explicitly publishes the `Temporal Web production admission` commit
+status for the exact candidate SHA: pending before proof, then success only after
+the entire admission job succeeds. A dependent finalizer publishes failure for
+failed, canceled, or skipped admission. This delivers the final result through
+Vercel's supported commit-status channel when its imported GitHub check remains
+running after job completion. Status publication failures fail their job; they
+never authorize promotion or disable the configured Deployment Check. The
+finalizer requires proof from the same workflow attempt: rerun the whole
+admission workflow after notification failure, not only its publishing job.
+
+A separate `Temporal Web Admission Cancellation` workflow consumes completed
+cancellation events outside the admission concurrency group. Superseded waiting
+runs never start their own finalizer, so this notifier publishes failure for the
+exact canceled candidate after checking current run identity and attempt. It
+skips newer attempts and existing successful admission, never publishes success,
+and does not check out candidate code or use private deployment credentials.
 
 Do not deploy production from the local CLI, promote an existing deployment,
 use Instant Rollback, or force-promote past a Deployment Check. Those paths do
@@ -2354,6 +2492,10 @@ Current hosted billing assumptions:
   correlation.
 - `Reset everyone` requires the exact typed phrase, ignores any active search,
   and walks ascending hosted IDs in authenticated same-origin batches of 10.
+  Partly used as well as exhausted Starter accounts receive only the deficit
+  between their remaining Starter grants and the standard $4.50 allowance;
+  separate purchased and referral credit stays intact. Current period spend
+  is cleared, while already-full zero-spend Starter accounts are unchanged.
   Members are reset sequentially through the same canonical transaction; one
   stale re-read is allowed, the batch stops before acknowledging a remaining
   failure, and each runtime wake begins only after that member commits. The page

@@ -58,6 +58,7 @@ export interface SignalHostedUserRuntimeWorkflowInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   ensureWorkspace?: boolean;
+  onSignalStarted?: () => void;
   prisma?: PrismaClient;
   signal: HostedRuntimeSignal;
   taskQueue?: string | null;
@@ -71,16 +72,16 @@ export interface SignalHostedMailboxAppendInput {
   expectedUserId?: string | null;
   // Lane facts from the caller's own append row in the current request.
   // Presence means the appending transaction already proved the mailbox row
-  // and the workspace row, so the signal path skips its checkpoint re-read
-  // and workspace upsert. Active access is still rechecked before signaling
-  // because legacy Temporal histories may execute mailbox pointers without
-  // the reconciliation gate.
+  // and the workspace row, so signaling needs no database rediscovery.
+  // This pointer is a wake hint, not execution authority: mailbox fetch and
+  // runtime admission retain their current access checks.
   knownCheckpoint?: {
     lane: HostedMailboxLane;
     laneSeq: string;
     userId: string;
   };
   mailboxItemId: string;
+  onSignalStarted?: () => void;
   prisma?: PrismaClient;
 }
 
@@ -150,19 +151,12 @@ export async function signalHostedMailboxAppendRuntime(
     expectedUserId: input.expectedUserId ?? null,
     mailboxItemUserId: mailboxItem.userId,
   });
-  if (input.knownCheckpoint) {
-    await requireHostedRuntimeActiveAccess(mailboxItem.userId, {
-      code: "HOSTED_RUNTIME_USER_INACTIVE",
-      message: "Hosted runtime user is not active.",
-      prisma: input.prisma ?? getPrisma(),
-    });
-  }
-
   return signalHostedUserRuntimeWorkflow({
     abortSignal: input.abortSignal,
     client: input.client,
     environment: input.environment,
     ensureWorkspace: input.knownCheckpoint === undefined,
+    onSignalStarted: input.onSignalStarted,
     prisma: input.prisma,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
@@ -505,19 +499,26 @@ export async function signalHostedUserRuntimeWorkflow(
     || HOSTED_USER_RUNTIME_TASK_QUEUE;
   const signal = parseHostedRuntimeSignal(input.signal);
 
-  const signalWithStart = () => client.workflow.signalWithStart(
-    HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-    {
-      args: [{
-        options: readHostedRuntimeTemporalWorkflowOptions(environment),
-        userId: input.userId,
-      }],
-      signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
-      signalArgs: [signal],
-      taskQueue,
-      workflowId,
-    },
-  );
+  const signalWithStart = () => {
+    input.abortSignal?.throwIfAborted();
+    const pending = client.workflow.signalWithStart(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      {
+        args: [{
+          options: readHostedRuntimeTemporalWorkflowOptions(environment),
+          userId: input.userId,
+        }],
+        signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
+        signalArgs: [signal],
+        taskQueue,
+        workflowId,
+      },
+    );
+    // The caller proved the committed pointer or workspace admission.
+    // An ephemeral hint may overlap; success still requires acknowledgement.
+    input.onSignalStarted?.();
+    return pending;
+  };
   if (input.abortSignal) {
     await client.withAbortSignal(input.abortSignal, signalWithStart);
   } else {

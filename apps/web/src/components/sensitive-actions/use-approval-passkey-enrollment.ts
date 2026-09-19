@@ -5,6 +5,7 @@ import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider
 import { useRouter } from "next/navigation";
 import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 import { HostedOnboardingApiError, requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import { useInitialApprovalEnrollment } from "./use-initial-approval-enrollment";
 import { useSensitiveActionAuthorization } from "./use-sensitive-action-authorization";
 
 export function useApprovalPasskeyEnrollment() {
@@ -12,6 +13,7 @@ export function useApprovalPasskeyEnrollment() {
   const router = useRouter();
   const inFlight = useRef(false);
   const authorization = useSensitiveActionAuthorization();
+  const repair = useInitialApprovalEnrollment();
   const [pending, setPending] = useState(false);
   const [registered, setRegistered] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,21 +29,16 @@ export function useApprovalPasskeyEnrollment() {
     setError(null);
     try {
       const status = await requestHostedOnboardingJson<{ initialEnrollmentAllowed: boolean }>({ url: "/api/settings/approval-passkeys" });
-      let options: PublicKeyCredentialCreationOptionsJSON;
-      let proof: Record<string, unknown>;
       if (status.initialEnrollmentAllowed === true) {
-        const initial = await requestHostedOnboardingJson<{ options: PublicKeyCredentialCreationOptionsJSON; token: string }>({
-          method: "POST", payload: {}, url: "/api/settings/approval-passkeys/initial-options",
-        });
-        options = initial.options;
-        proof = { initialToken: initial.token };
-      } else {
-        const authorizationProof = await authorization.authorize("approval.passkey.enroll");
-        options = await requestHostedOnboardingJson<PublicKeyCredentialCreationOptionsJSON>({
-          method: "POST", payload: { authorization: authorizationProof }, url: "/api/settings/approval-passkeys/options",
-        });
-        proof = { authorization: authorizationProof };
+        try { await repair.repair(); setRegistered(true); }
+        finally { router.refresh(); }
+        return;
       }
+      const authorizationProof = await authorization.authorize("approval.passkey.enroll");
+      const options = await requestHostedOnboardingJson<PublicKeyCredentialCreationOptionsJSON>({
+        method: "POST", payload: { authorization: authorizationProof }, url: "/api/settings/approval-passkeys/options",
+      });
+      const proof = { authorization: authorizationProof };
       const response = await startRegistration({ optionsJSON: options });
       try {
         await requestHostedOnboardingJson({
@@ -62,5 +59,5 @@ export function useApprovalPasskeyEnrollment() {
     }
   }
 
-  return { enroll, error, pending, registered };
+  return { enroll, error, pending, registered, pendingLabel: repair.pendingLabel };
 }

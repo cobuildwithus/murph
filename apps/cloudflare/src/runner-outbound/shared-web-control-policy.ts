@@ -3,6 +3,7 @@ import {
 } from "@murphai/hosted-execution/connected-apps";
 import {
   HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
@@ -44,6 +45,7 @@ import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+  HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH,
   HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_LABS_TOOL_PATH,
@@ -162,6 +164,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   clinicalRecordsConnectLink: defineHostedRunnerWebControlPostRoute(
     "clinical_records_connect_link",
     HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+  ),
+  clinicalRecordsFetchDocument: defineHostedRunnerWebControlPostRoute(
+    "clinical_records_fetch_document",
+    HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_DOCUMENT_PATH,
   ),
   clinicalRecordsFetchPage: defineHostedRunnerWebControlPostRoute(
     "clinical_records_fetch_page",
@@ -282,6 +288,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   physicalNoteSend: defineHostedRunnerWebControlPostRoute(
     "physical_note_send",
     HOSTED_PHYSICAL_NOTES_PATH,
+  ),
+  imageGenerationAccess: defineHostedRunnerWebControlPostRoute(
+    "image_generation_access",
+    HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH,
   ),
   planUsageTool: defineHostedRunnerWebControlPostRoute(
     "plan_usage_tool",

@@ -16,7 +16,9 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { validatePrChangelog } from "./check-pr-changelog.mjs";
 import { validatePrComplexitySummary } from "./check-pr-complexity-summary.mjs";
+import { validatePrDeploymentConcerns } from "./check-pr-deployment-concerns.mjs";
 import {
   normalizeFrogPullRequestBody,
   selectFrogPullRequest,
@@ -32,6 +34,21 @@ function actionRefs(workflow: string): string[] {
     const match = /^\s*-?\s*uses:\s+[^@\s]+@([^\s#]+)/u.exec(line);
     return match?.[1] ? [match[1]] : [];
   });
+}
+
+function renderPlainFooterDeclaration(
+  body: string,
+  heading: "Changelog" | "Deployment concerns",
+): string {
+  const items = new RegExp(`^## ${heading}\\n\\n(?<items>(?:- .+\\n?)+)`, "mu")
+    .exec(body)?.groups?.items.trim().split("\n");
+  expect(items).toBeDefined();
+  return [
+    `<h2>${heading}</h2>`,
+    "<ul>",
+    ...(items ?? []).map((item) => `<li>${item.replace(/^- /u, "")}</li>`),
+    "</ul>",
+  ].join("\n");
 }
 
 describe("Frog workflow guards", () => {
@@ -432,34 +449,20 @@ fi
     expect(
       normalizedBody.match(/<!-- murph:frog-pr-context:end -->/gu),
     ).toHaveLength(1);
-    const changelogValidation = spawnSync(
-      process.execPath,
-      [path.join(repoRoot, "scripts", "check-pr-changelog.mjs")],
-      {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          MURPH_PR_BASE_SHA: "HEAD",
-          MURPH_PR_BODY: normalizedBody,
-          MURPH_PR_HEAD_SHA: "HEAD",
-        },
-      },
-    );
-    expect(changelogValidation.status, changelogValidation.stderr).toBe(0);
-    const deploymentValidation = spawnSync(
-      process.execPath,
-      [path.join(repoRoot, "scripts", "check-pr-deployment-concerns.mjs")],
-      {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          MURPH_PR_BODY: normalizedBody,
-        },
-      },
-    );
-    expect(deploymentValidation.status, deploymentValidation.stderr).toBe(0);
+    expect(
+      validatePrChangelog({
+        changedPaths: [".agents/friction-log/example.md"],
+        prBodyHtml: renderPlainFooterDeclaration(normalizedBody, "Changelog"),
+      }),
+    ).toEqual([]);
+    expect(
+      validatePrDeploymentConcerns({
+        prBodyHtml: renderPlainFooterDeclaration(
+          normalizedBody,
+          "Deployment concerns",
+        ),
+      }),
+    ).toEqual([]);
 
     const readme = readRepoFile(".agents", "friction-log", "README.md");
     expect(readme).toContain("FROG_APP_CLIENT_ID");

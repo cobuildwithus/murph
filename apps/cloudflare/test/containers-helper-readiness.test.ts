@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { Container } from "@cloudflare/containers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -31,6 +32,64 @@ interface ProbeHarness {
 describe("patched Cloudflare container readiness probes", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it.each(["TimeoutError", "AbortError"])("returns HTTP 500 when a native wake fetch rejects with %s", async (name) => {
+    const runner: Container = Object.create(Container.prototype);
+    const nativeFetch = vi.fn(async () => {
+      throw new DOMException("Synthetic wake transport cancellation", name);
+    });
+    const decrementInflight = vi.fn();
+    Object.defineProperties(runner, {
+      container: { value: { running: true, getTcpPort: () => ({ fetch: nativeFetch }) } },
+      ctx: { value: { id: "synthetic-container" } },
+      defaultPort: { value: runnerPort },
+      decrementInflight: { value: decrementInflight },
+      inflightRequests: { value: 0, writable: true },
+      renewActivityTimeout: { value: vi.fn() },
+      state: { value: { getState: async () => ({ status: "healthy" }) } },
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      // Exercise the installed, patched SDK rather than the runner's transport
+      // double: the wrapper hides a thrown timeout inside an HTTP response.
+      const response = await runner.containerFetch("http://container/internal/runtime-wake", {
+        method: "POST",
+      });
+      expect(response.status).toBe(500);
+      expect(response.headers.get("x-runtime-wake-accepted")).toBeNull();
+      expect(nativeFetch).toHaveBeenCalledOnce();
+      expect(decrementInflight).toHaveBeenCalledOnce();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("performs SDK readiness before a wake when a running shell has non-healthy cached status", async () => {
+    const runner: Container = Object.create(Container.prototype);
+    const nativeFetch = vi.fn(async () => {
+      const response = new Response(null, { status: 204 });
+      Object.defineProperty(response, "webSocket", { value: null });
+      return response;
+    });
+    Object.defineProperties(runner, {
+      container: { value: { running: true, getTcpPort: () => ({ fetch: nativeFetch }) } },
+      defaultPort: { value: runnerPort },
+      decrementInflight: { value: vi.fn() },
+      inflightRequests: { value: 0, writable: true },
+      renewActivityTimeout: { value: vi.fn() },
+      state: { value: { getState: async () => ({ status: "running" }) } },
+    });
+    let releaseReadiness!: () => void;
+    const readiness = vi.spyOn(runner, "startAndWaitForPorts").mockImplementation(
+      () => new Promise<void>((resolve) => { releaseReadiness = resolve; }),
+    );
+    const wake = runner.containerFetch("http://container/internal/runtime-wake", { method: "POST" });
+    await vi.waitFor(() => expect(readiness).toHaveBeenCalledOnce());
+    expect(nativeFetch).not.toHaveBeenCalled();
+    releaseReadiness();
+    await expect(wake).resolves.toMatchObject({ status: 204 });
+    expect(nativeFetch).toHaveBeenCalledOnce();
   });
 
   it("uses native destruction completion independently of cached SDK status", async () => {
@@ -97,7 +156,7 @@ describe("patched Cloudflare container readiness probes", () => {
     }
   });
 
-  it("applies the bounded probe to the direct start path used by shell prewarm", async () => {
+  it("applies the bounded probe to the direct SDK start path", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-30T12:01:30.000Z"));
     const harness = await createProbeHarness({
@@ -500,4 +559,119 @@ async function createProbeHarness(options: {
     runner,
     stats,
   };
+}
+
+// This suite exercises the installed patched SDK's SQL, scheduling, generic
+// request accounting, and alarm owner. The adapter supplies storage/native I/O,
+// not an imitation deadline or alarm algorithm.
+describe("native container deadline schedules", () => {
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it("runs a persisted deadline despite generic RPC activity and inflight requests", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = Date.parse("2026-08-01T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const database = new DatabaseSync(":memory:");
+    let releaseRequest!: (response: Response) => void;
+    const responsePending = new Promise<Response>((resolve) => { releaseRequest = resolve; });
+    const callback = vi.fn(async () => { native.running = false; });
+    const { native, runner } = await createNativeScheduleHarness(database, callback, () => responsePending);
+    try {
+      await runner.schedule(new Date(now + 600_000), "onActivityExpired", null);
+      native.running = true;
+      const request = runner.containerFetch("http://container/internal/runtime-wake");
+      await vi.waitFor(() => expect(native.getTcpPort).toHaveBeenCalled());
+      vi.setSystemTime(now + 600_000);
+      runner.renewActivityTimeout();
+      await runner.alarm();
+      expect(callback).toHaveBeenCalledOnce();
+      expect(await runner.listSchedules("onActivityExpired")).toEqual([]);
+      const response = new Response(null, { status: 204 });
+      Object.defineProperty(response, "webSocket", { value: null });
+      releaseRequest(response);
+      await expect(request).resolves.toMatchObject({ status: 204 });
+      expect(await runner.listSchedules("onActivityExpired")).toEqual([]);
+    } finally {
+      releaseRequest(new Response(null, { status: 204 }));
+      database.close();
+    }
+  });
+
+  it("preserves a pre-armed recovery task when the SDK consumes a throwing callback", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = Date.parse("2026-08-01T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const database = new DatabaseSync(":memory:");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { runner } = await createNativeScheduleHarness(database, async () => {
+      runner.deleteSchedules("onActivityExpired");
+      await runner.schedule(new Date(now + 60_000), "onActivityExpired", null);
+      throw new Error("synthetic health/storage failure after prearming");
+    });
+    try {
+      const original = await runner.schedule(new Date(now), "onActivityExpired", null);
+      await runner.alarm();
+      expect(await runner.getSchedule(original.taskId)).toBeUndefined();
+      expect(await runner.listSchedules("onActivityExpired")).toMatchObject([{ time: (now + 60_000) / 1_000 }]);
+    } finally { database.close(); }
+  });
+
+  it("keeps tasks through object replacement and uses the preceding callback name", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = Date.parse("2026-08-01T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const database = new DatabaseSync(":memory:");
+    try {
+      const original = await createNativeScheduleHarness(database, async () => undefined);
+      const task = await original.runner.schedule(new Date(now + 600_000), "onActivityExpired", null);
+      vi.setSystemTime(now + 600_000);
+      const callback = vi.fn(async () => undefined);
+      const replacement = await createNativeScheduleHarness(database, callback);
+      expect(await replacement.runner.listSchedules("onActivityExpired")).toEqual([task]);
+      await replacement.runner.alarm();
+      expect(callback).toHaveBeenCalledOnce();
+      expect(await replacement.runner.listSchedules("onActivityExpired")).toEqual([]);
+    } finally { database.close(); }
+  });
+});
+
+async function createNativeScheduleHarness(
+  database: DatabaseSync,
+  onExpiry: () => Promise<void>,
+  fetchResponse: () => Promise<Response> = async () => new Response(null, { status: 204 }),
+) {
+  const values = new Map<string, unknown>([["__CF_CONTAINER_STATE", { status: "healthy", lastChange: Date.now() }]]);
+  const constructorOperations: Promise<unknown>[] = [];
+  const native = {
+    running: false,
+    getTcpPort: vi.fn(() => ({ fetch: fetchResponse })),
+  };
+  const storage = {
+    get: async (key: string) => values.get(key),
+    put: async (key: string, value: unknown) => { values.set(key, value); },
+    kv: { get: (key: string) => values.get(key), put: (key: string, value: unknown) => { values.set(key, value); } },
+    setAlarm: vi.fn(async (_at: number) => undefined),
+    deleteAlarm: vi.fn(async () => undefined),
+    sync: async () => undefined,
+    sql: {
+      exec: (query: string, ...bindings: (string | number | boolean | null)[]) =>
+        database.prepare(query).all(...bindings.map((value) => typeof value === "boolean" ? Number(value) : value)),
+    },
+  };
+  class ScheduledContainer extends Container {
+    override sleepAfter = "10m";
+    override defaultPort = runnerPort;
+    override async onActivityExpired(): Promise<void> { await onExpiry(); }
+  }
+  const runner = new ScheduledContainer({
+    container: native,
+    storage,
+    blockConcurrencyWhile(operation: () => Promise<unknown>) {
+      const promise = Promise.resolve().then(operation);
+      constructorOperations.push(promise);
+      return promise;
+    },
+  } as never, {});
+  await Promise.all(constructorOperations);
+  return { native, runner };
 }

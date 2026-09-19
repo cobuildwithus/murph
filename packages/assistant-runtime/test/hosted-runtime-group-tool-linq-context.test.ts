@@ -7,7 +7,7 @@ import type {
 
 import {
   createHostedGroupToolWithCurrentTurnContext,
-} from "../src/hosted-runtime/workspace-assistant-phase.ts";
+} from "../src/hosted-runtime/group-tool-context.ts";
 import type { HostedAssistantLinqDeliveryContext } from "../src/hosted-runtime/linq-delivery-context.ts";
 import type { HostedAssistantEmailDeliveryContext } from "../src/hosted-runtime/email-delivery-context.ts";
 
@@ -251,6 +251,18 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       },
     });
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("forwards freshness only for authenticated conversation ingress (email=%s)", async (groupEmailIngress) => {
+    const request = vi.fn().mockResolvedValue({ action: "read_shared", result: { status: "ok" } });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({ groupToolPort: { request }, linqDeliveryContexts: [], groupEmailIngress });
+    const freshness = [{ projectionScopeKey: "sleep-duration-days.v0", date: "2026-08-04" }];
+    const projectionScopes = [{ projectionKind: "sleep-duration-days.v0" as const }];
+    const signal = new AbortController().signal;
+    await groupTool.request({ action: "read_shared", projectionScopes, freshness }, { signal });
+    expect(request).toHaveBeenCalledExactlyOnceWith({ action: "read_shared", projectionScopes,
+      ...(groupEmailIngress ? {} : { freshness }),
+    }, { signal });
   });
 
   it("forwards telegram current-turn sender evidence channel-qualified", async () => {

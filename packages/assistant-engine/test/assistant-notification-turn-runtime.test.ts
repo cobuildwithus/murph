@@ -285,6 +285,37 @@ test.each([
   }
 })
 
+test('connected-channel greeting selects isolated output-only continuation and removes exact onboarding instructions', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-greeting-policy-'))
+  try {
+    const providerResult = createProviderResult({ response: JSON.stringify({
+      kind: 'send_message', privateSummary: 'Greet the connected phone.', text: 'Hey, you can text me here now.',
+    }) })
+    const { sendAssistantNotificationLocal, deliverMessage, mocks } = await loadNotificationTurnHarness({
+      providerResult, turnId: 'turn-connected-channel-greeting',
+    })
+    await sendAssistantNotificationLocal({
+      channel: 'linq', threadIsDirect: true, connectedChannelGreeting: true,
+      executionContext: { hosted: null }, instructions: 'PREMADE_WELCOME_SENTINEL',
+      responsePolicy: { kind: 'require_send_exact_text', text: 'PREMADE_WELCOME_SENTINEL' },
+      vault,
+    })
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+    const request = mocks.executeCodexTurnWithRecovery.mock.calls[0]![0]
+    expect(request.profile).toEqual({
+      nativeResumePolicy: 'disabled', promptProfile: 'operator-message',
+      threadScope: 'isolated-thread', toolProfile: 'output-only-turn',
+    })
+    expect(request.input.prompt).toContain('Do not restart onboarding')
+    expect(request.input.prompt).not.toContain('PREMADE_WELCOME_SENTINEL')
+    expect(request.hostedToolContext).toBeNull()
+    expect(deliverMessage).toHaveBeenCalledOnce()
+    expect(mocks.applyAssistantSessionCodexResumeStateAction).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
 test('sendAssistantNotificationLocal scopes cron output history to the resolved conversation session', async () => {
   const session = createAssistantSession({
     sessionId: 'session-current-cron-history',
@@ -790,12 +821,11 @@ test('sendAssistantNotificationLocal rejects exact text before delivery when the
     },
     channel: 'telegram',
     deliveryPolicy: 'explicit-target-override',
-    effectiveThreadIsDirect: null,
+    threadIsDirect: null,
     explicitTarget: 'external-thread',
     identityId: 'stored-direct-identity',
     replyToMessageId: null,
     threadId: 'external-thread',
-    threadIsDirect: null,
   }
   const providerResult = createProviderResult({ session })
   const {
@@ -854,12 +884,11 @@ test('sendAssistantNotificationLocal rejects an unknown audience before provider
     },
     channel: 'linq',
     deliveryPolicy: 'explicit-target-override',
-    effectiveThreadIsDirect: null,
+    threadIsDirect: null,
     explicitTarget: 'saved-linq-chat',
     identityId: null,
     replyToMessageId: null,
     threadId: null,
-    threadIsDirect: null,
   }
   const providerResult = createProviderResult({ session })
   const {
@@ -2646,12 +2675,11 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     bindingDelivery: null,
     channel: null,
     deliveryPolicy: 'binding-target-only',
-    effectiveThreadIsDirect: null,
+    threadIsDirect: null,
     explicitTarget: null,
     identityId: null,
     replyToMessageId: null,
     threadId: null,
-    threadIsDirect: null,
   })
   expect(resolveAssistantConversationScope(
     maintenanceRunnerCall.plan.conversationPolicy.audience,
@@ -3308,12 +3336,11 @@ test('sendAssistantNotificationLocal keeps scheduled group reads and offers mode
     bindingDelivery: null,
     channel: 'linq',
     deliveryPolicy: 'not-requested',
-    effectiveThreadIsDirect: false,
+    threadIsDirect: false,
     explicitTarget: null,
     identityId: null,
     replyToMessageId: null,
     threadId: 'family-step-challenge',
-    threadIsDirect: false,
   }
 
   const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
@@ -3450,12 +3477,11 @@ test('sendAssistantNotificationLocal forwards one hosted context and leaves audi
     bindingDelivery: null,
     channel: 'linq',
     deliveryPolicy: 'not-requested',
-    effectiveThreadIsDirect: true,
+    threadIsDirect: true,
     explicitTarget: null,
     identityId: null,
     replyToMessageId: null,
     threadId: 'direct-scheduled-thread',
-    threadIsDirect: true,
   }
 
   const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
@@ -3651,12 +3677,11 @@ test.each(SCHEDULED_GROUP_CARD_CASES)(
       bindingDelivery: null,
       channel,
       deliveryPolicy: 'not-requested',
-      effectiveThreadIsDirect: false,
+      threadIsDirect: false,
       explicitTarget: target,
       identityId: null,
       replyToMessageId: null,
       threadId: target,
-      threadIsDirect: false,
     }
     const { deliverMessage, mocks, sendAssistantNotificationLocal } =
       await loadNotificationTurnHarness({
@@ -4006,6 +4031,57 @@ test.each(['linq', 'telegram', 'email'] as const)(
     )
   },
 )
+
+test('manual meal estimation has isolated vault tools and one private reply', async () => {
+  const response = JSON.stringify({
+    kind: 'send_message', text: 'About how large was the serving?',
+    privateSummary: 'Asked for the missing portion.',
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult: createProviderResult({ response }),
+      turnId: 'turn-manual-meal-estimation',
+    })
+  await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Complete the already saved meal from its photo.',
+    manualMealEstimation: true,
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: true,
+    vault: '/vaults/manual-meal',
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(1)
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      profile: {
+        nativeResumePolicy: 'disabled', promptProfile: 'conversation',
+        threadScope: 'isolated-thread', toolProfile: 'provider-turn',
+      },
+    }),
+  )
+  expect(deliverMessage).toHaveBeenCalledTimes(1)
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    message: 'About how large was the serving?',
+  }))
+})
+
+test('manual meal estimation cannot enable tools in a group', async () => {
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult: createProviderResult({ response: '{}' }),
+      turnId: 'turn-manual-meal-group-denied',
+    })
+  await expect(sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Complete the already saved meal.',
+    manualMealEstimation: true,
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: false,
+    vault: '/vaults/manual-meal',
+  })).rejects.toThrow('Manual meal estimation requires a private direct route')
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
 
 test('sendAssistantNotificationLocal delivers ordinary context handoff text through the existing output-only path', async () => {
   const response = 'The final round stayed controlled. Nice work.'
@@ -6048,12 +6124,11 @@ function createSharedPlan(): AssistantTurnSharedPlan {
         bindingDelivery: null,
         channel: null,
         deliveryPolicy: 'not-requested',
-        effectiveThreadIsDirect: true,
+        threadIsDirect: true,
         explicitTarget: null,
         identityId: null,
         replyToMessageId: null,
         threadId: null,
-        threadIsDirect: null,
       },
       operatorAuthority: 'direct-operator',
     },

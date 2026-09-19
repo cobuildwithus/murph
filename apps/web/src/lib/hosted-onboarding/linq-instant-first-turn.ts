@@ -37,6 +37,7 @@ import { recordHostedAiUsageRecords } from "../hosted-execution/usage";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
+  buildHostedLinqDeliveryId,
   claimHostedLinqDeliveryProviderDispatchTx,
   hasConflictingHostedLinqInstantFirstTurnForChatTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
@@ -50,6 +51,7 @@ import {
   type HostedLinqSendResult,
 } from "./linq-client";
 import type { HostedLinqFirstContactAdmissionRequest } from "./linq-first-contact-admission";
+import { lockHostedLinqMessageReceiptsTx } from "./linq-message-receipt-lock";
 import type { HostedLinqParticipantContact } from "./linq-participant-contact";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
@@ -287,12 +289,6 @@ export async function claimHostedLinqInstantFirstTurn(input: {
   const idempotencyKey = buildHostedLinqInstantFirstTurnIdempotencyKey(
     input.request.eventId,
   );
-  const route = await readHostedThreadRouteByThreadIdentity({
-    channel: "linq",
-    prisma,
-    threadId: input.linqChatId,
-  });
-  if (route) return { kind: "unavailable" };
   const openingTone = input.continuationMemberId
     ? await readHostedLinqOpeningContinuationTone({
         ...input,
@@ -940,6 +936,10 @@ async function finalizeHostedLinqInstantFirstTurn(input: {
   );
 
   await input.prisma.$transaction(async (tx) => {
+    await lockHostedLinqMessageReceiptsTx({
+      messageIds: [input.providerMessageId],
+      prisma: tx,
+    });
     const milestone = await markHostedLinqDeliveryAcceptedTx({
       acceptedAt: input.acceptedAt,
       idempotencyKey,
@@ -1016,6 +1016,11 @@ async function readCompletedHostedLinqInstantFirstTurn(input: {
     kind: "accepted",
     wakeHandoff: {
       ...input.wakeHandoff,
+      acceptedLinqDeliveryId: buildHostedLinqDeliveryId(
+        requireHostedLinqInstantFirstTurnIdempotencyLookupKey(
+          buildHostedLinqInstantFirstTurnIdempotencyKey(input.wakeHandoff.eventId),
+        ),
+      ),
       mailboxItemId: item.id,
       wakeMailboxCheckpoint: {
         lane: item.lane,

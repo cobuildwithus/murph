@@ -21,12 +21,15 @@ import { upsertHostedMemberIdentity } from "../src/lib/hosted-onboarding/hosted-
 import { claimHostedSignupReferralLink, issueHostedSignupReferralLink } from "../src/lib/hosted-growth/signup-referral";
 import { prepareHostedAuthTelegramMember } from "../src/lib/better-auth/telegram-member";
 import { commitHostedAuthSession } from "../src/lib/better-auth/verified-session";
+import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
 import { authLookupKey, openAuthRecord } from "../src/lib/better-auth/record-crypto";
 import { POST as startCredential } from "../app/api/settings/login-methods/telegram/start/route";
 import { POST as prepareCredential } from "../app/api/settings/login-methods/telegram/prepare/route";
 import { POST as verifyCredential } from "../app/api/settings/login-methods/telegram/verify/route";
 import { POST as removeCredential } from "../app/api/settings/login-methods/remove/route";
 import { POST as credentialChallenge } from "../app/api/settings/login-methods/challenge/route";
+import { POST as legacyRepairOptions } from "../app/api/settings/approval-passkeys/initial-options/route";
+import { readHostedMemberIdentity } from "../src/lib/hosted-onboarding/hosted-member-identity-store";
 import { POST as initialPasskeyOptions } from "../app/api/settings/approval-passkeys/initial-options/route";
 import { POST as registerPasskey } from "../app/api/settings/approval-passkeys/register/route";
 import { authenticator } from "./approval-webauthn-fixture";
@@ -40,7 +43,9 @@ const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
   const url = new URL(process.env.DATABASE_URL ?? "");
   if (!["postgres:", "postgresql:"].includes(url.protocol) || !["127.0.0.1", "localhost"].includes(url.hostname)
-    || url.searchParams.has("host") || !["/murph_dev_better_auth_adoption", "/murph_dev_better_auth_retirement"].includes(url.pathname)) throw new Error("Telegram proof requires its isolated local task database.");
+    || url.search || !/^\/(?:murph_dev_better_auth_adoption|murph_test(?:_[a-z0-9_]+)?)$/u.test(url.pathname)) {
+    throw new Error("Telegram proof requires an isolated local test database.");
+  }
 }
 const baseURL = "http://localhost:3000";
 const clientId = "123456789";
@@ -72,6 +77,9 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
       { lookupKey: { in: [...nonces].map((nonce) => authLookupKey("verification", "identifier", `telegram-login:${nonce}`)) } },
       { id: { in: ["start", "verify"].map((operation) => `arl_${authLookupKey("verification", "rate-limit", `telegram:${operation}:ip:${ip}`)}`) } },
     ] } });
+    await prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: [
+      `initial-approval-enrollment:ip:${ip}`, ...[...memberIds].map((id) => `initial-approval-enrollment:member:${id}`),
+    ].map((value) => `arl_${authLookupKey("verification", "rate-limit", value)}`) } } });
     memberIds.clear(); telegramIds.clear(); nonces.clear();
   });
   afterAll(async () => { if (enabled) await getPrisma().$disconnect(); });
@@ -81,13 +89,13 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
       origin: baseURL, "content-type": "application/json", "x-vercel-forwarded-for": ip, ...(cookie ? { cookie } : {}),
     }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   }
-  async function begin(id = String(randomInt(100_000_000, 999_999_999))) {
+  async function begin(id = String(randomInt(100_000_000, 999_999_999)), profileIdAsString = false) {
     telegramIds.add(id);
     const response = await start(request("/api/auth/telegram/start"));
     expect(response.status).toBe(200);
     const { nonce } = await response.json(); nonces.add(nonce);
     const cookie = response.headers.getSetCookie()[0].split(";")[0];
-    const idToken = await new SignJWT({ id: Number(id), nonce, email: "untrusted@example.test", phone_number: "+12025550111" })
+    const idToken = await new SignJWT({ id: profileIdAsString ? id : Number(id), nonce, email: "untrusted@example.test", phone_number: "+12025550111" })
       .setProtectedHeader({ alg: "ES256" }).setIssuer("https://oauth.telegram.org").setAudience(clientId)
       .setSubject("different-oidc-subject").setIssuedAt().setExpirationTime("5m").sign(keys.privateKey);
     return { id, nonce, cookie, idToken };
@@ -95,13 +103,89 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
   const finish = (flow: Awaited<ReturnType<typeof begin>>, extra: Record<string, unknown> = {}) =>
     verify(request("/api/auth/telegram/verify", { idToken: flow.idToken, ...extra }, flow.cookie));
 
-  async function credentialMember() {
+  async function beginReauthentication(cookie: string, id: string) {
+    const response = await start(request("/api/auth/telegram/start", { reauthenticate: true }, cookie));
+    expect(response.status).toBe(200);
+    const { nonce } = await response.json(); nonces.add(nonce);
+    const nonceCookie = response.headers.getSetCookie()[0].split(";")[0];
+    const idToken = await new SignJWT({ id: Number(id), nonce })
+      .setProtectedHeader({ alg: "ES256" }).setIssuer("https://oauth.telegram.org").setAudience(clientId)
+      .setSubject("not-the-canonical-profile-id").setIssuedAt().setExpirationTime("5m").sign(keys.privateKey);
+    return { cookie: `${cookie}; ${nonceCookie}`, nonceCookie, idToken };
+  }
+  function issuedCookie(response: Response) {
+    return response.headers.getSetCookie().find((value) => value.startsWith("murph-auth-session="))!.split(";")[0];
+  }
+
+  it("bound Telegram primary proof repairs never-migrated approval without a Privy provider or signup completion", async () => {
+    const flow = await begin();
+    const login = await finish(flow);
+    expect(login.status).toBe(200);
+    const { memberId } = await login.json(); memberIds.add(memberId);
+    const cookie = issuedCookie(login); const prisma = getPrisma();
+    const identity = await readHostedMemberIdentity({ memberId, prisma });
+    await prisma.$transaction((tx) => upsertHostedMemberIdentity({ ...identity!, memberId,
+      preparedControlRoot: { domain: "control", userId: memberId, rootKeyId: "synthetic-root" }, prisma: tx,
+    }));
+    // Match an imported legacy user rather than a newly created first-party user.
+    await hostedAuthAdapter(prisma)({ user: { additionalFields: { credentialsChangedAt: { type: "date" } } } }).update({
+      model: "user", where: [{ field: "id", value: memberId }], update: { credentialsChangedAt: null },
+    });
+    const session = await getHostedAppSessionFromRequest(request("/home", {}, cookie));
+    await hostedAuthAdapter(prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
+      model: "session", where: [{ field: "id", value: session!.sessionId }], update: { primaryAuthenticatedAt: null },
+    });
+    vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "true");
+    expect((await legacyRepairOptions(request("/api/settings/approval-passkeys/initial-options", {}, cookie))).status).toBe(403);
+    const proof = await beginReauthentication(cookie, flow.id);
+    const result = await verify(request("/api/auth/telegram/verify", { idToken: proof.idToken, reauthenticate: true }, proof.cookie));
+    expect(result.status).toBe(200);
+    expect(await result.json()).toMatchObject({ memberId });
+    const renewedCookie = issuedCookie(result);
+    expect((await getHostedAppSessionFromRequest(request("/home", {}, renewedCookie)))?.primaryAuthenticatedAt).toBeInstanceOf(Date);
+    const options = await legacyRepairOptions(request("/api/settings/approval-passkeys/initial-options", {}, renewedCookie));
+    expect(options.status).toBe(200);
+    const registration = await options.json();
+    const key = authenticator("synthetic Telegram legacy repair", baseURL);
+    expect((await registerPasskey(request("/api/settings/approval-passkeys/register", {
+      initialToken: registration.token, response: key.registration(true, registration.options.challenge),
+    }, renewedCookie))).status).toBe(200);
+    expect(await getHostedAppSessionFromRequest(request("/home", {}, cookie))).toBeNull();
+  });
+
+  it("reauthentication nonce cannot move between sessions/members, become ordinary login, or be replayed", async () => {
+    const first = await begin(); const login = await finish(first);
+    const { memberId } = await login.json(); memberIds.add(memberId);
+    const cookie = issuedCookie(login);
+    const secondLogin = await finish(await begin(first.id));
+    const secondCookie = issuedCookie(secondLogin);
+    const otherLogin = await finish(await begin());
+    const other = await otherLogin.json(); memberIds.add(other.memberId);
+    const proof = await beginReauthentication(cookie, first.id);
+    const payload = { idToken: proof.idToken, reauthenticate: true };
+    for (const foreignCookie of [secondCookie, issuedCookie(otherLogin)]) {
+      expect((await verify(request("/api/auth/telegram/verify", payload, `${foreignCookie}; ${proof.nonceCookie}`))).status).toBe(401);
+    }
+    expect((await verify(request("/api/auth/telegram/verify", { idToken: proof.idToken }, proof.cookie))).status).toBe(401);
+    expect((await verify(request("/api/auth/telegram/verify", payload, proof.cookie))).status).toBe(200);
+    expect((await verify(request("/api/auth/telegram/verify", payload, proof.cookie))).status).toBe(401);
+  });
+
+  it("bound Telegram reauthentication cannot adopt an unlinked profile", async () => {
+    const login = await finish(await begin()); const { memberId } = await login.json(); memberIds.add(memberId);
+    const otherId = String(randomInt(100_000_000, 999_999_999)); telegramIds.add(otherId);
+    const proof = await beginReauthentication(issuedCookie(login), otherId);
+    expect((await verify(request("/api/auth/telegram/verify", { idToken: proof.idToken, reauthenticate: true }, proof.cookie))).status).toBe(409);
+    expect(await getPrisma().hostedAuthRecord.count({ where: { model: "account", lookupKey: authLookupKey("account", "accountId", otherId) } })).toBe(0);
+  });
+
+  async function credentialMember(withApproval = true) {
     const prisma = getPrisma();
     const contact = createHostedLinqParticipantContact({ kind: "email", value: `telegram-settings-${randomUUID()}@example.test` });
     if (!contact) throw new Error("Invalid synthetic email");
     const login = async () => {
       let code = "";
-      await sendHostedAuthOtp({ baseURL, secret, prisma, contact, delivery: { email: async (delivery) => { code = delivery.code; }, sms: async () => { throw new Error("Unexpected SMS"); } } });
+      await sendHostedAuthOtp({ baseURL, secret, prisma, contact, delivery: { email: async (delivery) => { code = delivery.code; } } });
       const prepared = await prepareHostedAuthOtpMember({ contact, prisma });
       const issued = await commitHostedAuthOtp({ baseURL, secret, prisma, ...prepared, otp: { kind: "email", address: contact.value, code } });
       memberIds.add(issued.memberId);
@@ -109,12 +193,15 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     };
     const member = await login();
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "true");
-    const initial = await (await initialPasskeyOptions(request("/api/settings/approval-passkeys/initial-options", {}, member.cookie))).json();
     const key = authenticator("synthetic Telegram settings", baseURL);
-    expect((await registerPasskey(request("/api/settings/approval-passkeys/register", {
-      initialToken: initial.token, response: key.registration(true, initial.options.challenge),
-    }, member.cookie))).status).toBe(200);
-    return { ...member, login, approve(challenge: { message: string; token: string }) {
+    const enroll = async () => {
+      const initial = await (await initialPasskeyOptions(request("/api/settings/approval-passkeys/initial-options", {}, member.cookie))).json();
+      expect((await registerPasskey(request("/api/settings/approval-passkeys/register", {
+        initialToken: initial.token, response: key.registration(true, initial.options.challenge),
+      }, member.cookie))).status).toBe(200);
+    };
+    if (withApproval) await enroll();
+    return { ...member, login, enroll, approve(challenge: { message: string; token: string }) {
       return { method: "passkey", token: challenge.token, assertion: key.assertion({ counter: 0, customMessage: challenge.message }) };
     } };
   }
@@ -138,6 +225,83 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     expect(result, `Telegram prepare status ${response.status}`).toHaveProperty("challenge.token");
     return { idToken: flow.idToken, change: result.change, authorization: member.approve(result.challenge) };
   }
+
+  it("creates login proofs and linked accounts without adapter ID warnings", async () => {
+    const member = await credentialMember(false);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const login = await begin();
+    const credential = await beginCredential(member);
+    const credentialNonce = credential.nonceCookie.slice(credential.nonceCookie.indexOf("=") + 1);
+    const rows = await getPrisma().hostedAuthRecord.findMany({ where: {
+      model: "verification", lookupKey: { in: [login.nonce, credentialNonce].map((nonce) =>
+        authLookupKey("verification", "identifier", `telegram-login:${nonce}`)) },
+    }, take: 2 });
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2);
+    for (const row of rows) {
+      const record = await openAuthRecord(row, getPrisma());
+      expect(record.id).toEqual(expect.any(String));
+      expect(record.id).toBeTruthy();
+      expect(record.expiresAt).toBeInstanceOf(Date);
+    }
+    const prepared = await (await prepareCredential(request("/api/settings/login-methods/telegram/prepare", {
+      idToken: credential.idToken,
+    }, credential.cookie))).json();
+    expect((await verifyCredential(request("/api/settings/login-methods/telegram/verify", {
+      change: prepared.change, idToken: credential.idToken,
+    }, credential.cookie))).status).toBe(200);
+    expect((await readHostedLoginMethods(getPrisma(), member.memberId)).methods.telegram).toBe(credential.id);
+    expect(warn.mock.calls.some((args) => args.some((arg) => String(arg).includes("forceAllowId")))).toBe(false);
+    expect(log.mock.calls.some((args) => args.some((arg) => String(arg).includes("Create method with `id`")))).toBe(false);
+  });
+
+  it("links the first Telegram account after email without a passkey and rejects replay and replacement", async () => {
+    const prisma = getPrisma(); const member = await credentialMember(false);
+    const flow = await beginCredential(member);
+    const response = await prepareCredential(request("/api/settings/login-methods/telegram/prepare", { idToken: flow.idToken }, flow.cookie));
+    expect(response.status).toBe(200);
+    const prepared = await response.json();
+    expect(prepared.challenge).toBeNull();
+    const completion = { change: prepared.change, idToken: flow.idToken };
+    expect((await verifyCredential(request("/api/settings/login-methods/telegram/verify", completion, flow.cookie))).status).toBe(200);
+    expect((await readHostedLoginMethods(prisma, member.memberId)).methods.telegram).toBe(flow.id);
+    expect((await readHostedMemberRoutingState({ memberId: member.memberId, prisma }))?.telegramUserId).toBe(flow.id);
+    expect((await prepareHostedAuthTelegramMember({ prisma, telegramUserId: flow.id })).memberId).toBe(member.memberId);
+    expect(await prisma.hostedMemberApprovalCredentials.count({ where: { memberId: member.memberId } })).toBe(0);
+    expect((await getHostedAppSessionFromRequest(request("/home", {}, member.cookie)))?.member.id).toBe(member.memberId);
+    expect((await verifyCredential(request("/api/settings/login-methods/telegram/verify", completion, flow.cookie))).status).toBe(401);
+    const replacement = await beginCredential(member);
+    const replacementChange = { ...prepared.change, expectedIdentity: flow.id, value: replacement.id };
+    expect((await verifyCredential(request("/api/settings/login-methods/telegram/verify", { change: replacementChange, idToken: replacement.idToken }, replacement.cookie))).status).toBe(400);
+  });
+
+  it.each(["stale", "exchanged", "future", "revoked", "protected", "other-session"] as const)("rejects initial Telegram linking after %s authority", async (kind) => {
+    const prisma = getPrisma(); const member = await credentialMember(false); const flow = await beginCredential(member);
+    const prepared = await (await prepareCredential(request("/api/settings/login-methods/telegram/prepare", { idToken: flow.idToken }, flow.cookie))).json();
+    expect(prepared.challenge).toBeNull();
+    const session = await getHostedAppSessionFromRequest(request("/home", {}, member.cookie));
+    expect(session).not.toBeNull();
+    let cookie = flow.cookie;
+    if (kind === "protected") await member.enroll();
+    else if (kind === "other-session") cookie = `${(await member.login()).cookie}; ${flow.nonceCookie}`;
+    else if (kind === "revoked") await prisma.hostedAuthRecord.delete({ where: { model_id: { model: "session", id: session!.sessionId } } });
+    else await hostedAuthAdapter(prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
+      model: "session", where: [{ field: "id", value: session!.sessionId }],
+      update: { primaryAuthenticatedAt: kind === "exchanged" ? null : new Date(Date.now() + (kind === "stale" ? -6 : 6) * 60_000) },
+    });
+    const response = await verifyCredential(request("/api/settings/login-methods/telegram/verify", { change: prepared.change, idToken: flow.idToken }, cookie));
+    expect([400, 401, 403]).toContain(response.status);
+    expect((await readHostedLoginMethods(prisma, member.memberId)).methods.telegram).toBeNull();
+  });
+
+  it("commits one concurrent initial Telegram connection", async () => {
+    const member = await credentialMember(false); const flow = await beginCredential(member);
+    const prepared = await (await prepareCredential(request("/api/settings/login-methods/telegram/prepare", { idToken: flow.idToken }, flow.cookie))).json();
+    const responses = await Promise.all([1, 2].map(() => verifyCredential(request("/api/settings/login-methods/telegram/verify", { change: prepared.change, idToken: flow.idToken }, flow.cookie))));
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    expect((await readHostedLoginMethods(getPrisma(), member.memberId)).methods.telegram).toBe(flow.id);
+  });
 
   it("adds and removes Telegram through current-session approval with canonical readback", async () => {
     const prisma = getPrisma(); const member = await credentialMember(); const other = await member.login();
@@ -197,8 +361,8 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     expect((await readHostedLoginMethods(getPrisma(), existingMember.memberId)).methods.telegram).toBe(existing.id);
   });
 
-  it("creates a canonical member, completes onboarding, and keeps provider contacts out of login authority", async () => {
-    const prisma = getPrisma(); const flow = await begin();
+  it.each([false, true])("creates a canonical member and completes onboarding with string profile ID=%s", async (profileIdAsString) => {
+    const prisma = getPrisma(); const flow = await begin(undefined, profileIdAsString);
     const response = await finish(flow, { timeZone: "America/Denver" });
     expect(response.status).toBe(200);
     const body = await response.json(); memberIds.add(body.memberId);
@@ -221,7 +385,7 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     const flow = await begin(); const first = await finish(flow); expect(first.status).toBe(200);
     const body = await first.json(); memberIds.add(body.memberId);
     expect((await finish(flow)).status).toBe(401);
-    const again = await finish(await begin(flow.id)); expect(again.status).toBe(200);
+    const again = await finish(await begin(flow.id, true)); expect(again.status).toBe(200);
     expect(await again.json()).toMatchObject({ memberId: body.memberId });
     expect(await getPrisma().hostedAuthRecord.count({ where: { model: "session", memberId: body.memberId } })).toBe(2);
   });

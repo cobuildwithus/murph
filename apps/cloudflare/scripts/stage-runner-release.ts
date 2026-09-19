@@ -100,7 +100,9 @@ export async function stageHostedRunnerRelease(input: {
     if (live && (!isObjectRecord(live.configuration) || !Number.isSafeInteger(live.max_instances)
       || Number(live.max_instances) < 0 || !isObjectRecord(live.durable_objects)
       || live.durable_objects.namespace_id !== readNamespaceId(input.currentVersion, className))) throw invalid();
-    return { rendered, className, name, live };
+    const updateImage = className === "DeploySmokeRunnerContainer"
+      || (!input.retainServingRunner && className === activeClass);
+    return { rendered, className, name, live, updateImage };
   }));
   const serving = entries.find(entry => entry.className === activeClass);
   const smoke = entries.find(entry => entry.className === "DeploySmokeRunnerContainer");
@@ -115,9 +117,8 @@ export async function stageHostedRunnerRelease(input: {
     artifact, specification, liveConfiguration: serving.live.configuration,
     retainServingRunner: !!input.retainServingRunner });
   const retirements: StagedRunnerRelease["retirements"] = [];
-  const effectiveContainers = entries.filter(entry => entry.live || entry.className === activeClass).map(entry => {
-    if (entry.className === "DeploySmokeRunnerContainer"
-      || (!input.retainServingRunner && entry.className === activeClass)) return entry.rendered;
+  const effectiveContainers = entries.filter(entry => entry.live || entry.updateImage).map(entry => {
+    if (entry.updateImage) return entry.rendered;
     if (!entry.live || !isObjectRecord(entry.live.configuration)) throw invalid();
     const retire = !input.retainServingRunner && entry.className === inactiveClass;
     if (retire && Number(entry.live.max_instances) > 0) retirements.push({
@@ -125,17 +126,10 @@ export async function stageHostedRunnerRelease(input: {
       namespaceId: readNamespaceId(input.currentVersion, entry.className),
     });
     const maxInstances = retire ? 0 : entry.live.max_instances;
-    const { rollout_step_percentage: steps, constraints: _constraints, ...rendered } = entry.rendered;
-    const resources = runnerApplicationResources(entry.live.configuration);
-    const constraints = isObjectRecord(entry.live.constraints) ? entry.live.constraints : {};
-    return { ...rendered, image: requiredString(entry.live.configuration.image), max_instances: maxInstances,
-      instance_type: { vcpu: resources.vcpu, memory_mib: resources.memoryMiB, disk_mb: resources.diskMB },
-      rollout_active_grace_period: entry.live.rollout_active_grace_period,
-      ...(Array.isArray(constraints.regions) ? { constraints: { regions: constraints.regions } } : {}),
-      ...(Number(maxInstances) > 0 && steps !== undefined ? { rollout_step_percentage: steps } : {}) };
+    return retainNativeContainer(entry.rendered, entry.live, maxInstances);
   });
-  const applications = [smoke, ...(!input.retainServingRunner ? [serving] : [])].map(entry => ({
-    applicationId: requiredString(entry.live?.id), className: entry.className, name: entry.name,
+  const applications = [smoke, ...entries.filter(entry => entry.updateImage && entry !== smoke)].map(entry => ({
+    applicationId: entry.live ? requiredString(entry.live.id) : null, className: entry.className, name: entry.name,
     namespaceId: readNamespaceId(input.currentVersion, entry.className),
     specification: runnerApplicationSpecification(entry.rendered, logsEnabled),
   }));
@@ -144,12 +138,29 @@ export async function stageHostedRunnerRelease(input: {
   const configPath = path.join(path.dirname(input.configPath), `wrangler.stage-${attempt}.jsonc`);
   const promotionConfigPath = path.join(path.dirname(input.configPath), `wrangler.promote-${attempt}.jsonc`);
   const render = (release: HostedRunnerDeployment) => `${JSON.stringify({
-    ...config, containers: effectiveContainers, vars: { ...vars, HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(release) },
+    ...config, containers: effectiveContainers, vars: { ...vars,
+      HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(release) },
   }, null, 2)}\n`;
   await writeFile(configPath, render(deployment), { encoding: "utf8", flag: "wx" });
   await writeFile(promotionConfigPath, render(promoted), { encoding: "utf8", flag: "wx" });
   return { activeApplicationName: serving.name, applications, retirements, configPath, deployment,
     promotionConfigPath, workerOnly: !!input.retainServingRunner };
+}
+
+/** Retained releases use native resource ownership. */
+function retainNativeContainer(rendered: Record<string, unknown>, live: Record<string, unknown>, maxInstances: unknown = live.max_instances): Record<string, unknown> {
+  if (!isObjectRecord(live.configuration)) throw invalid();
+  const resources = runnerApplicationResources(live.configuration);
+  const { rollout_step_percentage: steps, constraints: _constraints, ...rest } = rendered;
+  const constraints = isObjectRecord(live.constraints) ? live.constraints : {};
+  return { ...rest, image: requiredString(live.configuration.image), max_instances: maxInstances,
+    instance_type: { vcpu: resources.vcpu, memory_mib: resources.memoryMiB, disk_mb: resources.diskMB },
+    rollout_active_grace_period: live.rollout_active_grace_period,
+    ...(Array.isArray(constraints.regions) ? { constraints: { regions: constraints.regions } } : {}),
+    ...(Number(maxInstances) > 0 && steps !== undefined
+      ? { rollout_step_percentage: Array.isArray(steps) ? steps.slice(-Number(maxInstances)) : steps }
+      : {}),
+  };
 }
 
 function prepareImageTransition({ active, liveDeployment, artifact, specification, liveConfiguration, retainServingRunner }: {

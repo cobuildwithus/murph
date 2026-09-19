@@ -1,9 +1,5 @@
-import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { permanentRedirect } from "next/navigation";
 
-import HistoryPageClient from "./history-page-client";
-
-export default async function HistoryPage() {
-  await getHostedDashboardPageAuthSnapshot();
-
-  return <HistoryPageClient />;
+export default function RetiredHistoryPage(): never {
+  permanentRedirect("/journal");
 }

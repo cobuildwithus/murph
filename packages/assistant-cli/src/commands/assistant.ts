@@ -8,7 +8,6 @@ import {
 import {
   assistantAskResultSchema,
   assistantChannelNameSchema,
-  assistantChatResultSchema,
   assistantDeliverResultSchema,
   assistantDoctorResultSchema,
   assistantOnboardingCompletionReasonValues,
@@ -32,7 +31,6 @@ import {
 import { deliverAssistantMessage } from '@murphai/assistant-engine/outbound-channel'
 import {
   runAssistantAutomation,
-  runAssistantChat,
   sendAssistantMessage,
   stopAssistantAutomation,
 } from '../assistant-runtime.js'
@@ -155,28 +153,28 @@ const assistantProviderOptionFields = {
     'Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.',
   ),
   codexHome: optionalNonEmptyStringOption(
-    'Optional Codex home directory used by local assistant chat.',
+    'Optional Codex home directory used by local assistant turns.',
   ),
   model: optionalNonEmptyStringOption(
-    'Optional Codex model override for local chat turns.',
+    'Optional Codex model override for local turns.',
   ),
   modelProvider: optionalNonEmptyStringOption(
-    'Optional Codex model provider id for local chat turns.',
+    'Optional Codex model provider id for local turns.',
   ),
   reasoningEffort: z
     .enum(assistantReasoningEffortValues)
     .optional()
     .describe(
-      'Optional Codex reasoning effort for local assistant chat turns.',
+      'Optional Codex reasoning effort for local assistant turns.',
     ),
   sandbox: z
     .enum(assistantSandboxValues)
     .optional()
     .describe(
-      'Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.',
+      'Codex sandbox mode for local assistant turns. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.',
     ),
   approvalPolicy: z.literal('never').optional().describe(
-    'Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.',
+    'Codex approval policy for local assistant turns. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.',
   ),
   profile: optionalNonEmptyStringOption('Optional Codex config profile name.'),
 }
@@ -285,22 +283,6 @@ function isMissingPathError(error: unknown): boolean {
   )
 }
 
-const assistantChatArgsSchema = z.object({
-  prompt: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional first prompt to send before the chat loop starts.'),
-})
-
-const assistantChatOptionsSchema = withBaseOptions({
-  ...assistantSessionOptionFields,
-  ...assistantProviderOptionFields,
-})
-
-type AssistantChatArgs = z.infer<typeof assistantChatArgsSchema>
-type AssistantChatOptions = z.infer<typeof assistantChatOptionsSchema>
-
 type AssistantConversationCliOptions = {
   alias?: string
   channel?: string
@@ -311,14 +293,14 @@ type AssistantConversationCliOptions = {
 }
 
 type AssistantProviderCliOptions = {
-  approvalPolicy?: AssistantChatOptions['approvalPolicy']
+  approvalPolicy?: z.infer<typeof assistantProviderOptionFields.approvalPolicy>
   codexCommand?: string
   codexHome?: string
   model?: string
   modelProvider?: string
   profile?: string
-  reasoningEffort?: AssistantChatOptions['reasoningEffort']
-  sandbox?: AssistantChatOptions['sandbox']
+  reasoningEffort?: z.infer<typeof assistantProviderOptionFields.reasoningEffort>
+  sandbox?: z.infer<typeof assistantProviderOptionFields.sandbox>
 }
 
 type AssistantDeliveryCliOptions = {
@@ -834,58 +816,6 @@ async function resolveAssistantDeliveryInvocationFromCli(
   }
 }
 
-async function runAssistantChatCommand(context: {
-  args: AssistantChatArgs
-  options: AssistantChatOptions
-  agent: boolean
-  formatExplicit: boolean
-}) {
-  // Lazy import: the ink chat surface drags ink/react/yoga-layout into the
-  // module graph, which must stay off the per-invocation CLI hot path.
-  const { assertAssistantInkInteractiveInputAvailable } = await import(
-    '../assistant-chat-ink.js'
-  )
-  assertAssistantInkInteractiveInputAvailable()
-
-  const result = await runAssistantChat({
-    vault: context.options.vault,
-    initialPrompt: context.args.prompt,
-    ...assistantConversationOptionsFromCli(context.options),
-    ...assistantProviderOverridesFromCli(context.options),
-  })
-
-  if (!context.agent && !context.formatExplicit) {
-    process.stderr.write(
-      `Resume chat by typing: ${formatAssistantChatResumeCommand(result.session.sessionId)}\n`,
-    )
-  }
-
-  return result
-}
-
-function formatAssistantChatResumeCommand(sessionId: string): string {
-  return `murph chat --session "${sessionId}"`
-}
-
-function createAssistantChatCommandDefinition(input?: {
-  description?: string
-  hint?: string
-}) {
-  return {
-    args: assistantChatArgsSchema,
-    description:
-      input?.description ??
-      'Open an Ink terminal chat UI backed by Codex App Server while Murph stores session metadata plus a local transcript outside the canonical vault. This command requires interactive terminal input.',
-    hint:
-      input?.hint ??
-      'Requires an interactive terminal. Type /exit to close the chat loop or /session to print the current Murph session id.',
-    options: assistantChatOptionsSchema,
-    output: assistantChatResultSchema,
-    outputPolicy: 'agent-only' as const,
-    run: runAssistantChatCommand,
-  }
-}
-
 const assistantRunOptionsSchema = withBaseOptions({
   maxPerScan: z
     .number()
@@ -996,7 +926,7 @@ export function registerAssistantCommands(
 ) {
   const assistant = Cli.create('assistant', {
     description:
-      'Murph assistant commands for canonical conversation style, Codex App Server-backed local chat sessions, Ink terminal chat, outbound delivery, and auto-routing inbox automation.',
+      'Murph assistant commands for canonical conversation style, Codex App Server-backed local turns, outbound delivery, and auto-routing inbox automation.',
   })
 
   const registerConversationCommands = () => {
@@ -1063,8 +993,6 @@ export function registerAssistantCommands(
         })
       },
     })
-
-    assistant.command('chat', createAssistantChatCommandDefinition())
 
     assistant.command('deliver', {
       args: z.object({
@@ -1479,15 +1407,6 @@ export function registerAssistantCommands(
   }
 
   const registerRootAliases = () => {
-    cli.command(
-      'chat',
-      createAssistantChatCommandDefinition({
-        description:
-          'Open the same interactive assistant chat UI as `assistant chat` directly from the CLI root.',
-        hint:
-          'Shorthand for `assistant chat`. Requires an interactive terminal. Type /exit to close the chat loop or /session to print the current Murph session id.',
-      }),
-    )
     cli.command(
       'run',
       createAssistantRunCommandDefinition(inboxServices, vaultServices, {

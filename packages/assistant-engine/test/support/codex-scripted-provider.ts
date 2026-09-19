@@ -20,6 +20,8 @@ interface ScriptedResponseRoute {
   beforeRespond?: () => Promise<void>
   completionLabel?: string
   delayMs?: number
+  delayAfterCreatedMs?: number
+  reasoningIntervalMs?: number
   requestExcludes?: readonly string[]
   requestIncludes?: readonly string[]
   usageInputTokens?: number
@@ -103,6 +105,7 @@ export async function prepareScriptedTurnScenario(
   scriptedStub: ScriptedStub,
   temporaryPaths: string[],
   options: {
+    websocket?: { streamIdleTimeoutMs: number }
     additionalTomlLines?: readonly string[]
     model?: string
     modelProvider?: string
@@ -164,6 +167,7 @@ export async function prepareScriptedTurnScenario(
 function buildScriptedCodexConfigToml(
   baseUrl: string,
   options: {
+    websocket?: { streamIdleTimeoutMs: number }
     additionalTomlLines?: readonly string[]
     modelProvider?: string
     multiAgentV2?: boolean
@@ -188,7 +192,11 @@ function buildScriptedCodexConfigToml(
     'wire_api = "responses"',
     'requires_openai_auth = false',
     'request_max_retries = 4',
-    'stream_max_retries = 5',
+    `stream_max_retries = ${options.websocket ? 0 : 5}`,
+    ...(options.websocket ? [
+      'supports_websockets = true',
+      `stream_idle_timeout_ms = ${options.websocket.streamIdleTimeoutMs}`,
+    ] : []),
     '',
     ...(options.multiAgentV2
       ? [
@@ -357,11 +365,13 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
                     type: 'message',
                   },
         ]
-    writeScriptedSseResponse({
+    await writeScriptedSseResponse({
       outputItems,
       response,
       responseId,
       usageInputTokens: scripted.usageInputTokens,
+      delayAfterCreatedMs: scripted.delayAfterCreatedMs,
+      reasoningIntervalMs: scripted.reasoningIntervalMs,
     })
     if (scripted.completionLabel) {
       completedResponseLabels.push(scripted.completionLabel)
@@ -572,12 +582,14 @@ function readProviderToolOutputText(value: unknown): string | null {
   return textItems.length > 0 ? textItems.join('\n') : null
 }
 
-function writeScriptedSseResponse(input: {
+async function writeScriptedSseResponse(input: {
   outputItems: readonly Record<string, unknown>[]
   response: ServerResponse
   responseId: string
   usageInputTokens?: number
-}): void {
+  delayAfterCreatedMs?: number
+  reasoningIntervalMs?: number
+}): Promise<void> {
   const inputTokens = input.usageInputTokens ?? 12
   const usage = {
     input_tokens: inputTokens,
@@ -606,21 +618,40 @@ function writeScriptedSseResponse(input: {
     },
     type: 'response.created',
   })
+  let remainingDelayMs = input.delayAfterCreatedMs ?? 0
+  let reasoningItems = 0
+  const reasoningOutput: Record<string, unknown>[] = []
+  while (input.reasoningIntervalMs && remainingDelayMs > 0) {
+    const item = { id: `rs_${input.responseId}_${reasoningItems}`, type: 'reasoning', summary: [] }
+    reasoningOutput.push(item)
+    writeScriptedSseEvent(input.response, 'response.output_item.added', {
+      type: 'response.output_item.added', item, output_index: reasoningItems,
+    })
+    const waitMs = Math.min(input.reasoningIntervalMs, remainingDelayMs)
+    await delay(waitMs)
+    remainingDelayMs -= waitMs
+    writeScriptedSseEvent(input.response, 'response.output_item.done', {
+      type: 'response.output_item.done', item, output_index: reasoningItems,
+    })
+    reasoningItems += 1
+  }
+  if (remainingDelayMs) await delay(remainingDelayMs)
   for (const [outputIndex, outputItem] of input.outputItems.entries()) {
     writeScriptedSseEvent(input.response, 'response.output_item.added', {
       item: {
         ...outputItem,
         status: 'in_progress',
       },
-      output_index: outputIndex,
+      output_index: outputIndex + reasoningItems,
       type: 'response.output_item.added',
     })
     writeScriptedSseEvent(input.response, 'response.output_item.done', {
       item: outputItem,
-      output_index: outputIndex,
+      output_index: outputIndex + reasoningItems,
       type: 'response.output_item.done',
     })
   }
+  completedResponse.output = [...reasoningOutput, ...input.outputItems]
   writeScriptedSseEvent(input.response, 'response.completed', {
     response: completedResponse,
     type: 'response.completed',

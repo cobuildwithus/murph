@@ -1,7 +1,9 @@
+import { createPostgresTestOwner, mockPostgresOwnerCommand, forbiddenLegacyRuntime, settledNativeRuntime } from "./postgres-owner-fixtures.ts";
 import { readFile } from "node:fs/promises";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -61,6 +63,10 @@ import type {
 import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const TRANSCRIBE_URL = "http://murph-transcribe.worker/v1/transcribe";
 const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET = "provider-egress-signing-secret";
@@ -191,6 +197,11 @@ function createOutboundEnv(input: {
   openAiApiKey?: string;
   ownsRuntimeWriteFence?: boolean;
 } = {}): RunnerOutboundEnvironmentSource {
+  mockPostgresOwnerCommand(async ({ userId, command }) => {
+    if (command.operation !== "authorize_provider" && command.operation !== "authorize_effect") throw new Error("Unexpected owner operation.");
+    const owns = command.operation === "authorize_provider" ? Boolean(command.runnerContainerName) : input.ownsRuntimeWriteFence ?? false;
+    return { cutover: "postgres", status: owns ? "authorized" : "stale", owner: owns ? createPostgresTestOwner({ userId, attemptId: command.operation === "authorize_effect" ? command.attemptId : "attempt_provider_egress_credential", generation: command.operation === "authorize_effect" ? command.generation : "7", runnerContainerName: command.runnerContainerName ?? "member_123--v-test" }) : null };
+  });
   return {
     ...createHostedExecutionTestEnv(),
     AI: input.AI,
@@ -203,6 +214,7 @@ function createOutboundEnv(input: {
         readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
       }),
       getByName: () => ({
+        ...settledNativeRuntime,
         destroyInstance: async () => {},
         invoke: async () => {
           throw new Error("Runner container must not be invoked by outbound wrapper tests.");
@@ -214,19 +226,7 @@ function createOutboundEnv(input: {
       }),
       idFromString: (id: string) => id,
     },
-    USER_RUNNER: {
-      getByName: () => ({
-        validateRuntimeProviderEgressCredential: async (credentialInput: { userId: string }) => ({
-          attemptId: "attempt_provider_egress_credential",
-          leaseGeneration: "7",
-          owns: true,
-          userId: credentialInput.userId,
-          workspaceVersion: "4",
-        }),
-        validateRuntimeProviderEgressToken: async () => ({ owns: false }),
-        validateRuntimeWriteFence: async () => input.ownsRuntimeWriteFence ?? false,
-      }),
-    },
+    USER_RUNNER: forbiddenLegacyRuntime,
   };
 }
 
@@ -515,7 +515,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
             { importedSeq: "0", lane: "conversation" },
             { importedSeq: "0", lane: "system" },
           ],
-          "hosted-invocation:checkpoint-interrupt-rearm-foreground-prefetch:1",
+          "hosted-invocation:checkpoint-interrupt-foreground-prefetch:1",
         ),
         createOutboundEnv(),
         { containerId: "opaque-container-id" },
@@ -550,7 +550,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
               conversationSeqEnd: null,
               kind: "mailbox_fetch_finished",
               ordinal: 4,
-              probeKind: "checkpoint_interrupt_rearm",
+              probeKind: "checkpoint_interrupt",
               responseStatus: 200,
             },
           ],
@@ -677,7 +677,12 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     }).then((response) => response.status)).resolves.toBe(404);
   });
 
-  it("returns priceable modality usage from the hosted-local OpenAI Images stub", async () => {
+  it.each([true, false])("enforces image access before the hosted-local OpenAI Images stub (allowed=%s)", async (allowed) => {
+    const imageAccessFetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      expect(url.pathname).toBe(HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH);
+      return Response.json({ allowed, reason: allowed ? "allowed" : "subscription_required" });
+    });
     const handler = readHostedLocalTestOutboundByHost()[
       HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi
     ];
@@ -691,6 +696,12 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       { containerId: RUNNER_CONTAINER_NAME },
     );
 
+    expect(imageAccessFetch).toHaveBeenCalledTimes(1);
+    if (!allowed) {
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED" } });
+      return;
+    }
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       usage: {

@@ -141,7 +141,9 @@ async function buildGifStoryboard(input: {
         fit: "inside",
         withoutEnlargement: true,
       })
-      .png()
+      // These bounded, in-memory frames are immediately decoded by the join below.
+      // Skip intermediate compression; the final WebP encoding is unchanged.
+      .png({ compressionLevel: 0 })
       .toBuffer();
     frames.push(frame);
   }

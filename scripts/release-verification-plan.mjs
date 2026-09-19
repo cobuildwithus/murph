@@ -24,7 +24,6 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   { dir: "packages/core", shard: "platform-b" },
   { dir: "packages/setup-cli", shard: "platform-b" },
   { dir: "packages/assistant-cli", shard: "platform-b" },
-  { dir: "packages/assistantd", shard: "platform-a" },
   { dir: "packages/cloudflare-hosted-control", shard: "platform-a" },
   { dir: "packages/contracts", shard: "platform-b" },
   { dir: "packages/clinical-records", shard: "platform-b" },

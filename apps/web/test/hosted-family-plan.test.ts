@@ -1711,26 +1711,12 @@ describe("hosted Family plan", () => {
     expect(
       cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly.mock.invocationCallOrder[0],
     ).toBeLessThan(tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]);
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
-    const acceptedMemberId = tx.$queryRaw.mock.calls[1]?.[1];
-    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
-      1,
-      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
-      "member_owner",
-    );
-    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
-      2,
-      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
-      acceptedMemberId,
-    );
-    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
-      3,
-      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
-      acceptedMemberId,
-    );
-    expect(tx.$queryRaw.mock.invocationCallOrder[2]).toBeLessThan(
-      tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]
-      ?? Number.POSITIVE_INFINITY,
+    const memberLocks = tx.$queryRaw.mock.calls.map((args, index) => ({ args, order: tx.$queryRaw.mock.invocationCallOrder[index] }))
+      .filter(({ args }) => Array.isArray(args[0]) && args[0].join("").includes('from "hosted_member"'));
+    const acceptedMemberId = memberLocks[1]?.args[1];
+    expect(memberLocks.map(({ args }) => args[1])).toEqual(["member_owner", acceptedMemberId, acceptedMemberId]);
+    expect(memberLocks[2]?.order).toBeLessThan(
+      tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
     expect(tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]).toBeLessThan(
       tx.hostedAccountGroupMembership.upsert.mock.invocationCallOrder[0],
@@ -1762,31 +1748,12 @@ describe("hosted Family plan", () => {
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
     });
 
-    const acceptedMemberId = tx.$queryRaw.mock.calls[1]?.[1];
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(4);
-    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
-      1,
-      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
-      "member_owner",
-    );
-    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
-      2,
-      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
-      acceptedMemberId,
-    );
-    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
-      3,
-      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
-      acceptedMemberId,
-    );
-    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
-      4,
-      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
-      acceptedMemberId,
-    );
-    expect(tx.$queryRaw.mock.invocationCallOrder[3]).toBeLessThan(
-      tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]
-      ?? Number.POSITIVE_INFINITY,
+    const memberLocks = tx.$queryRaw.mock.calls.map((args, index) => ({ args, order: tx.$queryRaw.mock.invocationCallOrder[index] }))
+      .filter(({ args }) => Array.isArray(args[0]) && args[0].join("").includes('from "hosted_member"'));
+    const acceptedMemberId = memberLocks[1]?.args[1];
+    expect(memberLocks.map(({ args }) => args[1])).toEqual(["member_owner", acceptedMemberId, acceptedMemberId, acceptedMemberId]);
+    expect(memberLocks[3]?.order).toBeLessThan(
+      tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
     expect(tx.hostedMemberRouting.upsert).toHaveBeenCalledOnce();
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
@@ -5315,6 +5282,28 @@ describe("hosted Family plan", () => {
       );
     },
   );
+
+  it.each([
+    { stripeCustomerLookupKey: "customer_history" },
+    { stripeSubscriptionItemLookupKey: "item_history" },
+    { currentBillingPhase: "paid" },
+    { currentPeriodStart: new Date("2026-07-01T00:00:00.000Z") },
+    { currentPeriodEnd: new Date("2026-08-01T00:00:00.000Z") },
+    { lastStripeEventCreatedAt: new Date("2026-07-01T00:00:00.000Z") },
+  ])("preserves draft billing history without an aggregate: %j", async (history) => {
+    const draft = createNeverPaidFamilyDraftRecord();
+    const tx = createTxMock();
+    tx.hostedAccountGroup.findUnique.mockResolvedValueOnce({
+      ...draft,
+      billingRef: { ...draft.billingRef, ...history },
+    });
+
+    await expect(readHostedFamilyDraftRecoveryStateForOwner({
+      ownerMemberId: "member_mom",
+      prisma: tx,
+    })).resolves.toEqual({ state: "recovery_required" });
+    expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
+  });
 
   it("does not advertise abandonment during a direct-paid conversion", async () => {
     const tx = createTxMock();
@@ -10612,7 +10601,9 @@ function createTxMock(input: {
   });
 
   Object.assign(tx, {
-    $queryRaw: vi.fn().mockResolvedValue([]),
+    $queryRaw: vi.fn().mockImplementation((query: TemplateStringsArray) =>
+      Promise.resolve(Array.isArray(query) && query.join("").includes("hosted_runtime_cutover") ? [{ phase: "legacy" }] : [])),
+    hostedRuntimeOwner: { create: vi.fn().mockResolvedValue({}) },
     hostedAccountGroup: {
       create: vi.fn().mockResolvedValue(group),
       deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -10758,7 +10749,9 @@ function createTxMock(input: {
     hostedAccountGroupPlanCapacity: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
       deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
-      findMany: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn().mockResolvedValue(input.billedSeatCount === null
+        ? []
+        : [{ billedQuantity: input.billedSeatCount ?? 4, planCode: "pulse" }]),
     },
   });
 

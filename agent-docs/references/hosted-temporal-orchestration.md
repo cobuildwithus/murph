@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-08-31
+Last verified: 2026-09-09
 
 ## Decision
 
@@ -56,7 +56,16 @@ authorization. After a relevant revision reaches public `main`,
 wire proof for that exact public commit against the then-current private
 `main` and live reader set. Its `Temporal Web production admission` job must be
 configured as a Vercel production Deployment Check so a completed build cannot
-move production domains before the proof succeeds. The controller re-reads
+move production domains before the proof succeeds. The workflow also publishes
+an explicit pending commit status and a final status derived from the completed
+admission job. Only success becomes a successful status; failure, cancellation,
+and skipped proof fail closed. The proof attempt must match the current workflow
+attempt, so retrying only a failed finalizer cannot reuse historical admission.
+Both notifications use the exact `github.sha`
+and the existing check context, with the ordinary job-scoped GitHub token's
+`statuses: write` permission. The finalizer has no checkout or private credential.
+This repairs missed imported-check completion without a second admission owner
+or Vercel promotion authority. The controller re-reads
 both public and private `main` before accepting the result, while the private
 workflow independently re-reads the complete reader set. Every `main` commit
 must create its managed Vercel candidate, and the Git integration is the only
@@ -141,11 +150,22 @@ attempt.
 
 An exact system-mailbox pointer is admission, not completion. Web projects the
 authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
-redacted workspace checkpoint and classifies only the exact first live system
-row as `model_free` or `default_owned`. Environment completion is one generic
+redacted workspace checkpoint and projects `model_free` when live eligible work
+exists after that prefix, otherwise `default_owned` for retained live work.
+The first-row lookup adds at most one tenant-scoped, ordered, filtered lookup
+when its head requires the default owner. It reads no payloads and uses no
+transaction. This class admits execution; it neither completes the earlier row
+nor changes the handled prefix. Runtime claims own independent execution. Environment completion is one generic
 model-free kind, as is deterministic member-channel reconciliation; Temporal
 does not know their product meaning or select a feature-specific processing
-mode. Temporal applies three distinct retirement
+mode. The wire shape and the existing two processing modes remain unchanged.
+Deploy the runtime consumer before the broader Web readiness producer. Older
+Web producers remain safe but can delay independent work behind a default-owned
+head; older runtime consumers retain that delay with newer Web facts. Neither
+skew may retire a live pointer before its handled prefix advances. No Temporal
+workflow command or history changes are required, and rollback preserves the
+existing snapshot, mailbox, and receipt readers.
+Temporal applies three distinct retirement
 rules: a handled-through frontier that reaches the pointer lane sequence retires
 it as completed; an explicit `systemMailboxFrontier: null` retires only
 Temporal's noncanonical pointer projection because the current facts admit no
@@ -205,8 +225,10 @@ Allowed Temporal state is tiny and pointer-only:
   that calls the existing Cloudflare processing adapter when facts are idle. It
   carries no provider value or credential, is discarded while facts are
   blocked, and is cleared after accepted processing only when no newer wake
-  arrived. Authenticated provider changes are the current Web producer of this
-  payload-free signal. Newly committed hosted-group projection grants instead
+  arrived. Settings no longer produce this signal: inference preferences are
+  saved in Postgres and observed through normal invocation and mailbox reads.
+  The signal remains supported for existing histories and operational callers.
+  Newly committed hosted-group projection grants instead
   atomically admit the existing durable `runtime.maintenance-requested`
   system-mailbox row with the grant transaction, then signal its pointer after
   commit.
@@ -416,6 +438,18 @@ due connection create one new canonical wake when its matching `v2` wake was
 already consumed under the older handling semantics, while retries within `v3`
 remain deterministic.
 
+An exact, non-conflicting `v3` duplicate can admit a successor when the original
+scheduled item is consumed but the same active connection epoch still has that
+overdue canonical reconcile date. The scheduled mailbox append checks matching
+imported, handled, and consumed system frontiers, an empty system lane, no pending
+item or retained continuation, and no future workspace wake. Older checkpoints
+may omit the optional pending/continuation fields only when the other settled
+frontier evidence agrees. The successor identity includes the consumed frontier;
+the original dedupe lock serializes competing recovery attempts, and the normal
+post-commit signal owns its handoff. Recovery neither rewrites consumed history
+nor changes preflight eligibility or a retained retry's ownership. Conflicting
+payloads and retired payloads without exact duplicate proof remain fail-closed.
+
 The Vercel device-sync dirty-sweeper cron is not registered, and there is no
 Temporal dirty-row sweep replacement. Temporal is the single production owner of
 the due-reconcile scheduled-wake cadence, while the signed web sweep command
@@ -462,6 +496,25 @@ synthetic pre-patch replay fixture were removed. The workflow must keep the
 `deprecatePatch()` marker and patch id until a later removal phase confirms the
 deprecatePatch-window histories have drained. Private replay and package
 coverage gates require that marker to remain present.
+
+## Checkpoint recheck suppression
+
+Web signals after a successful checkpoint with a workspace or retention wake.
+Intermediate checkpoints may suppress that signal only when a successful prior
+signal is acknowledged for the same scheduling facts, every persisted wake is
+future, and no mailbox progress changed. The existing workspace row holds a
+nullable `runtime_recheck_signaled_version` receipt. A callback records it only
+after Temporal accepts the signal and only if the exact checkpoint version still
+matches. The checkpoint CAS carries the receipt across equal wake timestamps,
+reasons, progress generation and complete redacted status; mailbox counter or
+consumption changes invalidate it in the same transaction. Missing receipts,
+legacy projections, due work and `idle_shutdown` retain rechecks. Signal or
+receipt failure leaves the next checkpoint eligible to retry. This receipt is
+operational acknowledgment, not scheduling authority, and never enters runtime
+responses or Temporal facts. It adds one bounded database write after an actual
+successful signal, no read and no extra round trip for a suppressed checkpoint.
+Apply the nullable-column migration before deploying Web; old Web ignores the
+receipt and its version movement conservatively invalidates suppression.
 
 ## Final Minimal Contract
 
@@ -690,7 +743,12 @@ Cloudflare uses its existing web-control/readiness timeout values as per-step
 caps inside that budget and never lets unsigned timeout metadata increase the
 configured Cloudflare wait.
 The Web direct-wake lane supplies a 25-second end-to-end command budget inside
-a shared 29-second outer deadline. Cloudflare starts its server-side clock at
+a shared 29-second outer deadline. Web executes canonical Postgres admission
+locally before each attempt and sends that response with its OIDC request,
+skipping the initial Worker-to-Web claim callback. Local admission consumes the
+same outer deadline; a blocked result stops the direct hint. Temporal callers
+continue to claim through Web, and Temporal still owns durable recovery if a
+Web claim is followed by an uncertain or absent dispatch. Cloudflare starts its server-side clock at
 runtime-control authorization, before route parsing, Durable Object dispatch,
 consent serialization, and health-data admission. Container readiness is capped at 20
 wall-clock seconds end to end: at most 15 seconds for readiness, including
@@ -782,6 +840,17 @@ The hard-cut architecture is accepted when:
   Clinical recovery does not create a second run, wake, receipt, or generation.
   There is no Vercel device-sync dirty-sweeper cron cadence and no
   Temporal dirty-row sweep replacement.
+- Background phase changes belong to the existing Temporal Schedule owner,
+  not sleeps inside Web commands or a second scheduler. A fixed interval
+  offset preserves cadence while moving the global recovery sweep away from
+  minute boundaries; it does not spread individual runtime wakes or reduce
+  total work. Review shared mailbox recovery latency, overlap/catch-up policy,
+  and schedule create/update convergence before deploying such a change.
+  Preserve canonical per-user deadlines: the shared `assistant` wake also
+  covers pending input and exact reminders, while device `nextReconcileAt`
+  can represent an earlier provider retry. Onboarding follow-ups already have
+  deterministic per-member staggering. No blanket jitter applies to these
+  aggregate wake timestamps.
 - Temporal stores only pointer fields, coalesced flags, counters, timestamps,
   and bounded metadata.
 - Temporal imports no assistant-runtime, Prisma, Cloudflare Worker, or app code
@@ -841,26 +910,38 @@ The hard-cut architecture is accepted when:
   no private revision pointer or reader policy. Missing, stale, skipped,
   canceled, duplicated, malformed, or failed proof remains red or pending.
 
-- Every public `main` push runs the exact-main producer and compatibility
+- Every public `main` push runs the exact-candidate producer and compatibility
   controller again in `.github/workflows/temporal-web-deployment-admission.yml`.
   Vercel must select the `Temporal Web production admission` job as a
   production Deployment Check; with that external binding in place, production
-  domains stay on the previous deployment until the current public commit,
+  domains stay on the previous deployment until the pinned public candidate,
   current private `main`, and current live readers produce one accepted proof.
-  That same private run selects the one canonical foreground-priority lane from
-  its integration manifest, forces and observes standby allocation, and emits a
-  second digest bound to both exact main SHAs, the fixed lane, and the public
-  protected environment's expected production Temporal target digest. Private
+  That same private run selects the `production_core` scope from its canonical
+  integration manifest: Linq delivery, scheduled reminder, hosted-web browser
+  smoke, foreground reply priority, and foreground checkpoint ordering. It
+  forces and observes standby allocation in the foreground proof and emits a
+  second digest bound to both exact main SHAs, the fixed scope, and the public
+  protected environment's expected production Temporal target digest. All five
+  lanes must have unique successful job receipts bound to that same digest;
+  missing, skipped, canceled, duplicated, malformed, or stale receipts block
+  admission. Deploy private scope support before the public controller; older
+  foreground-only proof cannot satisfy or downgrade the new request. Private
   setup and final attestation derive the live target from protected
   configuration and reject mismatch without exporting its component values.
   The release mode rejects an arbitrary public ref; public pull requests remain
   fixture-only and never execute beside private source. The public controller
-  re-reads both branch heads, and private protected attestations re-read the
-  supported reader set and both heads, before success. Every `main` commit creates one managed
+  and private protected attestations re-read both branch heads before success:
+  public main may advance if the exact tested candidate remains its ancestor;
+  private main must still equal the dispatched controller. The supported reader
+  set, lifecycle, routing and target must remain unchanged. Required public main
+  checks use SHA-scoped concurrency; Web admission retains its active run and
+  coalesces waiting pushes to the latest candidate. The private plan, runner
+  bundle and scenarios all retain the requested public SHA, never the newer tip.
+  Deploy this private consumer before the public controller change. Every `main` commit creates one managed
   candidate, and no local production upload or historical promotion/rollback
   path may compete with that Git owner. Rollback uses a fresh revert commit so
   it receives current proof. This proves the reconciliation-facts wire boundary
-  and foreground/standby path; Murph Cloud release admission still owns full
+  and the composed core hosted journeys; Murph Cloud release admission still owns full
   worker/runtime integration, replay, routing, and canary safety.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
@@ -868,6 +949,31 @@ The hard-cut architecture is accepted when:
   scenario that starts managed local Temporal, signals through web, queries the
   workflow, and proves the worker reaches Cloudflare ensure-processing. Heavier
   continuity/stress cases remain opt-in.
+
+## Compatibility controller upgrades
+
+The pull-request compatibility workflow executes the controller from trusted
+public `main`, not the controller proposed by that pull request. A successor
+controller therefore cannot authorize its own admission. When changing the
+controller and producer fixture together would fail the current controller,
+use two pull requests:
+
+1. Land only the controller/bootstrap change, keeping the candidate producer
+   fixture compatible with the currently trusted controller and supported
+   private readers. Run the existing controller contract tests and require the
+   ordinary exact-head compatibility status to pass under the old controller.
+2. After that merge is on public `main`, open or refresh the producer/runtime
+   change against that base. Require a new exact-head compatibility proof under
+   the successor controller and the private owner's live supported reader set.
+
+Review the first PR's changed paths and fixture diff to confirm it does not
+introduce the incompatible producer field or behavior early. If it cannot pass
+under the old controller, split out a compatible prerequisite at its existing
+owner; do not bypass the required status, execute candidate controller code
+with protected credentials, or temporarily relax private reader policy. A
+private reader prerequisite follows the existing consumer-first release order.
+The later production deployment still requires its separate exact-main
+admission; a bootstrap merge is not production authorization.
 
 ## Related References
 

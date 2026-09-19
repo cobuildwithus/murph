@@ -1,3 +1,9 @@
+export const JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY = "junctionProfileSummaryCheckedAt";
+export const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY =
+  "junctionProfileSummaryNormalizationRevision";
+export const JUNCTION_RECONCILE_PROOF_METADATA_KEY = "junctionReconcileProofV1";
+export const JUNCTION_TEMPORAL_SWEEP_METADATA_KEY = "junctionTemporalSweepV1";
+
 const DEVICE_SYNC_METADATA_MAX_ENTRIES = 16;
 const DEVICE_SYNC_METADATA_MAX_KEY_LENGTH = 64;
 export const DEVICE_SYNC_METADATA_MAX_STRING_LENGTH = 256;

@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   hostedMailboxItemUpdateMany: vi.fn(),
   logHostedOnboardingDiagnostic: vi.fn(),
   lockHostedMemberRoutingStateTx: vi.fn(),
+  lockHostedLinqMessageReceiptsTx: vi.fn(),
   markHostedLinqDeliveryAcceptedTx: vi.fn(),
   markHostedLinqDeliverySendFailedTx: vi.fn(),
   markHostedLinqDeliverySkippedTx: vi.fn(),
@@ -95,7 +96,8 @@ vi.mock("@/src/lib/hosted-execution/usage", () => ({
   recordHostedAiUsageRecords: mocks.recordHostedAiUsageRecords,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
+vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async (importOriginal) => ({
+  buildHostedLinqDeliveryId: (await importOriginal<typeof import("@/src/lib/hosted-onboarding/linq-delivery-store")>()).buildHostedLinqDeliveryId,
   claimHostedLinqDeliveryProviderDispatchTx:
     mocks.claimHostedLinqDeliveryProviderDispatchTx,
   hasConflictingHostedLinqInstantFirstTurnForChatTx:
@@ -118,6 +120,10 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   markHostedLinqDeliverySendFailedTx:
     mocks.markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx: mocks.markHostedLinqDeliverySkippedTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-message-receipt-lock", () => ({
+  lockHostedLinqMessageReceiptsTx: mocks.lockHostedLinqMessageReceiptsTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
@@ -278,6 +284,7 @@ describe("hosted Linq instant first turn", () => {
       status: "skipped",
     });
     mocks.recordHostedAiUsageRecords.mockResolvedValue({ recordedIds: [] });
+    mocks.lockHostedLinqMessageReceiptsTx.mockResolvedValue(undefined);
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
       id: "delivery_123",
@@ -355,7 +362,7 @@ describe("hosted Linq instant first turn", () => {
       service: "imessage",
       wakeHandoff: WAKE_HANDOFF,
     })).resolves.toMatchObject({ kind: "accepted" });
-    expect(mocks.hostedThreadRouteFindMany).toHaveBeenCalledTimes(3);
+    expect(mocks.hostedThreadRouteFindMany).toHaveBeenCalledTimes(2);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       chatId: "chat_123",
       message: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal,
@@ -444,9 +451,8 @@ describe("hosted Linq instant first turn", () => {
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])("rejects a group route at continuation admission, including a concurrent conversion %s", async (concurrent) => {
+  it("rejects a group route under the chat lock after continuation preflight", async () => {
     prepareContinuation();
-    if (concurrent) mocks.hostedThreadRouteFindMany.mockResolvedValueOnce([]);
     mocks.hostedThreadRouteFindMany.mockResolvedValue([{
       channel: "linq", containerMemberId: "group_container",
       container: { member: { id: "group_container" }, owner: { id: "group_owner" } },
@@ -783,6 +789,7 @@ describe("hosted Linq instant first turn", () => {
       kind: "accepted",
       wakeHandoff: {
         ...WAKE_HANDOFF,
+        acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
         wakeMailboxCheckpoint: {
           lane: "conversation",
@@ -790,6 +797,26 @@ describe("hosted Linq instant first turn", () => {
         },
       },
     });
+  });
+
+  it("retains the accepted delivery link on completed webhook replay without resending", async () => {
+    const result = await completeHostedLinqInstantFirstTurn({
+      generation: { kind: "completed" },
+      inboundMessageId: "inbound_message_123",
+      participantContact: { kind: "phone", lookupKey: "phone_lookup_123", value: "+15551234567" },
+      prisma: createPrisma(),
+      recipientPhoneNumber: "+15550000000",
+      service: "iMessage",
+      wakeHandoff: WAKE_HANDOFF,
+    });
+    expect(result).toMatchObject({
+      kind: "accepted",
+      wakeHandoff: {
+        acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
+        mailboxItemId: "mailbox_outbound",
+      },
+    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("makes unsafe model output unavailable", async () => {
@@ -833,6 +860,21 @@ describe("hosted Linq instant first turn", () => {
       message: "Hey! What would you like help with?",
       replyToMessageId: "inbound_message_123",
     });
+    expect(mocks.lockHostedLinqMessageReceiptsTx).toHaveBeenCalledExactlyOnceWith({
+      messageIds: ["provider_message_123"],
+      prisma: expect.anything(),
+    });
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prisma: mocks.lockHostedLinqMessageReceiptsTx.mock.calls[0]?.[0].prisma,
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.lockHostedLinqMessageReceiptsTx.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.lockHostedLinqMessageReceiptsTx.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.markHostedLinqDeliveryAcceptedTx.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
     expect(mocks.recordHostedAiUsageRecords).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -845,6 +887,7 @@ describe("hosted Linq instant first turn", () => {
       kind: "accepted",
       wakeHandoff: {
         ...WAKE_HANDOFF,
+        acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
         wakeMailboxCheckpoint: {
           lane: "conversation",
@@ -1005,6 +1048,7 @@ describe("hosted Linq instant first turn", () => {
       kind: "accepted",
       wakeHandoff: {
         ...WAKE_HANDOFF,
+        acceptedLinqDeliveryId: "hld_9fcbd74ffb0be2360b61fcbb8599b45b",
         mailboxItemId: "mailbox_outbound",
         wakeMailboxCheckpoint: {
           lane: "conversation",

@@ -46,7 +46,7 @@ export function HostedLoginMethodSettingsView({ account, murphPhoneNumber, onSel
   const rows = [
     { method: "phone", label: "Phone", value: phone ? formatMaskedPhoneNumber(phone) : null, icon: Phone,
       href: phone && murphPhoneNumber ? `sms:${murphPhoneNumber}` : null, linkLabel: "Text Murph" },
-    { method: "telegram", label: "Telegram", value: telegram ? "Connected" : null, icon: Send,
+    { method: "telegram", label: "Telegram", value: telegram ? (account.telegram.username ? `@${account.telegram.username}` : "Connected") : null, icon: Send,
       href: telegram ? MURPH_TELEGRAM_URL : null, linkLabel: "Message Murph" },
     { method: "email", label: "Email", value: email, icon: Mail,
       href: email && account.email.murphEmailAddress ? `mailto:${account.email.murphEmailAddress}` : null, linkLabel: "Email Murph" },
@@ -56,10 +56,10 @@ export function HostedLoginMethodSettingsView({ account, murphPhoneNumber, onSel
       {rows.map(({ method, label, value, icon: Icon, href, linkLabel }) => <SettingsRow key={method}
         icon={<Icon className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
         label={label} value={value ?? "Not connected"} empty={!value}
-        meta={href ? <SettingsContactLink href={href} label={linkLabel} external={method === "telegram"}>{linkLabel}</SettingsContactLink> : null}
-        action={<div className="flex flex-col justify-end gap-1 sm:flex-row">
-          <Button type="button" size="sm" variant={value ? "ghost" : "default"} aria-label={`${value ? "Change" : "Add"} ${label}`} onClick={() => onSelect({ method, operation: "set" })}>{value ? "Change" : "Connect"}</Button>
-          {value && canRemove ? <Button type="button" size="sm" variant="ghost" aria-label={`Remove ${label}`} onClick={() => onSelect({ method, operation: "remove" })}>Remove</Button> : null}
+        meta={href ? <SettingsContactLink href={href} label={method === "telegram" ? "Message Murph on Telegram" : linkLabel} external={method === "telegram"}>{linkLabel}</SettingsContactLink> : null}
+        action={<div className="flex flex-wrap justify-end gap-1">
+          <Button type="button" size="sm" variant={value ? "ghost" : method === "telegram" ? "secondary" : "default"} aria-label={`${value ? "Change" : "Add"} ${label}`} onClick={() => onSelect({ method, operation: "set" })}>{value ? "Change" : method === "telegram" ? "Connect" : `Link ${method}`}</Button>
+          {value && canRemove ? <Button type="button" size="sm" variant="ghost" className="text-destructive hover:text-destructive" aria-label={`Remove ${label}`} onClick={() => onSelect({ method, operation: "remove" })}>Remove</Button> : null}
         </div>}
       />)}
       <SettingsRow icon={<Link2 className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}

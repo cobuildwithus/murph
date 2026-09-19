@@ -1,6 +1,7 @@
 import type {
   HealthCommonsCatalog,
   HealthCommonsBiomarkerFallbackRange,
+  HealthCommonsBiomarkerPrivateMetricBinding,
   HealthCommonsBiomarkerDesiredDirection,
   HealthCommonsBiomarkerProtocolExpectedDirection,
   HealthCommonsCatalogEntity,
@@ -27,6 +28,7 @@ import {
   buildHealthCommonsWebBiomarkerResearch,
   buildHealthCommonsWebBiomarkerShell,
   resolveHealthCommonsWebBiomarkerShortName,
+  resolveHealthCommonsWebBiomarkerMetricFields,
   type HealthCommonsWebBiomarkerProjectionArtifact,
   type HealthCommonsWebBiomarkerProjectionKey,
 } from "./biomarker-web-artifacts.ts";
@@ -50,7 +52,7 @@ export const HEALTH_COMMONS_WEB_ROUTE_BUNDLE_SCHEMA_VERSION =
 export const HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION =
   "murph.commons.web.experiment-index.v1" as const;
 export const HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION =
-  "murph.commons.web.biomarker-index.v3" as const;
+  "murph.commons.web.biomarker-index.v4" as const;
 export const HEALTH_COMMONS_WEB_GOAL_INDEX_SCHEMA_VERSION =
   "murph.commons.web.goal-index.v2" as const;
 export const HEALTH_COMMONS_WEB_GOAL_PAGE_SCHEMA_VERSION =
@@ -184,6 +186,8 @@ export interface HealthCommonsWebBiomarkerIndexEntry {
   categories: string[];
   desiredDirection: HealthCommonsBiomarkerDesiredDirection | null;
   fallbackRanges: HealthCommonsWebBiomarkerFallbackRange[];
+  privateMetricBindings: HealthCommonsBiomarkerPrivateMetricBinding[];
+  valuePrecision: number;
   hidden: boolean;
   key: string;
   published: boolean;
@@ -761,6 +765,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
             bundlePath: bundlePathForEntity(bundle.route.entityType, bundle.route.routeId),
             categories: entity.categories ?? [],
             desiredDirection: entity.biomarker?.direction?.desired ?? null,
+            ...resolveHealthCommonsWebBiomarkerMetricFields(entity),
             fallbackRanges: entity.referenceGuidance?.fallbackRanges?.map((range) => ({
               applicability: range.applicability,
               eligibleSpecimenKinds: range.eligibleSpecimenKinds,

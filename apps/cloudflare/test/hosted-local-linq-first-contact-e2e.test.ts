@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -26,7 +26,6 @@ import {
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
-  type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedRunnerStatusResponse,
@@ -35,10 +34,6 @@ import type {
   HostedRunnerStatusResponse,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
 import {
   createIntegratedVaultServices,
 } from "@murphai/vault-usecases/vault-services";
@@ -64,10 +59,12 @@ import {
   HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
+  postHostedLocalLinqWebhook,
   startHostedLocalLinqStub,
   type ObservedLinqRequest,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
+import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.js";
 
 const userId = `member_local_linq_first_contact_${Date.now()}`;
 const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
@@ -1012,7 +1009,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       matchingSends
         .slice(outboundCountBeforeReply)
         .map((request) => request.authorizationStatus),
-    ).toEqual(["hosted-sentinel", "hosted-sentinel"]);
+    ).toEqual(["expected", "expected"]);
     expect(newSendTexts).toEqual([
       progressToolAttemptText,
       progressToolFinalReplyText,
@@ -1518,7 +1515,7 @@ testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
   beforeAll(async () => {
     directWakeRetryBarrier = await startHostedLocalDirectWakeRetryBarrier();
     await restartLinqScenario({
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
     }, {
       faultInjection: true,
       webProcessEnvOverrides: {
@@ -1680,7 +1677,7 @@ testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
 testControlsDescribe("hosted local Linq stale scheduled wake e2e", () => {
   beforeAll(async () => {
     await restartLinqScenario({
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1200",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200",
     }, {
       faultInjection: true,
     });
@@ -1867,27 +1864,11 @@ function buildActivationWake(userId: string) {
 }
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
-  const rawBody = JSON.stringify(event);
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const signature = signLinqWebhook(linqWebhookSecret, rawBody, timestamp);
-
-  return await fetch(`${requireScenario().harness.webBaseUrl}/api/hosted-onboarding/linq/webhook`, {
-    body: rawBody,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "x-webhook-signature": signature,
-      "x-webhook-timestamp": timestamp,
-    },
-    method: "POST",
+  return postHostedLocalLinqWebhook({
+    event,
+    secret: linqWebhookSecret,
+    webBaseUrl: requireScenario().harness.webBaseUrl,
   });
-}
-
-function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
-  const signature = createHmac("sha256", secret)
-    .update(`${timestamp}.${payload}`)
-    .digest("hex");
-
-  return `sha256=${signature}`;
 }
 
 function requireLinqStub(): HostedLocalLinqStub {
@@ -2070,11 +2051,14 @@ async function seedEmptyHostedWorkspaceCheckpointForTest(
     vault: vaultRoot,
   });
 
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshotRef = await uploadHostedLocalWorkspaceSnapshot({
+    environment: requireScenario().runtimeEnv,
+    harness: requireScenario().harness,
     operatorHomeRoot,
+    userId: memberId,
     vaultRoot,
   });
-  const hash = sha256HostedBundleHex(snapshot.bundle);
+  const hash = snapshotRef.archive.encryptedObjectSha256;
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: createBrowserVaultReplicaRef(memberId, hash, label),
     environment: requireScenario().runtimeEnv,
@@ -2083,45 +2067,10 @@ async function seedEmptyHostedWorkspaceCheckpointForTest(
     redactedStatusJson: {
       seeded: true,
     },
-    snapshotRef: createSnapshotBundleRef(hash, snapshot.bundle.byteLength),
+    snapshotRef,
     userId: memberId,
   });
   expect(checkpoint.status).toBe("updated");
-
-  await uploadHostedSnapshotArtifact({
-    bytes: snapshot.bundle,
-    hash,
-    userId: memberId,
-  });
-}
-
-async function uploadHostedSnapshotArtifact(input: {
-  bytes: Uint8Array;
-  hash: string;
-  userId: string;
-}): Promise<void> {
-  await requireScenario().harness.request(
-    `/__test/artifacts?userId=${encodeURIComponent(input.userId)}&sha256=${input.hash}`,
-    {
-      body: new Blob([new Uint8Array(input.bytes)]),
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
-      },
-      method: "PUT",
-    },
-  );
-}
-
-function createSnapshotBundleRef(
-  hash: string,
-  size: number,
-): HostedExecutionSnapshotRef {
-  return {
-    hash,
-    key: `cloudflare-workspace-snapshots/${hash}.bundle`,
-    size,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 function createBrowserVaultReplicaRef(
@@ -2216,7 +2165,7 @@ async function ensureLinqScenario(): Promise<void> {
   }
 
   await startLinqScenario({
-    HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+    HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
   });
 }
 

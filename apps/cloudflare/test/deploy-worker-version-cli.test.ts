@@ -1,6 +1,10 @@
 import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { syntheticHostedWebProtocolAdmission } from "./helpers/hosted-web-protocol";
+
+const webProtocolMocks = vi.hoisted(() => ({ admit: vi.fn() }));
+vi.mock("../scripts/deploy-web-protocol.ts", () => ({ assertHostedWebProtocolAdmission: webProtocolMocks.admit }));
 
 const fileMocks = vi.hoisted(() => ({ readFile: vi.fn(async () => "{}"), writeFile: vi.fn(async () => {}) }));
 vi.mock("node:fs/promises", async () => ({
@@ -21,7 +25,9 @@ vi.mock("../scripts/prepare-container-deploy-image.ts", () => imageMocks);
 const releaseMocks = vi.hoisted(() => ({
   stageHostedRunnerRelease: vi.fn(), readWorkerVersion: vi.fn(), assertDrained: vi.fn(), retireApplication: vi.fn(), assertCapacity: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
 }));
-vi.mock("../scripts/stage-runner-release.ts", () => ({ stageHostedRunnerRelease: releaseMocks.stageHostedRunnerRelease }));
+vi.mock("../scripts/stage-runner-release.ts", () => ({
+  stageHostedRunnerRelease: releaseMocks.stageHostedRunnerRelease,
+}));
 vi.mock("../scripts/runner-release-provider.ts", () => ({ createRunnerReleaseProvider: () => releaseMocks }));
 vi.mock("../scripts/smoke-hosted-deploy.shared.ts", () => ({ runSmokeHostedDeploy: releaseMocks.runSmokeHostedDeploy }));
 const receiptMocks = vi.hoisted(() => ({
@@ -52,6 +58,71 @@ vi.mock("../scripts/container-release-receipt.js", () => ({
 import { runDeployWorkerVersionCli } from "../scripts/deploy-worker-version.cli.js";
 
 describe("runDeployWorkerVersionCli", () => {
+  it.each(["old-reader", "old-audience", "unavailable", "denied", "malformed", "unknown-version"])("rejects %s before image work or native mutation", async shape => {
+    await useRealWebAdmission(shape);
+    await expect(syntheticDeployment()).rejects.toThrow("Hosted Web protocol admission failed");
+    expect(imageMocks.prepareHostedContainerDeployImage).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLogged).not.toHaveBeenCalled();
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
+  });
+
+  it.each(["immediate", "worker-only"] as const)("admits current Web for %s without revision equality", async mode => {
+    await useRealWebAdmission("current");
+    if (mode === "worker-only") releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: configPath, activeApplicationName: "serving", workerOnly: true, applications: [], retirements: [],
+    }));
+    await syntheticDeployment(mode);
+    expect(wranglerMocks.runWranglerLogged).toHaveBeenCalled();
+    expect(webProtocolMocks.admit).toHaveBeenCalledWith(expect.anything());
+  });
+
+  it("does not mistake retaining the runner for proof that legacy audience is sufficient", async () => {
+    await useRealWebAdmission("old-audience");
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: configPath, activeApplicationName: "serving", workerOnly: true, applications: [], retirements: [],
+    }));
+    await expect(syntheticDeployment("worker-only")).rejects.toThrow("thread_route_audience");
+    expect(wranglerMocks.runWranglerLogged).not.toHaveBeenCalled();
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+  });
+
+  it.each(["retirement", "smoke-application", "compatibility", "serving", "promotion"])("rechecks Web immediately before %s", async boundary => {
+    const trace: string[] = [];
+    const serving = { name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: "synthetic-serving", namespaceId: "synthetic-namespace", specification: {} };
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false,
+      applications: boundary === "serving" ? [serving]
+        : boundary === "smoke-application" ? [{ ...serving, name: "synthetic-smoke", className: "DeploySmokeRunnerContainer" }] : [],
+      retirements: boundary === "retirement" ? [{ name: "synthetic-retired", applicationId: "synthetic-retired", namespaceId: "synthetic-retired" }] : [],
+    }));
+    const failAt = ["serving", "promotion"].includes(boundary) ? 3 : 2;
+    await useRealWebAdmission(check => check === failAt ? "old-reader" : "current", () => trace.push("web"));
+    wranglerMocks.runWranglerJson.mockImplementation(async () => {
+      trace.push("identity");
+      return JSON.stringify({ versions: [{ percentage: 100, version_id: "version-direct" }] });
+    });
+    wranglerMocks.runWranglerLogged.mockImplementation(async args => { if (args[0] === "versions") trace.push("activation"); });
+    await expect(syntheticDeployment()).rejects.toThrow("runtime_log_event:runner.processing_finished");
+    expect(trace.at(-1)).toBe("web");
+    for (let i = 0; i < trace.length; i += 1) {
+      if (trace[i] === "activation") expect(trace.slice(i - 2, i)).toEqual(["web", "identity"]);
+    }
+    expect(trace.filter(event => event === "activation")).toHaveLength(failAt === 3 ? 1 : 0);
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse admission after a previously successful deployment", async () => {
+    await useRealWebAdmission("current");
+    await syntheticDeployment();
+    const activations = wranglerMocks.runWranglerLogged.mock.calls.length;
+    await useRealWebAdmission("old-reader");
+    await expect(syntheticDeployment()).rejects.toThrow("runtime_log_event:runner.processing_finished");
+    expect(wranglerMocks.runWranglerLogged.mock.calls).toHaveLength(activations);
+  });
+
   it("retires drained capacity, proves quota, activates compatibility, then rolls the serving image", async () => {
     const trace: string[] = [];
     const deployment = { active: { id: "synthetic-permanent" }, candidate: { id: "synthetic-permanent" }, previous: null };
@@ -92,6 +163,8 @@ describe("runDeployWorkerVersionCli", () => {
   });
 
   beforeEach(() => {
+    fileMocks.readFile.mockReset().mockResolvedValue("{}");
+    webProtocolMocks.admit.mockReset().mockResolvedValue(undefined);
     releaseMocks.stageHostedRunnerRelease.mockReset();
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       retirements: [], configPath, promotionConfigPath: `${configPath}.promote`,
@@ -193,7 +266,7 @@ describe("runDeployWorkerVersionCli", () => {
   it("uploads container metadata before admission without switching traffic", async () => {
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       retirements: [], configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
-      applications: [{ name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
+      applications: [{ name: renderedContainers[0]!.applicationName, className: "DeploySmokeRunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
     }));
     let containerEnabled = false;
     wranglerMocks.runWranglerLoggedCaptured.mockImplementation(async () => {
@@ -226,7 +299,7 @@ describe("runDeployWorkerVersionCli", () => {
   it.each(["quota rejection", "pending distribution"])("keeps serving traffic unchanged during native %s", async (failure) => {
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       retirements: [], configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: "serving", workerOnly: false,
-      applications: [{ name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
+      applications: [{ name: renderedContainers[0]!.applicationName, className: "DeploySmokeRunnerContainer", applicationId: null, namespaceId: "synthetic-namespace", specification: {} }],
     }));
     let reject!: (error: Error) => void;
     const operation = failure === "quota rejection" ? releaseMocks.admitApplication : releaseMocks.assertApplicationReady;
@@ -410,7 +483,6 @@ describe("runDeployWorkerVersionCli", () => {
       readRollout,
     });
     receiptMocks.readCloudflareContainerApplicationIdentities.mockResolvedValueOnce(before);
-
 
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
@@ -646,13 +718,36 @@ const releasedContainers = [
   },
 ] as const;
 
-async function syntheticDeployment(containerRolloutMode: "gradual" | "immediate" | "worker-only" = "immediate") {
+async function syntheticDeployment(containerRolloutMode: "gradual" | "immediate" | "worker-only" = "immediate", extraEnv: Record<string, string> = {}) {
   return runDeployWorkerVersionCli([], {
     deployRoot: "/tmp/repo/apps/cloudflare", log: false,
-    env: { CF_WORKER_NAME: "hosted-worker", CF_BUNDLES_BUCKET: "hosted-bundles", CLOUDFLARE_ACCOUNT_ID: "fixture", CLOUDFLARE_API_TOKEN: "fixture" },
+    env: { CF_WORKER_NAME: "hosted-worker", CF_BUNDLES_BUCKET: "hosted-bundles", CLOUDFLARE_ACCOUNT_ID: "fixture", CLOUDFLARE_API_TOKEN: "fixture", ...extraEnv },
     runHostedWorkerDeployment: async ({ dependencies }) => {
       await dependencies.deployDirect({ configPath: "/tmp/config.jsonc", containerRolloutMode, deploymentMessage: "synthetic", includeSecrets: false, secretsFilePath: "/tmp/secrets.json", versionTag: "synthetic", workerName: "hosted-worker" });
       return createDeploymentResult();
     },
+  });
+}
+
+async function useRealWebAdmission(shape: string | ((check: number) => string), onCheck?: () => void) {
+  const { assertHostedWebProtocolAdmission } = await vi.importActual<typeof import("../scripts/deploy-web-protocol.ts")>("../scripts/deploy-web-protocol.ts");
+  const keys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const signingKey = JSON.stringify(await crypto.subtle.exportKey("jwk", keys.privateKey));
+  let checks = 0;
+  webProtocolMocks.admit.mockImplementation(env => {
+    const responseShape = typeof shape === "function" ? shape(++checks) : shape;
+    onCheck?.();
+    return assertHostedWebProtocolAdmission({
+      ...env, HOSTED_WEB_BASE_URL: "https://web.example.test", HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: signingKey,
+    }, { sleep: async () => {}, fetchImpl: async input => {
+      if (responseShape === "unavailable") return new Response(null, { status: 503 });
+      if (responseShape === "malformed") return new Response("not JSON", { headers: { "cache-control": "no-store", "content-type": "application/json" } });
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const evidence = syntheticHostedWebProtocolAdmission(url.searchParams.get("nonce")!);
+      if (responseShape === "old-reader") evidence.runtimeLogEventCodes = evidence.runtimeLogEventCodes.filter(code => code !== "runner.processing_finished");
+      if (responseShape === "old-audience") evidence.threadRouteAuthority = { direct: { authorized: true }, group: { authorized: true } };
+      if (responseShape === "denied") evidence.threadRouteAuthority = { direct: { authorized: false }, group: { authorized: true, threadIsDirect: false } };
+      return Response.json(responseShape === "unknown-version" ? { ...evidence, schemaVersion: 2 } : evidence, { headers: { "cache-control": "no-store" } });
+    } });
   });
 }

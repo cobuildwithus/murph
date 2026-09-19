@@ -139,7 +139,7 @@ privacy, authorization, or provider boundaries.
   the early-stall check-in. No skill or resume read is needed for those proven
   exchanges. The onboarding skill owns ambiguous/resumed and later-stage
   conversation policy; the managed automation resumes it when useful.
-- For eligible new direct text-only iMessage conversations, the existing Web
+- For eligible new direct text-only iMessage, SMS, and RCS conversations, the existing Web
   Luna path may send at most two replies: the welcome and the bundled identity
   question. The second requires the immediately preceding confirmed canonical
   welcome and exactly one earlier opening delivery. Resolve its member through

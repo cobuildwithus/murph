@@ -88,13 +88,28 @@ const resolveHostedPublicLayoutAuthSnapshot = cache(
   },
 );
 
-function buildHostedPageAuthSnapshot(
+const recoverHostedPagePhoneContact = cache(async (memberId: string): Promise<void> => {
+  try {
+    const { ensureHostedMemberPhoneWelcome } = await import("./phone-welcome");
+    const { getPrisma } = await import("../prisma");
+    await ensureHostedMemberPhoneWelcome({ memberId, prisma: getPrisma() });
+  } catch {
+    // Optional contact recovery cannot invalidate an authenticated session.
+    // A later page load can retry through the same durable assignment owner.
+    console.warn("Hosted phone contact recovery is temporarily unavailable.");
+  }
+});
+
+async function buildHostedPageAuthSnapshot(
   session: HostedAppSession | null,
-): HostedPageAuthSnapshot {
+): Promise<HostedPageAuthSnapshot> {
   if (!session) {
     return buildAnonymousHostedPageAuthSnapshot();
   }
 
+  // Finish recovery before Home/Settings read their contact projections so a
+  // verified phone gains a usable Text Murph action in this response.
+  await recoverHostedPagePhoneContact(session.member.id);
   return {
     authenticated: true,
     authenticatedMember: session.member,

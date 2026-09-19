@@ -5,11 +5,17 @@ import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
 import { lockHostedMemberRow } from "../src/lib/hosted-onboarding/shared";
 
 vi.mock("server-only", () => ({}));
+vi.mock("../src/lib/hosted-crypto/domain-root-store", async (original) => ({
+  ...await original<typeof import("../src/lib/hosted-crypto/domain-root-store")>(),
+  prepareHostedDomainRootForWeb: async ({ userId }: { userId: string }) => ({ domain: "control", userId, rootKeyId: "synthetic-root" }),
+  revalidatePreparedHostedDomainRootForWebTx: async () => ({ rootKeyId: "synthetic-root", root: Promise.resolve({ rootKey: Buffer.alloc(32, 7) }) }),
+}));
+import { upsertHostedMemberEmailAuthorization } from "../src/lib/hosted-onboarding/hosted-member-store";
 
 import { POST as authenticationOptionsRoute } from "../app/api/settings/approval-passkeys/authenticate/route";
 import { getPrisma } from "@/src/lib/prisma";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
-import { createInitialApprovalPasskeyRegistrationOptions, registerApprovalPasskey } from "@/src/lib/sensitive-actions/passkey-enrollment";
+import { createInitialApprovalEnrollmentOptions, registerInitialApprovalEnrollment } from "@/src/lib/sensitive-actions/initial-passkey-enrollment";
 import { readApprovalPasskeyState, prepareApprovalPasskeyWrite, commitApprovalPasskeyWriteTx } from "@/src/lib/sensitive-actions/passkey-store";
 import {
   buildSettingsSensitiveActionBinding, createSensitiveActionChallenge,
@@ -31,6 +37,7 @@ if (enabled) {
 
 describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
   beforeEach(() => {
+    vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "true");
     vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 9).toString("base64url"));
     vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 10).toString("base64url"));
@@ -47,7 +54,13 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
   async function createMember() {
     const prisma = getPrisma();
     const memberId = `member_approval_test_${randomUUID()}`;
-    await prisma.hostedMember.create({ data: { id: memberId } });
+    await prisma.hostedMember.create({ data: { id: memberId, identity: { create: {} } } });
+    const now = new Date();
+    const email = `approval-${randomUUID()}@example.test`;
+    await upsertHostedMemberEmailAuthorization({ memberId, prisma,
+      verifiedEmail: { address: email, verifiedAt: now } });
+    await hostedAuthAdapter(prisma)({}).create({ model: "user", forceAllowId: true,
+      data: { id: memberId, email, emailVerified: true, name: "", createdAt: now, updatedAt: now } });
     const issued = await issueHostedAppSession({ memberId, primaryAuthenticatedAt: new Date() });
     const request = new Request("https://www.withmurph.ai/api/settings/approval-passkeys/register", {
       headers: { cookie: issued.cookie.split(";")[0] ?? "", origin: "https://www.withmurph.ai" },
@@ -59,11 +72,11 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
       return { bindingHash, kind, ...material };
     }
     async function enrollment() {
-      const material = await createInitialApprovalPasskeyRegistrationOptions({ prisma, session });
+      const material = await createInitialApprovalEnrollmentOptions({ prisma, session, request });
       const key = authenticator();
       return {
         key,
-        input: { authorization: undefined, initialToken: material.token, prisma, request,
+        input: { token: material.token, prisma, request,
           response: key.registration(true, material.options.challenge), session },
       };
     }
@@ -72,7 +85,7 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
 
   it("binds options to the current browser and rejects missing cookies or another origin", () => withMember(async (f) => {
     const initial = await f.enrollment();
-    await registerApprovalPasskey(initial.input);
+    await registerInitialApprovalEnrollment(initial.input);
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "false");
     const challenge = await f.challenge("vault.export");
     const other = await issueHostedAppSession({ memberId: f.memberId, primaryAuthenticatedAt: new Date() });
@@ -99,21 +112,21 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
   it("keeps enrollment closed before compatible readers deploy", () => withMember(async (f) => {
     const enrollment = await f.enrollment();
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "false");
-    await expect(createInitialApprovalPasskeyRegistrationOptions({ prisma: f.prisma, session: f.session })).rejects.toMatchObject({ code: "APPROVAL_PASSKEY_ENROLLMENT_UNAVAILABLE" });
-    await expect(registerApprovalPasskey(enrollment.input)).rejects.toMatchObject({ code: "APPROVAL_PASSKEY_ENROLLMENT_UNAVAILABLE" });
+    await expect(createInitialApprovalEnrollmentOptions({ prisma: f.prisma, session: f.session, request: f.request })).rejects.toMatchObject({ code: "APPROVAL_PASSKEY_ENROLLMENT_UNAVAILABLE" });
+    await expect(registerInitialApprovalEnrollment(enrollment.input)).rejects.toMatchObject({ code: "APPROVAL_PASSKEY_ENROLLMENT_UNAVAILABLE" });
     expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
   }));
 
   it("admits one concurrent first enrollment and permanently selects the new verifier", () => withMember(async (f) => {
     const attempts = await Promise.all([f.enrollment(), f.enrollment()]);
-    const outcomes = await Promise.allSettled(attempts.map(({ input }) => registerApprovalPasskey(input)));
+    const outcomes = await Promise.allSettled(attempts.map(({ input }) => registerInitialApprovalEnrollment(input)));
     expect(outcomes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
     const state = await readApprovalPasskeyState(f);
     expect(state.credentials).toHaveLength(1);
     const winner = attempts.find(({ key }) => key.credential.id === state.credentials[0]?.id);
     expect(winner).toBeDefined();
     if (!winner) throw new Error("Missing committed enrollment.");
-    await expect(registerApprovalPasskey(winner.input)).rejects.toMatchObject({ code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED" });
+    await expect(registerInitialApprovalEnrollment(winner.input)).rejects.toMatchObject({ code: "SENSITIVE_ACTION_CREDENTIALS_CHANGED" });
     const challenge = await f.challenge("vault.export");
     await expect(verifySensitiveActionChallenge({
       ...f, ...challenge,
@@ -124,7 +137,7 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
 
   it("consumes a counterless assertion once under concurrent commits", () => withMember(async (f) => {
     const initial = await f.enrollment();
-    await registerApprovalPasskey(initial.input);
+    await registerInitialApprovalEnrollment(initial.input);
     const challenge = await f.challenge("vault.export");
     const proof = await verifySensitiveActionChallenge({
       ...f, ...challenge,
@@ -139,7 +152,7 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
 
   it("rolls back a prepared credential update when challenge consumption fails", () => withMember(async (f) => {
     const initial = await f.enrollment();
-    await registerApprovalPasskey(initial.input);
+    await registerInitialApprovalEnrollment(initial.input);
     const challenge = await f.challenge("vault.export");
     const proof = await verifySensitiveActionChallenge({
       ...f, ...challenge,
@@ -157,13 +170,13 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
     if (change === "expired") await hostedAuthAdapter(f.prisma)({}).update({ model: "session", where: [{ field: "id", value: f.session.sessionId }], update: { expiresAt: new Date(0) } });
     if (change === "suspended") await f.prisma.hostedMember.update({ where: { id: f.memberId }, data: { suspendedAt: new Date() } });
     if (change === "deleted") await f.prisma.hostedMember.delete({ where: { id: f.memberId } });
-    await expect(registerApprovalPasskey(enrollment.input)).rejects.toThrow();
+    await expect(registerInitialApprovalEnrollment(enrollment.input)).rejects.toThrow();
     expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
   }));
 
   it("fences stale prepared state and cascades credential removal with deletion", () => withMember(async (f) => {
     const enrollment = await f.enrollment();
-    await registerApprovalPasskey(enrollment.input);
+    await registerInitialApprovalEnrollment(enrollment.input);
     const before = await readApprovalPasskeyState(f);
     const replacement = authenticator();
     const stale = await prepareApprovalPasskeyWrite({ state: before, credentials: [replacement.credential], prisma: f.prisma });

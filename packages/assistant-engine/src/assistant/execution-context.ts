@@ -96,7 +96,7 @@ import { normalizeNullableString } from './shared.js'
 
 export type AssistantChannelTypingDependencies = Pick<
   AssistantChannelDependencies,
-  'startLinqTyping' | 'startTelegramTyping'
+  'startLinqTyping' | 'startTelegramTyping' | 'onTypingAccepted'
 >
 
 export type AssistantHostedProgressDeliveryDependencies = Pick<
@@ -438,6 +438,7 @@ export interface AssistantHostedGroupParticipantDisplayNameReader {
 export interface AssistantHostedGroupSharedReader {
   request(
     request: AssistantHostedGroupSharedReadRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<AssistantHostedGroupSharedReadResponse>
 }
 
@@ -619,7 +620,7 @@ export interface AssistantHostedExecutionContext {
     channel: 'telegram'
     signal?: AbortSignal | null
     target: string
-  }): Promise<HostedExecutionExternalThreadRouteAuthority>
+  }): Promise<HostedExecutionExternalThreadRouteAuthority & { threadIsDirect: boolean }>
   runtimeAttemptId?: string | null
   runtimeName?: string | null
   usageRecorder?: AssistantUsageRecorder | null
@@ -652,67 +653,70 @@ export function normalizeAssistantExecutionContext(
   input: AssistantExecutionContext | null | undefined,
 ): AssistantExecutionContext {
   const hosted = input?.hosted
-  const memberId = normalizeNullableString(hosted?.memberId)
+  if (!hosted) {
+    return { hosted: null }
+  }
+  const memberId = normalizeNullableString(hosted.memberId)
   const actionApprovalPort = normalizeAssistantActionApprovalPort(
-    hosted?.actionApprovalPort,
+    hosted.actionApprovalPort,
   )
-  const automationTool = normalizeAssistantAutomationTool(hosted?.automationTool)
+  const automationTool = normalizeAssistantAutomationTool(hosted.automationTool)
   const assistantConfigurationTool = normalizeAssistantConfigurationTool(
-    hosted?.assistantConfigurationTool,
+    hosted.assistantConfigurationTool,
   )
-  const connectedApps = normalizeAssistantConnectedAppsPort(hosted?.connectedApps)
+  const connectedApps = normalizeAssistantConnectedAppsPort(hosted.connectedApps)
   const clinicalRecordsConnectLinkTool = normalizeAssistantClinicalRecordsConnectLinkTool(
-    hosted?.clinicalRecordsConnectLinkTool,
+    hosted.clinicalRecordsConnectLinkTool,
   )
-  const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
+  const defaultTarget = normalizeAssistantBackendTarget(hosted.defaultTarget ?? null)
   const channelTypingDependencies = normalizeAssistantChannelTypingDependencies(
-    hosted?.channelTypingDependencies,
+    hosted.channelTypingDependencies,
   )
   const progressDeliveryDependencies = normalizeAssistantHostedProgressDeliveryDependencies(
-    hosted?.progressDeliveryDependencies,
+    hosted.progressDeliveryDependencies,
   )
   const deviceConnectProviders = normalizeAssistantHostedDeviceConnectProviders(
-    hosted?.deviceConnectProviders,
+    hosted.deviceConnectProviders,
   )
-  const deviceTool = normalizeAssistantDeviceTool(hosted?.deviceTool)
+  const deviceTool = normalizeAssistantDeviceTool(hosted.deviceTool)
   const dynamicContextPrompts = normalizeAssistantDynamicContextPrompts(
-    hosted?.dynamicContextPrompts,
+    hosted.dynamicContextPrompts,
   )
-  const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
+  const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted.familyPlanTool)
   const imessageContactTool = normalizeAssistantIMessageContactTool(
-    hosted?.imessageContactTool,
+    hosted.imessageContactTool,
   )
   const personalizationTool = normalizeAssistantPersonalizationTool(
-    hosted?.personalizationTool,
+    hosted.personalizationTool,
   )
   const groupParticipantDisplayNameReader =
     normalizeAssistantGroupParticipantDisplayNameReader(
-      hosted?.groupParticipantDisplayNameReader,
+      hosted.groupParticipantDisplayNameReader,
     )
   const groupPermissionOfferTool = normalizeAssistantGroupPermissionOfferTool(
-    hosted?.groupPermissionOfferTool,
+    hosted.groupPermissionOfferTool,
   )
-  const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
+  const groupTool = normalizeAssistantGroupTool(hosted.groupTool)
   const groupSharedReader = normalizeAssistantGroupSharedReader(
-    hosted?.groupSharedReader,
+    hosted.groupSharedReader,
   )
-  const labsTool = normalizeAssistantLabsTool(hosted?.labsTool)
-  const planUsageTool = normalizeAssistantPlanUsageTool(hosted?.planUsageTool)
+  const labsTool = normalizeAssistantLabsTool(hosted.labsTool)
+  const planUsageTool = normalizeAssistantPlanUsageTool(hosted.planUsageTool)
   const subscriptionTool = normalizeAssistantSubscriptionTool(
-    hosted?.subscriptionTool,
+    hosted.subscriptionTool,
   )
-  const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
-  const physicalNotes = normalizeAssistantPhysicalNotePort(hosted?.physicalNotes)
+  const phoneCalls = normalizeAssistantPhoneCallPort(hosted.phoneCalls)
+  const physicalNotes = normalizeAssistantPhysicalNotePort(hosted.physicalNotes)
   const privateImageUrlPublisher = normalizeAssistantPrivateImageUrlPublisher(
-    hosted?.privateImageUrlPublisher,
+    hosted.privateImageUrlPublisher,
   )
   const productFeedbackCandidateSink = normalizeAssistantProductFeedbackCandidateSink(
-    hosted?.productFeedbackCandidateSink,
+    hosted.productFeedbackCandidateSink,
   )
-  const releaseSha = normalizeNullableString(hosted?.releaseSha)
-  const runtimeAttemptId = normalizeNullableString(hosted?.runtimeAttemptId)
-  const runtimeName = normalizeNullableString(hosted?.runtimeName)
-  const usageRecorder = normalizeAssistantUsageRecorder(hosted?.usageRecorder)
+  const releaseSha = normalizeNullableString(hosted.releaseSha)
+  const runtimeAttemptId = normalizeNullableString(hosted.runtimeAttemptId)
+  const runtimeName = normalizeNullableString(hosted.runtimeName)
+  const usageRecorder = normalizeAssistantUsageRecorder(hosted.usageRecorder)
   if (!memberId) {
     return {
       hosted: null,
@@ -721,106 +725,100 @@ export function normalizeAssistantExecutionContext(
 
   return {
     hosted: {
-      ...(actionApprovalPort ? { actionApprovalPort } : {}),
-      ...(typeof hosted?.assertTurnCommitAuthority === 'function'
+      ...optionalHostedField('actionApprovalPort', actionApprovalPort),
+      ...(typeof hosted.assertTurnCommitAuthority === 'function'
         ? {
             assertTurnCommitAuthority:
               hosted.assertTurnCommitAuthority.bind(hosted),
           }
         : {}),
-      ...(automationTool ? { automationTool } : {}),
-      ...(typeof hosted?.currentAssistantInputId === 'function'
+      ...optionalHostedField('automationTool', automationTool),
+      ...(typeof hosted.currentAssistantInputId === 'function'
         ? {
             currentAssistantInputId: hosted.currentAssistantInputId,
           }
         : {}),
-      ...(typeof hosted?.createScheduledGroupTools === 'function'
+      ...(typeof hosted.createScheduledGroupTools === 'function'
         ? { createScheduledGroupTools: hosted.createScheduledGroupTools }
         : {}),
-      ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
-      ...(connectedApps ? { connectedApps } : {}),
-      ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
-      ...(hosted?.imageGenerationLauncher
+      ...optionalHostedField('assistantConfigurationTool', assistantConfigurationTool),
+      ...optionalHostedField('connectedApps', connectedApps),
+      ...optionalHostedField('clinicalRecordsConnectLinkTool', clinicalRecordsConnectLinkTool),
+      ...(hosted.imageGenerationLauncher
         ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
         : {}),
-      ...(familyPlanTool ? { familyPlanTool } : {}),
-      ...(imessageContactTool ? { imessageContactTool } : {}),
-      ...(personalizationTool ? { personalizationTool } : {}),
-      ...(groupParticipantDisplayNameReader
-        ? { groupParticipantDisplayNameReader }
-        : {}),
-      ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
-      ...(groupSharedReader ? { groupSharedReader } : {}),
-      ...(groupTool ? { groupTool } : {}),
-      ...(labsTool ? { labsTool } : {}),
-      ...(planUsageTool ? { planUsageTool } : {}),
-      ...(physicalNotes ? { physicalNotes } : {}),
-      ...(privateImageUrlPublisher ? { privateImageUrlPublisher } : {}),
-      ...(subscriptionTool ? { subscriptionTool } : {}),
-      ...(typeof hosted?.materializeWorkspaceArtifacts === 'function'
+      ...optionalHostedField('familyPlanTool', familyPlanTool),
+      ...optionalHostedField('imessageContactTool', imessageContactTool),
+      ...optionalHostedField('personalizationTool', personalizationTool),
+      ...optionalHostedField('groupParticipantDisplayNameReader', groupParticipantDisplayNameReader),
+      ...optionalHostedField('groupPermissionOfferTool', groupPermissionOfferTool),
+      ...optionalHostedField('groupSharedReader', groupSharedReader),
+      ...optionalHostedField('groupTool', groupTool),
+      ...optionalHostedField('labsTool', labsTool),
+      ...optionalHostedField('planUsageTool', planUsageTool),
+      ...optionalHostedField('physicalNotes', physicalNotes),
+      ...optionalHostedField('privateImageUrlPublisher', privateImageUrlPublisher),
+      ...optionalHostedField('subscriptionTool', subscriptionTool),
+      ...(typeof hosted.materializeWorkspaceArtifacts === 'function'
         ? {
             materializeWorkspaceArtifacts: hosted.materializeWorkspaceArtifacts,
           }
         : {}),
-      ...(typeof hosted?.persistGeneratedImageCapture === 'function'
+      ...(typeof hosted.persistGeneratedImageCapture === 'function'
         ? {
             persistGeneratedImageCapture: hosted.persistGeneratedImageCapture,
           }
         : {}),
-      ...(defaultTarget
-        ? {
-            defaultTarget,
-          }
-        : {}),
-      ...(channelTypingDependencies
-        ? {
-            channelTypingDependencies,
-          }
-        : {}),
+      ...optionalHostedField('defaultTarget', defaultTarget),
+      ...optionalHostedField('channelTypingDependencies', channelTypingDependencies),
       ...(deviceConnectProviders.length > 0
         ? {
             deviceConnectProviders,
           }
         : {}),
-      ...(deviceTool ? { deviceTool } : {}),
+      ...optionalHostedField('deviceTool', deviceTool),
       ...(dynamicContextPrompts.length > 0
         ? {
             dynamicContextPrompts,
           }
         : {}),
-      ...(productFeedbackCandidateSink ? { productFeedbackCandidateSink } : {}),
-      ...(releaseSha ? { releaseSha } : {}),
-      ...(runtimeAttemptId ? { runtimeAttemptId } : {}),
-      ...(runtimeName ? { runtimeName } : {}),
-      ...(usageRecorder ? { usageRecorder } : {}),
+      ...optionalHostedField('productFeedbackCandidateSink', productFeedbackCandidateSink),
+      ...optionalHostedField('releaseSha', releaseSha),
+      ...optionalHostedField('runtimeAttemptId', runtimeAttemptId),
+      ...optionalHostedField('runtimeName', runtimeName),
+      ...optionalHostedField('usageRecorder', usageRecorder),
       memberId,
-      ...(progressDeliveryDependencies
-        ? {
-            progressDeliveryDependencies,
-          }
-        : {}),
-      ...(phoneCalls ? { phoneCalls } : {}),
-      ...(typeof hosted?.providerFetch === 'function'
+      ...optionalHostedField('progressDeliveryDependencies', progressDeliveryDependencies),
+      ...optionalHostedField('phoneCalls', phoneCalls),
+      ...(typeof hosted.providerFetch === 'function'
         ? { providerFetch: hosted.providerFetch }
         : {}),
-      ...(typeof hosted?.publicInternetFetch === 'function'
+      ...(typeof hosted.publicInternetFetch === 'function'
         ? { publicInternetFetch: hosted.publicInternetFetch }
         : {}),
-      ...(typeof hosted?.resolveScheduledLinqRoute === 'function'
+      ...(typeof hosted.resolveScheduledLinqRoute === 'function'
         ? { resolveScheduledLinqRoute: hosted.resolveScheduledLinqRoute }
         : {}),
-      ...(typeof hosted?.resolveScheduledExternalThreadRoute === 'function'
+      ...(typeof hosted.resolveScheduledExternalThreadRoute === 'function'
         ? {
             resolveScheduledExternalThreadRoute:
               hosted.resolveScheduledExternalThreadRoute,
           }
         : {}),
-      userEnvKeys:
-        hosted?.userEnvKeys
-          .map((key) => normalizeNullableString(key))
-          .filter((key): key is string => key !== null) ?? [],
+      userEnvKeys: hosted.userEnvKeys
+        .map((key) => normalizeNullableString(key))
+        .filter((key): key is string => key !== null) ?? [],
     },
   }
+}
+
+// Normalized capabilities and metadata are omitted, not emitted as undefined.
+// Callers retain the field order and keep raw accessor/function checks explicit.
+function optionalHostedField<Key extends keyof AssistantHostedExecutionContext>(
+  key: Key,
+  value: AssistantHostedExecutionContext[Key],
+) {
+  return value ? { [key]: value } : {}
 }
 
 function normalizeAssistantDynamicContextPrompts(
@@ -1121,6 +1119,9 @@ function normalizeAssistantChannelTypingDependencies(
   }
 
   const dependencies: AssistantChannelTypingDependencies = {}
+  if (typeof input.onTypingAccepted === 'function') {
+    dependencies.onTypingAccepted = input.onTypingAccepted
+  }
   if (typeof input.startLinqTyping === 'function') {
     dependencies.startLinqTyping = input.startLinqTyping
   }

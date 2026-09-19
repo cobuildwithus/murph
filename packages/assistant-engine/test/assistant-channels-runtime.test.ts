@@ -2462,6 +2462,7 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledWith({
       card: NUTRITION_CARD,
       chatId: 'private-thread-1',
+      companionMessage: NUTRITION_CARD_TEXT,
       idempotencyKey: 'card-delivery-1',
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
@@ -2707,6 +2708,7 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledWith({
       card: CHALLENGE_CARD,
       chatId: 'scheduled-group-thread',
+      companionMessage: CHALLENGE_CARD_TEXT,
       idempotencyKey: 'scheduled-group-card',
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
@@ -3629,6 +3631,7 @@ describe('assistant channels runtime seam', () => {
       },
     )
 
+    expect(handle.isActive?.()).toBe(true)
     await vi.advanceTimersByTimeAsync(2 * 60_000)
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
     await vi.advanceTimersByTimeAsync(3 * 60_000 - 1)
@@ -3637,6 +3640,7 @@ describe('assistant channels runtime seam', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
 
+    expect(handle.isActive?.()).toBe(false)
     await handle.stop()
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })

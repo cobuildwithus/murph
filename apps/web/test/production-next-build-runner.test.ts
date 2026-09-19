@@ -63,11 +63,13 @@ if [[ "\${1:-}" == "../../scripts/rm-paths.mjs" ]]; then
 fi
 if [[ "\${2:-}" == "\$MURPH_FAKE_TYPESCRIPT_BIN" ]]; then
   printf 'NODE_OPTIONS=%s\\n' "\${NODE_OPTIONS:-}" > "\$MURPH_FAKE_TYPECHECK_LOG"
+  printf 'GOMEMLIMIT=%s\\n' "\${GOMEMLIMIT:-}" >> "\$MURPH_FAKE_TYPECHECK_LOG"
   printf 'TYPECHECK_GATE=%s\\n' "\${MURPH_HOSTED_WEB_PREPARED_TYPECHECK:-}" >> "\$MURPH_FAKE_TYPECHECK_LOG"
   printf '%s\\n' "\$@" >> "\$MURPH_FAKE_TYPECHECK_LOG"
   exit "\${MURPH_FAKE_TYPECHECK_EXIT_CODE:-0}"
 fi
 printf 'NODE_OPTIONS=%s\\n' "\${NODE_OPTIONS:-}" >> "\$MURPH_FAKE_BUILD_LOG"
+printf 'GOMEMLIMIT=%s\\n' "\${GOMEMLIMIT:-}" >> "\$MURPH_FAKE_BUILD_LOG"
 printf 'TYPECHECK_GATE=%s\\n' "\${MURPH_HOSTED_WEB_PREPARED_TYPECHECK:-}" >> "\$MURPH_FAKE_BUILD_LOG"
 printf '%s\\n' "\$@" >> "\$MURPH_FAKE_BUILD_LOG"
 if [[ "\${3:-}" == "build" ]]; then
@@ -110,6 +112,7 @@ function runProductionBuild(input: {
     MURPH_FAKE_TYPECHECK_LOG: input.typecheckLog,
     MURPH_FAKE_TYPESCRIPT_BIN: "/fixture/tsc",
     MURPH_HOSTED_WEB_PREPARED_TYPECHECK: "forged",
+    GOMEMLIMIT: "8GiB",
     NODE_OPTIONS: "--trace-warnings --max-old-space-size=99",
     PATH: `${input.binDir}:${process.env.PATH ?? ""}`,
   };
@@ -148,11 +151,13 @@ test("production Next runner owns the cache transition and fail-closed epoch", a
     await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(".next/cache\n");
     await expect(readFile(fixture.buildLog, "utf8")).resolves.toBe([
       "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
+      "GOMEMLIMIT=8GiB",
       "TYPECHECK_GATE=",
       "--max-old-space-size=1024",
       "/fixture/next",
       "typegen",
       "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
+      "GOMEMLIMIT=1GiB",
       "TYPECHECK_GATE=complete",
       "--max-old-space-size=1024",
       "/fixture/next",
@@ -162,6 +167,7 @@ test("production Next runner owns the cache transition and fail-closed epoch", a
     ].join("\n"));
     await expect(readFile(fixture.typecheckLog, "utf8")).resolves.toBe([
       "NODE_OPTIONS=--trace-warnings --max-old-space-size=6144",
+      "GOMEMLIMIT=8GiB",
       "TYPECHECK_GATE=",
       "--max-old-space-size=6144",
       "/fixture/tsc",
@@ -230,6 +236,7 @@ test("production Next runner fails closed before compilation when the prepared t
     expect(result.status).toBe(19);
     await expect(readFile(fixture.buildLog, "utf8")).resolves.toBe([
       "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
+      "GOMEMLIMIT=8GiB",
       "TYPECHECK_GATE=",
       "--max-old-space-size=1024",
       "/fixture/next",

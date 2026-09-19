@@ -126,10 +126,6 @@ function assertBatchCommandAllowed(argv: readonly string[]) {
     return invalidBatchCommand('Batch commands cannot run onboarding setup.')
   }
 
-  if (root === 'chat' || (root === 'assistant' && subcommand === 'chat')) {
-    return invalidBatchCommand('Batch commands cannot run interactive assistant chat.')
-  }
-
   const isAssistantRun =
     root === 'run' || (root === 'assistant' && subcommand === 'run')
   if (isAssistantRun) {

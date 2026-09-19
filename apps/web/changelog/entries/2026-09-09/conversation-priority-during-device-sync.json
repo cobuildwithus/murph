@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-09",
+  "order": 150,
+  "item": {
+    "id": "conversation-priority-during-device-sync",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Conversations take priority during device sync",
+    "summary": "Murph can pause more of its background device-data preparation when you send a message.",
+    "details": "Interrupted sync work remains queued to continue, and data already saved stays saved.",
+    "relevanceTags": [
+      "conversations",
+      "devices",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      3116
+    ]
+  }
+}

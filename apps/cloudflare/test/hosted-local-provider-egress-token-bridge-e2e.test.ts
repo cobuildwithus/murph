@@ -30,9 +30,9 @@ describe("hosted local provider-egress-token bridge e2e", () => {
       text: "Please send a short reply so Linq delivery crosses provider egress.",
     });
 
-    expect(reply.authorizationStatus).toBe("hosted-sentinel");
+    expect(reply.authorizationStatus).toBe("expected");
     expect(harness.linqStub.observedRequests.some((request) =>
-      request.authorizationStatus === "hosted-sentinel"
+      request.authorizationStatus === "expected"
       && request.url === `/chats/${encodeURIComponent(harness.chatId)}/messages`
     )).toBe(true);
     await harness.assertHealthy({ expectAssistantProviderRequest: true });

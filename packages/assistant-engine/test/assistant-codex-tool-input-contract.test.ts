@@ -18,7 +18,12 @@ import {
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from '../src/assistant-codex/dynamic-tools/generate-song.ts'
+import { MURPH_ATTACH_RESPONSE_CARD_TOOL, MURPH_PERSONALIZATION_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
+import { MURPH_AUTOMATION_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import type { AssistantProviderDynamicTool } from '../src/assistant/providers/types.ts'
+import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
+import { buildUpcomingContextPrompt } from '../src/assistant/upcoming-context.ts'
+import { buildAssistantSystemPromptLayers } from '../src/assistant/system-prompt.ts'
 import { writeHostedOpenAiMixedModeModelCatalogJson } from './support/codex-model-catalog.ts'
 import { assertNoSongAttachmentFailure } from './support/song-receipt-proof.ts'
 import {
@@ -285,6 +290,420 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       expect(repeated).toEqual(offered)
       expect(buildCodexThreadResumeParams({ input: registration(tools), codexThreadId: 'existing-thread' })).not.toHaveProperty('dynamicTools')
     }
+  })
+
+  it.skipIf(process.env.MURPH_MEASURE_UPCOMING_INPUT !== '1').each(['direct', 'group'] as const)(
+    'upcoming context: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: false, progressUpdatesAvailable: false,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-10-01',
+        currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      const context = buildUpcomingContextPrompt({ incomplete: false, entries: [{
+        eventId: 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1', summary: 'Conference trip',
+        startsAt: '2026-10-01T00:00:00+02:00', endsAt: '2026-10-04T00:00:00+02:00',
+        timeZone: 'Europe/Paris', timing: 'timed', status: 'planned', lastVerifiedAt: '2026-10-01T06:00:00Z',
+        details: ['Away from the usual gym; hotel equipment unknown. Return Saturday evening.'],
+      }] }, new Date('2026-10-01T08:00:00Z'))
+      assert.ok(context)
+      // The base has the same prompt layers/tools; its only authored routing
+      // difference is this line, and it has no upcoming-context injection.
+      const currentRoute = '- For connected calendar or email Journal plans, upcoming-context corrections, and opt-outs, read `journal-connected-context`.'
+      const baseRoute = '- For connected calendar or email Journal capture and opt-outs, read `journal-connected-context`.'
+      const headInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      if (scope === 'direct') assert.ok(headInstructions.includes(currentRoute))
+      const measurements = []
+      for (const phase of ['base', 'head'] as const) {
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        const developerInstructions = phase === 'base' ? headInstructions.replace(currentRoute, baseRoute) : headInstructions
+        const prompt = [layers.dynamicTurnContextPrompt,
+          phase === 'head' && scope === 'direct' ? context : null,
+          'Help me prepare for tomorrow.'].filter(Boolean).join('\n\n')
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          dynamicTools: tools, developerInstructions, prompt, groupConversation: scope === 'group',
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(stub.requestCountSinceBaseline(), 1)
+        const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(captured)
+        const body = readRecord(JSON.parse(captured.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        if (scope === 'group' || phase === 'base') assert.ok(!captured.json.includes('evt_01JNV422Y2M5ZBV64ZP4N1DRB1'))
+        else assert.ok(captured.json.includes('evt_01JNV422Y2M5ZBV64ZP4N1DRB1'))
+        measurements.push({ phase, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+          registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+          instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, prompt].join('\n\n')),
+          exclusions: [...new Set([...captured.excludedTransportFields, 'prompt_cache_key'])],
+        })
+      }
+      process.stdout.write('[upcoming-input-proof] ' + JSON.stringify({ scope, measurements,
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured; scripted usage is not tokenization.',
+        baseline: '810fba9d0890; exact one-line routing ablation and no upcoming context; same tools and synthetic history',
+      }) + '\n')
+    },
+  )
+
+  it.skipIf(process.env.MURPH_MEASURE_WORKSPACE_EXPORT_INPUT !== '1').each(['direct', 'group'] as const)(
+    'workspace export: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const baseline = process.env.MURPH_MEASURE_WORKSPACE_EXPORT_BASE === '1'
+      let tools: readonly AssistantProviderDynamicTool[] = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true,
+        automationAvailable: true,
+        vaultFileSendAvailable: scope === 'direct',
+        personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group',
+        groupChallengeResponseCardsAvailable: scope === 'group',
+        responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: false,
+        progressUpdatesAvailable: false,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-09-14',
+        currentInstant: '2026-09-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      let developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      // Exact two authored-text changes relative to 251f3c8f6fc9. Keep the
+      // production base instructions, schemas, tools, and fixture identical.
+      if (baseline && scope === 'direct') {
+        const archiveLine = developerInstructions.split('\n').find((line) => line.startsWith('- Export requested vault files.'))
+        assert.ok(archiveLine)
+        developerInstructions = developerInstructions.replace(archiveLine, '- Export requested vault files. ZIPs may read originals in place. Inspect before refusing.')
+        tools = tools.map((tool) => {
+          if (tool.name !== 'send_vault_file') return tool
+          const start = tool.description.indexOf(' For an explicit full-workspace request')
+          const end = tool.description.indexOf(' When a generated ZIP contains derived exports/packs/')
+          assert.ok(start > 0 && end > start)
+          return { ...tool, description: tool.description.slice(0, start) + tool.description.slice(end) }
+        })
+      }
+      stub.captureProviderRequestDiagnostics({ completeInput: true })
+      stub.queue({ text: CONTRACT_CAPTURE_DONE })
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS, dynamicTools: tools, developerInstructions,
+        groupConversation: scope === 'group',
+        prompt: [layers.dynamicTurnContextPrompt, 'Please prepare a backup of my workspace.'].join('\n\n'),
+        env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+      })
+      const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+      assert.ok(captured)
+      assert.equal(stub.requestCountSinceBaseline(), 1)
+      assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+      assert.equal(tools.some((tool) => tool.name === 'send_vault_file'), scope === 'direct')
+      process.stdout.write('[workspace-export-input-proof] ' + JSON.stringify({
+        scope, phase: baseline ? 'base' : 'head', decodedRequestUtf8Bytes: Buffer.byteLength(captured.json),
+        requestSha256: createHash('sha256').update(captured.json).digest('hex'),
+        registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+        instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, layers.dynamicTurnContextPrompt].join('\n\n')),
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured; scripted usage is not tokenization.',
+        exclusions: captured.excludedTransportFields,
+      }) + '\n')
+    },
+  )
+
+  it.skipIf(process.env.MURPH_MEASURE_GRAPH_IMAGE_INPUT !== '1').each(['direct', 'group'] as const)(
+    'graph image guidance: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const headTools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: true, progressUpdatesAvailable: false,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-10-01',
+        currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      // The base has the same prompt layers/tools; its only authored differences
+      // are the image-tool descriptions and messaging presentation guidance.
+      const graphGuidanceStart = ' Requested graphs, charts, and trend lines:'
+      const currentGroupImageLine = 'No decorative group images.'
+      const baseGroupImageLine = 'No decorative/private-health group images.'
+      const headInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      assert.ok(headInstructions.includes(currentGroupImageLine))
+      const headImageTool = headTools.find((tool) => tool.name === 'generate_image')
+      assert.ok(headImageTool)
+      assert.ok(headImageTool.description.includes(graphGuidanceStart))
+      const baseTools = headTools.map((tool) => {
+        if (tool.name === 'generate_image') {
+          return { ...tool, description: tool.description.slice(0, tool.description.indexOf(graphGuidanceStart)) }
+        }
+        if (tool.name === 'attach_response_media') {
+          return { ...tool, description: tool.description.replace(' For charts, the final reply must include one brief numeric takeaway from the source data, such as the start/end values or range; do not list every plotted value.', '') }
+        }
+        return tool
+      })
+      const measurements = []
+      for (const phase of ['base', 'head'] as const) {
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        const tools = phase === 'base' ? baseTools : headTools
+        const developerInstructions = phase === 'base'
+          ? headInstructions.replace(currentGroupImageLine, baseGroupImageLine)
+            .replace('safety, and fallback.', 'safety, and fallback; do not repeat visuals.')
+          : headInstructions
+        const prompt = [layers.dynamicTurnContextPrompt, 'Can you make us a sleep trend graph for the last week?'].join('\n\n')
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          dynamicTools: tools, developerInstructions, prompt, groupConversation: scope === 'group',
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(stub.requestCountSinceBaseline(), 1)
+        const captured: ReturnType<ScriptedStub['requestSummariesSinceBaseline']>[number]['completeProviderInput'] =
+          stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(captured)
+        const body = readRecord(JSON.parse(captured.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        assert.equal(captured.json.includes('Requested graphs, charts, and trend lines:'), phase === 'head')
+        measurements.push({ phase, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+          registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+          instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, prompt].join('\n\n')),
+          exclusions: [...new Set([...captured.excludedTransportFields, 'prompt_cache_key'])],
+        })
+      }
+      process.stdout.write('[graph-image-input-proof] ' + JSON.stringify({ scope, measurements,
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured; scripted usage is not tokenization.',
+        baseline: '4daaf3601f78; exact image-tool description and media-guidance ablation; same tools and synthetic history',
+      }) + '\n')
+    },
+  )
+
+  it.skipIf(process.env.MURPH_MEASURE_MEAL_INPUT !== '1').each(['direct', 'group'] as const)(
+    'meal recovery: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true,
+        automationAvailable: true,
+        personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group',
+        groupChallengeResponseCardsAvailable: scope === 'group',
+        responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: false,
+        progressUpdatesAvailable: false,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-09-14',
+        currentInstant: '2026-09-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      stub.captureProviderRequestDiagnostics({ completeInput: true })
+      stub.queue({ text: CONTRACT_CAPTURE_DONE })
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput, dynamicTools: tools, developerInstructions,
+        groupConversation: scope === 'group',
+        prompt: [layers.dynamicTurnContextPrompt, 'Log a bowl of vegetable soup for lunch.'].join('\n\n'),
+        env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+      })
+      const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+      assert.ok(captured)
+      assert.equal(stub.requestCountSinceBaseline(), 1)
+      assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+      assert.equal(tools.includes(MURPH_ATTACH_RESPONSE_CARD_TOOL), scope === 'direct')
+      process.stdout.write('[meal-input-proof] ' + JSON.stringify({
+        scope, decodedRequestUtf8Bytes: Buffer.byteLength(captured.json),
+        requestSha256: createHash('sha256').update(captured.json).digest('hex'),
+        registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+        instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, layers.dynamicTurnContextPrompt].join('\n\n')),
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured; scripted usage is not tokenization.',
+        exclusions: captured.excludedTransportFields,
+      }) + '\n')
+    },
+  )
+
+  it.skipIf(process.env.MURPH_MEASURE_AUTOMATION_INPUT !== '1').each(['direct', 'group'] as const)(
+    'automation edit: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true,
+        automationAvailable: true,
+        personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group',
+        imageGenerationAvailable: false,
+        progressUpdatesAvailable: true,
+        progressUpdateMode: scope,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantProgressUpdatesAvailable: true, channel: 'linq',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-10-14',
+        currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      stub.captureProviderRequestDiagnostics({ completeInput: true })
+      stub.queue({ text: CONTRACT_CAPTURE_DONE })
+      await executeCodexAppServerTurn({
+        ...scenario.turnInput, dynamicTools: tools,
+        developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
+        prompt: [layers.dynamicTurnContextPrompt, 'Update the wording of my existing reminders.'].join('\n\n'),
+        env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+      })
+      const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+      assert.ok(captured)
+      const body = readRecord(JSON.parse(captured.json))
+      assert.ok(body)
+      delete body.prompt_cache_key
+      process.stdout.write('[automation-input-proof] ' + JSON.stringify({
+        scope, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+        automationRegistrationUtf8Bytes: Buffer.byteLength(JSON.stringify(MURPH_AUTOMATION_TOOL)),
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured.',
+        exclusions: ['prompt_cache_key'],
+      }) + '\n')
+    },
+  )
+
+  it.skipIf(process.env.MURPH_MEASURE_WEARABLE_INPUT !== '1').each(['direct', 'group'] as const)(
+    'wearable recovery: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true,
+        automationAvailable: true,
+        personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group',
+        groupPermissionOfferAvailable: scope === 'group',
+        imageGenerationAvailable: false,
+        progressUpdatesAvailable: true,
+        progressUpdateMode: scope,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantProgressUpdatesAvailable: true, channel: 'linq',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: scope, currentLocalDate: '2026-10-14',
+        currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: scope === 'direct',
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        turnTrigger: scope === 'group' ? 'automation-cron' : null,
+        scheduledOccurrenceAt: scope === 'group' ? '2026-10-14T16:00:00.000Z' : null,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      stub.captureProviderRequestDiagnostics({ completeInput: true })
+      stub.queue({ text: CONTRACT_CAPTURE_DONE })
+      await executeCodexAppServerTurn({
+        ...scenario.turnInput, dynamicTools: tools,
+        developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
+        prompt: [layers.dynamicTurnContextPrompt, 'Summarize today’s sleep.'].join('\n\n'),
+        env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+      })
+      const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+      assert.ok(captured)
+      const body = readRecord(JSON.parse(captured.json))
+      assert.ok(body)
+      delete body.prompt_cache_key
+      process.stdout.write('[wearable-input-proof] ' + JSON.stringify({
+        scope, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+        registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+        instructionsUtf8Bytes: Buffer.byteLength([layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt, layers.dynamicTurnContextPrompt].join('\n\n')),
+        tokens: null, tokenLimitation: 'No exact Terra tokenizer configured.',
+        exclusions: ['prompt_cache_key'],
+      }) + '\n')
+    },
+  )
+
+  it('renders actionable automation edit types in real Codex code-mode discovery', { timeout: 180_000 }, async () => {
+    const [observed] = await observeContracts([MURPH_AUTOMATION_TOOL], 'code-only')
+    assert.ok(observed)
+    const declaration = observed.description.replace(/^MURPH_INPUT_SCHEMA_JSON: .+$/mu, '')
+    expect(/expectedUpdatedAt:\s*string/u.test(declaration), 'required typed edit version').toBe(true)
+    expect(/expectedUpdatedAt\??:\s*unknown/u.test(declaration), 'no unknown edit version').toBe(false)
+    expect(observed.description.includes('Required current automation updatedAt'), 'canonical version readback documentation').toBe(true)
+    expect(/lookup:\s*string/u.test(declaration), 'typed exact lookup').toBe(true)
+    expect(/instructions\??:\s*string/u.test(declaration), 'typed replacement instructions').toBe(true)
+  })
+
+  it('keeps nutrition and personalization inputs concrete in real Codex declarations', { timeout: 180_000 }, async () => {
+    const [card, personalization] = await observeContracts([MURPH_ATTACH_RESPONSE_CARD_TOOL, MURPH_PERSONALIZATION_TOOL], 'code-only')
+    assert.ok(card)
+    assert.ok(personalization)
+    const cardDeclaration = card.description.replace(/^MURPH_INPUT_SCHEMA_JSON: .+$/mu, '')
+    for (const field of ['carbsGrams', 'fatGrams', 'fiberGrams']) {
+      expect(cardDeclaration.match(new RegExp(`${field}: \\{`, 'gu')), `${field} totals and goal objects`).toHaveLength(2)
+      expect(cardDeclaration).not.toMatch(new RegExp(`${field}: unknown`, 'u'))
+    }
+    const personalizationDeclaration = personalization.description.replace(/^MURPH_INPUT_SCHEMA_JSON: .+$/mu, '')
+    expect(personalizationDeclaration).toMatch(/action: "update"/u)
+    expect(personalizationDeclaration).toMatch(/message_ref\?: string/u)
+    for (const field of ['mainPersona', 'supportingPersona', 'tone', 'voice']) {
+      expect(personalizationDeclaration).toMatch(new RegExp(`${field}\\??:`, 'u'))
+      expect(personalizationDeclaration).not.toMatch(new RegExp(`${field}\\??: unknown`, 'u'))
+      expect(personalizationDeclaration).toMatch(new RegExp(`${field}\\??: \"`, 'u'))
+    }
+  })
+
+  it('never factors a named input property into an empty schema anywhere in the catalog', () => {
+    const inspect = (value: unknown, location: string): void => {
+      if (Array.isArray(value)) {
+        value.forEach((entry, index) => inspect(entry, `${location}[${index}]`))
+        return
+      }
+      const object = readRecord(value)
+      if (!object) return
+      const properties = readRecord(object.properties)
+      for (const [name, property] of Object.entries(properties ?? {})) {
+        expect(property, `${location}.properties.${name}`).not.toEqual({})
+      }
+      for (const [key, child] of Object.entries(object)) inspect(child, `${location}.${key}`)
+    }
+    for (const tool of inventory) inspect(tool.inputSchema, `${tool.namespace}.${tool.name}`)
   })
 
   it.each(MODES)('preserves complete sentinel contracts and rejects corrupted runtime evidence (%s)', { timeout: 180_000 }, async (mode) => {

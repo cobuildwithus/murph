@@ -1,6 +1,7 @@
 ---
 title: 'Standalone runner install changes a workspace dependency after a Web-only addition'
 severity: 'minor'
+issue: 'cobuildwithus/murph#3179'
 ---
 
 ## Expected Behavior

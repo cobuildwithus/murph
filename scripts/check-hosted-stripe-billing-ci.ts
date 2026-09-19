@@ -17,6 +17,7 @@ const REQUIRED_MATRIX_MARKERS = [
   "proveStarterUsageStartsPaidPulseThroughCheckout",
   "provePaidPulseUpgradesToEdgeThroughPortal",
   "proveEdgeSchedulesPulseAtRenewal",
+  "provePaidPulseRenewalAfterScheduledDowngrade",
   "proveIndividualStartsFamilyThroughCheckout",
   "proveFamilyInviteActivation",
   "provePaidIndividualConvertsToFamilyInPlace",
@@ -36,7 +37,12 @@ export function inspectHostedStripeBillingWorkflow(
   requireText(
     "missing-main-push-trigger",
     "  push:\n    branches:\n      - main\n",
-    "Workflow must run the live lane on pushes to main.",
+    "Workflow must run the hermetic lane on pushes to main.",
+  );
+  requireText(
+    "missing-live-schedule",
+    '  schedule:\n    - cron: "23 8 * * *"\n',
+    "Live Stripe proof must run once daily.",
   );
   if (source.includes("pull_request_target")) {
     issues.push({
@@ -76,6 +82,16 @@ export function inspectHostedStripeBillingWorkflow(
     "Hermetic proof must retain browser and provider-boundary support tests.",
   );
   requireText(
+    "missing-hydration-proof",
+    "apps/web/test/hosted-billing-browser-hydration.test.ts",
+    "Hermetic proof must exercise real React control hydration in Chromium.",
+  );
+  requireText(
+    "disabled-hydration-proof",
+    'MURPH_E2E_BILLING_BROWSER_SMOKE: "1"',
+    "Hermetic browser proof must run rather than skip behind its local opt-in.",
+  );
+  requireText(
     "missing-web-test-client-setup",
     "pnpm --dir apps/web prisma:generate",
     "Hermetic web billing proof must generate Prisma Client in a fresh checkout.",
@@ -83,13 +99,13 @@ export function inspectHostedStripeBillingWorkflow(
   if (source.includes("HOSTED_STRIPE_BILLING_LIVE_CONFIGURED")) {
     issues.push({
       code: "silent-live-config-skip",
-      message: "Main merges must fail preflight when sandbox configuration is absent, not skip behind a marker.",
+      message: "Scheduled runs must fail preflight when sandbox configuration is absent, not skip behind a marker.",
     });
   }
   requireText(
     "missing-live-if",
-    "if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.billing-hermetic.result == 'success' }}",
-    "The secret-bearing live job must bypass a skipped PR-only ancestor only for trusted pushes with successful hermetic proof.",
+    "if: ${{ always() && !cancelled() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.ref_protected && needs.billing-hermetic.result == 'success' }}",
+    "The secret-bearing live job must bypass a skipped PR-only ancestor only for protected-main schedules with successful hermetic proof.",
   );
   requireText(
     "missing-dedicated-environment",
@@ -148,12 +164,12 @@ export function inspectHostedStripeBillingWorkflow(
   );
   requireText(
     "missing-fail-closed-live-gate",
-    'case "$EVENT_NAME" in\n            push)\n              if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "success" ]]',
-    "Main merges must fail when the live lane is missing, skipped, or unsuccessful.",
+    'case "$EVENT_NAME" in\n            schedule)\n              if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "success" ]]',
+    "Scheduled runs must fail when the live lane is missing, skipped, or unsuccessful.",
   );
   requireText(
     "missing-pr-live-exclusion",
-    'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]',
+    'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]; then\n                  echo "Full pull-request proof requires hermetic success and must not start the secret-bearing live job."',
     "Full pull-request proof must fail closed if hermetic proof is absent or the secret-bearing live job starts.",
   );
   requireText(
@@ -219,6 +235,11 @@ export function inspectHostedStripeBillingProviderBoundary(
     [sources.matrix, "assertHostedStripeListenerAlive", "live stripe listen ownership"],
     [sources.sandbox, "completeCheckoutSessionWithOfficialFixture", "exact Checkout completion"],
     [sources.sandbox, "this.stripe.subscriptions.update", "Portal-equivalent mutation"],
+    [sources.sandbox, "this.stripe.testHelpers.testClocks.advance", "real Stripe renewal clock"],
+    [sources.matrix, "useTestClock: true", "clock-backed subscription fixture"],
+    [sources.matrix, "await requireSandbox().advanceTestClock", "completed renewal advancement"],
+    [sources.matrix, "await readHostedBillingUsageGateForTest", "production usage admission after renewal"],
+    [sources.matrix, "at: stripeNow", "usage admission at the provider's renewed time"],
   ] as const) {
     requireSourceText(
       source,

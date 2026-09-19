@@ -31,6 +31,8 @@ import type {
   HostedExecutionLogLevel,
 } from "./observability.ts";
 
+export const HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS = 10 * 60 * 1_000;
+
 export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hosted-execution-signature";
 export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hosted-execution-timestamp";
 export const HOSTED_EXECUTION_NONCE_HEADER = "x-hosted-execution-nonce";
@@ -106,6 +108,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "assistant.ask.requested",
   "assistant.ask.completed",
   "clinical-records.sync-requested",
+  "clinical-records.enrichment-requested",
   "device-sync.wake",
   "environment-interview.completed",
   "environment-voice.captured",
@@ -887,6 +890,13 @@ export interface HostedExecutionClinicalRecordsSyncRequestedWake
   runId: string;
 }
 
+/** Local durable work points to retained clinical evidence, never provider credentials. */
+export interface HostedExecutionClinicalEnrichmentRequestedWake
+  extends HostedExecutionBaseWake {
+  jobId: string;
+  kind: "clinical-records.enrichment-requested";
+}
+
 export const HOSTED_EXECUTION_ENVIRONMENT_VOICE_MAX_BYTES = 3 * 1024 * 1024;
 
 export const HOSTED_EXECUTION_ENVIRONMENT_VOICE_CONTENT_TYPES = [
@@ -1038,6 +1048,7 @@ export type HostedExecutionWake =
   | HostedExecutionAssistantAskRequestedWake
   | HostedExecutionAssistantAskCompletedWake
   | HostedExecutionClinicalRecordsSyncRequestedWake
+  | HostedExecutionClinicalEnrichmentRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionEnvironmentInterviewCompletedWake
   | HostedExecutionEnvironmentVoiceCapturedWake

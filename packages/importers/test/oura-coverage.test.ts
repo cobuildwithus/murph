@@ -51,6 +51,115 @@ test("normalizeOuraSnapshot covers dailySpo2 aliasing", () => {
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 
+test("normalizeOuraSnapshot preserves daily resource order, fallback identity, and evidence", () => {
+  const importedAt = "2026-03-16T10:00:00.000Z";
+  const personalInfo = { id: "synthetic-oura-account" };
+  const activity = {
+    id: 42,
+    day: "2026-03-14",
+    timestamp: "2026-03-15T01:30:00+02:00",
+    score: "80",
+    steps: 42,
+  };
+  const dailySleep = { day: "2026-03-15", score: 90 };
+  const invalidReadiness = { score: "invalid", temperature_deviation: Infinity };
+  const readiness = { score: 0, temperature_deviation: "-0.2" };
+  const spo2 = {
+    spo2_percentage: { average: 97 },
+    breathing_disturbance_index: 2,
+  };
+  const sleep = { average_hrv: 42 };
+  const payload = normalizeOuraSnapshot({
+    importedAt,
+    personalInfo,
+    dailyActivity: [null, false, [], {}, activity],
+    dailySleep: [dailySleep],
+    dailyReadiness: [invalidReadiness, readiness],
+    dailySpO2: [spo2],
+    sleeps: [sleep],
+  });
+
+  assert.deepEqual(payload.events?.map((event) => [
+    event.externalRef?.resourceType,
+    event.externalRef?.resourceId,
+    event.externalRef?.facet,
+    event.fields?.value,
+  ]), [
+    ["daily-activity", "42", "activity-score", 80],
+    ["daily-activity", "42", "steps", 42],
+    ["daily-sleep", "2026-03-15", "sleep-score", 90],
+    ["daily-readiness", "daily-readiness-4", "readiness-score", 0],
+    ["daily-readiness", "daily-readiness-4", "temperature-deviation", -0.2],
+    ["daily-spo2", "daily-spo2-6", "spo2-average", 97],
+    ["daily-spo2", "daily-spo2-6", "breathing-disturbance-index", 2],
+    ["sleep", "sleep-8", "average-hrv", 42],
+  ]);
+  assert.deepEqual(payload.events?.slice(0, 7).map((event) => [
+    event.occurredAt, event.recordedAt, event.dayKey, event.externalRef?.version,
+  ]), [
+    ["2026-03-14T23:30:00.000Z", "2026-03-14T23:30:00.000Z", "2026-03-14", "2026-03-14T23:30:00.000Z"],
+    ["2026-03-14T23:30:00.000Z", "2026-03-14T23:30:00.000Z", "2026-03-14", "2026-03-14T23:30:00.000Z"],
+    ["2026-03-15T00:00:00.000Z", "2026-03-15T00:00:00.000Z", "2026-03-15", undefined],
+    [importedAt, importedAt, "2026-03-16", undefined],
+    [importedAt, importedAt, "2026-03-16", undefined],
+    [importedAt, importedAt, "2026-03-16", undefined],
+    [importedAt, importedAt, "2026-03-16", undefined],
+  ]);
+  for (const event of payload.events?.slice(0, 7) ?? []) {
+    assert.equal(event.fields?.observationGrain, "summary");
+    assert.equal(event.externalRef?.system, "oura");
+    assert.deepEqual(event.evidenceRoles, [
+      `${event.externalRef?.resourceType}:${event.externalRef?.resourceId}`,
+    ]);
+  }
+  assert.deepEqual(payload.evidenceParts?.map((part) => [part.role, part.fileName]), [
+    ["personal-info", "personal-info.json"],
+    ["daily-activity:42", "daily-activity-42.json"],
+    ["daily-sleep:2026-03-15", "daily-sleep-2026-03-15.json"],
+    ["daily-readiness:daily-readiness-4", "daily-readiness-daily-readiness-4.json"],
+    ["daily-readiness:daily-readiness-4", "daily-readiness-daily-readiness-4.json"],
+    ["daily-spo2:daily-spo2-6", "daily-spo2-daily-spo2-6.json"],
+    ["sleep:sleep-8", "sleep-sleep-8.json"],
+  ]);
+  assert.deepEqual(payload.evidenceParts?.map((part) => part.content), [
+    personalInfo, activity, dailySleep, invalidReadiness, readiness, spo2, sleep,
+  ]);
+  assert.deepEqual(payload.provenance?.importedSections, {
+    personalInfo: true,
+    dailyActivity: 2,
+    dailySleep: 1,
+    dailyReadiness: 2,
+    dailySpO2: 1,
+    sleeps: 1,
+    sessions: 0,
+    workouts: 0,
+    deletions: 0,
+  });
+});
+
+test("normalizeOuraSnapshot prefers dailySpO2 even when the primary collection is empty", () => {
+  const alias = [{ day: "2026-03-15", spo2_percentage: { average: 97 } }];
+  for (const dailySpO2 of [[], [{ day: "2026-03-14", spo2_percentage: { average: 98 } }]]) {
+    const payload = normalizeOuraSnapshot({
+      importedAt: "2026-03-16T10:00:00.000Z",
+      dailySpO2,
+      dailySpo2: alias,
+    });
+    assert.deepEqual(payload.events?.map((event) => event.fields?.value), dailySpO2.length ? [98] : []);
+    assert.deepEqual(payload.evidenceParts?.map((part) => part.content), dailySpO2);
+  }
+});
+
+test.each(["dailyActivity", "dailySleep", "dailyReadiness", "dailySpO2"])(
+  "normalizeOuraSnapshot rejects an invalid %s timestamp before day fallback",
+  (collection) => {
+    assert.throws(() => normalizeOuraSnapshot({
+      importedAt: "2026-03-16T10:00:00.000Z",
+      [collection]: [{ timestamp: "invalid", day: "2026-03-15" }],
+    }), { name: "TypeError", message: "timestamp must be a valid timestamp" });
+  },
+);
+
 test("normalizeOuraSnapshot preserves explicit main-sleep and nap identity without guessing unknown types", () => {
   const sleeps = [
     { id: "main", type: "sleep" },
@@ -271,4 +380,94 @@ test("normalizeOuraSnapshot covers deletion resource and event fallbacks", () =>
   assert.ok(
     payload.evidenceParts?.some((artifact) => artifact.role.startsWith("deletion:workout:workout.deleted:")),
   );
+});
+
+test("Oura record emitters preserve deletion, rest, and skipped-session fallback ids", () => {
+  const start = "2026-04-22T01:00:00.000Z";
+  const end = "2026-04-22T02:00:00.000Z";
+  const payload = normalizeOuraSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    dailySleep: [{ score: 0 }],
+    sleeps: [
+      { type: "deleted" },
+      { type: "rest", bedtime_start: start, bedtime_end: end, average_hrv: 0 },
+      { type: "nap", bedtime_start: start, bedtime_end: end, average_hrv: 0 },
+    ],
+    sessions: [
+      {
+        start, end: start,
+        get heart_rate(): never { throw new Error("skipped session metrics must not be read"); },
+      },
+      { start, end, type: "meditation", heart_rate: 0 },
+    ],
+    workouts: [
+      {
+        start, end: start,
+        get active_calories(): never { throw new Error("skipped workout metrics must not be read"); },
+      },
+      { start, end, activity: false, activity_type: "running", distance: 0, active_calories: 0 },
+    ],
+  });
+
+  assert.deepEqual(payload.events?.map((event) => [
+    event.externalRef?.resourceType, event.externalRef?.resourceId, event.externalRef?.facet,
+  ]), [
+    ["daily-sleep", "daily-sleep-1", "sleep-score"],
+    ["sleep", "sleep-2", "deleted"],
+    ["sleep", "sleep-3", "average-hrv"],
+    ["sleep", "sleep-4", undefined],
+    ["sleep", "sleep-4", "average-hrv"],
+    ["session", "session-6", undefined],
+    ["workout", "workout-7", undefined],
+  ]);
+  assert.deepEqual(payload.evidenceParts?.slice(-4).map((part) => part.role), [
+    "session:session-6", "session:session-6", "workout:workout-7", "workout:workout-7",
+  ]);
+  assert.equal(payload.events?.[3]?.fields?.sleepType, "nap");
+  assert.equal(payload.events?.at(-1)?.fields?.activityType, "false");
+  assert.equal(payload.events?.at(-1)?.fields?.distanceKm, 0);
+  assert.deepEqual(payload.provenance?.importedSections, {
+    personalInfo: false, dailyActivity: 0, dailySleep: 1, dailyReadiness: 0,
+    dailySpO2: 0, sleeps: 3, sessions: 2, workouts: 2, deletions: 0,
+  });
+});
+
+test("Oura identity resolution preserves nullish priority and explicit account short-circuiting", () => {
+  for (const primary of [undefined, null, false, 0]) {
+    const reads: string[] = [];
+    const personalInfo = {
+      get id() { reads.push("id"); return primary; },
+      get user_id() { reads.push("user_id"); return "synthetic-profile"; },
+      get userId(): never { throw new Error("lower-priority identity must not be read"); },
+    };
+    const payload = normalizeOuraSnapshot({
+      importedAt: "2026-04-24T12:00:00.000Z", personalInfo,
+    });
+    const expected = primary === false ? undefined : primary === 0 ? "0" : "synthetic-profile";
+    assert.equal(payload.accountId, expected);
+    assert.equal(payload.provenance?.ouraUserId, expected);
+    assert.deepEqual(reads, primary === undefined || primary === null
+      ? ["id", "user_id", "id", "user_id"] : ["id", "id"]);
+
+    reads.length = 0;
+    const explicit = normalizeOuraSnapshot({
+      importedAt: "2026-04-24T12:00:00.000Z", accountId: 0, personalInfo,
+    });
+    assert.equal(explicit.accountId, "0");
+    assert.equal(explicit.provenance?.ouraUserId, expected);
+    assert.deepEqual(reads, primary === undefined || primary === null
+      ? ["id", "user_id"] : ["id"]);
+  }
+});
+
+test("Oura record emitters preserve the first getter exception and stop before later sections", () => {
+  const reads: string[] = [];
+  const failure = new Error("synthetic sleep failure");
+  assert.throws(() => normalizeOuraSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    personalInfo: { get id() { reads.push("identity"); return "synthetic-profile"; } },
+    sleeps: [{ get type(): never { reads.push("sleep"); throw failure; } }],
+    sessions: [{ get start_datetime(): never { throw new Error("later section was read"); } }],
+  }), (error: unknown) => error === failure);
+  assert.deepEqual(reads, ["identity", "sleep"]);
 });

@@ -185,6 +185,40 @@ export function toIso(value: unknown): string | undefined {
   return normalizeTimestamp(value, "timestamp");
 }
 
+/** Preserve provider date-string acceptance without applying the strict event timestamp schema. */
+export function normalizeProviderTimestamp(value: unknown): string | undefined {
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return value.toISOString();
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value).toISOString();
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    return undefined;
+  }
+
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
+}
+
+export function laterIsoTimestamp(left: string, right: string): string {
+  return Date.parse(right) > Date.parse(left) ? right : left;
+}
+
+export function laterOptionalIsoTimestamp(left: string | undefined, right: string | undefined): string | undefined {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return laterIsoTimestamp(left, right);
+}
+
 export function minutesBetween(startAt: string | undefined, endAt: string | undefined): number | undefined {
   if (!startAt || !endAt) {
     return undefined;

@@ -1,11 +1,12 @@
 import { buildHostedLocalWebAuthEnvironment, removeHostedLocalWebAuthorityEnvironment } from "../authority-env.ts";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { constants, existsSync, readdirSync, readFileSync } from "node:fs";
-import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { constants, existsSync } from "node:fs";
+import { access, chmod, cp, mkdir, mkdtemp, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { stripVTControlCharacters } from "node:util";
 
 import {
   removeHostedLocalWebAuthorityFromProcessEnvironment,
@@ -17,6 +18,7 @@ import {
   resolveHostedLocalCodexSubscriptionAuthEnvValue,
   shouldSeedHostedLocalCodexSubscriptionAuth,
 } from "./codex-subscription-auth.ts";
+import { prepareHostedLocalCloudflareSourceSnapshot } from "./cloudflare-source-snapshot.ts";
 import { resolveHostedLocalDevConfig } from "./config.ts";
 import {
   cloudflareDir,
@@ -26,6 +28,7 @@ import {
   DEFAULT_WORKER_PERSIST_DIR,
   DEFAULT_WORKER_PORT,
   HOSTED_LOCAL_WORKTREE_ROOT,
+  HOSTED_LOCAL_RUNNER_BUNDLE_ROOT,
   HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
   HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
@@ -202,30 +205,8 @@ const HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER = {
 } as const;
 const HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG = "gpt-5.4-nano";
 const HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG = "gpt-5.4-mini";
-const HOSTED_LOCAL_RUNNER_BUNDLE_ROOT = path.join(
-  repoRoot,
-  "apps",
-  "cloudflare",
-  ".deploy",
-  "runner-bundle",
-);
 const HOSTED_LOCAL_RUNNER_BUNDLE_MANIFEST_FILE =
   ".murph-runner-bundle-manifest.json";
-const HOSTED_LOCAL_CLOUDFLARE_SOURCE_SNAPSHOT_DIR = "cloudflare-source";
-const HOSTED_LOCAL_WORKSPACE_PACKAGE_SCOPE = "@murphai/";
-
-type HostedLocalCloudflareSourceSnapshot = {
-  cloudflareAppDir: string;
-  workspaceRoot: string;
-};
-
-type HostedLocalWorkspacePackage = {
-  dependencies: readonly string[];
-  dir: string;
-  externalDependencies: readonly string[];
-  packageJsonPath: string;
-};
-
 function registerHostedLocalStackLifecycle(input: {
   abortSignal?: AbortSignal;
   kill: (signal?: NodeJS.Signals) => void;
@@ -690,61 +671,12 @@ export async function startHostedLocalDevStack(input: {
       stderrTarget: input.stderrTarget,
     });
 
-    if (!config.skipPrismaMigrate) {
-      if (shouldSyncLocalDatabaseSchema(runtimeEnv.DATABASE_URL)) {
-        await runCommand("pnpm", [
-          "--dir",
-          "apps/web",
-          "exec",
-          "prisma",
-          "db",
-          "push",
-          config.forceResetLocalDatabase ? "--force-reset" : "--accept-data-loss",
-        ], {
-          cwd: repoRoot,
-          env: runtimeEnv,
-          name: "setup",
-          signal: abortController.signal,
-        });
-      } else {
-        await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
-          cwd: repoRoot,
-          env: runtimeEnv,
-          name: "setup",
-          signal: abortController.signal,
-        });
-      }
-
-      // The DB is now the hosted Linq home-line authority, so seed the
-      // configured lines the same way the Vercel deploy does. Without this a
-      // fresh local database has no assignable line and onboarding activation
-      // fails closed with LINQ_CONVERSATION_PHONE_REQUIRED. Provider inventory
-      // sync is skipped locally so startup needs no Linq API call. With no
-      // configured conversation phones there is nothing to seed and the
-      // script's pool-ready assertion would fail startup, so skip it: e2e
-      // scenarios seed their own line inventory, and a dev stack without Linq
-      // env keeps failing closed at activation exactly as before.
-      const configuredLinqConversationPhones =
-        runtimeEnv.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS?.trim() ?? "";
-      if (configuredLinqConversationPhones.length > 0) {
-        await runCommand("pnpm", [
-          "--dir",
-          "apps/web",
-          "linq:sync-lines",
-          "--",
-          "--skip-provider-inventory",
-        ], {
-          cwd: repoRoot,
-          env: runtimeEnv,
-          name: "setup",
-          signal: abortController.signal,
-        });
-      } else {
-        (input.stderrTarget ?? process.stderr).write(
-          "[setup] No HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS configured; skipping hosted Linq line seeding.\n",
-        );
-      }
-    }
+    await prepareHostedLocalDatabase({
+      abortSignal: abortController.signal,
+      config,
+      runtimeEnv,
+      stderrTarget: input.stderrTarget,
+    });
 
     if (!config.skipWeb) {
       await maybeGenerateHostedWebHealthCommons({
@@ -756,74 +688,14 @@ export async function startHostedLocalDevStack(input: {
     }
 
     if (workerRuntimeEnv !== null) {
-      if (initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1") {
-        const runnerBundleEnv: NodeJS.ProcessEnv = {
-          ...(workerProcessEnv ?? workerRuntimeEnv),
-          MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY:
-            (workerProcessEnv ?? workerRuntimeEnv).MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY ?? "1",
-          MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1",
-        };
-        if (runnerBundleEnv[HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV] === "1") {
-          runnerBundleEnv[MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV] = "1";
-        }
-        await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"], {
-          cwd: repoRoot,
-          env: runnerBundleEnv,
-          name: "setup",
-          signal: abortController.signal,
-        });
-        if (workerProcessEnv !== null) {
-          workerProcessEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
-        }
-      }
-      const runnerBundleFingerprintEnv =
-        await readHostedLocalRunnerBundleFingerprintEnv();
-      applyHostedLocalRunnerBundleFingerprintEnv({
-        fingerprintEnv: runnerBundleFingerprintEnv,
+      await prepareHostedLocalRunner({
+        abortSignal: abortController.signal,
+        initialEnv,
+        tempDir,
+        workerConfigPath,
+        workerPersistDir,
         workerProcessEnv,
         workerRuntimeEnv,
-      });
-      const cloudflareSourceSnapshot = await prepareHostedLocalCloudflareSourceSnapshot({
-        abortSignal: abortController.signal,
-        tempDir,
-      });
-      await writeFile(
-        workerConfigPath,
-        `${JSON.stringify(
-          buildWranglerLocalDevConfig(workerRuntimeEnv, {
-            cloudflareAppDir: cloudflareSourceSnapshot.cloudflareAppDir,
-            configDir: path.dirname(workerConfigPath),
-            workspaceRoot: cloudflareSourceSnapshot.workspaceRoot,
-          }),
-          null,
-          2,
-        )}\n`,
-        {
-          encoding: "utf8",
-          mode: 0o600,
-        },
-      );
-      await chmod(workerConfigPath, 0o600);
-
-      const runnerCleanupScope = resolvePreStartHostedRunnerContainerCleanupScope(initialEnv);
-      await cleanupHostedRunnerContainers({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        ignoreErrors: true,
-        scope: runnerCleanupScope,
-        stoppedOnly: true,
-      });
-      await cleanupHostedRunnerImages({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        force: false,
-        ignoreErrors: true,
-        preserveCurrentBuild: true,
-        scope: runnerCleanupScope,
-      });
-      await cleanupHostedRunnerContainerLocalState({
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        persistDir: workerPersistDir,
       });
     }
     throwIfAbortSignalAborted(abortController.signal);
@@ -1334,6 +1206,171 @@ export async function startHostedLocalDevStack(input: {
   function killHostedLocalMinioMonitor(): void {
     if (minioMonitor !== null) {
       minioMonitor.kill();
+    }
+  }
+}
+
+async function prepareHostedLocalRunner({
+  abortSignal,
+  initialEnv,
+  tempDir,
+  workerConfigPath,
+  workerPersistDir,
+  workerProcessEnv,
+  workerRuntimeEnv,
+}: {
+  abortSignal: AbortSignal;
+  initialEnv: NodeJS.ProcessEnv;
+  tempDir: string;
+  workerConfigPath: string;
+  workerPersistDir: string;
+  workerProcessEnv: NodeJS.ProcessEnv | null;
+  workerRuntimeEnv: NodeJS.ProcessEnv;
+}): Promise<void> {
+  if (initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1") {
+    const runnerBundleEnv: NodeJS.ProcessEnv = {
+      ...(workerProcessEnv ?? workerRuntimeEnv),
+      MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY:
+        (workerProcessEnv ?? workerRuntimeEnv).MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY ?? "1",
+      MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS: "1",
+    };
+    if (runnerBundleEnv[HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV] === "1") {
+      runnerBundleEnv[MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV] = "1";
+    }
+    await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"], {
+      cwd: repoRoot,
+      env: runnerBundleEnv,
+      name: "setup",
+      signal: abortSignal,
+    });
+    if (workerProcessEnv !== null) {
+      workerProcessEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
+    }
+  }
+  const runnerBundleFingerprintEnv =
+    await readHostedLocalRunnerBundleFingerprintEnv();
+  applyHostedLocalRunnerBundleFingerprintEnv({
+    fingerprintEnv: runnerBundleFingerprintEnv,
+    workerProcessEnv,
+    workerRuntimeEnv,
+  });
+  const cloudflareSourceSnapshot = await prepareHostedLocalCloudflareSourceSnapshot({
+    abortSignal: abortSignal,
+    tempDir,
+  });
+  await writeFile(
+    workerConfigPath,
+    `${JSON.stringify(
+      buildWranglerLocalDevConfig(workerRuntimeEnv, {
+        cloudflareAppDir: cloudflareSourceSnapshot.cloudflareAppDir,
+        configDir: path.dirname(workerConfigPath),
+        workspaceRoot: cloudflareSourceSnapshot.workspaceRoot,
+      }),
+      null,
+      2,
+    )}\n`,
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
+  await chmod(workerConfigPath, 0o600);
+
+  const runnerCleanupScope = resolvePreStartHostedRunnerContainerCleanupScope(initialEnv);
+  await cleanupHostedRunnerContainers({
+    cwd: repoRoot,
+    env: workerProcessEnv ?? workerRuntimeEnv,
+    ignoreErrors: true,
+    scope: runnerCleanupScope,
+    stoppedOnly: true,
+  });
+  await cleanupHostedRunnerImages({
+    cwd: repoRoot,
+    env: workerProcessEnv ?? workerRuntimeEnv,
+    force: false,
+    ignoreErrors: true,
+    preserveCurrentBuild: true,
+    scope: runnerCleanupScope,
+  });
+  await cleanupHostedRunnerContainerLocalState({
+    env: workerProcessEnv ?? workerRuntimeEnv,
+    persistDir: workerPersistDir,
+  });
+}
+
+async function prepareHostedLocalDatabase({
+  abortSignal,
+  config,
+  runtimeEnv,
+  stderrTarget,
+}: {
+  abortSignal: AbortSignal;
+  config: HostedLocalDevConfig;
+  runtimeEnv: NodeJS.ProcessEnv;
+  stderrTarget: NodeJS.WritableStream | undefined;
+}): Promise<void> {
+  if (!config.skipPrismaMigrate) {
+    if (shouldSyncLocalDatabaseSchema(runtimeEnv.DATABASE_URL)) {
+      await runCommand("pnpm", [
+        "--dir",
+        "apps/web",
+        "exec",
+        "prisma",
+        "db",
+        "push",
+        config.forceResetLocalDatabase ? "--force-reset" : "--accept-data-loss",
+      ], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+      await runCommand("pnpm", [
+        "--dir", "apps/web", "exec", "prisma", "db", "execute",
+        "--file", "scripts/initialize-local-runtime-cutover.sql",
+      ], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+    } else {
+      await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+    }
+
+    // The DB is now the hosted Linq home-line authority, so seed the
+    // configured lines the same way the Vercel deploy does. Without this a
+    // fresh local database has no assignable line and onboarding activation
+    // fails closed with LINQ_CONVERSATION_PHONE_REQUIRED. Provider inventory
+    // sync is skipped locally so startup needs no Linq API call. With no
+    // configured conversation phones there is nothing to seed and the
+    // script's pool-ready assertion would fail startup, so skip it: e2e
+    // scenarios seed their own line inventory, and a dev stack without Linq
+    // env keeps failing closed at activation exactly as before.
+    const configuredLinqConversationPhones =
+      runtimeEnv.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS?.trim() ?? "";
+    if (configuredLinqConversationPhones.length > 0) {
+      await runCommand("pnpm", [
+        "--dir",
+        "apps/web",
+        "linq:sync-lines",
+        "--",
+        "--skip-provider-inventory",
+      ], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: abortSignal,
+      });
+    } else {
+      (stderrTarget ?? process.stderr).write(
+        "[setup] No HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS configured; skipping hosted Linq line seeding.\n",
+      );
     }
   }
 }
@@ -1874,248 +1911,6 @@ function usesHostedLocalIsolatedRunnerScope(env: NodeJS.ProcessEnv): boolean {
 function shouldUseIsolatedDockerConfig(env: NodeJS.ProcessEnv): boolean {
   return requiresHostedLocalE2eIsolation(env)
     && env[HOSTED_LOCAL_PRESERVE_DOCKER_CONFIG_ENV]?.trim() !== "1";
-}
-
-async function prepareHostedLocalCloudflareSourceSnapshot(input: {
-  abortSignal: AbortSignal | undefined;
-  tempDir: string;
-}): Promise<HostedLocalCloudflareSourceSnapshot> {
-  const workspaceRoot = path.join(
-    input.tempDir,
-    HOSTED_LOCAL_CLOUDFLARE_SOURCE_SNAPSHOT_DIR,
-  );
-  const cloudflareAppDir = path.join(workspaceRoot, "apps", "cloudflare");
-
-  await rm(workspaceRoot, { force: true, recursive: true });
-  await mkdir(cloudflareAppDir, { recursive: true });
-  throwIfAbortSignalAborted(input.abortSignal);
-
-  await copyFile(
-    path.join(repoRoot, "Dockerfile.cloudflare-hosted-runner"),
-    path.join(workspaceRoot, "Dockerfile.cloudflare-hosted-runner"),
-  );
-  await copyFile(
-    path.join(cloudflareDir, "package.json"),
-    path.join(cloudflareAppDir, "package.json"),
-  );
-  await copyFile(
-    path.join(cloudflareDir, ".dockerignore"),
-    path.join(cloudflareAppDir, ".dockerignore"),
-  );
-  await cp(
-    path.join(cloudflareDir, "src"),
-    path.join(cloudflareAppDir, "src"),
-    { recursive: true },
-  );
-  throwIfAbortSignalAborted(input.abortSignal);
-
-  await mkdir(path.join(cloudflareAppDir, ".deploy"), { recursive: true });
-  await cp(
-    HOSTED_LOCAL_RUNNER_BUNDLE_ROOT,
-    path.join(cloudflareAppDir, ".deploy", "runner-bundle"),
-    { recursive: true },
-  );
-  await symlinkIfPresent(
-    path.join(repoRoot, "node_modules"),
-    path.join(workspaceRoot, "node_modules"),
-  );
-  await materializeHostedLocalCloudflareWorkspacePackages({
-    abortSignal: input.abortSignal,
-    cloudflareAppDir,
-  });
-
-  return { cloudflareAppDir, workspaceRoot };
-}
-
-async function materializeHostedLocalCloudflareWorkspacePackages(input: {
-  abortSignal: AbortSignal | undefined;
-  cloudflareAppDir: string;
-}): Promise<void> {
-  const packagesByName = discoverHostedLocalWorkspacePackages();
-  const packageNames = resolveHostedLocalCloudflareWorkspacePackageNames(packagesByName);
-  const nodeModulesRoot = path.join(input.cloudflareAppDir, "node_modules");
-  const cloudflarePackageJson = readPackageJsonRecord(
-    path.join(cloudflareDir, "package.json"),
-  );
-
-  await rm(
-    path.join(nodeModulesRoot, HOSTED_LOCAL_WORKSPACE_PACKAGE_SCOPE.slice(0, -1)),
-    { force: true, recursive: true },
-  );
-
-  for (const packageName of packageNames) {
-    throwIfAbortSignalAborted(input.abortSignal);
-    const workspacePackage = packagesByName.get(packageName);
-    if (!workspacePackage) {
-      throw new Error(
-        `Hosted local Cloudflare snapshot could not find workspace package ${packageName}.`,
-      );
-    }
-
-    const packageTargetDir = path.join(nodeModulesRoot, ...packageName.split("/"));
-    const sourceDistDir = path.join(workspacePackage.dir, "dist");
-    if (!existsSync(sourceDistDir)) {
-      throw new Error(
-        `Hosted local Cloudflare snapshot requires ${packageName}/dist. Run the package build before starting pnpm dev.`,
-      );
-    }
-
-    await mkdir(packageTargetDir, { recursive: true });
-    await copyFile(
-      workspacePackage.packageJsonPath,
-      path.join(packageTargetDir, "package.json"),
-    );
-    await cp(sourceDistDir, path.join(packageTargetDir, "dist"), {
-      recursive: true,
-    });
-    await linkHostedLocalExternalDependencies({
-      dependencyNames: workspacePackage.externalDependencies,
-      sourceNodeModulesRoot: path.join(workspacePackage.dir, "node_modules"),
-      targetNodeModulesRoot: path.join(packageTargetDir, "node_modules"),
-    });
-  }
-
-  await linkHostedLocalExternalDependencies({
-    dependencyNames: readExternalDependencyNames(cloudflarePackageJson),
-    sourceNodeModulesRoot: path.join(cloudflareDir, "node_modules"),
-    targetNodeModulesRoot: nodeModulesRoot,
-  });
-}
-
-async function linkHostedLocalExternalDependencies(input: {
-  dependencyNames: readonly string[];
-  sourceNodeModulesRoot: string;
-  targetNodeModulesRoot: string;
-}): Promise<void> {
-  for (const dependencyName of input.dependencyNames) {
-    const dependencyParts = dependencyName.split("/");
-    const sourcePath = path.join(input.sourceNodeModulesRoot, ...dependencyParts);
-    const targetPath = path.join(input.targetNodeModulesRoot, ...dependencyParts);
-
-    await mkdir(path.dirname(targetPath), { recursive: true });
-    await symlinkIfPresent(sourcePath, targetPath);
-  }
-}
-
-function resolveHostedLocalCloudflareWorkspacePackageNames(
-  packagesByName: ReadonlyMap<string, HostedLocalWorkspacePackage>,
-): readonly string[] {
-  const cloudflarePackageJsonPath = path.join(cloudflareDir, "package.json");
-  const cloudflarePackageJson = readPackageJsonRecord(cloudflarePackageJsonPath);
-  const queue = readWorkspaceDependencyNames(cloudflarePackageJson);
-  const names: string[] = [];
-  const seen = new Set<string>();
-
-  for (let index = 0; index < queue.length; index += 1) {
-    const packageName = queue[index];
-    if (seen.has(packageName)) {
-      continue;
-    }
-
-    const workspacePackage = packagesByName.get(packageName);
-    if (!workspacePackage) {
-      throw new Error(
-        `Cloudflare depends on ${packageName}, but no matching workspace package was found.`,
-      );
-    }
-
-    seen.add(packageName);
-    names.push(packageName);
-    queue.push(...workspacePackage.dependencies);
-  }
-
-  return names;
-}
-
-function discoverHostedLocalWorkspacePackages(): ReadonlyMap<string, HostedLocalWorkspacePackage> {
-  const packagesRoot = path.join(repoRoot, "packages");
-  const packagesByName = new Map<string, HostedLocalWorkspacePackage>();
-
-  for (const entry of readdirSync(packagesRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
-
-    const packageJsonPath = path.join(packagesRoot, entry.name, "package.json");
-    if (!existsSync(packageJsonPath)) {
-      continue;
-    }
-
-    const packageJson = readPackageJsonRecord(packageJsonPath);
-    const packageName = packageJson.name;
-    if (
-      typeof packageName !== "string"
-      || !packageName.startsWith(HOSTED_LOCAL_WORKSPACE_PACKAGE_SCOPE)
-    ) {
-      continue;
-    }
-
-    packagesByName.set(packageName, {
-      dependencies: readWorkspaceDependencyNames(packageJson),
-      dir: path.dirname(packageJsonPath),
-      externalDependencies: readExternalDependencyNames(packageJson),
-      packageJsonPath,
-    });
-  }
-
-  return packagesByName;
-}
-
-function readPackageJsonRecord(packageJsonPath: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-  if (!isRecord(parsed)) {
-    throw new Error(`Invalid package.json at ${formatRepoPath(packageJsonPath)}.`);
-  }
-
-  return parsed;
-}
-
-function readWorkspaceDependencyNames(
-  packageJson: Record<string, unknown>,
-): string[] {
-  return readPackageDependencyNames(packageJson, "workspace");
-}
-
-function readExternalDependencyNames(
-  packageJson: Record<string, unknown>,
-): string[] {
-  return readPackageDependencyNames(packageJson, "external");
-}
-
-function readPackageDependencyNames(
-  packageJson: Record<string, unknown>,
-  kind: "external" | "workspace",
-): string[] {
-  const dependencies = isRecord(packageJson.dependencies)
-    ? packageJson.dependencies
-    : {};
-
-  return Object.entries(dependencies)
-    .filter(([name, version]) => {
-      if (typeof version !== "string") {
-        return false;
-      }
-
-      const workspaceDependency =
-        name.startsWith(HOSTED_LOCAL_WORKSPACE_PACKAGE_SCOPE)
-        && version.startsWith("workspace:");
-      return kind === "workspace" ? workspaceDependency : !workspaceDependency;
-    })
-    .map(([name]) => name);
-}
-
-async function symlinkIfPresent(sourcePath: string, targetPath: string): Promise<void> {
-  try {
-    await access(sourcePath);
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return;
-    }
-
-    throw error;
-  }
-
-  await symlink(sourcePath, targetPath, "dir");
 }
 
 async function maybePersistHostedLocalLinqWebhookSecret(input: {
@@ -3086,11 +2881,12 @@ function appendStartupDiagnostics(
 }
 
 function childReportedPortBindCollision(child: BufferedNamedChildProcess): boolean {
-  return [child.stdoutText(), child.stderrText()].some((output) =>
-    /\bEADDRINUSE\b/u.test(output)
-    || /\baddress already in use\b/ui.test(output)
-    || /\bport \d+ is already in use\b/ui.test(output)
-  );
+  return [child.stdoutText(), child.stderrText()].some((output) => {
+    const plainOutput = stripVTControlCharacters(output);
+    return /\bEADDRINUSE\b/u.test(plainOutput)
+      || /\baddress already in use\b/ui.test(plainOutput)
+      || /\bport \d+ is already in use\b/ui.test(plainOutput);
+  });
 }
 
 function combineChildOutput(input: readonly BufferedNamedChildProcess[] | readonly string[]): string {

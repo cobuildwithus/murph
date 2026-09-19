@@ -161,19 +161,7 @@ function createContext(
     BUNDLES: bucket,
     RUNNER_CONTAINER: createUnusedContainerNamespace(),
     RUNNER_CONTAINER_SMOKE: createUnusedContainerNamespace(),
-    USER_RUNNER: {
-      getByName() {
-        return {
-          async bindUser(userId) {
-            return { userId };
-          },
-          deleteHostedUserData: failUnused,
-          ensureRuntimeProcessingForUser: failUnused,
-          publishHostedPrivateMedia: failUnused,
-          runnerStatus: failUnused,
-        };
-      },
-    },
+
   };
   return {
     env,

@@ -1,6 +1,8 @@
 import type {
   HostedClinicalRecordsConnectLinkRequest,
   HostedClinicalRecordsConnectLinkResponse,
+  HostedClinicalRecordsFetchDocumentRequest,
+  HostedClinicalRecordsFetchDocumentResponse,
   HostedClinicalRecordsFetchPageRequest,
   HostedClinicalRecordsFetchPageResponse,
   HostedClinicalRecordsRecordOutcomeRequest,
@@ -452,6 +454,7 @@ export interface HostedRuntimeAssistantAskPrivateCompletionAuthorityResult {
 
 export interface HostedRuntimeExternalThreadRouteAuthorityResult {
   assistantAskFallbackRequired?: boolean | null;
+  threadIsDirect?: boolean;
 }
 
 export interface HostedRuntimeLinqDeliveryOutcomeRequest {
@@ -598,6 +601,10 @@ export interface HostedRuntimeClinicalRecordsPort {
       signal?: AbortSignal | null
     },
   ): Promise<HostedClinicalRecordsConnectLinkResponse>;
+  fetchDocument?(
+    request: HostedClinicalRecordsFetchDocumentRequest,
+    options?: { signal?: AbortSignal | null },
+  ): Promise<HostedClinicalRecordsFetchDocumentResponse>;
   fetchPage(
     request: HostedClinicalRecordsFetchPageRequest,
     options?: { signal?: AbortSignal | null },

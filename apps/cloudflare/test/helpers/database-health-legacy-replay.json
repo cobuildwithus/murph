@@ -1,0 +1,82 @@
+{
+  "sourceCommit": "b5bfd8c6c7a5",
+  "scenario": "Synthetic base writer: failed slot 1, healthy slot 2, failed slot 4, then completed-slot 4 replay at +10s; the two-check telemetry page was acknowledged.",
+  "meta": [
+    {
+      "singleton": 1,
+      "run_lease_until_ms": 0,
+      "consecutive_scrape_failures": 2,
+      "incident_open": 1,
+      "incident_sequence": 1,
+      "alert_sequence": 1,
+      "deferred_direct_error_count": 0,
+      "deferred_direct_error_checked_at_ms": null,
+      "deferred_pooled_error_count": 0,
+      "deferred_pooled_error_checked_at_ms": null,
+      "last_alert_attempted_at_ms": 1210000,
+      "monitoring_alert_owed_json": null,
+      "pending_alert_includes_monitoring": 0,
+      "pending_alert_idempotency_key": null,
+      "pending_alert_message": null
+    }
+  ],
+  "samples": [
+    {
+      "observed_at_ms": 300000,
+      "checked_at_ms": 300000,
+      "scrape_status": "failed",
+      "failure_code": "required_metrics_missing",
+      "client_wait_seconds": 0,
+      "client_waiting_connections": 3,
+      "server_connections": null,
+      "server_pool_capacity": null,
+      "server_pool_saturation_ratio": null,
+      "server_pool_states_json": "{\"active\":40,\"idle\":6}",
+      "postgres_connections": 10,
+      "postgres_max_connections": null,
+      "postgres_connection_states_json": "{\"active\":5,\"idle\":5}",
+      "direct_connection_error_delta": 0,
+      "direct_connection_error_counters_json": "{\"[\\\"5432\\\",\\\"us-east\\\"]\":0,\"[\\\"6432\\\",\\\"us-east\\\"]\":0}",
+      "monitoring_evidence_json": "{\"availability\":\"incomplete\",\"connectionErrorEvidence\":{\"missingPortAttempts\":{\"5432\":0,\"6432\":0},\"parsedAttempts\":2},\"missingMetrics\":[\"planetscale_postgres_settings_max_connections\"]}",
+      "conditions_json": "[]"
+    },
+    {
+      "observed_at_ms": 600000,
+      "checked_at_ms": 600000,
+      "scrape_status": "ok",
+      "failure_code": null,
+      "client_wait_seconds": 0,
+      "client_waiting_connections": 3,
+      "server_connections": 10,
+      "server_pool_capacity": 50,
+      "server_pool_saturation_ratio": 0.2,
+      "server_pool_states_json": "{\"active\":40,\"idle\":6}",
+      "postgres_connections": 10,
+      "postgres_max_connections": 50,
+      "postgres_connection_states_json": "{\"active\":5,\"idle\":5}",
+      "direct_connection_error_delta": 0,
+      "direct_connection_error_counters_json": "{\"[\\\"5432\\\",\\\"us-east\\\"]\":0,\"[\\\"6432\\\",\\\"us-east\\\"]\":0}",
+      "monitoring_evidence_json": null,
+      "conditions_json": "[]"
+    },
+    {
+      "observed_at_ms": 1200000,
+      "checked_at_ms": 1210000,
+      "scrape_status": "failed",
+      "failure_code": "required_metrics_missing",
+      "client_wait_seconds": 0,
+      "client_waiting_connections": 3,
+      "server_connections": null,
+      "server_pool_capacity": null,
+      "server_pool_saturation_ratio": null,
+      "server_pool_states_json": "{\"active\":40,\"idle\":6}",
+      "postgres_connections": 10,
+      "postgres_max_connections": null,
+      "postgres_connection_states_json": "{\"active\":5,\"idle\":5}",
+      "direct_connection_error_delta": 0,
+      "direct_connection_error_counters_json": "{\"[\\\"5432\\\",\\\"us-east\\\"]\":0,\"[\\\"6432\\\",\\\"us-east\\\"]\":0}",
+      "monitoring_evidence_json": "{\"availability\":\"incomplete\",\"connectionErrorEvidence\":{\"missingPortAttempts\":{\"5432\":0,\"6432\":0},\"parsedAttempts\":2},\"missingMetrics\":[\"planetscale_postgres_settings_max_connections\"]}",
+      "conditions_json": "[{\"connectionErrorEvidence\":{\"missingPortAttempts\":{\"5432\":0,\"6432\":0},\"parsedAttempts\":4},\"failures\":2,\"kind\":\"monitoring_unavailable\",\"missingMetrics\":[\"planetscale_postgres_settings_max_connections\"],\"incompleteChecks\":2,\"unavailableChecks\":0}]"
+    }
+  ]
+}

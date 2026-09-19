@@ -2,7 +2,8 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { HostedLoginMethodEditor } from "../settings/hosted-login-method-dialog";
+import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
 import { ArrowRightIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -169,14 +170,11 @@ export function JoinInviteSignOutButtonIsland({
 }
 
 export function JoinInviteMessagingSetupIsland() {
-  const router = useRouter();
-  return <div className="flex flex-col gap-4">
-    <p className="text-sm leading-relaxed text-muted-foreground">
-      Add a phone number or connect Telegram in your account settings. Your current sign-in stays active.
-    </p>
-    <Button nativeButton={false} render={<Link href="/settings/accounts" />}>Connect a messaging account</Button>
-    <Button type="button" variant="outline" onClick={() => router.refresh()}>I’ve connected my account</Button>
-  </div>;
+  const [phoneActive, setPhoneActive] = useState(false);
+  return <HostedContactChannelChoice
+    phone={<HostedLoginMethodEditor method="phone" operation="set" presentation="inline" onOpenChange={() => {}} onActiveChange={setPhoneActive} />}
+    telegram={phoneActive ? null : <HostedLoginMethodEditor method="telegram" operation="set" presentation="inline" onOpenChange={() => {}} />}
+  />;
 }
 
 export function JoinInviteLegalConsentIsland({

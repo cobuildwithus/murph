@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: goal_template
 key: goal_template:prevent-gout-attacks
 slug: prevent-gout-attacks
-title: Prevent Gout Attacks
-summary: Prevent painful gout flares by keeping urate controlled, taking treatment consistently, and managing personal triggers without an extreme diet.
+title: Track My Gout Flare-Ups
+summary: Keep a simple record of gout flare-ups, symptoms, and possible triggers to discuss with your clinician.
 status: field-testing
 quality: usable
 aliases:
@@ -17,7 +17,7 @@ categories:
 goal:
   category: biomarkers
   outcomeKind: symptom
-  goalPhrase: prevent gout attacks
+  goalPhrase: track my gout flare-ups
   successSignals:
     - id: gout_flare_frequency
       kind: symptom
@@ -31,7 +31,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - cardiometabolic-health
-  startPrompt: Hey Murph, help me prevent gout attacks.
+  startPrompt: Hey Murph, help me track my gout flare-ups.
   indexable: true
 safety:
   cautionLevel: moderate
@@ -87,4 +87,4 @@ Do not start or stop allopurinol casually. Seek prompt help for a new widespread
 
 ## Related goals
 
-[Lower My Uric Acid](/goals/lower-uric-acid) · [Protect My Kidney Function](/goals/protect-kidney-function) · [Lower My Blood Pressure](/goals/lower-blood-pressure)
+[Understand My Uric Acid](/goals/lower-uric-acid) · [Understand My Kidney Health](/goals/protect-kidney-function) · [Track My Blood Pressure](/goals/lower-blood-pressure)

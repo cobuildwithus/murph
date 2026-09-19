@@ -1,436 +1,190 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
 import { createExperiment, initializeVault, readJsonlRecords } from '@murphai/core'
 import { assistantOutboxIntentSchema } from '@murphai/operator-config/assistant-cli-contracts'
-import { resolveAssistantStatePaths } from '@murphai/runtime-state/node'
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 
-import { logExperimentSessionRecord } from '../src/usecases/experiment-journal-vault.js'
+import {
+  logExperimentSessionRecord,
+  logExperimentSessionRecordFromInput,
+} from '../src/usecases/experiment-journal-vault.js'
+import { createIntegratedVaultServices } from '../src/vault-services.js'
 
-const occurrenceDate = new Date()
-occurrenceDate.setUTCDate(occurrenceDate.getUTCDate() - 1)
-occurrenceDate.setUTCHours(15, 0, 0, 0)
-const occurrenceAt = occurrenceDate.toISOString()
-const crossingReminderDate = new Date(occurrenceDate)
-crossingReminderDate.setUTCHours(23, 55, 0, 0)
-const crossingReminderAt = crossingReminderDate.toISOString()
-const plannedOccurrenceAt = new Date(
-  crossingReminderDate.getTime() + 15 * 60 * 1000,
-).toISOString()
-const experimentStartedOn = formatLocalDate(addUtcDays(occurrenceDate, -7))
-const experimentInterventionEnd = formatLocalDate(addUtcDays(occurrenceDate, 60))
-const firstIntentId = 'outbox_experiment_reminder_01'
-const retryIntentId = 'outbox_experiment_reminder_02'
-const automationId = 'automation_experiment_reminder_01'
-
-function addUtcDays(date: Date, days: number): Date {
-  const copy = new Date(date)
-  copy.setUTCDate(copy.getUTCDate() + days)
-  return copy
-}
-
-function formatLocalDate(date: Date): string {
-  return date.toISOString().slice(0, 10)
-}
-
-async function countEventIdInLedger(input: {
-  eventId: string
-  ledgerFile: string
-  vaultRoot: string
-}): Promise<number> {
-  const records = await readJsonlRecords({
-    vaultRoot: input.vaultRoot,
-    relativePath: input.ledgerFile,
-  })
-  return records.filter((record) => record.id === input.eventId).length
-}
+const occurrenceAt = '2026-08-10T15:00:00.000Z'
+const intentId = 'outbox_experiment_reminder_01'
 
 async function withExperiment(
-  run: (input: { experimentId: string; vaultRoot: string }) => Promise<void>,
+  run: (input: { experimentId: string; vault: string }) => Promise<void>,
 ): Promise<void> {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-reminder-session-'))
+  const vault = await mkdtemp(path.join(os.tmpdir(), 'murph-reminder-reader-'))
   try {
-    await initializeVault({ vaultRoot })
+    await initializeVault({ vaultRoot: vault })
     const created = await createExperiment({
-      vaultRoot,
-      slug: 'reminder-backed-sauna',
-      title: 'Reminder-backed sauna',
-      startedOn: experimentStartedOn,
+      vaultRoot: vault,
+      slug: 'reminder-reader-sauna',
+      title: 'Sauna',
+      startedOn: '2026-08-01',
       status: 'active',
       runPlan: {
-        interventionStart: experimentStartedOn,
-        interventionEnd: experimentInterventionEnd,
+        interventionStart: '2026-08-01',
+        interventionEnd: '2026-08-31',
         modality: 'sauna',
         targetSessions: 8,
         minimumUsefulSessions: 4,
       },
     })
-    await run({
-      experimentId: created.experiment.id,
-      vaultRoot,
-    })
+    await run({ experimentId: created.experiment.id, vault })
   } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
+    await rm(vault, { recursive: true, force: true })
   }
 }
 
-async function writeReminderIntent(input: {
-  automationId?: string
-  experimentId: string
-  intentId: string
-  plannedOccurrenceAt?: string | null
-  scheduledOccurrenceAt?: string
-  status?: 'pending' | 'sent'
-  supportSeriesId?: string
-  threadIsDirect?: boolean
-  vaultRoot: string
-}): Promise<void> {
-  const message = 'Sauna session time. Reply when you finish.'
-  const status = input.status ?? 'sent'
-  const scheduledOccurrenceAt = input.scheduledOccurrenceAt ?? occurrenceAt
-  const intent = assistantOutboxIntentSchema.parse({
+function reminderIntent(experimentId: string) {
+  return assistantOutboxIntentSchema.parse({
     schema: 'murph.assistant-outbox-intent.v1',
-    intentId: input.intentId,
-    sessionId: `session_${input.intentId}`,
-    turnId: `turn_${input.intentId}`,
-    createdAt: scheduledOccurrenceAt,
-    updatedAt: scheduledOccurrenceAt,
-    lastAttemptAt: scheduledOccurrenceAt,
+    intentId,
+    sessionId: 'session_reminder',
+    turnId: 'turn_reminder',
+    createdAt: occurrenceAt,
+    updatedAt: occurrenceAt,
+    lastAttemptAt: occurrenceAt,
     nextAttemptAt: null,
-    sentAt: status === 'sent' ? scheduledOccurrenceAt : null,
-    attemptCount: status === 'sent' ? 1 : 0,
-    status,
-    message,
-    subject: null,
-    operation: null,
-    dedupeKey: `experiment-reminder-dedupe:${input.intentId}`,
-    targetFingerprint: 'experiment-reminder-target',
+    sentAt: occurrenceAt,
+    attemptCount: 1,
+    status: 'sent',
+    message: 'Session time.',
+    dedupeKey: 'experiment-reminder',
+    targetFingerprint: 'private-reminder',
     channel: 'linq',
     identityId: null,
-    actorId: 'member-1',
-    threadId: 'thread-1',
-    threadIsDirect: input.threadIsDirect ?? true,
-    replyToMessageId: null,
+    actorId: 'member-demo',
+    threadId: 'thread-demo',
+    threadIsDirect: true,
     bindingDelivery: null,
-    deliverySource: null,
-    automationAuthority: {
-      automationId: input.automationId ?? automationId,
-      supportSeriesId:
-        input.supportSeriesId ?? `experiment:${input.experimentId}`,
-      expectedUpdatedAt: scheduledOccurrenceAt,
-    },
-    scheduledOccurrenceAt,
-    plannedOccurrenceAt:
-      input.plannedOccurrenceAt === undefined
-        ? scheduledOccurrenceAt
-        : input.plannedOccurrenceAt,
     explicitTarget: null,
-    delivery:
-      status === 'sent'
-        ? {
-            kind: 'message',
-            channel: 'linq',
-            idempotencyKey: null,
-            target: 'thread-1',
-            targetKind: 'thread',
-            sentAt: scheduledOccurrenceAt,
-            messageLength: message.length,
-            providerMessageId: `linq-message:${input.intentId}`,
-            providerThreadId: 'thread-1',
-          }
-        : null,
-    deliveryConfirmationPending: false,
-    deliveryIdempotencyKey: null,
-    deliveryTransportIdempotent: false,
+    automationAuthority: {
+      automationId: 'automation_reminder',
+      supportSeriesId: `experiment:${experimentId}`,
+      expectedUpdatedAt: occurrenceAt,
+    },
+    scheduledOccurrenceAt: occurrenceAt,
+    plannedOccurrenceAt: occurrenceAt,
+    delivery: {
+      kind: 'message',
+      channel: 'linq',
+      idempotencyKey: null,
+      target: 'thread-demo',
+      targetKind: 'thread',
+      sentAt: occurrenceAt,
+      messageLength: 13,
+      providerMessageId: 'message-demo',
+      providerThreadId: 'thread-demo',
+    },
     lastError: null,
   })
-  const outboxDirectory = resolveAssistantStatePaths(input.vaultRoot).outboxDirectory
-  await mkdir(outboxDirectory, { recursive: true })
-  await writeFile(
-    path.join(outboxDirectory, `${input.intentId}.json`),
-    `${JSON.stringify(intent)}\n`,
-    'utf8',
-  )
 }
 
-test('delivered reminder provenance owns one deterministic experiment occurrence without a current automation read', async () => {
-  await withExperiment(async ({ experimentId, vaultRoot }) => {
-    await writeReminderIntent({
-      automationId: 'automation_first_session_prep',
-      experimentId,
-      intentId: firstIntentId,
-      plannedOccurrenceAt,
-      scheduledOccurrenceAt: crossingReminderAt,
-      vaultRoot,
-    })
-    await writeReminderIntent({
-      automationId: 'automation_planned_session_support',
-      experimentId,
-      intentId: retryIntentId,
-      plannedOccurrenceAt,
-      scheduledOccurrenceAt: plannedOccurrenceAt,
-      vaultRoot,
-    })
-
-    const [first, replay] = await Promise.all([
-      logExperimentSessionRecord({
-        vault: vaultRoot,
-        lookup: experimentId,
-        reminderIntentId: firstIntentId,
-      }),
-      logExperimentSessionRecord({
-        vault: vaultRoot,
-        lookup: experimentId,
-        reminderIntentId: retryIntentId,
-      }),
-    ])
-    const sequentialReplay = await logExperimentSessionRecord({
-      vault: vaultRoot,
-      lookup: experimentId,
-      reminderIntentId: retryIntentId,
-    })
-
-    assert.equal([first, replay].filter((result) => result.created).length, 1)
-    assert.equal(replay.eventId, first.eventId)
-    assert.equal(sequentialReplay.created, false)
-    assert.equal(sequentialReplay.eventId, first.eventId)
-    if (
-      !('progress' in first)
-      || !('progress' in replay)
-      || !('progress' in sequentialReplay)
-    ) {
-      assert.fail('reminder-backed writes must return canonical progress readback')
-    }
-    assert.equal(first.progress?.adherence.completedSessions, 1)
-    assert.deepEqual(first.progress?.adherence.sessionEventIds, [first.eventId])
-    assert.equal(replay.progress?.adherence.completedSessions, 1)
-    assert.deepEqual(replay.progress?.adherence.sessionEventIds, [first.eventId])
-    assert.equal(sequentialReplay.progress?.adherence.completedSessions, 1)
-    assert.deepEqual(
-      sequentialReplay.progress?.adherence.sessionEventIds,
-      [first.eventId],
-    )
-    assert.equal(
-      await countEventIdInLedger({
-        eventId: first.eventId,
-        ledgerFile: first.ledgerFile,
-        vaultRoot,
-      }),
-      1,
-    )
-  })
-})
-
-test('distinct planned occurrences retain distinct canonical session effects', async () => {
-  await withExperiment(async ({ experimentId, vaultRoot }) => {
-    const laterOccurrenceAt = new Date(
-      Date.parse(occurrenceAt) + 60 * 60 * 1000,
-    ).toISOString()
-    await writeReminderIntent({
-      automationId: 'automation_session_one',
-      experimentId,
-      intentId: firstIntentId,
-      plannedOccurrenceAt: occurrenceAt,
-      scheduledOccurrenceAt: occurrenceAt,
-      vaultRoot,
-    })
-    await writeReminderIntent({
-      automationId: 'automation_session_two',
-      experimentId,
-      intentId: retryIntentId,
-      plannedOccurrenceAt: laterOccurrenceAt,
-      scheduledOccurrenceAt: laterOccurrenceAt,
-      vaultRoot,
-    })
-
-    const first = await logExperimentSessionRecord({
-      vault: vaultRoot,
-      lookup: experimentId,
-      reminderIntentId: firstIntentId,
-    })
-    const second = await logExperimentSessionRecord({
-      vault: vaultRoot,
-      lookup: experimentId,
-      reminderIntentId: retryIntentId,
-    })
-
-    assert.notEqual(second.eventId, first.eventId)
-    assert.equal(first.created, true)
-    assert.equal(second.created, true)
-    if (!('progress' in second)) {
-      assert.fail('reminder-backed writes must return canonical progress readback')
-    }
-    assert.equal(second.progress?.adherence.completedSessions, 2)
-    assert.deepEqual(
-      second.progress?.adherence.sessionEventIds,
-      [first.eventId, second.eventId],
-    )
-  })
-})
-
-test('reminder-backed logging records a planned session after midnight instead of the earlier reminder date', async () => {
-  await withExperiment(async ({ experimentId, vaultRoot }) => {
-    await writeReminderIntent({
-      experimentId,
-      intentId: firstIntentId,
-      plannedOccurrenceAt,
-      scheduledOccurrenceAt: crossingReminderAt,
-      vaultRoot,
-    })
-
+test('reminder logging passes the exact vault and intent id to the injected owner reader', async () => {
+  await withExperiment(async ({ experimentId, vault }) => {
+    const readAssistantOutboxIntent = vi.fn(async () => reminderIntent(experimentId))
     const result = await logExperimentSessionRecord({
-      vault: vaultRoot,
+      vault,
       lookup: experimentId,
-      reminderIntentId: firstIntentId,
-    })
-    const records = await readJsonlRecords({
-      vaultRoot,
-      relativePath: result.ledgerFile,
-    })
-    const event = records.find((record) => record.id === result.eventId)
+      reminderIntentId: intentId,
+    }, { readAssistantOutboxIntent })
 
-    assert.equal(event?.occurredAt, plannedOccurrenceAt)
+    assert.deepEqual(readAssistantOutboxIntent.mock.calls, [[vault, intentId]])
+    assert.equal(result.created, true)
+    const records = await readJsonlRecords({ vaultRoot: vault, relativePath: result.ledgerFile })
+    assert.equal(records.find((record) => record.id === result.eventId)?.occurredAt, occurrenceAt)
   })
 })
 
-test('reminder-backed session logging rejects transport, owner, and occurrence substitutions', async () => {
-  await withExperiment(async ({ experimentId, vaultRoot }) => {
-    await writeReminderIntent({
-      experimentId,
-      intentId: firstIntentId,
-      supportSeriesId: 'experiment:exp_other_owner',
-      vaultRoot,
+test('manual session logging needs no outbox reader and never calls an injected reader', async () => {
+  await withExperiment(async ({ experimentId, vault }) => {
+    const input = { vault, lookup: experimentId, occurredAt: occurrenceAt }
+    assert.equal((await logExperimentSessionRecord(input)).created, true)
+    const readAssistantOutboxIntent = vi.fn(async () => {
+      throw new Error('Manual sessions must not read assistant runtime state.')
     })
-    await assert.rejects(
-      () =>
-        logExperimentSessionRecord({
-          vault: vaultRoot,
-          lookup: experimentId,
-          reminderIntentId: firstIntentId,
-        }),
-      /does not own experiment/u,
-    )
-
-    await writeReminderIntent({
-      experimentId,
-      intentId: firstIntentId,
-      status: 'pending',
-      vaultRoot,
-    })
-    await assert.rejects(
-      () =>
-        logExperimentSessionRecord({
-          vault: vaultRoot,
-          lookup: experimentId,
-          reminderIntentId: firstIntentId,
-        }),
-      /not a provider-accepted private reminder message/u,
-    )
-
-    await writeReminderIntent({
-      experimentId,
-      intentId: firstIntentId,
-      threadIsDirect: false,
-      vaultRoot,
-    })
-    await assert.rejects(
-      () =>
-        logExperimentSessionRecord({
-          vault: vaultRoot,
-          lookup: experimentId,
-          reminderIntentId: firstIntentId,
-        }),
-      /not a provider-accepted private reminder message/u,
-    )
-
-    await writeReminderIntent({
-      experimentId,
-      intentId: firstIntentId,
-      plannedOccurrenceAt: null,
-      vaultRoot,
-    })
-    await assert.rejects(
-      () =>
-        logExperimentSessionRecord({
-          vault: vaultRoot,
-          lookup: experimentId,
-          reminderIntentId: firstIntentId,
-        }),
-      /has no planned occurrence provenance/u,
-    )
-
-    await writeReminderIntent({
-      experimentId,
-      intentId: firstIntentId,
-      vaultRoot,
-    })
-    await assert.rejects(
-      () =>
-        logExperimentSessionRecord({
-          vault: vaultRoot,
-          lookup: experimentId,
-          reminderIntentId: firstIntentId,
-          occurredAt: '2026-08-10T16:00:00.000Z',
-        }),
-      /Do not pass date, occurredAt, or source/u,
-    )
-    await assert.rejects(
-      () =>
-        logExperimentSessionRecord({
-          vault: vaultRoot,
-          lookup: experimentId,
-          reminderIntentId: firstIntentId,
-          date: '2026-08-10',
-        }),
-      /Do not pass date, occurredAt, or source/u,
-    )
-    await assert.rejects(
-      () =>
-        logExperimentSessionRecord({
-          vault: vaultRoot,
-          lookup: experimentId,
-          reminderIntentId: firstIntentId,
-          source: 'device',
-        }),
-      /Do not pass date, occurredAt, or source/u,
-    )
+    assert.equal((await logExperimentSessionRecord(input, { readAssistantOutboxIntent })).created, true)
+    assert.equal(readAssistantOutboxIntent.mock.calls.length, 0)
   })
 })
 
-test('reminder occurrence replays reject semantic changes instead of silently rewriting or duplicating the event', async () => {
-  await withExperiment(async ({ experimentId, vaultRoot }) => {
-    await writeReminderIntent({
-      experimentId,
-      intentId: firstIntentId,
-      vaultRoot,
-    })
-    const created = await logExperimentSessionRecord({
-      vault: vaultRoot,
-      lookup: experimentId,
-      reminderIntentId: firstIntentId,
-      sessionStatus: 'completed',
-    })
-
-    await assert.rejects(
-      () =>
-        logExperimentSessionRecord({
-          vault: vaultRoot,
-          lookup: experimentId,
-          reminderIntentId: firstIntentId,
-          sessionStatus: 'missed',
-        }),
-      /already logged with different sessionStatus/u,
-    )
-    assert.equal(
-      await countEventIdInLedger({
-        eventId: created.eventId,
-        ledgerFile: created.ledgerFile,
-        vaultRoot,
+test('reminder logging fails closed without its reader, for a missing intent, and for an id substitution', async () => {
+  await withExperiment(async ({ experimentId, vault }) => {
+    const input = { vault, lookup: experimentId, reminderIntentId: intentId }
+    await assert.rejects(() => logExperimentSessionRecord(input), { code: 'runtime_unavailable' })
+    await assert.rejects(() => logExperimentSessionRecord(input, {
+      readAssistantOutboxIntent: async () => null,
+    }), { code: 'contract_invalid' })
+    await assert.rejects(() => logExperimentSessionRecord(input, {
+      readAssistantOutboxIntent: async () => ({
+        ...reminderIntent(experimentId),
+        intentId: 'outbox_different_intent',
       }),
-      1,
-    )
+    }), { code: 'contract_invalid' })
+
+    const progress = await createIntegratedVaultServices().query.showExperimentProgress({
+      vault,
+      lookup: experimentId,
+      requestId: null,
+    })
+    assert.deepEqual(progress.progress.adherence.sessionEventIds, [])
+  })
+})
+
+test('invalid reminder ids are rejected before invoking the owner reader', async () => {
+  await withExperiment(async ({ experimentId, vault }) => {
+    const readAssistantOutboxIntent = vi.fn(async () => reminderIntent(experimentId))
+    await assert.rejects(() => logExperimentSessionRecord({
+      vault,
+      lookup: experimentId,
+      reminderIntentId: '../outbox_other',
+    }, { readAssistantOutboxIntent }), { code: 'invalid_option' })
+    assert.equal(readAssistantOutboxIntent.mock.calls.length, 0)
+  })
+})
+
+test('JSON payloads cannot supply reminder proof through direct or lazy integrated services', async () => {
+  await withExperiment(async ({ experimentId, vault }) => {
+    const inputFile = path.join(vault, 'session.json')
+    await writeFile(inputFile, JSON.stringify({
+      reminderIntentId: intentId,
+      plannedOccurrenceAt: '2026-08-11T15:00:00.000Z',
+      reminderProof: { plannedOccurrenceAt: '2026-08-11T15:00:00.000Z' },
+      intent: reminderIntent(experimentId),
+      dependencies: { readAssistantOutboxIntent: reminderIntent(experimentId) },
+    }))
+    const input = { vault, lookup: experimentId, inputFile, requestId: null }
+    await assert.rejects(() => logExperimentSessionRecordFromInput(input), {
+      code: 'runtime_unavailable',
+    })
+    const readAssistantOutboxIntent = vi.fn(async () => null)
+    const dependencies = { readAssistantOutboxIntent }
+    await assert.rejects(() => logExperimentSessionRecordFromInput(input, dependencies), {
+      code: 'contract_invalid',
+    })
+    const services = createIntegratedVaultServices(dependencies)
+    await assert.rejects(() => services.core.logExperimentSessionJson(input), {
+      code: 'contract_invalid',
+    })
+    assert.deepEqual(readAssistantOutboxIntent.mock.calls, [[vault, intentId], [vault, intentId]])
+
+    const trustedServices = createIntegratedVaultServices({
+      readAssistantOutboxIntent: async () => reminderIntent(experimentId),
+    })
+    const result = await trustedServices.core.logExperimentSessionJson(input)
+    const records = await readJsonlRecords({ vaultRoot: vault, relativePath: result.ledgerFile })
+    assert.equal(records.find((record) => record.id === result.eventId)?.occurredAt, occurrenceAt)
+    const replay = await logExperimentSessionRecordFromInput(input, {
+      readAssistantOutboxIntent: async () => reminderIntent(experimentId),
+    })
+    assert.equal(replay.eventId, result.eventId)
+    assert.equal(replay.created, false)
   })
 })

@@ -190,7 +190,6 @@ describe('assistant codex runtime', () => {
       baseInstructions: 'Do not use this in normal Murph config.',
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
-      excludeResumeTurns: true,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       prompt: 'User message:\nWhat changed?',
@@ -1219,10 +1218,10 @@ describe('assistant codex runtime', () => {
     expect(groupSharedRead).toHaveBeenCalledTimes(2)
     expect(groupSharedRead).toHaveBeenNthCalledWith(1, {
       projectionScopes: [{ projectionKind: 'steps-days.v0' }],
-    })
+    }, { signal: expect.any(AbortSignal) })
     expect(groupSharedRead).toHaveBeenNthCalledWith(2, {
       projectionScopes: [{ projectionKind: 'steps-days.v0' }],
-    })
+    }, { signal: expect.any(AbortSignal) })
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
   })
 

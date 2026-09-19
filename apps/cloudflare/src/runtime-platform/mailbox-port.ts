@@ -1,6 +1,7 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   parseHostedMailboxFetchResponse,
+  parseHostedExecutionWake,
   parseHostedMailboxPayloadFetchResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
@@ -24,7 +25,7 @@ export function createHostedWebMailboxPort(input: {
       let payload: unknown;
       try {
         payload = await fetchReplaySafeHostedWebControlPlaneJson({
-          body: request,
+          body: { ...request, decodeInlinePayloads: true },
           boundUserId: input.boundUserId,
           description: "Hosted mailbox fetch",
           fetchImpl: input.fetchImpl,
@@ -40,7 +41,19 @@ export function createHostedWebMailboxPort(input: {
         throw error;
       }
 
-      return parseHostedMailboxFetchResponse(payload);
+      const mailbox = parseHostedMailboxFetchResponse(payload);
+      // The ordinary parser proves these item records. Only the Worker port
+      // accepts this ephemeral enrichment; Web's canonical parser discards it.
+      const rawItems = (payload as { items: Array<Record<string, unknown>> }).items;
+      return {
+        ...mailbox,
+        items: mailbox.items.map((item, index) => ({
+          ...item,
+          ...(rawItems[index]?.decodedWake === undefined ? {} : {
+            decodedWake: parseHostedExecutionWake(rawItems[index]!.decodedWake),
+          }),
+        })),
+      };
     },
     async fetchPayload(
       request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetchPayload"]>[0],

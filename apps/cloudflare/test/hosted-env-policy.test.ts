@@ -36,6 +36,25 @@ const requiredHostedAssistantProvider = {
 } as const;
 
 describe("buildHostedRunnerContainerEnv", () => {
+  it.each([
+    "http://host.docker.internal:4011",
+    "http://127.0.0.1:4011",
+    "https://linq.example.test/custom/tenant/v3",
+  ])("keeps Linq upstream %s behind the canonical intercepted endpoint", (upstream) => {
+    const workerEnv = {
+      ...requiredHostedAssistantProvider,
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
+      LINQ_API_BASE_URL: upstream,
+      LINQ_API_TOKEN: "synthetic-worker-linq-token",
+    };
+    const runnerEnv = buildHostedRunnerContainerEnv(workerEnv);
+
+    expect(runnerEnv.LINQ_API_BASE_URL).toBe("https://api.linqapp.com/api/partner/v3");
+    expect(runnerEnv.LINQ_API_TOKEN).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
+    expect(workerEnv.LINQ_API_BASE_URL).toBe(upstream);
+    expect(workerEnv.LINQ_API_TOKEN).toBe("synthetic-worker-linq-token");
+  });
+
   it("does not forward legacy assistant api key selectors or unrelated referenced secrets", () => {
     const env = buildHostedRunnerContainerEnv({
       ...requiredHostedAssistantProvider,

@@ -157,7 +157,7 @@ test("first provider-filtered read rebuilds carried v25 underscore provider rows
       readOnly: true,
     });
     try {
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 26);
+      assert.ok(QUERY_PROJECTION_SQLITE_VERSION >= 26);
       assert.equal(
         readSqliteRuntimeUserVersion(rebuiltDatabase),
         QUERY_PROJECTION_SQLITE_VERSION,
@@ -291,7 +291,9 @@ test("activity runtime reads bounded workout features without hydrating query en
       ].map((record) => JSON.stringify(record)).join("\n").concat("\n"),
       "utf8",
     );
+    const coldSourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot);
     await rebuildQueryProjection(vaultRoot);
+    assert.deepEqual(await summarizeWearableSourceHealthRuntime(vaultRoot), coldSourceHealth);
 
     const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH));
     try {

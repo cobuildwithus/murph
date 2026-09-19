@@ -37,6 +37,31 @@ describe("auth request admission", () => {
     mocks.consume.mockResolvedValueOnce({ allowed: false, retryAfter: 60 });
     await expect(admit(request())).rejects.toMatchObject({ code: "AUTH_RATE_LIMITED", httpStatus: 429 });
   });
+  it.each(["browser", "native"] as const)("allows one immediate resend on %s while preserving broader limits", async (transport) => {
+    await admit(request(), transport);
+    expect(mocks.consume.mock.calls).toEqual([
+      ["send:ip:127.0.0.1", { max: 20, window: 600 }],
+      ["send:cooldown:email:member@example.test", { max: 2, window: 60 }],
+      ["send:contact:email:member@example.test", { max: 5, window: 600 }],
+    ]);
+  });
+  it.each(["email", "phone"] as const)("does not charge the ten-minute %s budget for a short-window rejection", async (kind) => {
+    mocks.consume.mockImplementation(async (key: string) => ({
+      allowed: !key.startsWith("send:cooldown:"), retryAfter: 35,
+    }));
+    await expect(admit(request({ kind, value: kind === "email" ? "member@example.test" : "+12025550142" })))
+      .rejects.toMatchObject({ code: "AUTH_RATE_LIMITED", httpStatus: 429 });
+    expect(mocks.consume).toHaveBeenCalledTimes(2);
+    expect(mocks.consume.mock.calls.some(([key]) => key.startsWith("send:contact:"))).toBe(false);
+  });
+  it("retains the separate verification attempt budgets", async () => {
+    await admitHostedAuthOtpRequest({ request: request({ kind: "email", value: "member@example.test", code: "654321" }),
+      transport: "native", operation: "verify", prisma: getPrisma() });
+    expect(mocks.consume.mock.calls).toEqual([
+      ["verify:ip:127.0.0.1", { max: 100, window: 600 }],
+      ["verify:contact:email:member@example.test", { max: 20, window: 600 }],
+    ]);
+  });
   it("rejects browser origin and credential confusion before touching limit state", async () => {
     await expect(admit(request(undefined, { origin: "https://untrusted.example" }))).rejects.toMatchObject({ httpStatus: 403 });
     await expect(admit(request(undefined, { authorization: "Bearer synthetic" }))).rejects.toMatchObject({ code: "AUTH_REQUEST_INVALID" });
@@ -65,8 +90,12 @@ describe("auth code delivery", () => {
     await hostedAuthDelivery().email({ address: "member@example.test", code: "123456" });
     expect(mocks.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: expect.stringMatching(/^auth-/u), subject: "Your Murph sign-in code", to: ["member@example.test"],
+      text: expect.stringContaining("123456"),
+      html: expect.stringContaining(">123456</span>"),
     }));
-    await expect(hostedAuthDelivery().email({ address: "member@example.test", code: "invalid" })).rejects.toMatchObject({ code: "AUTH_DELIVERY_UNAVAILABLE" });
+    for (const code of ["invalid", "12345", "1234567", "<img src=x onerror=alert(1)>"]) {
+      await expect(hostedAuthDelivery().email({ address: "member@example.test", code })).rejects.toMatchObject({ code: "AUTH_DELIVERY_UNAVAILABLE" });
+    }
     expect(mocks.sendEmail).toHaveBeenCalledTimes(1);
   });
   it("redacts provider exceptions from the public error", async () => {
@@ -74,22 +103,5 @@ describe("auth code delivery", () => {
     await expect(hostedAuthDelivery().email({ address: "member@example.test", code: "123456" })).rejects.toMatchObject({
       code: "AUTH_DELIVERY_UNAVAILABLE", message: "We could not send a sign-in code. Try again shortly.",
     });
-  });
-  it("sends SMS with provider privacy settings and refuses redirects", async () => {
-    vi.stubEnv("HOSTED_AUTH_TWILIO_ACCOUNT_SID", `AC${"a".repeat(32)}`);
-    vi.stubEnv("HOSTED_AUTH_TWILIO_API_KEY_SID", `SK${"b".repeat(32)}`);
-    vi.stubEnv("HOSTED_AUTH_TWILIO_API_KEY_SECRET", "synthetic-twilio-secret");
-    vi.stubEnv("HOSTED_AUTH_TWILIO_MESSAGING_SERVICE_SID", `MG${"c".repeat(32)}`);
-    const send = vi.fn().mockResolvedValue(new Response("{}", { status: 201 }));
-    vi.stubGlobal("fetch", send);
-    await hostedAuthDelivery().sms({ phoneNumber: "+12025550147", code: "123456" });
-    const init = send.mock.calls[0]?.[1] as RequestInit;
-    expect(init.redirect).toBe("error");
-    expect(init.body).toBeInstanceOf(URLSearchParams);
-    expect(Object.fromEntries(init.body as URLSearchParams)).toMatchObject({
-      To: "+12025550147", ContentRetention: "discard", AddressRetention: "obfuscate", ValidityPeriod: "300", RiskCheck: "enable",
-    });
-    send.mockResolvedValue(new Response("synthetic private provider body", { status: 500 }));
-    await expect(hostedAuthDelivery().sms({ phoneNumber: "+12025550147", code: "123456" })).rejects.toMatchObject({ code: "AUTH_DELIVERY_UNAVAILABLE" });
   });
 });

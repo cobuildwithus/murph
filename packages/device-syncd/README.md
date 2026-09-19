@@ -2,6 +2,15 @@
 
 Workspace-private local device sync runtime for Murph.
 
+Junction `blood_oxygen` resource jobs that fail complete-day normalization and
+`electrocardiogram_voltage` jobs that fail recording binding stay queued for a
+30-minute recheck even after their initial attempt allowance. Existing data and
+the failed resource/window remain intact; corrected provider responses use the
+same import owner. This does not revive already terminal jobs, weaken source
+binding, or bypass disconnect and lease fences. Other failure classes retain
+their existing retry behavior. See `agent-docs/RELIABILITY.md` for the finite
+normalization categories, ECG collection counts, and hosted progress diagnostics.
+
 Contributing a new wearable provider? Start with `docs/device-provider-contribution-kit.md` in the repo root, then use the scaffolds listed in `docs/templates/README.md`.
 
 Murph's CLI can install, start, reuse, and stop this daemon for the selected vault through `murph device daemon ...`, so most operators should treat it as a built-in local service rather than a separately managed sidecar.
@@ -161,13 +170,26 @@ Current providers:
   `temporal-*` facet set through existing authoritative event sets, so a
   successful empty or insufficient replacement retracts stale derived facts;
   failed or yielded work grants no authority.
-- The temporal horizon is clamped to 1–14 authoritative vault-local days. The
-  newest eligible day imports inline, while older resource/day coordinates use
-  the existing durable queue in newest-first order. Queued or running work
-  deduplicates across restarts, while succeeded rows remain history rather than
-  suppressing a later scheduled pull whose source roster or provider data may
-  have widened. At the failure/yield ceiling, 28 temporal rows plus one ordinary
-  reconcile follow-up remain serialized by the existing per-account fence.
+- The temporal horizon is clamped to 1–14 authoritative vault-local days. All
+  complete-day work uses the existing durable resource/day queue, newest first.
+  A hashed `junctionTemporalSweepV1` metadata marker records the scheduled scope:
+  newest eligible day, timezone, resources, horizon, and stable source roster and
+  capabilities. Matching hourly reconciles skip the broad sweep; a new day or
+  changed scope schedules it again. The marker and children commit atomically in
+  local SQLite. Hosted recovery checkpoints the marker with exact retained jobs
+  before publishing it to Web; SQLite itself is excluded from hosted snapshots.
+  The marker never proves an import completed. Ordinary reconciliation keeps its cadence.
+- Oxygen/stress data-event jobs also queue intersecting local days within that
+  rolling horizon, plus days still awaiting closure and the 24-hour arrival lag.
+  Future children become available only after the lag. Bursts share the existing
+  day key; the account fence ensures an event arriving during a fetch executes
+  afterward and can recreate its completed day job. Daily repair covers missing
+  events and late corrections. No source-authority check is cached or removed.
+- Queued/running children retain existing retries across restarts. Succeeded or
+  dead rows can be recreated; a daily sweep has at most 28 temporal children plus
+  one ordinary continuation. Targeted events add at most the configured horizon
+  plus three not-yet-eligible local days for one resource. All jobs stay serialized
+  by the existing account fence, with unchanged complete-source-day validation.
 - Temporal children never advance generic account completion. That watermark is
   account activity state rather than complete floor coverage, so every scheduled
   reconcile still refetches configured ordinary resources. Collection remains
@@ -251,6 +273,15 @@ and authoritative facet scope changed earlier in the drain is disjoint from
 the next import. Overlap, an external ledger write, or an import failure forces
 a full rescan. The session is neither persisted nor shared across drains, and
 the worker still checks the foreground-yield fence before each job.
+
+The job's abort signal also reaches snapshot normalization and canonical import
+preparation. Large identity scans yield to the event loop at bounded row
+intervals so foreground polling can interrupt them. Cancellation before
+publication releases the canonical lock, discards the session cache, and
+requeues the existing job without consuming its retry budget. Once canonical
+publication starts it finishes atomically and reports committed progress, even
+if the signal aborts during the write. This does not make synchronous
+normalization, archive validation, or every preparation segment interruptible.
 
 Privacy-safe job timing separates Junction inventory requests, Junction
 resource requests, normalization, event-identity indexing, canonical writes,
@@ -485,3 +516,17 @@ discard that reuse. Historical attempts and calendar repair load their own
 inventory. Every canonical import retains its live connection-source admission
 check. The scope contains provider inventory only, never cached authorization
 or durable state.
+
+Schedule-time extended history, including weight, keeps one active identity per
+source lifecycle and coverage generation across day boundaries. Source-first
+exact history retains its window identity. Already accepted legacy jobs preserve
+their frozen windows and continuation keys until completion. A pending upstream
+weight pull still permits bounded reads and canonical import of available exact
+records; it prevents coverage certification and retains a daily continuation.
+A scan that began while the pull was pending carries that observation through
+its continuations and never certifies coverage; its daily continuation restarts
+from the history start and re-reads readiness there.
+Daily aggregate history continues to wait for provider readiness before its
+scan. Hosted future history can share the checkpoint-fenced reconcile proof's
+bounded deferral; content changes, dirty work, and proof expiry still admit the
+ordinary runtime path.

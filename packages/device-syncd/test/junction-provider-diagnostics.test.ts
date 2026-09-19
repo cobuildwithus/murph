@@ -2215,7 +2215,9 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     }),
   );
 
-  assert.deepEqual(initialResult.metadataPatch, {
+  const { junctionTemporalSweepV1, ...historicalProgress } = initialResult.metadataPatch ?? {};
+  assert.equal(typeof junctionTemporalSweepV1, "string");
+  assert.deepEqual(historicalProgress, {
     junctionHistoricalBackfillStatus: "coverage_v3_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
@@ -2223,7 +2225,7 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(initialResult.nextReconcileAt, "2026-04-04T00:15:00.000Z");
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, 0);
   await executeTemporalAuthorityChildren({ context, initialResult, provider });
   const result = await executeFullJobTimeseriesContinuations({
     context,
@@ -2361,7 +2363,7 @@ test("Junction connect-window timeseries continuation bypasses completed setup w
         const searchParams = new URL(url).searchParams;
         return [searchParams.get("start_date"), searchParams.get("end_date")];
       }),
-    [["2026-04-01", "2026-04-01"]],
+    [["2026-04-01", "2026-04-01"], ["2026-04-02", "2026-04-02"]],
   );
   assert.equal(
     secondRequests.some((url) =>
@@ -2370,13 +2372,8 @@ test("Junction connect-window timeseries continuation bypasses completed setup w
     false,
   );
   assert.equal(secondResult.metadataPatch, undefined);
-  assert.deepEqual(secondResult.scheduledJobs?.[0]?.payload, {
-    windowStart: ownerWindowStart,
-    windowEnd: ownerWindowEnd,
-    timeseriesCursor: "2026-04-02T00:00:00.000Z",
-    timeseriesResourceCursor: "hrv",
-  });
-  assert.equal(secondImportedSnapshots.length, 1);
+  assert.equal(secondResult.scheduledJobs, undefined);
+  assert.equal(secondImportedSnapshots.length, 2);
 
   const terminalResult = await executeFullJobTimeseriesContinuations({
     context,

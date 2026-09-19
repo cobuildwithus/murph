@@ -553,3 +553,25 @@ function historyCoverageVersion(resource: string): number {
   }
   return version;
 }
+
+it("merges unpublished history coverage without evicting hosted completion markers", () => {
+  const progress = {
+    junctionProfileSummaryCheckedAt: "2026-04-03T14:00:00.000Z",
+    junctionProfileSummaryNormalizationRevision: 2,
+    junctionReconcileProofV1: "synthetic-proof",
+    junctionTemporalSweepV1: "synthetic-sweep",
+  };
+  const hostedMetadata = {
+    ...Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`diagnostic${index}`, index])),
+    ...progress,
+  };
+  const localMetadata = addCoverage({}, "omron", "caffeine");
+  const result = mergeHostedJunctionHistoricalBackfillMetadata({
+    hostedMetadata, localMetadata, localConnectionStateUnpublished: true,
+  });
+  expect(result.metadata).toMatchObject(progress);
+  expect(Object.keys(result.metadata)).toHaveLength(16);
+  expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    result.metadata, "omron", "caffeine", historyCoverageVersion("caffeine"),
+  )).toBe(true);
+});

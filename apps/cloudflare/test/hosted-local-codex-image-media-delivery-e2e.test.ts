@@ -36,7 +36,9 @@ const imageGenerationStartedReplyText =
 const interveningConversationReplyText = "Breathe out slowly for six seconds.";
 const generatedImageReplyText = "Here is the generated setup image.";
 const productionLikeAssistantModel = "gpt-5.6-terra";
-const localRunnerIdleTtlMs = "300000";
+// Completion includes the idle checkpoint; keep it inside the scenario's
+// completion deadline while the explicit image barrier owns detached work.
+const localRunnerIdleTtlMs = "1000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -76,9 +78,12 @@ describe("hosted local Codex image media delivery e2e", () => {
   beforeAll(async () => {
     await ensureScenario();
     await requireScenario().seedActiveHostedLinqMember({
+      billingPlanCode: "launch_monthly",
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
       memberPhone: buildLinqRecipientPhoneNumber(userId),
+      stripeCustomerId: `cus_local_image_media_${userId}`,
+      stripeSubscriptionId: `sub_local_image_media_${userId}`,
     });
     await requireScenario().runWake(buildActivationWake(userId), userId);
     await requireScenario().waitForHostedCompletion(userId);
@@ -126,7 +131,7 @@ describe("hosted local Codex image media delivery e2e", () => {
       scenario: requireScenario(),
       userId,
     });
-    expect(replySend.authorizationStatus).toBe("hosted-sentinel");
+    expect(replySend.authorizationStatus).toBe("expected");
     expect(readObservedLinqMessageParts(replySend)).toEqual([
       {
         type: "text",

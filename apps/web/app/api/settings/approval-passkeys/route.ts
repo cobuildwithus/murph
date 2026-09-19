@@ -3,11 +3,13 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 import { readApprovalPasskeyState } from "@/src/lib/sensitive-actions/passkey-store";
 
+import { isInitialApprovalEnrollmentEligible } from "@/src/lib/sensitive-actions/initial-passkey-enrollment";
+
 export const GET = withJsonError(async (request: Request) => {
   const session = await requireHostedAppSessionFromRequest(request);
   const state = await readApprovalPasskeyState({ memberId: session.member.id, prisma: getPrisma() });
   return jsonOk({
     configured: state.credentials.length > 0,
-    initialEnrollmentAllowed: state.encrypted === null,
+    initialEnrollmentAllowed: state.encrypted === null && await isInitialApprovalEnrollmentEligible(getPrisma(), session),
   });
 });

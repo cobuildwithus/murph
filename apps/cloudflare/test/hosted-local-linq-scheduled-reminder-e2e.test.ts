@@ -115,15 +115,15 @@ afterAll(async () => {
 describe("hosted local Linq scheduled reminder e2e", () => {
   beforeAll(async () => {
     await startScenario();
-  }, 600_000);
-
-  it("creates a reminder from the hosted assistant turn, wakes from the scheduled alarm, and sends it", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const homePhone = buildLinqHomePhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
+      billingPlanCode: "launch_monthly",
       homePhone,
       memberId: userId,
       memberPhone,
+      stripeCustomerId: `cus_local_scheduled_reminder_${userId}`,
+      stripeSubscriptionId: `sub_local_scheduled_reminder_${userId}`,
     });
     await requireScenario().runWake(buildActivationWake(userId), userId);
     const activatedStatus = await requireScenario().waitForHostedCompletion(userId);
@@ -149,7 +149,9 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const welcomeStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(welcomeStatus.lastErrorCode ?? null).toBeNull();
     await welcomeSendPromise;
+  }, 600_000);
 
+  it("preserves the scheduled image reminder through a checkpoint race and bills its delivery", async () => {
     const scheduledChatId = requireLinqStub().requireObservedChatId(userId);
     const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
     const setupReplyBaselineCount = requireLinqStub().countObservedSends(reminderPath);
@@ -351,7 +353,11 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       memberId: userId,
       notBeforeIso: reminderCronUsageNotBeforeIso,
     });
+  }, 720_000);
 
+  it("delivers a due reminder after the overlapping foreground reply", async () => {
+    const scheduledChatId = requireLinqStub().requireObservedChatId(userId);
+    const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
     const overlapSetupTimes = resolveScheduledReminderTimes();
     const overlapSetupBaselineCount = requireLinqStub().countObservedSends(reminderPath);
     requireScenario().queueAssistantResponses(
@@ -495,7 +501,12 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     } finally {
       heldOverlapReminderResponse.release();
     }
+  }, 720_000);
 
+  it("delivers a scheduled nutrition card through the native iMessage capability", async () => {
+    const memberPhone = buildLinqRecipientPhoneNumber(userId);
+    const scheduledChatId = requireLinqStub().requireObservedChatId(userId);
+    const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
     const scheduledCardSetupTimes = resolveScheduledReminderTimes();
     const scheduledCardSetupBaselineCount =
       requireLinqStub().countObservedSends(reminderPath);
@@ -617,12 +628,12 @@ describe("hosted local Linq scheduled reminder timing helpers", () => {
     });
 
     expect(fullTiming).toEqual({
-      idleCheckpointDelayMs: 10_000,
+      runnerIdleTtlMs: 10_000,
       leadMs: 90_000,
       setupLeadText: "about two minutes",
     });
     expect(fastTiming).toEqual({
-      idleCheckpointDelayMs: 1,
+      runnerIdleTtlMs: 1,
       leadMs: 90_000,
       setupLeadText: "about two minutes",
     });
@@ -887,8 +898,8 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
-        String(scheduledReminderTiming.idleCheckpointDelayMs),
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:
+        String(Math.max(1_000, scheduledReminderTiming.runnerIdleTtlMs)),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
@@ -1249,12 +1260,12 @@ function resolveScheduledReminderLocalAt(dueAtIso: string): {
 function resolveScheduledReminderTiming(
   env: NodeJS.ProcessEnv = process.env,
 ): {
-  idleCheckpointDelayMs: number;
+  runnerIdleTtlMs: number;
   leadMs: number;
   setupLeadText: string;
 } {
   return {
-    idleCheckpointDelayMs:
+    runnerIdleTtlMs:
       env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? 1 : 10_000,
     leadMs: 90_000,
     setupLeadText: "about two minutes",

@@ -14,7 +14,6 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
-  compareByLatest,
   loadQueryRuntime,
   toCommandShowEntity,
 } from '../commands/query-record-command-helpers.js'
@@ -159,17 +158,13 @@ export async function findLiveWorkoutRefreshTargets(
 
 async function findStructuredWorkoutRecords(vault: string) {
   const query = await loadQueryRuntime('live workout query reads')
-  const readModel = await query.readVault(vault)
-  return query
-    .listEntities(readModel, {
-      families: ['event'],
-      kinds: ['activity_session'],
-    })
+  const records = await query.readCanonicalEntityFamilySource(vault, 'event')
+  return records
+    .filter((record) => record.kind === 'activity_session')
     .flatMap((record) => {
       const parsed = workoutSessionSchema.safeParse(record.attributes.workout)
       return parsed.success ? [{ record, workout: parsed.data }] : []
     })
-    .sort((left, right) => compareByLatest(left.record, right.record))
 }
 
 export function parseShownWorkout(shown: WorkoutShowResult): WorkoutSession {

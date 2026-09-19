@@ -1,3 +1,4 @@
+import { resolveDailyNutritionIntroduction } from './assistant/nutrition-card-introduction.js'
 import {
   completeDynamicToolFailureDiagnostics,
   createDynamicToolFailureIssue,
@@ -516,7 +517,6 @@ export interface CodexAppServerTurnInput {
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
   generateSongPolicy?: AssistantGenerateSongTurnPolicy | null
-  excludeResumeTurns?: boolean
   model?: string | null
   modelProvider?: string | null
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null
@@ -804,6 +804,114 @@ function appendRequiredAutomationLocalAtClarification(
   return [normalizedMessage, ...missingClarifications]
     .filter((part): part is string => part !== null)
     .join('\n\n')
+}
+
+type CodexTrailingResponseSelection = 'current' | 'retain' | 'promote' | 'suppress'
+
+function selectCodexTrailingResponse(input: {
+  candidate: CodexAppServerTrailingResponseCandidate | null
+  latestFinalAction: MurphDynamicToolFinalActionPatch | null
+  candidateFinalAction: MurphDynamicToolFinalActionPatch | null
+  currentMessage: string
+  currentMedia: readonly AssistantResponseMedia[]
+  currentCard: AssistantResponseCard | null
+  currentCardTextFallback: CompactTableWorkoutResponseCardV1 | null
+}): CodexTrailingResponseSelection {
+  if (input.candidate === null) {
+    return 'current'
+  }
+  // A later quiet acknowledgement must retain the earlier answer as a segment.
+  if (input.latestFinalAction?.kind === 'none') {
+    return 'promote'
+  }
+  if (input.latestFinalAction === null && input.candidateFinalAction?.kind === 'none') {
+    return 'suppress'
+  }
+  if (
+    normalizeNullableString(input.currentMessage) !== null ||
+    input.currentMedia.length > 0 ||
+    input.currentCard !== null ||
+    input.currentCardTextFallback !== null
+  ) {
+    return 'promote'
+  }
+  return 'retain'
+}
+
+function renderCodexResponseCardPresentation(input: {
+  card: AssistantResponseCard | null
+  cardTextFallback: CompactTableWorkoutResponseCardV1 | null
+  omitCardTracking: boolean
+  nutritionIntroduction?: string | null
+}): { message: string; transcript: string } | null {
+  if (input.card) {
+    const message = renderAssistantResponseCardText(input.card, input.nutritionIntroduction)
+    return {
+      message,
+      transcript: input.omitCardTracking
+        ? renderAssistantResponseCardText(input.card)
+        : renderAssistantResponseCardTranscriptText(input.card, input.nutritionIntroduction),
+    }
+  }
+  if (input.cardTextFallback) {
+    return {
+      message: renderAssistantWorkoutResponseCardText(input.cardTextFallback),
+      transcript: renderAssistantWorkoutResponseCardTranscriptText(input.cardTextFallback),
+    }
+  }
+  return null
+}
+
+function buildCodexFinalResponsePresentation(input: {
+  nutritionIntroduction: string | null
+  modelMessage: string
+  media: readonly AssistantResponseMedia[]
+  card: AssistantResponseCard | null
+  cardTextFallback: CompactTableWorkoutResponseCardV1 | null
+  requiredClarifications: readonly RequiredAutomationLocalAtClarification[]
+  requiredApprovalUrls: readonly string[]
+  requiredSuffix: string | null
+  requiredFallback: string | null
+}): Pick<CodexAppServerTurnResult, 'finalMessage' | 'transcriptMessage' | 'responseCard'> {
+  const hasRequiredClarifications = input.requiredClarifications.length > 0
+  const renderedCard = renderCodexResponseCardPresentation({
+    card: input.card,
+    cardTextFallback: input.cardTextFallback,
+    omitCardTracking: hasRequiredClarifications,
+    nutritionIntroduction: input.nutritionIntroduction,
+  })
+  const semanticMessage = renderedCard?.message ?? input.modelMessage
+  const requiredMessage =
+    normalizeNullableString(semanticMessage) ?? input.requiredFallback ?? semanticMessage
+  const finalMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredVaultFileApprovalUrls(
+      appendRequiredAutomationLocalAtClarification(
+        requiredMessage,
+        input.requiredClarifications,
+      ),
+      input.requiredApprovalUrls,
+    ),
+    input.requiredSuffix,
+    input.requiredFallback,
+  )
+  const semanticTranscript = renderedCard?.transcript ??
+    normalizeNullableString(input.modelMessage) ??
+    (input.media.length > 0 ? '' : null)
+  const transcriptMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredAutomationLocalAtClarification(
+      normalizeNullableString(semanticTranscript) ??
+        input.requiredFallback ??
+        semanticTranscript,
+      input.requiredClarifications,
+    ),
+    input.requiredSuffix,
+    input.requiredFallback,
+  )
+  return {
+    finalMessage,
+    transcriptMessage,
+    responseCard: hasRequiredClarifications ? null : input.card,
+  }
 }
 
 export async function executeCodexAppServerTurn(
@@ -3309,9 +3417,12 @@ function buildCodexTransportDiagnosticsTraceEvent(input: {
   const retryProgress = readCodexTransportRetryProgress(diagnosticText)
   const fallbackActivated =
     normalizedText.includes('falling back from websockets to https transport')
-  const idleTimeout =
-    normalizedText.includes('idle timeout waiting for websocket') ||
-    normalizedText.includes('idle timeout waiting for sse')
+  const [, timeoutPhase] = ([
+    ['idle timeout sending websocket request', 'websocket-send'],
+    ['idle timeout waiting for websocket', 'websocket-read'],
+    ['idle timeout waiting for sse', 'http-read'],
+  ] as const).find(([phrase]) => normalizedText.includes(phrase)) ?? ['', null]
+  const idleTimeout = timeoutPhase !== null
   const streamDisconnected =
     normalizedText.includes('stream disconnected') ||
     normalizedText.includes('response stream disconnected')
@@ -3346,11 +3457,13 @@ function buildCodexTransportDiagnosticsTraceEvent(input: {
     codexTransportEventKind: eventKind,
     codexTransportFallbackActivated: fallbackActivated,
     codexTransportIdleTimeout: idleTimeout,
+    codexTransportTimeoutPhase: timeoutPhase,
     codexTransportProviderActionCount: input.providerActionCount,
     codexTransportRetryCount: retryProgress?.retryCount ?? null,
     codexTransportRetryMax: retryProgress?.retryMax ?? null,
     codexTransportRetryExhausted: terminalStreamFailure,
     codexTransportSourceMethod: source.sourceMethod,
+    codexTransportScope: source.turnIdPresent ? 'turn' : source.threadIdPresent ? 'thread' : 'unscoped',
     codexTransportStreamDisconnected: streamDisconnected,
     codexTransportTerminalAfterProviderAction:
       terminalStreamFailure && input.providerActionCount > 0,
@@ -3593,6 +3706,10 @@ async function runCodexAppServerTurnOnProcess(
   let codexTimingTurnStartAckElapsedMs: number | null = null
   let codexTimingTurnStartedNotificationElapsedMs: number | null = null
   let codexTimingTurnCompletedNotificationElapsedMs: number | null = null
+  let firstProviderReceiptElapsedMs: number | null = null
+  let firstAssistantReceiptElapsedMs: number | null = null
+  let lastProviderReceiptElapsedMs: number | null = null
+  let providerReceiptCount = 0
   let currentTurnStartedNotificationObserved = false
   let liveInterruptRequested = false
   let terminalNoReplyInterruptRequested = false
@@ -3842,6 +3959,10 @@ async function runCodexAppServerTurnOnProcess(
                 ...(turnId === null
                   ? {}
                   : { codexTimingTurnCorrelation: buildCodexTurnCorrelation(turnId) }),
+                codexTimingFirstProviderReceiptElapsedMs: firstProviderReceiptElapsedMs,
+                codexTimingFirstAssistantReceiptElapsedMs: firstAssistantReceiptElapsedMs,
+                codexTimingLastProviderReceiptElapsedMs: lastProviderReceiptElapsedMs,
+                codexTimingProviderReceiptCount: providerReceiptCount,
                 // This ends when the completion trace is emitted after local
                 // dynamic-tool/progress drains. The outer provider-result
                 // boundary is recorded separately by assistant.turn.timing.
@@ -3867,6 +3988,53 @@ async function runCodexAppServerTurnOnProcess(
       })
     } catch {
       // Timing traces are diagnostic-only and must not block assistant turns.
+    }
+  }
+
+  const recordProviderReceipt = (kind: 'assistant' | 'reasoning' | 'tool') => {
+    if (!input.onTraceEvent || turnId === null || codexProviderRequestStartedAtMs === null) return
+    const elapsedMs = Math.max(0, Date.now() - codexProviderRequestStartedAtMs)
+    const first = firstProviderReceiptElapsedMs === null
+    const firstAssistant = kind === 'assistant' && firstAssistantReceiptElapsedMs === null
+    firstProviderReceiptElapsedMs ??= elapsedMs
+    if (firstAssistant) firstAssistantReceiptElapsedMs = elapsedMs
+    lastProviderReceiptElapsedMs = elapsedMs
+    providerReceiptCount += 1
+    if (!first && !firstAssistant) return
+    try {
+      input.onTraceEvent({
+        codexThreadId,
+        rawEvent: {
+          schema: CODEX_APP_SERVER_TIMING_TRACE_SCHEMA,
+          type: CODEX_APP_SERVER_TIMING_TRACE_TYPE,
+          codexTimingStage: first ? 'provider-output-received' : 'assistant-output-received',
+          codexTimingReceiptKind: kind,
+          codexTimingTurnCorrelation: buildCodexTurnCorrelation(turnId),
+          codexTimingProviderRequestOrdinal: input.providerRequestOrdinal,
+          codexTimingFirstProviderReceiptElapsedMs: firstProviderReceiptElapsedMs,
+          codexTimingFirstAssistantReceiptElapsedMs: firstAssistantReceiptElapsedMs,
+          codexTimingLastProviderReceiptElapsedMs: lastProviderReceiptElapsedMs,
+          codexTimingProviderReceiptCount: providerReceiptCount,
+          codexTimingThreadIdPresent: codexThreadId !== null,
+          codexTimingTurnIdPresent: true,
+        },
+        updates: [],
+      })
+    } catch {
+      // Receipt observations cannot change output consumption or tool dispatch.
+    }
+  }
+
+  const recordProviderEventReceipt = (normalizedEvent: ReturnType<typeof normalizeCodexEvent>) => {
+    if (normalizedEvent.kind === 'assistant_delta' || normalizedEvent.kind === 'assistant_message') {
+      recordProviderReceipt('assistant')
+    } else if (normalizedEvent.kind === 'reasoning_delta') {
+      recordProviderReceipt('reasoning')
+    } else if (
+      normalizedEvent.kind === 'tool_call' || normalizedEvent.kind === 'web_search'
+      || (normalizedEvent.kind === 'status_item' && normalizedEvent.itemType === 'commandExecution')
+    ) {
+      recordProviderReceipt('tool')
     }
   }
 
@@ -4089,20 +4257,13 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const response = trailingSteerCandidate.card
-      ? renderAssistantResponseCardText(trailingSteerCandidate.card)
-      : trailingSteerCandidate.cardTextFallback
-        ? renderAssistantWorkoutResponseCardText(
-            trailingSteerCandidate.cardTextFallback,
-          )
-        : trailingSteerCandidate.response
-    const transcriptResponse = trailingSteerCandidate.card
-      ? renderAssistantResponseCardTranscriptText(trailingSteerCandidate.card)
-      : trailingSteerCandidate.cardTextFallback
-        ? renderAssistantWorkoutResponseCardTranscriptText(
-            trailingSteerCandidate.cardTextFallback,
-          )
-        : response
+    const renderedCard = renderCodexResponseCardPresentation({
+      card: trailingSteerCandidate.card,
+      cardTextFallback: trailingSteerCandidate.cardTextFallback,
+      omitCardTracking: false,
+    })
+    const response = renderedCard?.message ?? trailingSteerCandidate.response
+    const transcriptResponse = renderedCard?.transcript ?? response
     precedingAgentMessageSegments.push({
       ...(trailingSteerCandidate.contextReferences === undefined
         ? {}
@@ -4541,6 +4702,7 @@ async function runCodexAppServerTurnOnProcess(
       })
       return
     }
+    recordProviderReceipt('tool')
 
     const dynamicToolRequestDeliveryContextOrdinal =
       currentDeliveryContextOrdinal()
@@ -5309,6 +5471,42 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
+  const emitTransportDiagnostics = (
+    message: CodexRpcMessage,
+    method: string | null,
+    scope: 'turn' | 'thread' = 'turn',
+  ): void => {
+    if (!input.onTraceEvent) return
+    if (scope === 'thread') {
+      const params = readCodexRecordField(message, 'params')
+      if (method !== 'warning' || !currentTurnStartedNotificationObserved || !codexThreadId
+        || !params || readCodexStringField(params, 'threadId') !== codexThreadId) return
+    }
+    const diagnostic = buildCodexTransportDiagnosticsTraceEvent({
+      codexThreadId, message, method, providerActionCount, turnId,
+    })
+    if (!diagnostic) return
+    try {
+      input.onTraceEvent({
+        codexThreadId: null,
+        rawEvent: {
+          ...diagnostic,
+          codexTransportWarmReused: isReusedWarmProcess,
+          ...(codexProviderRequestStartedAtMs === null ? {} : {
+            codexTransportElapsedMs: Math.max(0, Date.now() - codexProviderRequestStartedAtMs),
+          }),
+          ...(typeof input.providerRequestOrdinal === 'number' ? {
+            codexTransportProviderRequestOrdinal: input.providerRequestOrdinal,
+          } : {}),
+          ...(turnId ? { codexTransportTurnCorrelation: buildCodexTurnCorrelation(turnId) } : {}),
+        },
+        updates: [],
+      })
+    } catch {
+      // Metadata-only diagnostics must never alter turn processing.
+    }
+  }
+
   const handleAcceptedEvent = (
     message: CodexRpcMessage,
     method: string | null,
@@ -5335,6 +5533,7 @@ async function runCodexAppServerTurnOnProcess(
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
 
     const normalizedEvent = normalizeCodexEvent(message)
+    recordProviderEventReceipt(normalizedEvent)
     const runtimeIssueInput = actionRuntimeIssueTracker.recordEvent({
       activeTurnId: turnId,
       normalizedEvent,
@@ -5349,26 +5548,7 @@ async function runCodexAppServerTurnOnProcess(
       observedAtMs,
       rawEvent: message,
     })
-    const transportDiagnosticsTraceEvent = input.onTraceEvent
-      ? buildCodexTransportDiagnosticsTraceEvent({
-          codexThreadId,
-          message,
-          method,
-          providerActionCount,
-          turnId,
-        })
-      : null
-    if (transportDiagnosticsTraceEvent) {
-      try {
-        input.onTraceEvent?.({
-          codexThreadId: null,
-          rawEvent: transportDiagnosticsTraceEvent,
-          updates: [],
-        })
-      } catch {
-        // Transport diagnostics are metadata-only and must not block turns.
-      }
-    }
+    emitTransportDiagnostics(message, method)
     const transportDiagnosticSource =
       readCodexTransportDiagnosticSource(message, method)
     if (transportDiagnosticSource?.willRetry === true) {
@@ -5755,6 +5935,9 @@ async function runCodexAppServerTurnOnProcess(
       messageTurnId === null &&
       method !== 'model/rerouted'
     ) {
+      // Native fallback warnings are thread-scoped. Observe their sanitized
+      // diagnostics without admitting raw text, output, or turn completion.
+      emitTransportDiagnostics(message, method, 'thread')
       return
     }
 
@@ -6200,41 +6383,28 @@ async function runCodexAppServerTurnOnProcess(
   const latestFinalActionPatch = resolveFinalActionPatch(
     latestDeliveryContextOrdinal,
   )
-  let finalTrailingSteerCandidate = readTrailingSteerCandidate()
-  const trailingSteerCandidateDeliveryContextOrdinal =
-    finalTrailingSteerCandidate?.deliveryContextOrdinal ?? null
-  const trailingSteerCandidateFinalActionPatch =
-    trailingSteerCandidateDeliveryContextOrdinal !== null
-      ? resolveFinalActionPatch(trailingSteerCandidateDeliveryContextOrdinal)
-      : null
-  const suppressTrailingSteerCandidateForEarlierNoReply =
-    latestFinalActionPatch === null &&
-    finalTrailingSteerCandidate !== null &&
-    trailingSteerCandidateFinalActionPatch?.kind === 'none'
-  const shouldPromoteTrailingSteerCandidate =
-    finalTrailingSteerCandidate !== null &&
-    (
-      latestFinalActionPatch?.kind === 'none' ||
-      (
-        !suppressTrailingSteerCandidateForEarlierNoReply &&
-        (
-          normalizeNullableString(extractedFinalMessage) !== null ||
-          responseMedia.length > 0 ||
-          responseCard !== null ||
-          responseCardTextFallback !== null
-        )
-      )
-    )
-  if (shouldPromoteTrailingSteerCandidate) {
+  const finalTrailingSteerCandidate = readTrailingSteerCandidate()
+  const trailingResponseSelection = selectCodexTrailingResponse({
+    candidate: finalTrailingSteerCandidate,
+    latestFinalAction: latestFinalActionPatch,
+    candidateFinalAction: finalTrailingSteerCandidate === null
+      ? null
+      : resolveFinalActionPatch(finalTrailingSteerCandidate.deliveryContextOrdinal),
+    currentMessage: extractedFinalMessage,
+    currentMedia: responseMedia,
+    currentCard: responseCard,
+    currentCardTextFallback: responseCardTextFallback,
+  })
+  if (trailingResponseSelection === 'promote') {
     promoteTrailingSteerCandidate()
-    finalTrailingSteerCandidate = null
   }
+  const suppressTrailingSteerCandidateForEarlierNoReply =
+    trailingResponseSelection === 'suppress'
+  const finalResponseCandidate = trailingResponseSelection === 'retain'
+    ? finalTrailingSteerCandidate
+    : null
   const selectedFinalMessage =
-    finalTrailingSteerCandidate?.response ?? extractedFinalMessage
-  // A latest-context no-reply already promoted and cleared the candidate above.
-  const finalResponseCandidate = suppressTrailingSteerCandidateForEarlierNoReply
-    ? null
-    : finalTrailingSteerCandidate
+    finalResponseCandidate?.response ?? extractedFinalMessage
   const finalResponseMedia = finalResponseCandidate?.media ?? responseMedia
   const finalResponseCard = finalResponseCandidate?.card ?? responseCard
   if (finalResponseCard !== null && finalResponseMedia.length > 0) {
@@ -6264,54 +6434,26 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
-  const semanticFinalMessage = finalResponseCard
-    ? renderAssistantResponseCardText(finalResponseCard)
-    : finalResponseCardTextFallback
-      ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
-      : modelFinalMessage
-  const normalizedSemanticFinalMessage =
-    normalizeNullableString(semanticFinalMessage)
-  const requiredSemanticFinalMessage =
-    normalizedSemanticFinalMessage ??
-    requiredFinalResponseFallback ??
-    semanticFinalMessage
-  const requiredAutomationLocalAtClarificationsInOrder =
-    [...requiredAutomationLocalAtClarifications.values()]
-  const deliveredFinalResponseCard =
-    requiredAutomationLocalAtClarificationsInOrder.length === 0
-      ? finalResponseCard
-      : null
-  const finalMessage = appendRequiredFinalResponseSuffix(
-    appendRequiredVaultFileApprovalUrls(
-      appendRequiredAutomationLocalAtClarification(
-        requiredSemanticFinalMessage,
-        requiredAutomationLocalAtClarificationsInOrder,
-      ),
-      requiredVaultFileApprovalUrls,
-    ),
-    requiredFinalResponseSuffix,
-    requiredFinalResponseFallback,
-  )
-  const semanticTranscriptMessage = finalResponseCard
-    ? requiredAutomationLocalAtClarificationsInOrder.length === 0
-      ? renderAssistantResponseCardTranscriptText(finalResponseCard)
-      : renderAssistantResponseCardText(finalResponseCard)
-    : finalResponseCardTextFallback
-      ? renderAssistantWorkoutResponseCardTranscriptText(
-          finalResponseCardTextFallback,
-        )
-      : normalizeNullableString(modelFinalMessage) ??
-        (finalResponseMedia.length > 0 ? '' : null)
-  const transcriptMessage = appendRequiredFinalResponseSuffix(
-    appendRequiredAutomationLocalAtClarification(
-      normalizeNullableString(semanticTranscriptMessage) ??
-      requiredFinalResponseFallback ??
-      semanticTranscriptMessage,
-      requiredAutomationLocalAtClarificationsInOrder,
-    ),
-    requiredFinalResponseSuffix,
-    requiredFinalResponseFallback,
-  )
+  const nutritionIntroduction = await resolveDailyNutritionIntroduction({
+    card: finalResponseCard,
+    message: modelFinalMessage,
+    vault: input.vaultRoot,
+  })
+  const {
+    finalMessage,
+    transcriptMessage,
+    responseCard: deliveredFinalResponseCard,
+  } = buildCodexFinalResponsePresentation({
+    modelMessage: modelFinalMessage,
+    nutritionIntroduction,
+    media: finalResponseMedia,
+    card: finalResponseCard,
+    cardTextFallback: finalResponseCardTextFallback,
+    requiredClarifications: [...requiredAutomationLocalAtClarifications.values()],
+    requiredApprovalUrls: requiredVaultFileApprovalUrls,
+    requiredSuffix: requiredFinalResponseSuffix,
+    requiredFallback: requiredFinalResponseFallback,
+  })
   if (
     noReplySelected &&
     normalizeNullableString(extractedFinalMessage) !== null
@@ -6341,8 +6483,7 @@ async function runCodexAppServerTurnOnProcess(
     acceptedNoReplyDeliveryContextOrdinals:
       acceptedNoReplyDeliveryContextOrdinals,
     finalAction,
-    finalActionExplicit:
-      finalActionPatch?.kind === 'none' && !requiredUserVisibleOutput,
+    finalActionExplicit: noReplySelected,
     finalMessage,
     providerAuthoredFinalMessage: modelFinalMessage,
     transcriptMessage,

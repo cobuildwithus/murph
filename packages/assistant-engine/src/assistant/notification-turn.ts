@@ -100,6 +100,7 @@ import {
   readAssistantOutboxIntentByDeliveryIdempotencyKey,
 } from './outbox.js'
 import { createAssistantBinding } from './bindings.js'
+import { prepareAssistantChannelWelcome } from './connected-channel-greeting.js'
 import {
   createAssistantSessionId,
   resolveAssistantStatePaths,
@@ -182,7 +183,7 @@ const ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
 }
-const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
+const ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
   nativeResumePolicy: 'disabled',
@@ -290,6 +291,10 @@ export interface AssistantNotificationInput
   beforeCommit?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
+  /** Trusted runtime welcome policy; never accepted from notification wire data. */
+  connectedChannelGreeting?: boolean
+  /** Trusted manual app capture; never accepted from notification wire data. */
+  manualMealEstimation?: true
   instructions: string
   onGroupEmailPendingDeliveryIntentId?: ((intentId: string) => void) | null
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
@@ -319,6 +324,7 @@ export async function sendAssistantNotificationLocal(
     defaults: await resolveAssistantOperatorDefaults(),
     executionContext,
   })
+  const markFirstContactOnAccepted = input.firstContactPolicy?.markSeenOnDeliveryAccepted === true
   // Built before the turn lock so evidence reads never extend the window in
   // which fresh foreground input waits on lock admission.
   const maintenanceEvidence = isAssistantNotificationMaintenanceExactSkip(input)
@@ -334,6 +340,9 @@ export async function sendAssistantNotificationLocal(
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
+      const welcome = await prepareAssistantChannelWelcome(input)
+      if (welcome.recovered) return welcome.recovered
+      input = welcome.input
       const recoveredOperatorMessage =
         await recoverQueuedAssistantOperatorMessage(input)
       if (recoveredOperatorMessage) {
@@ -796,7 +805,7 @@ export async function sendAssistantNotificationLocal(
             vault: input.vault,
           })
           if (
-            input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
+            markFirstContactOnAccepted &&
             assistantNotificationDeliveryAcceptedFirstContact({
               deliveryOutcome,
               dispatchMode: input.deliveryDispatchMode,
@@ -910,7 +919,7 @@ export async function sendAssistantNotificationLocal(
         })()
         committedDeliveryOutcomeKind = committedDeliveryOutcome.kind
         if (
-          input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
+          markFirstContactOnAccepted &&
           assistantNotificationDeliveryAcceptedFirstContact({
             deliveryOutcome: committedDeliveryOutcome,
             dispatchMode: input.deliveryDispatchMode,
@@ -1901,8 +1910,14 @@ function resolveAssistantNotificationTurnProfile(
   if (input.notificationPromptProfile === 'operator-message') {
     return ASSISTANT_OPERATOR_MESSAGE_NOTIFICATION_TURN_PROFILE
   }
+  if (input.manualMealEstimation) {
+    if (input.threadIsDirect !== true) {
+      throw new TypeError('Manual meal estimation requires a private direct route.')
+    }
+    return ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
+  }
   if (isAssistantOnboardingGoalCheckinNotification(input)) {
-    return ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE
+    return ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
   }
   return isAssistantNotificationScheduledOccurrence(input)
     ? null
@@ -2141,7 +2156,7 @@ export function parseAssistantNotificationDecision(
   }
 }
 
-function resolveAssistantNotificationDecision(input: {
+export function resolveAssistantNotificationDecision(input: {
   providerAuthoredResponse: string
   runtimeReplacesFinalPresentation: boolean
   runtimeResponse: string

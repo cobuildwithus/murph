@@ -82,7 +82,7 @@ export interface HostedWorkspaceInvocationOptions {
     containerEnsureReadyStartedAtEpochMs?: number;
   } | null;
   nodeStartupMs?: number | null;
-  onConversationActivityObserved?: () => void;
+  onConversationActivityObserved?: (receivedAtEpochMs: number) => void;
   onRuntimeWakeReady?: (
     sendWake: (input?: HostedWorkspaceInvocationRuntimeWakeInput) => boolean
   ) => void;

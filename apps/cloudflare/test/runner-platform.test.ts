@@ -921,7 +921,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform/presign-put",
       );
       await expect(presignRequest.json()).resolves.toEqual({
+        supportsManagedUpload: true,
         encryptedByteSize: encryptedBytes.byteLength,
+        encryptedMd5: createHash("md5").update(encryptedBytes).digest("hex"),
         encryptedObjectSha256: "c".repeat(64),
         objectKey,
         snapshotId: "snapshot_runner_platform",
@@ -943,6 +945,45 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         force: true,
         recursive: true,
       });
+    }
+  });
+
+  it("uploads a managed part and binds its exact ETag to canonical snapshot completion", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-managed-snapshot-proof-"));
+    try {
+      const sourceFilePath = path.join(tempRoot, "snapshot.enc");
+      await writeFile(sourceFilePath, encryptedBytes);
+      const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: encryptedBytes.length });
+      const putUrl = "https://r2.example.test/snapshot?uploadId=synthetic-upload&partNumber=1";
+      let completion: unknown;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "managed snapshot request");
+        if (request.url.endsWith("/presign-put")) {
+          expect(await request.json()).toMatchObject({ supportsManagedUpload: true });
+          return Response.json({ putUrl, expiresAt: new Date(Date.now() + 60_000).toISOString(), managedUploadId: "synthetic-upload" });
+        }
+        if (request.url === putUrl) {
+          expect(request.headers.get("if-none-match")).toBeNull();
+          expect(request.headers.get("x-amz-meta-encryptedsha256")).toBeNull();
+          expect(request.headers.get("content-length")).toBe(String(encryptedBytes.length));
+          expect(new Uint8Array(await request.arrayBuffer())).toEqual(encryptedBytes);
+          return new Response(null, { status: 200, headers: { etag: '"synthetic-part-etag"' } });
+        }
+        if (request.url.endsWith("/complete")) {
+          completion = await request.json();
+          return createWorkspaceSnapshotCompleteResponse(ref);
+        }
+        if (request.url.endsWith("/heartbeat")) return Response.json({ alive: true });
+        throw new Error("Unexpected managed snapshot request.");
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({ boundUserId: "member_123", fetchImpl: fetchMock as typeof fetch });
+      await platform.workspaceSnapshotPort!.putSnapshotObjectDirect({ sourceFilePath, objectKey: ref.objectKey,
+        snapshotId: ref.snapshotId, encryptedByteSize: encryptedBytes.length, encryptedObjectSha256: ref.archive.encryptedObjectSha256 });
+      await platform.workspaceSnapshotPort!.completeSnapshotSession({ ref, checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref) });
+      expect(completion).toMatchObject({ managedPart: { uploadId: "synthetic-upload", etag: '"synthetic-part-etag"' } });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
     }
   });
 
@@ -1482,7 +1523,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const firstBody = await firstPresignRequest.json();
       const secondBody = await secondPresignRequest.json();
       expect(firstBody).toEqual({
+        supportsManagedUpload: true,
         encryptedByteSize: encryptedBytes.byteLength,
+        encryptedMd5: createHash("md5").update(encryptedBytes).digest("hex"),
         encryptedObjectSha256: "c".repeat(64),
         objectKey,
         snapshotId: "snapshot_runner_platform",
@@ -4101,6 +4144,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               },
             }, { highWaterMark: 0 }), {
               headers: {
+                "cf-ray": "abcdef0123456781-IAD",
+                "x-amz-request-id": "0123456789ABCDE1",
                 "content-length": String(encrypted.encryptedByteSize),
                 "content-type": "application/octet-stream",
               },
@@ -4121,6 +4166,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             },
           }, { highWaterMark: 0 }), {
             headers: {
+              "cf-ray": "abcdef0123456782-IAD",
+              "x-amz-request-id": "0123456789ABCDE2",
               "content-length": String(encrypted.encryptedByteSize),
               "content-type": "application/octet-stream",
             },
@@ -4179,6 +4226,24 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         log.message === "Hosted workspace snapshot body read settled."
       );
       expect(bodyLogs).toHaveLength(2);
+      const headerLogs = readWorkspaceSnapshotDiagnosticLogs().filter((log) =>
+        log.message === "Hosted workspace snapshot response headers settled."
+      );
+      expect(headerLogs).toHaveLength(2);
+      for (const [index, headerLog] of headerLogs.entries()) {
+        const correlation = {
+          workspaceSnapshotRestoreAttempt: index + 1,
+          workspaceSnapshotRestoreStep: "object_fetch",
+          cfRay: `abcdef012345678${index + 1}-IAD`,
+          r2RequestId: `0123456789ABCDE${index + 1}`,
+        };
+        expect(headerLog.details).toMatchObject({
+          ...correlation,
+          responseStatus: 200,
+          transportObserved: false,
+        });
+        expect(bodyLogs[index]?.details).toMatchObject(correlation);
+      }
       expect(bodyLogs[1]?.details).toMatchObject({
         complete: true,
         bytesRead: encrypted.encryptedByteSize,
@@ -6249,7 +6314,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(rejectedFetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps hosted-local Linq URL rewrite and provider fetch allowlist in sync", async () => {
+  it("keeps canonical container Linq URL and provider fetch allowlist in sync", async () => {
     const runnerEnv = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
@@ -6258,11 +6323,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     expect(runnerEnv.LINQ_API_BASE_URL).toBe(
-      "http://host.docker.internal:4011/api/partner/v3",
+      "https://api.linqapp.com/api/partner/v3",
     );
     const providerFetchBaseUrls = readCloudflareHostedProviderFetchBaseUrls(runnerEnv);
     expect(providerFetchBaseUrls).toEqual([
-      "http://host.docker.internal:4011/api/partner/v3",
+      "https://api.linqapp.com/api/partner/v3",
     ]);
 
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
@@ -6281,7 +6346,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     );
 
-    const response = await hostedFetch("http://host.docker.internal:4011/api/partner/v3/chats", {
+    const response = await hostedFetch("https://api.linqapp.com/api/partner/v3/chats", {
       body: "{}",
       method: "POST",
     });
@@ -6289,7 +6354,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(response.status).toBe(204);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "configured Linq provider fetch");
-    expect(request.url).toBe("http://host.docker.internal:4011/api/partner/v3/chats");
+    expect(request.url).toBe("https://api.linqapp.com/api/partner/v3/chats");
     expect(request.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(request.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
@@ -6919,6 +6984,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       `http://web-control.worker${buildExpectedVaultShareActiveKindsPath(HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE)}`,
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",
     ]);
+    // The composed group and both publication paths advertise one canonical
+    // scope per metric, not a second history registry or capability flag.
+    for (const request of requests.slice(12, 15)) {
+      const url = new URL(request.url);
+      const scopes = url.searchParams.getAll("supportedProjectionScope");
+      expect(scopes).toHaveLength(100);
+      expect(new Set(scopes).size).toBe(100);
+      expect(scopes.every((scope) => !scope.includes("historyDays"))).toBe(true);
+      expect(url.searchParams.has("supportedHistoryDays")).toBe(false);
+    }
     for (const request of requests) {
       expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
       expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
@@ -7053,9 +7128,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       requireFetchRequest(call, `direct web-control request ${index}`)
     );
     expect(requests.map((request) => request.url)).toEqual([
-      "https://web.example.test/api/internal/hosted-runtime/log",
-      "https://web.example.test/api/internal/device-sync/runtime/snapshot",
-      "https://web.example.test/api/internal/hosted-execution/usage/record",
+      "https://web.example.test/api/internal/hosted-runtime/log?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6",
+      "https://web.example.test/api/internal/device-sync/runtime/snapshot?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6",
+      "https://web.example.test/api/internal/hosted-execution/usage/record?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6",
     ]);
     for (const request of requests) {
       expectDefaultRuntimeWriteFenceHeaders(request);
@@ -7141,7 +7216,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
-  it("write-fences exact external thread route authority through direct web-control", async () => {
+  it.each([undefined, true, false, "invalid", null])("write-fences external route authority and validates audience %s", async (threadIsDirect) => {
     const authority = {
       channel: "telegram" as const,
       containerMemberId: "member_123",
@@ -7153,7 +7228,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
       );
       await expect(request.json()).resolves.toEqual(authority);
-      return new Response(JSON.stringify({ authorized: true }), {
+      return new Response(JSON.stringify({ authorized: true, threadIsDirect }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
       });
@@ -7173,16 +7248,22 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     if (!assertExternalThreadRouteAuthority) {
       throw new Error("Expected external thread route authority effect.");
     }
-    await expect(
-      assertExternalThreadRouteAuthority(authority),
-    ).resolves.toBeUndefined();
+    if (threadIsDirect !== undefined && typeof threadIsDirect !== "boolean") {
+      await expect(assertExternalThreadRouteAuthority(authority)).rejects.toThrow(
+        "Hosted external thread route authority response is invalid.",
+      );
+    } else {
+      await expect(assertExternalThreadRouteAuthority(authority)).resolves.toEqual(
+        threadIsDirect === undefined ? undefined : { threadIsDirect },
+      );
+    }
 
     const request = requireFetchRequest(
       fetchMock.mock.calls[0],
       "direct external thread route authority request",
     );
     expect(request.url).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}`,
+      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`,
     );
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
@@ -7254,7 +7335,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "private Assistant Ask completion authority request",
     );
     expect(request.url).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}`,
+      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`,
     );
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
@@ -7349,7 +7430,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "direct email recipient authority request",
     );
     expect(request.url).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH}`,
+      `https://web.example.test${HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`,
     );
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
@@ -7467,17 +7548,18 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [index, call] of fetchMock.mock.calls.entries()) {
       const request = requireFetchRequest(call, `direct Linq egress authority request ${index}`);
-      expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`);
+      expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`);
       expectDefaultRuntimeWriteFenceHeaders(request);
       expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
       expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
     }
   });
 
-  it("does not synthesize a Linq route from legacy response fields", async () => {
+  it.each([undefined, { target: "chat_legacy", targetKind: "thread", threadIsDirect: true }, { conversationThreadId: null, directRecipientPhoneNumber: "+15550100001", fromPhoneNumber: null, target: "chat_group", targetKind: "thread", threadIsDirect: false }])("does not synthesize a Linq route from legacy or invalid response fields %#", async (resolvedRoute) => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
         ok: true,
+        resolvedRoute,
         targetOverride: {
           conversationThreadId: "hid_legacy_chat",
           target: "chat_legacy",
@@ -7512,10 +7594,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("strictly parses typed Linq health blocks from web-control", async () => {
+  it.each(["chat_opted_out", "automation_engagement_paused"] as const)("parses the typed Linq block %s from web-control", async (deliveryBlockCode) => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
-        deliveryBlockCode: "chat_opted_out",
+        deliveryBlockCode,
         deliveryPosture: "unknown-posture",
         ok: true,
         resolvedRoute: {
@@ -7551,7 +7633,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       target: "chat_blocked",
       targetKind: "thread",
     })).resolves.toEqual({
-      deliveryBlockCode: "chat_opted_out",
+      deliveryBlockCode,
       resolvedRoute: {
         conversationThreadId: null,
         directRecipientPhoneNumber: "+15550001",
@@ -7601,7 +7683,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "direct Linq delivery request");
-    expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH}`);
+    expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`);
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
@@ -7651,7 +7733,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "direct phone-call result delivery request",
     );
     expect(request.url).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH}`,
+      `https://web.example.test${HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`,
     );
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
@@ -7701,7 +7783,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "direct outbound message-volume receipt request",
     );
     expect(request.url).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH}`,
+      `https://web.example.test${HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH}?runtimeAuthority=1&runtimeAttempt=runtime_write_123&runtimeGeneration=7&runtimeWorkspaceVersion=6`,
     );
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
@@ -8598,6 +8680,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.method).toBe("POST");
     expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     await expect(request.json()).resolves.toEqual({
+      decodeInlinePayloads: true,
       lanes: [
         {
           importedSeq: "0",
@@ -10363,7 +10446,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   });
 
   it.each([undefined, "ECONNRESET", "UND_ERR_SOCKET"])(
-    "keeps artifact upload behavior and existing logs with network code %s",
+    "bounds artifact upload transport replay and preserves safe logs with network code %s",
     async (code) => {
       const cause = {
         code,
@@ -10398,7 +10481,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       expect(rejectedError).toBeInstanceOf(HostedRuntimeArtifactWriteError);
       expect(rejectedError).toMatchObject({ retryable: true, cause: { cause: failure } });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
       const logs = mocks.emitHostedExecutionStructuredLog.mock.calls.map(([input]) => input);
       expect(logs.map((input) => input.message)).toEqual([
         "Hosted runtime artifact upload started.",
@@ -10406,26 +10489,35 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "Hosted runtime internal request started.",
         "Hosted runtime internal request failed.",
         "Hosted runtime upstream request failed.",
+        "Hosted runtime artifact upload transport recovery backoff.",
+        "Hosted runtime internal request started.",
+        "Hosted runtime internal request failed.",
+        "Hosted runtime upstream request failed.",
         "Hosted runtime artifact upload failed before response.",
       ]);
-      expect(logs[5]).toMatchObject({
-        component: "hosted.runtime.artifact-store",
-        level: "warn",
-        phase: "checkpoint",
-        details: {
-          errorCode: code ? "type_error" : "runtime_error",
-          fetchCauseCode: code ? "type_error" : "runtime_error",
-          fetchCauseKind: "fetch_failed",
-          fetchCauseName: code ? "TypeError" : "Error",
-          fetchCallerSignalAborted: false,
-          fetchRequestSignalAborted: false,
-          fetchTimeoutSignalAborted: false,
-          ...(code ? { fetchNetworkErrorCode: code } : {}),
-        },
-      });
-      if (!code) {
-        expect(logs[5].details).not.toHaveProperty("fetchNetworkErrorCode");
+      for (const [index, attempt] of [[5, 1], [9, 2]] as const) {
+        expect(logs[index]).toMatchObject({
+          component: "hosted.runtime.artifact-store",
+          level: "warn",
+          phase: "checkpoint",
+          details: {
+            artifactUploadAttempt: attempt,
+            errorCode: code ? "type_error" : "runtime_error",
+            fetchCauseCode: code ? "type_error" : "runtime_error",
+            fetchCauseKind: "fetch_failed",
+            fetchCauseName: code ? "TypeError" : "Error",
+            fetchCallerSignalAborted: false,
+            fetchRequestSignalAborted: false,
+            fetchTimeoutSignalAborted: false,
+            ...(code ? { fetchNetworkErrorCode: code } : {}),
+          },
+        });
+        if (!code) {
+          expect(logs[index].details).not.toHaveProperty("fetchNetworkErrorCode");
+        }
       }
+      expect(logs[5].details).not.toHaveProperty("responseOrigin");
+      expect(JSON.stringify(logs[5])).not.toContain("https://");
       const serialized = JSON.stringify(logs);
       for (const hidden of [
         "192.0.2.10", "43210", "192.0.2.11", "example.invalid",
@@ -10437,9 +10529,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fail = false;
       await platform.artifactStore.put(artifact);
       await platform.artifactStore.put(artifact);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(12);
-      for (const [input] of mocks.emitHostedExecutionStructuredLog.mock.calls.slice(6)) {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(16);
+      for (const [input] of mocks.emitHostedExecutionStructuredLog.mock.calls.slice(10)) {
         expect(input.details).not.toHaveProperty("fetchNetworkErrorCode");
       }
     },

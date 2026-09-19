@@ -74,11 +74,26 @@ afterEach(() => {
 });
 
 describe("temporary development CLI evaluation", () => {
-  it("uses isolated scriptless public-registry dlx without touching workspace dependency files", () => {
+  it.each([
+    {
+      args: ["--", "inspect", "--format", "json"],
+      forwarded: ["inspect", "--format", "json"],
+    },
+    {
+      args: ["inspect", "--format", "json"],
+      forwarded: ["inspect", "--format", "json"],
+    },
+    { args: ["--", "--help"], forwarded: ["--help"] },
+    { args: [], forwarded: [] },
+    {
+      args: ["--", "inspect", "--", "two words", "", "$(exit 99)"],
+      forwarded: ["inspect", "--", "two words", "", "$(exit 99)"],
+    },
+  ])("forwards $args through scriptless registry dlx without changing dependencies", ({ args, forwarded }) => {
     const harness = createHarness();
     const result = spawnSync(
       "../../scripts/evaluate-dev-cli",
-      ["@fixture/tool@1.2.3", "--", "inspect", "--format", "json"],
+      ["@fixture/tool@1.2.3", ...args],
       {
         cwd: harness.appDir,
         encoding: "utf8",
@@ -93,10 +108,7 @@ describe("temporary development CLI evaluation", () => {
         "--config.registry=https://registry.npmjs.org/",
         "dlx",
         "@fixture/tool@1.2.3",
-        "--",
-        "inspect",
-        "--format",
-        "json",
+        ...forwarded,
         "",
       ].join("\n"),
     );

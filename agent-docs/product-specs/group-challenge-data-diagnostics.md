@@ -1,8 +1,10 @@
-# Group Challenge Data Diagnostics
+# Group Challenge Data, Sharing History, and Diagnostics
 
-Last verified: 2026-08-13
+Last verified: 2026-09-18
 
-Status: Implemented
+Status: Follow-up implementation authored; repository verification and rollout pending.
+The current policy requires the consumer-first rollout below. Synthetic checks
+do not establish deployment, provider coverage, or production health.
 
 ## Purpose
 
@@ -14,6 +16,153 @@ evidence supports, and gives the smallest safe next action.
 This contract adds an explicit `device-sync-status.v0` group share. It gives
 the room bounded literal connection-status context without exposing private
 account or device details. It never establishes why a shared metric is absent.
+
+## Metric permissions, 90-date retention, and ordinary reads
+
+Every active dated health permission, whether existing or newly approved, shares
+available canonical data for **90 member-local civil dates**, including today
+and the previous 89. This covers wearable metrics, nightly duration/timing/stages,
+complete meal totals, selected activity/session metrics, workout summaries and
+items, and heart-rate zones. It neither requests provider backfill nor promises a
+complete dataset. Recent-sync recovery remains a bounded recent check, not an
+arbitrary-history import.
+
+The existing plain metric scope key is the sole grant identity. There is no
+history-specific permission, scope suffix, regrant, supersession, or migration.
+An already-active grant receives the longer window through normal publication;
+no settings visit or fresh approval is needed. This current product decision
+supersedes the seven-day-authority policy recorded in the earlier completed plan;
+that historical plan remains immutable. Current membership, chosen metrics,
+recipient identity, revocation, generation, and workspace-order fences remain
+authoritative. A history request never creates a grant, enables an unshared
+metric, or restores a revoked grant.
+
+Saved offers retain their immutable scopes, identity, and replay fences, even
+when their stored description mentions seven days. Joining or liking that offer
+still selects the same metrics. Current Web and native permission disclosures
+state the 90-date policy; they do not reuse historical duration text as current
+policy, add a history checkbox, or request expansion consent. Existing settings
+retain the active metric selections, with only the genuine pre-existing sleep
+v0/v1 compatibility mapping. Automatic expansion does not regrant permissions.
+Explicit saves retain the existing pending-generation refresh recovery.
+
+Retention is separate from response selection. Ordinary `read_shared`, weekly
+updates, and group-email reads retain their short reporting windows: the shared
+reader returns at most the recent seven civil dates from a timezone-aware
+snapshot, and the newsletter/challenge applies its requested reporting cutoff.
+It must not average whatever 90 dates happen to be stored. Email preparation
+uses that ordinary reader with plain metric scopes and preserves the final
+send's exact share-ID authorization proof.
+
+An explicit longer read selects one existing dated metric scope, one current
+room `participantId`, and inclusive `history.fromDate` / `throughDate` covering
+at most 90 dates, without freshness or email authority. The exact active grant
+is still required. `not_granted` means the metric is unshared and needs ordinary
+metric consent; missing, sparse, or not-yet-published history never asks for a
+history permission.
+
+After authority checks and decryption, the reader clips the stored member-local
+retention window and the requested range. Pages hold at most 256 KiB of record
+JSON and keep every source/workout for a date together. `dateCoverage` reports
+requested/returned bounds, actual `availableDates`, and optional `nextFromDate`.
+Follow that date through the original end without a stored cursor or history
+store. Gaps are not zero and do not prove private/provider history is absent.
+Single-participant reads are partial-roster evidence. Graphs use `generate_image`
+with the exact shared observations, following pages and stating actual coverage;
+do not archive observations or introduce a duplicate chart renderer.
+
+## Date context, retention, and bounded publication
+
+The encrypted snapshot envelope optionally carries `memberTimeZone`. Every new
+90-date dated publication obtains it from canonical vault metadata, not the
+model, a recipient, an event timezone, or a separately shared timezone profile.
+The reader reapplies that civil-date window at read time. An old snapshot without
+timezone remains usable for ordinary reads with its prior bounded contents;
+a longer read remains pending until normal compatible publication on the same
+grant supplies canonical date context. Never invent a timezone or synthesize
+missing observations. Workout retention uses the canonical member date; the
+UTC-12 calendar remains only its monotonic global completion watermark, not a
+second retention policy. No live row rewrite is part of this implementation.
+
+The projection window is **not a deletion TTL**. A successful publication
+replaces the complete bounded encrypted snapshot on the exact active grant.
+Revocation clears ciphertext, and regrant rotates the row identity; generation
+and source-workspace-version fences still reject stale producers. Stored rows
+need not disappear when their observations age out of a read. Previously
+delivered charts, email, and chat cannot be recalled by revocation.
+
+The existing canonical query owners remain the only input. Metric and sleep
+queries receive explicit date bounds; no row limit discards late sources or
+lets naps displace main sleep. Manual fallback reads are complete within those
+dates. Meal totals use the existing canonical nutrition owner and date filter.
+Activity/workout entity queries admit 104 rows per source-window date plus one
+overflow probe: at 90 dates and two civil-boundary dates, at most **9,569** rows,
+below the query owner's 10,000-row cap. Source, workout and record overflow
+rejects the whole capture; it must not publish an empty or truncated substitute.
+
+Runtime admission, Web request parsing, encrypted snapshots and Cloudflare
+shared-read responses have finite 4 MiB bounds. The publisher reserves 1 KiB
+for the existing continuation envelope. Web publication still processes at most
+25 destination rows per page, preserves exact grant/generation/workspace order,
+and performs no external work in database transactions. Group reads first select
+bounded authority metadata (at most 1,200 candidate rows for a 200-member room:
+three requested metrics, two possible legacy sleep counterparts, and one profile
+per participant; one additional query sentinel detects overflow),
+then read at most four selected ciphertexts per short transaction and recheck
+exact row IDs, grant status, access and consent before decryption outside the
+transaction. Four maximum plaintexts are 16 MiB before encryption/JSON overhead;
+the response itself is capped at 4 MiB. At 200 members and three requested
+scopes plus profile names, 800 selected snapshots require at most 200 sequential
+batches plus the initial authority transaction (201 transactions total, one
+pooled connection at a time). There are 202 share queries, one membership query,
+and 201 canonical runtime-access checks (at most two ORM reads each, for at most 605
+total reads, plus a device query only when a device scope replaces a ciphertext
+scope); crypto/key work runs only between
+transactions. An explicit history request selects one participant and fits one
+batch. This increases round trips for wide room reads; no latency improvement
+is claimed. The model-result ceiling is deliberately
+not multiplied by the enlarged storage ceiling: ordinary oversized results
+explicitly omit whole members and require narrower retries. A single history
+page and its member envelope fit the established model budget.
+
+The single registry has 100 known scopes (99 selectable). Email authorization
+carries at most 99 non-email scope/share-ID pairs per participant, plus its
+separate email grant and one overflow sentinel in the bounded Web query. Both
+preparation and final recipient rechecks use that same count; parser tests admit
+the complete canonical set and reject an over-limit snapshot.
+
+## Consumer-first history rollout and rollback floor
+
+This is a release-order requirement, not authorization to deploy. No feature
+flag, migration queue or new state service is introduced.
+
+1. Deploy compatible consumers first: shared contract parsers/count limits,
+   Web snapshot/delivery/shared-read owners, Cloudflare transport/response bounds,
+   and assistant normal/detached/email read schemas. Keep the old runtime
+   publishers until these consumers are serving all relevant traffic. Old plain
+   keys and no-timezone seven-day snapshots remain ordinary-readable during this
+   phase; unavailable older dates are not claimed to exist. Deploy current Web
+   and native policy copy with these compatible owners, not as an approval gate.
+2. After incompatible readers are drained, release the canonical-timezone
+   90-date runtime publishers, including normal refresh and first materialization.
+   Existing grants update in place under the same plain keys. Cloudflare's normal
+   group, active-scope, and first-materialization paths advertise the same 100
+   known scopes, with no history capability flag or duplicate catalog. Verify
+   synthetic date-89/date-90, 720-observation, byte/page, sparse/no-zone, saved-offer,
+   revocation/generation, and weekly/email clipping proofs before proceeding.
+3. Once a new snapshot is persisted, the **rollback floor is the compatible
+   consumer release**: keep readers/parsers/transports that accept the timezone
+   envelope and enlarged count/byte bounds. A publisher rollback may temporarily
+   reduce available observations; it must not remove the reader compatibility or
+   claim full coverage. Do not roll consumers below that floor while such
+   snapshots remain. Do not rotate grants, strip fields, delete snapshots, or
+   reinterpret scopes as a rollback shortcut. Any operational data mutation
+   requires separate authorization; this patch performs none.
+
+Repository Vitest/typechecking, exact-head CI, UI/native interaction checks,
+and an authorized staged rollout remain local-owner gates. Synthetic tests do
+not establish provider coverage or production health. There is no feature flag,
+migration queue, or persistent rollout state.
 
 ## Product outcome
 
@@ -144,12 +293,24 @@ complete record per available public source, and each record carries a
 canonical `{ source, label }` tag plus a `date.source` record key. A canonical
 manually entered observation is the explicit `manual` / `Manual` source and is
 never attributed to a wearable or aggregator. Murph-derived meal totals use
-`murph` / `Murph`. The producer admits at most eight public sources and seven
-member-local civil dates, fails closed above the complete 56-record bound, and
-never truncates or chooses one source to represent another.
+`murph` / `Murph`. The producer admits at most eight public sources and the
+same rolling 90 member-local dates under each plain grant. Source-tagged daily
+scopes admit at most 720 records; single-owner dated scopes admit 90. Nondated
+profile, timezone, email, and status scopes retain their existing limits.
+Overflow fails the complete projection, never truncates it or chooses one
+source to represent another.
 Source-tagged Deep and REM records also carry that provider's bounded
 `recordedAt` timestamp, or `null` when unavailable; their `occurredAt` remains
 the synthetic UTC midnight used only for civil-date identity.
+
+Shared nightly duration, Deep/REM, and sleep timing exclude sessions explicitly
+classified as naps. Nap records remain in the personal vault and do not fill a
+missing-night reporting gap; other metrics from naps remain eligible under
+their own scopes. Unknown sleep types remain eligible without guessing from
+duration or clock time. Per-source metric reads derive this classification
+from retained sleep summaries, including when cached MetricPoints predate the
+metadata. A later main sleep fills the gap on the ordinary projection refresh;
+already-delivered snapshots converge through that same complete replacement.
 
 The same source-preserving rule applies across steps, sleep duration and times,
 sleep stages, activity metrics and selectors, workout-day summaries, heart-rate
@@ -158,8 +319,11 @@ inside its existing day record and admits up to thirteen workouts independently
 for each of eight public sources on a day. Legacy unsourced workout days retain
 their original thirteen-item limit, and any source-specific or combined-source
 overflow fails the complete projection closed rather than dropping a workout.
-The maximum legal 104-item day stays inside the shared 320 KiB delivery and
-encrypted-snapshot bound. The other dated health scopes tag the record.
+Complete snapshots and delivery requests share a 4 MiB UTF-8 ceiling. A
+90-date, eight-source workout shape retains all 104 items per date when the
+complete payload fits that ceiling. Count and byte limits apply together;
+admitted field lengths do not override the byte ceiling. The other dated
+health scopes tag the record.
 Duplicate normalization may resolve multiple facts within one public source,
 but it never compares sources to pick a group-share winner. Single-owner
 profile, timezone, and group-email authority records stay unsourced, and
@@ -187,10 +351,10 @@ remain parseable during convergence. A new join view or access offer still
 derives the matching legacy sleep policy request as v1, so existing groups keep
 one complete permission without owner reconfiguration. The durable v0 policy
 entry remains exact, and saving an existing v0 grant preserves that scope key.
-The authenticated sharing controls show v0 and v1 under the same row; turning
-that permission off revokes both versions through the existing flow. There is
-no separate source-details grant or upgrade control because source identity is
-part of every health scope's contract.
+The authenticated sharing controls collapse the genuine v0/v1 sleep mapping.
+Turning a permission off revokes the corresponding versions through the existing
+flow. There is no separate source-details or history grant: source identity and
+the current 90-date retention policy are part of each selected health metric.
 
 A persisted reader that still requests a legacy v0 sleep scope may use records
 from the matching v1 grant when no exact v0 grant is active. New source-tagged

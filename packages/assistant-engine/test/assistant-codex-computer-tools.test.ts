@@ -696,6 +696,100 @@ describe("murph computer dynamic tools", () => {
     );
   });
 
+  describe.each([
+    { kind: "computer-open", args: { startUrl: null } },
+    { kind: "computer-act", args: { code: "return null;", runId: "run_123", timeoutMs: 1000 } },
+    { kind: "computer-os-control", args: { action: "pressKey", durationMs: 0, keys: ["Return"], runId: "run_123" } },
+    { kind: "computer-pause-for-user", args: {
+      handoffPurpose: "manual_browser_help", pauseDeliveryContext: null,
+      reason: "final_confirmation", runId: "run_123", suggestedReply: "done",
+    } },
+    { kind: "computer-finish-run", args: { outcome: "completed", runId: "run_123" } },
+  ] satisfies MurphDynamicToolRequest[])("$kind uncertain failures", (request) => {
+    it.each(["transport", "success-json", "uncoded-server"] as const)(
+      "preserves uncertain %s output, diagnostics and one request",
+      async (failure) => {
+        const controller = new AbortController();
+        const fetchImpl = vi.fn(async (): Promise<Response> => {
+          if (failure === "transport") throw new Error("synthetic transport failure");
+          return failure === "success-json"
+            ? new Response("not JSON", { status: 200 })
+            : jsonResponse({}, 500);
+        });
+        const progressDelivery = createProgressDelivery();
+        const result = await executeMurphDynamicToolRequest({
+          abortSignal: controller.signal,
+          env: {}, fetchImpl, hostedToolContext: createHostedToolContext(),
+          nextUsageOrdinal: () => 1, progressDelivery, request,
+        });
+        const diagnostic = failure === "uncoded-server"
+          ? { errorCategory: "unavailable", failureReason: "reported_failure", failureStage: "result" }
+          : { errorCategory: "unknown", failureReason: "handler_exception", failureStage: "execution" };
+        expect(result.rpcResult).toEqual({
+          success: false,
+          contentItems: [{ type: "inputText", text:
+            "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step" }],
+        });
+        expect(result.failureDiagnostic).toEqual(diagnostic);
+        expect(result.runtimeIssueInputs).toEqual([expect.objectContaining({
+          operation: request.kind,
+          details: { ...diagnostic, diagnosticRole: "classification", requestKind: request.kind },
+        })]);
+        expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+          expect.any(String),
+          expect.objectContaining({ method: "POST", signal: controller.signal }),
+        );
+        expect(progressDelivery.send).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  it.each([
+    { status: 400, body: "not JSON", expected: "computer API failed with status 400" },
+    { status: 500, body: "not JSON", expected: "uncertain" },
+    { status: 400, body: {}, expected: "computer API failed with status 400" },
+    { status: 500, body: {}, expected: "uncertain" },
+    { status: 500, body: { error: { message: "synthetic backend message" } },
+      expected: "uncertain; backend error: synthetic backend message" },
+    { status: 500, body: { error: { code: "KNOWN_CONFIGURATION_FAILURE", message: "synthetic backend message" } },
+      expected: "computer API failed with status 500: KNOWN_CONFIGURATION_FAILURE: synthetic backend message" },
+    { status: 400, body: { error: { code: "KNOWN_CONFIGURATION_FAILURE" } },
+      expected: "computer API failed with status 400: KNOWN_CONFIGURATION_FAILURE" },
+    { status: 500, body: { error: { code: "KNOWN_CONFIGURATION_FAILURE", details: { timeoutMs: 1000 } } },
+      expected: "computer API failed with status 500: KNOWN_CONFIGURATION_FAILURE\nbackend details:\ntimeoutMs: 1000" },
+    { status: 400, body: { error: { code: "HOSTED_COMPUTER_EVAL_FAILED" } },
+      expected: "uncertain; backend error: HOSTED_COMPUTER_EVAL_FAILED" },
+    { status: 400, body: { error: { code: "HOSTED_COMPUTER_ACTION_STATE_INVALID" } },
+      expected: "uncertain; backend error: HOSTED_COMPUTER_ACTION_STATE_INVALID" },
+    { status: 400, body: { error: { code: "HOSTED_COMPUTER_OS_CONTROL_FAILED" } },
+      expected: "uncertain; backend error: HOSTED_COMPUTER_OS_CONTROL_FAILED" },
+  ])("preserves status/code precedence for $status $body", async ({ status, body, expected }) => {
+    const fetchImpl = vi.fn(async (): Promise<Response> =>
+      typeof body === "string" ? new Response(body, { status }) : jsonResponse(body, status)
+    );
+    const result = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl, hostedToolContext: createHostedToolContext(),
+      nextUsageOrdinal: () => 1, progressDelivery: null,
+      request: {
+        kind: "computer-act",
+        args: { code: "return null;", runId: "run_123", timeoutMs: 1000 },
+      },
+    });
+    expect(result.rpcResult).toEqual({
+      success: false,
+      contentItems: [{ type: "inputText", text: expected.replace(
+        /^uncertain/u,
+        "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step",
+      ) }],
+    });
+    expect(result.failureDiagnostic).toEqual({
+      errorCategory: status === 400 ? "invalid_input" : "unavailable",
+      failureReason: "reported_failure",
+      failureStage: "result",
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("includes redacted browser execution details in unknown-outcome action failures", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({

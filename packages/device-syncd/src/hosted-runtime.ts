@@ -1,11 +1,8 @@
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 
-import {
-  parseSerializableConfiguredDeviceSyncProviderConfigs,
-  type SerializableConfiguredDeviceSyncProviderConfigs,
-} from "./config/serializable-provider-configs.ts";
+export { encodeJunctionReconcileProof, readJunctionReconcileProof } from "./junction-reconcile-proof.ts";
 
-import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
+import { JUNCTION_RECONCILE_PROOF_METADATA_KEY, JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
@@ -24,6 +21,8 @@ import type {
   DeviceConnectionSourceStatus,
 } from "./client.ts";
 export {
+  JUNCTION_RECONCILE_PROOF_METADATA_KEY,
+  JUNCTION_TEMPORAL_SWEEP_METADATA_KEY,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeGuardedJunctionHistoricalBackfillMetadata,
@@ -248,11 +247,21 @@ export function mergeHostedDeviceSyncConnectionMetadata(input: {
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown> | null | undefined;
 }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
-  return mergeHostedJunctionHistoricalBackfillMetadata({
+  const merged = mergeHostedJunctionHistoricalBackfillMetadata({
     hostedMetadata: input.hostedMetadata,
     localConnectionStateUnpublished: input.localConnectionStateUnpublished,
     localMetadata: input.localMetadata ?? {},
   });
+  // Local SQLite owns unpublished scheduling/import progress. Keep the actual
+  // Web baseline until a checkpointed continuation authorizes publication.
+  for (const key of [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY, JUNCTION_RECONCILE_PROOF_METADATA_KEY]) {
+    const localValue = input.localMetadata?.[key];
+    if (typeof localValue === "string") {
+      merged.metadata[key] = localValue;
+      merged.preservedLocalProgress ||= localValue !== input.hostedMetadata[key];
+    }
+  }
+  return merged;
 }
 
 export interface HostedExecutionDeviceSyncConnectLinkResponse {
@@ -447,8 +456,6 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotResponse {
   generatedAt: string;
   /** Null only when the current bounded page exhausted matching authority. */
   nextCursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
-  /** Invocation-scoped client configuration for current app-bound connections. */
-  providerConfigs?: SerializableConfiguredDeviceSyncProviderConfigs;
   userId: string;
 }
 
@@ -583,6 +590,7 @@ export interface HostedExecutionDeviceSyncDirtyResource {
   providerSendToWebhookMs?: number | null;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
+  providerDedupeKey?: string;
   resource: string | null;
   resourceCategory: string | null;
   sourceProviderSlug: string | null;
@@ -744,6 +752,8 @@ export interface HostedExecutionDeviceSyncJobHint {
 }
 
 export interface HostedExecutionDeviceSyncWakeHint {
+  junctionReconcileProof?: string;
+  junctionTemporalSweepKey?: string;
   eventType?: string | null;
   jobs?: HostedExecutionDeviceSyncJobHint[];
   nextReconcileAt?: string | null;
@@ -783,6 +793,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   historicalProofFirstSeenAt: "isoTimestamp",
   historicalProofSourceProviderSlug: "string",
   historicalProviderRecordsSeen: "boolean",
+  historicalPullPending: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",
   historicalUnresolvedProviderRecordCount: "number",
@@ -791,6 +802,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   includeProfile: "boolean",
   objectId: "string",
   occurredAt: "isoTimestamp",
+  reconcileProof: "string",
   resource: "string",
   resourceCategory: "string",
   sourceLifecycleEpoch: "number",
@@ -1071,14 +1083,6 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
                 record.nextCursor,
                 "Hosted device-sync runtime snapshot response nextCursor",
               ),
-        }),
-    ...(record.providerConfigs === undefined
-      ? {}
-      : {
-          providerConfigs: parseSerializableConfiguredDeviceSyncProviderConfigs(
-            record.providerConfigs,
-            "Hosted device-sync runtime snapshot response providerConfigs",
-          ),
         }),
     userId: requireString(record.userId, "Hosted device-sync runtime snapshot response userId"),
   };
@@ -1546,6 +1550,23 @@ export function parseHostedExecutionDeviceSyncWakeHint(
     ).map((entry, index) => parseHostedExecutionDeviceSyncJobHint(entry, index));
   }
 
+  if (record.junctionReconcileProof !== undefined) {
+    if (typeof record.junctionReconcileProof !== "string"
+      || record.junctionReconcileProof.trim().length === 0
+      || record.junctionReconcileProof.length > 256) {
+      throw new TypeError("Hosted execution device-sync.wake hint junctionReconcileProof must be a nonempty string of at most 256 characters.");
+    }
+    next.junctionReconcileProof = record.junctionReconcileProof;
+  }
+
+  if (record.junctionTemporalSweepKey !== undefined) {
+    if (typeof record.junctionTemporalSweepKey !== "string"
+      || !/^[a-f0-9]{64}$/u.test(record.junctionTemporalSweepKey)) {
+      throw new TypeError("Hosted execution device-sync.wake hint junctionTemporalSweepKey must be a SHA-256 hash.");
+    }
+    next.junctionTemporalSweepKey = record.junctionTemporalSweepKey;
+  }
+
   if (record.nextReconcileAt !== undefined) {
     next.nextReconcileAt = readNullableIsoTimestamp(
       record.nextReconcileAt,
@@ -1836,6 +1857,14 @@ function parseHostedExecutionDeviceSyncDirtyResource(
       : {}),
     jobKind: requireString(record.jobKind, `${label}.jobKind`),
     payload: readHostedExecutionDeviceSyncDirtyPayload(record.payload, `${label}.payload`),
+    ...(record.providerDedupeKey === undefined || record.providerDedupeKey === null
+      ? {}
+      : {
+          providerDedupeKey: requireString(
+            record.providerDedupeKey,
+            `${label}.providerDedupeKey`,
+          ),
+        }),
     resource: readNullableStringValue(record.resource, `${label}.resource`),
     resourceCategory: readNullableStringValue(record.resourceCategory, `${label}.resourceCategory`),
     sourceProviderSlug: readNullableStringValue(record.sourceProviderSlug, `${label}.sourceProviderSlug`),

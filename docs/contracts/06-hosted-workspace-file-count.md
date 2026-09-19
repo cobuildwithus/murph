@@ -258,7 +258,7 @@ landing; record the chosen posture here so the decision is reviewable.
   replay, while a write without one receives a unique retention-only identity.
   The generated-image owner materializes this shared file before every lookup
   read; hosted private generation requires the workspace runner's existing
-  persistence boundary, so a lazy legacy index cannot be replaced as empty and
+  persistence boundary, so an existing lookup cannot be replaced as empty and
   the capture cannot commit without its deadline checkpoint.
   Retries of a stable identity update no file count and either reuse the saved
   capture or return the deleted outcome.
@@ -285,7 +285,7 @@ landing; record the chosen posture here so the decision is reviewable.
   their exact 14-day cutoff into that wake in the same canonical receipt
   checkpoint, preserving the earliest cutoff through shutdown. Retirement uses
   that boundary too: guarded raw text-replacement receipts carry the inspected
-  preimage, and legacy lazy restore materializes receipt targets before replay.
+  preimage, and current receipt recovery resolves required media references before replay.
 
 - `assistant-state/hosted-provider-cleanup.json`
   (`murph.hosted-provider-cleanup.v1`) is compact durable operational-continuity

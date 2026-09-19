@@ -37,6 +37,9 @@ vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
   handoffHostedMailboxWake: mocks.handoffHostedMailboxWake,
 }));
 
+import { buildHostedRuntimeWebProtocolAdmission } from "../src/lib/hosted-execution/runtime-protocol";
+import { parseHostedExternalThreadRouteAuthorityResponse } from "@murphai/hosted-execution/parsers";
+
 import { POST } from "../app/api/internal/hosted-runtime/thread-route/authority/route";
 
 describe("hosted runtime thread route authority route", () => {
@@ -48,7 +51,7 @@ describe("hosted runtime thread route authority route", () => {
         await run({}),
     });
     mocks.assertHostedAssistantNotificationRouteAuthority.mockResolvedValue(
-      undefined,
+      false,
     );
     mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx
       .mockResolvedValue(undefined);
@@ -249,7 +252,7 @@ describe("hosted runtime thread route authority route", () => {
     ));
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ authorized: true });
+    await expect(response.json()).resolves.toEqual({ authorized: true, threadIsDirect: false });
     expect(
       mocks.assertHostedAssistantNotificationRouteAuthority,
     ).toHaveBeenCalledWith({ authority, prisma: {} });
@@ -290,10 +293,12 @@ describe("hosted runtime thread route authority route", () => {
     await expect(response.json()).resolves.toEqual({
       assistantAskFallbackRequired: true,
       authorized: true,
+      threadIsDirect: false,
     });
   });
 
-  it("delegates exact Telegram route authority to the Web-owned notification route validator", async () => {
+  it.each([true, false])("returns the Web-owned Telegram audience %s with exact route authority", async (threadIsDirect) => {
+    mocks.assertHostedAssistantNotificationRouteAuthority.mockResolvedValueOnce(threadIsDirect);
     const authority = {
       channel: "telegram",
       containerMemberId: "member_123",
@@ -309,7 +314,10 @@ describe("hosted runtime thread route authority route", () => {
     ));
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ authorized: true });
+    const payload = await response.json();
+    const witness = buildHostedRuntimeWebProtocolAdmission("synthetic-nonce").threadRouteAuthority;
+    expect(payload).toEqual(threadIsDirect ? witness.direct : witness.group);
+    expect(parseHostedExternalThreadRouteAuthorityResponse(payload)).toEqual({ threadIsDirect });
     expect(
       mocks.assertHostedAssistantNotificationRouteAuthority,
     ).toHaveBeenCalledWith({

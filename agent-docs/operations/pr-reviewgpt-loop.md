@@ -4,8 +4,7 @@ Last verified: 2026-09-04
 
 Use this runbook only when `completion-workflow.md` selects final ReviewGPT or
 the user requests it. It owns the managed-browser review, exact-head packaging,
-finding disposition, retries, and base-update rules. It does not add a local
-specialist or deep-review pass.
+finding disposition, retries, and base-update rules.
 
 Read the sections needed for the current round. Run on the stable pushed head
 after focused local proof and parent candidate review, concurrently with CI.
@@ -24,6 +23,11 @@ meaningful code, concepts, or owners while preserving required behavior and
 invariants without replacement machinery. Minor refactoring, UX polish,
 disclosure gaps, and speculative edge cases are not blocking findings. The
 targeted exploratory presets remain available separately.
+
+Both lean and full guarded archives include the tracked native CI controller
+policy, PR evidence template, and assistant verification skill through the
+existing exact always-path manifest. These inputs remain available when they
+are unchanged by the candidate.
 
 Round 1 is always a full-patch audit. On round 2 or later, the packager reads the
 PR body's explicit context
@@ -104,6 +108,39 @@ minutes.
 
 Same-session waiting, polling, and deliberate handoffs all preserve exact-head,
 exact-thread, attachment, model, timeout, and response-marker validation.
+
+### Recover an accepted review after capture failure
+
+After the waited capture owner exits with a hard-refresh or export failure,
+retain its original capture metadata and recover the already accepted request
+before considering another send. For a failure without a confirmed lane rate
+limit, use the installed exact-metadata exporter from the same session:
+
+```bash
+pnpm exec cobuild-review-gpt thread export \
+  --browser-endpoint "$BROWSER_ENDPOINT" \
+  --chat-url "$CHAT_URL" \
+  --capture-metadata "$CAPTURE_METADATA" \
+  --output .tmp/review-gpt-recovered-thread.json
+```
+
+Set `BROWSER_ENDPOINT` and `CHAT_URL` to the original metadata's endpoint and
+conversation, and `CAPTURE_METADATA` to that invocation's unchanged metadata
+file. Keep the export in task-owned ignored scratch space. Do not start this
+recovery while a waiter or detached owner is still capturing the same request.
+The exporter rejects endpoint, thread, accepted-turn, response, or artifact
+identity mismatches; do not remove metadata or broaden the target to make a
+failed export succeed.
+
+A successful export recovers evidence; it does not by itself validate a review.
+Check the exact accepted prompt and attachment, completed response and
+`REVIEW_COMPLETE` marker, requested model evidence, and minimum response time
+under the final gate below. Preserve the original round and head when these
+checks pass. If the response is still incomplete, keep the original completion
+owner and paced polling rule. If identity or model evidence remains missing,
+report that gap without treating a visible answer as a pass. Close only any
+remaining task-owned recovery tab after capture; shared lanes remain untouched.
+Confirmed capability limits retain the separate lane-recovery rule below.
 
 ## Finding Disposition Boundary
 
@@ -195,12 +232,24 @@ none apply. Missing, malformed, or duplicate declarations are packaged as
 `undeclared` and default to the full snapshot.
 
 At round 1, record the exact first-reviewed head in the PR body. Include the exact machine-readable line
-`ReviewGPT first-reviewed head: <full-sha>`. Keep that line and baseline
-immutable. The packager fails if its supplied first head differs from this
-persisted PR-body value. Later substantive rounds report the remediation delta
+`ReviewGPT first-reviewed head: <full-sha>`. Once the first substantive review
+validates, keep that line and baseline immutable. The packager fails if its
+supplied first head differs from this persisted PR-body value. Later substantive rounds report the remediation delta
 from that baseline without asking the author to maintain a manual line-count
 table. Here `<full-sha>` means exactly the 40-character lowercase hexadecimal
 value returned by `git rev-parse HEAD`; a shortened SHA is invalid.
+
+If every initial attempt is invalid and an already-authorized candidate change
+produces a new pushed head, first preserve the old head, invalidity reason, and
+artifact references in a separate PR-body attempt-history entry. Confirm that
+no valid substantive review exists; an accepted prompt still awaiting capture
+is not an invalid result and must be recovered before this decision. Then
+replace the single machine-readable first-reviewed-head line with the new full
+head and retry round 1 with a fresh full snapshot. Leave previous-reviewed-head
+unset and use the new head as the context anchor. No extra commit is needed
+solely to restart review. Do not relabel a valid `PASS` or `FINDINGS` response as
+invalid, erase prior findings, reset a later round, or grant new edit authority
+through this recovery. Same-head tooling retries retain their existing baseline.
 
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
 to go green first. Final round 1 runs in parallel with CI. Green CI on the final
@@ -345,7 +394,7 @@ the current user explicitly asks for it.
    recent full-snapshot head as `REVIEW_GPT_CONTEXT_ANCHOR_HEAD`.
 
    The repo wrapper runs the current installed Brave binary with one usable
-   ReviewGPT browser lane per run: Eragon on CDP port `9448`, Phlebas on `9442`,
+   ReviewGPT browser lane per run: Eragon on CDP port `9448`,
    Hercules on `9444`, Mountain on `9450`, Vonneumann on `9446`, or Apollo on
    `9454`, always with profile `Default` and
    `app_connector=current` so review context comes from the guarded ZIP and
@@ -359,7 +408,7 @@ the current user explicitly asks for it.
    Spotlight or scans unrelated filesystem roots for an app bundle.
 
    `REVIEW_GPT_BROWSER_LANE_COUNT` limits the automatic pool to the first one
-   through six lanes and defaults to all six. A value supplied on the current
+   through five lanes and defaults to all five. A value supplied on the current
    command is authoritative; the local config is only a fallback preference and
    cannot widen or replace that per-run pool cap. A host can narrow the pool by
    setting the count in its local `$XDG_CONFIG_HOME/murph/review-gpt.conf`,
@@ -372,13 +421,26 @@ the current user explicitly asks for it.
    and fails loudly if the profile needs operator cleanup.
 
    The wrapper requests the configured Pro review model on the selected lane.
-   If ChatGPT reports that the selected lane has reached its model limit, do not
-   move an existing conversation to another workspace. Reuse its original lane,
-   or use the fresh-full recovery command above with a different lane instead of
-   downgrading the model.
+   Treat `REVIEW_GPT_RATE_LIMITED`, a visible “Capabilities reduced until…”
+   notice, or Pro becoming unselectable under that notice as a lane rate limit.
+   A completed answer, `PASS`, matching model text, or elapsed-time fallback
+   cannot validate that attempt. Continue automatically on another configured
+   lane within the current pool cap, excluding lanes already limited in this
+   retry sequence. Try each allowed lane at most once; if all are limited,
+   report the reset notice and stop until a lane recovers.
+
+   Start a fresh conversation with the same requested model and reviewed head;
+   never move the limited conversation to another workspace. For round 1,
+   rerun the full review with a different explicit `REVIEW_GPT_BROWSER_LANE`.
+   For later rounds, use the fresh-full recovery command above with a different
+   lane and `REVIEW_GPT_FULL_REVIEW_REASON="previous lane capability limit"`,
+   omitting `REVIEW_GPT_THREAD_URL` and preserving the findings/disposition
+   summary. Keep the substantive round number and first-reviewed head: a
+   rejected rate-limited attempt is not a completed review round. Record the
+   replacement lane and conversation for subsequent same-thread work.
 
    To pin a specific lane, preserve a conversation's workspace, or debug one
-   profile, set `REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain|vonneumann|apollo` on
+   profile, set `REVIEW_GPT_BROWSER_LANE=eragon|hercules|mountain|vonneumann|apollo` on
    that command.
    `aragon` is accepted as an alias for `eragon`. A first round may leave it
    unset to select a usable lane automatically, but its handoff must record the
@@ -392,8 +454,10 @@ the current user explicitly asks for it.
    if that lane cannot continue, use the fresh-full recovery command.
 
    Use `--wait` for normal review runs so ReviewGPT closes the tab it created
-   after capture. Do not resend an accepted prompt during recovery; continue
-   from the same thread and close any task-owned recovery tab when done.
+   after capture. For capture failures without a confirmed lane rate limit,
+   do not resend an accepted prompt; continue from the same thread and close
+   any task-owned recovery tab when done. Confirmed lane rate limits follow
+   the fresh-full recovery path above.
 
 3. Confirm the captured output is an actual completed review before triaging
    it. If the run leaves an empty/preliminary response, lacks
@@ -422,10 +486,11 @@ the current user explicitly asks for it.
 
    A response with `ROUND_OUTCOME: INVALID` does not count as a substantive
    round. Correct its evidence or invocation gap and retry the same round number
-   against the same pushed head.
+   against the same pushed head. An authorized head change before any valid
+   initial review uses the round-one baseline recovery above.
 
-   Require at least 4.5 minutes (270 seconds) for a marked concrete-model final
-   response. The repository wrapper passes `--minimum-marked-response-time 270s`
+   Require at least 3 minutes (180 seconds) for a marked concrete-model final
+   response. The repository wrapper passes `--minimum-marked-response-time 180s`
    to align the tool's attestation fallback with this final-gate minimum. Below
    that minimum, the response does not count. At or above it, inspect the exact
    turn, attachment, requested model selection, completion marker, and a

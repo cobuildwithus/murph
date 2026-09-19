@@ -3,7 +3,7 @@ import { parseHostedRuntimeLatencyTraceResponse } from "@murphai/hosted-executio
 import type { HostedRuntimeLatencyTraceResponse } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
-import { writeRunnerRuntimeWriteFenceHeaders } from "../runner-outbound/write-fence.ts";
+import { writeRunnerRuntimeWriteFenceHeaders } from "../runner-outbound/headers.ts";
 import {
   fetchHostedWebControlPlaneJson,
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,

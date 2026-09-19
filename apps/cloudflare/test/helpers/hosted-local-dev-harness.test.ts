@@ -1,3 +1,4 @@
+import { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -9,7 +10,7 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
 
-import type { HostedLocalDevConfig } from "@murphai/hosted-local-harness/dev-hosted-local/types";
+import type { BufferedNamedChildProcess, HostedLocalDevConfig } from "@murphai/hosted-local-harness/dev-hosted-local/types";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
 } from "../hosted-execution-fixtures.ts";
@@ -59,7 +60,7 @@ const createHostedLocalDevStack = (ready: Promise<void> = Promise.resolve()) => 
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
   },
   processes: {
-    cloudflare: null,
+    cloudflare: null as BufferedNamedChildProcess | null,
     healthCommons: null,
     linqTunnel: null,
     minio: null,
@@ -213,8 +214,27 @@ it("removes disposable hosted web smoke artifacts outside the E2E prod profile",
   }
 });
 
-it("fails fast when hosted completion reaches a terminal runner error", async () => {
+it.each(["stdout", "stderr"] as const)("retains %s diagnostics when hosted completion reaches a terminal runner error", async (stream) => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const containerFailure = JSON.stringify({
+    message: "Hosted execution container failed.",
+    details: { runnerFailureKind: "runner_transport_failure", objectKey: "hidden-worker-object-key" },
+  });
+  const stack = createHostedLocalDevStack();
+  startHostedLocalDevStack.mockResolvedValueOnce({
+    ...stack,
+    processes: {
+      ...stack.processes,
+      cloudflare: {
+        child: new ChildProcess(), name: "cloudflare",
+        stdoutTail: () => stream === "stdout" ? containerFailure : "",
+        stdoutText: () => stream === "stdout" ? containerFailure : "",
+        stderrTail: () => stream === "stderr" ? containerFailure : "",
+        stderrText: () => stream === "stderr" ? containerFailure : "",
+      },
+    },
+    stdoutTail: () => "unrelated teardown output\n".repeat(3_000),
+  });
   const status = {
     inFlight: false,
     lastErrorCode: "configuration_error",
@@ -292,6 +312,8 @@ it("fails fast when hosted completion reaches a terminal runner error", async ()
       failureMessage = error instanceof Error ? error.message : String(error);
     }
 
+    expect(failureMessage).toContain("runner_transport_failure");
+    expect(failureMessage).not.toContain("hidden-worker-object-key");
     expect(failureMessage).toContain("snapshotRefPresent");
     expect(failureMessage).toContain("browserVaultReplicaRefPresent");
     expect(failureMessage).toContain("recentLogsPresent");
@@ -1038,9 +1060,9 @@ it("does not treat foreground system imports as completion without a durable che
   }
 });
 
-it("calls the hosted-local alarm test route with the bound user headers", async () => {
+it("nudges canonical Postgres processing with bound user headers", async () => {
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
-    return Response.json({ ok: true });
+    return Response.json({ kind: "runtime_processing_accepted", action: "started", runtimeAttemptId: "synthetic-attempt", recommendedRecheckAt: new Date().toISOString() });
   });
   vi.stubGlobal("fetch", fetch);
 
@@ -1062,7 +1084,7 @@ it("calls the hosted-local alarm test route with the bound user headers", async 
 
     expect(fetch).toHaveBeenCalledTimes(1);
     const [request, init] = fetch.mock.calls[0]!;
-    expect(String(request)).toBe("http://127.0.0.1:8787/__test/users/member_alarm/alarm");
+    expect(String(request)).toBe("http://127.0.0.1:8787/internal/users/member_alarm/runtime/ensure-processing");
     const headers = new Headers(init?.headers);
     expect(headers.get("authorization")).toBe("Bearer oidc-token");
     expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_alarm");
@@ -1202,9 +1224,10 @@ it("controls the hosted-local shutdown checkpoint publication barrier", async ()
   }
 });
 
-it("calls the hosted-local run-until-idle route without an idle checkpoint reason", async () => {
+it("waits for canonical status after a manual test nudge", async () => {
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
-    return Response.json({ status: "idle" });
+    if (String(_input).endsWith("/runtime/ensure-processing")) return Response.json({ kind: "runtime_processing_accepted", action: "started", runtimeAttemptId: "synthetic-attempt", recommendedRecheckAt: new Date().toISOString() });
+    return Response.json({ inFlight: false, lastInvocationAt: null, mailboxLag: [], userId: "member_manual_invocation", workspace: null });
   });
   vi.stubGlobal("fetch", fetch);
 
@@ -1220,12 +1243,12 @@ it("calls the hosted-local run-until-idle route without an idle checkpoint reaso
 
   try {
     await expect(harness.runHostedManualInvocationForTest("member_manual_invocation"))
-      .resolves.toEqual({ status: "idle" });
+      .resolves.toEqual({ nextWakeAt: null, status: "idle" });
 
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
     const [request, init] = fetch.mock.calls[0]!;
     expect(String(request)).toBe(
-      "http://127.0.0.1:8787/__test/users/member_manual_invocation/run-until-idle",
+      "http://127.0.0.1:8787/internal/users/member_manual_invocation/runtime/ensure-processing",
     );
     const headers = new Headers(init?.headers);
     expect(headers.get("authorization")).toBe("Bearer oidc-token");
@@ -1239,9 +1262,10 @@ it("calls the hosted-local run-until-idle route without an idle checkpoint reaso
   }
 });
 
-it("calls the hosted-local run-until-idle route without an alarm reason", async () => {
+it("waits for canonical status after an alarm test nudge", async () => {
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
-    return Response.json({ nextWakeAt: null, status: "idle" });
+    if (String(_input).endsWith("/runtime/ensure-processing")) return Response.json({ kind: "runtime_processing_accepted", action: "started", runtimeAttemptId: "synthetic-attempt", recommendedRecheckAt: new Date().toISOString() });
+    return Response.json({ inFlight: false, lastInvocationAt: null, mailboxLag: [], userId: "member_alarm_invocation", workspace: null });
   });
   vi.stubGlobal("fetch", fetch);
 
@@ -1259,10 +1283,10 @@ it("calls the hosted-local run-until-idle route without an alarm reason", async 
     await expect(harness.runHostedAlarmInvocationForTest("member_alarm_invocation"))
       .resolves.toEqual({ nextWakeAt: null, status: "idle" });
 
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
     const [request, init] = fetch.mock.calls[0]!;
     expect(String(request)).toBe(
-      "http://127.0.0.1:8787/__test/users/member_alarm_invocation/run-until-idle",
+      "http://127.0.0.1:8787/internal/users/member_alarm_invocation/runtime/ensure-processing",
     );
     const headers = new Headers(init?.headers);
     expect(headers.get("authorization")).toBe("Bearer oidc-token");
@@ -1274,4 +1298,27 @@ it("calls the hosted-local run-until-idle route without an alarm reason", async 
   } finally {
     await harness.stop();
   }
+});
+
+
+it("waits for processing acceptance after retry_later before reading idle status", async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(Response.json({ kind: "retry_later", retryAt: new Date().toISOString() }))
+    .mockResolvedValueOnce(Response.json({ kind: "runtime_processing_accepted", action: "started", runtimeAttemptId: "synthetic-attempt", recommendedRecheckAt: new Date().toISOString() }))
+    .mockResolvedValueOnce(Response.json({ inFlight: false, lastInvocationAt: null, mailboxLag: [], userId: "synthetic-member", workspace: null }));
+  vi.stubGlobal("fetch", fetch);
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const harness = await startHostedLocalDevHarness({
+    env: { DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test", NEXT_DIST_DIR_MODE: "smoke" },
+    persistDirPrefix: "murph-hosted-local-test-", testControls: true,
+  });
+  try {
+    await expect(harness.runHostedManualInvocationForTest("synthetic-member")).resolves.toEqual({ status: "idle", nextWakeAt: null });
+    expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/internal/users/synthetic-member/runtime/ensure-processing",
+      "/internal/users/synthetic-member/runtime/ensure-processing",
+      "/internal/users/synthetic-member/status",
+    ]);
+    expect(fetch.mock.calls[0]?.[1]?.body).toBe(fetch.mock.calls[1]?.[1]?.body);
+  } finally { await harness.stop(); }
 });

@@ -1,16 +1,10 @@
 export {
   HostedRuntimeBridgeCheckpointLeaseError,
-  checkpointHostedRuntimeBridgeWorkspace,
-  snapshotHostedRuntimeBridgeWorkspaceBundle,
 } from "./hosted-runtime/checkpoint-bridge.ts";
 export type {
-  HostedRuntimeBridgeBundleWriteContext,
-  HostedRuntimeBridgeCheckpointContext,
-  HostedRuntimeBridgeCheckpointInput,
   HostedRuntimeBridgeCheckpointLease,
   HostedRuntimeBridgeCheckpointLeaseErrorCode,
   HostedRuntimeBridgeCheckpointLeaseStage,
-  HostedRuntimeBridgeSnapshotInput,
 } from "./hosted-runtime/checkpoint-bridge.ts";
 export {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
