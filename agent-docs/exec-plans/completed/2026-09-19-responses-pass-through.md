@@ -1,6 +1,6 @@
 # Simplify hosted Responses WebSockets with platform pass-through
 
-Status: active
+Status: completed
 
 ## Outcome and invariants
 
@@ -50,4 +50,8 @@ and any available isolated deployed proof honestly.
 - Cloudflare typecheck, docs drift and complexity guard pass. Existing hotspots
   are the OpenAI policy boundary (26) and provider diagnostic projection (25);
   neither warrants a new abstraction for this transport deletion.
-- Final PR/head CI and external review remain pending.
+- Ten changelog rendering tests pass. PR #3590 owns the final exact-head CI
+  and ReviewGPT gate; implementation/local proof is complete. No production
+  deployment is authorized or claimed by this plan.
+Updated: 2026-09-19
+Completed: 2026-09-19
