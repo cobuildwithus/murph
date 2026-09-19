@@ -65,7 +65,20 @@ Initial enrollment now owns both new and imported members with no approval
 aggregate. New-user creation no longer stamps a revocation for authority that
 never existed; subsequent credential revocations and enrollment keep the existing
 fence. A later credential fence requests bound reauthentication before setup.
-The temporary operator cleanup PR still requires deployment and session expiry
-before execution. No production mutation or native publication has run.
+The temporary operator cleanup release is deployed; execution still waits for
+session expiry. No production account deletion, contraction or native publication
+has run.
 
 - Merged additive preparation #3589 after valid review and green required CI. Integrated its main commit, retaining the calendar-stable video fixture correction and immutable completed plan; removed its temporary Ops endpoint, guard and optional deletion mode from retirement readers. Production execution remains pending session expiry.
+
+## Final review and CI correction
+
+Full sensitive round 3 passed at `12bd39220dd5a3e06dfa916227b62e28cedc1134`.
+The completed capture binds the accepted turn, actual gpt-6-pro response and
+SHA-256 `5d178422f19fece439a60e8d27d1e64699d78f7f3fd2e5ce0988b6755b2350ea`.
+CI exposed two fixture omissions: a newer runtime-enrollment fixture still wrote
+the removed provider receipt column, and a Cloudflare full-stack fixture omitted
+the two first-party harness keys. Corrected only those fixtures and retired two
+unused receipt-test fields. The 29-case PostgreSQL/cleanup run, 29-case harness
+run, Web/Cloudflare typechecks and scoped lint pass. No runtime source changed
+since the full review; final exact-head CI remains pending.

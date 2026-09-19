@@ -37,7 +37,7 @@ describe.skipIf(!enabled)("historical encrypted runtime enrollment", () => {
       kmsKeyName: "projects/murph-test/locations/global/keyRings/test/cryptoKeys/account-cleanup",
       payloadCiphertext: Buffer.from(JSON.stringify({ schema: "murph.hosted-account-deletion-cleanup.v1", runtimeMemberIds: ids,
         privyUserId: null, stripeCustomerIds: [] })).toString("base64"),
-      cloudflareCompletedAt: now, stripeCompletedAt: now, privyCompletedAt: now, runtimeLogsCompletedAt: now, temporalCompletedAt: now } });
+      cloudflareCompletedAt: now, stripeCompletedAt: now, runtimeLogsCompletedAt: now, temporalCompletedAt: now } });
   }
   async function bind(ids: string[]) {
     const bindings = ids.map(userId => ({ userId, objectId: createHash("sha256").update(userId).digest("hex") }));

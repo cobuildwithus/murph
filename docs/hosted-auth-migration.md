@@ -51,12 +51,12 @@ The earlier reviewed-head table is historical candidate evidence. Current state:
 | --- | --- |
 | Web adoption #3127, #3128, #3132 | Merged; current first-party production records observed. |
 | Passkey repair #3504 | Merged after the original retirement candidate; its canonical login and revocation safeguards are preserved by this reconciliation. |
-| Web retirement #3134 | Retargeted to main and held in draft during reconciliation and new verification. Prior reviews do not certify this changed source. |
-| Targeted signup cleanup #3589 | Merged additive guarded Ops endpoint with second full review and green required CI. Production deployment must be verified; no production deletion performed. Live legacy sessions independently block execution. This retirement source removes the temporary endpoint after its obligations converge. |
+| Web retirement #3134 | Reconciled with main and passkey repair. Full sensitive round 3 passed at `12bd39220dd5a3e06dfa916227b62e28cedc1134`; isolated fixture corrections and final CI remain. Merge/deployment hold is unchanged. |
+| Targeted signup cleanup #3589 | Merged additive guarded Ops endpoint with second full review and green required CI. Production deployment of merge `e42b2b81f8264af6fc37ba75c8db1168d6bf937e` is ready; no production deletion performed. Live legacy sessions independently block execution. This retirement source removes the temporary endpoint after its obligations converge. |
 | iOS adoption #150 / Android adoption #39 | Merged. Store distribution and installed-device upgrades remain unqualified by merge evidence. |
-| iOS retirement #151 / Android retirement #40 | Open, gated on native distribution, installed/dormant/skipped-version recovery and shared provider obligations. |
-| Android CI cleanup #41 | Open, stacked after #40. |
-| Android canary setup #44 | Separate SDK package fix; explicit `platform-tools` avoids the removed package requested by the pinned action default. |
+| iOS retirement #151 / Android retirement #40 | Reconciled with main, locally verified and in fresh source reviews. Gated on native distribution, installed/dormant/skipped-version recovery and shared provider obligations. |
+| Android CI cleanup #41 | Reconciled with #40; the trusted-base review still sees only two unused public placeholders removed. Open and stacked after #40. |
+| Android canary setup #44 | Merged as `929d9493e178d12523ac4705963326199bae37a3` after validated PASS and green CI; explicit `platform-tools` avoids the removed package requested by the pinned action default. |
 | Privy browser test #3221 | Closed as obsolete; branch and historical evidence retained. |
 
 Read-only production aggregates still show valid legacy browser sessions and one
@@ -67,7 +67,7 @@ code is added for that account. Zero pending provider targets in cleanup receipt
 does not prove provider-orphan inventory or wallet/export completion.
 
 The public native controllers still pin older private sources. The iOS canary
-fails at its legacy OTP stage; Android fails at SDK setup before instrumentation.
+last failed at its legacy OTP stage; the last Android run failed at SDK setup before instrumentation, now corrected by #44 but not yet requalified.
 Neither supplies first-party rollout evidence. Update source pins only to reviewed
 immutable commits and qualify actual generated-code delivery, installed updates
 and dormant/skipped-version recovery. Do not revive provider fixed-code login.

@@ -632,6 +632,8 @@ async function startScenarioWithRealHarness() {
   mocks.startHostedLocalDevStack.mockImplementationOnce(async ({ env }) => ({
     config: resolveHostedLocalDevConfig(env),
     hostedAppSessionHmacKey: "synthetic-session-key",
+    hostedBetterAuthSecret: "synthetic-better-auth-secret",
+    hostedAuthStorageKey: "11".repeat(32),
     kill: vi.fn(),
     linqWebhookTargetUrl: null,
     oidcIdentity: { environment: "development", projectName: "murph", teamSlug: "local" },

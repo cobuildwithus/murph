@@ -926,8 +926,6 @@ interface CleanupRow {
   leaseToken: string | null;
   nextAttemptAt: Date;
   payloadCiphertext: string;
-  privyCompletedAt: Date | null;
-  privyUserLookupKey: string | null;
   runtimeLogsCompletedAt: Date | null;
   stripeCompletedAt: Date | null;
   temporalCompletedAt: Date | null;
