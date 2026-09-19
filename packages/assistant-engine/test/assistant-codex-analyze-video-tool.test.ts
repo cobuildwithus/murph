@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   executeMurphDynamicToolRequest,
@@ -32,6 +32,11 @@ import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
+
+beforeEach(() => {
+  // Keep retained-media fixtures current without changing provider timers.
+  vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-08-20T12:00:00.000Z') })
+})
 
 afterEach(async () => {
   vi.useRealTimers()
