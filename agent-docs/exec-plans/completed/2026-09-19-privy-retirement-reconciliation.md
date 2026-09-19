@@ -1,6 +1,6 @@
 # Reconcile Privy retirement with current authentication
 
-Status: active
+Status: completed
 Created: 2026-09-19
 Updated: 2026-09-19
 
@@ -81,4 +81,23 @@ the removed provider receipt column, and a Cloudflare full-stack fixture omitted
 the two first-party harness keys. Corrected only those fixtures and retired two
 unused receipt-test fields. The 29-case PostgreSQL/cleanup run, 29-case harness
 run, Web/Cloudflare typechecks and scoped lint pass. No runtime source changed
-since the full review; final exact-head CI remains pending.
+since the full review; all hosted checks passed at `638aaf2cbaf1c5bdb96fd4337b992a5e098d692b`.
+
+## Completion and operational handoff
+
+Web code preparation is complete. Full sensitive review passed, all required
+source-head CI passed, and merge-tree verification against freshly fetched main
+`261ff4ff82` is conflict-free. This final commit only closes the plan and refreshes
+the durable rollout record; its final-head CI remains a delivery gate.
+
+Android retirement has validated PASS and green CI; its CI cleanup remains
+stacked after it. iOS retirement has passing current simulator tests/builds and
+is completing its final review after deleting an unused diagnostic adapter.
+Native store distribution, installed upgrades and dormant/skipped-version
+recovery are still external qualification gates. The additive guarded signup
+cleanup and Android SDK package correction are merged; the former is deployed.
+No production deletion, forced logout, vendor/configuration retirement or schema
+contraction was performed. Browser authority must drain naturally, the signup
+must be eligible at execution, and provider-orphan/wallet obligations must be
+recorded before final retirement. Keep the shared HMAC key.
+Completed: 2026-09-19
