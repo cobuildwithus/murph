@@ -1,6 +1,6 @@
 # Preserve complete hosted snapshots during filesystem races
 
-Status: active
+Status: completed
 Created: 2026-09-19
 Updated: 2026-09-19
 
@@ -31,7 +31,7 @@ existing checkpoint failure handling; add no retries, schemas, or state owners.
 2. Cover vanished included files/directories in both roots and absent initial roots.
 3. Run focused runtime-state and real Cloudflare snapshot tests, both owner
    typechecks, changelog rendering, and the complexity guard.
-4. Review the candidate, push a draft PR, and run ReviewGPT alongside exact-head CI.
+4. Review the candidate and prepare a draft PR for ReviewGPT and exact-head CI.
 
 ## Risks and limits
 
@@ -41,4 +41,20 @@ already incomplete stored snapshot or prove the exact path of a historical race.
 
 ## Results
 
-Implementation and verification in progress.
+Implementation complete. Candidate review found no remaining in-scope defect.
+Excluded-cache deletion preserves vault metadata, notes, and operator memory after
+real encrypted restore. Included file/directory/root races reject planning in
+both roots, initially missing roots remain supported, and cancellation preserves
+its exact reason even when readdir fails concurrently.
+
+- Runtime-state focused tests: 89 passed across four files.
+- Cloudflare archive and restore tests: 41 passed across two files.
+- Runtime-state and Cloudflare typechecks: passed. Cloudflare required the normal
+  Prisma client generation step after refreshing the checkout.
+- Changelog rendering: 10 tests passed.
+- Complexity guard: passed; traversal complexity 27 to 25, debt 7 to 5.
+- Privacy/diff review and git diff whitespace check: passed.
+
+PR #3587 owns final ReviewGPT and exact-head CI evidence. Merge, deployment,
+and recovery of any previously incomplete snapshot remain separate actions.
+Completed: 2026-09-19
