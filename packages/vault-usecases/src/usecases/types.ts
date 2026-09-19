@@ -1827,6 +1827,7 @@ export interface ImportersRuntime {
     mealId: string
     event: {
       id: string
+      dayKey: string
       occurredAt?: string | null
       note?: string | null
       source?: ImporterSource | null

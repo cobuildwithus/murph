@@ -3,6 +3,8 @@ import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { MURPH_ATTACH_RESPONSE_CARD_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
+
 import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 import { buildManualMealEstimationInstructions } from '../src/assistant/manual-meal-estimation.js'
@@ -35,6 +37,24 @@ function buildPrompt(
 }
 
 describe('assistant food journal skill', () => {
+  it('composes the saved-day summary with card authority without redundant reads', async () => {
+    const root = resolveAssistantSkillsRoot()
+    const food = compact(await readFile(path.join(root, 'food-journal/SKILL.md'), 'utf8'))
+    const goals = compact(await readFile(path.join(root, 'nutrition-strategy/references/daily-nutrition-card-goals.md'), 'utf8'))
+    const tool = MURPH_ATTACH_RESPONSE_CARD_TOOL.description
+    for (const instructions of [food, goals, tool]) {
+      expect(instructions).toContain('--with-daily-totals')
+      expect(instructions).toContain('dailyTotals.data')
+      expect(instructions).toContain('available')
+    }
+    expect(food).toContain('never repeat the meal mutation')
+    expect(food).toContain('before adding estimates or `--with-daily-totals`, not after receiving totals')
+    expect(food).toContain('Omit `--with-daily-totals` when numeric guidance is suppressed')
+    expect(tool).not.toContain('Before every daily_nutrition card or explicit target-proposal decision, run')
+    expect(food).toContain('Incomplete coverage still triggers the selected-date recovery')
+    expect(food).toContain('Do not read the goal-derivation reference or full nutrition-strategy skill unless the member explicitly engages in target-setting')
+  })
+
   it('composes manual estimation with ordinary meal recovery and numeric preferences', async () => {
     const instructions = [
       buildPrompt(),
@@ -197,7 +217,7 @@ describe('assistant food journal skill', () => {
       'before deciding that the five canonical daily goals are complete',
     )
     expect(skill).toContain(
-      "Use its\nproposal workflow only for an explicit target-setting request, never merely a\nmeal log, daily summary, numeric-card request, or scheduled closeout.",
+      "and use its proposal workflow only for an explicit target-setting request,\nnever merely a meal log, daily summary, numeric-card request, or scheduled closeout.",
     )
     expect(skill).toContain(
       'Treat a routine daily-card request, including a requested meal estimate needed\nfor that card, as one fulfillment workflow.',

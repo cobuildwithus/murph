@@ -4610,6 +4610,10 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
+                        "withDailyTotals": {
+                          "description": "After saving, return fresh totals and goal context for the saved meal local date. Replaces a separate meal totals --resolve-goals read; does not attach a card or approve numeric suitability. If the read fails the meal is still saved: retry only meal totals, never meal add.",
+                          "type": "boolean"
+                        },
                         "photo": {
                           "description": "Optional meal photo path.",
                           "type": "string",
@@ -4840,6 +4844,10 @@
                         "input": {
                           "type": "string",
                           "description": "Structured meal payload in @file.json form or - for stdin. Structured payload object keys: `photo` or `photoPath` for an optional meal photo path; `audio` or `audioPath` for an optional audio note path; `note`, `occurredAt`, and `source` for the saved event fields; `ingredients` as a string array; `nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams?, waterGrams? }, micros?: { <supported bounded nutrient keys> }, provenance?: { source, confidence?, sourceDetail? } }`."
+                        },
+                        "withDailyTotals": {
+                          "description": "After saving, return fresh totals and goal context for the saved meal local date. Replaces a separate meal totals --resolve-goals read; does not attach a card or approve numeric suitability. If the read fails the meal is still saved: retry only meal totals, never meal add.",
+                          "type": "boolean"
                         },
                         "photo": {
                           "description": "Optional meal photo path.",

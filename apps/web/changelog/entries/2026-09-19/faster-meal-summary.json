@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-19",
+  "order": 100,
+  "item": {
+    "id": "faster-meal-summary",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Fewer steps from meal log to nutrition card",
+    "summary": "Murph can save a meal and prepare its daily nutrition summary together, reducing the work before your card is ready.",
+    "details": "Meal-history reads also avoid an extra rebuild after new data arrives. Food lookups and missing details can still take additional time, and your number-tracking preferences still apply.",
+    "relevanceTags": ["food", "nutrition"],
+    "sourcePullRequests": []
+  }
+}
