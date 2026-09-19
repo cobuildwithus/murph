@@ -34,8 +34,8 @@ import { createTempVaultContext } from './test-helpers.ts'
 const tempRoots: string[] = []
 
 beforeEach(() => {
-  // Keep retained-media fixtures current without changing provider timers.
-  vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-08-20T12:00:00.000Z') })
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-08-20T11:00:00.000Z'))
 })
 
 afterEach(async () => {
