@@ -454,3 +454,29 @@ rereads it. This is a user-facing compatibility control, not a security fence.
 Older installed binaries without the reader cannot show the new screen and
 still require an ordinary App Store update. Keep legacy auth until its separate
 retirement gates pass; publishing a new app does not prove adoption.
+
+## Operator disposition of unused legacy signups
+
+During retirement preparation, an explicitly authorized unused signup can be
+removed through `POST /api/ops/auth-migration/unused-signup`. This temporary
+endpoint requires the existing active Ops allowlist and same-origin checks,
+one exact `memberId`, its ISO `createdAt`, and the confirmation
+`DELETE UNUSED SIGNUP`. There is no discovery, batch delete, impersonated session
+or contact-based target selection. Keep private target values in the authenticated
+request only; do not record them in rollout documents or command logs.
+
+Before any external operation, the normal deletion locks protect a fresh check
+that the target is the specified never-onboarded legacy signup, with no
+first-party authentication, verified/contact routing, wallet, approval protection,
+billing, workspace, messaging, group, device or other admitted product use.
+Browser activity outside the first ten minutes of signup rejects cleanup.
+The same transaction establishes the ordinary suspension fence. A changed target
+returns `UNUSED_SIGNUP_CHANGED`; missing or conflicting data never becomes
+permission to delete a retained member.
+
+The existing deletion service then owns revocation, canonical deletion and the
+encrypted provider/runtime cleanup receipt. Partial failure retains suspension
+and the existing retry owners. An HTTP success with `cleanupPending: true` is
+not provider convergence. Verify canonical absence and receipt outcomes before
+clearing the retirement inventory. Remove this endpoint and its unused-signup
+check with the importer after authorized cleanup converges.
