@@ -9,6 +9,6 @@
     "summary": "Murph can save a meal and prepare its daily nutrition summary together, reducing the work before your card is ready.",
     "details": "Meal-history reads also avoid an extra rebuild after new data arrives. Food lookups and missing details can still take additional time, and your number-tracking preferences still apply.",
     "relevanceTags": ["food", "nutrition"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3588]
   }
 }
