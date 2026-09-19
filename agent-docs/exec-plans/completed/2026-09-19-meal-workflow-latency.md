@@ -1,6 +1,6 @@
 # Reduce meal workflow tool round trips and query latency
 
-Status: active
+Status: completed
 Created: 2026-09-19
 Updated: 2026-09-19
 
@@ -86,5 +86,11 @@ failure after persistence returns saved evidence plus a read-only recovery path.
   owning guidance now resolves unknown canonical preferences before saving,
   reusing that read for subsequent suitability and invitation decisions.
 
-Parent candidate review is complete. Pending: stable-head ReviewGPT, required
-CI and plan closure. No production mutation or deployment is included.
+Parent candidate and final reviews are complete. PR #3588's full-patch
+ReviewGPT round passed at `01bdcd87a1570395075e77c3754fc8fd5745a317` with no
+qualifying findings; exact head, response model and response digest verified.
+This plan closure changes only explanatory documentation and requires no new
+substantive review under the review loop's exemption. Exact-head GitHub checks
+remain the external completion gate, tracked in the PR. No production mutation
+or deployment is included.
+Completed: 2026-09-19
