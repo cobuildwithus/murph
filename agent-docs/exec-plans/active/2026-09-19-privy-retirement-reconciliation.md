@@ -67,3 +67,5 @@ never existed; subsequent credential revocations and enrollment keep the existin
 fence. A later credential fence requests bound reauthentication before setup.
 The temporary operator cleanup PR still requires deployment and session expiry
 before execution. No production mutation or native publication has run.
+
+- Merged additive preparation #3589 after valid review and green required CI. Integrated its main commit, retaining the calendar-stable video fixture correction and immutable completed plan; removed its temporary Ops endpoint, guard and optional deletion mode from retirement readers. Production execution remains pending session expiry.

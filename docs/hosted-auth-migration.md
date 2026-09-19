@@ -30,7 +30,7 @@ Current candidates and code qualification:
 | 3 | [Murph #3132](https://github.com/cobuildwithus/murph/pull/3132) | [Round 3 PASS](https://chatgpt.com/c/6aa27f48-2834-83ea-8988-d5c4ca137932) and green CI at `540a4ac11863970587139579edc9d5e19b2040bc` |
 | 3 | [iOS #150](https://github.com/cobuildwithus/murph-ios/pull/150) | Round 2 PASS and green CI at `c46430d6dfbf93a1805f50ace6c9599b0c3f0c9e` |
 | 3 | [Android #39](https://github.com/cobuildwithus/murph-android/pull/39) | [Round 3 PASS](https://chatgpt.com/c/6aa27f77-4630-83ea-9bbd-fd92c0d39a01) and green CI at `a589e0072bbcfc9efcce36471e0d4dce099bb4f7` |
-| 4 | [Murph #3134](https://github.com/cobuildwithus/murph/pull/3134) | [Round 2 PASS](https://chatgpt.com/c/6aa26b77-4f88-83ea-83c6-b8d752026677) and green CI on runtime source `87786eda0b935ac32614fc843665e0aadefa971c`; later base reconciliation and handoff change only docs. Check final-head CI on the PR |
+| 4 | [Murph #3134](https://github.com/cobuildwithus/murph/pull/3134) | [Round 2 PASS](https://chatgpt.com/c/6aa26b77-4f88-83ea-83c6-b8d752026677) and green CI on runtime source `87786eda0b935ac32614fc843665e0aadefa971c`; the September reconciliation includes newer first-passkey behavior and requires a fresh full review and final-head CI |
 | 4 | [iOS #151](https://github.com/cobuildwithus/murph-ios/pull/151) | Round 1 PASS and green CI at `4380c93cca8bd47fc4b8ddee0c41e1de58de1b72` |
 | 4 | [Android #40](https://github.com/cobuildwithus/murph-android/pull/40) | [Round 2 PASS](https://chatgpt.com/c/6aa28183-b694-83ea-92c1-a430aebc4552) and green CI at `ffc5d97752b6c2c99ae73f9002201dfbbe4c562c` |
 
@@ -52,7 +52,7 @@ The earlier reviewed-head table is historical candidate evidence. Current state:
 | Web adoption #3127, #3128, #3132 | Merged; current first-party production records observed. |
 | Passkey repair #3504 | Merged after the original retirement candidate; its canonical login and revocation safeguards are preserved by this reconciliation. |
 | Web retirement #3134 | Retargeted to main and held in draft during reconciliation and new verification. Prior reviews do not certify this changed source. |
-| Targeted signup cleanup #3589 | Additive guarded Ops endpoint; second full review passed. No production deletion performed. Live legacy sessions independently block execution. |
+| Targeted signup cleanup #3589 | Merged additive guarded Ops endpoint with second full review and green required CI. Production deployment must be verified; no production deletion performed. Live legacy sessions independently block execution. This retirement source removes the temporary endpoint after its obligations converge. |
 | iOS adoption #150 / Android adoption #39 | Merged. Store distribution and installed-device upgrades remain unqualified by merge evidence. |
 | iOS retirement #151 / Android retirement #40 | Open, gated on native distribution, installed/dormant/skipped-version recovery and shared provider obligations. |
 | Android CI cleanup #41 | Open, stacked after #40. |
@@ -553,3 +553,35 @@ rereads it. This is a user-facing compatibility control, not a security fence.
 Older installed binaries without the reader cannot show the new screen and
 still require an ordinary App Store update. Keep legacy auth until its separate
 retirement gates pass; publishing a new app does not prove adoption.
+
+## Operator disposition of unused legacy signups
+
+The preparation release in #3589 provides this operation. It is deliberately
+absent from retirement readers and must finish before deploying them. During
+preparation, an explicitly authorized unused signup can be
+removed through `POST /api/ops/auth-migration/unused-signup`. This temporary
+endpoint requires the existing active Ops allowlist and same-origin checks,
+one exact `memberId`, its ISO `createdAt`, and the confirmation
+`DELETE UNUSED SIGNUP`. There is no discovery, batch delete, impersonated session
+or contact-based target selection. Keep private target values in the authenticated
+request only; do not record them in rollout documents or command logs.
+
+Before any external operation, the normal deletion locks protect a fresh check
+that the target is the specified never-onboarded legacy signup, with no
+first-party authentication, verified/contact routing, wallet, approval protection,
+billing, workspace, messaging, group, device or other admitted product use.
+Any unrevoked, unexpired legacy session rejects cleanup. Legacy cookie reads do
+not advance `lastSeenAt`, so signup-only timestamps cannot prove absence of
+return visits. Recorded session activity outside the first ten minutes also
+rejects cleanup. Eligibility means no durable product use and no live legacy
+authority; it is not a claim that the person never revisited the site.
+The same transaction establishes the ordinary suspension fence. A changed target
+returns `UNUSED_SIGNUP_CHANGED`; missing or conflicting data never becomes
+permission to delete a retained member.
+
+The existing deletion service then owns revocation, canonical deletion and the
+encrypted provider/runtime cleanup receipt. Partial failure retains suspension
+and the existing retry owners. An HTTP success with `cleanupPending: true` is
+not provider convergence. Verify canonical absence and receipt outcomes before
+clearing the retirement inventory. The retirement change removes this endpoint and its unused-signup check with
+the importer; do not deploy retirement before authorized cleanup converges.
