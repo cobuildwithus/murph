@@ -839,11 +839,14 @@ MURPH_RUN_CODEX_STALL_REPRO=1 MURPH_VITEST_MAX_WORKERS=1 \
   --no-coverage test/assistant-codex-websocket-stall.test.ts
 ```
 
-The Cloudflare Node and Workers
-`runner-egress-codex-memory-websocket.test.ts` suites prove content-free relay
-milestones, actual runtime-log parser/persistence routing, bounded outstanding
-writes, and forwarding despite failed diagnostics. These fixtures require no
-provider credentials; they do not prove production model health.
+The Cloudflare `codex-websocket-passthrough.test.ts` runs the pinned binary
+through production interception and real local workerd fetch coupling. It proves
+one connection across a 35-second gap, native recovery after an upstream close,
+and HTTPS text fallback when image access denies an opaque socket. The Workers
+`runner-egress-websocket-passthrough.test.ts` proves unchanged upgrade identity,
+bidirectional traffic, and fail-closed handshake admission. These synthetic
+fixtures require no provider credentials; they do not reproduce the managed
+Containers outbound proxy or prove production model health.
 
 The planner characterization retains its pre-adapter identity projection only
 for the existing broad snapshot; it separately asserts the new fingerprint
