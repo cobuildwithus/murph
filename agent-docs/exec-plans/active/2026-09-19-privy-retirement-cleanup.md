@@ -72,3 +72,11 @@ Complexity passes after keeping the preparation order in one owner-local helper;
 maximum complexity in the deletion module decreases from 19 to 15. No production
 mutation has run. The local proof database was created by this task and uses only
 synthetic fixtures.
+
+## Review disposition
+
+Round 1 accepted one admission bug: legacy cookie reads do not update
+`lastSeenAt`, so signup-only timestamps cannot establish inactivity. Admission
+now refuses every live legacy session under the existing deletion lock. This
+uses existing expiry/revocation authority without new visit tracking. Production
+execution must wait for target-session expiry and repeat every other predicate.

@@ -39,6 +39,9 @@ export async function assertUnusedHostedSignupTx(input: {
         } } }] },
       ],
       webSessions: { none: { OR: [
+        // Legacy cookie reads do not advance lastSeenAt. A live session is
+        // unresolved authority even when both timestamps look unused.
+        { revokedAt: null, expiresAt: { gt: new Date() } },
         { createdAt: { gt: signupWindowEnd } }, { lastSeenAt: { gt: signupWindowEnd } },
       ] } },
       subscriptionCheckouts: { none: {} }, aiUsage: { none: {} },

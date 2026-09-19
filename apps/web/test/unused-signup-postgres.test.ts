@@ -45,6 +45,15 @@ describe.skipIf(!enabled)("unused-signup locked PostgreSQL admission", () => {
   it("rejects a wrong creation timestamp", async () => {
     await expect(check(await seed(), new Date(0))).rejects.toMatchObject({ code: "UNUSED_SIGNUP_CHANGED" });
   });
+  it("refuses a live original cookie with unchanged signup timestamps, then admits after expiry", async () => {
+    const id = await seed();
+    await prisma.hostedWebSession.create({ data: { id, memberId: id, tokenHash: id,
+      privyUserId: "synthetic-provider", createdAt, lastSeenAt: createdAt,
+      expiresAt: new Date(Date.now() + 60_000) } });
+    await expect(check(id)).rejects.toMatchObject({ code: "UNUSED_SIGNUP_CHANGED" });
+    await prisma.hostedWebSession.update({ where: { id }, data: { expiresAt: new Date(Date.now() - 1_000) } });
+    await expect(check(id)).resolves.toBeUndefined();
+  });
   it.each(["activated", "phone", "wallet", "approval", "workspace", "first-party", "device-intent", "returning-session"])("rejects %s state", async (kind) => {
     const id = await seed();
     if (kind === "activated") await prisma.hostedMember.update({ where: { id }, data: { initialOnboardingCompletedAt: new Date() } });

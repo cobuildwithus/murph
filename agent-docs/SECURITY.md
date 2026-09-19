@@ -1765,7 +1765,8 @@ same-origin admission, an exact member/creation-time pair and explicit deletion
 confirmation. The canonical deletion suspension transaction checks unused legacy
 signup eligibility under member locks before any external operation. It cannot
 admit first-party/protected, onboarded, contact-bound, billed or product-active
-accounts. Targets and private metadata are not logged; output contains only
+accounts or a target with a live legacy browser session. Legacy session timestamps
+are not return-visit telemetry. Targets and private metadata are not logged; output contains only
 canonical-deletion and pending-cleanup booleans. The existing encrypted receipt
 retains every vendor/runtime target through retry. Remove this temporary operation
 with auth import after retirement cleanup, without weakening self-service deletion.

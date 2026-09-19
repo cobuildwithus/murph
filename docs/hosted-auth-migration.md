@@ -469,7 +469,11 @@ Before any external operation, the normal deletion locks protect a fresh check
 that the target is the specified never-onboarded legacy signup, with no
 first-party authentication, verified/contact routing, wallet, approval protection,
 billing, workspace, messaging, group, device or other admitted product use.
-Browser activity outside the first ten minutes of signup rejects cleanup.
+Any unrevoked, unexpired legacy session rejects cleanup. Legacy cookie reads do
+not advance `lastSeenAt`, so signup-only timestamps cannot prove absence of
+return visits. Recorded session activity outside the first ten minutes also
+rejects cleanup. Eligibility means no durable product use and no live legacy
+authority; it is not a claim that the person never revisited the site.
 The same transaction establishes the ordinary suspension fence. A changed target
 returns `UNUSED_SIGNUP_CHANGED`; missing or conflicting data never becomes
 permission to delete a retained member.
