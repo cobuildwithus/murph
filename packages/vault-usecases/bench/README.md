@@ -47,3 +47,20 @@ not a hosted one-vCPU latency guarantee or an end-to-end assistant reply
 measurement. Vault composition, supplied origin metadata, concurrency, and
 runner CPU affect the gain. Follow deployment with bounded tool-duration
 aggregates; provider thinking and other dispatch overhead remain separate.
+
+
+## Meal listing
+
+`pnpm exec tsx --tsconfig tsconfig.base.json packages/vault-usecases/bench/meal-list.ts`
+compares the previous projection query with the meal-list usecase on separate,
+identical synthetic vaults containing 8,000 device observations and one meal.
+It checks matching kind/timestamp hashes; the focused meal-list tests compare
+full output and cover local dates, ordering, limits, corrections and deletion.
+Fixture creation is excluded. No network or production records are used.
+
+A local run on 2026-09-19 measured projection/source wall times of 1,507/25 ms
+cold, 2/24 ms warm, and 1,341/25 ms after an unrelated event write. The source
+path avoids expensive projection refreshes but scans events on each read, so
+an already-current projection is faster for repeated unchanged reads. This
+is synthetic CLI evidence, not a hosted reply-time guarantee. The first
+source read includes dynamic module resolution; process startup is excluded.

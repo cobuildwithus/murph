@@ -230,3 +230,14 @@ Retell call objects are actively deleted before the local wipe. The local phone-
 - usage-credit cleanup: store coverage includes purchase and ledger rows, deletion counts both stores, and ledger entries are deleted before purchases and hosted member rows.
 
 Any future account data store should update `HOSTED_ACCOUNT_DATA_STORE_COVERAGE`, the deletion/export implementation, this document, and the coverage test in the same change.
+
+## Temporary Ops unused-signup cleanup
+
+The authentication retirement owner documents a narrow, explicitly targeted Ops
+operation for unused legacy signups. It calls `deleteHostedAccountData` with an
+expected creation time. Eligibility and suspension share the existing member
+locks and precede external refresh/billing/provider operations; ordinary
+self-service deletion keeps its existing behavior. Both paths use the same
+canonical deletion and encrypted cleanup receipts. See
+[`hosted-auth-migration.md`](hosted-auth-migration.md#operator-disposition-of-unused-legacy-signups)
+for admission, refusal, retry and removal conditions.

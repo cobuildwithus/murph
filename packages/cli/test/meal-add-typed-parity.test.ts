@@ -9,7 +9,7 @@ import {
 } from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 
 import { registerMealCommands } from '../src/commands/meal.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
@@ -78,14 +78,14 @@ interface MealListResult {
   items: Array<{ id: string }>
 }
 
-function createMealCli() {
+function createMealCli(services = createIntegratedVaultServices()) {
   const cli = Cli.create('vault-cli', {
     description: 'meal add typed parity test cli',
     version: '0.0.0-test',
   })
   cli.use(incurErrorBridge)
 
-  registerMealCommands(cli, createIntegratedVaultServices())
+  registerMealCommands(cli, services)
   return cli
 }
 
@@ -973,3 +973,103 @@ test.sequential(
     }
   },
 )
+
+interface MealAddWithTotalsResult extends MealAddResult {
+  dailyTotals?:
+    | { status: 'available'; data: Awaited<ReturnType<ReturnType<typeof createIntegratedVaultServices>['query']['showMealNutritionTotals']>> }
+    | { status: 'unavailable'; localDate: string; code: string; hint: string }
+}
+
+test.sequential('meal save composes fresh totals and goals for its canonical local day', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-save-totals-')
+  const services = createIntegratedVaultServices()
+  const totals = vi.spyOn(services.query, 'showMealNutritionTotals')
+  try {
+    await initializeVault({ vaultRoot, timezone: 'America/Los_Angeles' })
+    await addMeal({ vaultRoot, occurredAt: '2026-04-10T18:00:00Z', note: 'Earlier synthetic meal',
+      nutrition: { totals: { calories: 300, proteinGrams: 10, carbsGrams: 40, fatGrams: 11, fiberGrams: 5 } } })
+    const result = await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(services), [
+      'meal', 'add', '--note', 'Synthetic evening meal', '--occurred-at', '2026-04-11T02:00:00Z',
+      '--nutrition-calories', '400', '--nutrition-protein-grams', '20', '--nutrition-carbs-grams', '50',
+      '--nutrition-fat-grams', '13', '--nutrition-fiber-grams', '6', '--nutrition-source', 'estimated',
+      '--with-daily-totals', '--vault', vaultRoot,
+    ])
+    assert.equal(result.exitCode, null)
+    const saved = requireData(result.envelope)
+    assert.equal(saved.dailyTotals?.status, 'available')
+    if (saved.dailyTotals?.status !== 'available') throw new Error('Expected daily totals')
+    assert.equal(totals.mock.calls.length, 1)
+    assert.deepEqual(totals.mock.calls[0], [{ vault: vaultRoot, requestId: null, from: '2026-04-10', to: '2026-04-10', resolveGoals: true }])
+    assert.equal(saved.dailyTotals.data.mealCount, 2)
+    assert.deepEqual(saved.dailyTotals.data.totals.calories, { total: 700, mealCount: 2 })
+    assert.equal(saved.dailyTotals.data.goalContext?.status, 'missing')
+    const fresh = await services.query.showMealNutritionTotals({ vault: vaultRoot, requestId: null, from: '2026-04-10', to: '2026-04-10', resolveGoals: true })
+    assert.deepEqual(saved.dailyTotals.data, fresh)
+    const shown = await runInProcessJsonCli<ShowResult>(createMealCli(), ['meal', 'show', saved.mealId, '--vault', vaultRoot])
+    assert.equal(requireData(shown.envelope).entity.id, saved.mealId)
+  } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+test.sequential.each(['unavailable', 'malformed'] as const)('a %s post-save totals read preserves success and retries only the read', async (failure) => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-save-read-failure-')
+  const services = createIntegratedVaultServices()
+  const readTotals = services.query.showMealNutritionTotals.bind(services.query)
+  const totals = vi.spyOn(services.query, 'showMealNutritionTotals')
+  if (failure === 'unavailable') totals.mockRejectedValueOnce(new Error('Synthetic read unavailable'))
+  else totals.mockImplementationOnce(async (input) => ({ ...await readTotals(input), mealCount: -1 }))
+  try {
+    await initializeVault({ vaultRoot, timezone: 'UTC' })
+    const result = await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(services), [
+      'meal', 'add', '--note', 'Synthetic meal without numeric estimates', '--occurred-at', '2026-04-10',
+      '--with-daily-totals', '--vault', vaultRoot,
+    ])
+    assert.equal(result.exitCode, null)
+    const saved = requireData(result.envelope)
+    assert.equal(saved.dailyTotals?.status, 'unavailable')
+    if (saved.dailyTotals?.status !== 'unavailable') throw new Error('Expected unavailable totals')
+    assert.equal(saved.dailyTotals.localDate, '2026-04-10')
+    assert.match(saved.dailyTotals.hint, /do not repeat meal add/u)
+    assert.equal(saved.nutrition, null)
+    const retry = await services.query.showMealNutritionTotals({ vault: vaultRoot, requestId: null, from: '2026-04-10', to: '2026-04-10', resolveGoals: true })
+    assert.equal(retry.mealCount, 1)
+    assert.deepEqual(retry.totals.calories, { total: null, mealCount: 0 })
+  } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+test.sequential('ordinary and invalid meal saves never perform an optional totals read', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-save-read-opt-in-')
+  const services = createIntegratedVaultServices()
+  const totals = vi.spyOn(services.query, 'showMealNutritionTotals')
+  try {
+    await initializeVault({ vaultRoot })
+    const cli = createMealCli(services)
+    const saved = requireData((await runInProcessJsonCli<MealAddWithTotalsResult>(cli, [
+      'meal', 'add', '--note', 'Synthetic nonnumeric meal', '--vault', vaultRoot,
+    ])).envelope)
+    assert.equal(saved.dailyTotals, undefined)
+    const invalid = await runInProcessJsonCli(cli, ['meal', 'add', '--with-daily-totals', '--vault', vaultRoot])
+    assert.equal(invalid.envelope.ok, false)
+    assert.equal(totals.mock.calls.length, 0)
+  } finally { totals.mockRestore(); await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+
+test.sequential('structured meal save retains incomplete daily coverage in its combined result', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('meal-import-totals-')
+  try {
+    await initializeVault({ vaultRoot, timezone: 'Pacific/Auckland' })
+    await addMeal({ vaultRoot, occurredAt: '2026-04-10T06:00:00Z', note: 'Synthetic earlier meal without estimates' })
+    const inputFile = path.join(parentRoot, 'meal.json')
+    await writeFile(inputFile, JSON.stringify({ note: 'Synthetic recipe', occurredAt: '2026-04-09T23:00:00Z',
+      ingredients: ['chickpeas', 'rice'], nutrition: { totals: { calories: 560 } } }))
+    const saved = requireData((await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(), [
+      'meal', 'import-json', '--input', '@' + inputFile, '--with-daily-totals', '--vault', vaultRoot,
+    ])).envelope)
+    assert.equal(saved.dailyTotals?.status, 'available')
+    if (saved.dailyTotals?.status !== 'available') throw new Error('Expected daily totals')
+    assert.equal(saved.dailyTotals.data.goalContext?.localDate, '2026-04-10')
+    assert.equal(saved.dailyTotals.data.mealCount, 2)
+    assert.deepEqual(saved.dailyTotals.data.totals.calories, { total: 560, mealCount: 1 })
+    assert.deepEqual(saved.dailyTotals.data.totals.fiberGrams, { total: null, mealCount: 0 })
+  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+})

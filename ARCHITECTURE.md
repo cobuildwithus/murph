@@ -2583,6 +2583,15 @@ than values that would require conversion or invented authority. Query owns
 date windows, point compatibility, the existing calorie floor, and the narrow
 complete historical bundle display exception; prompts retain health
 suitability, card intent, meal recovery, and explicit proposal acceptance.
+The CLI can compose a new meal write with that same read using
+`meal add --with-daily-totals` (also on `meal import-json`). It selects the
+canonical saved event's local day and returns `dailyTotals.data` when available.
+A failed summary read preserves the successful save and directs a read-only
+retry; it must never invite replaying the meal mutation. This result replaces
+separate save confirmation and totals reads for an eligible same-date card;
+later mutations invalidate it. Meal listing reads the canonical event family
+directly, preserving revision, visibility, date, ordering and limit semantics
+without refreshing unrelated query projections.
 Ordinary totals reads keep their existing shape. Fresh V2 authoring accepts
 exactly all five null goals or all five compatible accepted snapshots; mixed
 nullable historical readers remain unchanged. `missing` selects totals-only,
