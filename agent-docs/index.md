@@ -1,7 +1,7 @@
 # Murph Agent Docs Index
 
 Runtime completion HTTP consolidation is tracked in
-[`2026-09-20-edge-completion-calls.md`](exec-plans/active/2026-09-20-edge-completion-calls.md).
+[`2026-09-20-edge-completion-calls.md`](exec-plans/completed/2026-09-20-edge-completion-calls.md).
 
 Finite Codex background-boundary failure codes and early child-completion
 ordering are owned by `ARCHITECTURE.md`. Focused proof and simplification are
