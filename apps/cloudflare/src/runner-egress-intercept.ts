@@ -22,7 +22,6 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
-  buildHostedCodexMemoryUsageRecord,
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedGeminiVideoAnalysisUsageRecord,
@@ -31,7 +30,6 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
-  resolveHostedAiUsageTokenPricingBasis,
   type HostedRuntimeUsageRecordResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -97,22 +95,6 @@ import {
   buildHostedCustomInferenceUpstreamRequestBody,
   injectHostedCustomInferenceAuth,
 } from "./runner-egress-custom-inference.ts";
-import {
-  HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
-  hasHostedCodexMemoryBillableUsage,
-  parseHostedCodexMemoryTerminalResponse,
-  parseHostedCodexMemoryRequestMetadata,
-  readHostedCodexNativeMemoryKind,
-  type HostedCodexMemoryProviderRequestOutcome,
-  type HostedCodexMemoryRequestMetadata,
-  type HostedCodexMemoryUsage,
-  type HostedCodexNativeMemoryKind,
-} from "./runner-egress-codex-memory.ts";
-import {
-  relayHostedOpenAiResponsesWebSocketUpgrade,
-  type HostedCodexMemoryWebSocketCompletion,
-  type HostedOpenAiWebSocketFailurePhase,
-} from "./runner-egress-openai-responses-websocket.ts";
 import { readHostedOpenAiImageRequest } from "./runner-egress-openai-image-request.ts";
 import {
   DEFAULT_ELEVENLABS_API_BASE_URL,
@@ -144,10 +126,7 @@ import {
 } from "./runner-egress-venice.ts";
 import {
   buildHostedOpenAiCacheDiagnostic,
-  readHostedResponsesRequestModelKind,
-  readVeniceDiagnosticModelKind,
   type HostedOpenAiCacheDiagnosticEndpointKind,
-  type HostedResponsesDiagnosticProviderKind,
   type HostedRunnerDiagnosticJson,
 } from "./runner-egress-responses-diagnostics.ts";
 import {
@@ -171,6 +150,7 @@ const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com";
+const HOSTED_OPENAI_RESPONSES_MAX_BODY_BYTES = 32 * 1024 * 1024;
 const OPENAI_AUTHORIZATION_ALERT_SINGLETON_NAME = "production";
 const OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_CODE =
   "openai_authorization_alert_report_failed";
@@ -1406,24 +1386,21 @@ function reportOpenAiAuthorizationFailureSafely(input: {
 }
 
 async function readHostedOpenAiRequestBody(input: {
-  nativeMemory: boolean;
   pathnameSuffix: string;
   request: Request;
 }): Promise<Response | {
   boundedBody: ArrayBuffer | undefined;
   imageGenerationRequested: boolean;
-  memoryRequestMetadata: HostedCodexMemoryRequestMetadata | null;
 }> {
   let boundedBody: ArrayBuffer | undefined;
   let imageGenerationRequested = false;
-  let memoryRequestMetadata: HostedCodexMemoryRequestMetadata | null = null;
   if (
     input.request.method === "POST"
     && input.pathnameSuffix === "/v1/responses"
   ) {
     const body = await readBoundedRequestBody(
       input.request,
-      HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
+      HOSTED_OPENAI_RESPONSES_MAX_BODY_BYTES,
     );
     if (body === null) {
       return new Response("Payload Too Large", { status: 413 });
@@ -1433,12 +1410,6 @@ async function readHostedOpenAiRequestBody(input: {
       return new Response("Invalid Responses request.", { status: 400 });
     }
     imageGenerationRequested = imageRequest === "image";
-    if (input.nativeMemory) {
-      memoryRequestMetadata = parseHostedCodexMemoryRequestMetadata(body);
-      if (!memoryRequestMetadata) {
-        return new Response("Invalid Codex memory request.", { status: 400 });
-      }
-    }
     boundedBody = body;
   } else if (
     input.request.method === "POST"
@@ -1454,7 +1425,7 @@ async function readHostedOpenAiRequestBody(input: {
     boundedBody = body;
   }
 
-  return { boundedBody, imageGenerationRequested, memoryRequestMetadata };
+  return { boundedBody, imageGenerationRequested };
 }
 
 async function maybeHandleOpenAiRequest(input: {
@@ -1501,19 +1472,25 @@ async function maybeHandleOpenAiRequest(input: {
     });
   }
 
-  const nativeMemoryKind = authorization.platformAiUsageAllowed !== false
-    ? readHostedCodexNativeMemoryKind(input.request.headers)
-    : null;
   const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", "Bearer " + token);
   const bodyRead = await readHostedOpenAiRequestBody({
-    nativeMemory: nativeMemoryKind !== null,
     pathnameSuffix,
     request: input.request,
   });
   if (bodyRead instanceof Response) return bodyRead;
-  const { boundedBody, imageGenerationRequested, memoryRequestMetadata } = bodyRead;
+  const { boundedBody, imageGenerationRequested } = bodyRead;
+
+  // An opaque socket cannot inspect later image-tool requests. Admit only
+  // accounts allowed to use that capability; native Codex falls back to HTTP
+  // for other accounts, where the ordinary per-request image check remains.
+  if (input.request.method === "GET" && pathnameSuffix === "/v1/responses") {
+    const denied = await checkHostedImageGenerationAccess({ authorization, env: input.env });
+    if (denied) {
+      return new Response("Use HTTPS Responses for this account.", { status: 426 });
+    }
+  }
 
   if (imageGenerationRequested || pathnameSuffix === "/v1/images/generations" || pathnameSuffix === "/v1/images/edits") {
     const denied = await checkHostedImageGenerationAccess({ authorization, env: input.env });
@@ -1569,73 +1546,10 @@ async function maybeHandleOpenAiRequest(input: {
     await diagnosticPromise;
   }
 
-  if (
-    input.request.method === "GET"
-    && pathnameSuffix === "/v1/responses"
-  ) {
-    return relayHostedOpenAiResponsesWebSocketUpgrade({
-      reportDiagnostic: createHostedRunnerWebSocketDiagnosticReporter({
-        ctx: input.ctx, env: input.env, request: input.request,
-        userId: authorization.userId, writeFence: authorization.writeFence,
-      }),
-      authorizeClientFrame: async (data) => {
-        const imageRequest = readHostedOpenAiImageRequest(data);
-        if (imageRequest === "invalid") {
-          return Response.json({ error: {
-            code: "MURPH_RESPONSES_REQUEST_INVALID",
-            message: "Invalid Responses request.",
-          } }, { status: 400 });
-        }
-        return imageRequest === "image"
-          ? await checkHostedImageGenerationAccess({ authorization, env: input.env })
-          : null;
-      },
-      ...(typeof input.ctx?.waitUntil === "function"
-        ? {
-            defer: (promise) => {
-              input.ctx?.waitUntil?.(promise);
-            },
-          }
-        : {}),
-      ...(nativeMemoryKind
-        ? {
-            persistUsage: async (completion: HostedCodexMemoryWebSocketCompletion) => {
-              await recordHostedCodexMemoryUsage({
-                apiKeyEnv: "OPENAI_API_KEY",
-                authorization,
-                baseUrl: DEFAULT_OPENAI_API_BASE_URL + "/v1",
-                env: input.env,
-                providerName: "hosted-openai",
-                providerRequestOutcome: completion.providerRequestOutcome,
-                requestMetadata: completion.requestMetadata,
-                usage: completion.usage,
-              });
-            },
-            reportFailure: ({ phase }: { phase: HostedOpenAiWebSocketFailurePhase }) => {
-              reportHostedCodexMemoryUsageFailure({
-                memoryKind: nativeMemoryKind,
-                providerName: "hosted-openai",
-                reason: "websocket_" + phase,
-              });
-            },
-          }
-        : {}),
-      upstreamResponse: response,
-    });
-  }
-
-  return memoryRequestMetadata && nativeMemoryKind
-    ? await handleHostedCodexMemoryUsageResponse({
-        apiKeyEnv: "OPENAI_API_KEY",
-        authorization,
-        baseUrl: DEFAULT_OPENAI_API_BASE_URL + "/v1",
-        env: input.env,
-        memoryKind: nativeMemoryKind,
-        providerName: "hosted-openai",
-        requestMetadata: memoryRequestMetadata,
-        response,
-      })
-    : response;
+  // Return upgrades unaccepted: Cloudflare owns the byte forwarding and
+  // native Codex owns connection reuse/recovery. Accepting here would couple
+  // every subsequent frame to this Worker invocation's JavaScript lifetime.
+  return response;
 }
 
 async function maybeHandleVeniceRequest(input: {
@@ -1684,21 +1598,12 @@ async function maybeHandleVeniceRequest(input: {
     });
   }
 
-  const nativeMemoryKind = authorization.platformAiUsageAllowed !== false
-    ? readHostedCodexNativeMemoryKind(input.request.headers)
-    : null;
   const body = await readBoundedRequestBody(
     input.request,
     HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
   );
   if (body === null) {
     return new Response("Payload Too Large", { status: 413 });
-  }
-  const memoryRequestMetadata = nativeMemoryKind
-    ? parseHostedCodexMemoryRequestMetadata(body)
-    : null;
-  if (nativeMemoryKind && !memoryRequestMetadata) {
-    return new Response("Invalid Codex memory request.", { status: 400 });
   }
   const upstreamBody = buildHostedVeniceResponsesRequestBody({
     body,
@@ -1721,246 +1626,16 @@ async function maybeHandleVeniceRequest(input: {
     headers,
     { body: upstreamBody },
   );
-  const captureMemoryDiagnostic = nativeMemoryKind !== null;
-  const diagnosticBody = captureMemoryDiagnostic
-    ? upstreamRequest.clone()
-    : null;
-  const canonicalModelKind = captureMemoryDiagnostic
-    ? readHostedResponsesRequestModelKind(body)
-    : null;
-  const providerStartedAt = Date.now();
-  let response: Response;
-  try {
-    response = await fetchAuthorizedProviderUpstream({
-      authorization,
-      providerKind: "venice",
-      request: input.request,
-      startedAt,
-      upstreamRequest,
-      url: input.url,
-    });
-  } catch (error) {
-    if (diagnosticBody) {
-      const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
-        canonicalModelKind,
-        ctx: input.ctx ?? null,
-        endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
-        env: input.env,
-        providerKind: "venice",
-        providerTransportFailed: true,
-        request: input.request,
-        upstreamRequestBody: diagnosticBody,
-        userId: authorization.userId,
-        writeFence: authorization.writeFence,
-      });
-      scheduleHostedProviderDiagnostic({
-        ctx: input.ctx ?? null,
-        promise: diagnosticPromise,
-      });
-    }
-    throw error;
-  }
-
-  if (diagnosticBody) {
-    const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
-      canonicalModelKind,
-      ctx: input.ctx ?? null,
-      endpointKind: readVeniceCacheDiagnosticEndpointKind(pathMatch.pathnameSuffix),
-      env: input.env,
-      providerKind: "venice",
-      providerResponseTtfbMs: Date.now() - providerStartedAt,
-      request: input.request,
-      response,
-      upstreamRequestBody: diagnosticBody,
-      userId: authorization.userId,
-      writeFence: authorization.writeFence,
-    });
-    scheduleHostedProviderDiagnostic({
-      ctx: input.ctx ?? null,
-      promise: diagnosticPromise,
-    });
-  }
-  return memoryRequestMetadata && nativeMemoryKind
-    ? await handleHostedCodexMemoryUsageResponse({
-        apiKeyEnv: "VENICE_API_KEY",
-        authorization,
-        baseUrl: DEFAULT_VENICE_API_BASE_URL,
-        env: input.env,
-        memoryKind: nativeMemoryKind,
-        providerName: "venice",
-        requestMetadata: memoryRequestMetadata,
-        response,
-      })
-    : response;
-}
-
-async function handleHostedCodexMemoryUsageResponse(input: {
-  apiKeyEnv: string;
-  authorization: HostedProviderEgressAuthorization;
-  baseUrl: string;
-  env: RunnerOutboundEnvironmentSource;
-  memoryKind: HostedCodexNativeMemoryKind;
-  providerName: "hosted-openai" | "venice";
-  requestMetadata: HostedCodexMemoryRequestMetadata;
-  response: Response;
-}): Promise<Response> {
-  if (!input.response.ok) {
-    return input.response;
-  }
-
-  const responseBody = await readBoundedRequestBody(
-    input.response,
-    HOSTED_CODEX_MEMORY_MAX_MESSAGE_BYTES,
-  );
-  if (responseBody === null) {
-    reportHostedCodexMemoryUsageFailure({
-      memoryKind: input.memoryKind,
-      providerName: input.providerName,
-      reason: "response_too_large",
-    });
-    return new Response("Hosted Codex memory response too large.", {
-      status: 502,
-    });
-  }
-
-  const terminal = parseHostedCodexMemoryTerminalResponse(responseBody);
-  if (
-    input.requestMetadata.usageRequired
-    && (
-      terminal === null
-      || (
-        terminal.usage === null
-        && terminal.providerRequestOutcome === "succeeded"
-      )
-    )
-  ) {
-    reportHostedCodexMemoryUsageFailure({
-      memoryKind: input.memoryKind,
-      providerName: input.providerName,
-      reason: "terminal_usage_missing",
-    });
-    return new Response("Hosted Codex memory usage was unavailable.", {
-      status: 502,
-    });
-  }
-
-  if (
-    terminal?.usage
-    && hasHostedCodexMemoryBillableUsage(terminal.usage)
-  ) {
-    try {
-      await recordHostedCodexMemoryUsage({
-        apiKeyEnv: input.apiKeyEnv,
-        authorization: input.authorization,
-        baseUrl: input.baseUrl,
-        env: input.env,
-        providerName: input.providerName,
-        providerRequestOutcome: terminal.providerRequestOutcome,
-        requestMetadata: input.requestMetadata,
-        usage: terminal.usage,
-      });
-    } catch (error) {
-      reportHostedCodexMemoryUsageFailure({
-        error,
-        memoryKind: input.memoryKind,
-        providerName: input.providerName,
-        reason: "persistence_failed",
-      });
-      // The provider work has already completed. Preserve its terminal
-      // response so Codex does not retry an irreversible, billable request.
-    }
-  }
-
-  return rebuildBufferedProviderResponse(input.response, responseBody);
-}
-
-async function recordHostedCodexMemoryUsage(input: {
-  apiKeyEnv: string;
-  authorization: HostedProviderEgressAuthorization;
-  baseUrl: string;
-  env: RunnerOutboundEnvironmentSource;
-  providerName: "hosted-openai" | "venice";
-  providerRequestOutcome: HostedCodexMemoryProviderRequestOutcome;
-  requestMetadata: HostedCodexMemoryRequestMetadata;
-  usage: HostedCodexMemoryUsage;
-}): Promise<void> {
-  const writeFence = requireHostedDirectUsageWriteFence(input.authorization);
-  const record = buildHostedCodexMemoryUsageRecord({
-    apiKeyEnv: input.apiKeyEnv,
-    baseUrl: input.baseUrl,
-    cacheWriteTokens: input.usage.cacheWriteTokens,
-    cachedInputTokens: input.usage.cachedInputTokens,
-    inputTokens: input.usage.inputTokens,
-    memberId: writeFence.userId,
-    occurredAt: input.usage.occurredAt,
-    outputTokens: input.usage.outputTokens,
-    providerName: input.providerName,
-    providerRequestId: input.usage.providerRequestId,
-    providerRequestOutcome: input.providerRequestOutcome,
-    rawUsageJson: input.usage.rawUsageJson,
-    reasoningTokens: input.usage.reasoningTokens,
-    requestedModel: input.requestMetadata.requestedModel,
-    // Venice exposes its translated provider id. The canonical request model
-    // remains the priceable identity for that provider.
-    servedModel: input.providerName === "venice"
-      ? null
-      : input.usage.servedModel,
-    tokenPricingBasis: resolveHostedAiUsageTokenPricingBasis({
-      model: input.requestMetadata.requestedModel,
-      providerName: input.providerName,
-      serviceTier: input.usage.serviceTier
-        ?? input.requestMetadata.serviceTier,
-    }),
-    totalTokens: input.usage.totalTokens,
-  });
-  await recordHostedDirectRuntimeUsage({
-    env: input.env,
-    record,
-    writeFence,
+  return await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "venice",
+    request: input.request,
+    startedAt,
+    upstreamRequest,
+    url: input.url,
   });
 }
 
-function rebuildBufferedProviderResponse(
-  response: Response,
-  body: ArrayBuffer,
-): Response {
-  const headers = new Headers(response.headers);
-  headers.delete("content-encoding");
-  headers.delete("content-length");
-  return new Response(body, {
-    headers,
-    status: response.status,
-    statusText: response.statusText,
-  });
-}
-
-function reportHostedCodexMemoryUsageFailure(input: {
-  error?: unknown;
-  memoryKind: HostedCodexNativeMemoryKind;
-  providerName: "hosted-openai" | "venice";
-  reason: string;
-}): void {
-  const errorName = input.error === undefined
-    ? null
-    : readHostedExecutionSafeErrorName(input.error);
-  emitHostedExecutionStructuredLog({
-    component: "runner",
-    details: {
-      ...(input.error === undefined
-        ? {}
-        : {
-            errorCode: deriveHostedExecutionErrorCode(input.error),
-            ...(errorName ? { errorName } : {}),
-          }),
-      memoryKind: input.memoryKind,
-      providerKind: input.providerName + "_codex_memory",
-      reason: input.reason,
-    },
-    level: "warn",
-    message: "Hosted Codex memory usage accounting failed.",
-    phase: "wake.running",
-  });
-}
 
 async function maybeHandleElevenLabsRequest(input: {
   ctx?: HostedRunnerOutboundContext;
@@ -2493,14 +2168,6 @@ function readOpenAiCacheDiagnosticEndpointKind(
   return null;
 }
 
-function readVeniceCacheDiagnosticEndpointKind(
-  pathnameSuffix: string,
-): HostedOpenAiCacheDiagnosticEndpointKind {
-  return pathnameSuffix === "/responses/compact"
-    ? "responses_compact"
-    : "responses";
-}
-
 async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   pathnameSuffix: string;
   request: Request;
@@ -2521,44 +2188,11 @@ async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
   );
 }
 
-function scheduleHostedProviderDiagnostic(input: {
-  ctx: HostedRunnerOutboundContext | null;
-  promise: Promise<void>;
-}): void {
-  if (typeof input.ctx?.waitUntil === "function") {
-    try {
-      input.ctx.waitUntil(input.promise);
-      return;
-    } catch {
-      // Production container interception has no lifecycle owner. If an
-      // optional scheduler rejects synchronously, use the same best-effort
-      // detached fallback without extending the provider-response budget.
-    }
-  }
-  void input.promise.catch((error: unknown) => {
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        ...buildHostedExecutionSafeErrorDetails(error),
-        providerKind: "venice",
-      },
-      level: "warn",
-      message: "Hosted runner provider request diagnostic detached task failed.",
-      phase: "wake.running",
-    });
-  });
-}
-
 async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
-  canonicalModelKind?: string | null;
   ctx: HostedRunnerOutboundContext | null;
   endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
   env: RunnerOutboundEnvironmentSource;
-  providerKind?: HostedResponsesDiagnosticProviderKind;
-  providerResponseTtfbMs?: number;
-  providerTransportFailed?: boolean;
   request: Request;
-  response?: Response;
   upstreamRequestBody: HostedRunnerDiagnosticBodySource;
   userId: string | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
@@ -2567,22 +2201,14 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
   try {
     const requestBytes = new Uint8Array(await input.upstreamRequestBody.arrayBuffer());
     diagnostic = await buildHostedOpenAiCacheDiagnostic({
-      canonicalModelKind: input.canonicalModelKind ?? null,
       endpointKind: input.endpointKind,
       fingerprintSecret: readOpenAiCacheDiagnosticFingerprintSecret(input.env),
       method: input.request.method,
-      providerKind: input.providerKind ?? "openai",
+      providerKind: "openai",
       requestBytes,
       turnMetadataHeader: input.request.headers.get(
         OPENAI_CACHE_DIAGNOSTIC_CODEX_TURN_METADATA_HEADER,
       ),
-    });
-    appendProviderResponseDiagnostics({
-      diagnostic,
-      providerKind: input.providerKind ?? "openai",
-      providerResponseTtfbMs: input.providerResponseTtfbMs,
-      providerTransportFailed: input.providerTransportFailed ?? false,
-      response: input.response,
     });
   } catch (error) {
     emitHostedExecutionStructuredLog({
@@ -2590,7 +2216,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       details: {
         diagnosticCaptured: false,
         endpointKind: input.endpointKind,
-        providerKind: input.providerKind ?? "openai",
+        providerKind: "openai",
       },
       error,
       level: "warn",
@@ -2628,7 +2254,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       component: "runner",
       details: {
         endpointKind: input.endpointKind,
-        providerKind: input.providerKind ?? "openai",
+        providerKind: "openai",
         runtimeLogScheduled,
       },
       error,
@@ -2639,113 +2265,6 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
   });
 }
 
-function readBoundedProviderRetryCount(value: string | null): number | null {
-  const normalized = value?.trim() ?? "";
-  if (!/^\d{1,3}$/u.test(normalized)) {
-    return null;
-  }
-  const parsed = Number(normalized);
-  return parsed <= 100 ? parsed : null;
-}
-
-function appendProviderResponseDiagnostics(input: {
-  diagnostic: HostedRunnerDiagnosticJson;
-  providerKind: HostedResponsesDiagnosticProviderKind;
-  providerResponseTtfbMs?: number;
-  providerTransportFailed: boolean;
-  response?: Response;
-}): void {
-  if (input.providerResponseTtfbMs !== undefined) {
-    input.diagnostic.providerResponseTtfbMs = Math.max(
-      0,
-      Math.trunc(input.providerResponseTtfbMs),
-    );
-  }
-  if (input.providerTransportFailed) {
-    input.diagnostic.providerResponseOutcomeKind = "transport_error";
-    return;
-  }
-  if (!input.response) {
-    return;
-  }
-
-  input.diagnostic.providerResponseOk = input.response.ok;
-  input.diagnostic.providerResponseOutcomeKind = input.response.ok
-    ? "accepted"
-    : "rejected";
-  input.diagnostic.providerResponseStatus = input.response.status;
-  input.diagnostic.providerResponseContentKind = readResponseContentKind(
-    input.response.headers.get("content-type"),
-  );
-
-  if (input.providerKind !== "venice") {
-    return;
-  }
-  const cloudflareRay = readSafeCloudflareRay(input.response.headers.get("cf-ray"));
-  if (cloudflareRay) {
-    input.diagnostic.providerResponseCloudflareRay = cloudflareRay;
-  }
-  const responseModelKind = readVeniceDiagnosticModelKind(
-    input.response.headers.get("x-venice-model-id"),
-  );
-  input.diagnostic.providerResponseModelKind = responseModelKind;
-  const requestModelKind = input.diagnostic.upstreamModelKind;
-  input.diagnostic.providerResponseModelMatchesRequest =
-    typeof requestModelKind === "string"
-    && requestModelKind !== "missing"
-    && requestModelKind !== "other"
-    && responseModelKind === requestModelKind;
-
-  const retryCount = readBoundedProviderRetryCount(
-    input.response.headers.get("x-retry-count"),
-  );
-  if (retryCount !== null) {
-    input.diagnostic.providerResponseRetryCount = retryCount;
-  }
-}
-
-function createHostedRunnerWebSocketDiagnosticReporter(input: {
-  ctx?: HostedRunnerOutboundContext;
-  env: RunnerOutboundEnvironmentSource;
-  request: Request;
-  userId: string | null;
-  writeFence: HostedProviderEgressWriteFenceMetadata | null;
-}): (diagnostic: HostedRunnerDiagnosticJson) => void {
-  let pendingWrites = 0;
-  let droppedRecords = 0;
-  return (diagnostic) => {
-    // No diagnostic queue: four ordinary writes plus one reserved terminal
-    // write, so a busy connection can still report why it closed.
-    // Missing rows remain missing evidence, never evidence of healthy transport.
-    const terminal = diagnostic.websocketMilestone === "closed" || diagnostic.websocketMilestone === "failed";
-    const runtimeLogScheduled = input.userId !== null && pendingWrites < (terminal ? 5 : 4);
-    if (!runtimeLogScheduled && input.userId) droppedRecords += 1;
-    const details = { ...diagnostic, droppedRecords, runtimeLogScheduled };
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details,
-      message: "Hosted Responses WebSocket milestone observed.",
-      phase: "wake.running",
-    });
-    if (!input.userId || !runtimeLogScheduled) return;
-    pendingWrites += 1;
-    const write = writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog({
-      diagnostic: details, env: input.env, request: input.request,
-      userId: input.userId, writeFence: input.writeFence,
-    }).catch(() => {
-      droppedRecords += 1;
-    }).finally(() => {
-      pendingWrites -= 1;
-    });
-    try {
-      if (input.ctx?.waitUntil) input.ctx.waitUntil(write);
-      else waitUntil(write);
-    } catch {
-      // Best-effort persistence must not change relay admission or forwarding.
-    }
-  };
-}
-
 async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
   diagnostic: HostedRunnerDiagnosticJson;
   env: RunnerOutboundEnvironmentSource;
@@ -2753,13 +2272,6 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
   userId: string;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }): Promise<void> {
-  // This is an observed interrupted generation, not proof of failed delivery:
-  // Codex still owns cancellation and transport recovery.
-  const interruptedGeneration = input.diagnostic.responseRequestKind === "generation"
-    && input.diagnostic.responseAssociationKind === "single-request"
-    && input.diagnostic.responseInspectionIncomplete === false
-    && input.diagnostic.responseTerminalKind === null
-    && (input.diagnostic.closeCode === 1006 || input.diagnostic.closeCode === 1011);
   const route = HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite;
   const writeFence = input.writeFence ?? readRuntimeLogWriteFenceMetadata({
     headers: input.request.headers,
@@ -2774,14 +2286,7 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
           component: "runner",
           eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
           ...(writeFence ? { leaseGeneration: writeFence.leaseGeneration } : {}),
-          level:
-            input.diagnostic.providerResponseOutcomeKind === "rejected"
-              || input.diagnostic.providerResponseOutcomeKind === "transport_error"
-              || (input.diagnostic.websocketMilestone === "closed"
-                && input.diagnostic.upstreamSendObserved === true
-                && (input.diagnostic.upstreamFrameObserved === false || interruptedGeneration))
-              ? "warn"
-              : "debug",
+          level: "debug",
           phase: "fetch",
           redactedJson: input.diagnostic,
           ...(writeFence?.workspaceVersion ? { workspaceVersion: writeFence.workspaceVersion } : {}),

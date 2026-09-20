@@ -1082,9 +1082,13 @@ to apply after cutover.
 - Personal Starter image generation and editing require subscription access
   from the canonical usage gate. A saved payment card alone grants no access.
   The signed, runtime-member-bound Web callback is enforced before Cloudflare
-  Images API egress and native image tools in Responses HTTP/WebSocket frames.
-  Each image rechecks access; ordinary text adds no callback. Missing or
-  unavailable authority fails closed. Normal Pulse or eligible Group signup
+  Images API egress and native image tools in Responses HTTP requests.
+  Opaque Responses WebSockets require image access at handshake; denied or
+  unavailable access returns HTTP 426 for native Codex HTTPS fallback. HTTP
+  images recheck access per request; an admitted socket retains its image
+  eligibility until it closes. Existing container destruction owns consent
+  revocation, and every new handshake revalidates runtime authority. Normal
+  Pulse or eligible Group signup
   owns recovery; existing paid, Family, and group allowances remain authoritative.
   See the [Starter usage owner](product-specs/starter-usage.md#text-entry-and-image-access)
   for billing authority, abuse email signals, and deployment ordering.
@@ -1757,3 +1761,16 @@ flag. Web validates the task against the callback-bound member and recorded
 occurrence window before excluding its cost from allowance. The original
 credential source and token evidence remain intact. Ordinary usage retains its
 existing accounting and provider access checks.
+
+### Temporary unused-signup retirement operation
+
+`POST /api/ops/auth-migration/unused-signup` requires active Ops allowlist and
+same-origin admission, an exact member/creation-time pair and explicit deletion
+confirmation. The canonical deletion suspension transaction checks unused legacy
+signup eligibility under member locks before any external operation. It cannot
+admit first-party/protected, onboarded, contact-bound, billed or product-active
+accounts or a target with a live legacy browser session. Legacy session timestamps
+are not return-visit telemetry. Targets and private metadata are not logged; output contains only
+canonical-deletion and pending-cleanup booleans. The existing encrypted receipt
+retains every vendor/runtime target through retry. Remove this temporary operation
+with auth import after retirement cleanup, without weakening self-service deletion.

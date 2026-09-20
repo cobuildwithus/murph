@@ -34,13 +34,12 @@ import { createTempVaultContext } from './test-helpers.ts'
 const tempRoots: string[] = []
 
 beforeEach(() => {
-  // Keep the fixed synthetic videos within retention as the real calendar advances.
-  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-08-20T12:00:00.000Z'))
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-08-20T11:00:00.000Z'))
 })
 
 afterEach(async () => {
   vi.useRealTimers()
-  vi.restoreAllMocks()
   await Promise.all(tempRoots.splice(0).map((root) =>
     rm(root, { force: true, recursive: true }),
   ))
@@ -513,7 +512,6 @@ describe('executeAnalyzeVideoTool', () => {
   it('aborts the provider request at the trusted timeout', async () => {
     const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-08-20T12:00:00.000Z'))
     let markFetchStarted: (() => void) | null = null
     const fetchStarted = new Promise<void>((resolve) => {
       markFetchStarted = resolve
