@@ -2572,3 +2572,21 @@ Current hosted billing assumptions:
   submitted as separate emails in one strict Resend batch with a Preview-bound
   idempotency key, so an ambiguous response can be retried without duplicate
   delivery. Logs contain aggregate counts and safe provider status only.
+
+## Local GPT-Live voice preview
+
+Open `/voice` on a localhost development server with `OPENAI_API_KEY` in the
+server environment. The key needs `gpt-live-1` and `gpt-5.6-terra` access.
+`LiveVoiceButton` from `src/components/live-voice/live-voice-button` is reusable:
+render `<LiveVoiceButton />`, or supply a same-origin `endpoint` returning
+`{ sdp: string }` for a posted `{ sdp: string }` WebRTC offer.
+
+Click the circle to start, pause, and resume. Pause mutes microphone transmission
+and local playback while keeping context connected; GPT-Live duration billing
+continues. End conversation closes the session. The preview does not access
+Murph records or persist transcripts, and requests `store: false`.
+
+The bundled session route rejects production and non-loopback requests. Add the
+website's authenticated admission and usage limits before public integration.
+Inert component states are available at `/screenshots/voice`. Protocol reference:
+[GPT-Live WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live).

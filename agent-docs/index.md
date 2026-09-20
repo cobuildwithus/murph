@@ -94,6 +94,10 @@ container-owned revocation are documented in `apps/cloudflare/README.md`,
 Pinned Codex/workerd reuse and fallback proof is indexed in
 `agent-docs/references/testing-ci-map.md`.
 
+Local GPT-Live voice preview is tracked in
+[`2026-09-20-live-voice.md`](exec-plans/completed/2026-09-20-live-voice.md).
+Setup and embedding are documented in `apps/web/README.md`.
+
 ## Purpose
 
 Deferred device hints honor their persisted retry time in wake projection and
