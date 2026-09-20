@@ -82,6 +82,8 @@ identify initialization costs but do not predict production latency.
 The resource client's media, orphan, and replica contracts already belong to
 the Worker's eager graph. Keep those imports static: dynamic imports preserve
 unused exports from their shared dependencies and increase startup work.
+Response-card authoring schema builders are also marked pure at their owner, so
+runtime consumers omit their unused JSON Schema conversion work.
 
 ## Route Surface
 
