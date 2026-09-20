@@ -2578,8 +2578,12 @@ Current hosted billing assumptions:
 Open `/voice` on a localhost development server with `OPENAI_API_KEY` in the
 server environment. The key needs `gpt-live-1` and `gpt-5.6-terra` access.
 `LiveVoiceButton` from `src/components/live-voice/live-voice-button` is reusable:
-render `<LiveVoiceButton />`, or supply a same-origin `endpoint` returning
-`{ sdp: string }` for a posted `{ sdp: string }` WebRTC offer.
+render `<LiveVoiceButton />` for the circle, or `<LiveVoiceButton showVoicePicker />`
+for ten English voices grouped by female/male presentation. Gleam is the default;
+`voice="willow"` chooses another default. Voice changes require ending the current
+conversation. An optional same-origin `endpoint` returns `{ sdp: string }` for a
+posted `{ sdp: string, voice: string }` WebRTC offer. The server validates the voice
+against the shared catalog before setting `session.audio.output.voice`.
 
 Click the circle to start, pause, and resume. Pause mutes microphone transmission
 and local playback while keeping context connected; GPT-Live duration billing

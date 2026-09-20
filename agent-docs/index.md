@@ -98,6 +98,9 @@ Local GPT-Live voice preview is tracked in
 [`2026-09-20-live-voice.md`](exec-plans/completed/2026-09-20-live-voice.md).
 Setup and embedding are documented in `apps/web/README.md`.
 
+GPT-Live voice selection is tracked in
+[`2026-09-20-live-voice-picker.md`](exec-plans/completed/2026-09-20-live-voice-picker.md).
+
 ## Purpose
 
 Deferred device hints honor their persisted retry time in wake projection and

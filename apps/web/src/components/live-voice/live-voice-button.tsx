@@ -4,6 +4,9 @@ import { LoaderCircle, Mic, Pause, Play, Square } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { LiveVoiceSession, type VoiceSnapshot, type VoiceState } from "./live-voice-session";
 
+import { DEFAULT_LIVE_VOICE, type LiveVoice } from "@/src/lib/live-voice/voices";
+import { LiveVoicePicker } from "./live-voice-picker";
+
 const labels: Record<VoiceState, string> = {
   idle: "Click to talk", connecting: "Connecting…", live: "Listening · click to pause",
   pausing: "Pausing…", paused: "Paused · click to resume", resuming: "Resuming…",
@@ -11,7 +14,8 @@ const labels: Record<VoiceState, string> = {
 };
 
 /** Drop into a page; endpoint must create a GPT-Live WebRTC session server-side. */
-export function LiveVoiceButton({ endpoint = "/api/live-voice/session" }: { endpoint?: string }) {
+export function LiveVoiceButton({ endpoint = "/api/live-voice/session", showVoicePicker = false, voice = DEFAULT_LIVE_VOICE }: { endpoint?: string; showVoicePicker?: boolean; voice?: LiveVoice }) {
+  const [selectedVoice, setSelectedVoice] = useState<LiveVoice>(voice);
   const [snapshot, setSnapshot] = useState<VoiceSnapshot>({ state: "idle" });
   const session = useRef<LiveVoiceSession | null>(null);
   useEffect(() => {
@@ -24,11 +28,16 @@ export function LiveVoiceButton({ endpoint = "/api/live-voice/session" }: { endp
   function toggle() {
     if (snapshot.state === "idle" || snapshot.state === "error") {
       session.current?.dispose();
-      session.current = new LiveVoiceSession(setSnapshot, endpoint);
+      session.current = new LiveVoiceSession(setSnapshot, endpoint, showVoicePicker ? selectedVoice : voice);
       void session.current.start();
     } else session.current?.togglePause();
   }
-  return <LiveVoiceControl {...snapshot} onToggle={toggle} onEnd={() => session.current?.end()} />;
+  return (
+    <div className="flex w-full flex-col items-center gap-2">
+      <LiveVoiceControl {...snapshot} onToggle={toggle} onEnd={() => session.current?.end()} />
+      {showVoicePicker ? <LiveVoicePicker voice={selectedVoice} onChange={setSelectedVoice} disabled={snapshot.state !== "idle" && snapshot.state !== "error"} /> : null}
+    </div>
+  );
 }
 
 /** Shared presentation for the live control and inert design studies. */

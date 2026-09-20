@@ -1,3 +1,5 @@
+import { DEFAULT_LIVE_VOICE, isLiveVoice, type LiveVoice } from "@/src/lib/live-voice/voices";
+
 // This prototype is local-only. Public use needs member admission and usage limits.
 export const runtime = "nodejs";
 
@@ -15,7 +17,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const offer = await readOffer(request);
   if (offer instanceof Response) return offer;
-  const sdp = offer;
+  const { sdp, voice } = offer;
 
   try {
     const response = await fetch("https://api.openai.com/v1/live/sessions", {
@@ -26,6 +28,7 @@ export async function POST(request: Request): Promise<Response> {
         session: {
           model: "gpt-live-1",
           store: false,
+          audio: { output: { voice } },
           instructions: "You are a friendly voice assistant in a local demo. Keep replies brief and natural. You have no access to personal records or app actions. Delegate questions requiring reasoning to the backend.",
           delegation: {
             type: "responses",
@@ -53,7 +56,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-async function readOffer(request: Request): Promise<string | Response> {
+async function readOffer(request: Request): Promise<{ sdp: string; voice: LiveVoice } | Response> {
   try {
     const raw = await request.text();
     if (raw.length > 65_536) return reply("Connection offer is too large.", 413);
@@ -61,7 +64,9 @@ async function readOffer(request: Request): Promise<string | Response> {
     if (!body || typeof body !== "object" || !("sdp" in body) || typeof body.sdp !== "string" || !body.sdp.startsWith("v=0")) {
       return reply("A valid connection offer is required.", 400);
     }
-    return body.sdp;
+    const voice = "voice" in body ? body.voice : DEFAULT_LIVE_VOICE;
+    if (!isLiveVoice(voice)) return reply("Choose one of the available voices.", 400);
+    return { sdp: body.sdp, voice };
   } catch {
     return reply("A valid connection offer is required.", 400);
   }

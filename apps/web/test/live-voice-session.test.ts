@@ -91,6 +91,13 @@ describe("GPT-Live call lifecycle", () => {
     expect(track.stop).toHaveBeenCalled();
     expect(FakePeer.latest.close).toHaveBeenCalled();
   });
+  it("sends the chosen voice in the browser connection offer", async () => {
+    session.dispose();
+    session = new LiveVoiceSession((snapshot) => updates.push(snapshot), "/api/live-voice/session", "willow");
+    await session.start();
+    const options = vi.mocked(fetch).mock.calls[0][1];
+    expect(JSON.parse(String(options?.body))).toEqual({ sdp: "v=0", voice: "willow" });
+  });
   it("releases a microphone granted after startup is cancelled", async () => {
     let grant!: (value: typeof stream) => void;
     getUserMedia.mockImplementation(() => new Promise((resolve) => { grant = resolve; }));

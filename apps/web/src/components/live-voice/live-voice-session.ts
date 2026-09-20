@@ -1,3 +1,5 @@
+import { DEFAULT_LIVE_VOICE, type LiveVoice } from "../../lib/live-voice/voices";
+
 export type VoiceState = "idle" | "connecting" | "live" | "pausing" | "paused" | "resuming" | "ending" | "error";
 export type VoiceSnapshot = { state: VoiceState; error?: string };
 
@@ -13,7 +15,7 @@ export class LiveVoiceSession {
   private state: VoiceState = "idle";
   private disposed = false;
 
-  constructor(private readonly update: (snapshot: VoiceSnapshot) => void, private readonly endpoint: string) {}
+  constructor(private readonly update: (snapshot: VoiceSnapshot) => void, private readonly endpoint: string, private readonly voice: LiveVoice = DEFAULT_LIVE_VOICE) {}
 
   private publish(state: VoiceState, error?: string) {
     this.state = state;
@@ -131,7 +133,7 @@ export class LiveVoiceSession {
       const response = await fetch(this.endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sdp: peer.localDescription?.sdp }),
+        body: JSON.stringify({ sdp: peer.localDescription?.sdp, voice: this.voice }),
         signal: this.abort.signal,
       });
       const result = await response.json();
