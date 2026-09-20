@@ -5,6 +5,8 @@ import type { PrismaClient } from "@prisma/client";
 import { requireHostedRuntimeCallbackTx } from "../hosted-execution/runtime-owner";
 import { requireRuntimeResourcesPublishableTx, recordRuntimeOrphansTx, snapshotOrphanCandidates, replicaOrphanCandidate } from "../hosted-execution/runtime-orphans";
 import { getPrisma } from "../prisma";
+import { runWithPrismaOperationTimings, type PrismaOperationTiming } from "../prisma-operation-timing";
+import { buildHostedWebhookDbTimingLogDetails } from "../hosted-onboarding/webhook-db-timing";
 import {
   checkpointHostedWorkspaceTx,
   publishLatestBrowserVaultReplicaRefTx,
@@ -18,20 +20,56 @@ type RuntimePublication = {
 export async function checkpointHostedRuntimeWorkspace(
   input: Omit<Parameters<typeof checkpointHostedWorkspaceTx>[0], "tx"> & RuntimePublication,
 ) {
-  return (input.prisma ?? getPrisma()).$transaction(async (tx) => {
-    const owner = await requireHostedRuntimeCallbackTx(tx, input.userId, input.runtimeAuthority
-      ? { ...input.runtimeAuthority, userId: input.userId }
-      : null);
-    if (owner) await requireRuntimeResourcesPublishableTx(tx, input.userId, snapshotOrphanCandidates(parseHostedExecutionSnapshotRef(input.snapshotRef)));
-    const result = await checkpointHostedWorkspaceTx({ ...input, tx });
-    if (owner && result.status === "updated") {
-      await recordRuntimeOrphansTx(tx, input.userId, [
-        ...snapshotOrphanCandidates(parseHostedExecutionSnapshotRef(input.snapshotRef)),
-        ...snapshotOrphanCandidates(result.replacedSnapshotRef ?? null),
-      ], new Date());
-    }
+  const operations: PrismaOperationTiming[] = [];
+  const startedAtMs = Date.now();
+  let callbackStartedAtMs: number | null = null;
+  let callbackFinishedAtMs: number | null = null;
+  let completed = false;
+  try {
+    const result = await runWithPrismaOperationTimings(operations, async () =>
+      (input.prisma ?? getPrisma()).$transaction(async (tx) => {
+        callbackStartedAtMs = Date.now();
+        try {
+          const owner = await requireHostedRuntimeCallbackTx(tx, input.userId, input.runtimeAuthority
+            ? { ...input.runtimeAuthority, userId: input.userId }
+            : null);
+          if (owner) await requireRuntimeResourcesPublishableTx(tx, input.userId, snapshotOrphanCandidates(parseHostedExecutionSnapshotRef(input.snapshotRef)));
+          const result = await checkpointHostedWorkspaceTx({ ...input, tx });
+          if (owner && result.status === "updated") {
+            await recordRuntimeOrphansTx(tx, input.userId, [
+              ...snapshotOrphanCandidates(parseHostedExecutionSnapshotRef(input.snapshotRef)),
+              ...snapshotOrphanCandidates(result.replacedSnapshotRef ?? null),
+            ], new Date());
+          }
+          return result;
+        } finally {
+          callbackFinishedAtMs = Date.now();
+        }
+      }),
+    );
+    completed = true;
     return result;
-  });
+  } finally {
+    const finishedAtMs = Date.now();
+    if (finishedAtMs - startedAtMs >= 1_000) {
+      try {
+        console.info("Hosted workspace slow checkpoint database timing.", {
+          completed,
+          totalMs: finishedAtMs - startedAtMs,
+          transactionAcquireMs: (callbackStartedAtMs ?? finishedAtMs) - startedAtMs,
+          transactionCallbackMs: callbackStartedAtMs === null
+            ? null
+            : (callbackFinishedAtMs ?? finishedAtMs) - callbackStartedAtMs,
+          transactionFinishMs: callbackFinishedAtMs === null
+            ? null
+            : finishedAtMs - callbackFinishedAtMs,
+          ...buildHostedWebhookDbTimingLogDetails(operations),
+        });
+      } catch {
+        // Diagnostic output must not change checkpoint success or failure.
+      }
+    }
+  }
 }
 
 export async function publishHostedRuntimeBrowserVaultReplica(

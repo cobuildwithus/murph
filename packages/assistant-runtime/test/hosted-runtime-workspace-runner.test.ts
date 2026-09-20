@@ -4731,6 +4731,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
   test("checkpoints mailbox progress when its canonical receipt is already durable", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const checkpointStarted = createDeferred<void>();
+    const releaseCheckpoint = createDeferred<void>();
+    const events: string[] = [];
+    let running: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
     const mailboxItem = createMailboxItem({
       id: "mailbox_item_runner_durable_canonical_receipt",
       laneSeq: "1",
@@ -4744,12 +4748,20 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     });
 
     try {
-      await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
-          attemptId: "attempt_synthetic_runner_durable_mailbox_receipt",
-          checkpointRequests,
-          leaseGeneration: "1",
-        }),
+      const checkpointRuntimeRedactedStatus = createRuntimeRedactedStatusCheckpoint({
+        attemptId: "attempt_synthetic_runner_durable_mailbox_receipt",
+        checkpointRequests,
+        leaseGeneration: "1",
+      });
+      running = runHostedWorkspaceUntilIdleOrBudget({
+        async checkpointRuntimeRedactedStatus(request) {
+          events.push("checkpoint:start");
+          checkpointStarted.resolve();
+          await releaseCheckpoint.promise;
+          const result = await checkpointRuntimeRedactedStatus(request);
+          events.push("checkpoint:done");
+          return result;
+        },
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_durable_mailbox_receipt",
           expectedWorkspaceVersion: "0",
@@ -4760,6 +4772,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
+          events.push("mailbox:imported");
           return { status: "imported" };
         },
         limitPerLane: 10,
@@ -4768,10 +4781,25 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         requestId: "request_synthetic_runner_durable_mailbox_receipt",
+        async runAssistantPhase() {
+          events.push("assistant:admitted");
+          return { progressed: false };
+        },
         vaultRoot,
         workspace,
         now: () => TEST_NOW,
       });
+
+      await withTestTimeout(checkpointStarted.promise);
+      assert.deepEqual(events, ["mailbox:imported", "checkpoint:start"]);
+      releaseCheckpoint.resolve();
+      await running;
+      assert.deepEqual(events, [
+        "mailbox:imported",
+        "checkpoint:start",
+        "checkpoint:done",
+        "assistant:admitted",
+      ]);
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
@@ -4787,6 +4815,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "a".repeat(64),
       );
     } finally {
+      releaseCheckpoint.resolve();
+      await running?.catch(() => undefined);
       await rm(vaultRoot, {
         force: true,
         recursive: true,
