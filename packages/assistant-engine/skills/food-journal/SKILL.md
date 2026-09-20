@@ -94,7 +94,47 @@ When a numeric safety exception already applies, save the meal without calorie
 or macro estimates. Do not force a nutrition lookup, clarification, or safety
 preflight just to capture the meal.
 
-- After every verified private meal mutation, apply default attachment intent for its eligible daily nutrition card. This includes an ordinary meal reply to an ordinary scheduled check-in; the reply is interactive meal intent, not target acceptance or new scheduled authority. Read fresh canonical same-date totals with `--resolve-goals`. When numeric suitability, complete stored-meal coverage, private routing, and bounded-card checks pass and the card completely answers the turn, attach it. `goalContext.status: ready` uses the unchanged five accepted snapshots; `missing` uses five explicit null goals, even when a subset of compatible targets exists. Never author a mixed bundle or derive, propose, accept, activate, or mutate goals to send a summary. Conflict, incompatible, capacity, incomplete totals after the recovery below, or other failed prerequisites retain the short truthful fallback. Never replace a failed gate with improvised totals, targets, analysis, or a second response surface.
+- After every verified private meal mutation, apply default attachment intent for its eligible daily nutrition card. This includes an ordinary meal reply to an ordinary scheduled check-in; the reply is interactive meal intent, not target acceptance or new scheduled authority. Use fresh canonical same-date totals with resolved goals, including the combined-save result below. When numeric suitability, complete stored-meal coverage, private routing, and bounded-card checks pass and the card completely answers the turn, attach it. `goalContext.status: ready` uses the unchanged five accepted snapshots; `missing` uses five explicit null goals, even when a subset of compatible targets exists. Never author a mixed bundle or derive, propose, accept, activate, or mutate goals to send a summary. Conflict, incompatible, capacity, incomplete totals after the recovery below, or other failed prerequisites retain the short truthful fallback. Never replace a failed gate with improvised totals, targets, analysis, or a second response surface.
+
+### Save and read the day in one call
+
+Apply the member's numeric preferences before choosing this path. If canonical
+preferences are not already available in context, run
+`vault-cli memory show --compact --format json` once before saving, alongside
+independent label lookups when needed. Apply any numeric-suppression decision
+before adding estimates or `--with-daily-totals`, not after receiving totals.
+Reuse that preference read for suitability and invitation checks; do not repeat it.
+
+For a new meal whose identity, amount, and nutrition are already resolved, use
+`vault-cli meal add --with-daily-totals --format json` with the typed meal flags.
+Use `--note`, `--occurred-at`, `--nutrition-calories`,
+`--nutrition-protein-grams`, `--nutrition-carbs-grams`,
+`--nutrition-fat-grams`, `--nutrition-fiber-grams`, `--nutrition-source`,
+`--nutrition-confidence`, and `--nutrition-source-detail` as needed.
+Nutrition source is `user`, `label`, `database`, `inherited`, or `estimated`;
+confidence is `low`, `medium`, or `high`. For member-provided portion totals,
+use `--nutrition-source user`; do not look up a substitute estimate.
+`--with-daily-totals` also works with `meal import-json` for structured ingredients.
+Do not rediscover these flags through help/schema calls unless a required
+field is genuinely unknown or validation identifies a problem.
+
+The successful save is the meal readback. `dailyTotals.status: available`
+provides `dailyTotals.data`, the fresh canonical `meal totals --resolve-goals`
+result for the saved meal's local date, including coverage and goal context.
+Reuse it for the eligible same-date card; do not add `meal show`, `meal list`,
+or a separate `meal totals` read just to confirm this save. With context already
+known and complete nutrition, this is one save-and-read call followed by
+`murph.attach_response_card`. For an ordinary card, the rules here and in the
+card tool provide the target-authority and complete active-Goal discovery contract.
+Do not read the goal-derivation reference or full nutrition-strategy skill
+unless the member explicitly engages in target-setting.
+
+If `dailyTotals.status: unavailable`, the meal is still saved. Retry only the
+same-date totals read; never repeat the meal mutation. A later meal or Goal
+mutation invalidates this summary and requires a new totals read. Incomplete
+coverage still triggers the selected-date recovery below; conflicts and numeric
+suitability still apply. Omit `--with-daily-totals` when numeric guidance is
+suppressed. Never make a new meal to replace an existing meal needing an edit.
 
 ### Optional introduction, not an onboarding requirement
 
@@ -130,12 +170,12 @@ is neither a numeric proposal nor acceptance.
 
 Before every requested daily nutrition card, apply the concise known-context
 numeric-suitability rule in the `murph.attach_response_card` prompt. Do not run
-a universal medical-history or measurement preflight. Also read and follow the
-target-authority and complete active-Goal discovery contract in
+a universal medical-history or measurement preflight. Use the fresh canonical
+goal context and the card tool's authority rules
+before selecting the all-null or accepted all-five presentation. Read
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
-before selecting the all-null or accepted all-five presentation. Use its
-proposal workflow only for an explicit target-setting request, never merely a
-meal log, daily summary, numeric-card request, or scheduled closeout.
+and use its proposal workflow only for an explicit target-setting request,
+never merely a meal log, daily summary, numeric-card request, or scheduled closeout.
 Treat a routine daily-card request, including a requested meal estimate needed
 for that card, as one fulfillment workflow. Reply once with the card or one
 concise truthful fallback. Never narrate individual safety, totals, estimation,
@@ -152,7 +192,7 @@ identity or amount. Do not end with a missing-estimate refusal before trying
 this recovery. Keep reads bounded to the selected date; unrelated conversation
 does not trigger meal recovery.
 
-After the fresh selected-date `vault-cli meal totals` read, compare every
+After the fresh selected-date totals read (standalone or combined save), compare every
 metric's `mealCount` with the top-level `mealCount`. When any metric has lower
 coverage, do not treat the normal interactive card workflow as finished with a
 partial card. List only that selected date, show the exact meals that lack
@@ -231,7 +271,12 @@ Before calculating a meal total:
   generic row is preferable; use normal lookup for branded, packaged, menu, UPC,
   or exact-FDC searches. Because `--generic` applies to the whole batch, split a
   mixed meal into at most two lookups: one generic USDA batch and one normal
-  branded/menu/package batch. The default returns one compact nutrition match
+  branded/menu/package batch. Repeat the singular `--query` flag, for example:
+  `vault-cli food search-labels-batch --generic --query 'cooked chickpeas' --query 'cooked brown rice' --format json`.
+  Do not pass a JSON array or invent `--queries`. When independent label
+  lookups and a needed compact memory read are known, run them in the same
+  tool round; save only after their results are available.
+  The default returns one compact nutrition match
   per component with serving, calories, protein, carbohydrate, fat, fiber, and
   a bounded exact-product contaminant summary. Read `contaminantSummary` by
   default: `no_known_product_tests` means evidence is unknown, observations are

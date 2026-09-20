@@ -31514,6 +31514,7 @@ describeRealCodex('real Codex totals-only nutrition journeys', () => {
           if (breakfastId) expect(commands.filter((command) =>
             /^(?:meal show|meal edit) /u.test(command) && command.includes(breakfastId!))).toEqual([])
           if (scenario === 'number-sensitive') {
+            expect(commands.some((command) => command.includes('--with-daily-totals'))).toBe(false)
             // A meal date is not a nutrition number. Reject nutrient values and goal offers.
             expect(result.finalMessage).not.toMatch(/calories|kcal|\d\s*(?:g\b|grams)|protein|carb(?:s|ohydrate)?|\bfat\b|fiber|\bgoals?\b/iu)
           }
@@ -31597,6 +31598,51 @@ describeRealCodex('real Codex totals-only nutrition journeys', () => {
 })
 
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
+  it('saves a nutrition-resolved meal and attaches its card without redundant reads', {
+    timeout: 1_800_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const startedAt = performance.now()
+    try {
+      const result = await runRealNutritionCardAuthorityScenario({
+        config, conditionRecovery: 'none', goalScenario: 'no-goals', realVault: true,
+        seedMeals: false, allowMealWrites: true,
+        initialPrompt: [
+          'Log my lunch for July 30 at noon: a chickpea and rice bowl.',
+          'My recipe totals for the entire portion I ate are 560 calories,',
+          '22 g protein, 82 g carbs, 16 g fat, and 12 g fiber.',
+          'Use those provided totals. I am comfortable with nutrition numbers.',
+          'I already declined nutrition goals and do not want another invitation.',
+        ].join(' '),
+        setupVault: async (vaultRoot) => {
+          await upsertMemory(vaultRoot, { section: 'Instructions',
+            text: 'Comfortable with nutrition tracking. Declined nutrition goals; do not offer them again.' })
+        },
+        verifyVault: async (vaultRoot) => {
+          const meals = (await readVaultRawTolerant(vaultRoot)).events.filter((event) => event.kind === 'meal')
+          expect(meals).toHaveLength(1)
+          expect(meals[0]).toMatchObject({ attributes: { nutrition: { totals: { calories: 560, fiberGrams: 12 } } } })
+        },
+      })
+      const commands = expandRecordedVaultCommands(result.commands)
+      const actions = commands.filter((command) => !isRecordedVaultHelpCommand(command))
+      process.stdout.write('[meal-short-workflow] ' + JSON.stringify({
+        elapsedMs: Math.round(performance.now() - startedAt), commands,
+        attachCallCount: result.attachCallCount,
+      }) + '\n')
+      expect(actions.filter((command) => command.startsWith('meal add '))).toHaveLength(1)
+      expect(actions.find((command) => command.startsWith('meal add '))).toContain('--with-daily-totals')
+      expect(commands.filter((command) => /^meal (?:show|list|totals)\b/u.test(command))).toEqual([])
+      expect(readNutritionGoalMutationCommands(commands)).toEqual([])
+      expect(result.attachCallCount).toBe(1)
+      expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2,
+        localDate: '2026-07-30', mealCount: 1, goals: ALL_NULL_NUTRITION_GOALS,
+        totals: { calories: { total: 560, mealCount: 1 }, fiberGrams: { total: 12, mealCount: 1 } } })
+      expect(result.progressUpdates).toEqual([])
+      expect(result.finalMessage).not.toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)
+    } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  })
+
   it.each([
     ['rolling-legacy', true],
     ['date-window', true],

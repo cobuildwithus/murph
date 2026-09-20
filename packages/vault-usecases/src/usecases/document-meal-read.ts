@@ -4,6 +4,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 import {
   firstString,
   loadQueryRuntime,
+  matchesDateRange,
   toOwnedEventCommandShowEntity,
   type QueryRecord,
 } from '../commands/query-record-command-helpers.js'
@@ -153,13 +154,18 @@ async function listOwnedRecords(input: {
 }) {
   const limit = input.limit ?? DEFAULT_LIST_LIMIT
   const query = await loadQueryRuntime('document/meal query reads')
-  const records = await query.listCanonicalEntities(input.vault, {
-    family: 'event',
-    kinds: [input.expectedKind],
-    from: input.from,
-    to: input.to,
-    limit: null,
-  })
+  const records = input.expectedKind === 'meal'
+    ? (await query.readCanonicalEntityFamilySource(input.vault, 'event')).filter(
+        (record) => record.kind === 'meal'
+          && matchesDateRange(record.date ?? record.occurredAt, input.from, input.to),
+      )
+    : await query.listCanonicalEntities(input.vault, {
+        family: 'event',
+        kinds: [input.expectedKind],
+        from: input.from,
+        to: input.to,
+        limit: null,
+      })
   const items = records
     .slice(0, limit)
     .map((record: QueryRecord) => {
