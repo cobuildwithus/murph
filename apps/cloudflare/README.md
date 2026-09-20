@@ -49,6 +49,42 @@ filename reaches only the final Containers helper command, while the Node
 workspace still runs in full. Use the direct invocation above for focused
 workspace proof.
 
+## Worker startup profiling
+
+Use the pinned Wrangler's `check startup` to profile the Worker, separately from
+container startup. Its nested deployment dry run also builds configured container
+images, so a fresh checkout needs a profiling-only scratch config:
+
+1. Copy `apps/cloudflare/wrangler.jsonc` to the ignored
+   `apps/cloudflare/.tmp/startup/wrangler.jsonc`.
+2. Remove `containers` and set `main` to `../../src/index.ts`. Preserve the
+   compatibility date, compatibility flags, and bundling options. Do not add a
+   `tsconfig` override; resolution follows the source entrypoint.
+3. From the repository root, run:
+
+```bash
+WRANGLER_WRITE_LOGS=false WRANGLER_SEND_METRICS=false \
+  pnpm --dir apps/cloudflare exec wrangler check startup \
+  --args="--config .tmp/startup/wrangler.jsonc" \
+  --outfile=.tmp/startup/worker.cpuprofile
+```
+
+Pass the scratch config through `--args`: the outer `--config` alone does not
+configure the nested build in the pinned Wrangler. This command stays local and
+does not require production credentials or a container image.
+
+Compare alternating runs of the baseline and candidate on the same machine,
+excluding idle samples from CPU totals. `--worker=<multipart-bundle>` can reuse
+an existing Wrangler upload bundle for repeated measurements. Keep raw profiles,
+bundles, and source maps local; they may contain filesystem paths. Local timings
+identify initialization costs but do not predict production latency.
+
+The resource client's media, orphan, and replica contracts already belong to
+the Worker's eager graph. Keep those imports static: dynamic imports preserve
+unused exports from their shared dependencies and increase startup work.
+Response-card authoring schema builders are also marked pure at their owner, so
+runtime consumers omit their unused JSON Schema conversion work.
+
 ## Route Surface
 
 Public routes:
