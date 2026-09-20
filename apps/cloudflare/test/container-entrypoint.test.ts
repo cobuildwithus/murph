@@ -3211,7 +3211,11 @@ describe("classifyRunnerJobError", () => {
     expect(JSON.stringify(classified.payload)).not.toContain("boom");
   });
 
-  it("transports a phase alongside a generic control-plane failure code", () => {
+  it.each([
+    "EACCES",
+    "ASSISTANT_CODEX_BACKGROUND_WORK_UNTRACKED_COMPLETION",
+    "ASSISTANT_CODEX_BACKGROUND_WORK_INTERACTED",
+  ])("transports phase and finite failure code %s without private details", (code) => {
     const fetchFailure = new HostedRuntimeControlPlaneFetchError({
       cause: new TypeError("hidden control-plane transport failure"),
       description: "Hosted workspace snapshot",
@@ -3226,7 +3230,7 @@ describe("classifyRunnerJobError", () => {
       new Error("hidden snapshot wrapper at /private/workspace/vault", {
         cause: fetchFailure,
       }),
-      { code: "EACCES" },
+      { code },
     );
     attachHostedRuntimeFailurePhaseCode(
       wrappedFailure,
@@ -3239,7 +3243,7 @@ describe("classifyRunnerJobError", () => {
       payload: {
         code: "runtime_error",
         details: {
-          errorCodeDetail: "EACCES",
+          errorCodeDetail: code,
           runtimeFailurePhaseCode:
             "runtime_phase:workspace.checkpoint.idle_compact",
         },

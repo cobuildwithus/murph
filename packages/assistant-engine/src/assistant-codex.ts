@@ -1206,7 +1206,15 @@ class CodexAppServerProcess {
     string,
     NonNullable<CodexAppServerActiveTurnBinding['onSubagentMessage']>
   >()
-  private detachedChildViolation: string | null = null
+  private detachedChildViolation:
+    | 'outside_root'
+    | 'reused_child'
+    | 'malformed_lifecycle'
+    | 'nested_child'
+    | 'untracked_completion'
+    | 'interacted'
+    | 'interrupted'
+    | null = null
   private readonly detachedRootThreadIdsByTurnId = new Map<string, string>()
   private readonly detachedRootThreadIds = new Set<string>()
   private readonly pendingDetachedUsageReports = new Set<Promise<void>>()
@@ -1619,8 +1627,8 @@ class CodexAppServerProcess {
   private assertDetachedChildContractSupported(): void {
     if (this.detachedChildViolation) {
       throw new VaultCliError(
-        'ASSISTANT_CODEX_BACKGROUND_WORK_UNSUPPORTED',
-        this.detachedChildViolation,
+        `ASSISTANT_CODEX_BACKGROUND_WORK_${this.detachedChildViolation.toUpperCase()}`,
+        `Unsupported Codex background work: ${this.detachedChildViolation}.`,
         { retryable: true },
       )
     }
@@ -1693,10 +1701,6 @@ class CodexAppServerProcess {
     this.detachedRootThreadIds.clear()
   }
 
-  private recordDetachedChildViolation(message: string): void {
-    this.detachedChildViolation ??= message
-  }
-
   private admitDetachedChild(input: {
     parentThreadId: string
     parentTurnId: string
@@ -1706,22 +1710,16 @@ class CodexAppServerProcess {
       this.detachedRootThreadIdsByTurnId.get(input.parentTurnId)
       !== input.parentThreadId
     ) {
-      this.recordDetachedChildViolation(
-        'Codex emitted a detached child outside the active root turn.',
-      )
+      this.detachedChildViolation ??= 'outside_root'
       return
     }
 
-    const existingParentTurnId = this.detachedChildParentTurnIds.get(
-      input.threadId,
-    )
+    const existingParentTurnId = this.detachedChildParentTurnIds.get(input.threadId)
     if (
       existingParentTurnId !== undefined
       && existingParentTurnId !== input.parentTurnId
     ) {
-      this.recordDetachedChildViolation(
-        'Codex reused a detached child across root turns.',
-      )
+      this.detachedChildViolation ??= 'reused_child'
       return
     }
     this.detachedChildParentTurnIds.set(input.threadId, input.parentTurnId)
@@ -1731,23 +1729,15 @@ class CodexAppServerProcess {
     const activity = readCodexSubagentActivity(message)
     if (activity) {
       const senderThreadId = extractCodexThreadIdFromMessage(message)
-      if (
-        activity.kind === 'malformed'
-        || !activity.agentThreadId
-        || !activity.turnId
-      ) {
-        this.recordDetachedChildViolation(
-          'Codex emitted a malformed detached-child lifecycle.',
-        )
+      if (activity.kind === 'malformed') {
+        this.detachedChildViolation ??= 'malformed_lifecycle'
       } else if (activity.kind === 'started') {
         if (
           !senderThreadId
           || this.detachedRootThreadIdsByTurnId.get(activity.turnId)
             !== senderThreadId
         ) {
-          this.recordDetachedChildViolation(
-            'Detached Codex children may not spawn nested children.',
-          )
+          this.detachedChildViolation ??= 'nested_child'
         } else {
           this.admitDetachedChild({
             parentThreadId: senderThreadId,
@@ -1775,15 +1765,11 @@ class CodexAppServerProcess {
           ) {
             this.detachedCompletedChildThreadIds.add(activity.agentThreadId)
           } else {
-            this.recordDetachedChildViolation(
-              'Codex emitted an untracked detached-child completion.',
-            )
+            this.detachedChildViolation ??= 'untracked_completion'
           }
         }
       } else {
-        this.recordDetachedChildViolation(
-          'Detached Codex children may not be messaged, reused, or interrupted.',
-        )
+        this.detachedChildViolation ??= activity.kind
       }
     }
 
@@ -2118,9 +2104,7 @@ class CodexAppServerProcess {
           threadId,
         })
       } else {
-        this.recordDetachedChildViolation(
-          'Codex emitted a detached child outside the active root turn.',
-        )
+        this.detachedChildViolation ??= 'outside_root'
       }
     }
     handler(message)
@@ -2281,10 +2265,10 @@ function readCodexBackgroundTerminalPresence(value: unknown): boolean {
 }
 
 function readCodexSubagentActivity(message: CodexRpcMessage): {
-  agentThreadId: string | null
-  kind: 'completed' | 'interacted' | 'interrupted' | 'malformed' | 'started'
-  turnId: string | null
-} | null {
+  agentThreadId: string
+  kind: 'completed' | 'interacted' | 'interrupted' | 'started'
+  turnId: string
+} | { kind: 'malformed' } | null {
   const method = typeof message.method === 'string' ? message.method : null
   if (method !== 'item/completed') {
     return null
@@ -2298,6 +2282,7 @@ function readCodexSubagentActivity(message: CodexRpcMessage): {
   const turnId = asCodexString(asCodexRecord(message.params)?.turnId)
   if (
     !agentThreadId
+    || !turnId
     || (
       kind !== 'completed'
       && kind !== 'started'
@@ -2305,13 +2290,9 @@ function readCodexSubagentActivity(message: CodexRpcMessage): {
       && kind !== 'interrupted'
     )
   ) {
-    return {
-      agentThreadId: agentThreadId ?? null,
-      kind: 'malformed',
-      turnId: turnId ?? null,
-    }
+    return { kind: 'malformed' }
   }
-  return { agentThreadId, kind, turnId: turnId ?? null }
+  return { agentThreadId, kind, turnId }
 }
 
 function throwIfCodexBackgroundWorkWaitAborted(
