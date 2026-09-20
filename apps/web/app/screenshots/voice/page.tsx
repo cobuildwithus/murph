@@ -9,7 +9,7 @@ export default function VoiceStudies() {
     <h1 className="font-serif text-3xl">Voice control</h1>
     <div className="mt-10 flex flex-wrap gap-12">
       <LiveVoicePicker voice="gleam" />
-      <LiveVoicePicker voice="vesper" disabled />
+      <LiveVoicePicker voice="marin" disabled />
     </div>
     <div className="mt-16 flex flex-wrap gap-16">
       {(["idle", "connecting", "live", "paused", "ending", "error"] as const).map((state) => (

@@ -49,7 +49,7 @@ describe("local GPT-Live admission", () => {
     expect((await POST(request({ sdp: "v=0\r\n", voice: id }))).status).toBe(201);
     expect(JSON.parse(provider.mock.calls[0][1].body).session.audio.output.voice).toBe(id);
   });
-  it.each(["unsupported", null, { id: "gleam" }])("rejects invalid voice %j before provider work", async (voice) => {
+  it.each(["unsupported", "nova", "alloy", "meridian", "vesper", "ripple", "stone", "beacon", "cinder", null, { id: "gleam" }])("rejects invalid voice %j before provider work", async (voice) => {
     expect((await POST(request({ sdp: "v=0\r\n", voice }))).status).toBe(400);
     expect(provider).not.toHaveBeenCalled();
   });

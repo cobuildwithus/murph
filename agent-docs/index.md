@@ -101,6 +101,9 @@ Setup and embedding are documented in `apps/web/README.md`.
 GPT-Live voice selection is tracked in
 [`2026-09-20-live-voice-picker.md`](exec-plans/completed/2026-09-20-live-voice-picker.md).
 
+Female-only GPT-Live selection is tracked in
+[`2026-09-20-live-female-voices.md`](exec-plans/completed/2026-09-20-live-female-voices.md).
+
 ## Purpose
 
 Deferred device hints honor their persisted retry time in wake projection and

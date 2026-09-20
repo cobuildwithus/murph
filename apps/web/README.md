@@ -2579,7 +2579,10 @@ Open `/voice` on a localhost development server with `OPENAI_API_KEY` in the
 server environment. The key needs `gpt-live-1` and `gpt-5.6-terra` access.
 `LiveVoiceButton` from `src/components/live-voice/live-voice-button` is reusable:
 render `<LiveVoiceButton />` for the circle, or `<LiveVoiceButton showVoicePicker />`
-for ten English voices grouped by female/male presentation. Gleam is the default;
+for nine female voices: Gleam, Marin, Willow, Quartz, Delta, Coral, Sage,
+Shimmer, and Bossa (Brazilian Portuguese). The older Coral/Sage/Shimmer options
+were verified against GPT-Live session startup; Nova was rejected by the API.
+Gleam is the default;
 `voice="willow"` chooses another default. Voice changes require ending the current
 conversation. An optional same-origin `endpoint` returns `{ sdp: string }` for a
 posted `{ sdp: string, voice: string }` WebRTC offer. The server validates the voice
