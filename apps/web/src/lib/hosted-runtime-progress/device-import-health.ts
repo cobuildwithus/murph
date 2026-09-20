@@ -76,28 +76,28 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
   for (const connectionRows of groupConnectionObservations(rows).values()) {
     const evidence = summarizeConnection(connectionRows, now, due, restartTimes, row => row.pending);
     if (!evidence) continue;
-    // Reuse the same checkpoint and continuity rules without discarding the
-    // scheduled retry obligations used by stall and cycling detection.
-    const backlog = summarizeConnection(connectionRows, now, false, restartTimes,
+    // Saved deferral ends active cycling/backlog evidence. Keep all pending
+    // retry obligations in the separate stall summary for overdue wakes.
+    const runnable = summarizeConnection(connectionRows, now, false, restartTimes,
       row => row.runnable ?? row.pending);
-    const { backlogAge, lastProgress, restarts, cancellations, savedPasses } = evidence;
     const conditions: DeviceImportCondition[] = [];
     if ((due || evidence.latestPassUncheckpointed)
       && !evidence.awaitingProgressCheckpoint
       && !evidence.awaitingDeferredCheckpoint
-      && now - lastProgress >= DEVICE_IMPORT_STALL_MS) {
+      && now - evidence.lastProgress >= DEVICE_IMPORT_STALL_MS) {
       conditions.push("stalled");
     }
-    if (Math.max(restarts, cancellations) >= DEVICE_IMPORT_CYCLE_LIMIT && savedPasses < 2) {
+    if (runnable && Math.max(runnable.restarts, runnable.cancellations) >= DEVICE_IMPORT_CYCLE_LIMIT
+      && runnable.savedPasses < 2) {
       conditions.push("cycling");
     }
-    if (backlog && backlog.backlogAge >= DEVICE_IMPORT_BACKLOG_MS && backlog.evidenceCurrent) conditions.push("backlog");
+    if (runnable && runnable.backlogAge >= DEVICE_IMPORT_BACKLOG_MS && runnable.evidenceCurrent) conditions.push("backlog");
     for (const condition of conditions) {
+      const { backlogAge, restarts, cancellations, savedPasses } = condition === "stalled" ? evidence : runnable!;
       const health = result[condition];
       health.anomalous = true;
       health.affectedRuntimeCount = 1;
-      health.oldestBacklogMs = Math.max(health.oldestBacklogMs,
-        condition === "backlog" ? backlog!.backlogAge : backlogAge);
+      health.oldestBacklogMs = Math.max(health.oldestBacklogMs, backlogAge);
       health.restartCount = Math.max(health.restartCount, restarts);
       health.cancellationCount += cancellations;
       health.savedProgressPassCount += savedPasses;

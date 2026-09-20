@@ -247,6 +247,63 @@ describe("device import progress and efficiency alerts", () => {
       .backlog.anomalous).toBe(true);
   });
 
+  it("does not count webhook starts across checkpointed scheduled-only queues as cycling", () => {
+    const rows = [39, 27, 15, 3, 2, 1].flatMap((age, index) => {
+      const attemptId = `webhook-${index}`;
+      return [
+        row(age + 0.1, { eventCode: "runner.processing_finished", pending: null, restarted: true, attemptId }),
+        row(age, { runnable: false, progressed: index === 3 || index === 5, attemptId }),
+        ...(index === 5 ? [] : [checkpoint(age - 0.1, { attemptId })]),
+      ];
+    });
+    expect(health(rows, false).cycling.anomalous).toBe(false);
+    // A genuinely overdue wake remains a stall even for saved deferred work.
+    const unchanged = rows.map(observation => ({ ...observation, progressed: false }));
+    expect(health(unchanged, true).stalled.anomalous).toBe(true);
+    expect(health(rows.map(observation => ({ ...observation, runnable: null })), false)
+      .cycling.anomalous).toBe(true);
+  });
+
+  it("requires matching checkpoint acceptance before deferral clears cycling", () => {
+    const rows = [19, 14, 9, 4].map(age => row(age, { restarted: true, runnable: true }));
+    const deferred = row(1, { runnable: false, attemptId: "deferred" });
+    for (const extra of [
+      [],
+      [checkpoint(0.5)],
+      [checkpoint(0.5, { attemptId: "deferred", checkpointAccepted: false })],
+    ]) {
+      expect(health([...rows, deferred, ...extra], false).cycling.anomalous).toBe(true);
+    }
+    expect(health([...rows, deferred, checkpoint(0.5, { attemptId: "deferred" })], false)
+      .cycling.anomalous).toBe(false);
+    expect(health([14, 9, 4, 1].map(age => row(age, { restarted: true, runnable: age === 14 })), false)
+      .cycling.anomalous).toBe(true);
+  });
+
+  it("counts only cycles since the latest saved deferral when work becomes runnable again", () => {
+    const deferred = [19, 14, 9, 4].flatMap(age => [
+      row(age, { runnable: false, restarted: true }), checkpoint(age - 0.1),
+    ]);
+    const resumed = row(3, { runnable: true, restarted: true });
+    expect(health([...deferred, resumed], false).cycling.anomalous).toBe(false);
+    const result = health([...deferred, resumed,
+      ...[2, 1, 0].map(age => row(age, { runnable: true, restarted: true }))], false);
+    expect(result.cycling).toMatchObject({
+      anomalous: true, restartCount: 4, oldestBacklogMs: 3 * minute,
+    });
+  });
+
+  it("does not let a deferred connection hide another cycling connection", () => {
+    const rows = [19, 14, 9, 4].flatMap(age => [
+      row(age, { runnable: true, restarted: true }),
+      row(age, { runnable: false, connectionKey: "b".repeat(64), attemptId: "deferred" }),
+      checkpoint(age - 0.1, { attemptId: "deferred" }),
+    ]);
+    expect(health(rows, false).cycling).toMatchObject({
+      anomalous: true, affectedRuntimeCount: 1, restartCount: 4,
+    });
+  });
+
   it("starts backlog age when scheduled work becomes runnable", () => {
     const rows = Array.from({ length: 15 }, (_, index) => 70 - index * 5)
       .flatMap(age => [row(age + 0.1, { runnable: age <= 55 }), checkpoint(age)]);
