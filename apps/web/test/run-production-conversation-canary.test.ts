@@ -378,15 +378,89 @@ describe("production conversation canary runner", () => {
     });
   });
 
-  it.each([404, 503])("fails explicitly when the outcome route or control configuration is unavailable (%s)", async (status) => {
+  it.each([401, 403, 404, 500])("fails explicitly for a non-retryable outcome status (%s)", async (status) => {
     prepareCompleteConversation();
     vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockResolvedValueOnce(new Response(null, { status }));
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-read-failed; stage=runtime-identity" });
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: `outcome-read-failed; stage=runtime-identity; http_status=${status}` });
     expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries an unavailable observer without repeating any message or reset", async () => {
+    prepareCompleteConversation();
+    const cancel = vi.fn();
+    const unavailable = new Response(new ReadableStream({ cancel }), { status: 503 });
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
+      .mockResolvedValueOnce(unavailable);
+
+    await expect(runLinqProductionCanary(TEST_ENV)).resolves.toHaveProperty("canonicalOutcome.savedGoalCount", 1);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(mocks.delay).toHaveBeenCalledOnce();
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+    expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+  });
+
+  it.each(["headers", "body"])("retries a timed-out %s read within the original observation deadline", async (phase) => {
+    prepareCompleteConversation();
+    const clock = mockCanaryObservationClock();
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
+      .mockImplementationOnce(async (_url, options) => {
+        const failAfterTimeout = async () => {
+          clock.advance(10_000);
+          options?.signal?.throwIfAborted();
+          throw new Error("Expected the request deadline to expire.");
+        };
+        if (phase === "headers") return failAfterTimeout();
+        const response = outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 });
+        vi.spyOn(response, "json").mockImplementation(failAfterTimeout);
+        return response;
+      });
+
+    await expect(runLinqProductionCanary(TEST_ENV)).resolves.toHaveProperty("canonicalOutcome.readbackGoalCount", 1);
+    expect(clock.elapsedMs()).toBe(11_000);
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+  });
+
+  it.each(["unavailable", "timeout"])("fails at the original deadline when the observer stays %s", async (mode) => {
+    prepareCompleteConversation();
+    const clock = mockCanaryObservationClock();
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
+      .mockImplementation(async (_url, options) => {
+        if (mode === "unavailable") return new Response(null, { status: 503 });
+        clock.advance(Math.min(10_000, CANARY_OUTCOME_WAIT_MS - clock.elapsedMs()));
+        options?.signal?.throwIfAborted();
+        throw new Error("Expected the request deadline to expire.");
+      });
+
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=runtime-identity" });
+    expect(clock.elapsedMs()).toBe(CANARY_OUTCOME_WAIT_MS);
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it("does not accept evidence returned after the observation deadline", async () => {
+    prepareCompleteConversation();
+    const clock = mockCanaryObservationClock();
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
+      .mockImplementationOnce(async () => {
+        clock.advance(CANARY_OUTCOME_WAIT_MS);
+        return outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 });
+      });
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=runtime-identity" });
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps non-timeout transport failures content-free", async () => {
+    prepareCompleteConversation();
+    const privateError = new Error("synthetic-private-content");
+    privateError.name = "synthetic-private-name";
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockRejectedValueOnce(privateError);
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({
+      name: "outcome-read-failed; stage=runtime-identity", message: "The Linq production canary failed.",
+    });
   });
 });
 
-function mockCanaryObservationClock(): { elapsedMs(): number } {
+function mockCanaryObservationClock(): { elapsedMs(): number; advance(durationMs: number): void } {
   let elapsedMs = 0;
   const deadlines: Array<{ at: number; controller: AbortController }> = [];
   vi.spyOn(AbortSignal, "timeout").mockImplementation((durationMs) => {
@@ -394,14 +468,17 @@ function mockCanaryObservationClock(): { elapsedMs(): number } {
     deadlines.push({ at: elapsedMs + durationMs, controller });
     return controller.signal;
   });
-  mocks.delay.mockImplementation(async (durationMs: number, _value: unknown, options: { signal: AbortSignal }) => {
+  const advance = (durationMs: number) => {
     elapsedMs += durationMs;
     for (const deadline of deadlines) {
       if (elapsedMs >= deadline.at) deadline.controller.abort(new DOMException("Synthetic deadline elapsed", "TimeoutError"));
     }
+  };
+  mocks.delay.mockImplementation(async (durationMs: number, _value: unknown, options: { signal: AbortSignal }) => {
+    advance(durationMs);
     options.signal.throwIfAborted();
   });
-  return { elapsedMs: () => elapsedMs };
+  return { elapsedMs: () => elapsedMs, advance };
 }
 
 function prepareCompleteConversation(readback = LINQ_PRODUCTION_CANARY_GOAL_TITLE): void {

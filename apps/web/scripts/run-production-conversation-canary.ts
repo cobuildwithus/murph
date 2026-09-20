@@ -223,19 +223,9 @@ async function waitForCanonicalGoalOutcome(
 ): Promise<LinqProductionCanaryOutcome> {
   const signal = AbortSignal.timeout(CANARY_OUTCOME_WAIT_MS);
   for (let attempt = 0; attempt < CANARY_OUTCOME_WAIT_MS / CANARY_OUTCOME_POLL_MS; attempt += 1) {
-    const response = await fetch(new URL(CANARY_OUTCOME_PATH, config.productionBaseUrl), {
-      headers: { authorization: `Bearer ${config.resetSecret}` },
-      method: "GET",
-      redirect: "error",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
-    }).catch(() => throwCanaryFailure(`outcome-read-failed; stage=${stage}`));
-    if (!response.ok) throwCanaryFailure(`outcome-read-failed; stage=${stage}`);
-    const body: unknown = await response.json().catch(() => null);
-    if (!isLinqProductionCanaryOutcomeResponse(body)) {
-      throwCanaryFailure(`outcome-response-invalid; stage=${stage}`);
-    }
-    const { outcome } = body;
-    if (outcome.ready) {
+    const outcome = await readCanonicalGoalOutcome(config, signal, stage);
+    if (signal.aborted) throwCanaryFailure(`outcome-not-ready; stage=${stage}`);
+    if (outcome?.ready) {
       if (outcome.totalGoalCount > expectedCount
         || outcome.totalGoalCount !== outcome.matchingGoalCount
         || outcome.matchingGoalIdCount !== outcome.matchingGoalCount) {
@@ -247,6 +237,40 @@ async function waitForCanonicalGoalOutcome(
       .catch(() => throwCanaryFailure(`outcome-not-ready; stage=${stage}`));
   }
   throwCanaryFailure(`outcome-not-ready; stage=${stage}`);
+}
+
+async function readCanonicalGoalOutcome(
+  config: LinqProductionCanaryConfig,
+  observationSignal: AbortSignal,
+  stage: string,
+): Promise<LinqProductionCanaryOutcome | null> {
+  const requestSignal = AbortSignal.any([observationSignal, AbortSignal.timeout(10_000)]);
+  const response = await fetch(new URL(CANARY_OUTCOME_PATH, config.productionBaseUrl), {
+    headers: { authorization: `Bearer ${config.resetSecret}` },
+    method: "GET",
+    redirect: "error",
+    signal: requestSignal,
+  }).catch(() => {
+    if (requestSignal.aborted) return null;
+    throwCanaryFailure(`outcome-read-failed; stage=${stage}`);
+  });
+  if (!response) return null;
+  // The observer is read-only. A transient unavailable response or request
+  // timeout can use the next existing poll, but never extends the stage deadline.
+  if (response.status === 503) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+  if (!response.ok) throwCanaryFailure(`outcome-read-failed; stage=${stage}; http_status=${response.status}`);
+  const body: unknown = await response.json().catch(() => {
+    if (requestSignal.aborted) return null;
+    throwCanaryFailure(`outcome-response-invalid; stage=${stage}`);
+  });
+  if (requestSignal.aborted) return null;
+  if (!isLinqProductionCanaryOutcomeResponse(body)) {
+    throwCanaryFailure(`outcome-response-invalid; stage=${stage}`);
+  }
+  return body.outcome;
 }
 
 function isLinqProductionCanaryOutcomeResponse(value: unknown): value is {
