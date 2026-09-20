@@ -654,6 +654,67 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect((await claimHostedRuntimeResourceCleanup({ prisma: second, now })).orphans.some(row => row.userId === userId)).toBe(false);
   });
 
+  it.each([
+    { legacyHeartbeat: false, upload: "pending" },
+    { legacyHeartbeat: true, upload: "pending" },
+    { legacyHeartbeat: false, upload: "settled" },
+    { legacyHeartbeat: true, upload: "settled" },
+    { legacyHeartbeat: false, upload: "published" },
+    { legacyHeartbeat: true, upload: "published" },
+  ] as const)("protects snapshots through exact writes and canonical refs, not heartbeat state: %j", async ({ legacyHeartbeat, upload }) => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const now = new Date();
+    const admittedAt = new Date(now.getTime() - 2 * 3_600_000);
+    const session = { ...await snapshotSession(runtime), createdAt: admittedAt.toISOString(),
+      expiresAt: new Date(admittedAt.getTime() + 3_600_000).toISOString() };
+    await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, now: admittedAt,
+      command: { operation: "snapshot_create", session } });
+    const admitted = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, now: admittedAt,
+      command: { operation: "snapshot_managed_admit", expectedSession: session,
+        uploadId: "synthetic-cleanup-upload", encryptedByteSize: 128, encryptedSha256: "a".repeat(64) } });
+    const read = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId,
+      command: { operation: "snapshot_managed_read", ...runtime, snapshotId: session.snapshotId } });
+    expect(read.session?.snapshotId).toBe(session.snapshotId);
+    expect(read.managedUpload).toEqual(admitted.managedUpload);
+    if (legacyHeartbeat) {
+      expect((await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, now,
+        command: { operation: "snapshot_heartbeat", ...runtime, snapshotId: session.snapshotId } })).applied).toBe(true);
+    }
+    if (upload !== "pending") {
+      await executeHostedRuntimeSnapshotCommand({ prisma: first, userId,
+        command: { operation: "snapshot_managed_settled", ...runtime, snapshotId: session.snapshotId,
+          uploadId: "synthetic-cleanup-upload", verified: true } });
+    }
+    const ref = {
+      schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA, userId, snapshotId: session.snapshotId,
+      objectKey: session.objectKey, createdAt: session.createdAt,
+      encryption: { ...session.encryption, ivBase64: Buffer.alloc(12).toString("base64url") },
+      upload: "direct-r2-presigned-put" as const,
+      archive: { compression: "zstd" as const, format: "tar" as const,
+        encryptedByteSize: 128, encryptedObjectSha256: "a".repeat(64),
+        plaintextArchiveSha256: "b".repeat(64), fileCount: 1, totalPlainBytes: 256 },
+    };
+    await observer.hostedWorkspace.create({ data: { userId } });
+    if (upload === "published") {
+      await checkpointHostedRuntimeWorkspace({ prisma: first, userId,
+        runtimeAuthority: { ...runtime, workspaceVersion: "0" }, expectedVersion: "0",
+        reason: "idle_shutdown", snapshotRef: ref });
+      // A current archive stays protected even when its cleanup grace has passed.
+      await observer.hostedRuntimeOrphan.updateMany({ where: { userId }, data: { cleanupAt: now } });
+    }
+    const claimed = (await claimHostedRuntimeResourceCleanup({ prisma: second, now })).orphans
+      .filter(row => row.userId === userId);
+    expect(claimed).toHaveLength(upload === "settled" ? 1 : 0);
+    if (upload === "settled") {
+      await expect(checkpointHostedRuntimeWorkspace({ prisma: first, userId,
+        runtimeAuthority: { ...runtime, workspaceVersion: "0" }, expectedVersion: "0",
+        reason: "idle_shutdown", snapshotRef: ref }))
+        .rejects.toMatchObject({ code: "HOSTED_RUNTIME_RESOURCE_RETIRED" });
+      expect((await observer.hostedRuntimePutDrain.findFirstOrThrow({ where: { userId } })).completedAt).not.toBeNull();
+    }
+  });
+
   it.each(["none", "soon", "unknown"] as const)("retains a replaced v2 snapshot without extending %s content expiry", async (expiry) => {
     const userId = await member();
     const runtime = identity((await claim(userId)).owner);

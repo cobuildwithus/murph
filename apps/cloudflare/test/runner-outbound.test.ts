@@ -1,3 +1,4 @@
+import { expectedManagedSnapshotEtag } from "../src/managed-snapshot-upload.ts";
 import { createOutboundMultipartTestBucket } from "./multipart-bucket-fixtures.ts";
 import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import assert from "node:assert/strict";
@@ -5603,11 +5604,10 @@ describe("handleRunnerOutboundRequest", () => {
     );
     expect(completeResponse.status).toBe(200);
     expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
-      checkpointHandoffCompletedAt: expect.any(String),
       replacedSnapshotRef,
       snapshotId,
     });
-    expect(runner.completeHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.completeHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
 
     const abortResponse = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotAbortRequest({
@@ -6985,7 +6985,9 @@ describe("handleRunnerOutboundRequest", () => {
         version: "5",
       }),
     }));
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledTimes(5);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
+    expect(runtimeResourceClient.commandHostedRuntimeSnapshot).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledTimes(baseline === "omitted" ? 2 : 1);
     expect(fetchMock.mock.calls.filter(isHostedWorkspaceReadFetch)).toHaveLength(baseline === "omitted" ? 1 : 0);
     expect(fetchMock.mock.lastCall?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace/checkpoint?runtimeAuthority=1&runtimeAttempt=attempt_1&runtimeGeneration=9&runtimeWorkspaceVersion=5");
@@ -8831,6 +8833,16 @@ describe("handleRunnerOutboundRequest", () => {
       return staleSession;
     });
 
+    const originalCommand = vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).getMockImplementation();
+    if (!originalCommand) throw new Error("Missing resource command fixture.");
+    vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).mockImplementation(async commandInput => {
+      const result = await originalCommand(commandInput);
+      if (commandInput.command.operation === "snapshot_delete" && !result.applied) {
+        throw new HostedRuntimeResourceRejectedError("HOSTED_RUNTIME_OWNER_STALE");
+      }
+      return result;
+    });
+
     const deleteObject = vi.fn(async () => {});
     const headObject = vi.fn();
     const env = createRunnerOutboundEnv({
@@ -8858,7 +8870,8 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted workspace snapshot upload session is stale.",
+      code: "HOSTED_RUNTIME_OWNER_STALE",
+      error: "Hosted runtime resource rejected: HOSTED_RUNTIME_OWNER_STALE.",
     });
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
     expect(runner.readHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
@@ -9306,7 +9319,7 @@ describe("handleRunnerOutboundRequest", () => {
       error: "Hosted workspace snapshot upload session is stale.",
     });
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledOnce();
     expect(deleteObject).not.toHaveBeenCalled();
     expect(runtimeResourceClient.recordHostedRuntimeOrphan).not.toHaveBeenCalled();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
@@ -9527,7 +9540,8 @@ describe("handleRunnerOutboundRequest", () => {
     });
     const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
       onCheckpoint: () => {
-        throw new Error("stale completion must not checkpoint");
+        // The final Web publication owns fresh authority after external R2 work.
+        return Response.json({ error: { code: "HOSTED_RUNTIME_OWNER_STALE" } }, { status: 409 });
       },
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -9546,10 +9560,10 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot upload session is stale.",
     });
-    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(3);
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
     expect(runner.readHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(headObject).toHaveBeenCalledWith(objectKey);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(runner.workspaceSnapshotUploadSessions.get(activeSnapshotId)).toEqual(activeSession);
@@ -10345,11 +10359,73 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     );
 
     expect(response.status).toBe(409);
-    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(4);
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(deleteObject).not.toHaveBeenCalledWith(objectKey);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("completes a managed snapshot with one combined read, one settlement and one fenced publication", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_combined_managed_read";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({ snapshotId, userId: "member_123" });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64), objectKey, snapshotId, userId: "member_123" });
+    const session = createWorkspaceSnapshotUploadSession(snapshotRef, { replacedSnapshotRef: null });
+    const receipt = { userId: session.userId, snapshotId, objectKey, uploadId: "synthetic-upload",
+      attemptId: session.attemptId, generation: session.leaseGeneration,
+      encryptedByteSize: 4, encryptedSha256: snapshotRef.archive.encryptedObjectSha256,
+      encryptedMd5: "b".repeat(32), completedAt: null, verifiedAt: null };
+    const operations: string[] = [];
+    vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).mockImplementation(async ({ command }) => {
+      operations.push(command.operation);
+      if (command.operation === "snapshot_managed_read") {
+        return { cutover: "postgres", applied: true, session, managedUpload: receipt };
+      }
+      if (command.operation === "snapshot_managed_settled") {
+        expect(command).toMatchObject({ snapshotId, uploadId: receipt.uploadId,
+          attemptId: receipt.attemptId, generation: receipt.generation, verified: true });
+        return { cutover: "postgres", applied: true, session: null, managedUpload: receipt };
+      }
+      throw new Error(`Unexpected snapshot coordination: ${command.operation}`);
+    });
+    const complete = vi.fn(async () => {});
+    const abort = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: {
+        ...createWorkspaceSnapshotBucket(async key => ({ key, size: 4 }), async key => ({
+          key, size: 4, etag: expectedManagedSnapshotEtag(receipt.encryptedMd5),
+          customMetadata: { ...createWorkspaceSnapshotHeadMetadata(snapshotRef), managedupload: "1" },
+        })),
+      },
+      runtimeControl: { getByName: runner.getByName },
+    });
+    env.BUNDLES.resumeMultipartUpload = (key, uploadId) => {
+      expect([key, uploadId]).toEqual([objectKey, receipt.uploadId]);
+      return { uploadId, complete, abort, uploadPart: async () => { throw new Error("Completion cannot upload new bytes."); } };
+    };
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      onCheckpoint: args => {
+        const request = readTestFetchBodyObject(args, "combined snapshot checkpoint");
+        expect(request).toMatchObject({ attemptId: receipt.attemptId, leaseGeneration: receipt.generation,
+          expectedWorkspaceVersion: "4", snapshotRef: { snapshotId, objectKey } });
+        return Response.json(createHostedWorkspaceCheckpointResponseWithSnapshotRef("5", request.snapshotRef));
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const request = createWorkspaceSnapshotCompleteRequest({ snapshotId, snapshotRef, workspaceVersion: "4" });
+    const body = requireTestObject(await request.json(), "managed completion request");
+    const response = await handleRunnerOutboundRequest(new Request(request.url, {
+      headers: request.headers, method: "POST",
+      body: JSON.stringify({ ...body, managedPart: { uploadId: receipt.uploadId, etag: "synthetic-etag" } }),
+    }), env, "member_123");
+    expect(operations).toEqual(["snapshot_managed_read", "snapshot_managed_settled"]);
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(complete).toHaveBeenCalledOnce();
+    expect(abort).not.toHaveBeenCalled();
   });
 
   it.each(["missing", "digest_mismatch"])("returns a conflict for %s managed completion authority without publishing", async rejection => {
@@ -10366,7 +10442,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     vi.mocked(runtimeResourceClient.commandHostedRuntimeSnapshot).mockImplementation(input => {
       if (input.command.operation !== "snapshot_managed_read") return originalCommand(input);
       return Promise.resolve({
-        cutover: "postgres", applied: rejection !== "missing", session: null,
+        cutover: "postgres", applied: true, session,
         managedUpload: rejection === "missing" ? null : {
           userId: session.userId, snapshotId, objectKey, uploadId: "synthetic-upload",
           attemptId: session.attemptId, generation: session.leaseGeneration,
@@ -10704,7 +10780,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     );
 
     expect(response.status).toBe(503);
-    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(4);
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

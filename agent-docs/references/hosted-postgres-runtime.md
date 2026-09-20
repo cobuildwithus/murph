@@ -150,6 +150,27 @@ foreign key so account deletion cannot erase physical cleanup requirements.
 Snapshot sessions retain existing presign admission and capability-drain policy;
 fresh final admission precedes returning a presigned capability.
 
+Current snapshot producers do not send handoff heartbeats or completion markers.
+A session expires after sixty minutes; unaccepted resources first become cleanup
+candidates after sixty-five. Independent pending upload receipts protect writes,
+current workspace refs protect committed archives, and publication rejects a
+retired ref under the same owner locks as cleanup. Expired completion can only
+acknowledge a matching already-current checkpoint, never publish new bytes.
+Session replacement does not use heartbeat or completion state. The legacy
+heartbeat/completion commands and fields remain accepted until older Workers and
+warm containers drain; their timestamps are compatibility data, not cleanup or
+execution authority. No schema migration or coordinated rollout is required.
+
+Managed completion reads both its session and immutable upload receipt through
+the existing `snapshot_managed_read` command. It validates their exact identity
+and admitted bytes locally, completes/verifies the existing R2 upload, and settles
+that exact receipt even after revocation. The final checkpoint transaction owns
+fresh attempt/generation admission, workspace CAS and resource-retirement checks;
+normal completion has no additional standalone owner-read RPCs. Exceptional
+cleanup retains its exact-session checks. Snapshot start shares the configured
+commit deadline across request and response decoding, without a separate
+heartbeat-derived six-second cap.
+
 Accepted v2 workspace snapshots retain their encrypted R2 object and complete
 authenticated snapshot reference, including the wrapped data key, for up to seven
 days from archive creation. The archive's explicit inbox/media retention wake
