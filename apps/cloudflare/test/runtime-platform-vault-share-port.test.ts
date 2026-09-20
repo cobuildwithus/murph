@@ -42,6 +42,31 @@ beforeEach(() => {
 });
 
 describe("createHostedWebVaultSharePort", () => {
+  it.each([undefined, "7"])(
+    "sends the optional source version %j through the existing GET route",
+    async (sourceWorkspaceVersion) => {
+      const fetchImpl = vi.fn(async () => Response.json({
+        projectionKinds: [],
+        projectionScopes: [],
+      }));
+      const port = createHostedWebVaultSharePort({
+        boundUserId: "member_projection_version",
+        fetchImpl,
+        timeoutMs: 1_000,
+        transport: { mode: "proxy" },
+      });
+
+      await expect(port.listActiveProjectionScopes({ sourceWorkspaceVersion }))
+        .resolves.toMatchObject({ projectionScopes: [] });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      const request = vi.mocked(fetchImpl as typeof fetch).mock.calls[0];
+      const url = new URL(String(request?.[0]));
+      expect(url.pathname).toBe("/api/internal/hosted-runtime/vault-share/active-kinds");
+      expect(url.searchParams.get("sourceWorkspaceVersion"))
+        .toBe(sourceWorkspaceVersion ?? null);
+    },
+  );
+
   it("aborts an active projection-scope read and preserves the foreground wake reason", async () => {
     const scopeReadController = new AbortController();
     const wakeReason = new Error("Foreground runtime wake interrupted projection scope read.");

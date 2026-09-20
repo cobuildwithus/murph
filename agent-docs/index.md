@@ -1,5 +1,10 @@
 # Murph Agent Docs Index
 
+Version-aware vault-share scope discovery is owned by
+`agent-docs/product-specs/group-challenge-data-diagnostics.md`; implementation
+and focused proof are tracked in
+[`2026-09-20-edge-sharing-calls.md`](exec-plans/active/2026-09-20-edge-sharing-calls.md).
+
 Finite Codex background-boundary failure codes and early child-completion
 ordering are owned by `ARCHITECTURE.md`. Focused proof and simplification are
 recorded in
