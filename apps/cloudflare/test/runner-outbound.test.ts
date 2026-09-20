@@ -8986,7 +8986,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
 
-  it("deletes replaced state without deleting the current snapshot", async () => {
+  it("defers replaced snapshot retirement to Web even on an expired completion retry", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const progressProjection: HostedSystemProgressProjection = {
       nextDefaultProcessingWakeAt: "2026-05-02T00:05:00.000Z",
@@ -9078,9 +9078,10 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotId,
     }));
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
-    expect(deleteObject).not.toHaveBeenCalledWith(objectKey);
-    expect(runtimeResourceClient.recordHostedRuntimeOrphan).not.toHaveBeenCalled();
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runtimeResourceClient.recordHostedRuntimeOrphan).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "member_123", resource: { kind: "snapshot", objectKey: replacedObjectKey },
+    }));
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledWith({
       snapshotId,
       userId: "member_123",
@@ -9382,8 +9383,7 @@ describe("handleRunnerOutboundRequest", () => {
       error: "Hosted workspace replaced snapshot cleanup failed.",
     });
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
-    expect(deleteObject).not.toHaveBeenCalledWith(objectKey);
+    expect(deleteObject).not.toHaveBeenCalled();
     expect(runtimeResourceClient.recordHostedRuntimeOrphan).toHaveBeenCalledOnce();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({

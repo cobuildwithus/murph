@@ -29,6 +29,12 @@ tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 
 ## Current Repo Checks
 
+Personal Patterns cross-automation repetition is covered by managed recipe and
+reconciliation assertions in `managed-automations.test.ts` and the focused
+`Personal Pattern cross-automation history` real-Codex journeys. These prove
+silent first/later digests for already-covered findings, preservation of reviewed
+identities without invented delivery dates, and delivery of a distinct finding.
+
 Shared wearable freshness proof spans `group-shared-freshness.test.ts` in
 hosted-execution, `hosted-group-shared-freshness.test.ts` in Web, and
 `hosted-runtime-group-freshness.test.ts` in assistant-runtime. These cover

@@ -1,5 +1,6 @@
 import type { HostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
-import { parseHostedExecutionSnapshotRef, parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
+import { parseHostedExecutionSnapshotRef, parseHostedBrowserVaultReplicaRef, isHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
+import { HOSTED_RUNTIME_SNAPSHOT_RECOVERY_RETENTION_MS } from "@murphai/hosted-execution/runtime-resources";
 import type { PrismaClient } from "@prisma/client";
 
 import { requireHostedRuntimeCallbackTx } from "../hosted-execution/runtime-owner";
@@ -36,8 +37,24 @@ export async function checkpointHostedRuntimeWorkspace(
           if (owner) await requireRuntimeResourcesPublishableTx(tx, input.userId, snapshotOrphanCandidates(parseHostedExecutionSnapshotRef(input.snapshotRef)));
           const result = await checkpointHostedWorkspaceTx({ ...input, tx });
           if (owner && result.status === "updated") {
+            const snapshot = parseHostedExecutionSnapshotRef(input.snapshotRef);
+            const candidates = snapshotOrphanCandidates(snapshot);
+            const previous = result.replacedSnapshotRef;
+            // Only a newly accepted archive with explicit retention evidence earns
+            // a recovery window. Reusing an old ref cannot refresh its content age.
+            if (input.reason === "idle_shutdown" && isHostedWorkspaceSnapshotV2Ref(snapshot)
+              && (!isHostedWorkspaceSnapshotV2Ref(previous) || previous.snapshotId !== snapshot.snapshotId)
+              && input.inboxMediaRetentionWakeAt !== undefined) {
+              const contentExpiry = input.inboxMediaRetentionWakeAt === null ? Infinity
+                : new Date(input.inboxMediaRetentionWakeAt).getTime();
+              const recoveryUntil = new Date(Math.min(
+                Date.parse(snapshot.createdAt) + HOSTED_RUNTIME_SNAPSHOT_RECOVERY_RETENTION_MS,
+                contentExpiry,
+              ));
+              for (const candidate of candidates) candidate.recoveryUntil = recoveryUntil;
+            }
             await recordRuntimeOrphansTx(tx, input.userId, [
-              ...snapshotOrphanCandidates(parseHostedExecutionSnapshotRef(input.snapshotRef)),
+              ...candidates,
               ...snapshotOrphanCandidates(result.replacedSnapshotRef ?? null),
             ], new Date());
           }

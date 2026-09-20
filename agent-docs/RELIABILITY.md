@@ -2618,9 +2618,13 @@ to apply after cutover.
   continuation availability; running jobs and missing/invalid availability remain
   runnable. Only a completed/yielded pass with a complete queue sample and zero
   runnable jobs in both sources can prove deferral. The notice applies the same
-  matching-checkpoint and continuity rules to this runnable signal. Stall and
-  cycling detection retain all pending retry obligations, including scheduled
-  jobs, so an overdue wake still exposes a stalled import. Failed, missing,
+  matching-checkpoint and continuity rules to this runnable signal. Cycling
+  detection uses that same runnable summary: a matching accepted checkpoint
+  proving deferral ends the cycling window, so subsequent webhook starts cannot
+  accumulate against future-scheduled jobs. Local deferral without that checkpoint
+  cannot clear an existing runnable window. Stall detection retains all pending
+  retry obligations, including scheduled jobs, so an overdue wake still exposes
+  a stalled import. Failed, missing,
   malformed, truncated, or legacy runnable evidence falls back to the existing
   pending signal. This additive reader deploys before the runner; remove its
   legacy fallback only after old producers and the two-hour observation window
@@ -2661,9 +2665,8 @@ to apply after cutover.
   across attempts; repeated deferrals and restarts cannot extend it. Only the
   matching accepted checkpoint removes an outstanding pass. Runnable or unknown
   queue evidence and overdue wakes retain conservative stall detection. Deferred
-  publication never counts as saved progress or changes cycling/backlog policy.
-  Cycling detection uses pending observations and backlog detection uses runnable
-  observations within the same 15-minute continuity window independently of the
+  publication never counts as saved progress. Cycling and backlog detection use
+  runnable observations within the same 15-minute continuity window independently of the
   wake, so eligibility cannot
   lapse before the evidence itself resets and a continuing incident reminds
   instead of re-alerting after the next pass. The backlog notice also requires

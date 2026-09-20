@@ -131,6 +131,12 @@ resource rows. Transactions contain bounded database work only, with five-second
 transaction/admission limits. External allocation, container operations, provider
 calls, and R2 writes run outside transactions.
 
+Owner locks return the current row, and callback/provider admission reads member
+existence from the member lock itself. These paths use three ordered lock queries
+in the completed Postgres phase, without separate owner/member rereads. Returned
+generations and workspace versions retain native bigint precision. Deleted
+members remain unauthorized even when cleanup retains their owner row.
+
 The native usage-settlement receipt is a negative latch: pending or denied
 settlement blocks managed provider access. Only an explicit allowance response
 clears that report's pending latch. Eviction or an unknown response cannot grant
@@ -143,6 +149,32 @@ and typed orphan candidates live in Postgres. These obligations have no member
 foreign key so account deletion cannot erase physical cleanup requirements.
 Snapshot sessions retain existing presign admission and capability-drain policy;
 fresh final admission precedes returning a presigned capability.
+
+Accepted v2 workspace snapshots retain their encrypted R2 object and complete
+authenticated snapshot reference, including the wrapped data key, for up to seven
+days from archive creation. The archive's explicit inbox/media retention wake
+caps this window so backup retention cannot extend expiring content. Missing
+retention evidence grants only the existing orphan grace. The first complete
+reference fixes that archive's `recovery_until` deadline; repeated refs and
+key-only records cannot renew it. `cleanup_at` remains the retry schedule, so
+deferring deletion of a current snapshot cannot renew its recovery deadline
+after replacement. The existing orphan row owns this recovery history;
+no additional scheduler or plaintext backup is created. Key-only session and
+adapter cleanup records preserve that reference and cannot shorten its deadline.
+Unaccepted uploads and ordinary replica orphans retain the 65-minute grace.
+The existing bounded cleanup sweep retires expired, non-current snapshots under
+the same owner/publication locks. Account deletion still drains writes and
+deletes the entire member snapshot namespace without waiting seven days.
+
+The runner rejects a replacement archive plan without a nonempty regular
+canonical `vault.json` file before building or uploading it. Enumeration and
+archive validation independently reject included files disappearing during the
+scan or archive write. First bootstrap without an earlier snapshot remains
+supported. These guards do not assert that every historical record is present;
+the retained encrypted checkpoints provide the recovery window for other
+integrity failures. Recovery must validate canonical coverage, preserve its
+sources, and fence the workspace update; a Browser Vault projection alone is
+not a complete canonical backup.
 
 Worker-owned media, private images, and each replica shard use recoverable R2
 multipart uploads. An empty upload is created first; its exact object key and

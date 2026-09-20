@@ -280,6 +280,43 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(artifactGet).not.toHaveBeenCalled();
   });
 
+  it.each(["missing", "empty", "directory", "missing-root"])("rejects a replacement with %s canonical vault metadata before archive upload", async (kind) => {
+    const vaultRoot = await createVaultRoot();
+    await writeFile(path.join(vaultRoot, "vault.json"), "{}");
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const options = createBridgeOptions({ platform, vaultRoot, snapshotArchiveBuilder });
+    const baseline = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    await rm(path.join(vaultRoot, "vault.json"));
+    if (kind === "empty") await writeFile(path.join(vaultRoot, "vault.json"), "");
+    if (kind === "directory") await mkdir(path.join(vaultRoot, "vault.json"));
+    if (kind === "missing-root") await rm(vaultRoot, { recursive: true });
+    vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mockClear();
+    calls.putSnapshotObjectDirect.mockClear();
+    calls.completeSnapshotSession.mockClear();
+
+    await expect(options.createCheckpointSnapshot({
+      ...createCheckpointInput("idle_shutdown"), currentSnapshotRef: baseline.snapshotRef,
+    })).rejects.toMatchObject({ code: "workspace_snapshot_vault_missing" });
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).not.toHaveBeenCalled();
+    expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+  });
+
+  it("allows canonical file deletion while retaining vault metadata in a replacement", async () => {
+    const vaultRoot = await createVaultRoot();
+    await writeFile(path.join(vaultRoot, "vault.json"), "{}");
+    const { calls, platform } = createRuntimePlatform();
+    const options = createBridgeOptions({ platform, vaultRoot });
+    const baseline = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    await rm(path.join(vaultRoot, "note.md"));
+    await expect(options.createCheckpointSnapshot({
+      ...createCheckpointInput("idle_shutdown"), currentSnapshotRef: baseline.snapshotRef,
+    })).resolves.toHaveProperty("snapshotRef");
+    expect(calls.completeSnapshotSession).toHaveBeenCalledTimes(2);
+  });
+
   it("waits for assistant background work before snapshot publication", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();

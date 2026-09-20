@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-20",
+  "order": 100,
+  "item": {
+    "id": "fewer-repeated-health-insights",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Fewer repeated health insights",
+    "summary": "Personal Patterns updates check earlier health notes before sharing a finding again.",
+    "details": "Findings already covered by a weekly insight or recent conversation are kept quiet, while genuinely new findings remain eligible for an update.",
+    "relevanceTags": [
+      "personal-patterns",
+      "insights"
+    ],
+    "sourcePullRequests": [
+      3597
+    ]
+  }
+}

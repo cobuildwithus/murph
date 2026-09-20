@@ -312,7 +312,13 @@ its current query report and versioned notification Knowledge ledger. A complete
 first digest plus already-reviewed factors, graded identities, and grades can skip
 a clean scheduled model attempt. Unknown history, edited recipes, manual requests,
 and retries keep the ordinary model path. The existing ledger remains the only
-notification-history owner; no cron cache or new schedule state is introduced.
+notification-history owner; no cron cache or new schedule state is introduced. The daily
+recipe checks the existing weekly insight page and bounded committed conversation
+before treating a ledger-absent identity as new. Covered findings are recorded as
+reviewed in the existing ledger even on a skipped run, without inventing delivery
+dates. This applies to first digests and later updates. Shared proactive pacing
+still governs interruption cost; weekly reinterpretations require a materially
+changed takeaway rather than a reworded notification.
 
 Read-only hosted automation inspection also projects execution evidence from
 that automation's existing runtime state, its ten newest retained cron runs,
@@ -2539,6 +2545,13 @@ lifecycle stops the exact process and fails the boundary closed. Explicit
 workspace invocation abort/preemption also interrupts the wait and
 synchronously stops the exact process before workspace or job-slot ownership
 can be reused.
+Native child completion may precede parent-side admission and remains valid
+completion evidence. The first unsupported lifecycle reason is retained as a
+finite `ASSISTANT_CODEX_BACKGROUND_WORK_*`
+error code (outside root, reused child, malformed lifecycle, nested child,
+untracked completion, interaction, or interruption). Existing container error
+metadata and Worker diagnostics preserve that code without thread identifiers,
+provider payloads, or another telemetry stream.
 
 - Low hosted usage is not a proactive message. Web's existing mailbox allowance check projects an optional coarse low-capacity bit for an allowed conversation batch; the runtime binds it to the accepted input sidecar, and assistant turn context asks Murph to mention it naturally after answering the current request. No balance, price, contributor, or internal accounting reaches the runtime. The hosted developer-policy addition changes the stable assistant contract: every existing native-resume hosted conversation starts one new provider thread on its first turn after deployment, using the existing bounded committed-transcript fallback, and later turns resume that new thread. Exhaustion remains a deterministic notice because denied input cannot start a model turn. Its target is derived after the foreground checkpoint from durable provider-accepted assistant input events: direct Linq and Telegram inputs retain their exact origin; group Linq inputs additionally require exact external-thread route authority. Every accepted input must resolve to the same route, the newest accepted message supplies the reply target, and missing, mixed, or invalid provenance fails closed. The runtime does not keep a parallel mailbox route projection, and a thread-container crossing never falls back to a member home route.
 

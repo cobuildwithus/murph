@@ -73,6 +73,15 @@ test.each(['Legacy history with a saved factor mute.', '{}', JSON.stringify({ ..
     expect(query).not.toHaveBeenCalled()
   },
 )
+test('keeps a cross-automation reviewed result quiet without claiming it was delivered', async () => {
+  const history = ledger()
+  history.results[0]!.firstSharedDate = null
+  const input = await setup(JSON.stringify(history))
+  expect(await canSkipManagedPersonalPatterns(input)).toBe(true)
+  const saved = await getKnowledgePage({ vault: input.vaultRoot, slug: 'personal-pattern-notifications' })
+  expect(parsePersonalPatternNotificationLedger(saved.page.body)).toEqual(history)
+})
+
 test('keeps an incomplete first digest eligible even when pending identities are known', async () => {
   expect(await canSkipManagedPersonalPatterns(await setup(JSON.stringify({ ...ledger(), initialDigestSent: false })))).toBe(false)
   expect(query).not.toHaveBeenCalled()
