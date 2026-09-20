@@ -281,6 +281,29 @@ describe("hosted account deletion cleanup", () => {
     expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves retained canary runtime logs across a failed vendor cleanup and retry", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    mocks.deleteHostedRunnerUserDataBestEffort
+      .mockResolvedValueOnce(makeCloudflareDeletionResult({ configured: false, deleted: false }))
+      .mockResolvedValueOnce(makeCloudflareDeletionResult({ deleted: true }));
+    const prepared = await createCleanup(store, now, { privyUserId: null, stripeCustomerIds: [] });
+    if (!store.row) throw new Error("Expected a persisted cleanup receipt.");
+    store.row.runtimeLogsCompletedAt = now;
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id, now, prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: true });
+    expect(store.row.runtimeLogsCompletedAt).toEqual(now);
+    expect(mocks.deleteHostedRuntimeLogDataForUsers).not.toHaveBeenCalled();
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id, now: store.row.nextAttemptAt, prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: false });
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(2);
+    expect(mocks.deleteHostedRuntimeLogDataForUsers).not.toHaveBeenCalled();
+    expect(store.row).toBeNull();
+  });
+
   it("keeps unconfigured required targets pending", async () => {
     const store = new CleanupStore();
     const now = new Date("2026-07-26T18:00:00.000Z");

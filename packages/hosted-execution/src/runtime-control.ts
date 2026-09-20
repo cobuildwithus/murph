@@ -3688,6 +3688,7 @@ export interface HostedRuntimeWebProtocolAdmission {
   nonce: string;
   runtimeLogEventCodes: readonly string[];
   threadRouteAuthority: { direct: unknown; group: unknown };
+  runtimeReplicaBatch: { admission: unknown; settlement: unknown };
   runtimeOwnerCompletion: { early: unknown; settled: unknown };
 }
 

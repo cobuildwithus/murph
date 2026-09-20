@@ -7,9 +7,6 @@ import { after } from "next/server";
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import {
-  signalHostedRuntimeRecheckRuntime,
-} from "@/src/lib/hosted-orchestration/signal-runtime";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
@@ -19,8 +16,15 @@ import { checkpointHostedRuntimeWorkspace } from "@/src/lib/hosted-workspace/run
 import { readHostedRuntimeCallbackAuthority } from "@/src/lib/hosted-execution/runtime-write-fence";
 
 const HOSTED_WORKSPACE_CHECKPOINT_CALLBACK_BODY_LIMIT_BYTES = 256 * 1024;
+let firstInvocation = true;
 
 export const POST = withJsonError(async (request: Request) => {
+  if (firstInvocation) {
+    firstInvocation = false;
+    // Compare this timestamp with invocation start and the first pool log to
+    // distinguish route initialization from signed-body verification.
+    console.info("Hosted workspace checkpoint handler first invocation.");
+  }
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     runtimeAuthority: "caller_transaction",
     maxBodyBytes: HOSTED_WORKSPACE_CHECKPOINT_CALLBACK_BODY_LIMIT_BYTES,
@@ -114,6 +118,11 @@ export const POST = withJsonError(async (request: Request) => {
 
 async function signalWorkspaceWakeBestEffort(userId: string, version: string): Promise<void> {
   try {
+    // Loading the signal owner also initializes Temporal and KMS dependencies.
+    // Checkpoints only need that graph when the post-response wake runs.
+    const { signalHostedRuntimeRecheckRuntime } = await import(
+      "@/src/lib/hosted-orchestration/signal-runtime"
+    );
     await signalHostedRuntimeRecheckRuntime({
       userId,
     });

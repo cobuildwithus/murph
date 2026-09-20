@@ -1,10 +1,11 @@
-import { parseHostedRuntimeOwnerCommand } from "../runtime-owner.ts";
+import { buildHostedRuntimeReplicaBatchProtocolProbe, parseHostedRuntimeReplicaPutCommand } from "../runtime-resources.ts";
 import {
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
 } from "../runtime-control.ts";
 import { requireObject } from "./assertions.ts";
+import { parseHostedRuntimeOwnerCommand } from "../runtime-owner.ts";
 
 // Preserve the legacy response for callers which do not need an audience.
 // Scheduled delivery still independently requires the live owner's boolean.
@@ -48,7 +49,17 @@ export function assertHostedRuntimeWebProtocolAdmission(
       throw new Error(`Hosted Web protocol admission failed: runtime_log_event:${required}.`);
     }
   }
-  assertRuntimeOwnerCompletionEvidence(record.runtimeOwnerCompletion);
+  try {
+    const replica = requireObject(record.runtimeReplicaBatch, "Replica batch evidence");
+    const expected = buildHostedRuntimeReplicaBatchProtocolProbe();
+    for (const field of ["admission", "settlement"] as const) {
+      if (JSON.stringify(parseHostedRuntimeReplicaPutCommand(replica[field])) !== JSON.stringify(parseHostedRuntimeReplicaPutCommand(expected[field]))) {
+        throw new Error("Replica batch witness mismatch.");
+      }
+    }
+  } catch {
+    throw new Error("Hosted Web protocol admission failed: replica_batch.");
+  }
   let direct: ReturnType<typeof parseHostedExternalThreadRouteAuthorityResponse>;
   let group: ReturnType<typeof parseHostedExternalThreadRouteAuthorityResponse>;
   try {
@@ -61,6 +72,7 @@ export function assertHostedRuntimeWebProtocolAdmission(
   if (direct?.threadIsDirect !== true || group?.threadIsDirect !== false) {
     throw new Error("Hosted Web protocol admission failed: thread_route_audience.");
   }
+  assertRuntimeOwnerCompletionEvidence(record.runtimeOwnerCompletion);
 }
 
 function assertRuntimeOwnerCompletionEvidence(value: unknown): void {

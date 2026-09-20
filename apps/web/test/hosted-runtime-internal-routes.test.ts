@@ -2620,10 +2620,15 @@ describe("hosted runtime internal web routes", () => {
   it("returns a due workspace checkpoint before running its recheck signal", async () => {
     const nextWakeAt = "2026-04-25T23:59:00.000Z";
     let resolveSignal!: () => void;
+    let markSignalStarted!: () => void;
+    const signalStarted = new Promise<void>((resolve) => {
+      markSignalStarted = resolve;
+    });
     mocks.signalHostedRuntimeRecheckRuntime.mockImplementationOnce(
       async () =>
         await new Promise<void>((resolve) => {
           resolveSignal = resolve;
+          markSignalStarted();
         }),
     );
     mocks.checkpointHostedWorkspace.mockResolvedValue({
@@ -2663,6 +2668,7 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
 
     const signalTask = mocks.after.mock.calls[0]?.[0]();
+    await signalStarted;
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });

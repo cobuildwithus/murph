@@ -157,6 +157,8 @@ test.each(priorityJourneys)(
           artifactBytesByHash: new Map([[restored.hash, restored.bytes]]),
           deviceSyncPort: createSnapshotDeviceSyncPort({
             connectionId: "synthetic-priority-connection",
+            // Clearing a disconnected account's retained wake is a real delta.
+            connectionStatus: "disconnected",
             nextReconcileAt: "2099-01-01T00:00:00.000Z",
             onApplyUpdates() {
               if (owner === "device completion" && nextInput === 0) sendInput();

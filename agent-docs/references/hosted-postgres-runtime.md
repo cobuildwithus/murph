@@ -163,6 +163,27 @@ foreign key so account deletion cannot erase physical cleanup requirements.
 Snapshot sessions retain existing presign admission and capability-drain policy;
 fresh final admission precedes returning a presigned capability.
 
+Current snapshot producers do not send handoff heartbeats or completion markers.
+A session expires after sixty minutes; unaccepted resources first become cleanup
+candidates after sixty-five. Independent pending upload receipts protect writes,
+current workspace refs protect committed archives, and publication rejects a
+retired ref under the same owner locks as cleanup. Expired completion can only
+acknowledge a matching already-current checkpoint, never publish new bytes.
+Session replacement does not use heartbeat or completion state. The legacy
+heartbeat/completion commands and fields remain accepted until older Workers and
+warm containers drain; their timestamps are compatibility data, not cleanup or
+execution authority. No schema migration or coordinated rollout is required.
+
+Managed completion reads both its session and immutable upload receipt through
+the existing `snapshot_managed_read` command. It validates their exact identity
+and admitted bytes locally, completes/verifies the existing R2 upload, and settles
+that exact receipt even after revocation. The final checkpoint transaction owns
+fresh attempt/generation admission, workspace CAS and resource-retirement checks;
+normal completion has no additional standalone owner-read RPCs. Exceptional
+cleanup retains its exact-session checks. Snapshot start shares the configured
+commit deadline across request and response decoding, without a separate
+heartbeat-derived six-second cap.
+
 Accepted v2 workspace snapshots retain their encrypted R2 object and complete
 authenticated snapshot reference, including the wrapped data key, for up to seven
 days from archive creation. The archive's explicit inbox/media retention wake
@@ -195,6 +216,24 @@ upload ID are admitted in Postgres before sending encrypted bytes. Each physical
 write has a separate receipt. Completion or confirmed abort releases that
 receipt. An unknown completion followed by an unknown abort leaves it pending.
 Stopping a runtime never converts a multipart receipt into a timed drain.
+
+Browser Vault replica refreshes allocate their fixed 36 empty uploads with at
+most four R2 operations in flight, then admit all exact upload IDs in one Web
+callback before sending bytes. One root orphan row still owns the family, and
+one receipt per physical upload survives independently. Admission uses one
+transaction with nine database operations in the Postgres phase (at most 15
+while the existing rolling cutover locks apply), including one set-based receipt
+insert; settlement uses one set-based update under the existing cutover gate. No R2 or crypto work occurs inside either transaction. The outer
+non-multipart receipt and preliminary ownership callback are unnecessary because
+batch admission performs the same live owner and resource-retirement checks.
+The Worker drains every started upload before one bounded settlement callback;
+only completed or confirmed-aborted identities enter it. Unknown completion or
+abort remains pending, and an uncertain admission response sends no bytes.
+A previously used identity rejects the entire admission batch. The deployed
+single-object commands remain accepted during Web-first rollout. The existing
+live Web protocol admission probe exercises both full-size batch parsers before
+a new Worker deploy; the rollback floor keeps that Web consumer until all batch
+producers have been reverted and converged.
 
 The existing external-retention cron runs at minutes 2, 7, …, 57 of each hour
 (`2-59/5 * * * *`). Its runtime-resource phase retains a 50-orphan selection
