@@ -2649,6 +2649,13 @@ to apply after cutover.
   unrelated connections and unkeyed attempts cannot grant it. An unchanged
   checkpoint does not count as import progress; once accepted, the canonical wake
   controls stall eligibility.
+  A latest owned pass proving that no retained jobs are runnable also receives
+  publication time when the canonical device wake is not overdue. Its allowance
+  expires 15 minutes after the oldest outstanding pass for that connection,
+  across attempts; repeated deferrals and restarts cannot extend it. Only the
+  matching accepted checkpoint removes an outstanding pass. Runnable or unknown
+  queue evidence and overdue wakes retain conservative stall detection. Deferred
+  publication never counts as saved progress or changes cycling/backlog policy.
   Cycling detection uses pending observations and backlog detection uses runnable
   observations within the same 15-minute continuity window independently of the
   wake, so eligibility cannot

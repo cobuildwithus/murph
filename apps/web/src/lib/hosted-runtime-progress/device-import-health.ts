@@ -30,6 +30,12 @@ export type DeviceImportObservation = {
   cancelled: boolean;
 };
 
+type PendingSnapshot = {
+  pending: boolean | null;
+  runnable: boolean | null;
+  firstObservedAt: number;
+};
+
 export function summarizeDeviceImportHealth(input: {
   now: Date;
   observations: readonly DeviceImportObservation[];
@@ -78,6 +84,7 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
     const conditions: DeviceImportCondition[] = [];
     if ((due || evidence.latestPassUncheckpointed)
       && !evidence.awaitingProgressCheckpoint
+      && !evidence.awaitingDeferredCheckpoint
       && now - lastProgress >= DEVICE_IMPORT_STALL_MS) {
       conditions.push("stalled");
     }
@@ -136,7 +143,7 @@ function summarizeConnection(
   let lastPendingAt = 0;
   let lastProgress = 0;
   const pendingProgress = new Map<string, number[]>();
-  const pendingSnapshots = new Map<string | null, boolean | null>();
+  const pendingSnapshots = new Map<string | null, PendingSnapshot>();
   let latestPassAttemptId: string | null = null;
   const savedAt: number[] = [];
   const cancellationsAt: number[] = [];
@@ -153,7 +160,7 @@ function summarizeConnection(
     }
     if (row.eventCode === "device-sync.pass_finished") {
       latestPassAttemptId = row.attemptId;
-      pendingSnapshots.set(row.attemptId, pending);
+      recordPendingSnapshot(pendingSnapshots, row, pending);
       if (row.progressed && row.attemptId) {
         const passes = pendingProgress.get(row.attemptId) ?? [];
         passes.push(at);
@@ -168,7 +175,7 @@ function summarizeConnection(
         pendingProgress.delete(row.attemptId);
       }
       // Local queue drain is not durable recovery until Web accepts it.
-      if (pendingSnapshots.get(row.attemptId) === false) {
+      if (pendingSnapshots.get(row.attemptId)?.pending === false) {
         pendingSince = null;
         pendingProgress.clear();
       }
@@ -188,12 +195,39 @@ function summarizeConnection(
   return {
     evidenceCurrent,
     awaitingProgressCheckpoint: isAwaitingProgressCheckpoint(pendingProgress, lastProgress, now),
+    awaitingDeferredCheckpoint: isAwaitingDeferredCheckpoint(pendingSnapshots, latestPassAttemptId, due, now),
     latestPassUncheckpointed: pendingSnapshots.has(latestPassAttemptId),
     backlogAge: now - pendingSince,
     lastProgress: Math.max(pendingSince, lastProgress),
     restarts: countAtOrAfter(restartTimes, recentAfter), cancellations: countRecent(cancellationsAt),
     savedPasses: countRecent(savedAt),
   };
+}
+
+function recordPendingSnapshot(
+  snapshots: Map<string | null, PendingSnapshot>,
+  row: DeviceImportObservation,
+  pending: boolean | null,
+) {
+  snapshots.set(row.attemptId, {
+    pending,
+    runnable: row.runnable,
+    firstObservedAt: snapshots.get(row.attemptId)?.firstObservedAt ?? row.at.getTime(),
+  });
+}
+
+function isAwaitingDeferredCheckpoint(
+  snapshots: ReadonlyMap<string | null, PendingSnapshot>,
+  latestAttemptId: string | null, due: boolean, now: number,
+): boolean {
+  // Deferral is not progress and cannot excuse an already-overdue device wake.
+  if (due || latestAttemptId === null || snapshots.get(latestAttemptId)?.runnable !== false) return false;
+  // Bound the idle publication wait by the oldest unsaved pass across attempts.
+  let firstUnsavedPassAt = Infinity;
+  for (const snapshot of snapshots.values()) {
+    firstUnsavedPassAt = Math.min(firstUnsavedPassAt, snapshot.firstObservedAt);
+  }
+  return now - firstUnsavedPassAt < DEVICE_IMPORT_STALL_MS;
 }
 
 function isAwaitingProgressCheckpoint(
