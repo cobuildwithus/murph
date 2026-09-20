@@ -42,7 +42,8 @@ void main() {
     + (billow - 0.5) * (0.6 + detail * 0.7)
     + 0.10 * sin(t * 3.0 + p.x * 4.0) * energy;
   vec3 color = mix(mist, ink, smoothstep(-0.5, 0.55, wave));
-  float ribbon = exp(-pow((wave + 0.07) * (4.2 + detail), 2.0));
+  float ribbonDistance = (wave + 0.07) * (4.2 + detail);
+  float ribbon = exp(-ribbonDistance * ribbonDistance);
   color = mix(color, vec3(0.98, 0.985, 1.0), ribbon * 0.93);
   float veil = cloud(p * 3.3 + flow + vec2(-t * 0.6, t));
   color = mix(color, mist, smoothstep(0.43, 0.85, veil) * 0.35);
