@@ -518,3 +518,6 @@ Authoritative empty-day recovery is recorded in
 Personal Patterns repeat-suppression proof is recorded in
 [`2026-09-20-insight-dedupe.md`](exec-plans/completed/2026-09-20-insight-dedupe.md);
 `ARCHITECTURE.md` owns the current cross-automation history contract.
+
+Interactive voice-orb design playground implementation and proof are tracked in
+[`2026-09-20-voice-orb.md`](exec-plans/completed/2026-09-20-voice-orb.md).
