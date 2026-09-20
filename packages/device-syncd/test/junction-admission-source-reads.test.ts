@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { rm } from "node:fs/promises";
+import path from "node:path";
+import { createDeviceSyncService, SqliteDeviceSyncStore } from "../src/service.ts";
 import { test } from "vitest";
 import {
   createAccount,
@@ -12,7 +15,7 @@ import {
   createJunctionWorkoutStreamTestProvider,
   executeJunctionJob,
 } from "./junction-provider.harness.ts";
-import { createJsonResponse, readUrl } from "./helpers.ts";
+import { createJsonResponse, makeTempDirectory, readUrl } from "./helpers.ts";
 
 test.each(["connected", "disconnected", "unavailable", "local"] as const)(
   "summary evidence and import share post-provider sources (%s)", async (scenario) => {
@@ -113,7 +116,7 @@ test.each([false, true])("workout admission reuses each fresh stream read (disco
   ]);
 });
 
-test.each(["connected", "disconnected", "unavailable", "new_epoch", "local"] as const)(
+test.each(["connected", "disconnected", "unavailable", "new_epoch", "without_reader"] as const)(
   "summary resources share projection admission without caching it (%s)", async (scenario) => {
     let inventoryReads = 0;
     let sourceReads = 0;
@@ -151,7 +154,7 @@ test.each(["connected", "disconnected", "unavailable", "new_epoch", "local"] as 
     const context = createJunctionJobContext({
       account: createAccount({ sources: [{ ...source, resourceCount: 1 }] }),
       connectionSourceAdmissionMode: "listed_only",
-      listConnectionSources: scenario === "local" ? undefined : async () => {
+      listConnectionSources: scenario === "without_reader" ? undefined : async () => {
         sourceReads += 1;
         if (fetches === 2 && scenario === "unavailable") throw failure;
         return [liveSource, createConnectionSource({
@@ -171,7 +174,7 @@ test.each(["connected", "disconnected", "unavailable", "new_epoch", "local"] as 
     assert.ok(provider.jobExecutor);
     const pass = provider.jobExecutor.createPassExecutor?.() ?? provider.jobExecutor;
     await pass.executeJob(context, job);
-    assert.equal(sourceReads, scenario === "local" ? 0 : 1, "fresh projection and import use one current source read");
+    assert.equal(sourceReads, scenario === "without_reader" ? 0 : 1, "fresh projection and import use one current source read");
     assert.ok(imported[0]?.includes("synthetic-admitted"));
     assert.ok(!imported[0]?.includes("synthetic-disconnected"));
     if (scenario === "unavailable") {
@@ -179,10 +182,82 @@ test.each(["connected", "disconnected", "unavailable", "new_epoch", "local"] as 
       assert.equal(imported.length, 1);
     } else {
       await pass.executeJob(context, job);
-      assert.equal(imported[1]?.includes("synthetic-admitted"), scenario === "connected" || scenario === "local");
+      assert.equal(imported[1]?.includes("synthetic-admitted"), scenario === "connected" || scenario === "without_reader");
       assert.ok(!imported[1]?.includes("synthetic-disconnected"));
     }
     assert.equal(inventoryReads, 1, "provider inventory can be reused across the pass");
-    assert.equal(sourceReads, scenario === "local" ? 0 : 2, "source authority is read again after the next provider fetch");
+    assert.equal(sourceReads, scenario === "without_reader" ? 0 : 2, "source authority is read again after the next provider fetch");
   },
 );
+
+test("local summary import observes a disconnect projected by fresh inventory", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-source-admission");
+  const stateDatabasePath = path.join(vaultRoot, "device-sync.sqlite");
+  const store = new SqliteDeviceSyncStore(stateDatabasePath);
+  const now = "2026-04-03T12:00:00.000Z";
+  const requests: string[] = [];
+  const imported: string[] = [];
+  const service = createDeviceSyncService({
+    secret: "synthetic-device-sync-secret",
+    config: { vaultRoot, stateDatabasePath, publicBaseUrl: "https://sync.example.test" },
+    clock: { now: () => new Date(now) },
+    store,
+    providers: [createJunctionProvider(async (input) => {
+      const pathname = new URL(readUrl(input)).pathname;
+      requests.push(pathname);
+      if (pathname === "/v2/summary/activity/junction-user-1") {
+        return createJsonResponse({ data: [
+          { id: "synthetic-revoked-record", source: { provider: "garmin" }, steps: 321 },
+          { id: "synthetic-connected-record", source: { provider: "whoop_v2" }, steps: 654 },
+        ] });
+      }
+      assert.equal(pathname, "/v2/user/providers/junction-user-1");
+      return createJsonResponse({ providers: [
+        { id: "synthetic-garmin", slug: "garmin", status: "revoked" },
+        { id: "synthetic-whoop", slug: "whoop_v2", status: "connected" },
+      ] });
+    }, { summaryResources: ["activity"], timeseriesResources: [] })],
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        imported.push(JSON.stringify(input.snapshot));
+        return { ok: true };
+      },
+    },
+  });
+  try {
+    const account = store.upsertAccount({
+      provider: "junction", externalAccountId: "junction-user-1", scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      connectedAt: now, nextReconcileAt: null,
+    });
+    for (const slug of ["garmin", "whoop_v2"]) {
+      store.upsertConnectionSource({
+        connectionId: account.id, sourceInstanceKey: `synthetic-${slug}`,
+        sourceProviderSlug: slug, status: "connected", firstSeenAt: now, lastSeenAt: now,
+      });
+    }
+    const job = store.enqueueJob({
+      accountId: account.id, provider: "junction", kind: "resource",
+      availableAt: now, priority: 30, dedupeKey: "synthetic-summary-source-revocation",
+      payload: {
+        resource: "activity", resourceCategory: "summary",
+        windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
+      },
+    });
+    await service.runWorkerOnce(account.id);
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
+    assert.deepEqual(requests, [
+      "/v2/summary/activity/junction-user-1", "/v2/user/providers/junction-user-1",
+    ]);
+    const sources = store.listConnectionSources({ connectionId: account.id });
+    assert.equal(sources.find((source) => source.sourceProviderSlug === "garmin")?.status, "disconnected");
+    assert.equal(sources.find((source) => source.sourceProviderSlug === "whoop_v2")?.status, "connected");
+    assert.equal(imported.length, 1);
+    assert.ok(imported[0]?.includes("synthetic-connected-record"));
+    assert.ok(!imported[0]?.includes("synthetic-revoked-record"));
+  } finally {
+    service.close();
+    store.close();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});

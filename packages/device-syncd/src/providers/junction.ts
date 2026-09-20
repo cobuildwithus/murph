@@ -2752,7 +2752,18 @@ export function createJunctionDeviceSyncProvider(
       }
       return sourceProviders;
     };
-    return { loadSourceProviders, loadAndProjectSourceProviders };
+    const loadImportAdmission = async () => {
+      const sourceProviders = await loadSourceProviders();
+      // Hosted projection cannot change Web authority. Local projection can
+      // disconnect SQLite sources, so local admission must read after projection.
+      const hostedSources = context.connectionSourceAdmissionMode === "listed_only"
+        ? await readJunctionImportSources(context)
+        : undefined;
+      await loadAndProjectSourceProviders(hostedSources);
+      const currentSources = hostedSources ?? await readJunctionImportSources(context);
+      return { sourceProviders, currentSources };
+    };
+    return { loadSourceProviders, loadAndProjectSourceProviders, loadImportAdmission };
   }
 
   async function executeResourceJob(
@@ -2914,11 +2925,7 @@ export function createJunctionDeviceSyncProvider(
       );
     }
 
-    const sourceProviders = await inventory.loadSourceProviders();
-    // Projection and import share this operation's post-fetch authority. The
-    // inventory cache retains providers only; every later import reads again.
-    const currentSources = await readJunctionImportSources(context);
-    await inventory.loadAndProjectSourceProviders(currentSources);
+    const { sourceProviders, currentSources } = await inventory.loadImportAdmission();
     const preparedImport = prepareJunctionImportSnapshotForSources(
       summaries,
       sourceProviders,

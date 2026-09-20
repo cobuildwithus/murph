@@ -42,10 +42,12 @@ snapshot is already reconciled; it does not need an empty Web callback.
    durable summary or timeseries import and remove records for disconnected
    sources. While any source is pending admission, unresolved source-reference
    identities fail closed. Outside hosted Web, a provider with no source row
-   remains admitted for legacy accounts. A summary resource operation may share
-   its fresh post-provider source read between local inventory projection and
-   canonical import admission. Pass inventory reuse retains provider metadata
-   only; later imports still read current source authority. Hosted Web instead
+   remains admitted for legacy accounts. A hosted summary resource operation
+   with listed-only admission may share its fresh post-provider Web source read
+   between local inventory projection and canonical import admission. Local
+   discovery must read SQLite source authority after projection, because that
+   projection can disconnect sources. Pass inventory reuse retains provider
+   metadata only; later imports still read current source authority. Hosted Web instead
    defers an authenticated, source-attributed Junction event to the existing source
    owner, which may create only a disconnected candidate before live provider
    proof and final locked admission.
