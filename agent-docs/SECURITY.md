@@ -1448,6 +1448,19 @@ Any approved path is a new trust-boundary change and follows normal security,
 verification, deployment, and review requirements without making the secret
 locally readable.
 
+The separately authorized checkpoint recovery assessment entrypoint is
+`apps/cloudflare/scripts/checkpoint-recovery-assessment.ts`, executed by the
+private repository's protected production job. It reads one member's artifact
+namespace after checking the expected canonical workspace version, obtains
+signed runtime root envelopes through the existing Web callback boundary, and
+returns only bounded aggregate counts. The member selector is sealed to the
+automation public key and expires within one hour. Production private keys and
+plaintext stay inside the hosted process; no recovery files or raw errors are
+uploaded. The census performs no restoration, checkpoint publication, mailbox
+mutation, or retention extension. Authenticated uploaded receipts are candidates
+until accepted history, deletion ordering, and content expiry are separately
+proven. A complete scan does not prove complete recovery.
+
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
 - The trusted `Pull Request Head Draft Reset` controller uses the existing Frog
   GitHub App credential only through the protected `frog-reconciliation`
