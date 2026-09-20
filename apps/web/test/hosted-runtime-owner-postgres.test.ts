@@ -1,3 +1,4 @@
+import { runWithPrismaOperationTimings, type PrismaOperationTiming } from "@/src/lib/prisma-operation-timing";
 import { reconcileHostedRuntimeUploads } from "@/src/lib/hosted-execution/runtime-upload-recovery";
 const uploadRecovery = vi.hoisted(() => ({ purge: vi.fn() }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
@@ -25,7 +26,7 @@ import {
 } from "@/src/lib/hosted-execution/runtime-owner";
 import { executeHostedRuntimeOwnerCommand } from "@/src/lib/hosted-execution/runtime-owner-control";
 import { executeHostedRuntimeReplicaPutCommand } from "@/src/lib/hosted-execution/runtime-replica-puts";
-import { hostedWorkspaceSnapshotObjectKey, hostedBrowserVaultReplicaUserPrefix } from "@murphai/hosted-execution/storage-paths";
+import { hostedWorkspaceSnapshotObjectKey, hostedBrowserVaultReplicaUserPrefix, listHostedBrowserVaultReplicaSiblingObjectKeys } from "@murphai/hosted-execution/storage-paths";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import { HOSTED_HEALTH_DATA_CONSENT_SCOPE, revokeHostedConsentScope } from "@/src/lib/legal/consent";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -852,6 +853,64 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({
       attemptId: successor.attemptId, lastErrorCode: null, failureCount: 1,
     });
+  });
+
+  it("admits 36 replica receipts atomically and retains unknown uploads through deletion", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const objectKey = `${await hostedBrowserVaultReplicaUserPrefix({ userId })}synthetic-batch.json`;
+    const keys = [objectKey, ...listHostedBrowserVaultReplicaSiblingObjectKeys(objectKey)];
+    const uploads = keys.map((objectKey, index) => ({ objectKey, writeId: `batch-${index}`, uploadId: `upload-${index}` }));
+    const command = { operation: "admit_batch" as const, ...runtime, objectKey, uploads };
+    const operations: PrismaOperationTiming[] = [];
+    expect(await runWithPrismaOperationTimings(operations, () => executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command }))).toEqual({ applied: true });
+    expect(operations.map(operation => operation.key).filter(key => key.startsWith("HostedRuntimePutDrain.")))
+      .toEqual(["HostedRuntimePutDrain.findFirst", "HostedRuntimePutDrain.createMany"]);
+    // Bound includes every raw authority lock and orphan operation, independent
+    // of the 36-upload cardinality; one short transaction owns all of them.
+    expect(operations).toHaveLength(9);
+    const rows = () => observer.hostedRuntimePutDrain.findMany({ where: { userId }, orderBy: { writeId: "asc" } });
+    expect(await rows()).toHaveLength(36);
+    expect((await rows()).every(row => row.uploadId && row.completedAt === null && row.drainUntil === null)).toBe(true);
+    expect(await executeHostedRuntimeReplicaPutCommand({ prisma: second, userId, command })).toEqual({ applied: false });
+    // A partially reused batch must not admit its otherwise-new identity.
+    expect(await executeHostedRuntimeReplicaPutCommand({ prisma: second, userId,
+      command: { ...command, uploads: [uploads[0]!, { ...uploads[1]!, writeId: "new-write" }] } })).toEqual({ applied: false });
+    expect(await rows()).toHaveLength(36);
+    const settled = uploads.slice(1).map(upload => upload.writeId);
+    const release = () => executeHostedRuntimeReplicaPutCommand({ prisma: second, userId,
+      command: { operation: "release_batch", writeIds: settled } });
+    await retireHostedRuntime({ prisma: first, identity: runtime });
+    await expect(executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command: { ...command,
+      uploads: uploads.map(upload => ({ ...upload, writeId: `late-${upload.writeId}` })) } }))
+      .rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+    await observer.hostedMember.delete({ where: { id: userId } });
+    expect(await release()).toEqual({ applied: true });
+    expect(await release()).toEqual({ applied: false });
+    const pending = (await rows()).filter(row => row.completedAt === null);
+    expect(pending).toMatchObject([{ writeId: "replica:batch-0", objectKey, uploadId: "upload-0", drainUntil: null }]);
+    expect(await isHostedRuntimeDeletionReady({ prisma: observer, userId })).toBe(false);
+    uploadRecovery.purge.mockResolvedValue(undefined);
+    await reconcileHostedRuntimeUploads({ prisma: observer, now: new Date(Date.now() + 70 * 60_000), deadlineAtMs: Date.now() + 5_000 });
+    expect(uploadRecovery.purge).toHaveBeenCalledWith(expect.objectContaining({ userId,
+      resource: { kind: "multipart", objectKey, uploadId: "upload-0" } }));
+    expect((await rows()).every(row => row.completedAt !== null)).toBe(true);
+  });
+
+  it("rejects foreign or retired replica families without partial batch admission", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const objectKey = `${await hostedBrowserVaultReplicaUserPrefix({ userId })}synthetic-retired.json`;
+    const command = { operation: "admit_batch" as const, ...runtime, objectKey,
+      uploads: [{ objectKey, writeId: "first", uploadId: "first-upload" },
+        { objectKey: `${objectKey}/foreign`, writeId: "second", uploadId: "second-upload" }] };
+    await expect(executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command })).rejects.toThrow("outside its root");
+    await first.$transaction(tx => recordRuntimeOrphansTx(tx, userId, [{ kind: "replica", resourceId: objectKey,
+      objectKey, snapshotRef: Prisma.DbNull }], new Date(0)));
+    await observer.hostedRuntimeOrphan.updateMany({ where: { userId, kind: "replica", resourceId: objectKey }, data: { retiredAt: new Date() } });
+    await expect(executeHostedRuntimeReplicaPutCommand({ prisma: first, userId,
+      command: { ...command, uploads: [command.uploads[0]!] } })).rejects.toMatchObject({ code: "HOSTED_RUNTIME_RESOURCE_RETIRED" });
+    expect(await observer.hostedRuntimePutDrain.count({ where: { userId } })).toBe(0);
   });
 
   it("keeps concurrent replica PUTs independent through revocation and account deletion", async () => {
