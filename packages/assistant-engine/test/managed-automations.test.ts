@@ -1367,6 +1367,16 @@ describe('applyMurphManagedAutomations', () => {
       status: 'active',
     })
     expect(patternsUpdateRecord?.instructions).toContain('Send at most one compact message')
+    expect(patternsUpdateRecord?.instructions).toContain('knowledge show weekly-health-insights')
+    expect(patternsUpdateRecord?.instructions).toContain('only a candidate until the cross-automation history check below passes')
+    expect(patternsUpdateRecord?.instructions).not.toContain('An eligible identity absent from that ledger is new.')
+    expect(patternsUpdateRecord?.instructions).not.toContain('If new identities exist, write')
+    expect(patternsUpdateRecord?.instructions).toContain('Apply this check to both the first digest and later updates')
+    expect(patternsUpdateRecord?.instructions).toContain('Record covered candidates as reviewed')
+    expect(patternsUpdateRecord?.instructions).toContain('do not invent a delivery date')
+    expect(patternsUpdateRecord?.instructions).toContain('An unrelated factor or outcome does not count as coverage')
+    expect(patternsUpdateRecord?.instructions).toContain('If another unsolicited health note appears recently')
+    expect(patternsUpdateRecord?.instructions).toContain('Only if an eligible uncovered identity remains and pacing permits')
     expect(patternsUpdateRecord?.instructions).toContain('factorId + outcomeId')
     expect(patternsUpdateRecord?.instructions).toContain(
       'Determine new identities against the notification ledger read at the start of this run, after alias migration',
@@ -1499,6 +1509,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).not.toContain('assistant onboarding')
     expect(insightRecord?.instructions).not.toContain('14 days')
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
+    expect(insightRecord?.instructions).toContain('Do not repeat a previously covered finding')
+    expect(insightRecord?.instructions).toContain('only when it materially changes the takeaway')
+    expect(insightRecord?.instructions).not.toContain('useful enough to repeat now')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
     expect(insightRecord?.instructions).toContain('vault-cli wearables patterns --date YYYY-MM-DD --format json')
@@ -1514,7 +1527,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('knowledge append-section weekly-health-insights YYYY-MM-DD')
     expect(insightRecord?.instructions).toContain('section already exists')
     expect(insightRecord?.instructions).toContain('do not append another section')
-    expect(insightRecord?.instructions).toContain('useful enough to repeat now')
+    expect(insightRecord?.instructions).toContain('does not repeat an already-covered takeaway')
     expect(insightRecord?.instructions).toContain('apply the same current interestingness gate')
     expect(insightRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"No weekly health insight cleared the interestingness bar."}',

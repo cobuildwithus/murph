@@ -639,7 +639,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('better to send nothing')
     expect(insightRecord?.instructions).toContain('knowledge append-section weekly-health-insights YYYY-MM-DD')
     expect(insightRecord?.instructions).toContain('section already exists')
-    expect(insightRecord?.instructions).toContain('useful enough to repeat now')
+    expect(insightRecord?.instructions).toContain('does not repeat an already-covered takeaway')
     expect(insightRecord?.instructions).toContain('apply the same current interestingness gate')
     expect(insightRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"No weekly health insight cleared the interestingness bar."}',

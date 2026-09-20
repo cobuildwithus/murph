@@ -511,3 +511,7 @@ Zero-valued SpO2 sample handling is tracked in
 
 Authoritative empty-day recovery is recorded in
 [`2026-09-18-canonical-empty-day-recovery.md`](exec-plans/completed/2026-09-18-canonical-empty-day-recovery.md).
+
+Personal Patterns repeat-suppression proof is recorded in
+[`2026-09-20-insight-dedupe.md`](exec-plans/completed/2026-09-20-insight-dedupe.md);
+`ARCHITECTURE.md` owns the current cross-automation history contract.
