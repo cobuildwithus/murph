@@ -8,6 +8,6 @@
     "title": "Typing starts sooner",
     "summary": "Murph can show typing as soon as your message is accepted, while it gets ready to respond.",
     "relevanceTags": ["messaging"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [3599]
   }
 }
