@@ -521,3 +521,6 @@ Personal Patterns repeat-suppression proof is recorded in
 
 Interactive voice-orb design playground implementation and proof are tracked in
 [`2026-09-20-voice-orb.md`](exec-plans/completed/2026-09-20-voice-orb.md).
+
+Voice-orb browser and PNG fallback proof is tracked in
+[`2026-09-20-voice-orb-browser-support.md`](exec-plans/completed/2026-09-20-voice-orb-browser-support.md).

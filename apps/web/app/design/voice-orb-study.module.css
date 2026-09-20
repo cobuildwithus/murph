@@ -250,6 +250,11 @@
   cursor: pointer;
 }
 
+.range input:disabled, .pause:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
 .pause {
   min-height: 44px;
   width: 100%;
