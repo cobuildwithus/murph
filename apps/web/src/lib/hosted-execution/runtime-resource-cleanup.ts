@@ -44,10 +44,9 @@ export async function claimHostedRuntimeResourceCleanup(input: { prisma: PrismaC
       if (replica) canonical.push(replicaOrphanCandidate(replica));
       const protectedRef = canonical.some(ref => ref.kind === candidate.kind && ref.resourceId === candidate.resourceId);
       const pendingPut = await tx.hostedRuntimePutDrain.findFirst({ where: { userId: candidate.userId, completedAt: null, OR: [{ drainUntil: null }, { drainUntil: { gt: input.now } }] }, select: { writeId: true } });
-      const handoff = await tx.hostedRuntimeSnapshotUpload.findUnique({ where: { userId: candidate.userId } });
-      const pendingHandoff = candidate.kind === "snapshot" && candidate.resourceId === handoff?.snapshotId
-        && !handoff.completedAt && handoff.heartbeatAt.getTime() + 10_000 > input.now.getTime();
-      if (protectedRef || pendingPut || pendingHandoff) {
+      // Upload receipts protect writes in flight; canonical refs protect accepted
+      // archives. Publication holds these same locks and rejects retired refs.
+      if (protectedRef || pendingPut) {
         // Revisit through the existing bounded sweep without starving later rows.
         await tx.hostedRuntimeOrphan.update({ where, data: { cleanupAt: new Date(input.now.getTime() + HOSTED_RUNTIME_ORPHAN_GRACE_MS) } });
         return null;

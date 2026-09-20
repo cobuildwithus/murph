@@ -1,3 +1,4 @@
+import { buildHostedRuntimeReplicaBatchProtocolProbe, parseHostedRuntimeReplicaPutCommand } from "@murphai/hosted-execution/runtime-resources";
 import { parseHostedRuntimeLatencyTraceBatchRequest, parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import {
   buildHostedRuntimeLogProtocolProbe,
@@ -20,14 +21,12 @@ export function buildHostedThreadRouteAuthorityResponse(
 }
 
 export function buildHostedRuntimeWebProtocolAdmission(nonce: string): HostedRuntimeWebProtocolAdmission {
+  const replica = buildHostedRuntimeReplicaBatchProtocolProbe();
   return {
+    runtimeReplicaBatch: { admission: parseHostedRuntimeReplicaPutCommand(replica.admission), settlement: parseHostedRuntimeReplicaPutCommand(replica.settlement) },
     kind: HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
     schemaVersion: HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
     nonce,
-    // This is the same parser imported by the real /hosted-runtime/log route.
-    // No log is persisted and no member, provider or runner is accessed.
-    runtimeLogEventCodes: HOSTED_RUNTIME_LOG_EVENT_CODES.map(eventCode =>
-      parseHostedRuntimeLogRequest(buildHostedRuntimeLogProtocolProbe(eventCode)).entries[0]!.eventCode),
     latencyMilestoneBatchMaxEvents: parseHostedRuntimeLatencyTraceBatchRequest({
       events: Array.from({ length: HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS }, () => ({
         type: "assistant_milestone", source: "linq", assistantInputIds: ["synthetic-input"],
@@ -35,6 +34,10 @@ export function buildHostedRuntimeWebProtocolAdmission(nonce: string): HostedRun
         milestone: "first_codex_output_observed",
       })),
     }).events.length,
+    // This is the same parser imported by the real /hosted-runtime/log route.
+    // No log is persisted and no member, provider or runner is accessed.
+    runtimeLogEventCodes: HOSTED_RUNTIME_LOG_EVENT_CODES.map(eventCode =>
+      parseHostedRuntimeLogRequest(buildHostedRuntimeLogProtocolProbe(eventCode)).entries[0]!.eventCode),
     threadRouteAuthority: {
       direct: buildHostedThreadRouteAuthorityResponse(true),
       group: buildHostedThreadRouteAuthorityResponse(false),

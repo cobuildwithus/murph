@@ -3696,9 +3696,10 @@ export interface HostedRuntimeWebProtocolAdmission {
   kind: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND;
   schemaVersion: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION;
   nonce: string;
-  runtimeLogEventCodes: readonly string[];
   latencyMilestoneBatchMaxEvents: number;
+  runtimeLogEventCodes: readonly string[];
   threadRouteAuthority: { direct: unknown; group: unknown };
+  runtimeReplicaBatch: { admission: unknown; settlement: unknown };
 }
 
 // A synthetic wire message, not a log write. Exercise every producer enum value

@@ -828,7 +828,7 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
 
   let offset = 0;
   let accepted = true;
-  do {
+  while (offset < updates.length) {
     const updatesBatch = updates.slice(
       offset,
       offset + HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
@@ -855,7 +855,7 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       }
     }
     offset += HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT;
-  } while (offset < updates.length);
+  }
   return accepted;
 }
 

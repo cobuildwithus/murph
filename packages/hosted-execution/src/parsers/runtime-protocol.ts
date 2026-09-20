@@ -1,3 +1,4 @@
+import { buildHostedRuntimeReplicaBatchProtocolProbe, parseHostedRuntimeReplicaPutCommand } from "../runtime-resources.ts";
 import {
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
@@ -37,6 +38,11 @@ export function assertHostedRuntimeWebProtocolAdmission(
     || record.nonce !== nonce) {
     throw new Error("Hosted Web protocol admission failed: version_or_nonce.");
   }
+  if (typeof record.latencyMilestoneBatchMaxEvents !== "number"
+    || !Number.isSafeInteger(record.latencyMilestoneBatchMaxEvents)
+    || record.latencyMilestoneBatchMaxEvents < HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
+    throw new Error("Hosted Web protocol admission failed: latency_milestone_batch.");
+  }
   const codes = record.runtimeLogEventCodes;
   if (!Array.isArray(codes) || codes.some(code => typeof code !== "string")) {
     throw new Error("Hosted Web protocol admission failed: runtime_log_evidence.");
@@ -48,10 +54,16 @@ export function assertHostedRuntimeWebProtocolAdmission(
       throw new Error(`Hosted Web protocol admission failed: runtime_log_event:${required}.`);
     }
   }
-  if (typeof record.latencyMilestoneBatchMaxEvents !== "number"
-    || !Number.isSafeInteger(record.latencyMilestoneBatchMaxEvents)
-    || record.latencyMilestoneBatchMaxEvents < HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
-    throw new Error("Hosted Web protocol admission failed: latency_milestone_batch.");
+  try {
+    const replica = requireObject(record.runtimeReplicaBatch, "Replica batch evidence");
+    const expected = buildHostedRuntimeReplicaBatchProtocolProbe();
+    for (const field of ["admission", "settlement"] as const) {
+      if (JSON.stringify(parseHostedRuntimeReplicaPutCommand(replica[field])) !== JSON.stringify(parseHostedRuntimeReplicaPutCommand(expected[field]))) {
+        throw new Error("Replica batch witness mismatch.");
+      }
+    }
+  } catch {
+    throw new Error("Hosted Web protocol admission failed: replica_batch.");
   }
   let direct: ReturnType<typeof parseHostedExternalThreadRouteAuthorityResponse>;
   let group: ReturnType<typeof parseHostedExternalThreadRouteAuthorityResponse>;
