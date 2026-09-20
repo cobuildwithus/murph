@@ -3383,6 +3383,78 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(JSON.stringify(envelope)).not.toContain("signed-voice-url");
   });
 
+  it.each(["accepted", "failed"] as const)(
+    "starts ordinary ingress typing before the wake settles and tolerates %s typing",
+    async (typingOutcome) => {
+      type WakeResult = Awaited<ReturnType<typeof mocks.signalHostedMailboxAppendRuntime>>;
+      let resolveWake!: (result: WakeResult) => void;
+      const wake = new Promise<WakeResult>((resolve) => { resolveWake = resolve; });
+      let enterWake!: () => void;
+      const enteredWake = new Promise<void>((resolve) => { enterWake = resolve; });
+      let resolveTyping!: (result: { ok: boolean; status: number }) => void;
+      const typing = new Promise<{ ok: boolean; status: number }>((resolve) => { resolveTyping = resolve; });
+      mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(() => {
+        enterWake();
+        return wake;
+      });
+      mocks.startHostedLinqChatTypingIndicator.mockReturnValueOnce(typing);
+      const prisma = asPrismaTransactionClient({
+        hostedWebhookReceipt: {
+          create: vi.fn().mockResolvedValue({}),
+          findUnique: vi.fn().mockResolvedValue({
+            payloadJson: {
+              eventType: "message.received",
+              receiptAttemptCount: 1,
+              receiptStatus: "processing",
+            },
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        hostedMember: {
+          findUnique: vi.fn().mockResolvedValue({
+            accountGroupMemberships: [],
+            billingStatus: HostedBillingStatus.active,
+            id: "member_123",
+            invites: [],
+            linqChatId: "chat_123",
+            phoneLookupKey: "+15551234567",
+          }),
+        },
+      });
+      const afterResponse: Array<() => Promise<void>> = [];
+      const response = handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({ eventId: "evt_early_typing" }),
+        scheduleAfterResponse: (task) => { afterResponse.push(task); },
+        signature: null,
+        timestamp: null,
+      });
+
+      await enteredWake;
+      expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+      expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
+        chatId: "chat_123",
+        timeoutMs: 2_500,
+      });
+      expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+
+      resolveWake({
+        signalAccepted: true,
+        workflowId: "hosted-user-runtime:member_123",
+      });
+      // Even an unsettled typing provider cannot hold the webhook response.
+      await expect(response).resolves.toMatchObject({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+      resolveTyping({ ok: typingOutcome === "accepted", status: typingOutcome === "accepted" ? 204 : 503 });
+      for (const task of afterResponse) await task();
+      await expect(mocks.maybeHandoffHostedExecutionWebhookWake.mock.calls.at(-1)?.[0]?.ingressTypingAcceptedAt)
+        .resolves.toEqual(typingOutcome === "accepted" ? expect.any(Date) : null);
+      expect(mocks.stopHostedLinqChatTypingIndicator).not.toHaveBeenCalled();
+    },
+  );
+
   it("sends active-member Linq read receipts without durable thread-route authority", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
@@ -3720,6 +3792,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       }),
     );
+    expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      timeoutMs: 2_500,
+    });
+    expect(mocks.startHostedLinqChatTypingIndicator.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],
+    );
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
@@ -3776,6 +3855,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       mailboxItemId: "mailbox_evt_direct_nudge_read_receipt",
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(mocks.stopHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      timeoutMs: 2_500,
+    }));
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.wake-handoff",
@@ -5783,6 +5866,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               reason: "sent-health-data-consent-withdrawn-notice",
             });
 
+        expect(mocks.startHostedLinqChatTypingIndicator).not.toHaveBeenCalled();
         expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
           .toHaveBeenCalledTimes(1);
         expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(1);
@@ -7982,7 +8066,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       activationEventId,
       eventId,
     ]));
-    expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
+    expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(2);
     expect(mocks.runHostedLinqInstantStartDeferredActivationWakeBestEffort)
       .not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -8251,7 +8335,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     await typingResult.promise;
     await vi.waitFor(() => {
       expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
-        "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+        "hosted-onboarding.webhook.linq.ingress-typing-hint-failed",
         { httpStatus: 503 },
       );
     });
@@ -8391,7 +8475,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {
       expect(mocks.logHostedOnboardingDiagnostic).toHaveBeenCalledWith(
-        "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+        "hosted-onboarding.webhook.linq.ingress-typing-hint-failed",
         { errorName: "Error" },
       );
     });

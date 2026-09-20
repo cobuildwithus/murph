@@ -2496,6 +2496,15 @@ to apply after cutover.
   expire after 30 days through bounded hourly retention. Unsent alerts remain
   recovery obligations. Emails contain channel, timings, workspace class, and an
   opaque alert reference, without member identity or message content.
+- Linq ingress reuses its best-effort onboarding typing hint for fresh,
+  authenticated, non-self messages after a conversation wake commits for the
+  exact inbound chat. It starts alongside durable wake handoff without waiting
+  for workspace startup, restore or mailbox import. Duplicate, ignored, edited,
+  reaction and already-answered inputs do not start another hint. The existing
+  2.5-second provider deadline, failure cleanup and post-response acceptance
+  recording remain authoritative; hint failure never blocks webhook acceptance.
+  This is receipt feedback, not inference or delivery authority. Runtime still
+  owns sustained typing and the decision whether to reply.
 - Attended progress guidance distinguishes quick work from a growing sequence.
   Several edits, substantive checks, or repeated repairs warrant one brief update
   before continuing; already-visible elapsed time can prompt an update around

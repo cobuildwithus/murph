@@ -508,3 +508,6 @@ Zero-valued SpO2 sample handling is tracked in
 
 Authoritative empty-day recovery is recorded in
 [`2026-09-18-canonical-empty-day-recovery.md`](exec-plans/completed/2026-09-18-canonical-empty-day-recovery.md).
+
+Early Linq typing feedback is tracked in
+[2026-09-20-typing-latency-simplify.md](exec-plans/active/2026-09-20-typing-latency-simplify.md).

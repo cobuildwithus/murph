@@ -1,0 +1,13 @@
+{
+  "publishedOn": "2026-09-20",
+  "order": 100,
+  "item": {
+    "id": "earlier-message-typing",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Typing starts sooner",
+    "summary": "Murph can show typing as soon as your message is accepted, while it gets ready to respond.",
+    "relevanceTags": ["messaging"],
+    "sourcePullRequests": []
+  }
+}

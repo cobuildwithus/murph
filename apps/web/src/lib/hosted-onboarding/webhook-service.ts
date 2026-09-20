@@ -291,7 +291,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   let eventWebhookVersion: string | null = null;
   let messagePartsInspection: HostedLinqMessageReceivedPartsInspection | null = null;
   let responseReason: string | null = null;
-  let instantStartTypingHint: HostedLinqInstantStartTypingHint | null = null;
+  let ingressTypingHint: HostedLinqIngressTypingHint | null = null;
   let pendingInstantStartActivationWake: {
     continuation: HostedLinqInstantStartDeferredActivationWake;
     prisma: PrismaClient;
@@ -797,8 +797,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         // The member row is committed, so show feedback immediately while
         // enrollment and the cold runtime path continue. This hint carries no
         // authority and has no effect on the reply path.
-        instantStartTypingHint = startHostedLinqInstantStartTypingHintBestEffort({
+        ingressTypingHint = startHostedLinqIngressTypingHintBestEffort({
           event: planningEvent,
+          plan,
         });
         let enrollmentFailed = false;
         try {
@@ -977,12 +978,20 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
 
+    ingressTypingHint = startHostedLinqIngressTypingHintBestEffort({
+      currentInboundReply,
+      event,
+      existingHint: ingressTypingHint,
+      plan,
+      wakeHandoff,
+    });
+
     const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
     const wakeHandoffResult = await (async () => {
       try {
         return await maybeHandoffHostedExecutionWebhookWake({
           webhookReceivedAt: input.webhookReceivedAt,
-          ingressTypingAcceptedAt: instantStartTypingHint?.started,
+          ingressTypingAcceptedAt: ingressTypingHint?.started,
           response: plan.response,
           scheduleAfterResponse: input.scheduleAfterResponse,
           signal: input.signal,
@@ -1049,8 +1058,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     // A failing webhook is retried later with no visible continuation until
     // then, so clear any started typing hint instead of letting its promise
     // decay into silence.
-    stopHostedLinqInstantStartTypingHintBestEffort({
-      hint: instantStartTypingHint,
+    stopHostedLinqIngressTypingHintBestEffort({
+      hint: ingressTypingHint,
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
     finishHostedOnboardingTiming(timing, "failed", {
@@ -1661,22 +1670,35 @@ function logHostedLinqChatClassification(
   });
 }
 
-const HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS = 2_500;
+const HOSTED_LINQ_INGRESS_TYPING_HINT_TIMEOUT_MS = 2_500;
 
-type HostedLinqInstantStartTypingHint = {
+type HostedLinqIngressTypingHint = {
   chatId: string;
   started: Promise<Date | null>;
 };
 
-// Instant start is the sender's first-ever message and the reply waits on a
-// cold runtime boot, so surface typing feedback immediately instead of leaving
-// the chat silent until the runtime's own typing session starts. Losing the
-// hint costs nothing; it must never affect webhook handling. The returned
-// handle lets a failing webhook clear the indicator so the hint cannot promise
-// a reply that no surviving continuation owns.
-function startHostedLinqInstantStartTypingHintBestEffort(input: {
+// Surface receipt feedback without waiting for runtime startup or import.
+// Losing the hint must never affect webhook handling. The existing runtime
+// owns sustained typing; a failed webhook clears its hint after start settles.
+function startHostedLinqIngressTypingHintBestEffort(input: {
+  currentInboundReply?: HostedLinqCurrentInboundReplyProof | null;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
-}): HostedLinqInstantStartTypingHint | null {
+  existingHint?: HostedLinqIngressTypingHint | null;
+  plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
+  wakeHandoff?: HostedWebhookWakeHandoff;
+}): HostedLinqIngressTypingHint | null {
+  if (input.existingHint) return input.existingHint;
+  // Onboarding starts after enrollment admission. Ordinary receipt feedback
+  // needs a fresh committed wake for the exact authenticated inbound chat.
+  if (!input.plan.instantStartEnrollment && (
+    !input.currentInboundReply
+    || input.event.event_type !== "message.received"
+    || requireHostedLinqMessageReceivedEvent(input.event).data.is_from_me
+    || input.plan.response.duplicate
+    || input.plan.response.ignored
+    || input.wakeHandoff?.linqChatId !== input.currentInboundReply.chatId
+    || input.wakeHandoff.acceptedLinqDeliveryId
+  )) return null;
   try {
     const chatId =
       requireHostedLinqMessageReceivedEvent(input.event).data.chat_id?.trim() ?? "";
@@ -1685,12 +1707,12 @@ function startHostedLinqInstantStartTypingHintBestEffort(input: {
     }
     const started = startHostedLinqChatTypingIndicator({
       chatId,
-      timeoutMs: HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS,
+      timeoutMs: HOSTED_LINQ_INGRESS_TYPING_HINT_TIMEOUT_MS,
     })
       .then((result) => {
         if (!result.ok) {
           logHostedOnboardingDiagnostic(
-            "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+            "hosted-onboarding.webhook.linq.ingress-typing-hint-failed",
             { httpStatus: result.status },
           );
         }
@@ -1698,7 +1720,7 @@ function startHostedLinqInstantStartTypingHintBestEffort(input: {
       })
       .catch((error: unknown) => {
         logHostedOnboardingDiagnostic(
-          "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+          "hosted-onboarding.webhook.linq.ingress-typing-hint-failed",
           { errorName: deriveHostedOnboardingTimingErrorName(error) },
         );
         return null;
@@ -1706,7 +1728,7 @@ function startHostedLinqInstantStartTypingHintBestEffort(input: {
     return { chatId, started };
   } catch (error) {
     logHostedOnboardingDiagnostic(
-      "hosted-onboarding.webhook.linq.instant-start-typing-hint-failed",
+      "hosted-onboarding.webhook.linq.ingress-typing-hint-failed",
       { errorName: deriveHostedOnboardingTimingErrorName(error) },
     );
     return null;
@@ -1718,8 +1740,8 @@ function startHostedLinqInstantStartTypingHintBestEffort(input: {
 // registered with the request's post-response scheduler because the failing
 // webhook's invocation may freeze right after the error response; a detached
 // promise would not be guaranteed to run, leaving the typing promise dangling.
-function stopHostedLinqInstantStartTypingHintBestEffort(input: {
-  hint: HostedLinqInstantStartTypingHint | null;
+function stopHostedLinqIngressTypingHintBestEffort(input: {
+  hint: HostedLinqIngressTypingHint | null;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
 }): void {
   const hint = input.hint;
@@ -1729,19 +1751,19 @@ function stopHostedLinqInstantStartTypingHintBestEffort(input: {
   const task = () => hint.started
     .then(() => stopHostedLinqChatTypingIndicator({
       chatId: hint.chatId,
-      timeoutMs: HOSTED_LINQ_INSTANT_START_TYPING_HINT_TIMEOUT_MS,
+      timeoutMs: HOSTED_LINQ_INGRESS_TYPING_HINT_TIMEOUT_MS,
     }))
     .then((result) => {
       if (!result.ok) {
         logHostedOnboardingDiagnostic(
-          "hosted-onboarding.webhook.linq.instant-start-typing-hint-stop-failed",
+          "hosted-onboarding.webhook.linq.ingress-typing-hint-stop-failed",
           { httpStatus: result.status },
         );
       }
     })
     .catch((error: unknown) => {
       logHostedOnboardingDiagnostic(
-        "hosted-onboarding.webhook.linq.instant-start-typing-hint-stop-failed",
+        "hosted-onboarding.webhook.linq.ingress-typing-hint-stop-failed",
         { errorName: deriveHostedOnboardingTimingErrorName(error) },
       );
     });
