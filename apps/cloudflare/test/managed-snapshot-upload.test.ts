@@ -61,10 +61,10 @@ describe("managed snapshot uploads", () => {
     const url = new URL(signed.putUrl);
     expect(url.searchParams.get("uploadId")).toBe(receipt.uploadId);
     expect(url.searchParams.get("partNumber")).toBe("1");
-    await expect(completeManagedSnapshotForSession({ source, session, encryptedByteSize: bytes.length, encryptedSha256,
+    await expect(completeManagedSnapshotForSession({ source, session, receipt: stored, encryptedByteSize: bytes.length, encryptedSha256,
       part: { uploadId: "wrong-upload", etag: "synthetic-etag" } })).rejects.toBeInstanceOf(ManagedSnapshotCompletionRejectedError);
     expect(h.complete).not.toHaveBeenCalled();
-    expect(await completeManagedSnapshotForSession({ source, session, encryptedByteSize: bytes.length, encryptedSha256,
+    expect(await completeManagedSnapshotForSession({ source, session, receipt: stored, encryptedByteSize: bytes.length, encryptedSha256,
       part: { uploadId: signed.managedUploadId, etag: "synthetic-etag" } })).toBe(encryptedSha256);
     expect(stored).toMatchObject({ completedAt: "2026-09-15T00:01:00.000Z", verifiedAt: "2026-09-15T00:01:00.000Z" });
     expect(h.bucket.get).toHaveBeenCalledWith(objectKey);
@@ -85,23 +85,23 @@ describe("managed snapshot uploads", () => {
       cutover: "postgres", applied: true, managedUpload: { ...receipt, ...changed },
     });
     await expect(completeManagedSnapshotForSession({
-      source: { BUNDLES: h.bucket }, session, encryptedByteSize: bytes.length, encryptedSha256,
+      source: { BUNDLES: h.bucket }, session, receipt: { ...receipt, ...changed }, encryptedByteSize: bytes.length, encryptedSha256,
       part: { uploadId: receipt.uploadId, etag: "synthetic-etag" },
     })).rejects.toBeInstanceOf(ManagedSnapshotCompletionRejectedError);
     expect(h.bucket.resumeMultipartUpload).not.toHaveBeenCalled();
     expect(h.bucket.get).not.toHaveBeenCalled();
-    expect(resource.command).toHaveBeenCalledOnce();
+    expect(resource.command).not.toHaveBeenCalled();
   });
 
-  it("preserves resource transport failures instead of classifying them as a completion conflict", async () => {
+  it("preserves settlement failures instead of classifying them as a completion conflict", async () => {
     const h = harness();
     const failure = new Error("Resource transport unavailable.");
     resource.command.mockReset().mockRejectedValue(failure);
     await expect(completeManagedSnapshotForSession({
-      source: { BUNDLES: h.bucket }, session, encryptedByteSize: bytes.length, encryptedSha256,
+      source: { BUNDLES: h.bucket }, session, receipt, encryptedByteSize: bytes.length, encryptedSha256,
       part: { uploadId: receipt.uploadId, etag: "synthetic-etag" },
     })).rejects.toBe(failure);
-    expect(h.bucket.resumeMultipartUpload).not.toHaveBeenCalled();
+    expect(h.bucket.resumeMultipartUpload).toHaveBeenCalledOnce();
   });
 
   it("hashes through the platform digest stream when the runtime provides one", async () => {
