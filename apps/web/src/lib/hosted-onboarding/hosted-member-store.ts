@@ -18,7 +18,6 @@ import {
 } from "./contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { createHostedMemberReplyAliasRoute } from "./hosted-email-reply-alias";
-import { assertHostedLegacyCredentialWriterTx } from "../better-auth/legacy-writer";
 import { activeHostedMemberAccessWhere } from "./member-access";
 import {
   decryptHostedWebNullableString,
@@ -214,7 +213,6 @@ export interface HostedMemberEmailAuthorizationWriteInput {
 }
 
 export interface HostedMemberVerifiedEmailSyncInput {
-  authSource?: "better-auth";
   address: string;
   memberId: string;
   preparedControlRoot?: PreparedHostedDomainRootForWeb;
@@ -937,7 +935,6 @@ export async function syncHostedMemberVerifiedEmailAuthorization(
   }
 
   return upsertHostedMemberVerifiedEmailAuthorizationTx({
-    authSource: input.authSource,
     memberId: input.memberId,
     preparedControlRoot: input.preparedControlRoot,
     preparedReplyAlias: input.preparedReplyAlias,
@@ -1011,7 +1008,6 @@ async function upsertHostedMemberVerifiedEmailAuthorizationTx(
   });
   await lockHostedMemberRow(input.prisma, input.memberId);
 
-  if (input.authSource !== "better-auth") await assertHostedLegacyCredentialWriterTx(input.prisma, input.memberId);
   const currentAuthorization = await input.prisma.hostedMemberEmailAuthorization.findUnique({
     where: { memberId: input.memberId },
     select: {

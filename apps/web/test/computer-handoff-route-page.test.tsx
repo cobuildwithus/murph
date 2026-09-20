@@ -579,7 +579,7 @@ function createSession() {
       id: "member_123",
       status: "active",
     },
-    privyUserId: "privy_123",
+
     sessionId: "hws_test",
   };
 }

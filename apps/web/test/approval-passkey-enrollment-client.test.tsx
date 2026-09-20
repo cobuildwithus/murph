@@ -4,14 +4,14 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   authorize: vi.fn(), authenticated: true, openAuthDialog: vi.fn(),
-  refresh: vi.fn(), requestJson: vi.fn(), startRegistration: vi.fn(),
+  reauthenticate: vi.fn(), refresh: vi.fn(), requestJson: vi.fn(), startRegistration: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
 vi.mock("@simplewebauthn/browser", () => ({ startRegistration: mocks.startRegistration }));
 vi.mock("@/src/components/hosted-onboarding/client-api", async (original) => ({
   ...await original<typeof import("@/src/components/hosted-onboarding/client-api")>(), requestHostedOnboardingJson: mocks.requestJson,
 }));
-vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({ useAuth: () => ({ authenticated: mocks.authenticated, openAuthDialog: mocks.openAuthDialog }) }));
+vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({ useAuth: () => ({ authenticated: mocks.authenticated, openAuthDialog: mocks.openAuthDialog, reauthenticate: mocks.reauthenticate }) }));
 vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization", () => ({ useSensitiveActionAuthorization: () => ({ authorize: mocks.authorize, setup: { clientAuthenticated: mocks.authenticated } }) }));
 import { useApprovalPasskeyEnrollment } from "@/src/components/sensitive-actions/use-approval-passkey-enrollment";
 import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
@@ -102,7 +102,7 @@ test("uses first-party initial enrollment without a legacy wallet signature", as
 });
 
 
-test("shows first-passkey setup and returns to login when primary proof is stale", async () => {
+test("shows first-passkey setup and reauthenticates inline when primary proof is stale", async () => {
   mocks.requestJson.mockImplementation(async ({ url }: { url: string }) => {
     if (url.endsWith("/initial-options")) throw new HostedOnboardingApiError({
       code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", message: "Sign in again to set up your first passkey.",
@@ -115,7 +115,7 @@ test("shows first-passkey setup and returns to login when primary proof is stale
   expect(rendered.button.textContent).toBe("Set up");
   expect(rendered.button.getAttribute("aria-label")).toBe("Set up passkey");
   await click(rendered);
-  expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
+  expect(mocks.reauthenticate).toHaveBeenCalledTimes(1);
   expect(mocks.authorize).not.toHaveBeenCalled();
   expect(mocks.startRegistration).not.toHaveBeenCalled();
   expect(rendered.container.textContent).toContain("Sign in again to set up your first passkey.");

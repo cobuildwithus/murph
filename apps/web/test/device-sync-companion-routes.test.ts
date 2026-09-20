@@ -12,7 +12,7 @@ import { createBearerRequest, createJsonPostRequest } from "./route-test-helpers
 
 vi.mock("server-only", () => ({}));
 
-const LEGACY_TOKEN = `header.${Buffer.from(JSON.stringify({ exp: 4_000_000_000 })).toString("base64url")}.signature`;
+const NATIVE_TOKEN = `murph_auth_v1.${"a".repeat(32)}`;
 const SIGN_IN_TOKEN = "junction-sdk-sign-in-token-do-not-log";
 const HRV_ROUTE_NOW = "2026-07-10T13:46:00.000Z";
 
@@ -28,8 +28,6 @@ const mocks = vi.hoisted(() => ({
   listConnectionsForUser: vi.fn(),
   listMemberConnectionStatuses: vi.fn(),
   listRecentConnectionStatusSignals: vi.fn(),
-  lookupHostedMemberForPrivyPrincipal: vi.fn(),
-  projectHostedMemberIdentityState: vi.fn(),
   persistHostedDeviceSyncCompanionMetadata: vi.fn(),
   prismaClient: {
     hostedAuthRecord: { findUnique: vi.fn() },
@@ -44,37 +42,20 @@ const mocks = vi.hoisted(() => ({
     label: "test-prisma",
   },
   runtimeEnv: {
-    privyAppId: "cm_app_123" as string | null,
-    privyAppSecret: null as string | null,
-    privyVerificationKey: "verification-key" as string | null,
+
+
     telegramBotUsername: null as string | null,
     telegramWebhookSecret: null as string | null,
   },
   signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
-  verifyIdentityToken: vi.fn(),
+  readHostedAuthSession: vi.fn(),
 }));
 
-vi.mock("@privy-io/node", () => ({
-  NotFoundError: class NotFoundError extends Error {},
-  PrivyClient: vi.fn(),
-  verifyIdentityToken: mocks.verifyIdentityToken,
+vi.mock("@/src/lib/better-auth/config", () => ({
+  requireHostedBetterAuthConfig: () => ({ baseURL: "https://app.example.test", secret: "synthetic-session-secret" }),
 }));
-
-vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
-  getHostedOnboardingEnvironment: () => mocks.runtimeEnv,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
-  assertHostedPrivyAccountDeletionNotPending: async () => undefined,
-  lookupHostedMemberForPrivyPrincipal: mocks.lookupHostedMemberForPrivyPrincipal,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
-  lookupHostedMemberIdentityByPrivyUserId: async () => {
-    const core = await mocks.lookupHostedMemberForPrivyPrincipal();
-    return core ? { core, identity: { privyUserId: "did:privy:user_123" } } : null;
-  },
-  projectHostedMemberIdentityState: mocks.projectHostedMemberIdentityState,
+vi.mock("@/src/lib/better-auth/session", () => ({
+  readHostedAuthSession: mocks.readHostedAuthSession,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
@@ -123,22 +104,10 @@ const ACTIVE_MEMBER = {
   suspendedAt: null,
 };
 
-function mockVerifiedPrivyUser(): void {
-  mocks.verifyIdentityToken.mockResolvedValue({
-    id: "did:privy:user_123",
-    linked_accounts: [
-      {
-        latest_verified_at: 1741194420,
-        phoneNumber: "+1 415 555 2671",
-        type: "phone",
-      },
-    ],
-  });
-  mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(ACTIVE_MEMBER);
-  mocks.prismaClient.hostedAuthRecord.findUnique.mockResolvedValue(null);
-  mocks.prismaClient.hostedMemberIdentity.findUnique.mockResolvedValue({ memberId: ACTIVE_MEMBER.id });
-  mocks.prismaClient.hostedMember.findFirst.mockResolvedValue(null);
-  mocks.projectHostedMemberIdentityState.mockResolvedValue({ privyUserId: "did:privy:user_123" });
+function mockVerifiedHostedSession(): void {
+  mocks.readHostedAuthSession.mockResolvedValue({ session: {
+    member: ACTIVE_MEMBER, sessionId: "synthetic-session", proof: {},
+  } });
   mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
     accountGroupMemberships: [],
     billingStatus: ACTIVE_MEMBER.billingStatus,
@@ -161,7 +130,7 @@ function rejectHistoricalLaunchConsent(): void {
   );
 }
 
-function signInTokenRequest(body?: unknown, bearerToken: string | null = LEGACY_TOKEN) {
+function signInTokenRequest(body?: unknown, bearerToken: string | null = NATIVE_TOKEN) {
   const url = "https://app.example.test/api/device-sync/companion/sign-in-token";
   const init = bearerToken === null
     ? {}
@@ -173,7 +142,7 @@ function signInTokenRequest(body?: unknown, bearerToken: string | null = LEGACY_
 }
 
 function statusRequest(
-  bearerToken: string | null = LEGACY_TOKEN,
+  bearerToken: string | null = NATIVE_TOKEN,
   sourceProviderSlug?: string,
 ) {
   const url = new URL("https://app.example.test/api/device-sync/companion/status");
@@ -185,7 +154,7 @@ function statusRequest(
     : createBearerRequest(url.toString(), bearerToken);
 }
 
-function healthMetadataRequest(body: unknown, bearerToken: string | null = LEGACY_TOKEN) {
+function healthMetadataRequest(body: unknown, bearerToken: string | null = NATIVE_TOKEN) {
   const url = "https://app.example.test/api/device-sync/companion/health-metadata";
   const init = bearerToken === null
     ? {}
@@ -217,7 +186,7 @@ const validHrvObservation = {
 
 function hrvRmssdRequest(
   body: unknown,
-  bearerToken: string | null = LEGACY_TOKEN,
+  bearerToken: string | null = NATIVE_TOKEN,
 ) {
   return createJsonPostRequest(
     "https://app.example.test/api/device-sync/companion/hrv-rmssd",
@@ -348,7 +317,7 @@ describe("device sync companion routes", () => {
         stage: "session_refresh", method: "session", errorKind: "provider",
         diagnosticCode: "identity_token_missing", retryable: true,
         appBuild: "private@example.test", osVersion: "Bearer synthetic-token",
-        diagnosticSessionId: "did:privy:synthetic-member",
+        diagnosticSessionId: "member:synthetic-member",
       }));
       expect(response.status).toBe(200);
       expect(warn).toHaveBeenCalledWith("Companion auth diagnostic.", expect.objectContaining({
@@ -358,12 +327,12 @@ describe("device sync companion routes", () => {
       expect(JSON.stringify(warn.mock.calls)).not.toContain("synthetic-token");
     });
 
-    it("records typed pre-login Privy auth diagnostics without raw provider prose", async () => {
+    it("records typed pre-login hosted auth diagnostics without raw provider prose", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
         appVersion: "1.0.0",
-        diagnosticCode: "privy_rate_limited",
+        diagnosticCode: "hosted_response_rejected",
         errorKind: "rate_limited",
         httpStatus: 429,
         method: "email",
@@ -376,24 +345,24 @@ describe("device sync companion routes", () => {
       await expect(response.json()).resolves.toEqual({ ok: true });
       expect(warnSpy).toHaveBeenCalledWith("Companion auth diagnostic.", expect.objectContaining({
         appVersion: "1.0.0",
-        diagnosticCode: "privy_rate_limited",
-        diagnosticDescription: "Privy rate limited the auth request.",
+        diagnosticCode: "hosted_response_rejected",
+        diagnosticDescription: "Hosted authentication rejected the request.",
         errorKind: "rate_limited",
         httpStatus: 429,
         method: "email",
         platform: "ios",
-        provider: "privy",
+        provider: "better_auth",
         providerErrorCode: "too_many_requests",
         retryable: true,
         stage: "send_code",
       }));
     });
 
-    it("records native app configuration failures as typed diagnostics", async () => {
+    it("records invalid hosted responses as typed diagnostics", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        diagnosticCode: "privy_invalid_native_app_id",
+        diagnosticCode: "hosted_invalid_response",
         errorKind: "configuration",
         method: "email",
         providerErrorCode: null,
@@ -405,8 +374,8 @@ describe("device sync companion routes", () => {
       expect(warnSpy).toHaveBeenCalledWith(
         "Companion auth diagnostic.",
         expect.objectContaining({
-          diagnosticCode: "privy_invalid_native_app_id",
-          diagnosticDescription: "Privy rejected the native app configuration.",
+          diagnosticCode: "hosted_invalid_response",
+          diagnosticDescription: "Hosted authentication returned an invalid response.",
           providerErrorCode: null,
           retryable: false,
         }),
@@ -417,7 +386,7 @@ describe("device sync companion routes", () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        diagnosticCode: "privy_network_error",
+        diagnosticCode: "network_unknown",
         errorKind: "network",
         method: "sms",
         platform: "android",
@@ -436,7 +405,7 @@ describe("device sync companion routes", () => {
 
     it("rejects unsupported auth diagnostic platforms", async () => {
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        diagnosticCode: "privy_network_error",
+        diagnosticCode: "network_unknown",
         errorKind: "network",
         method: "sms",
         platform: "web",
@@ -477,7 +446,7 @@ describe("device sync companion routes", () => {
       expect(warnSpy).toHaveBeenCalledWith(
         "Companion auth diagnostic.",
         expect.objectContaining({
-          diagnosticCode: "privy_rate_limited",
+          diagnosticCode: "hosted_response_rejected",
           errorKind: "rate_limited",
           method: "email",
           providerErrorCode: "too_many_requests",
@@ -492,7 +461,7 @@ describe("device sync companion routes", () => {
 
       const response = await withProductionAuthDiagnosticsEnv(false, () =>
         authDiagnosticsRoute.POST(authDiagnosticsRequest({
-          diagnosticCode: "privy_unknown",
+          diagnosticCode: "hosted_response_rejected",
           errorKind: "provider",
           method: "email",
           retryable: true,
@@ -510,7 +479,7 @@ describe("device sync companion routes", () => {
 
       const response = await withProductionAuthDiagnosticsEnv(true, () =>
         authDiagnosticsRoute.POST(authDiagnosticsRequest({
-          diagnosticCode: "privy_unknown",
+          diagnosticCode: "hosted_response_rejected",
           errorKind: "provider",
           method: "email",
           retryable: true,
@@ -532,13 +501,13 @@ describe("device sync companion routes", () => {
       ["memberId", "hbm_abc123xyz"],
       ["phone", "+14155552671"],
       ["provider", "privy"],
-      ["providerMessage", "Privy failed for person@example.test code 123456"],
+      ["providerMessage", "Provider failed for person@example.test code 123456"],
       ["token", "secret-token"],
     ])("rejects the unknown %s field without logging it", async (field, value) => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        diagnosticCode: "privy_unknown",
+        diagnosticCode: "hosted_response_rejected",
         errorKind: "provider",
         method: "email",
         retryable: true,
@@ -572,7 +541,7 @@ describe("device sync companion routes", () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        diagnosticCode: "privy_unknown",
+        diagnosticCode: "hosted_response_rejected",
         errorKind: "provider",
         method: "email",
         providerErrorCode,
@@ -598,7 +567,7 @@ describe("device sync companion routes", () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        diagnosticCode: "privy_unknown",
+        diagnosticCode: "hosted_response_rejected",
         errorKind: "provider",
         method: "email",
         providerErrorCode,
@@ -618,7 +587,7 @@ describe("device sync companion routes", () => {
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
         appVersion: "1.0 beta",
-        diagnosticCode: "privy_unknown",
+        diagnosticCode: "hosted_response_rejected",
         errorKind: "provider",
         method: "email",
         retryable: true,
@@ -650,7 +619,7 @@ describe("device sync companion routes", () => {
     it("does not keep a process-local rate-limit owner after WAF admission", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const body = {
-        diagnosticCode: "privy_unknown",
+        diagnosticCode: "hosted_response_rejected",
         errorKind: "provider",
         method: "email",
         retryable: true,
@@ -677,7 +646,7 @@ describe("device sync companion routes", () => {
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
         email: "person@example.test",
-        diagnosticCode: "privy_unknown",
+        diagnosticCode: "hosted_response_rejected",
         errorKind: "provider",
         method: "email",
         retryable: true,
@@ -746,12 +715,12 @@ describe("device sync companion routes", () => {
       expect(await response.json()).toMatchObject({
         error: { code: "AUTH_REQUIRED" },
       });
-      expect(mocks.verifyIdentityToken).not.toHaveBeenCalled();
+      expect(mocks.readHostedAuthSession).not.toHaveBeenCalled();
       expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
     });
 
     it("never falls back to cookie auth when the bearer header is missing", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       const request = new Request(
         "https://app.example.test/api/device-sync/companion/sign-in-token",
         {
@@ -763,12 +732,12 @@ describe("device sync companion routes", () => {
       const response = await signInTokenRoute.POST(request);
 
       expect(response.status).toBe(401);
-      expect(mocks.verifyIdentityToken).not.toHaveBeenCalled();
+      expect(mocks.readHostedAuthSession).not.toHaveBeenCalled();
       expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
     });
 
     it("rejects non-bearer authorization schemes", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       const request = new Request(
         "https://app.example.test/api/device-sync/companion/sign-in-token",
         {
@@ -780,31 +749,18 @@ describe("device sync companion routes", () => {
       const response = await signInTokenRoute.POST(request);
 
       expect(response.status).toBe(401);
-      expect(mocks.verifyIdentityToken).not.toHaveBeenCalled();
+      expect(mocks.readHostedAuthSession).not.toHaveBeenCalled();
     });
 
-    it("rejects members without active access", async () => {
-      mockVerifiedPrivyUser();
-      const suspendedMember = {
-        ...ACTIVE_MEMBER,
-        suspendedAt: new Date("2026-06-01T00:00:00.000Z"),
-      };
-      mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(suspendedMember);
-      mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
-        accountGroupMemberships: [],
-        billingStatus: suspendedMember.billingStatus,
-        suspendedAt: suspendedMember.suspendedAt,
-        threadContainer: null,
-      });
-
+    it("rejects a session refused by the suspended-member authentication boundary", async () => {
+      mocks.readHostedAuthSession.mockResolvedValue({ session: null });
       const response = await signInTokenRoute.POST(signInTokenRequest({}));
-
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(401);
       expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
     });
 
     it("rejects malformed sdkVersions metadata", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const arrayResponse = await signInTokenRoute.POST(
         signInTokenRequest({ sdkVersions: ["vital"] }),
@@ -821,7 +777,7 @@ describe("device sync companion routes", () => {
     it.each([null, 17, "automatic", "connect "])(
       "rejects invalid connection intent %j before reaching Junction",
       async (connectionIntent) => {
-        mockVerifiedPrivyUser();
+        mockVerifiedHostedSession();
 
         const response = await signInTokenRoute.POST(signInTokenRequest({
           connectionIntent,
@@ -836,19 +792,19 @@ describe("device sync companion routes", () => {
     );
 
     it("rejects requests with an invalid bearer token", async () => {
-      mocks.verifyIdentityToken.mockRejectedValue(new Error("invalid token"));
+      mocks.readHostedAuthSession.mockResolvedValue({ session: null });
 
       const response = await signInTokenRoute.POST(signInTokenRequest({}));
 
       expect(response.status).toBe(401);
       expect(await response.json()).toMatchObject({
-        error: { code: "PRIVY_AUTH_FAILED" },
+        error: { code: "AUTH_REQUIRED" },
       });
       expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
     });
 
     it("issues a device sign-in token when launch-document acceptance is stale", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await signInTokenRoute.POST(signInTokenRequest({}));
 
@@ -861,7 +817,7 @@ describe("device sync companion routes", () => {
     });
 
     it("returns a retryable error before Junction when a pending activation wake is rejected", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.prismaClient.hostedMailboxItem.findUnique.mockResolvedValue({
         consumedAt: null,
         id: "mailbox_activation_1",
@@ -894,7 +850,7 @@ describe("device sync companion routes", () => {
     });
 
     it("issues a device sign-in token after a pending activation wake is accepted", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.prismaClient.hostedMailboxItem.findUnique.mockResolvedValue({
         consumedAt: null,
         id: "mailbox_activation_1",
@@ -909,7 +865,7 @@ describe("device sync companion routes", () => {
     });
 
     it("does not re-signal a consumed activation before issuing a device sign-in token", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.prismaClient.hostedMailboxItem.findUnique.mockResolvedValue({
         consumedAt: new Date("2026-07-09T11:59:00.000Z"),
         id: "mailbox_activation_1",
@@ -924,7 +880,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects a device sign-in token without both historical launch grants", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       rejectHistoricalLaunchConsent();
 
       const response = await signInTokenRoute.POST(signInTokenRequest({}));
@@ -937,7 +893,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects malformed installation metadata without reaching Junction", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await signInTokenRoute.POST(signInTokenRequest({ platform: 17 }));
 
@@ -949,7 +905,7 @@ describe("device sync companion routes", () => {
     });
 
     it("accepts Android companion platform metadata", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await signInTokenRoute.POST(signInTokenRequest({
         connectionIntent: "connect",
@@ -965,7 +921,7 @@ describe("device sync companion routes", () => {
     });
 
     it("requires Android companion requests to declare their lifecycle intent", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await signInTokenRoute.POST(signInTokenRequest({
         platform: "android",
@@ -979,7 +935,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects unsupported companion platform metadata without reaching Junction", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await signInTokenRoute.POST(signInTokenRequest({ platform: "web" }));
 
@@ -988,7 +944,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects empty companion platform metadata without reaching Junction", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await signInTokenRoute.POST(signInTokenRequest({ platform: "" }));
 
@@ -1000,7 +956,7 @@ describe("device sync companion routes", () => {
     });
 
     it("returns exactly the sign-in token and environment for the resolved member", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await signInTokenRoute.POST(signInTokenRequest({
         appInstallationId: "install-1",
@@ -1027,7 +983,7 @@ describe("device sync companion routes", () => {
     });
 
     it("forwards passive session repair as resume intent", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await signInTokenRoute.POST(signInTokenRequest({
         connectionIntent: "resume",
@@ -1043,7 +999,7 @@ describe("device sync companion routes", () => {
     });
 
     it("returns a typed reconnect requirement for terminal server state", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       mocks.createSdkSignInSession.mockRejectedValueOnce(deviceSyncError({
         code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
@@ -1068,7 +1024,7 @@ describe("device sync companion routes", () => {
     });
 
     it("accepts an empty request body", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await signInTokenRoute.POST(signInTokenRequest());
 
@@ -1085,7 +1041,7 @@ describe("device sync companion routes", () => {
     });
 
     it("never passes the sign-in token to any logger call", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       const consoleSpies = (["debug", "error", "info", "log", "warn"] as const).map((level) =>
         vi.spyOn(console, level).mockImplementation(() => {}),
       );
@@ -1105,7 +1061,7 @@ describe("device sync companion routes", () => {
     });
 
     it("keeps the sign-in token out of error logging when downstream calls fail after auth", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       const consoleSpies = (["debug", "error", "info", "log", "warn"] as const).map((level) =>
         vi.spyOn(console, level).mockImplementation(() => {}),
       );
@@ -1140,7 +1096,7 @@ describe("device sync companion routes", () => {
     });
 
     it("accepts current device observations when launch-document acceptance is stale", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await hrvRmssdRoute.POST(hrvRmssdRequest(validHrvObservation));
 
@@ -1153,7 +1109,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects current device observations without both historical launch grants", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       rejectHistoricalLaunchConsent();
 
       const response = await hrvRmssdRoute.POST(hrvRmssdRequest(validHrvObservation));
@@ -1166,7 +1122,7 @@ describe("device sync companion routes", () => {
     });
 
     it("accepts exactly one compact derived observation without echoing the value", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await hrvRmssdRoute.POST(hrvRmssdRequest(validHrvObservation));
       const responseBody = await response.json();
@@ -1200,7 +1156,7 @@ describe("device sync companion routes", () => {
         captureId: "wearable_serial_1234567890",
       }],
     ])("rejects %s before staging", async (_label, observation) => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await hrvRmssdRoute.POST(hrvRmssdRequest(observation));
 
@@ -1225,7 +1181,7 @@ describe("device sync companion routes", () => {
       _label,
       observation,
     ) => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await hrvRmssdRoute.POST(hrvRmssdRequest(observation));
 
@@ -1248,7 +1204,7 @@ describe("device sync companion routes", () => {
       ["capture end offset", { captureEndUtcOffsetMinutes: -4 * 60 }],
       ["aggregate interval coverage", { acceptedCoverageMs: 72 * 280_000 }],
     ])("rejects raw %s fields before staging", async (_label, rawField) => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await hrvRmssdRoute.POST(hrvRmssdRequest({
         ...validHrvObservation,
@@ -1263,7 +1219,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects oversized request bodies before staging", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await hrvRmssdRoute.POST(hrvRmssdRequest({
         ...validHrvObservation,
@@ -1275,7 +1231,7 @@ describe("device sync companion routes", () => {
     });
 
     it("keeps malformed HRV JSON fragments out of logs", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       const rawHealthMarker = "raw-rr-interval-811ms-do-not-log";
       const consoleSpies = (["debug", "error", "info", "log", "warn"] as const).map((level) =>
         vi.spyOn(console, level).mockImplementation(() => {}),
@@ -1285,7 +1241,7 @@ describe("device sync companion routes", () => {
         {
           body: `{"rrIntervals":[${rawHealthMarker}]}`,
           headers: {
-            authorization: `Bearer ${LEGACY_TOKEN}`,
+            authorization: `Bearer ${NATIVE_TOKEN}`,
             "content-type": "application/json",
           },
           method: "POST",
@@ -1320,7 +1276,7 @@ describe("device sync companion routes", () => {
     });
 
     it("reads current device sync status when launch-document acceptance is stale", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await statusRoute.GET(statusRequest());
 
@@ -1339,7 +1295,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects current device sync status without both historical launch grants", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       rejectHistoricalLaunchConsent();
 
       const response = await statusRoute.GET(statusRequest());
@@ -1352,7 +1308,7 @@ describe("device sync companion routes", () => {
     });
 
     it("returns empty evidence when the member has no junction connection", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listMemberConnectionStatuses.mockResolvedValue([]);
 
       const response = await statusRoute.GET(statusRequest());
@@ -1374,7 +1330,7 @@ describe("device sync companion routes", () => {
     });
 
     it("returns unscoped status for a Junction connection with all 33 configured sources", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listMemberConnectionStatuses.mockResolvedValue([{
         id: "dsc_1",
         status: "active",
@@ -1418,7 +1374,7 @@ describe("device sync companion routes", () => {
     });
 
     it("maps webhook receipts and source availability into per-resource evidence", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listMemberConnectionStatuses.mockResolvedValue([
         {
           id: "dsc_1",
@@ -1499,7 +1455,7 @@ describe("device sync companion routes", () => {
     });
 
     it("uses canonical import completion time as backend-confirmed freshness", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listMemberConnectionStatuses.mockResolvedValue([{
         id: "dsc_1",
         status: "active",
@@ -1520,7 +1476,7 @@ describe("device sync companion routes", () => {
       }]);
 
       const response = await statusRoute.GET(statusRequest(
-        LEGACY_TOKEN,
+        NATIVE_TOKEN,
         "apple_health_kit",
       ));
 
@@ -1535,7 +1491,7 @@ describe("device sync companion routes", () => {
     });
 
     it("does not revive a disconnected source from a later import acknowledgement", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listMemberConnectionStatuses.mockResolvedValue([{
         id: "dsc_1",
         status: "active",
@@ -1557,7 +1513,7 @@ describe("device sync companion routes", () => {
       }]);
 
       const response = await statusRoute.GET(statusRequest(
-        LEGACY_TOKEN,
+        NATIVE_TOKEN,
         "apple_health_kit",
       ));
 
@@ -1570,7 +1526,7 @@ describe("device sync companion routes", () => {
     });
 
     it("scopes availability and receipt reads to Health Connect", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listMemberConnectionStatuses.mockResolvedValue([{
         id: "dsc_1",
         status: "active",
@@ -1597,7 +1553,7 @@ describe("device sync companion routes", () => {
       }]);
 
       const response = await statusRoute.GET(statusRequest(
-        LEGACY_TOKEN,
+        NATIVE_TOKEN,
         "health_connect",
       ));
 
@@ -1629,7 +1585,7 @@ describe("device sync companion routes", () => {
     });
 
     it("invalidates Health Connect receipts older than a disconnected source", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listMemberConnectionStatuses.mockResolvedValue([{
         id: "dsc_1",
         status: "active",
@@ -1659,7 +1615,7 @@ describe("device sync companion routes", () => {
       }]);
 
       const response = await statusRoute.GET(statusRequest(
-        LEGACY_TOKEN,
+        NATIVE_TOKEN,
         "health_connect",
       ));
 
@@ -1672,7 +1628,7 @@ describe("device sync companion routes", () => {
     });
 
     it("accepts a Health Connect receipt newer than a disconnected source projection", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listMemberConnectionStatuses.mockResolvedValue([{
         id: "dsc_1",
         status: "active",
@@ -1695,7 +1651,7 @@ describe("device sync companion routes", () => {
       }]);
 
       const response = await statusRoute.GET(statusRequest(
-        LEGACY_TOKEN,
+        NATIVE_TOKEN,
         "health_connect",
       ));
 
@@ -1710,7 +1666,7 @@ describe("device sync companion routes", () => {
     });
 
     it("accepts the first source-attributed receipt before its source projection exists", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listMemberConnectionStatuses.mockResolvedValue([{
         id: "dsc_1",
         status: "active",
@@ -1730,7 +1686,7 @@ describe("device sync companion routes", () => {
       }]);
 
       const response = await statusRoute.GET(statusRequest(
-        LEGACY_TOKEN,
+        NATIVE_TOKEN,
         "health_connect",
       ));
 
@@ -1745,7 +1701,7 @@ describe("device sync companion routes", () => {
     });
 
     it("reads 32 Junction rows through one narrow connection, one source, and one signal query", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       const connectionIds = Array.from({ length: 32 }, (_, index) =>
         `dsc_${String(index + 1).padStart(2, "0")}`
       );
@@ -1814,11 +1770,11 @@ describe("device sync companion routes", () => {
     });
 
     it("does not use scoped receipts from a connection requiring reauthorization", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listMemberConnectionStatuses.mockResolvedValue([]);
 
       const response = await statusRoute.GET(statusRequest(
-        LEGACY_TOKEN,
+        NATIVE_TOKEN,
         "health_connect",
       ));
 
@@ -1861,7 +1817,7 @@ describe("device sync companion routes", () => {
     });
 
     it("stages current device metadata when launch-document acceptance is stale", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listConnectionsForUser.mockResolvedValue([{
         id: "dsc_1",
         provider: "junction",
@@ -1882,7 +1838,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects current device metadata without both historical launch grants", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       rejectHistoricalLaunchConsent();
 
       const response = await healthMetadataRoute.POST(healthMetadataRequest({
@@ -1898,7 +1854,7 @@ describe("device sync companion routes", () => {
     });
 
     it("stages on the sole active Junction connection before source projection", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listConnectionsForUser.mockResolvedValue([{
         id: "dsc_1",
         provider: "junction",
@@ -1953,7 +1909,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects metadata from a source-specific Apple Health disconnect", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listConnectionsForUser.mockResolvedValue([
         { id: "dsc_1", provider: "junction", status: "active" },
       ]);
@@ -1980,7 +1936,7 @@ describe("device sync companion routes", () => {
     });
 
     it("keeps durable batch identity stable across receipt-time retries", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listConnectionsForUser.mockResolvedValue([{
         id: "dsc_1",
         provider: "junction",
@@ -2007,7 +1963,7 @@ describe("device sync companion routes", () => {
     });
 
     it("accepts closed value, sync-version, history, and future-skew boundaries", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listConnectionsForUser.mockResolvedValue([{
         id: "dsc_1",
         provider: "junction",
@@ -2041,7 +1997,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects unknown fields, duplicate hashes, and out-of-range values", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listConnectionsForUser.mockResolvedValue([{
         id: "dsc_1",
         provider: "junction",
@@ -2117,7 +2073,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects payloads over the closed route body limit", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
 
       const response = await healthMetadataRoute.POST(healthMetadataRequest({
         padding: "x".repeat(64_000),
@@ -2130,7 +2086,7 @@ describe("device sync companion routes", () => {
     });
 
     it("keeps malformed health JSON fragments out of logs", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       const rawHealthMarker = "raw-health-value-do-not-log";
       const consoleSpies = (["debug", "error", "info", "log", "warn"] as const).map((level) =>
         vi.spyOn(console, level).mockImplementation(() => {}),
@@ -2140,7 +2096,7 @@ describe("device sync companion routes", () => {
         {
           body: `{"value":${rawHealthMarker}}`,
           headers: {
-            authorization: `Bearer ${LEGACY_TOKEN}`,
+            authorization: `Bearer ${NATIVE_TOKEN}`,
             "content-type": "application/json",
           },
           method: "POST",
@@ -2164,7 +2120,7 @@ describe("device sync companion routes", () => {
     });
 
     it("uses source projection to disambiguate multiple active Junction connections", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listConnectionsForUser.mockResolvedValue([
         { id: "dsc_1", provider: "junction", status: "active" },
         { id: "dsc_2", provider: "junction", status: "active" },
@@ -2187,7 +2143,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects ambiguous active Junction connections without source projection", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listConnectionsForUser.mockResolvedValue([
         { id: "dsc_1", provider: "junction", status: "active" },
         { id: "dsc_2", provider: "junction", status: "active" },
@@ -2206,7 +2162,7 @@ describe("device sync companion routes", () => {
     });
 
     it("rejects uploads when Apple Health has no active runtime lane", async () => {
-      mockVerifiedPrivyUser();
+      mockVerifiedHostedSession();
       mocks.listConnectionsForUser.mockResolvedValue([
         { id: "dsc_old", provider: "junction", status: "disconnected" },
       ]);

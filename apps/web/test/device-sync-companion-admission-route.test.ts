@@ -191,9 +191,9 @@ describe("POST /api/device-sync/companion/admission", () => {
       status: 403,
     },
     {
-      code: "PRIVY_USER_MISMATCH",
-      message: "Use the existing account to continue.",
-      status: 409,
+      code: "AUTH_CLIENT_UPGRADE_REQUIRED",
+      message: "Update the app to continue.",
+      status: 426,
     },
   ])("returns $code without crossing into device sync", async ({ code, message, status }) => {
     mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
@@ -209,30 +209,6 @@ describe("POST /api/device-sync/companion/admission", () => {
     expect(response.status).toBe(status);
     await expect(response.json()).resolves.toMatchObject({
       error: { code },
-    });
-    expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    "PRIVY_ACCOUNT_REQUIRED",
-    "PRIVY_AUTH_FAILED",
-  ])("maps %s to the public login recovery", async (code) => {
-    mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
-      hostedOnboardingError({
-        code,
-        httpStatus: 401,
-        message: "Request a fresh code and try again.",
-      }),
-    );
-
-    const response = await route.POST(request());
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "AUTH_REQUIRED",
-        message: "Sign in to continue.",
-      },
     });
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
   });
@@ -260,7 +236,7 @@ describe("POST /api/device-sync/companion/admission", () => {
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
   });
 
-  it("preserves account conflicts for alternate-sign-in recovery", async () => {
+  it("keeps unknown account conflicts in support recovery", async () => {
     mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
       hostedOnboardingError({
         code: "PRIVY_IDENTITY_CONFLICT",
@@ -274,7 +250,7 @@ describe("POST /api/device-sync/companion/admission", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
       error: {
-        code: "PRIVY_IDENTITY_CONFLICT",
+        code: "COMPANION_ADMISSION_SUPPORT_REQUIRED",
         retryable: false,
       },
     });

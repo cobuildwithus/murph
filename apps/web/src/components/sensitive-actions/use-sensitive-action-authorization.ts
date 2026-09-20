@@ -10,14 +10,11 @@ import {
   type SensitiveActionKind,
 } from "@/src/lib/sensitive-actions/shared";
 
-import { useLegacyApprovalRepair } from "./use-legacy-approval-repair";
-import { useLegacyWalletApproval } from "./legacy-wallet-approval-context";
+import { useInitialApprovalEnrollment } from "./use-initial-approval-enrollment";
 import type { HostedCredentialChange } from "@/src/lib/better-auth/credential-change";
 
 export function useSensitiveActionAuthorization() {
-  const repair = useLegacyApprovalRepair();
-  const legacy = useLegacyWalletApproval();
-  const { setup } = legacy;
+  const repair = useInitialApprovalEnrollment();
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   function assertActive() {
@@ -30,11 +27,11 @@ export function useSensitiveActionAuthorization() {
     refreshChallenge?: () => Promise<SensitiveActionChallengeResponse>,
   ): Promise<SensitiveActionAuthorization> {
     const selectMethod = (current: SensitiveActionChallengeResponse) => requestHostedOnboardingJson<
-      { method: "legacy-repair" } | { method: "wallet"; privyUserId: string } | { method: "passkey"; options: PublicKeyCredentialRequestOptionsJSON }
+      { method: "initial" } | { method: "passkey"; options: PublicKeyCredentialRequestOptionsJSON }
     >({ method: "POST", payload: { token: current.token, ...(credentialChange ? { credentialChange } : {}) }, url: "/api/settings/approval-passkeys/authenticate" });
     let method = await selectMethod(challenge);
     assertActive();
-    if (method.method === "legacy-repair") {
+    if (method.method === "initial") {
       // Never repair after a failed native assertion. Registration does not sign
       // the old challenge (reauthentication may also have replaced the session).
       await repair.repair();
@@ -50,8 +47,7 @@ export function useSensitiveActionAuthorization() {
       assertActive();
       return { method: "passkey", assertion, token: challenge.token };
     }
-    if (method.method !== "wallet" || !method.privyUserId) throw new Error("Secure approval could not be selected. Try again.");
-    return legacy.signChallenge(challenge, method.privyUserId);
+    throw new Error("Secure approval could not be selected. Try again.");
   }
 
   async function authorize(kind: SensitiveActionKind): Promise<SensitiveActionAuthorization> {
@@ -63,16 +59,5 @@ export function useSensitiveActionAuthorization() {
     return signChallenge(await getChallenge(), undefined, getChallenge);
   }
 
-  return {
-    authorize,
-    signChallenge,
-    setup: {
-      ...setup,
-      pendingLabel: repair.pendingLabel ?? setup.pendingLabel,
-      // The action endpoint owns current app identity and factor selection.
-      // SDK restoration is an approval step, never a primary-login gate.
-      clientAuthenticated: true,
-      ready: true,
-    },
-  };
+  return { authorize, signChallenge };
 }

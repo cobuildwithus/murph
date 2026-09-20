@@ -29,27 +29,6 @@ import {
   readHostedMemberRoutingPrivateState,
 } from "./member-private-codecs";
 import { projectHostedMemberAssistantPreferences } from "./member-preferences";
-import {
-  extractHostedPrivyEmailAccount,
-  extractHostedPrivyPhoneAccount,
-  extractHostedPrivyVerifiedEmailAccount,
-  resolveHostedPrivyLinkedAccounts,
-  resolveHostedPrivyTelegramAccountSelection,
-  type HostedPrivyLinkedAccountContainer,
-} from "./privy-shared";
-import { normalizePhoneNumber } from "./phone";
-import type { HostedPrivyAuthMethod } from "./types";
-
-export type HostedPrivySignInStatus =
-  | "absent"
-  | "ambiguous"
-  | "matched"
-  | "mismatched";
-
-export interface HostedPrivySignInState {
-  removable: boolean;
-  status: HostedPrivySignInStatus;
-}
 
 export interface HostedAccountSettingsSnapshot {
   assistant?: {
@@ -73,8 +52,6 @@ export interface HostedAccountSettingsSnapshot {
     number: string | null;
     verifiedAt: string | null;
   };
-  /** One server-derived source of truth for provider/canonical agreement. */
-  privySignInStates?: Record<HostedPrivyAuthMethod, HostedPrivySignInState> | null;
   /**
    * Browser-local invalidation only; it grants no referral authority. Absent
    * only in inert legacy fixtures—the server projection always supplies it.
@@ -291,118 +268,4 @@ export async function readHostedAccountSettingsPageSnapshot(input: {
         }
       : null,
   };
-}
-
-export function withServerApprovedPrivyAccountHints(input: {
-  serverApprovedPrivyUser?: HostedPrivyLinkedAccountContainer | null;
-  snapshot: HostedAccountSettingsSnapshot;
-}): HostedAccountSettingsSnapshot {
-  const providerUser = input.serverApprovedPrivyUser;
-  const privySignInStates = providerUser
-    ? resolveHostedPrivySignInStates(input.snapshot, providerUser)
-    : null;
-
-  return {
-    ...input.snapshot,
-    privySignInStates,
-    telegram: {
-      ...input.snapshot.telegram,
-      username: resolveHostedAccountTelegramUsername({
-        serverApprovedPrivyUser: providerUser,
-        telegramUserId: input.snapshot.telegram.telegramUserId,
-      }),
-    },
-  };
-}
-
-function resolveHostedPrivySignInStates(
-  snapshot: HostedAccountSettingsSnapshot,
-  providerUser: HostedPrivyLinkedAccountContainer,
-): Record<HostedPrivyAuthMethod, HostedPrivySignInState> {
-  const linkedAccounts = resolveHostedPrivyLinkedAccounts(providerUser);
-  const linkedPhone = extractHostedPrivyPhoneAccount(linkedAccounts);
-  const linkedEmail = extractHostedPrivyEmailAccount(linkedAccounts);
-  const telegramSelection = resolveHostedPrivyTelegramAccountSelection(providerUser);
-  const verifiedMethods = new Set<HostedPrivyAuthMethod>([
-    ...(linkedPhone ? ["phone" as const] : []),
-    ...(extractHostedPrivyVerifiedEmailAccount(linkedAccounts)
-      ? ["email" as const]
-      : []),
-    ...(telegramSelection.account
-      ? ["telegram" as const]
-      : []),
-  ]);
-  const hasAlternative = (method: HostedPrivyAuthMethod) =>
-    [...verifiedMethods].some((candidate) => candidate !== method);
-
-  const phoneStatus = resolvePrivySignInStatus(
-    normalizePhoneNumber(snapshot.phone.number),
-    linkedPhone?.number ?? null,
-  );
-  const emailStatus = resolvePrivySignInStatus(
-    normalizeComparableEmail(snapshot.email.address),
-    normalizeComparableEmail(linkedEmail?.address),
-  );
-  const telegramStatus = telegramSelection.ambiguous
-    ? "ambiguous"
-    : resolvePrivySignInStatus(
-        snapshot.telegram.telegramUserId,
-        telegramSelection.account?.telegramUserId ?? null,
-      );
-
-  return {
-    email: {
-      removable:
-        emailStatus === "matched"
-        && Boolean(snapshot.email.verifiedAt)
-        && hasAlternative("email"),
-      status: emailStatus,
-    },
-    phone: {
-      removable:
-        phoneStatus === "matched"
-        && Boolean(snapshot.phone.verifiedAt)
-        && hasAlternative("phone"),
-      status: phoneStatus,
-    },
-    telegram: {
-      removable: telegramStatus === "matched" && hasAlternative("telegram"),
-      status: telegramStatus,
-    },
-  };
-}
-
-function resolvePrivySignInStatus(
-  canonicalIdentity: string | null | undefined,
-  providerIdentity: string | null | undefined,
-): HostedPrivySignInStatus {
-  if (!providerIdentity) {
-    return "absent";
-  }
-
-  return canonicalIdentity === providerIdentity ? "matched" : "mismatched";
-}
-
-function normalizeComparableEmail(value: string | null | undefined): string | null {
-  const normalized = value?.trim().toLowerCase();
-  return normalized || null;
-}
-
-function resolveHostedAccountTelegramUsername(input: {
-  serverApprovedPrivyUser?: HostedPrivyLinkedAccountContainer | null;
-  telegramUserId: string | null;
-}): string | null {
-  if (!input.telegramUserId) {
-    return null;
-  }
-
-  const telegramSelection = resolveHostedPrivyTelegramAccountSelection(
-    input.serverApprovedPrivyUser,
-  );
-  const linkedTelegram = telegramSelection.account;
-
-  return !telegramSelection.ambiguous
-    && linkedTelegram?.telegramUserId === input.telegramUserId
-    ? linkedTelegram.username
-    : null;
 }

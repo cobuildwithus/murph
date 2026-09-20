@@ -64,7 +64,7 @@ describe("settings privacy delete route", () => {
       member: {
         id: "member_123",
       },
-      privyUserId: "privy-user-123",
+
       sessionId: "session_123",
     });
     mocks.buildHostedAppSessionClearCookies.mockReturnValue([

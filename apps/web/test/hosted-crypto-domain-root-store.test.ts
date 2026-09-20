@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   HostedBillingStatus,
   Prisma,
-  type HostedMember,
+
   type HostedMemberIdentity,
 } from "@prisma/client";
 import {
@@ -85,13 +85,6 @@ vi.mock("../src/lib/hosted-crypto/gcp-kms", async (importOriginal) => {
   };
 });
 
-vi.mock("../src/lib/hosted-onboarding/privy", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/lib/hosted-onboarding/privy")>();
-  return {
-    ...actual,
-    readHostedPrivyUserById: privyUserMock.readHostedPrivyUserById,
-  };
-});
 
 afterEach(() => {
   gcpKmsMock.client = null;
@@ -1597,7 +1590,7 @@ test("assistant notification state keeps private-field envelope reads serial on 
     memberId,
     phoneNumber: "+12125550123",
     prisma: tx.prisma,
-    privyUserId: "did:privy:notification-transaction",
+
     signupPhoneCodeSendAttemptId: null,
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
@@ -3415,7 +3408,7 @@ test("hosted member identity upsert keeps private-field crypto inside the caller
     phoneNumber: "redacted-phone-token",
     phoneNumberVerifiedAt: null,
     prisma: tx.prisma,
-    privyUserId: null,
+
     signupPhoneCodeSendAttemptId: null,
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
@@ -3433,41 +3426,6 @@ test("hosted member identity upsert keeps private-field crypto inside the caller
   assert.equal(signCalls.length, 1);
 });
 
-test("hosted Privy member creation provisions the control root before private identity fields", async () => {
-  const { encryptCalls, signCalls, tx } = await createHostedWebCryptoTransactionFixture(
-    createHostedMemberIdentityServiceTransaction,
-  );
-  const { ensureHostedMemberForPrivyIdentityTx } = await import(
-    "../src/lib/hosted-onboarding/member-identity-service"
-  );
-
-  const member = await ensureHostedMemberForPrivyIdentityTx({
-    identity: {
-      email: null,
-      phone: {
-        number: "+15551234567",
-        verifiedAt: 1770000000,
-      },
-      telegram: null,
-      userId: "did:privy:user_test_control_root",
-    },
-    now: new Date("2026-05-02T00:00:00.000Z"),
-    prisma: tx.prisma,
-  });
-
-  assert.equal(tx.persistedEnvelopes.length, 1);
-  assert.equal(tx.persistedEnvelopes[0]?.domain, "control");
-  assert.equal(tx.persistedEnvelopes[0]?.userId, member.id);
-  assert.equal(encryptCalls.length, 1);
-  assert.equal(signCalls.length, 1);
-  expect(privyUserMock.readHostedPrivyUserById).toHaveBeenCalledWith(
-    "did:privy:user_test_control_root",
-    {
-      maxRetries: 0,
-      timeout: 5_000,
-    },
-  );
-});
 
 test.each([false, true])("phone channel welcome prepares real routing and mailbox crypto before its transaction (quota full: %s)", async (quotaFull) => {
   const { tx, decryptMetrics } = await createHostedWebCryptoTransactionFixture();
@@ -3485,7 +3443,7 @@ test.each([false, true])("phone channel welcome prepares real routing and mailbo
     });
   }
   const identity = await buildHostedMemberIdentityPrivateColumns({
-    memberId, phoneNumber: phone, prisma: tx.prisma, privyUserId: null,
+    memberId, phoneNumber: phone, prisma: tx.prisma,
     signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null, signupPhoneNumber: null,
   });
@@ -3574,7 +3532,7 @@ test("established phone welcome skips the full snapshot and KMS work that previo
     domain: "control", prisma: tx.prisma, userId: memberId, reason: "test.phone-preflight",
   });
   const identity = await buildHostedMemberIdentityPrivateColumns({
-    memberId, phoneNumber: "+15550001001", prisma: tx.prisma, privyUserId: null,
+    memberId, phoneNumber: "+15550001001", prisma: tx.prisma,
     signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null, signupPhoneNumber: null,
   });
@@ -4042,93 +4000,6 @@ function createHostedMemberIdentityTransaction(): HostedCryptoTestTransaction {
   };
 }
 
-function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransaction {
-  const tx = createHostedMemberIdentityTransaction();
-  Object.assign(tx.prisma, { hostedRuntimeOwner: { create: vi.fn().mockResolvedValue({}) } });
-  const hostedMember = {
-    async create(input: {
-      data: Prisma.HostedMemberUncheckedCreateInput;
-    }): Promise<HostedMember> {
-      const now = new Date("2026-05-02T00:00:00.000Z");
-      return {
-        assistantPersona: input.data.assistantPersona ?? null,
-        assistantPersonaCausalSeq:
-          input.data.assistantPersonaCausalSeq === undefined ||
-          input.data.assistantPersonaCausalSeq === null
-            ? null
-            : BigInt(input.data.assistantPersonaCausalSeq),
-        groupJournalCaptureConsentRequestedAt: null,
-        groupJournalCaptureEnabled: null,
-        assistantDetail: null,
-        assistantDetailCausalSeq:
-          input.data.assistantDetailCausalSeq === undefined ||
-          input.data.assistantDetailCausalSeq === null
-            ? null
-            : BigInt(input.data.assistantDetailCausalSeq),
-        assistantHumor: null,
-        assistantHumorCausalSeq:
-          input.data.assistantHumorCausalSeq === undefined ||
-          input.data.assistantHumorCausalSeq === null
-            ? null
-            : BigInt(input.data.assistantHumorCausalSeq),
-        assistantModelPreference: null,
-        assistantProviderPreference: null,
-        assistantReasoningEffortPreference: null,
-        assistantPush: null,
-        assistantPushCausalSeq:
-          input.data.assistantPushCausalSeq === undefined ||
-          input.data.assistantPushCausalSeq === null
-            ? null
-            : BigInt(input.data.assistantPushCausalSeq),
-        assistantUnhinged: null,
-        assistantUnhingedCausalSeq:
-          input.data.assistantUnhingedCausalSeq === undefined ||
-          input.data.assistantUnhingedCausalSeq === null
-            ? null
-            : BigInt(input.data.assistantUnhingedCausalSeq),
-        assistantTone: null,
-        assistantToneCausalSeq: null,
-        assistantVoice: null,
-        assistantVoiceCausalSeq: null,
-        initialOnboardingCompletedAt: null,
-        billingStatus: input.data.billingStatus ?? HostedBillingStatus.not_started,
-        createdAt: now,
-        groupPrivateConversionTrackedAt:
-          input.data.groupPrivateConversionTrackedAt instanceof Date
-            ? input.data.groupPrivateConversionTrackedAt
-            : null,
-        id: input.data.id,
-        pendingActivationTimeZone: null,
-        signupNotificationContextEncrypted: null,
-        signupNotificationContextExpiresAt: null,
-        signupNotificationEmailAttemptedAt: null,
-        signupWelcomeEmailAttemptedAt: null,
-        suspendedAt: input.data.suspendedAt instanceof Date ? input.data.suspendedAt : null,
-        updatedAt: now,
-        usageCreditBalanceUsdMicros:
-          input.data.usageCreditBalanceUsdMicros === null
-            ? null
-            : BigInt(input.data.usageCreditBalanceUsdMicros ?? 0),
-        usageCreditLedgerVersion:
-          input.data.usageCreditLedgerVersion === null
-            ? null
-            : BigInt(input.data.usageCreditLedgerVersion ?? 0),
-      };
-    },
-  };
-  const hostedMemberIdentity = Object.assign({}, tx.prisma.hostedMemberIdentity, {
-    findFirst: async (): Promise<null> => null,
-    findMany: async (): Promise<[]> => [],
-  });
-
-  return {
-    ...tx,
-    prisma: Object.assign(tx.prisma, {
-      hostedMember,
-      hostedMemberIdentity,
-    }),
-  };
-}
 
 function buildHostedMemberIdentityRecord(
   input: Prisma.HostedMemberIdentityUncheckedCreateInput,
@@ -4145,8 +4016,8 @@ function buildHostedMemberIdentityRecord(
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt instanceof Date
       ? input.phoneNumberVerifiedAt
       : null,
-    privyUserIdEncrypted: nullableString(input.privyUserIdEncrypted),
-    privyUserLookupKey: nullableString(input.privyUserLookupKey),
+
+
     signupPhoneCodeSendAttemptId: nullableString(input.signupPhoneCodeSendAttemptId),
     signupPhoneCodeSendAttemptStartedAt:
       input.signupPhoneCodeSendAttemptStartedAt instanceof Date
@@ -4157,11 +4028,8 @@ function buildHostedMemberIdentityRecord(
       : null,
     signupPhoneNumberEncrypted: nullableString(input.signupPhoneNumberEncrypted),
     updatedAt: now,
-    walletAddressEncrypted: nullableString(input.walletAddressEncrypted),
-    walletAddressLookupKey: nullableString(input.walletAddressLookupKey),
-    walletChainType: nullableString(input.walletChainType),
-    walletCreatedAt: input.walletCreatedAt instanceof Date ? input.walletCreatedAt : null,
-    walletProvider: nullableString(input.walletProvider),
+
+
   };
 }
 

@@ -1,3 +1,4 @@
+import { removeHostedLocalWebAuthorityEnvironment } from "../authority-env.ts";
 import { createHash, createPrivateKey, createPublicKey, randomBytes } from "node:crypto";
 import { lstat, readFile, readlink } from "node:fs/promises";
 import path from "node:path";
@@ -226,7 +227,7 @@ export function mergeCloudflareLocalEnv(input: {
     ...input.existing,
     ...normalizedOverrides,
   };
-  delete resolvedExisting.HOSTED_APP_SESSION_HMAC_KEY;
+  removeHostedLocalWebAuthorityEnvironment(resolvedExisting);
   assertNoDeprecatedHostedLocalCodexBridgeEnv(input.existing);
   assertNoDeprecatedHostedLocalCodexBridgeEnv(normalizedOverrides);
   stripStaleHostedLocalOidcJwksOverride({

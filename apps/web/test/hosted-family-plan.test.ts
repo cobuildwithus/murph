@@ -2336,15 +2336,13 @@ describe("hosted Family plan", () => {
       phoneLookupKey: null,
       phoneNumber: null,
       phoneNumberVerifiedAt: null,
-      privyUserId: null,
+
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
-      walletAddress: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
+
+
     };
     const preparedControlRoot = {
       domain: "control",
@@ -2405,18 +2403,15 @@ describe("hosted Family plan", () => {
       phoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
       phoneNumberEncrypted: "encrypted:+15550000000",
       phoneNumberVerifiedAt: now,
-      privyUserIdEncrypted: null,
-      privyUserLookupKey: null,
+
+
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumberEncrypted: null,
       updatedAt: now,
-      walletAddressEncrypted: null,
-      walletAddressLookupKey: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
+
+
     };
     const ownerRouting = {
       linqChatIdEncrypted: "encrypted:chat_owner",
@@ -2837,16 +2832,14 @@ describe("hosted Family plan", () => {
       phoneLookupKey: createHostedPhoneLookupKey("+15550001111"),
       phoneNumberEncrypted: "encrypted:+15550001111",
       phoneNumberVerifiedAt: new Date("2026-06-18T12:00:00.000Z"),
-      privyUserIdEncrypted: null,
-      privyUserLookupKey: null,
+
+
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumberEncrypted: null,
-      walletAddressEncrypted: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
+
+
     });
     tx.hostedMemberRouting.findUnique.mockResolvedValueOnce({
       linqChatIdEncrypted: "encrypted:owner_home_chat",
@@ -2913,16 +2906,14 @@ describe("hosted Family plan", () => {
       phoneLookupKey: ownerPhoneLookupKey,
       phoneNumberEncrypted: "encrypted:+15550001111",
       phoneNumberVerifiedAt: new Date("2026-06-18T12:00:00.000Z"),
-      privyUserIdEncrypted: null,
-      privyUserLookupKey: null,
+
+
       signupPhoneCodeSendAttemptId: null,
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumberEncrypted: null,
-      walletAddressEncrypted: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
+
+
     });
     tx.hostedMemberRouting.findUnique.mockResolvedValueOnce({
       linqChatIdEncrypted: "encrypted:legacy_home_chat",

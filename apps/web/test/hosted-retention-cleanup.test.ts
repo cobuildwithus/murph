@@ -17,7 +17,6 @@ import {
   HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS,
   HOSTED_RETENTION_BATCH_SIZE,
   HOSTED_RETENTION_MAX_BATCHES,
-  HOSTED_WEB_SESSION_RETENTION_MS,
   deleteExpiredHostedCallbackRequestNonces,
   runHostedControlPlaneRetentionCleanup,
   runHostedRuntimeSignalRetentionCleanup,
@@ -49,14 +48,6 @@ function findRetentionCall(
   return call;
 }
 
-function findRetentionCalls(
-  executeRaw: ReturnType<typeof vi.fn>,
-  fragment: string,
-): unknown[][] {
-  return executeRaw.mock.calls.filter((candidate) =>
-    sqlOf(candidate).includes(fragment)
-  );
-}
 
 /** Every retention statement resolves to `0`, so each category runs one batch. */
 function createRetentionPrisma(input?: {
@@ -161,7 +152,6 @@ describe("hosted retention cleanup", () => {
       expiredOperatorTaskResultsRetired: 2,
       expiredSensitiveActionChallengesDeleted: 2,
       expiredSignupNotificationContextsRetired: 3,
-      staleWebSessionsDeleted: 9,
     });
 
     const signupContextRetentionCall = findRetentionCall(
@@ -222,7 +212,7 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(20);
+    expect(executeRaw).toHaveBeenCalledTimes(18);
 
     const groupParticipantObservationCall = findRetentionCall(
       executeRaw,
@@ -294,19 +284,6 @@ describe("hosted retention cleanup", () => {
       ),
     ).toBe(false);
 
-    const webSessionCalls = findRetentionCalls(
-      executeRaw,
-      'DELETE FROM "hosted_web_session"',
-    );
-    expect(webSessionCalls).toHaveLength(2);
-    expect(sqlOf(webSessionCalls[0]!)).toContain('"expires_at" <');
-    expect(sqlOf(webSessionCalls[1]!)).toContain('"revoked_at" <');
-    for (const call of webSessionCalls) {
-      expect(call.slice(1)).toEqual([
-        new Date(now.getTime() - HOSTED_WEB_SESSION_RETENTION_MS),
-        HOSTED_RETENTION_BATCH_SIZE,
-      ]);
-    }
     expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 

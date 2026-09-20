@@ -231,13 +231,13 @@ it.each([false, true])(
     try {
       await scenario.issueHostedAppSession({
         memberId: "member_cookie_mode",
-        privyUserId: "did:privy:cookie_mode",
+
       });
 
       expect(mocks.issueHostedAppSessionForTest).toHaveBeenCalledWith(
         expect.objectContaining({
           memberId: "member_cookie_mode",
-          privyUserId: "did:privy:cookie_mode",
+
           secureCookieMode: webUsesProductionArtifact,
         }),
       );
@@ -632,6 +632,8 @@ async function startScenarioWithRealHarness() {
   mocks.startHostedLocalDevStack.mockImplementationOnce(async ({ env }) => ({
     config: resolveHostedLocalDevConfig(env),
     hostedAppSessionHmacKey: "synthetic-session-key",
+    hostedBetterAuthSecret: "synthetic-better-auth-secret",
+    hostedAuthStorageKey: "11".repeat(32),
     kill: vi.fn(),
     linqWebhookTargetUrl: null,
     oidcIdentity: { environment: "development", projectName: "murph", teamSlug: "local" },

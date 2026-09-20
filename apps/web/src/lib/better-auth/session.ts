@@ -4,7 +4,6 @@ import type { HostedAuthRecord, Prisma, PrismaClient } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
-import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { betterAuth } from "better-auth";
 import { createAuthEndpoint } from "better-auth/api";
@@ -41,12 +40,11 @@ export async function readHostedAuthSession(input: {
   const member = await readHostedMemberCoreState({ memberId: user.id, prisma: input.prisma });
   if (!member) return { session: null, headers: result.headers };
   assertHostedMemberNotSuspended(member);
-  const identity = await readHostedMemberIdentity({ memberId: member.id, prisma: input.prisma });
   const proof: HostedAuthSessionProof = {
     credentialDigest: credentialDigest(input.credential), expiresAt: current.expiresAt, row,
   };
   return { headers: result.headers, session: {
-    member, sessionId: row.id, expiresAt: current.expiresAt, privyUserId: identity?.privyUserId ?? null,
+    member, sessionId: row.id, expiresAt: current.expiresAt,
     primaryAuthenticatedAt: current.primaryAuthenticatedAt instanceof Date ? current.primaryAuthenticatedAt : null, proof,
   } };
 }

@@ -50,7 +50,7 @@ import {
   readHostedMemberSignupPhoneCodeAttempt,
   writeHostedMemberSignupPhoneState,
 } from "./hosted-member-identity-store";
-import { hasHostedPrivyPhoneAuthConfig } from "./privy";
+import { isHostedAuthSmsReady } from "../better-auth/delivery";
 import {
   getHostedOnboardingEnvironment,
   requireHostedOnboardingPublicBaseUrl,
@@ -103,7 +103,7 @@ export async function getHostedInviteStatus(input: {
   )
     ? getHostedDefaultBillingPlanCode()
     : (billingPlans[0]?.code ?? null);
-  const phoneAuthReady = hasHostedPrivyPhoneAuthConfig();
+  const phoneAuthReady = isHostedAuthSmsReady();
 
   if (!invite) {
     return {

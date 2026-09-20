@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { cn } from "@/src/lib/utils";
 
 import type { HostedFirstPartyAuthPanelView as HostedAuthPanelView } from "./hosted-first-party-auth-panel";
@@ -145,7 +145,7 @@ export function AuthDialog({
   description?: string;
   reauthenticate?: boolean;
   onReauthenticated?: () => void;
-  onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
+  onCompleted?: (payload: HostedAuthenticationCompletionPayload) => Promise<void> | void;
   requireLaunchConsentOnCompletion?: boolean;
   showPassiveLegalNotice?: boolean;
 }) {

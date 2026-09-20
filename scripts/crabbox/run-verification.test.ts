@@ -68,7 +68,6 @@ describe("Crabbox verification environment", () => {
       MURPH_VERIFY_EXECUTOR: "local",
       MURPH_VERIFY_PROFILE: "default",
       MURPH_VERIFY_SHARED_HOST: "0",
-      NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_crabbox_verify_placeholder1",
       PATH: "/usr/local/bin:/usr/bin:/bin",
       TERM: "xterm-256color",
       USER: "crabbox",

@@ -768,7 +768,7 @@ async function issueHostedBrowserSession(input: {
 }): Promise<string> {
   const session = await requireScenario().issueHostedAppSession({
     memberId: input.memberId,
-    privyUserId: `did:privy:${input.memberId}`,
+
   });
   const cookie = `${session.cookieName}=${encodeURIComponent(session.cookieValue)}`;
   await acceptHostedLaunchConsents({

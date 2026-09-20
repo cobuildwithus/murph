@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  hasHostedPrivyClientConfig,
+
   parseHostedSignupPhoneNumber,
-  requireHostedPrivyClientAppId,
+
   resolveHostedInstallScriptUrl,
-  resolveHostedPrivyClientAppId,
-  resolveHostedPrivyResourceHintOrigins,
+
+
   resolveHostedSignupPhoneNumber,
 } from "@/src/lib/hosted-onboarding/landing";
 
@@ -29,17 +29,6 @@ describe("hosted onboarding landing helpers", () => {
     expect(parseHostedSignupPhoneNumber("1234")).toBeNull();
   });
 
-  it("derives Privy client readiness from the public app id only", () => {
-    expect(resolveHostedPrivyClientAppId({} as NodeJS.ProcessEnv)).toBeNull();
-    expect(() => requireHostedPrivyClientAppId({} as NodeJS.ProcessEnv)).toThrow(
-      /NEXT_PUBLIC_PRIVY_APP_ID/u,
-    );
-    expect(hasHostedPrivyClientConfig(createProcessEnv({}))).toBe(false);
-    expect(hasHostedPrivyClientConfig(createProcessEnv({ NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123" }))).toBe(true);
-    expect(
-      requireHostedPrivyClientAppId(createProcessEnv({ NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123" })),
-    ).toBe("cm_app_123");
-  });
 
   it("derives the hosted install-script URL from the public base URL", () => {
     expect(resolveHostedInstallScriptUrl(createProcessEnv({}))).toBeNull();
@@ -65,84 +54,7 @@ describe("hosted onboarding landing helpers", () => {
     ).toBe("https://www.withmurph.ai/install.sh");
   });
 
-  it("derives Privy resource hint origins from hosted auth domains", () => {
-    expect(resolveHostedPrivyResourceHintOrigins(createProcessEnv({}))).toEqual([
-      "https://auth.privy.io",
-      "https://challenges.cloudflare.com",
-    ]);
-    expect(
-      resolveHostedPrivyResourceHintOrigins(
-        createProcessEnv({
-          PRIVY_CUSTOM_AUTH_DOMAIN: "privy.example.test/path",
-          PRIVY_BASE_DOMAIN: "withmurph.ai",
-        }),
-      ),
-    ).toEqual([
-      "https://auth.privy.io",
-      "https://privy.example.test",
-      "https://challenges.cloudflare.com",
-    ]);
-    expect(
-      resolveHostedPrivyResourceHintOrigins(
-        createProcessEnv({ PRIVY_BASE_DOMAIN: "https://www.withmurph.ai" }),
-      ),
-    ).toEqual([
-      "https://auth.privy.io",
-      "https://privy.withmurph.ai",
-      "https://challenges.cloudflare.com",
-    ]);
-    expect(
-      resolveHostedPrivyResourceHintOrigins(
-        createProcessEnv({ HOSTED_WEB_BASE_URL: "https://www.example.test" }),
-      ),
-    ).toEqual([
-      "https://auth.privy.io",
-      "https://privy.example.test",
-      "https://challenges.cloudflare.com",
-    ]);
-    expect(
-      resolveHostedPrivyResourceHintOrigins(
-        createProcessEnv({ HOSTED_WEB_BASE_URL: "https://app.example.test" }),
-      ),
-    ).toEqual([
-      "https://auth.privy.io",
-      "https://privy.app.example.test",
-      "https://privy.example.test",
-      "https://challenges.cloudflare.com",
-    ]);
-    expect(
-      resolveHostedPrivyResourceHintOrigins(
-        createProcessEnv({ PRIVY_CUSTOM_AUTH_DOMAIN: "http://localhost:3000" }),
-      ),
-    ).toEqual([
-      "https://auth.privy.io",
-      "https://challenges.cloudflare.com",
-    ]);
-    expect(
-      resolveHostedPrivyResourceHintOrigins(
-        createProcessEnv({ PRIVY_CUSTOM_AUTH_DOMAIN: "https://127.0.0.2:3000" }),
-      ),
-    ).toEqual([
-      "https://auth.privy.io",
-      "https://challenges.cloudflare.com",
-    ]);
-    expect(
-      resolveHostedPrivyResourceHintOrigins(
-        createProcessEnv({ PRIVY_CUSTOM_AUTH_DOMAIN: "https://[::ffff:127.0.0.1]:3000" }),
-      ),
-    ).toEqual([
-      "https://auth.privy.io",
-      "https://challenges.cloudflare.com",
-    ]);
-    expect(
-      resolveHostedPrivyResourceHintOrigins(
-        createProcessEnv({ PRIVY_CUSTOM_AUTH_DOMAIN: "https://privy.localhost:3000" }),
-      ),
-    ).toEqual([
-      "https://auth.privy.io",
-      "https://challenges.cloudflare.com",
-    ]);
-  });
+
 });
 
 function createProcessEnv(values: Record<string, string>): NodeJS.ProcessEnv {

@@ -57,17 +57,6 @@ export function hostedBetterAuthOptions(input: {
     rateLimit: { enabled: true, customStorage: hostedAuthRateLimitStorage(input.prisma) },
     databaseHooks: {
       ...input.hooks,
-      user: {
-        ...input.hooks?.user,
-        create: {
-          ...input.hooks?.user?.create,
-          async before(user, context) {
-            const prepared = await input.hooks?.user?.create?.before?.(user, context);
-            if (prepared === false) return false;
-            return { data: { ...user, credentialsChangedAt: new Date(), ...(prepared && typeof prepared === "object" ? prepared.data : {}) } };
-          },
-        },
-      },
       session: {
         ...input.hooks?.session,
         create: {

@@ -4,10 +4,6 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
-  legacyWallet: vi.fn(() => ({ setup: {
-    clientAuthenticated: false, configured: false, error: null, pendingLabel: null, ready: true, walletAddress: null,
-    ensureConfigured: vi.fn(), ensureExistingFactor: vi.fn(), loginForSetup: vi.fn(),
-  }, signChallenge: vi.fn() })),
   openAuthDialog: vi.fn(),
   request: vi.fn(),
 }));
@@ -19,9 +15,7 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
 vi.mock("@/src/components/hosted-onboarding/client-api", async (original) => ({
   ...await original<typeof import("@/src/components/hosted-onboarding/client-api")>(), requestHostedOnboardingJson: mocks.request,
 }));
-vi.mock("@/src/components/sensitive-actions/legacy-wallet-approval-context", () => ({
-  useLegacyWalletApproval: mocks.legacyWallet,
-}));
+
 
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
 
@@ -31,7 +25,7 @@ function buttons(container: { querySelectorAll(selector: string): Iterable<{ tex
   return [...container.querySelectorAll("button")].map((button) => `${button.textContent}${button.disabled ? " (disabled)" : ""}`);
 }
 
-// The Settings control renders exactly the four outputs of readHostedSecureApprovalStatus.
+// The Settings control renders the outputs of readHostedSecureApprovalStatus.
 test("established Murph passkey shows recovery only", async () => {
   const rendered = await renderClientComponent(createElement(HostedPasskeySettings, {
     authenticated: true, enrollmentEnabled: true, secureApprovalStatus: { status: "configured", method: "passkey" },
@@ -47,18 +41,7 @@ test("new unprotected account offers initial setup", async () => {
   }));
   expect(rendered.container.textContent).toContain("Not set up");
   expect(buttons(rendered.container)).toEqual(["Set up"]);
-  expect(rendered.container.textContent).not.toContain("already linked");
-  await rendered.cleanup();
-});
-
-test("never-migrated legacy account offers the inline Murph passkey update", async () => {
-  const rendered = await renderClientComponent(createElement(HostedPasskeySettings, {
-    authenticated: true, enrollmentEnabled: true, secureApprovalStatus: { status: "not_configured", method: "legacy-repair" },
-  }));
-  expect(rendered.container.textContent).toContain("Update needed");
-  expect(buttons(rendered.container)).toEqual(["Add Murph passkey"]);
-  expect(rendered.container.textContent).toContain("sign-in method already linked to your account");
-  expect(rendered.container.textContent).toContain("cannot be replaced here");
+  expect(rendered.container.textContent).toContain("already linked");
   await rendered.cleanup();
 });
 
@@ -69,7 +52,6 @@ test("unavailable status stays closed without setup, restoration or migration ac
   expect(rendered.container.textContent).toContain("Unavailable");
   expect(rendered.container.textContent).toContain("temporarily unavailable");
   expect(buttons(rendered.container)).toEqual([]);
-  expect(mocks.legacyWallet).not.toHaveBeenCalled();
   expect(mocks.openAuthDialog).not.toHaveBeenCalled();
   expect(mocks.request).not.toHaveBeenCalled();
   await rendered.cleanup();

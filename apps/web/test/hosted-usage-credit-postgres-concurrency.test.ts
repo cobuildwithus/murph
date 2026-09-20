@@ -5520,7 +5520,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
                   cloudflareCompletedAt: null, environment: "test", id: cleanupId,
                   kmsKeyName: "projects/test/locations/global/keyRings/test/cryptoKeys/test",
                   nextAttemptAt: now, payloadCiphertext: "synthetic-kms-ciphertext",
-                  privyCompletedAt: now, privyUserLookupKey: null,
+
                   runtimeLogsCompletedAt: null, runtimeMemberIds: [fixture.payerMemberId],
                   stripeCustomerIds: [customerId], stripeCompletedAt: null,
                   stripeSubscriptionIds: [], temporalCompletedAt: null, temporalNextRuntimeIndex: 0,

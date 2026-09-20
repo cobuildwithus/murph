@@ -27,3 +27,16 @@ export function hostedAuthDelivery(signal?: AbortSignal): HostedAuthDelivery {
 function deliveryUnavailable() {
   return hostedOnboardingError({ code: "AUTH_DELIVERY_UNAVAILABLE", httpStatus: 503, message: "We could not send a sign-in code. Try again shortly." });
 }
+
+export function readHostedAuthSmsConfig() {
+  const account = process.env.HOSTED_AUTH_TWILIO_ACCOUNT_SID ?? "";
+  const key = process.env.HOSTED_AUTH_TWILIO_API_KEY_SID ?? "";
+  const secret = process.env.HOSTED_AUTH_TWILIO_API_KEY_SECRET ?? "";
+  const service = process.env.HOSTED_AUTH_TWILIO_MESSAGING_SERVICE_SID ?? "";
+  return /^AC[0-9a-f]{32}$/iu.test(account) && /^SK[0-9a-f]{32}$/iu.test(key)
+    && /^MG[0-9a-f]{32}$/iu.test(service) && secret ? { account, key, secret, service } : null;
+}
+
+export function isHostedAuthSmsReady(): boolean {
+  return process.env.HOSTED_BETTER_AUTH_ENABLED === "true" && readHostedAuthSmsConfig() !== null;
+}

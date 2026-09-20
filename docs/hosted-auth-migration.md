@@ -1,6 +1,6 @@
 # Hosted authentication migration
 
-Status: implementation in progress. This document is the rollout owner for removing Privy in favor of Better Auth. It is not evidence that any stage is deployed or ready to activate.
+Status: first-party adoption merged; final retirement remains gated. This document owns the rollout from Privy to Better Auth. Final pushed-head CI remains a merge gate; source review and local proof do not establish deployment or activation.
 
 ## Target and boundaries
 
@@ -21,13 +21,67 @@ Use no planned service outage. Prefer natural compatibility drain over elaborate
 
 Four Murph PRs are integration boundaries. iOS and Android changes are reviewed in their own repositories and pinned to the corresponding backend protocol; native store publication is a separate event from merging code.
 
-Current implementation PRs: [approval migration #3127](https://github.com/cobuildwithus/murph/pull/3127),
-[backend compatibility #3128](https://github.com/cobuildwithus/murph/pull/3128), and
-[Web adoption and recovery #3132](https://github.com/cobuildwithus/murph/pull/3132).
-These links identify review candidates, not deployed versions. Native and final
-retirement candidates will be pinned here before rollout qualification is complete.
+Current candidates and code qualification:
+
+| Stage | Candidate | Reviewed source and remaining preparation |
+| --- | --- | --- |
+| 1 | [Murph #3127](https://github.com/cobuildwithus/murph/pull/3127) | Round 2 PASS and green CI at `bc9f3728b12bcb54ab941505e34ff32cecde9c68` |
+| 2 | [Murph #3128](https://github.com/cobuildwithus/murph/pull/3128) | Round 3 PASS and green CI at `ca1c6a115aaf050df78a939c77f0590f0737e995` |
+| 3 | [Murph #3132](https://github.com/cobuildwithus/murph/pull/3132) | [Round 3 PASS](https://chatgpt.com/c/6aa27f48-2834-83ea-8988-d5c4ca137932) and green CI at `540a4ac11863970587139579edc9d5e19b2040bc` |
+| 3 | [iOS #150](https://github.com/cobuildwithus/murph-ios/pull/150) | Round 2 PASS and green CI at `c46430d6dfbf93a1805f50ace6c9599b0c3f0c9e` |
+| 3 | [Android #39](https://github.com/cobuildwithus/murph-android/pull/39) | [Round 3 PASS](https://chatgpt.com/c/6aa27f77-4630-83ea-9bbd-fd92c0d39a01) and green CI at `a589e0072bbcfc9efcce36471e0d4dce099bb4f7` |
+| 4 | [Murph #3134](https://github.com/cobuildwithus/murph/pull/3134) | [Round 2 PASS](https://chatgpt.com/c/6aa26b77-4f88-83ea-83c6-b8d752026677) and green CI on runtime source `87786eda0b935ac32614fc843665e0aadefa971c`; the September reconciliation includes newer first-passkey behavior and requires a fresh full review and final-head CI |
+| 4 | [iOS #151](https://github.com/cobuildwithus/murph-ios/pull/151) | Round 1 PASS and green CI at `4380c93cca8bd47fc4b8ddee0c41e1de58de1b72` |
+| 4 | [Android #40](https://github.com/cobuildwithus/murph-android/pull/40) | [Round 2 PASS](https://chatgpt.com/c/6aa28183-b694-83ea-92c1-a430aebc4552) and green CI at `ffc5d97752b6c2c99ae73f9002201dfbbe4c562c` |
+
+Android [#38](https://github.com/cobuildwithus/murph-android/pull/38) at `614cbc6cc05d2229c76148a3dd5bea1ed1c18bb5` is the independently reviewed tooling prerequisite before #39. After #40, [#41](https://github.com/cobuildwithus/murph-android/pull/41) at `bf346f57a1f8aaef5d620bd359dc57a1bdad59dc` removes two unused CI placeholders. Its refreshed trusted review passes against #40, including 13 contract tests and unchanged control-policy proof; check the PR for final CI. These control changes are isolated from product review and add no rollout stage.
+
+Web adoption now invalidates the previous decrypted vault at successful replacement-response headers and orders cookie writes across tabs. Its actual Next TypeScript 5 and Web TypeScript 7 checks and four real Chromium/HttpOnly-cookie OTP/Telegram scenarios pass. The first round-3 attempt produced only a preliminary note without a completed verdict or model evidence; it is invalid and does not count as a substantive round. The completed fresh full round 3 retains the original first-reviewed and previous valid heads; exact-turn, response hash and actual gpt-6-pro metadata validate its PASS.
+
+Android adoption uses the existing AndroidX Core AtomicFile to stage first writes consistently on supported platforms. Both empty and partial initial-write interruptions reproduce the old failure on API 29; all nine actual Keystore/storage/HTTP/composed recovery cases pass with the fix on API 28, 29 and 36. CI also passes all 44 synthetic cases on each of API 28/29/30. There is no new storage format, dependency or platform branch. The SDK-free release preserves this same secure-record owner, encryption key and local member binding. iOS retirement passes 601 unit tests and Debug/Release simulator builds.
+
+These are code candidates, not deployed versions. Do not merge retirement candidates or distribute SDK-free apps until every retirement gate passes. Keep the transition app available while eligible installed sessions still need its one-time bridge. Real delivery, installed/signed-device upgrades and dormant/skipped-version recovery remain release qualification work.
+
+
+## Current rollout record
+
+The earlier reviewed-head table is historical candidate evidence. Current state:
+
+| Work | State and next gate |
+| --- | --- |
+| Web adoption #3127, #3128, #3132 | Merged; current first-party production records observed. |
+| Passkey repair #3504 | Merged after the original retirement candidate; its canonical login and revocation safeguards are preserved by this reconciliation. |
+| Web retirement #3134 | Reconciled with main and passkey repair. Full sensitive round 3 passed at `12bd39220dd5a3e06dfa916227b62e28cedc1134`; isolated fixture corrections pass all hosted checks at `638aaf2cbaf1c5bdb96fd4337b992a5e098d692b`. Final documentation closeout must retain green exact-head CI. Merge/deployment hold is unchanged. |
+| Targeted signup cleanup #3589 | Merged additive guarded Ops endpoint with second full review and green required CI. Production deployment of merge `e42b2b81f8264af6fc37ba75c8db1168d6bf937e` is ready; no production deletion performed. Live legacy sessions independently block execution. This retirement source removes the temporary endpoint after its obligations converge. |
+| iOS adoption #150 / Android adoption #39 | Merged. Store distribution and installed-device upgrades remain unqualified by merge evidence. |
+| Android retirement #40 | Reconciled with main and #44 at `a16e52cf31c748732bf008c73b9fe5cef7671866`; validated full review PASS and all hosted checks green. Debug/Release builds and lint pass, 2,835 unit-test executions pass, and nine real Keystore/HTTP/interrupted-write cases pass on API 36. Current synthetic screenshots were inspected. Native distribution/recovery and shared provider obligations still hold merge/publication. |
+| iOS retirement #151 | Reconciled with main at `cc32d748f8db612234c3f234e693c95a9d6baa54`. Round 2 found only an unreachable provider diagnostic adapter; its removal deletes 96 net production lines and passes all 629 current host tests plus Debug/Release simulator builds. The prior reconciliation passed 67 UI tests with three hosted/configuration cases skipped; no UI changed afterward. Final round 3 is required; consult the PR ledger for its validated outcome. Native distribution/recovery and shared provider obligations still hold merge/publication. |
+| Android CI cleanup #41 | Reconciled with #40; the trusted-base review still sees only two unused public placeholders removed. All hosted checks green; open and stacked after #40. |
+| Android canary setup #44 | Merged as `929d9493e178d12523ac4705963326199bae37a3` after validated PASS and green CI; explicit `platform-tools` avoids the removed package requested by the pinned action default. |
+| Privy browser test #3221 | Closed as obsolete; branch and historical evidence retained. |
+
+Read-only production aggregates still show valid legacy browser sessions and one
+provider-bound signup without a first-party user. Signup-only `lastSeenAt` is not
+return-visit telemetry. The targeted deletion owner checks no live legacy session
+and no durable product use under the canonical deletion locks; no compatibility
+code is added for that account. Zero pending provider targets in cleanup receipts
+does not prove provider-orphan inventory or wallet/export completion.
+
+The public native controllers still pin older private sources. The iOS canary
+last failed at its legacy OTP stage; the last Android run failed at SDK setup before instrumentation, now corrected by #44 but not yet requalified.
+Neither supplies first-party rollout evidence. Update source pins only to reviewed
+immutable commits and qualify actual generated-code delivery, installed updates
+and dormant/skipped-version recovery. Do not revive provider fixed-code login.
+
+Preserve the shared HMAC key for billing, referrals and device flows. Keep
+contraction and vendor removal held until every recorded obligation converges.
 
 ## Backend configuration and deployment
+
+The following flags and import commands apply to the additive transition
+releases. The retirement release removes the native bridge, importer and legacy
+configuration after their obligations converge; do not run transition commands
+against the contracted deployment.
 
 PR 2 is an additive compatibility release. Apply both additive schema migrations
 before its Web build reaches requests; old builds tolerate the new tables. Keep
@@ -141,39 +195,35 @@ Use the same action challenge and member/session binding for both proof formats.
 
 Enrollment must be authorized by the member's existing approved factor, or by a separately defined independent recovery operation. A normal authenticated session alone cannot replace established protection. Verify authorization at options generation and final registration, then consume it with the credential write. Do not issue a login session from enrollment.
 
-New Better Auth accounts without any legacy identity or established approval credential can enroll their first passkey after primary authentication within five minutes. Silent exchange and session renewal do not count as primary proof. The fixed initial-options route creates an ordinary member/session-bound enrollment challenge; registration verifies WebAuthn, rechecks the current session and absent legacy binding, then atomically consumes the challenge and writes the first credential. Concurrent setup has one winner. An imported member without any approval aggregate may instead use the explicit legacy repair policy below. An existing Murph approval aggregate always requires its current factor or saved-key recovery.
+Accounts with no established approval aggregate use one first-passkey enrollment
+owner after retirement. Fresh proof must come from a canonical linked primary
+sign-in within five minutes; silent exchange and session renewal do not qualify.
+The newer repair protections remain in this shared path, including canonical
+login generation binding and revocation of other first-party sessions. An existing
+approval aggregate always requires its current factor or saved-key recovery.
 
 Credential state is bounded and encrypted under the existing member crypto owner. Verify and prepare crypto before the transaction; recheck the exact state and current session under member locks. Commit signature-counter changes, one-use challenge acceptance and the protected mutation together. Counterless synced passkeys still depend on challenge consumption for replay protection.
 
-Once replacement protection is established, do not try a legacy wallet after a failed passkey assertion. Corrupt credential state fails closed. The legacy proof reader is temporary and cannot become a recovery mechanism that ignores newer revocations.
+Once replacement protection is established, failed assertions and corrupt state
+fail closed. There is no wallet verifier or browser SDK fallback after retirement.
 
-First-party approval hooks do not load the legacy SDK. The approval page and
-shared Settings passkey controls select native assertion or the explicit legacy
-repair below, not wallet restoration. The temporary server wallet verifier and
-unrelated provider setup/login/native/cleanup owners remain compatibility code;
-none is a fallback after native verification fails.
+### First-passkey enrollment after retirement
 
-### Never-migrated legacy repair (explicit exception)
+The rollout accepted canonical primary proof for imported accounts that never
+established Murph approval protection. This remains a deliberate weaker-factor
+policy than proving the former Privy factor. After provider/schema retirement,
+new and imported accounts use the same policy; no legacy identity marker remains.
+Email, phone or Telegram compromise can therefore permit initial enrollment.
+Any approval row, including empty or corrupt state, excludes this path.
 
-This is a deliberate weaker-factor recovery policy for **never-migrated approval
-state**, not a claim of security equivalence to proving the old Privy factor.
-A person controlling an already-bound primary sign-in method can establish the
-first Murph approval passkey without that old factor. Email-account takeover,
-SIM swap, or compromise of the bound Telegram account therefore matters. Once a
-Murph approval aggregate exists, this exception is permanently unavailable:
-assertion failure, missing local passkeys, corrupt/empty ciphertext and client
-claims cannot downgrade it. The credential owner never deletes protection to
-make an account eligible again.
-
-`legacy-passkey-repair.ts` requires all of the following at options and commit:
-current authenticated member/session; canonical legacy identity bound to that
-member; **no approval-credential row at all**; and Better Auth primary proof no
-more than five minutes old and not in the future. Its already-adopted encrypted
-login projection must agree exactly with the canonical verified email/phone or
-bound Telegram identity. Credential-change fencing must not postdate the proof.
-No old cookie, approval-link possession, silent legacy/native exchange, session
-renewal, routing-only contact, or newly supplied contact qualifies as fresh proof.
-Registration does not create primary login authority or change a sign-in method.
+`initial-passkey-enrollment.ts` requires a current first-party session, no approval
+row, fresh non-future primary proof and an encrypted login projection exactly
+matching canonical verified methods. It binds the challenge to member, session,
+primary proof and canonical generation, then rechecks all state under locks.
+Credential revocation fencing must not postdate primary proof. New users start
+without a revocation timestamp because no earlier authority exists; subsequent
+revocation, recovery and initial enrollment stamp the existing field. Enrollment
+never creates a primary session or changes a sign-in method.
 
 When primary proof is stale, the existing auth dialog runs a same-account
 reauthentication continuation. Fixed OTP send/verify and Telegram start/verify
@@ -187,8 +237,8 @@ session through the existing auth owner. Recheck the old session and exact
 canonical/login snapshot at that commit. Canceling closes the dialog and does
 not resume enrollment.
 
-The existing Approve control calls `/approval-passkeys/legacy-options`, performs
-user-verified WebAuthn registration and submits the distinct `legacyRepairToken`
+The existing Approve control calls `/approval-passkeys/initial-options`, performs
+user-verified WebAuthn registration and submits the distinct `initialToken`
 to the existing register route. One five-minute, member/session/primary-proof/
 canonical-generation-bound challenge is pending per member; a new attempt
 supersedes an abandoned one. Member/IP admission and the existing twenty-session
@@ -263,8 +313,8 @@ supported browsers before widening.
 
 A previously saved key remains mandatory for replacement of any established
 Murph approval aggregate. Primary proof alone cannot provision or redeem that
-path. Never-migrated legacy accounts instead use the distinct, narrowly scoped
-repair policy above; accounts outside its canonical-ownership prerequisites
+path. Accounts without an approval aggregate use the first-passkey
+enrollment policy above; accounts outside its canonical-ownership prerequisites
 remain unresolved retirement gates, not an email/SMS support override. Saved-key
 recovery follows [OWASP's MFA recovery guidance](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html#resetting-mfa).
 
@@ -340,7 +390,7 @@ member ID. Duplicate or unknown companion parameters produce only the local
 `/join` link. A callback only asks native admission to reread canonical setup;
 it never proves successful account linking or changes the stored app principal.
 
-Both current native auth services call the SDK's access-token refresh before reading a Privy identity token. The transition release must retain that restore/refresh ability long enough to exchange a valid token for a same-member Better Auth session. Store new credentials through native secure storage; prove lost-response recovery, account switching, offline restoration and renewable background use. Never accept an expired token as fresh authority or fall back after failed new-token verification.
+Both native transition auth services call the SDK's access-token refresh before reading a Privy identity token. The transition release must retain that restore/refresh ability long enough to exchange a valid token for a same-member Better Auth session. Store new credentials through native secure storage; prove lost-response recovery, account switching, offline restoration and renewable background use. Never accept an expired token as fresh authority or fall back after failed new-token verification.
 
 Ship the usable backend first. Release native transition builds independently and measure supported-version adoption. Remove SDK restoration only after the migration journey and dormant-client recovery are qualified. Installed users who skip transition releases require a tested route; zero recent legacy traffic is not sufficient evidence. Expired or revoked credentials may require reauthentication.
 
@@ -404,11 +454,61 @@ Disable drained legacy admission; finish authorized vendor obligations while cre
 
 Remove live Privy SDKs, verifiers, hooks, wallet code, native dependencies, CSP/configuration, obsolete sessions/bindings, import/runtime migration branches, harnesses, canaries and current documentation. Keep canonical contacts and unrelated key consumers. In particular, the session-named HMAC key also authenticates billing quotes, referrals, device callbacks and recovery witnesses; it is not exclusively a Privy/session dependency.
 
+## Retirement execution
+
+PR 4 removes the old verifiers, exchange/import routes, provider contact writers,
+wallet approvals, SDK UI, native admission fallback and provider configuration.
+It retains the first-party credential format, secure storage contract, canonical
+member IDs and session signing/storage keys. Updated mobile installations read
+the same durable credential after the SDK is removed. Installed upgrades and
+skipped-version recovery still require device qualification before distribution.
+
+Do not merge or deploy PR 4 merely because code review and CI pass. First complete
+the inventory above, including protected accounts, dormant clients and vendor
+exports/deletions. Confirm no valid legacy browser session remains, no retained
+provider-bound identity lacks its first-party user, and no pending deletion
+receipt still targets the provider. For receipts, the relevant pending condition
+is a non-null provider lookup key with no provider completion timestamp; a new
+receipt with neither field is not an outstanding provider obligation. This SQL
+check supplements the hosted encrypted-record/provider inventory; it cannot
+prove passkey availability, payload integrity or native adoption.
+
+Deploy the code that does not reference the old schema, drain incompatible Web
+functions and cleanup workers, then run the existing postdeploy contract lane.
+`20260910070000_retire_legacy_auth` refuses to drop the old table/columns while
+those database obligations remain. The existing runner's current-deployment
+check and short transaction timeouts still apply. The new reader works both
+before and after contraction. After contraction, use a compatible forward fix;
+older schema-dependent builds are below the rollback floor.
+
+Cleanup payloads keep their existing v1 schema. The previous parser accepts an
+omitted optional provider identifier, so both versions can read newly written
+receipts during drain. Stripe, Cloudflare, runtime-log and Temporal cleanup keep
+their current leases, cursors and retry owner. The deletion response retains
+`vendorAccounts.privyUser` as a fixed `skipped_no_record` result for already-open
+browser tabs that read that key after deletion commits. This compatibility field
+is valid only after actual provider obligations are resolved; it never turns
+missing provider configuration into a successful deletion. Historical migrations,
+changelogs and secret-deny rules remain as evidence and privacy protection.
+
+The App Review helper prepares product access for an existing first-party
+account. The reviewer must first use ordinary authentication; it neither creates
+provider test users nor issues fixed codes. Qualify a usable reviewer code-delivery
+process before store submission. Finally revoke the obsolete provider secrets,
+custom auth-domain configuration and service account access through the approved
+hosted path after the last reader and obligation are gone.
+
 ## Completion evidence
 
-Each PR needs focused tests/typecheck, candidate review, applicable ReviewGPT and green required exact-head CI. Auth proof covers actual enabled adapter operations, atomic OTP completion, same-member linking/unlinking, signed transport classification, current-session/factor checks and deletion races. Approval proof includes real signatures, missing UV, wrong origin/action/session, replay, counters and enrollment races. Legacy-repair proof additionally covers stale/exchanged primary sessions, exact canonical sign-in, established/corrupt aggregate exclusion, flags at commit, session fencing/rollback, inline cancellation/reload/lost response, terminal actions and a separate native decision with Privy unavailable. Native proof uses actual apps/devices, including skipped-version upgrades.
+Each PR needs focused tests/typecheck, candidate review, applicable ReviewGPT and green required exact-head CI. Auth proof covers actual enabled adapter operations, atomic OTP completion, same-member linking/unlinking, signed transport classification, current-session/factor checks and deletion races. Approval proof includes real signatures, missing UV, wrong origin/action/session, replay, counters and enrollment races. First-passkey proof additionally covers stale/exchanged primary sessions, exact canonical sign-in, established/corrupt aggregate exclusion, flags at commit, session fencing/rollback, inline cancellation/reload/lost response, terminal actions and a separate native decision with Privy unavailable. Native proof uses actual apps/devices, including skipped-version upgrades.
 
 Final completion also inspects dependency graphs/bundles, schema/catalog, deployed configuration, operational jobs and durable cleanup outcomes. Startup without Privy configuration and cold/warm login must work. Static source review or a grep result alone does not establish vendor retirement.
+
+The final Web adoption response SHA-256 is `19433a8fcfb65fd2f446cfb3404db3a14cd1e72994400871db6d08163c5797a9`; Android adoption is `dfa8cd36fe214ed58930ae1efa6da0f58fdc987a0fd2183ea200168a3cdd27c0`. Android retirement response SHA-256 is `ba3ca1fb5839f18c6412ce9d23bec5bd216edb043cb54faa2fd8869b8b1d375c`; its exact-thread response, context digest, checked head and actual gpt-6-pro model metadata were validated. Native review bodies retain their reviewed context; this rollout owner records current cross-repository status.
+
+### Local browser proof limitation
+
+The composed `pnpm hosted-local e2e hosted-web-browser-smoke --profile e2e:stub` journey reaches authenticated Connect but reports the same invalid-element server-render failure on retirement source `87786eda0b935ac32614fc843665e0aadefa971c` and the earlier compatibility source `ca1c6a115aaf050df78a939c77f0590f0737e995`. Both pages recover through client rendering. This is an existing rendering defect, not a clean full-stack pass. The existing Frog entry `20260910003445-public-auth-smoke` owns the diagnostic gap. Focused real-browser auth/cookie proof, canonical PostgreSQL proof and native boundary tests pass independently; none substitutes for hosted delivery and installed-device qualification.
 
 ## Source contracts
 
@@ -457,7 +557,9 @@ retirement gates pass; publishing a new app does not prove adoption.
 
 ## Operator disposition of unused legacy signups
 
-During retirement preparation, an explicitly authorized unused signup can be
+The preparation release in #3589 provides this operation. It is deliberately
+absent from retirement readers and must finish before deploying them. During
+preparation, an explicitly authorized unused signup can be
 removed through `POST /api/ops/auth-migration/unused-signup`. This temporary
 endpoint requires the existing active Ops allowlist and same-origin checks,
 one exact `memberId`, its ISO `createdAt`, and the confirmation
@@ -482,5 +584,5 @@ The existing deletion service then owns revocation, canonical deletion and the
 encrypted provider/runtime cleanup receipt. Partial failure retains suspension
 and the existing retry owners. An HTTP success with `cleanupPending: true` is
 not provider convergence. Verify canonical absence and receipt outcomes before
-clearing the retirement inventory. Remove this endpoint and its unused-signup
-check with the importer after authorized cleanup converges.
+clearing the retirement inventory. The retirement change removes this endpoint and its unused-signup check with
+the importer; do not deploy retirement before authorized cleanup converges.

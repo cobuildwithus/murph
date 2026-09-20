@@ -71,9 +71,9 @@ for (const width of [390, 1280]) {
         if (registered) assertions += 1;
         return route.fulfill({ json: registered
           ? { method: "passkey", options: { challenge: "c3ludGhldGlj", rpId: "localhost", userVerification: "required" } }
-          : { method: "legacy-repair" } });
+          : { method: "initial" } });
       });
-      await page.route("**/api/settings/approval-passkeys/legacy-options", (route) => route.fulfill(authenticated
+      await page.route("**/api/settings/approval-passkeys/initial-options", (route) => route.fulfill(authenticated
         ? { json: { token: "synthetic-repair", options: {
           challenge: "c3ludGhldGlj", rp: { id: "localhost", name: "Murph" },
           user: { id: "bWVtYmVy", name: "member@example.test", displayName: "Synthetic member" },
@@ -82,7 +82,7 @@ for (const width of [390, 1280]) {
         } } }
         : { status: 403, json: { error: { code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", message: "Sign in again." } } }));
       await page.route("**/api/settings/approval-passkeys/register", (route) => {
-        expect(route.request().postDataJSON()).toMatchObject({ legacyRepairToken: "synthetic-repair", response: { type: "public-key" } });
+        expect(route.request().postDataJSON()).toMatchObject({ initialToken: "synthetic-repair", response: { type: "public-key" } });
         expect(decisions).toBe(0);
         registrations += 1;
         registered = true;

@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     readActiveHostedFamilySponsorship: vi.fn(),
+    readHostedMemberEmailAuthorization: vi.fn(),
     readHostedMemberFamilyBillingClaim: vi.fn(),
     requireHostedInviteForBillingCheckout: vi.fn(),
     requireHostedOnboardingPublicBaseUrl: vi.fn(),
@@ -38,6 +39,11 @@ const mocks = vi.hoisted(() => {
     stripe,
   };
 });
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async (original) => ({
+  ...await original<typeof import("@/src/lib/hosted-onboarding/hosted-member-store")>(),
+  readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   const actual = await vi.importActual<
@@ -87,8 +93,8 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     linqApiBaseUrl: "https://linq.example.test",
     linqApiToken: "linq-token",
     linqWebhookSecret: null,
-    privyAppId: "cm_app_123",
-    privyVerificationKey: "privy-key",
+
+
     publicBaseUrl: "https://join.example.test",
     stripePriceIdsByPlan: {
       launch_edge_monthly: "price_edge_monthly_123",
@@ -139,6 +145,7 @@ type BillingServiceInvite = {
 describe("createHostedBillingCheckout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readHostedMemberEmailAuthorization.mockReset().mockResolvedValue(null);
     vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
@@ -262,6 +269,7 @@ describe("createHostedBillingCheckout", () => {
   });
 
   it("creates a first-time Stripe Checkout Session without pre-creating a customer", async () => {
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({ verifiedEmail: { address: "member@example.test", verifiedAt: new Date() } });
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
     const prisma = makePrisma();
@@ -269,13 +277,7 @@ describe("createHostedBillingCheckout", () => {
     await expect(
       createHostedBillingCheckout({
         inviteCode: "invite-code",
-        linkedAccounts: [
-          {
-            address: "member@example.test",
-            type: "email",
-            verified_at: 1_710_000_000,
-          },
-        ],
+
         member: makeAuthenticatedMember(),
         now: new Date("2026-03-27T12:00:00.000Z"),
         prisma: prisma as never,
@@ -932,26 +934,14 @@ describe("createHostedBillingCheckout", () => {
     await expect(Promise.all([
       createHostedBillingCheckout({
         inviteCode: "invite-code",
-        linkedAccounts: [
-          {
-            address: "member@example.test",
-            type: "email",
-            verified_at: 1_710_000_000,
-          },
-        ],
+
         member: makeAuthenticatedMember(),
         now: new Date("2026-03-27T12:00:00.000Z"),
         prisma: prisma as never,
       }),
       createHostedBillingCheckout({
         inviteCode: "invite-code",
-        linkedAccounts: [
-          {
-            address: "member@example.test",
-            type: "email",
-            verified_at: 1_710_000_000,
-          },
-        ],
+
         member: makeAuthenticatedMember(),
         now: new Date("2026-03-27T12:00:00.000Z"),
         prisma: prisma as never,
@@ -1019,16 +1009,15 @@ describe("createHostedBillingCheckout", () => {
   });
 
   it("rejects a different verified email while an earlier checkout is open", async () => {
+    mocks.readHostedMemberEmailAuthorization
+      .mockResolvedValueOnce({ verifiedEmail: { address: "first@example.test", verifiedAt: new Date() } })
+      .mockResolvedValueOnce({ verifiedEmail: { address: "second@example.test", verifiedAt: new Date() } });
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
     const prisma = makePrisma();
 
     await createHostedBillingCheckout({
       inviteCode: "invite-code",
-      linkedAccounts: [{
-        address: "first@example.test",
-        type: "email",
-        verified_at: 1_710_000_000,
-      }],
+
       member: makeAuthenticatedMember(),
       now: new Date("2026-03-27T12:00:00.000Z"),
       prisma: prisma as never,
@@ -1036,11 +1025,7 @@ describe("createHostedBillingCheckout", () => {
 
     await expect(createHostedBillingCheckout({
       inviteCode: "invite-code",
-      linkedAccounts: [{
-        address: "second@example.test",
-        type: "email",
-        verified_at: 1_710_000_000,
-      }],
+
       member: makeAuthenticatedMember(),
       now: new Date("2026-03-27T12:00:05.000Z"),
       prisma: prisma as never,
@@ -1249,13 +1234,7 @@ describe("createHostedBillingCheckout", () => {
 
     await expect(createHostedBillingCheckout({
       inviteCode: "invite-code",
-      linkedAccounts: [
-        {
-          address: "member@example.test",
-          type: "email",
-          verified_at: 1_710_000_000,
-        },
-      ],
+
       member: makeAuthenticatedMember(),
       now: new Date("2026-03-27T12:00:00.000Z"),
       prisma: prisma as never,
@@ -1271,13 +1250,7 @@ describe("createHostedBillingCheckout", () => {
 
     await expect(createHostedBillingCheckout({
       inviteCode: "invite-code",
-      linkedAccounts: [
-        {
-          address: "member@example.test",
-          type: "email",
-          verified_at: 1_710_000_000,
-        },
-      ],
+
       member: makeAuthenticatedMember(),
       now: new Date("2026-03-27T12:00:05.000Z"),
       prisma: prisma as never,

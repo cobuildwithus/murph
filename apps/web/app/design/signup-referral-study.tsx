@@ -5,7 +5,7 @@ import {
   type HostedSignupReferralLandingState,
 } from "@/src/components/hosted-onboarding/hosted-signup-referral-landing";
 import { JoinInviteSignedInMismatchView } from "@/src/components/hosted-onboarding/join-invite-signed-in-mismatch-view";
-import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
+import { HostedLoginMethodSettingsView } from "@/src/components/settings/hosted-login-method-settings";
 import {
   HostedSignupReferralLinkButtonView,
   type HostedSignupReferralLinkButtonState,
@@ -24,11 +24,6 @@ const DESIGN_ACCOUNT: HostedAccountSettingsSnapshot = {
     number: "+15555550100",
     verifiedAt: "2026-08-01T00:00:00.000Z",
   },
-  privySignInStates: {
-    email: { removable: true, status: "matched" },
-    phone: { removable: true, status: "matched" },
-    telegram: { removable: true, status: "matched" },
-  },
   referralIdentityKey: "design-referral-member",
   telegram: {
     telegramUserId: "design-telegram-user",
@@ -40,11 +35,6 @@ const DESIGN_ACCOUNT_AFTER_EMAIL_REMOVAL: HostedAccountSettingsSnapshot = {
   email: {
     address: "billing@example.test",
     verifiedAt: null,
-  },
-  privySignInStates: {
-    email: { removable: false, status: "absent" },
-    phone: { removable: true, status: "matched" },
-    telegram: { removable: true, status: "matched" },
   },
 };
 
@@ -111,22 +101,22 @@ export function SignupReferralFlowStudy() {
           Settings · Messaging
         </p>
         <div inert>
-          <HostedAccountSettingsCards
+          <HostedLoginMethodSettingsView
             account={DESIGN_ACCOUNT}
             murphPhoneNumber="+15555550101"
-            privySessionMatchesAppSession
-            signupReferralUrl={DESIGN_REFERRAL_URL}
+            onSelect={() => undefined}
+            referralAction={<HostedSignupReferralLinkButtonView onAction={() => undefined} status="ready" />}
           />
         </div>
         <p className="mb-4 mt-8 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Settings · After email removal
         </p>
         <div inert>
-          <HostedAccountSettingsCards
+          <HostedLoginMethodSettingsView
             account={DESIGN_ACCOUNT_AFTER_EMAIL_REMOVAL}
             murphPhoneNumber="+15555550101"
-            privySessionMatchesAppSession
-            signupReferralUrl={DESIGN_REFERRAL_URL}
+            onSelect={() => undefined}
+            referralAction={<HostedSignupReferralLinkButtonView onAction={() => undefined} status="ready" />}
           />
         </div>
       </section>

@@ -980,7 +980,7 @@ async function createDirectRootPreparationFailureFixture(input: {
 
 async function createDirectPreparationTransitionFixture(input: {
   billingStatus?: HostedBillingStatus;
-  privyUserId?: string;
+  existingPhone?: boolean;
 } = {}) {
   mocks.enforceDirectMailboxPreparation = true;
   const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
@@ -1075,12 +1075,7 @@ async function createDirectPreparationTransitionFixture(input: {
     hostedMemberRouting,
     hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
   });
-  if (input.privyUserId) {
-    const privyUserIdEncrypted = await encryptHostedWebNullableString({
-      field: "hosted-member-identity.privy-user-id",
-      memberId: "member_123",
-      value: input.privyUserId,
-    });
+  if (input.existingPhone) {
     const findUnique = vi.mocked(prisma.hostedMemberIdentity!.findUnique!);
     const readIdentity = findUnique.getMockImplementation()!;
     findUnique.mockImplementation(async (...args) => {
@@ -1091,7 +1086,7 @@ async function createDirectPreparationTransitionFixture(input: {
       return {
         ...identity,
         phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
-        privyUserIdEncrypted,
+
       };
     });
   }
@@ -5510,7 +5505,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("admits ordinary conversation without unused identity preparation", async () => {
     const { prisma, hostedLinqDeliveryFindMany, restoreRootMock } =
-      await createDirectPreparationTransitionFixture({ privyUserId: "synthetic-login" });
+      await createDirectPreparationTransitionFixture({ existingPhone: true });
     hostedLinqDeliveryFindMany.mockResolvedValue([]);
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue("member_123");
     const projection = vi.spyOn(memberIdentityStore, "projectHostedMemberIdentityState");
@@ -5533,12 +5528,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }
   });
 
-  it("uses control-only preparation and preserves login identity on an expired Family acceptance replay", async () => {
+  it("uses control-only preparation and preserves canonical phone identity on an expired Family acceptance replay", async () => {
     const {
       prisma,
       providerDomainsAfterTransactionStart,
       restoreRootMock,
-    } = await createDirectPreparationTransitionFixture({ privyUserId: "synthetic-login" });
+    } = await createDirectPreparationTransitionFixture({ existingPhone: true });
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
       "member_123",
     );
@@ -5622,10 +5617,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       const identityWrite = vi.mocked(prisma.hostedMemberIdentity!.upsert!).mock.calls[0]?.[0];
       expect(identityWrite).toBeDefined();
       await expect(decryptHostedWebNullableString({
-        field: "hosted-member-identity.privy-user-id",
+        field: "hosted-member-identity.phone-number",
         memberId: "member_123",
-        value: identityWrite!.update.privyUserIdEncrypted as string,
-      })).resolves.toBe("synthetic-login");
+        value: identityWrite!.update.phoneNumberEncrypted as string,
+      })).resolves.toBe("+15551234567");
       expect(providerDomainsAfterTransactionStart).toEqual([]);
     } finally {
       prepareRootCandidates.mockReset();
@@ -16335,11 +16330,8 @@ function readHostedMemberIdentityFromMockMember(
     phoneLookupKey,
     phoneNumberVerifiedAt:
       identity.phoneNumberVerifiedAt instanceof Date ? identity.phoneNumberVerifiedAt : null,
-    privyUserId: typeof identity.privyUserId === "string" ? identity.privyUserId : null,
-    walletAddress: typeof identity.walletAddress === "string" ? identity.walletAddress : null,
-    walletChainType: typeof identity.walletChainType === "string" ? identity.walletChainType : null,
-    walletCreatedAt: identity.walletCreatedAt instanceof Date ? identity.walletCreatedAt : null,
-    walletProvider: typeof identity.walletProvider === "string" ? identity.walletProvider : null,
+
+
   };
 }
 

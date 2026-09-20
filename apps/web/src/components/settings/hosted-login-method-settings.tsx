@@ -10,7 +10,6 @@ import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import { SettingsContactLink } from "./connected-account-card";
 import { HostedSignupReferralLinkButton } from "./hosted-signup-referral-link-button";
 import { formatMaskedPhoneNumber, stripSettingsQueryParam } from "./hosted-settings-utils";
-import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-helpers";
 import { SettingsRow, SettingsRowList } from "./settings-row";
 
 const HostedLoginMethodDialog = dynamic(() => import("./hosted-login-method-dialog").then((module) => module.HostedLoginMethodDialog), { ssr: false });
@@ -47,7 +46,7 @@ export function HostedLoginMethodSettingsView({ account, murphPhoneNumber, onSel
   const rows = [
     { method: "phone", label: "Phone", value: phone ? formatMaskedPhoneNumber(phone) : null, icon: Phone,
       href: phone && murphPhoneNumber ? `sms:${murphPhoneNumber}` : null, linkLabel: "Text Murph" },
-    { method: "telegram", label: "Telegram", value: formatHostedTelegramDisplayValue(account.telegram), icon: Send,
+    { method: "telegram", label: "Telegram", value: telegram ? (account.telegram.username ? `@${account.telegram.username}` : "Connected") : null, icon: Send,
       href: telegram ? MURPH_TELEGRAM_URL : null, linkLabel: "Message Murph" },
     { method: "email", label: "Email", value: email, icon: Mail,
       href: email && account.email.murphEmailAddress ? `mailto:${account.email.murphEmailAddress}` : null, linkLabel: "Email Murph" },

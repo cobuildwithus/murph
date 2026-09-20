@@ -60,7 +60,6 @@ import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HealthDataConsentWithdrawalFlowStudy } from "./health-data-consent-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
-import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { OpsUsageStudy } from "./ops-usage-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
@@ -164,12 +163,6 @@ export function SectionsContent({
             >
               <DeepCarouselSection />
             </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Homepage background readiness and phone handoff">
-            <HomepageAuthWarmRuntimeStudy />
           </StudySection>
 
           <Separator />

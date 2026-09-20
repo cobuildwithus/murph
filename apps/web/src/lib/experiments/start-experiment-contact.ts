@@ -1,8 +1,4 @@
-import {
-  resolveHostedPrivyLinkedAccounts,
-  type HostedPrivyLinkedAccountContainer,
-  type PrivyLinkedAccountLike,
-} from "@/src/lib/hosted-onboarding/privy-shared";
+
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import {
   buildMurphEmailHref,
@@ -13,7 +9,6 @@ import {
   type MurphContactChannels,
   MURPH_TELEGRAM_BOT_USERNAME,
   MURPH_TELEGRAM_URL,
-  resolveMurphContactChannels,
 } from "@/src/lib/murph-contact-routing";
 
 export const MURPH_EXPERIMENT_CONTACT_EMAIL = MURPH_CONTACT_EMAIL;
@@ -43,7 +38,6 @@ export type ExperimentStartContactAction =
     };
 
 interface ExperimentStartContactOptionsInput {
-  accountContainer?: HostedPrivyLinkedAccountContainer | null;
   initialContactChannels?: Partial<ExperimentStartContactChannels> | null;
   murphEmailAddress?: string | null;
   murphPhoneNumber?: string | null;
@@ -81,7 +75,7 @@ export function resolveExperimentStartContactAction(
 export function resolveExperimentStartContactOptions(
   input: ExperimentStartContactOptionsInput,
 ): ExperimentStartContactOption[] {
-  const contactChannels = resolveExperimentStartContactChannelsForOptions(input);
+  const contactChannels = normalizeExperimentStartContactChannels(input.initialContactChannels);
   const message = buildExperimentStartMessage(input.protocolTitle);
   const murphPhoneNumber = normalizePhoneNumber(input.murphPhoneNumber);
   const textConnected = contactChannels.text && murphPhoneNumber !== null;
@@ -132,12 +126,6 @@ export function buildExperimentStartMessage(protocolTitle: string): string {
     : "I want to start this experiment.";
 }
 
-export function resolveExperimentStartContactChannels(input: {
-  accountContainer?: HostedPrivyLinkedAccountContainer | null;
-  linkedAccounts?: readonly PrivyLinkedAccountLike[];
-}): ExperimentStartContactChannels {
-  return resolveMurphContactChannels(input);
-}
 
 export function openExperimentStartContactOption(option: ExperimentStartContactOption): void {
   if (typeof window === "undefined") {
@@ -152,39 +140,6 @@ export function openExperimentStartContactOption(option: ExperimentStartContactO
   window.location.assign(option.href);
 }
 
-function resolveExperimentStartLinkedAccounts(
-  input: ExperimentStartContactOptionsInput,
-): PrivyLinkedAccountLike[] {
-  const accountContainer = input.accountContainer ?? { linkedAccounts: [] };
-  const linkedAccounts = resolveHostedPrivyLinkedAccounts(accountContainer);
-
-  if (linkedAccounts.length > 0) {
-    return linkedAccounts;
-  }
-
-  return [];
-}
-
-function resolveExperimentStartContactChannelsForOptions(
-  input: ExperimentStartContactOptionsInput,
-): ExperimentStartContactChannels {
-  const initialChannels = normalizeExperimentStartContactChannels(input.initialContactChannels);
-
-  if (!input.accountContainer) {
-    return initialChannels;
-  }
-
-  const accountChannels = resolveExperimentStartContactChannels({
-    accountContainer: input.accountContainer,
-    linkedAccounts: resolveExperimentStartLinkedAccounts(input),
-  });
-
-  return {
-    email: accountChannels.email || initialChannels.email,
-    telegram: accountChannels.telegram || initialChannels.telegram,
-    text: accountChannels.text || initialChannels.text,
-  };
-}
 
 function normalizeExperimentStartContactChannels(
   channels: Partial<ExperimentStartContactChannels> | null | undefined,

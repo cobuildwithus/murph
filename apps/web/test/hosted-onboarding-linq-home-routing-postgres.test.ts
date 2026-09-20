@@ -1462,7 +1462,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               memberId,
               phoneNumber: memberPhone,
               prisma: tx,
-              privyUserId: null,
+
               signupPhoneCodeSendAttemptId: null,
               signupPhoneCodeSendAttemptStartedAt: null,
               signupPhoneCodeSentAt: null,
@@ -1747,7 +1747,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               memberId,
               phoneNumber: memberPhone,
               prisma: tx,
-              privyUserId: null,
+
               signupPhoneCodeSendAttemptId: null,
               signupPhoneCodeSendAttemptStartedAt: null,
               signupPhoneCodeSentAt: null,
@@ -1997,7 +1997,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
                 memberId: requireString(memberId),
                 phoneNumber: memberPhone,
                 prisma: tx,
-                privyUserId: null,
+
                 signupPhoneCodeSendAttemptId: null,
                 signupPhoneCodeSendAttemptStartedAt: null,
                 signupPhoneCodeSentAt: null,
@@ -2697,7 +2697,7 @@ async function createActivationContactFixture(prisma: PrismaClient, consumed: nu
   await prisma.$transaction(async (tx) => {
     await tx.hostedMember.create({ data: { id: memberId, billingStatus: HostedBillingStatus.active } });
     const identityPrivate = await buildHostedMemberIdentityPrivateColumns({
-      memberId, phoneNumber: memberPhone, prisma: tx, privyUserId: null,
+      memberId, phoneNumber: memberPhone, prisma: tx,
       signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null, signupPhoneNumber: null,
     });

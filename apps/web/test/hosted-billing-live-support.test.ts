@@ -439,7 +439,6 @@ function createClockSandbox(): HostedStripeBillingSandbox {
       edge: "price_edge", familyEdge: "price_family_edge", familyMax: "price_family_max",
       familyPulse: "price_family_pulse", pulse: "price_pulse",
     },
-    privyAppId: "privy_clock_fixture",
     runId: "billing_clock_fixture",
     secretKey: "sk_test_clock_fixture",
   });

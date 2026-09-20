@@ -1,3 +1,4 @@
+import { sanitizeHostedLocalGenericEnvironment } from "../authority-env.ts";
 import { access } from "node:fs/promises";
 
 import { repoRoot, vercelLinkCandidatePaths } from "./constants.ts";
@@ -29,8 +30,7 @@ export async function resolveVercelOidcToken(env: NodeJS.ProcessEnv): Promise<st
     return existing;
   }
 
-  const oidcProcessEnv = { ...env };
-  delete oidcProcessEnv.HOSTED_APP_SESSION_HMAC_KEY;
+  const oidcProcessEnv = sanitizeHostedLocalGenericEnvironment(env);
   const token = await captureCommandOutput(
     "pnpm",
     [

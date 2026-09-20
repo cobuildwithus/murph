@@ -420,7 +420,7 @@ async function activateLinqGroupRoute(
     memberId: fixture.ownerMemberId,
     phoneNumber: participantPhone,
     prisma: fixture.observer,
-    privyUserId: null,
+
     signupPhoneCodeSendAttemptId: null,
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,

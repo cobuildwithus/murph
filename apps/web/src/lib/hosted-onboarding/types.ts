@@ -8,12 +8,12 @@ import type {
 } from "./billing-plans";
 import type { HostedConsentStatus } from "../legal/consent";
 
-export const HOSTED_PRIVY_AUTH_METHODS = ["phone", "email", "telegram"] as const;
+export const HOSTED_PRIMARY_AUTH_METHODS = ["phone", "email", "telegram"] as const;
 
-export type HostedPrivyAuthMethod = (typeof HOSTED_PRIVY_AUTH_METHODS)[number];
+export type HostedPrimaryAuthMethod = (typeof HOSTED_PRIMARY_AUTH_METHODS)[number];
 
-export function isHostedPrivyAuthMethod(value: unknown): value is HostedPrivyAuthMethod {
-  return HOSTED_PRIVY_AUTH_METHODS.includes(value as HostedPrivyAuthMethod);
+export function isHostedPrimaryAuthMethod(value: unknown): value is HostedPrimaryAuthMethod {
+  return HOSTED_PRIMARY_AUTH_METHODS.includes(value as HostedPrimaryAuthMethod);
 }
 
 export interface HostedInviteStatusPayload {
@@ -68,7 +68,7 @@ export type HostedInviteEmailAuthTarget =
 
 export type HostedInviteVerificationMode = "invite_email" | "invite_phone" | "manual_phone";
 
-export interface HostedPrivyCompletionPayload {
+export interface HostedAuthenticationCompletionPayload {
   inviteCode: string;
   joinUrl: string;
   launchConsentGranted?: boolean;

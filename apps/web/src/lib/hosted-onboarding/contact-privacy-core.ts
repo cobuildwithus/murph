@@ -29,7 +29,6 @@ export type HostedBlindIndexKind =
   | "linq-chat"
   | "linq-message"
   | "phone"
-  | "privy-user"
   | "stripe-billing-event"
   | "stripe-checkout-session"
   | "stripe-customer"
@@ -130,20 +129,6 @@ export function createHostedEmailLookupKeyReadCandidates(
   return createHostedLookupKeyReadCandidates("email", normalizeHostedEmailAddress(value));
 }
 
-export function createHostedPrivyUserLookupKey(value: string | null | undefined): string | null {
-  return createHostedLookupKey("privy-user", normalizeHostedOpaqueInput(value));
-}
-
-export function createHostedPrivyUserLookupKeyReadCandidates(
-  value: string | null | undefined,
-): string[] {
-  return createHostedLookupKeyReadCandidates("privy-user", normalizeHostedOpaqueInput(value));
-}
-
-export function createHostedWalletAddressLookupKey(value: string | null | undefined): string | null {
-  const normalized = normalizeHostedOpaqueInput(value)?.toLowerCase() ?? null;
-  return createHostedLookupKey("wallet-address", normalized);
-}
 
 export function createHostedLinqChatLookupKey(value: string | number | null | undefined): string | null {
   return createHostedLookupKey("linq-chat", normalizeHostedOpaqueInput(value));

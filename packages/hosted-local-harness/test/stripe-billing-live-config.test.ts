@@ -15,7 +15,6 @@ const configuredEnvironment: NodeJS.ProcessEnv = {
   [HOSTED_STRIPE_BILLING_LIVE_ENABLED_ENV]: "1",
   [HOSTED_STRIPE_BILLING_SECRET_KEY_ENV]: "sk_test_dedicated_authority",
   [HOSTED_STRIPE_BILLING_ACCOUNT_ID_ENV]: "acct_sandbox123",
-  NEXT_PUBLIC_PRIVY_APP_ID: "privytestbillingbrowser01",
   HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_pulse",
   HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge",
   HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: "price_familypulse",
@@ -89,7 +88,6 @@ describe("resolveHostedStripeBillingLiveConfig", () => {
       [HOSTED_STRIPE_BILLING_SECRET_KEY_ENV]: "sk_test_dedicated_authority",
       [HOSTED_STRIPE_BILLING_ACCOUNT_ID_ENV]: "acct_sandbox123",
       MURPH_HOSTED_STRIPE_BILLING_RUN_ID: "run_ci_12345678",
-      NEXT_PUBLIC_PRIVY_APP_ID: "privytestbillingbrowser01",
     })).toThrow(/price_id_launch_monthly/iu);
   });
 
@@ -108,7 +106,6 @@ describe("resolveHostedStripeBillingLiveConfig", () => {
       throw new Error("Expected configured live Stripe contract.");
     }
     expect(resolved.config.accountId).toBe("acct_sandbox123");
-    expect(resolved.config.privyAppId).toBe("privytestbillingbrowser01");
     expect(resolved.config.priceIds).toEqual({
       edge: "price_edge",
       familyEdge: "price_familyedge",
@@ -128,7 +125,6 @@ describe("removeHostedStripeBillingLiveEnvironment", () => {
     };
     removeHostedStripeBillingLiveEnvironment(environment);
     expect(environment).toEqual({
-      NEXT_PUBLIC_PRIVY_APP_ID: "privytestbillingbrowser01",
       SAFE_GENERIC: "kept",
     });
   });
@@ -155,11 +151,9 @@ describe("partitionHostedStripeBillingLiveEnvironment", () => {
     });
 
     expect(partitioned.genericEnvironment).toEqual({
-      NEXT_PUBLIC_PRIVY_APP_ID: "privytestbillingbrowser01",
       SAFE_GENERIC: "kept",
     });
     const scenarioEnvironment = { ...configuredEnvironment };
-    delete scenarioEnvironment.NEXT_PUBLIC_PRIVY_APP_ID;
     expect(partitioned.scenarioEnvironment).toEqual({
       NODE_ENV: undefined,
       ...scenarioEnvironment,

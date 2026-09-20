@@ -507,7 +507,8 @@ function createCipherEnvelope(ciphertext: string) {
 
 function createAuthorization() {
   return {
-    signature: `0x${"11".repeat(65)}` as `0x${string}`,
+    method: "passkey" as const,
+    assertion: { id: "synthetic-passkey", rawId: "synthetic-passkey", type: "public-key" as const, clientExtensionResults: {}, response: { authenticatorData: "synthetic", clientDataJSON: "synthetic", signature: "synthetic" } },
     token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
   };
 }

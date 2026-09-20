@@ -163,7 +163,6 @@ export default async function SettingsPage({
     ? await readSettingsPageData({
         memberId: authenticatedMember.id,
         prisma,
-        privyUserId: session?.privyUserId,
         usageReturnPurchaseId:
           request.usageTopUpPurchaseReturn?.purchaseId ?? null,
       })
@@ -972,15 +971,13 @@ function normalizeSettingsPageData(
 async function readSettingsPageData(input: {
   memberId: string;
   prisma: ReturnType<typeof getPrisma>;
-  privyUserId: string | null | undefined;
   usageReturnPurchaseId: string | null;
 }) {
   const { memberId, prisma } = input;
-  // Approval status adds one bounded member lookup before the legacy provider
-  // read. The larger Settings projections below remain sequential.
+  // Approval status adds one bounded member lookup. The larger Settings
+  // projections below remain sequential.
   const secureApprovalStatusPromise = readHostedSecureApprovalStatus({
     memberId, prisma,
-    privyUserId: input.privyUserId,
   });
 
   // The database-backed reads run sequentially on purpose: several of them

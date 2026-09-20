@@ -633,6 +633,18 @@ describe("hosted local dev stack", () => {
     const inheritedAppSessionHmacKey = Buffer.alloc(32, 9).toString("base64url");
     const localAppSessionHmacKey = Buffer.alloc(32, 8).toString("base64url");
     vi.stubEnv("HOSTED_APP_SESSION_HMAC_KEY", inheritedAppSessionHmacKey);
+    const inheritedAuth = {
+      HOSTED_BETTER_AUTH_SECRET: "inherited-first-party-secret",
+      HOSTED_AUTH_STORAGE_KEY: "inherited-auth-storage-key",
+      HOSTED_AUTH_TWILIO_API_KEY_SECRET: "inherited-delivery-secret",
+    };
+    const webAuth = {
+      HOSTED_BETTER_AUTH_SECRET: Buffer.alloc(32, 19).toString("base64url"),
+      HOSTED_AUTH_STORAGE_KEY: Buffer.alloc(32, 20).toString("base64url"),
+      HOSTED_AUTH_TWILIO_API_KEY_SECRET: "synthetic-web-delivery-secret",
+    };
+    for (const [key, value] of Object.entries(inheritedAuth)) vi.stubEnv(key, value);
+
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
@@ -682,6 +694,7 @@ describe("hosted local dev stack", () => {
       },
       webProcessEnvOverrides: {
         LINQ_API_BASE_URL: "http://127.0.0.1:4011",
+        ...webAuth,
       },
     });
     await stack.ready;
@@ -763,6 +776,23 @@ describe("hosted local dev stack", () => {
     const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
     const devWebCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
     expect(cloudflareCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
+    expect(devWebCall?.[3]).toMatchObject(webAuth);
+    expect(stack.hostedBetterAuthSecret).toBe(webAuth.HOSTED_BETTER_AUTH_SECRET);
+    expect(stack.hostedAuthStorageKey).toBe(webAuth.HOSTED_AUTH_STORAGE_KEY);
+    const otherEnvironments = [
+      process.env, stack.runtimeEnv, stack.workerRuntimeEnv,
+      ...spawnChildProcess.mock.calls.filter(([name]) => name !== "web").map((call) => call[3]),
+      ...runCommand.mock.calls.map((call) => call[2].env),
+      ...startHostedLocalTemporalRuntime.mock.calls.map(([input]) => input.env),
+      ...spawnStripeListenerWithSecretCapture.mock.calls.map(([input]) => input.env),
+      ...vi.mocked(vercelModule.resolveVercelOidcToken).mock.calls.map(([env]) => env),
+      ...vi.mocked(environmentModule.buildWranglerEnvFileText).mock.calls.map(([env]) => env),
+      ...vi.mocked(environmentModule.buildWranglerLocalDevConfig).mock.calls.map(([env]) => env),
+    ];
+    for (const env of otherEnvironments) {
+      for (const key of Object.keys(webAuth)) expect(env?.[key]).toBeUndefined();
+    }
+
     expect(devWebCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).toBe(localAppSessionHmacKey);
     expect(devWebCall?.[3].HOSTED_APP_SESSION_HMAC_KEY).not.toBe(
       inheritedAppSessionHmacKey,

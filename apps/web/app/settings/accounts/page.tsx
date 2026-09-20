@@ -33,7 +33,7 @@ export default async function AccountSettingsPage({ searchParams }: {
   } else {
     const prisma = getPrisma();
     const { account } = await readHostedAccountSettingsPageSnapshot({ memberId, prisma });
-    const status = await readHostedSecureApprovalStatus({ memberId, prisma, privyUserId: auth.session?.privyUserId });
+    const status = await readHostedSecureApprovalStatus({ memberId, prisma });
     controls = <>
       <section className="flex flex-col gap-4" aria-label="Connected accounts">
         <HostedLoginMethodSettings account={{ phone: account.phone, email: account.email, telegram: account.telegram, referralIdentityKey: account.referralIdentityKey }} />

@@ -67,8 +67,7 @@ describe("logoutHostedAppSession", () => {
     });
   });
 
-  it("uses the consent-decline endpoint before best-effort Privy logout", async () => {
-    const logoutPrivy = vi.fn().mockResolvedValue(undefined);
+  it("uses the consent-decline endpoint and invalidates local sessions", async () => {
     mocks.requestHostedOnboardingJson.mockImplementation(async (input: {
       onSuccessfulResponseHeaders?: () => void;
     }) => {
@@ -79,7 +78,7 @@ describe("logoutHostedAppSession", () => {
       "@/src/components/hosted-onboarding/hosted-app-session-client"
     );
 
-    await declineHostedLaunchConsent({ logoutPrivy });
+    await declineHostedLaunchConsent();
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
@@ -88,27 +87,8 @@ describe("logoutHostedAppSession", () => {
       signal: expect.any(AbortSignal),
       url: "/api/legal/consent/decline",
     });
-    expect(logoutPrivy).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a successful consent decline terminal when Privy cleanup fails", async () => {
-    const logoutPrivy = vi.fn().mockRejectedValue(new Error("Privy unavailable"));
-    mocks.requestHostedOnboardingJson.mockImplementation(async (input: {
-      onSuccessfulResponseHeaders?: () => void;
-    }) => {
-      input.onSuccessfulResponseHeaders?.();
-      return { ok: true };
-    });
-    const { declineHostedLaunchConsent } = await import(
-      "@/src/components/hosted-onboarding/hosted-app-session-client"
-    );
-
-    await expect(declineHostedLaunchConsent({ logoutPrivy })).resolves.toBeUndefined();
-
-    expect(logoutPrivy).toHaveBeenCalledTimes(1);
-    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
-    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
-  });
 
   it("does not replay destructive logout when ambient authority changes after a transport failure", async () => {
     const events: string[] = [];

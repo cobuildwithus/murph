@@ -171,7 +171,8 @@ test("hosted web smoke falls back to the local database url when none is configu
   delete environment.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
   delete environment.HOSTED_CONTACT_PRIVACY_KEYS;
   delete environment.HOSTED_MAILBOX_FINGERPRINT_KEY;
-  delete environment.NEXT_PUBLIC_PRIVY_APP_ID;
+  delete environment.HOSTED_BETTER_AUTH_SECRET;
+  delete environment.HOSTED_AUTH_STORAGE_KEY;
   const smokeEnv = createHostedWebSmokeEnvironment(environment);
 
   assert.equal(
@@ -185,8 +186,8 @@ test("hosted web smoke falls back to the local database url when none is configu
   assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION, "v1");
   assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_KEYS, "v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc");
   assert.equal(smokeEnv.HOSTED_MAILBOX_FINGERPRINT_KEY, "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc");
-  assert.equal(smokeEnv.NEXT_PUBLIC_PRIVY_APP_ID, "cm_app_smoke_placeholder1");
-  assert.equal(smokeEnv.NEXT_PUBLIC_PRIVY_APP_ID?.length, 25);
+  assert.equal(smokeEnv.HOSTED_BETTER_AUTH_SECRET, Buffer.alloc(32, 9).toString("base64url"));
+  assert.equal(smokeEnv.HOSTED_AUTH_STORAGE_KEY, Buffer.alloc(32, 10).toString("base64url"));
 });
 
 test("hosted web smoke preserves an existing database url", () => {
@@ -196,7 +197,8 @@ test("hosted web smoke preserves an existing database url", () => {
     HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: "v9",
     HOSTED_CONTACT_PRIVACY_KEYS: "v9:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     HOSTED_MAILBOX_FINGERPRINT_KEY: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-    NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_real",
+    HOSTED_BETTER_AUTH_SECRET: Buffer.alloc(32, 11).toString("base64url"),
+    HOSTED_AUTH_STORAGE_KEY: Buffer.alloc(32, 12).toString("base64url"),
   }));
 
   assert.equal(smokeEnv.DATABASE_URL, "postgresql://postgres:postgres@127.0.0.1:1/murph_test");
@@ -207,5 +209,6 @@ test("hosted web smoke preserves an existing database url", () => {
   assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION, "v9");
   assert.equal(smokeEnv.HOSTED_CONTACT_PRIVACY_KEYS, "v9:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
   assert.equal(smokeEnv.HOSTED_MAILBOX_FINGERPRINT_KEY, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
-  assert.equal(smokeEnv.NEXT_PUBLIC_PRIVY_APP_ID, "cm_app_real");
+  assert.equal(smokeEnv.HOSTED_BETTER_AUTH_SECRET, Buffer.alloc(32, 11).toString("base64url"));
+  assert.equal(smokeEnv.HOSTED_AUTH_STORAGE_KEY, Buffer.alloc(32, 12).toString("base64url"));
 });

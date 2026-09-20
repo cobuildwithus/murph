@@ -179,8 +179,8 @@ const mocks = vi.hoisted(() => {
       linqApiBaseUrl: "https://linq.example.test",
       linqApiToken: "linq-token",
       linqWebhookSecret: null as string | null,
-      privyAppId: "privy-app-id",
-      privyVerificationKey: "privy-key",
+
+
       publicBaseUrl: "https://join.example.test",
       stripeBillingMode: "payment" as const,
       stripePriceIdsByPlan: {
