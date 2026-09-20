@@ -1,6 +1,6 @@
 # Remove repeated runtime authority reads
 
-Status: active
+Status: completed
 Created: 2026-09-20
 Updated: 2026-09-20
 
@@ -66,4 +66,8 @@ needed data from the existing locks and delete the repeat reads.
   its required isolated `murph_test_*` database. Changed-file ESLint, docs drift,
   and privacy/diff checks pass.
 - Parent review confirms native row types, lock order, and unchanged admission
-  decisions. Remaining: scoped commit, external review, and exact-head CI.
+  decisions. Implementation is committed; PR #3601 owns final external review
+  and exact-head CI. These external gates remain pending at local closeout.
+- Changelog: `2026-09-20/less-repeated-reply-preparation`; existing archive
+  presentation is unchanged. No production mutation or deployment was performed.
+Completed: 2026-09-20
