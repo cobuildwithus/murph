@@ -90,19 +90,25 @@ and must be excluded from the measured cohort rather than treated as zeros.
 
 ### Ensure-processing summaries
 
-`runner.processing_finished` is one best-effort summary per completed
-`HostedUserRunner.ensureRuntimeProcessingForUser` call, including denied,
-queued-out, uncertain, accepted, and thrown outcomes. It is not a poll trace,
-mailbox admission, runtime health proof, or recovery signal. Only the existing
-`runner.accepted_attempt_failed` event requests failure recovery through this
-callback. No schema migration or new durable state is required.
+`runner.processing_finished` is a best-effort summary from the Postgres
+`ensure-processing` route owner in
+`apps/cloudflare/src/worker/route-handlers/runtime-control.ts`. A successful warm
+wake (`runtime_processing_accepted` with action `woken`) neither constructs a
+summary nor schedules a standalone signed log callback. Fresh starts (action
+`started`, consumed by the device-import cycling monitor), other accepted
+actions, every `retry_later` result, and thrown outcomes retain their summaries.
+The summary is not a poll trace, mailbox admission, runtime health proof, or
+recovery signal. The independent `runner.accepted_attempt_failed` event still
+requests failure recovery through this callback. Runtime log batching and
+foreground latency milestones are unchanged. No schema migration or new durable
+state is required.
 
-The existing invocation log owner sends the signed callback in a caught,
-detached promise. `HostedUserRunner` passes that promise to its existing
-`state.waitUntil` owner; neither the request nor its response cancellation is
-awaited by processing control. Response cancellation is initiated with owned
-rejection handling but is not awaited by the telemetry task either. A rejected
-HTTP log write emits only `runtimeLogWriteStatus` in the existing Workers logger,
+The route owner sends retained summaries through the existing log transport in a
+caught, detached promise, passed to its existing `executionCtx.waitUntil` owner;
+neither the request nor its response cancellation is awaited by processing
+control. Response cancellation is initiated with owned rejection handling but is
+not awaited by the telemetry task either. A rejected HTTP log write emits only
+`runtimeLogWriteStatus` in the existing Workers logger,
 never response content. Transport failures, rejections, and scheduling failures
 cannot replace the control result. Delivery remains best-effort.
 
