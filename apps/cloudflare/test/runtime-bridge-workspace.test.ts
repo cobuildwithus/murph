@@ -214,6 +214,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   it("writes idle shutdown full compactions without the browser-vault replica port", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "vault.json"), "{}");
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
     const baseSnapshotRef = createWorkspaceSnapshotV2FixtureRef();
     await writeFile(path.join(vaultRoot, "note.md"), "workspace changed\n", "utf8");
@@ -263,6 +264,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   it("uploads idle shutdown snapshots as a single encrypted workspace object", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "vault.json"), "{}");
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
     const baseSnapshotRef = createWorkspaceSnapshotV2FixtureRef();
     const rawRoot = path.join(vaultRoot, "raw", "captures");
@@ -965,6 +967,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   it("keeps live raw files inside the encrypted v2 snapshot without artifact-store reads", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "vault.json"), "{}");
     const rawPath = path.join("raw", "captures", "stale.bin");
     const rawBytes = Buffer.from("same live artifact bytes\n");
     await mkdir(path.join(vaultRoot, "raw", "captures"), { recursive: true });
@@ -1091,6 +1094,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   it("snapshots idle shutdown state with dangling Codex resume diagnostics", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "vault.json"), "{}");
     const baseSnapshotRef = createWorkspaceSnapshotV2FixtureRef();
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), {
       recursive: true,
@@ -1415,6 +1419,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "cache"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant", "sessions"), { recursive: true });
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await writeFile(path.join(vaultRoot, "vault.json"), "{}");
     await writeFile(
       path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
       "{\"rollout\":\"kept\"}\n",

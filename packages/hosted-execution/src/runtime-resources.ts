@@ -5,6 +5,9 @@ import { HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES } from "./workspace-sna
 
 export const HOSTED_RUNTIME_RESOURCES_PATH = "/api/internal/hosted-runtime/resources";
 export const HOSTED_RUNTIME_ORPHAN_GRACE_MS = 65 * 60_000;
+// Accepted snapshots remain recoverable beyond the ordinary upload/orphan
+// drain window. Their complete encrypted reference is retained by Web.
+export const HOSTED_RUNTIME_SNAPSHOT_RECOVERY_RETENTION_MS = 7 * 24 * 60 * 60_000;
 export const HOSTED_RUNTIME_REPLICA_POST_STOP_DRAIN_MS = 60_000;
 
 export type HostedRuntimeSnapshotCommand =

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-20",
+  "order": 100,
+  "item": {
+    "id": "vault-recovery-history",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Stronger protection for saved vaults",
+    "summary": "Murph keeps recent encrypted vault backups available for recovery and rejects replacements missing essential vault metadata.",
+    "details": "Recent backups can remain available for up to seven days, subject to existing content-expiry rules. Account deletion still removes them. These protections apply to new backups and do not automatically recover previously missing files.",
+    "relevanceTags": ["vault", "reliability"],
+    "sourcePullRequests": []
+  }
+}

@@ -601,6 +601,17 @@ async function createHostedWorkspaceV2Snapshot(
           vaultRoot: input.vaultRoot,
         });
         assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+        // A replacement must retain the canonical vault, even if a future
+        // inventory regression returns a structurally valid operator-only plan.
+        // A first bootstrap has no prior snapshot to destroy.
+        if (input.currentSnapshotRef !== null && !archivePlan.entries.some((entry) =>
+          entry.root === "vault" && entry.relativePath === "vault.json"
+          && entry.kind === "file" && (entry.size ?? 0) > 0
+        )) {
+          throw Object.assign(new Error("Hosted workspace replacement snapshot is missing canonical vault metadata."), {
+            code: "workspace_snapshot_vault_missing",
+          });
+        }
         workspaceSnapshotSizeDiagnostics =
           createHostedWorkspaceSnapshotArchivePlanSizeDiagnostics({
             archivePlan,
