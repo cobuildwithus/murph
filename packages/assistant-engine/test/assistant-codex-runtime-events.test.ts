@@ -3587,7 +3587,11 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
-    it('fails closed on a current-turn completion for an unadmitted child', async () => {
+    it.each([
+      { reason: 'UNTRACKED_COMPLETION', kind: 'completed', sender: 'parent', childId: 'thread-child' },
+      { reason: 'NESTED_CHILD', kind: 'started', sender: 'child', childId: 'thread-grandchild' },
+      { reason: 'MALFORMED_LIFECYCLE', kind: 'started', sender: 'parent', childId: '' },
+    ] as const)('reports $reason and fails the boundary closed', async ({ reason, kind, sender, childId }) => {
       const workingDirectory = await createTempDir(
         'assistant-codex-untracked-completed-child-work-',
       )
@@ -3603,11 +3607,10 @@ describe('assistant codex event shaping', () => {
         )
         writeSubAgentActivity(
           child,
-          'thread-untracked-completed-child-parent',
+          `thread-untracked-completed-child-${sender}`,
           'turn-untracked-completed-child-parent',
-          'thread-untracked-completed-child-child',
-          'completed',
-          { id: 'subagent-completed-turn-untracked-completed-child-child' },
+          childId,
+          kind,
         )
         writeCompletedTurn(
           child,
@@ -3622,9 +3625,31 @@ describe('assistant codex event shaping', () => {
         'attempt to complete an unadmitted child',
       )
       await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
-        code: 'ASSISTANT_CODEX_BACKGROUND_WORK_UNSUPPORTED',
+        code: `ASSISTANT_CODEX_BACKGROUND_WORK_${reason}`,
       })
       expect(spawnedChildren[0]?.signalCode).toBe('SIGTERM')
+    })
+
+    it('retains a native completion that precedes parent-side admission', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-early-completion-work-')
+      const codexHome = await createTempDir('assistant-codex-early-completion-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const scannedThreadIds: string[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_877, async (child) => {
+        await initializeWarmTurn(child, 'thread-parent', 'turn-parent')
+        writeCompletedTurn(child, 'thread-child', 'turn-child')
+        writeSubAgentActivity(child, 'thread-parent', 'turn-parent', 'thread-child')
+        writeCompletedTurn(child, 'thread-parent', 'turn-parent')
+        for (let count = 1; count <= 2; count += 1) {
+          const request = await respondToBackgroundTerminals(child, count)
+          scannedThreadIds.push(String(asRecord(request.params).threadId))
+        }
+      })
+
+      await executeBackgroundBoundaryTurn(codexHome, workingDirectory, 'run a bounded child')
+      await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
+      expect(scannedThreadIds).toEqual(['thread-parent', 'thread-child'])
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
     })
 
     it('tracks every sequential child admitted before the boundary', async () => {
@@ -3699,7 +3724,7 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
-    it('fails closed on child interaction and stops the exact warm process', async () => {
+    it.each(['interacted', 'interrupted'] as const)('reports %s and stops the exact warm process', async (kind) => {
       const workingDirectory = await createTempDir('assistant-codex-child-interaction-work-')
       const codexHome = await createTempDir('assistant-codex-child-interaction-home-')
       const spawnedChildren: MockChildProcess[] = []
@@ -3721,7 +3746,7 @@ describe('assistant codex event shaping', () => {
           'thread-child-interaction-child',
           'turn-child-interaction-child',
           'thread-child-interaction-parent',
-          'interacted',
+          kind,
         )
         writeSubAgentActivity(
           child,
@@ -3729,6 +3754,10 @@ describe('assistant codex event shaping', () => {
           'turn-child-interaction-parent',
           'thread-child-interaction-child',
         )
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: { item: { type: 'subAgentActivity', kind: 'invalid' } },
+        }))
         writeCompletedTurn(
           child,
           'thread-child-interaction-parent',
@@ -3742,7 +3771,7 @@ describe('assistant codex event shaping', () => {
         'attempt an unsupported interactive child',
       )
       await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
-        code: 'ASSISTANT_CODEX_BACKGROUND_WORK_UNSUPPORTED',
+        code: `ASSISTANT_CODEX_BACKGROUND_WORK_${kind.toUpperCase()}`,
       })
       expect(spawnedChildren[0]?.signalCode).toBe('SIGTERM')
     })

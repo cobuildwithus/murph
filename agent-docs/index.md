@@ -1,5 +1,10 @@
 # Murph Agent Docs Index
 
+Finite Codex background-boundary failure codes and early child-completion
+ordering are owned by `ARCHITECTURE.md`. Focused proof and simplification are
+recorded in
+[`2026-09-20-background-work-diagnostics.md`](exec-plans/completed/2026-09-20-background-work-diagnostics.md).
+
 Web runtime admission implementation and focused proof are recorded in
 [`2026-09-18-web-runtime-admission.md`](exec-plans/completed/2026-09-18-web-runtime-admission.md).
 Consumer-first rollout remains owned by `apps/cloudflare/DEPLOY.md`.

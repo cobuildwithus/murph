@@ -9028,7 +9028,11 @@ describe("RunnerContainer", () => {
     expect(JSON.stringify(failureLogInput)).not.toContain("placeholder");
   });
 
-  it("preserves runtime phase detail through the thrown and persisted error shapes", async () => {
+  it.each([
+    "EACCES",
+    "ASSISTANT_CODEX_BACKGROUND_WORK_UNTRACKED_COMPLETION",
+    "ASSISTANT_CODEX_BACKGROUND_WORK_INTERACTED",
+  ])("preserves runtime phase and %s through thrown and persisted errors", async (code) => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
@@ -9043,7 +9047,7 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           code: "runtime_error",
           details: {
-            errorCodeDetail: "EACCES",
+            errorCodeDetail: code,
             errorDetail: "Missing required file \"vault.json\".",
             runtimeFailurePhaseCode:
               "runtime_phase:workspace.checkpoint.idle_compact",
@@ -9071,13 +9075,13 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "runtime_error",
       details: {
-        errorCodeDetail: "EACCES",
+        errorCodeDetail: code,
         errorDetailPresent: true,
         payloadDetailsPresent: true,
         runtimeFailurePhaseCode:
           "runtime_phase:workspace.checkpoint.idle_compact",
       },
-      message: "Hosted execution runtime failed. Code: EACCES. Status: 500.",
+      message: `Hosted execution runtime failed. Code: ${code}. Status: 500.`,
       name: "Error",
       status: 500,
       statusCode: 500,
@@ -9087,7 +9091,7 @@ describe("RunnerContainer", () => {
       errorCode: "runtime_error",
       errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
       safeErrorDetail:
-        "Hosted execution runtime failed. Code: EACCES. Status: 500.",
+        `Hosted execution runtime failed. Code: ${code}. Status: 500.`,
     });
     expect(JSON.stringify(thrown)).not.toContain("vault.json");
   });
