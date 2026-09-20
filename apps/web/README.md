@@ -2582,13 +2582,16 @@ render `<LiveVoiceButton />` for the circle, or `<LiveVoiceButton showVoicePicke
 for nine female voices: Gleam, Marin, Willow, Quartz, Delta, Coral, Sage,
 Shimmer, and Bossa (Brazilian Portuguese). The older Coral/Sage/Shimmer options
 were verified against GPT-Live session startup; Nova was rejected by the API.
-Gleam is the default;
-`voice="willow"` chooses another default. Voice changes require ending the current
+Willow (Irish) is the default;
+`voice="marin"` chooses another default. Voice changes require ending the current
 conversation. An optional same-origin `endpoint` returns `{ sdp: string }` for a
 posted `{ sdp: string, voice: string }` WebRTC offer. The server validates the voice
 against the shared catalog before setting `session.audio.output.voice`.
 
-Click the circle to start, pause, and resume. Pause mutes microphone transmission
+Click the cloud orb to start, pause, and resume. Microphone audio makes it
+smaller with subtle cloud motion; assistant audio drives stronger cloud motion.
+Pausing freezes the clouds. Reduced-motion preferences and static-image
+fallbacks are supported. Audio levels are measured locally and never stored. Pause mutes microphone transmission
 and local playback while keeping context connected; GPT-Live duration billing
 continues. End conversation closes the session. The preview does not access
 Murph records or persist transcripts, and requests `store: false`.

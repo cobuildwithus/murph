@@ -16,7 +16,7 @@ class FakePeer extends EventTarget {
   iceGatheringState = "complete";
   connectionState = "connected";
   localDescription = { sdp: "v=0" };
-  ontrack?: unknown;
+  ontrack?: (event: { track: typeof track }) => void;
   onconnectionstatechange?: () => void;
   close = vi.fn();
   addTrack = vi.fn();
@@ -35,6 +35,27 @@ class FakeAudio {
   pause = vi.fn();
   constructor() { FakeAudio.latest = this; }
 }
+class FakeAnalyser {
+  fftSize = 512;
+  amplitude = 0;
+  disconnect = vi.fn();
+  getFloatTimeDomainData(samples: Float32Array) { samples.fill(this.amplitude); }
+}
+class FakeAudioContext {
+  static latest: FakeAudioContext;
+  state = "running";
+  analysers: FakeAnalyser[] = [];
+  sources: { connect: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }[] = [];
+  resume = vi.fn(async () => {});
+  close = vi.fn(async () => { this.state = "closed"; });
+  constructor() { FakeAudioContext.latest = this; }
+  createAnalyser() { const analyser = new FakeAnalyser(); this.analysers.push(analyser); return analyser; }
+  createMediaStreamSource() {
+    const source = { connect: vi.fn(), disconnect: vi.fn() };
+    this.sources.push(source);
+    return source;
+  }
+}
 const track = { enabled: true, stop: vi.fn(), onended: undefined };
 const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
 const updates: VoiceSnapshot[] = [];
@@ -49,6 +70,8 @@ beforeEach(() => {
   vi.stubGlobal("navigator", { mediaDevices: { getUserMedia } });
   vi.stubGlobal("RTCPeerConnection", FakePeer);
   vi.stubGlobal("Audio", FakeAudio);
+  vi.stubGlobal("AudioContext", FakeAudioContext);
+  vi.stubGlobal("MediaStream", class { constructor(readonly tracks: unknown[]) {} });
   vi.stubGlobal("fetch", vi.fn(async () => Response.json({ sdp: "answer" })));
   session = new LiveVoiceSession((snapshot) => updates.push(snapshot), "/api/live-voice/session");
 });
@@ -91,12 +114,63 @@ describe("GPT-Live call lifecycle", () => {
     expect(track.stop).toHaveBeenCalled();
     expect(FakePeer.latest.close).toHaveBeenCalled();
   });
+  it("meters both audio streams only while live and releases them with the call", async () => {
+    await session.start();
+    FakePeer.latest.ontrack?.({ track });
+    const context = FakeAudioContext.latest;
+    const [input, output] = context.analysers;
+    input.amplitude = 0.1;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(updates.at(-1)?.inputLevel).toBeUndefined();
+    FakePeer.latest.channel.emit({ type: "session.started" });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(updates.at(-1)?.inputLevel).toBeGreaterThan(0.5);
+    expect(updates.at(-1)?.outputLevel).toBe(0);
+    input.amplitude = 0;
+    output.amplitude = 0.1;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(updates.at(-1)?.inputLevel).toBe(0);
+    expect(updates.at(-1)?.outputLevel).toBeGreaterThan(0.5);
+    session.togglePause();
+    const pausedCount = updates.length;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(updates).toHaveLength(pausedCount);
+    expect(updates.at(-1)?.outputLevel).toBeUndefined();
+    acknowledge("session.input_audio.muted");
+    session.togglePause();
+    acknowledge("session.input_audio.unmuted");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(updates.at(-1)?.outputLevel).toBeGreaterThan(0.5);
+    session.end();
+    FakePeer.latest.channel.emit({ type: "session.closed" });
+    const endedCount = updates.length;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(updates).toHaveLength(endedCount);
+    expect(context.close).toHaveBeenCalledOnce();
+    for (const node of [...context.sources, ...context.analysers]) expect(node.disconnect).toHaveBeenCalledOnce();
+    // Each source connects only to its analyser: no microphone monitoring/echo.
+    for (const source of context.sources) expect(source.connect).toHaveBeenCalledOnce();
+  });
+  it("ignores quiet background noise and still connects without Web Audio", async () => {
+    await session.start();
+    FakeAudioContext.latest.analysers[0].amplitude = 0.004;
+    FakePeer.latest.channel.emit({ type: "session.started" });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(updates.at(-1)?.inputLevel).toBe(0);
+    session.dispose();
+    vi.stubGlobal("AudioContext", undefined);
+    session = new LiveVoiceSession((snapshot) => updates.push(snapshot), "/api/live-voice/session");
+    await session.start();
+    FakePeer.latest.channel.emit({ type: "session.started" });
+    expect(lastState()).toBe("live");
+    expect(track.enabled).toBe(true);
+  });
   it("sends the chosen voice in the browser connection offer", async () => {
     session.dispose();
-    session = new LiveVoiceSession((snapshot) => updates.push(snapshot), "/api/live-voice/session", "willow");
+    session = new LiveVoiceSession((snapshot) => updates.push(snapshot), "/api/live-voice/session", "coral");
     await session.start();
     const options = vi.mocked(fetch).mock.calls[0][1];
-    expect(JSON.parse(String(options?.body))).toEqual({ sdp: "v=0", voice: "willow" });
+    expect(JSON.parse(String(options?.body))).toEqual({ sdp: "v=0", voice: "coral" });
   });
   it("releases a microphone granted after startup is cancelled", async () => {
     let grant!: (value: typeof stream) => void;

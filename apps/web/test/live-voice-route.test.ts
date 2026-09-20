@@ -41,7 +41,7 @@ describe("local GPT-Live admission", () => {
     const body = JSON.parse(provider.mock.calls[0][1].body);
     expect(body.session.model).toBe("gpt-live-1");
     expect(body.session.store).toBe(false);
-    expect(body.session.audio.output.voice).toBe("gleam");
+    expect(body.session.audio.output.voice).toBe("willow");
     expect(body.transport).toEqual({ type: "webrtc", sdp: "v=0\r\n" });
   });
   it.each(LIVE_VOICES)("passes the selected $name voice to the provider", async ({ id }) => {

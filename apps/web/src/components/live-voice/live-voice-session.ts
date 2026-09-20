@@ -1,7 +1,8 @@
+import { LiveVoiceAudio, type VoiceLevels } from "./live-voice-audio";
 import { DEFAULT_LIVE_VOICE, type LiveVoice } from "../../lib/live-voice/voices";
 
 export type VoiceState = "idle" | "connecting" | "live" | "pausing" | "paused" | "resuming" | "ending" | "error";
-export type VoiceSnapshot = { state: VoiceState; error?: string };
+export type VoiceSnapshot = { state: VoiceState; error?: string } & Partial<VoiceLevels>;
 
 /** Owns one browser call. Audio and transcripts are never persisted by the demo. */
 export class LiveVoiceSession {
@@ -9,6 +10,7 @@ export class LiveVoiceSession {
   private events?: RTCDataChannel;
   private microphone?: MediaStream;
   private audio?: HTMLAudioElement;
+  private levels?: LiveVoiceAudio;
   private abort = new AbortController();
   private timeout?: ReturnType<typeof setTimeout>;
   private pending?: string;
@@ -19,12 +21,15 @@ export class LiveVoiceSession {
 
   private publish(state: VoiceState, error?: string) {
     this.state = state;
+    this.levels?.setActive(state === "live");
     if (!this.disposed) this.update({ state, error });
   }
 
   private release() {
     clearTimeout(this.timeout);
     this.abort.abort();
+    this.levels?.dispose();
+    this.levels = undefined;
     this.microphone?.getTracks().forEach((track) => track.stop());
     if (this.events) {
       this.events.onmessage = null;
@@ -96,6 +101,9 @@ export class LiveVoiceSession {
       this.fail("Voice needs a browser with microphone access on HTTPS or localhost.");
       return;
     }
+    this.levels = new LiveVoiceAudio((levels) => {
+      if (!this.disposed && this.state === "live") this.update({ state: this.state, ...levels });
+    });
     this.publish("connecting");
     // Covers permission, signaling, and a missing session.started event.
     this.deadline("Connection timed out. Check microphone permission and try again.", 45_000);
@@ -106,7 +114,9 @@ export class LiveVoiceSession {
       this.audio.autoplay = true;
       peer.ontrack = ({ track }) => {
         if (this.abort.signal.aborted || !this.audio) return;
-        this.audio.srcObject = new MediaStream([track]);
+        const remote = new MediaStream([track]);
+        this.audio.srcObject = remote;
+        this.levels?.attach("output", remote);
         void this.audio.play().catch(() => this.fail("Audio playback was blocked. Allow audio for this site and try again."));
       };
       peer.onconnectionstatechange = () => {
@@ -118,6 +128,7 @@ export class LiveVoiceSession {
         return;
       }
       this.microphone = microphone;
+      this.levels?.attach("input", microphone);
       for (const track of microphone.getAudioTracks()) {
         track.enabled = false;
         track.onended = () => { if (!this.abort.signal.aborted) this.fail("Microphone disconnected. Reconnect it and try again."); };

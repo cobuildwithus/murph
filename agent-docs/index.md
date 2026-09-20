@@ -96,6 +96,9 @@ Pinned Codex/workerd reuse and fallback proof is indexed in
 
 Local GPT-Live voice preview is tracked in
 [`2026-09-20-live-voice.md`](exec-plans/completed/2026-09-20-live-voice.md).
+
+Live voice cloud motion and Irish default:
+[`2026-09-20-live-voice-orb.md`](exec-plans/completed/2026-09-20-live-voice-orb.md).
 Setup and embedding are documented in `apps/web/README.md`.
 
 GPT-Live voice selection is tracked in

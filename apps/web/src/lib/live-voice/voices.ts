@@ -14,7 +14,7 @@ export const LIVE_VOICES = [
 ] as const;
 
 export type LiveVoice = typeof LIVE_VOICES[number]["id"];
-export const DEFAULT_LIVE_VOICE: LiveVoice = "gleam";
+export const DEFAULT_LIVE_VOICE: LiveVoice = "willow";
 
 export function isLiveVoice(value: unknown): value is LiveVoice {
   return LIVE_VOICES.some((voice) => voice.id === value);

@@ -1,0 +1,14 @@
+.canvas, .fallback {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.canvas { opacity: 0; }
+
+.fallback {
+  background: radial-gradient(ellipse at 62% 64%, #f3f4ff 3%, transparent 45%), linear-gradient(155deg, var(--orb-color) 20%, #e5e8f4 85%);
+}

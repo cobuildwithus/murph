@@ -1,10 +1,11 @@
 "use client";
 
-import { LoaderCircle, Mic, Pause, Play, Square } from "lucide-react";
+import { LoaderCircle, Play, Square } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { LiveVoiceSession, type VoiceSnapshot, type VoiceState } from "./live-voice-session";
 
 import { DEFAULT_LIVE_VOICE, type LiveVoice } from "@/src/lib/live-voice/voices";
+import { VoiceOrb } from "../voice-orb/voice-orb";
 import { LiveVoicePicker } from "./live-voice-picker";
 
 const labels: Record<VoiceState, string> = {
@@ -41,12 +42,17 @@ export function LiveVoiceButton({ endpoint = "/api/live-voice/session", showVoic
 }
 
 /** Shared presentation for the live control and inert design studies. */
-export function LiveVoiceControl({ state, error, onToggle, onEnd }: VoiceSnapshot & { onToggle?: () => void; onEnd?: () => void }) {
+export function LiveVoiceControl({ state, error, inputLevel = 0, outputLevel = 0, onToggle, onEnd }: VoiceSnapshot & { onToggle?: () => void; onEnd?: () => void }) {
   const statusId = useId();
   const busy = ["connecting", "pausing", "resuming", "ending"].includes(state);
   const canEnd = !["idle", "error", "ending"].includes(state);
   const active = state === "live";
-  const Icon = busy ? LoaderCircle : active ? Pause : state === "paused" ? Play : Mic;
+  const input = active ? inputLevel : 0;
+  const output = active ? outputLevel : 0;
+  const userSpeaking = input > 0.04;
+  const speaker = userSpeaking ? "user" : output > 0.04 ? "assistant" : "none";
+  const energy = Math.min(1, output * 1.8 + input * 0.15);
+  const speed = active ? 0.16 + input * 0.25 + output * 1.6 : 0.18;
   const action = active ? "Pause conversation" : state === "paused" ? "Resume conversation" : "Start conversation";
 
   return (
@@ -57,9 +63,17 @@ export function LiveVoiceControl({ state, error, onToggle, onEnd }: VoiceSnapsho
         aria-describedby={statusId}
         disabled={busy}
         onClick={onToggle}
-        className={`grid size-20 shrink-0 cursor-pointer place-items-center rounded-full border transition-[background-color,transform,outline-color] duration-200 focus-visible:outline-2 focus-visible:outline-offset-8 focus-visible:outline-ring active:scale-95 disabled:cursor-wait motion-reduce:transition-none ${active ? "border-primary bg-primary text-primary-foreground outline-4 outline-offset-4 outline-primary/15" : "border-border bg-foreground text-background hover:bg-foreground/85"}`}
+        data-speaker={speaker}
+        className="relative grid size-36 shrink-0 cursor-pointer place-items-center rounded-full border-0 bg-transparent focus-visible:outline-2 focus-visible:outline-offset-8 focus-visible:outline-ring disabled:cursor-wait"
       >
-        <Icon aria-hidden="true" className={`size-6 ${busy ? "motion-safe:animate-spin" : ""}`} strokeWidth={1.8} />
+        <span
+          className="pointer-events-none absolute inset-0 rounded-full transition-transform duration-300 ease-out motion-reduce:transition-none"
+          style={{ transform: `scale(${userSpeaking ? 0.8 - input * 0.04 : 1})` }}
+        >
+          <VoiceOrb energy={energy} speed={speed} paused={busy || state === "paused" || state === "error"} />
+        </span>
+        {busy ? <LoaderCircle aria-hidden="true" className="relative size-5 text-white motion-safe:animate-spin" /> : null}
+        {state === "paused" ? <Play aria-hidden="true" className="relative size-5 fill-white/60 text-white" /> : null}
       </button>
       <div className="min-h-24 text-center">
         <p id={statusId} role="status" className="text-sm text-muted-foreground">{labels[state]}</p>
