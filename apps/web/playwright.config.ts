@@ -36,7 +36,7 @@ export default defineConfig({
     : [["list"]],
   use: {
     baseURL,
-    reducedMotion: "reduce",
+    contextOptions: { reducedMotion: "reduce" },
     trace: "off",
   },
   // Bundled Chromium only (no `channel`), so `playwright install chromium` in
