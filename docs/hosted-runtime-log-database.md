@@ -729,10 +729,11 @@ authority. Ordinary account deletion has no diagnostic-retention option, even
 when called on the canary account.
 
 Primary ingress traces also retain their logical user/mailbox correlation across
-canary reset. They have no mailbox cascade after migration
+canary reset. They have no mailbox cascade after the post-promotion contract migration
 `20260920180000_canary_diagnostic_retention`; ordinary account deletion explicitly
 removes them, and their existing seven-day retention remains unchanged. Deploy
-the guarded trace writers and drain old Web instances before applying that
+the guarded trace writers and let the existing post-promotion contract runner
+verify the production alias and drain old Web instances before applying that
 migration; canary trace retention becomes effective once both are present. Each
 trace-creation statement takes a shared row lock on an unsuspended member,
 serializing with the existing account-deletion suspension fence. Writers that

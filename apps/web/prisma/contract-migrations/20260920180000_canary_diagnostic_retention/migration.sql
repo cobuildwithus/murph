@@ -3,4 +3,4 @@
 -- them for the existing time-bounded diagnostic sweep.
 -- Deploy the member-fenced trace writers and drain old Web instances first.
 ALTER TABLE "hosted_ingress_latency_trace"
-  DROP CONSTRAINT "hosted_ingress_latency_trace_user_id_mailbox_item_id_fkey";
+  DROP CONSTRAINT IF EXISTS "hosted_ingress_latency_trace_user_id_mailbox_item_id_fkey";

@@ -34,7 +34,7 @@ describe.skipIf(!runPostgresProof)(
     it("reproduces the mailbox cascade and preserves diagnostic rows after the retention migration", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const initialMigration = await readFile(new URL("../prisma/migrations/2026052700_hosted_ingress_latency_trace/migration.sql", import.meta.url), "utf8");
-      const retentionMigration = await readFile(new URL("../prisma/migrations/20260920180000_canary_diagnostic_retention/migration.sql", import.meta.url), "utf8");
+      const retentionMigration = await readFile(new URL("../prisma/contract-migrations/20260920180000_canary_diagnostic_retention/migration.sql", import.meta.url), "utf8");
       try {
         await prisma.$transaction(async (tx) => {
           // All migration objects stay connection-local; no shared fixture rows
@@ -56,6 +56,7 @@ describe.skipIf(!runPostgresProof)(
 
           await seed();
           await tx.$executeRawUnsafe(retentionMigration);
+          await tx.$executeRawUnsafe(retentionMigration); // Contract cleanup may be replayed.
           await tx.$executeRaw`DELETE FROM hosted_mailbox_item WHERE user_id = 'member_synthetic'`;
           expect(await tx.$queryRaw`SELECT id FROM hosted_mailbox_item`).toEqual([]);
           expect(await tx.$queryRaw`SELECT id FROM hosted_ingress_latency_trace`).toEqual([{ id: "trace_synthetic" }]);

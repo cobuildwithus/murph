@@ -47,7 +47,9 @@ No member or mailbox payload remains solely to retain canary diagnostics.
 Both ingress trace-creation paths lock the unsuspended member during their insert,
 so the ordinary account-deletion suspension fence also prevents late trace
 recreation after the mailbox cascade is removed. Roll out those writers and drain
-old Web instances before applying the diagnostic-retention migration.
+old Web instances before applying the diagnostic-retention contract migration
+from `apps/web/prisma/contract-migrations`. The existing post-promotion runner
+owns its alias check and drain; it must not run in the predeploy Prisma lane.
 
 ## Export contract
 
