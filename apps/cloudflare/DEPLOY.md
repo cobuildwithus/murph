@@ -56,6 +56,19 @@ Worker. After deployment verify the protocol probe and inspect bounded replica
 rejection and unresolved-upload aggregates; a successful 36-object refresh uses
 two receipt callbacks and still produces 36 durable physical-upload receipts.
 
+### Runtime completion consolidation
+
+Deploy the additive Web `complete` ownership command before activating the
+Worker that sends it. The existing live Web protocol admission requires early
+and settled completion witnesses from the deployed ownership command parser;
+an older Web is rejected before Worker activation. Old Workers still use the
+supported separate retirement, release, and owner-released requests. Warm
+containers keep their existing callback and native settlement receipt contract.
+Retain the new Web reader throughout Worker convergence and roll back the Worker
+producer before rolling Web below that reader. After deployment, inspect bounded
+ownership callback failures and confirm completion still progresses through
+retiring to idle without stale attempts changing a successor.
+
 ### Live Web protocol admission
 
 `deploy-worker-version.cli.ts` admits the **served** `HOSTED_WEB_BASE_URL` before
@@ -71,12 +84,15 @@ The signed, bodyless GET `/api/internal/hosted-runtime/protocol-admission` uses
 existing Web callback signature verification and replay protection, with its own
 system nonce owner (not the Temporal binding-admission contract). The request
 binds the protocol version and a fresh nonce in the signed query. The no-store
-reply echoes that nonce and contains executable evidence from two existing owners:
+reply echoes that nonce and contains executable evidence from existing owners:
 
 - The Web runtime-log reader parses synthetic entries for its actual event-code
   enum. The candidate requires its declared producer vocabulary to be a subset
   of the reader's; a future reader's extra codes are allowed. The actual log route and
   probe use the same parser, including `runner.processing_finished`.
+- The ownership command parser supplies early and settled completion witnesses.
+  The candidate verifies exact attempt/generation, native settlement target, and
+  immediate recheck semantics. The probe is synthetic and performs no mutation.
 - The normal thread-route authority handler and probe share their response
   builder. The candidate uses the actual Worker response parser on both direct
   and group witnesses, requiring explicit `true` and `false`. Denial, malformed

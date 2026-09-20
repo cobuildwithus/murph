@@ -4368,19 +4368,23 @@ The Worker records completion against the exact Postgres owner. The owner stays
 retiring until the native invocation settles or exact stop evidence permits
 release; a process-origin receipt alone does not release the outer operation. The disposable RunnerContainer activation sends no
 second receipt. A checkpoint, elapsed time, or container lifecycle event is not
-a completion receipt. After an exact successful runtime completion clears its
-write fence, Cloudflare makes at most one signed, bodyless, best-effort callback
-to web with a timeout of at most two seconds; a known future mailbox retry
-continuation skips it. The signed query binds the opaque released runtime
-attempt and may also carry one exact positive edge when that invocation newly
-committed an unserviced default or retention schedule. For actionable work, Web
-sends the pointer-only `runtime_owner_released` Temporal signal. Temporal may
-invalidate an accepted-owner horizon only when the attempt pointer matches;
-fresh reconciliation facts then choose the work mode. Legacy callbacks without
-the pointer remain facts-only `runtime_recheck_requested` signals during
-rollout. Neither signal converts a persisted due wake into a repeating
-level-triggered signal. Callback failure is non-fatal and is not retried by
-Cloudflare. Because an exact release changes Workflow command order, the
+a completion receipt. Each completion stage makes one signed Web ownership
+command that conditionally retires the exact attempt, releases only when native
+settlement names its exact target, and then sends the best-effort Temporal hint
+outside the database transactions. The early callback retains its owner-routing
+read, reducing the usual two-stage path from six Web requests to three. A known
+future mailbox retry continuation skips the hint unless the invocation newly
+committed an unserviced default or retention schedule. The hint retains its
+two-second budget and exact opaque runtime attempt. Temporal may invalidate an
+accepted-owner horizon only when that pointer matches; fresh reconciliation
+facts choose the work mode. Legacy bodyless callbacks and pointerless
+`runtime_recheck_requested` signals remain compatible during rollout. Neither
+signal converts a persisted due wake into a repeating level-triggered signal.
+Hint failure is non-fatal and is recovered by the existing accepted-attempt
+recheck. Web completion consumers must converge before Worker activation;
+the existing live protocol admission proves both command shapes through the
+actual reader, while old Workers retain their separate commands.
+Because an exact release changes Workflow command order, the
 private consumer deploys first as a patch-introducing direct-Current cutover
 with no prior or Ramping reader eligible. From the first possible signal until
 both public producers are disabled and signal-bearing histories drain, that

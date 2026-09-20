@@ -20,5 +20,11 @@ export function syntheticHostedWebProtocolAdmission(nonce: string): HostedRuntim
       direct: { authorized: true, threadIsDirect: true },
       group: { authorized: true, threadIsDirect: false },
     },
+    runtimeOwnerCompletion: {
+      early: { operation: "complete", attemptId: "protocol-probe", generation: "1",
+        settledRunnerContainerName: null, immediateRecheckRequested: false },
+      settled: { operation: "complete", attemptId: "protocol-probe", generation: "1",
+        settledRunnerContainerName: "protocol-probe-target", immediateRecheckRequested: true },
+    },
   };
 }

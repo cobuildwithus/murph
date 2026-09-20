@@ -3689,6 +3689,7 @@ export interface HostedRuntimeWebProtocolAdmission {
   runtimeLogEventCodes: readonly string[];
   threadRouteAuthority: { direct: unknown; group: unknown };
   runtimeReplicaBatch: { admission: unknown; settlement: unknown };
+  runtimeOwnerCompletion: { early: unknown; settled: unknown };
 }
 
 // A synthetic wire message, not a log write. Exercise every producer enum value

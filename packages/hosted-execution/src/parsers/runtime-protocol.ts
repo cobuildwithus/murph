@@ -5,6 +5,7 @@ import {
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
 } from "../runtime-control.ts";
 import { requireObject } from "./assertions.ts";
+import { parseHostedRuntimeOwnerCommand } from "../runtime-owner.ts";
 
 // Preserve the legacy response for callers which do not need an audience.
 // Scheduled delivery still independently requires the live owner's boolean.
@@ -70,5 +71,21 @@ export function assertHostedRuntimeWebProtocolAdmission(
   }
   if (direct?.threadIsDirect !== true || group?.threadIsDirect !== false) {
     throw new Error("Hosted Web protocol admission failed: thread_route_audience.");
+  }
+  assertRuntimeOwnerCompletionEvidence(record.runtimeOwnerCompletion);
+}
+
+function assertRuntimeOwnerCompletionEvidence(value: unknown): void {
+  try {
+    const evidence = requireObject(value, "Runtime completion evidence");
+    for (const [phase, target] of [["early", null], ["settled", "protocol-probe-target"]] as const) {
+      const command = parseHostedRuntimeOwnerCommand(evidence[phase]);
+      if (command.operation !== "complete" || command.attemptId !== "protocol-probe" || command.generation !== "1"
+        || command.settledRunnerContainerName !== target || command.immediateRecheckRequested !== (phase === "settled")) {
+        throw new Error("Invalid completion evidence.");
+      }
+    }
+  } catch {
+    throw new Error("Hosted Web protocol admission failed: runtime_owner_completion.");
   }
 }

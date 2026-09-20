@@ -1,3 +1,4 @@
+import { notifyHostedRuntimeOwnerCompletion } from "../hosted-orchestration/runtime-owner-release";
 import { resolveHostedLegacyMaterialization } from "./runtime-materialization";
 import { readHostedRuntimeMemberBackend } from "./runtime-cutover";
 import { reconcileHostedRuntimeUploads } from "./runtime-upload-recovery";
@@ -67,6 +68,15 @@ async function executeIdentityCommand(input: Omit<CommandInput, "command"> & { c
       return mutated(await recordHostedRuntimeAccepted({ prisma, identity }));
     case "record_failure":
       return mutated(await recordHostedRuntimeFailure({ prisma, identity, errorCode: command.errorCode }));
+    case "complete": {
+      if (!await retireHostedRuntime({ prisma, identity, completed: true })) return mutated(false);
+      if (command.settledRunnerContainerName !== null && !await releaseHostedRuntimeAfterCompletion({
+        prisma, identity, runnerContainerName: command.settledRunnerContainerName,
+      })) return mutated(false);
+      await notifyHostedRuntimeOwnerCompletion({ userId, runtimeAttemptId: command.attemptId,
+        immediateRecheckRequested: command.immediateRecheckRequested });
+      return mutated(true);
+    }
     case "retire":
       return mutated(await retireHostedRuntime({ prisma, identity, completed: command.completed }));
     case "release":

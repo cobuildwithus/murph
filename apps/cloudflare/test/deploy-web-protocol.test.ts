@@ -76,6 +76,8 @@ it("accepts reader supersets, but not missing audience or emitted log codes", ()
 });
 
 it.each([
+  { runtimeOwnerCompletion: undefined },
+  { runtimeOwnerCompletion: { early: { operation: "retire", attemptId: "protocol-probe", generation: "1", completed: true } } },
   { schemaVersion: 2 }, { nonce: "stale" }, { kind: "unrelated" }, { runtimeLogEventCodes: [42] },
   { threadRouteAuthority: { direct: { authorized: false }, group: { authorized: true } } },
   { threadRouteAuthority: { direct: { authorized: true, threadIsDirect: false }, group: { authorized: true, threadIsDirect: true } } },

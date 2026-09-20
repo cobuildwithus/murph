@@ -7,6 +7,7 @@ import {
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
   type HostedRuntimeWebProtocolAdmission,
 } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
 
 export function buildHostedThreadRouteAuthorityResponse(
   threadIsDirect: boolean,
@@ -33,6 +34,12 @@ export function buildHostedRuntimeWebProtocolAdmission(nonce: string): HostedRun
     threadRouteAuthority: {
       direct: buildHostedThreadRouteAuthorityResponse(true),
       group: buildHostedThreadRouteAuthorityResponse(false),
+    },
+    runtimeOwnerCompletion: {
+      early: parseHostedRuntimeOwnerCommand({ operation: "complete", attemptId: "protocol-probe", generation: "1",
+        settledRunnerContainerName: null, immediateRecheckRequested: false }),
+      settled: parseHostedRuntimeOwnerCommand({ operation: "complete", attemptId: "protocol-probe", generation: "1",
+        settledRunnerContainerName: "protocol-probe-target", immediateRecheckRequested: true }),
     },
   };
 }
