@@ -5,6 +5,7 @@ type HostedWebEncryptionModule =
 type PrismaModule = typeof import("@/src/lib/prisma");
 
 const serviceMocks = vi.hoisted(() => ({
+  readHostedLinqProductionCanaryMemberId: vi.fn(),
   assertUnusedHostedSignupTx: vi.fn(),
   acquireHostedPrivyPhoneTransferPhoneLocksTx: vi.fn(),
   assertHostedPrivyPhoneTransferSourceRetirementFenceTx: vi.fn(),
@@ -64,6 +65,10 @@ const serviceMocks = vi.hoisted(() => ({
   prepareHostedPrivyPhoneTransferSourceRetirementTx: vi.fn(),
 
   revokeStravaDeviceSyncAccess: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-production-canary", () => ({
+  readHostedLinqProductionCanaryMemberId: serviceMocks.readHostedLinqProductionCanaryMemberId,
 }));
 
 vi.mock("@/src/lib/hosted-privacy/unused-signup", () => ({
@@ -252,6 +257,7 @@ import {
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
   deleteHostedAccountData,
+  deleteHostedLinqProductionCanaryAccountData,
   deleteHostedPrivyPhoneTransferSourceAccountData,
   HOSTED_ACCOUNT_DATA_STORE_COVERAGE,
   parseHostedAccountDeletionRequest,
@@ -432,6 +438,8 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
 const HOSTED_ACCOUNT_DELETION_ERASURE_STATEMENT_BOUND = 14;
 
 beforeEach(() => {
+  serviceMocks.readHostedLinqProductionCanaryMemberId.mockReset();
+  serviceMocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(null);
   serviceMocks.assertUnusedHostedSignupTx.mockReset();
   serviceMocks.assertUnusedHostedSignupTx.mockResolvedValue(undefined);
   vi.stubEnv("KERNEL_API_KEY", "");
@@ -577,6 +585,7 @@ beforeEach(() => {
     payloadCiphertext: "encrypted",
     privyCompletedAt: null,
     privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
+    runtimeLogsCompletedAt: null,
     runtimeMemberIds: [...input.runtimeMemberIds],
     stripeCustomerIds: [...input.stripeCustomerIds],
     stripeCompletedAt: null,
@@ -1384,6 +1393,43 @@ describe("deleteHostedAccountData", () => {
 
     expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledOnce();
     expect(operationOrder).not.toContain("delete:hostedMember");
+  });
+
+  it.each(["canary-reset", "ordinary-deletion"] as const)("%s keeps its diagnostic policy in the deletion transaction", async (mode) => {
+    serviceMocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue("member_123");
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => undefined,
+      operationOrder,
+      rawDeletionQueries,
+    });
+    const deleteAccount = mode === "canary-reset"
+      ? deleteHostedLinqProductionCanaryAccountData
+      : deleteHostedAccountData;
+    await deleteAccount({
+      memberId: "member_123", prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(operationOrder).toContain("delete:hostedMember");
+    const persisted = serviceMocks.persistHostedAccountDeletionCleanupTx.mock.calls[0]?.[0].cleanup;
+    expect(persisted.runtimeLogsCompletedAt).toEqual(mode === "canary-reset" ? expect.any(Date) : null);
+    const traceDeletion = rawDeletionQueries.find((query) => query.sql.includes("deleted_ingress_traces AS"));
+    expect(traceDeletion).toBeDefined();
+    expect(traceDeletion?.values.filter((value) => typeof value === "boolean")).toEqual([mode !== "canary-reset"]);
+  });
+
+  it.each([null, "member_another"])("rejects a mismatched canary target before any account cleanup (%s)", async (canaryMemberId) => {
+    serviceMocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(canaryMemberId);
+    const onTransaction = vi.fn();
+    await expect(deleteHostedLinqProductionCanaryAccountData({
+      memberId: "member_123",
+      prisma: createHostedAccountDeletionPrismaForTest({ onTransaction }),
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({ code: "HOSTED_LINQ_PRODUCTION_CANARY_TARGET_MISMATCH" });
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).not.toHaveBeenCalled();
+    expect(onTransaction).not.toHaveBeenCalled();
   });
 
   it("persists cleanup ownership in the canonical deletion transaction before member removal", async () => {

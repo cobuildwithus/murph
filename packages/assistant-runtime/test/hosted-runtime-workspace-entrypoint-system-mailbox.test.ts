@@ -5875,6 +5875,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     });
     const deviceSyncPort = createSnapshotDeviceSyncPort({
       connectionId: "device_sync_connection_replica_publish_retry",
+      connectionStatus: "disconnected",
       nextReconcileAt: "2026-04-27T00:05:00.000Z",
     });
     let browserPublishCalls = 0;

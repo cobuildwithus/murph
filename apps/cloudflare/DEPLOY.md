@@ -43,6 +43,19 @@ contract. For rollback, restore and converge Web without the field before
 restoring an older Worker reader. Warm wakes retain exact native ownership
 checks; cold claims and recovery retain canonical Web mutations.
 
+### Replica upload batches
+
+Deploy and converge Web's additive `admit_batch` and `release_batch` replica
+receipt consumer before deploying the Worker producer. Existing single-object
+Worker commands remain accepted. The existing live Web protocol admission gate
+requires full-size synthetic admission and settlement witnesses from Web's real
+replica command parser, so an old Web blocks the new Worker deployment. No
+fallback dispatches per-object writes after an uncertain batch response. Before
+reverting the Web consumer, first revert and converge every batch-producing
+Worker. After deployment verify the protocol probe and inspect bounded replica
+rejection and unresolved-upload aggregates; a successful 36-object refresh uses
+two receipt callbacks and still produces 36 durable physical-upload receipts.
+
 ### Live Web protocol admission
 
 `deploy-worker-version.cli.ts` admits the **served** `HOSTED_WEB_BASE_URL` before
