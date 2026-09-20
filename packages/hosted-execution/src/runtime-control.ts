@@ -2341,6 +2341,7 @@ export function readHostedIngressLatencySource(
 
 export const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS = 64;
 export const HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES = 32 * 1024;
+export const HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS = 8;
 export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
   "runner_job_accepted",
   "runtime_phase_started",
@@ -3568,6 +3569,15 @@ export interface HostedRuntimeLatencyTraceRequest {
   event: HostedRuntimeLatencyTraceEvent;
 }
 
+export interface HostedRuntimeLatencyTraceBatchRequest {
+  events: HostedRuntimeLatencyTraceAssistantMilestoneEvent[];
+}
+
+export interface HostedRuntimeLatencyTraceBatchResponse {
+  // Positional results retain each event's retry ownership. Null means persistence failed.
+  results: Array<HostedRuntimeLatencyTraceResponse | null>;
+}
+
 export interface HostedRuntimeLatencyTraceResponse {
   matchedCount: number;
   recorded: boolean;
@@ -3686,6 +3696,7 @@ export interface HostedRuntimeWebProtocolAdmission {
   kind: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND;
   schemaVersion: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION;
   nonce: string;
+  latencyMilestoneBatchMaxEvents: number;
   runtimeLogEventCodes: readonly string[];
   threadRouteAuthority: { direct: unknown; group: unknown };
   runtimeReplicaBatch: { admission: unknown; settlement: unknown };

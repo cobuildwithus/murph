@@ -1,6 +1,7 @@
 import { buildHostedRuntimeReplicaBatchProtocolProbe } from "@murphai/hosted-execution/runtime-resources";
 import {
   HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
   type HostedRuntimeWebProtocolAdmission,
@@ -15,6 +16,7 @@ export function syntheticHostedWebProtocolAdmission(nonce: string): HostedRuntim
     kind: HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
     schemaVersion: HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
     nonce,
+    latencyMilestoneBatchMaxEvents: HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
     runtimeLogEventCodes: [...HOSTED_RUNTIME_LOG_EVENT_CODES],
     threadRouteAuthority: {
       direct: { authorized: true, threadIsDirect: true },

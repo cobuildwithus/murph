@@ -24,6 +24,8 @@ import type {
   HostedMailboxFetchResponse,
   HostedMailboxPayloadFetchRequest,
   HostedMailboxPayloadFetchResponse,
+  HostedRuntimeLatencyTraceBatchRequest,
+  HostedRuntimeLatencyTraceBatchResponse,
   HostedRuntimeLatencyTraceRequest,
   HostedRuntimeLatencyTraceResponse,
   HostedRuntimeLogRequest,
@@ -835,6 +837,7 @@ export interface HostedRuntimeLogPort {
 }
 
 export interface HostedRuntimeLatencyTracePort {
+  recordBatch?(request: HostedRuntimeLatencyTraceBatchRequest): Promise<HostedRuntimeLatencyTraceBatchResponse>;
   record(request: HostedRuntimeLatencyTraceRequest): Promise<HostedRuntimeLatencyTraceResponse>;
 }
 

@@ -17,6 +17,10 @@ Web runtime admission implementation and focused proof are recorded in
 [`2026-09-18-web-runtime-admission.md`](exec-plans/completed/2026-09-18-web-runtime-admission.md).
 Consumer-first rollout remains owned by `apps/cloudflare/DEPLOY.md`.
 
+Simultaneous runtime latency milestone batching is owned by `agent-docs/RELIABILITY.md`;
+implementation and proof are recorded in
+[`2026-09-20-edge-latency-batches.md`](exec-plans/completed/2026-09-20-edge-latency-batches.md).
+
 Deferred device webhook transfer and restored duplicate retirement are owned by
 `agent-docs/RELIABILITY.md`; focused mailbox and composed runtime proof are
 indexed in `agent-docs/references/testing-ci-map.md`.

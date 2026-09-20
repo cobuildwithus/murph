@@ -1,6 +1,7 @@
 import { buildHostedRuntimeReplicaBatchProtocolProbe, parseHostedRuntimeReplicaPutCommand } from "../runtime-resources.ts";
 import {
   HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
 } from "../runtime-control.ts";
@@ -37,6 +38,11 @@ export function assertHostedRuntimeWebProtocolAdmission(
     || record.schemaVersion !== HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION
     || record.nonce !== nonce) {
     throw new Error("Hosted Web protocol admission failed: version_or_nonce.");
+  }
+  if (typeof record.latencyMilestoneBatchMaxEvents !== "number"
+    || !Number.isSafeInteger(record.latencyMilestoneBatchMaxEvents)
+    || record.latencyMilestoneBatchMaxEvents < HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
+    throw new Error("Hosted Web protocol admission failed: latency_milestone_batch.");
   }
   const codes = record.runtimeLogEventCodes;
   if (!Array.isArray(codes) || codes.some(code => typeof code !== "string")) {
