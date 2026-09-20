@@ -33,6 +33,11 @@ work is tracked in `exec-plans/completed/2026-09-18-retention-proxy-triage.md`.
 The completed plain-grant 90-date group-sharing follow-up is recorded in
 [`2026-09-18-group-history-plain-grants.md`](exec-plans/completed/2026-09-18-group-history-plain-grants.md).
 
+Version-aware vault-share scope discovery is owned by
+`agent-docs/product-specs/group-challenge-data-diagnostics.md`; implementation
+and focused proof are tracked in
+[`2026-09-20-edge-sharing-calls.md`](exec-plans/completed/2026-09-20-edge-sharing-calls.md).
+
 Completed query rebuild phase telemetry implementation and parent validation are
 recorded in
 [`2026-09-17-query-rebuild-phase-telemetry.md`](exec-plans/completed/2026-09-17-query-rebuild-phase-telemetry.md).

@@ -247,10 +247,12 @@ export type HostedVaultShareProjectionCaptureResult =
 export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
   projectionMode?: HostedVaultShareProjectionMode;
   signal?: AbortSignal | null;
+  sourceWorkspaceVersion: string;
   vaultSharePort: HostedRuntimeVaultSharePort;
 }): Promise<HostedVaultShareProjectionScopeResolution> {
   try {
     const activeProjections = await input.vaultSharePort.listActiveProjectionScopes({
+      sourceWorkspaceVersion: input.sourceWorkspaceVersion,
       ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
     });

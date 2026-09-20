@@ -854,6 +854,7 @@ export interface HostedRuntimeVaultSharePort {
   listActiveProjectionScopes(input?: {
     projectionMode?: HostedVaultShareProjectionMode;
     signal?: AbortSignal | null;
+    sourceWorkspaceVersion?: string;
   }): Promise<HostedVaultShareActiveProjectionKindsResponse>;
   deliver(
     request: HostedVaultShareDeliverRequest,
