@@ -2736,12 +2736,16 @@ export function createJunctionDeviceSyncProvider(
       listedSourceProviders = sourceProviders;
       return sourceProviders;
     };
-    const loadAndProjectSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
+    const loadAndProjectSourceProviders = async (
+      admissionSources?: readonly JunctionImportAdmissionSource[],
+    ): Promise<readonly JunctionProviderConnection[]> => {
       if (projectedSourceProviders) {
         return projectedSourceProviders;
       }
       const sourceProviders = await loadSourceProviders();
-      await projectJunctionSources(context, sourceProviders);
+      await projectJunctionSources(context, sourceProviders, {
+        admissionSources: context.listConnectionSources ? admissionSources : undefined,
+      });
       projectedSourceProviders = sourceProviders;
       if (inventoryKey) {
         passInventories?.set(inventoryKey, sourceProviders);
@@ -2910,11 +2914,17 @@ export function createJunctionDeviceSyncProvider(
       );
     }
 
-    const sourceProviders = await inventory.loadAndProjectSourceProviders();
-    const preparedImport = await prepareJunctionImportSnapshot(
-      context,
+    const sourceProviders = await inventory.loadSourceProviders();
+    // Projection and import share this operation's post-fetch authority. The
+    // inventory cache retains providers only; every later import reads again.
+    const currentSources = await readJunctionImportSources(context);
+    await inventory.loadAndProjectSourceProviders(currentSources);
+    const preparedImport = prepareJunctionImportSnapshotForSources(
       summaries,
       sourceProviders,
+      currentSources,
+      {},
+      { allowUnlistedSources: context.connectionSourceAdmissionMode !== "listed_only" },
     );
     await commitPreparedJunctionCanonicalImport(
       context,
