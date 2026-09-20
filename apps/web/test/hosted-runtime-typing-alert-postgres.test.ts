@@ -28,11 +28,11 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
     await withTables(async (tx) => {
       await insertTrace(tx, "warm-boundary", { elapsed: 3000 });
       await insertTrace(tx, "warm-slow", { elapsed: 3001 });
-      await insertTrace(tx, "cold-boundary", { cold: true, elapsed: 10_000 });
-      await insertTrace(tx, "cold-slow", { cold: true, elapsed: 10_001 });
+      await insertTrace(tx, "cold-boundary", { cold: true, elapsed: 8_000 });
+      await insertTrace(tx, "cold-slow", { cold: true, elapsed: 8_001 });
       await insertTrace(tx, "retained-after-cold", { cold: true, restoredBeforeReceipt: true, elapsed: 3001 });
       await insertTrace(tx, "cold-fast", { cold: true, elapsed: 5000 });
-      await insertTrace(tx, "rollout-slow", { cold: true, elapsed: 10_001,
+      await insertTrace(tx, "rollout-slow", { cold: true, elapsed: 8_001,
         extra: { orchestration: { activeFenceTargetWasPriorVersion: true, replacedStaleFence: true } } });
       await insertTrace(tx, "missing-warm", { elapsed: null });
       await insertTrace(tx, "missing-cold", { cold: true, elapsed: null });
@@ -48,8 +48,8 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await insertTrace(tx, "telegram-fast", { source: "telegram", elapsed: 3000 });
       await insertTrace(tx, "telegram-active-followup", { source: "telegram", elapsed: -1000 });
       await insertTrace(tx, "telegram-missing", { source: "telegram", elapsed: null });
-      await insertTrace(tx, "telegram-cold-fast", { source: "telegram", cold: true, elapsed: 10_000 });
-      await insertTrace(tx, "telegram-cold-slow", { source: "telegram", cold: true, elapsed: 10_001 });
+      await insertTrace(tx, "telegram-cold-fast", { source: "telegram", cold: true, elapsed: 8_000 });
+      await insertTrace(tx, "telegram-cold-slow", { source: "telegram", cold: true, elapsed: 8_001 });
       await insertTrace(tx, "telemetry-in-flight", { elapsed: null, receivedAt: new Date(now.getTime() - 5000) });
       const rows = await tx.$queryRaw<Array<{ id: string; workspaceState: string; elapsedMs: bigint }>>(
         buildHostedRuntimeTypingAlertQuery({ now }),
@@ -194,7 +194,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
         "prior-ended", "prior-expired", "cold-gap", "cold-boundary"]) {
         await insertTrace(tx, id, {
           elapsed: ["missing", "recent", "answered"].includes(id) ? null
-            : id.startsWith("cold-") ? 13_000 : 9000,
+            : id.startsWith("cold-") ? 11_000 : 9000,
           cold: id.startsWith("cold-"),
         });
         await bindConversation(tx, id, `chat-${id}`);
@@ -226,7 +226,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
         buildHostedRuntimeTypingAlertQuery({ now }),
       );
       expect(rows.map(({ id, elapsedMs }) => [id, elapsedMs]).sort()).toEqual([
-        ["runtime-typing/cold-gap", 11_000n],
+        ["runtime-typing/cold-gap", 9000n],
         ["runtime-typing/gap", 7000n],
         ["runtime-typing/missing", 58_000n],
         ["runtime-typing/prior-ended", 7000n],

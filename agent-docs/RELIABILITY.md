@@ -2424,7 +2424,7 @@ to apply after cutover.
   are never copied into these fields.
 - Per-message typing alerts independently measure the Web route's receipt instant
   through the earliest accepted typing indicator: strictly over 3 seconds for a
-  warm workspace and over 10 seconds for a cold workspace. Mailbox acceptance
+  warm workspace and over 8 seconds for a cold workspace. Mailbox acceptance
   remains its existing timestamp; it never substitutes for webhook receipt.
   For unanswered Linq inputs, the latest accepted message in the same chat
   resets the silence start between receipt and the first typing acceptance
@@ -2447,7 +2447,7 @@ to apply after cutover.
   or delivery operation waits for this diagnostic persistence.
   A restore completed before the message arrived, or an explicit reused restore,
   identifies warmth. This includes later messages within an invocation that
-  originally started cold. Missing warmth evidence uses the 10-second cutoff and
+  originally started cold. Missing warmth evidence uses the 8-second cutoff and
   is labeled unconfirmed; deployment version, rollout convergence, canary identity,
   access changes, other incidents, and quiet hours do not suppress these alerts.
   An exact member-bound mailbox item with recorded `ai_usage_denied_at` is

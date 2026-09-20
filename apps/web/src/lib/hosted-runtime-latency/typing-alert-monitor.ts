@@ -6,7 +6,7 @@ import { sendPendingHostedLinqAlertsBestEffort } from "../hosted-onboarding/linq
 import { getPrisma } from "../prisma";
 
 export const HOSTED_WARM_TYPING_ALERT_THRESHOLD_MS = 3_000;
-export const HOSTED_COLD_TYPING_ALERT_THRESHOLD_MS = 10_000;
+export const HOSTED_COLD_TYPING_ALERT_THRESHOLD_MS = 8_000;
 const ALERT_READ_LIMIT = 1_000;
 const ALERT_SEND_LIMIT = 50;
 // Allow delayed telemetry to arrive before calling an absent indicator slow.
@@ -54,7 +54,7 @@ export async function runHostedRuntimeTypingAlertMonitor(input: TypingAlertInput
       status: "pending",
       subject: row.workspaceState === "warm"
         ? "Murph warm workspace typing exceeded 3 seconds"
-        : "Murph cold workspace typing exceeded 10 seconds",
+        : "Murph cold workspace typing exceeded 8 seconds",
       // This frozen body survives retries without leaking member/message identity.
       detailsJson: {
         schemaVersion: 1,
