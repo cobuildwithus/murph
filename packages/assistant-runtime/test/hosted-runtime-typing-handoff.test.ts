@@ -31,14 +31,14 @@ vi.mock("@murphai/assistant-engine/assistant-channel-adapters", async (importOri
 }));
 vi.mock("../src/hosted-runtime/mailbox-conversation-import.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/hosted-runtime/mailbox-conversation-import.ts")>();
-  const { startHostedLinqInputTyping } = await import("../src/hosted-runtime/channel-activity.ts");
+  const { startHostedLinqAttachmentTyping } = await import("../src/hosted-runtime/channel-activity.ts");
   return {
     ...actual,
     createHostedConversationMailboxImportItem: (
       input: Parameters<typeof actual.createHostedConversationMailboxImportItem>[0],
     ) => async () => {
       mocks.importedFetch = input.runtime.platform.providerFetch;
-      mocks.cancel = startHostedLinqInputTyping({
+      mocks.cancel = startHostedLinqAttachmentTyping({
         forwardedEnv: input.runtime.forwardedEnv, userEnv: input.runtime.userEnv,
         providerFetch: input.runtime.platform.providerFetch, linqDeliveryContext: route,
       });

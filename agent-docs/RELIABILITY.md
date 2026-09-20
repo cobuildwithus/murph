@@ -1502,6 +1502,12 @@ to apply after cutover.
   not claim decrypt recovery before plaintext and CRC integrity checks pass.
   These logs never contain credentials, resource names, AAD, ciphertext, or
   plaintext.
+- The Web workspace checkpoint route loads the runtime signal owner only inside
+  its existing post-response wake task. Importing the route must not initialize
+  Temporal or KMS solely for an optional recheck. Signal success still precedes
+  acknowledgement, and failed signals leave the durable recheck pending. One
+  value-free log marks the first handler invocation per route module instance,
+  separating startup from callback verification in platform log timelines.
 - Hosted workspace checkpoint session-start and completion failures preserve
   cancellation reasons and extensible `Error` identity while adding allowlisted
   phases for write-fence acquisition, deadline-bound request headers, response
@@ -2466,11 +2472,9 @@ to apply after cutover.
   Linq and Telegram acceptance milestones stay asynchronous. The engine's
   existing turn handle retains the original provider acceptance timestamp for
   the initial accepted-input journal and subsequent pre-provider or live-steered
-  admissions. Eligible, unconsumed Linq conversation inputs may start that same
-  session after durable input staging, before remote mailbox checkpoint work
-  completes. Text inputs use the same handoff as attachments. Model admission
-  still waits for checkpoint persistence and, for attachments, settled evidence.
-  The existing per-chat claim retains one preparation handle; the
+  admissions. Eligible, unconsumed Linq attachments may start that same session
+  after durable input staging, while model admission still waits for settled
+  evidence. The existing per-chat claim retains one preparation handle; the
   validated turn takes it only through the same provider-fetch authority,
   rebinding cancellation without another start or a reset session budget.
   Import failure cancels only an unclaimed preparation. Provider acceptance,

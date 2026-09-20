@@ -167,7 +167,7 @@ export function createHostedAssistantChannelTypingDependencies(input: {
 
 // The existing per-chat claim owns preparation and the turn's single refresh
 // loop. The importer can cancel only until a validated turn takes the handle.
-export function startHostedLinqInputTyping(input: Omit<
+export function startHostedLinqAttachmentTyping(input: Omit<
   HostedChannelTypingInput, "linqDeliveryContexts"
 > & {
   linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;

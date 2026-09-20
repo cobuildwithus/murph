@@ -965,53 +965,6 @@ describe("hosted mailbox conversation import adapter", () => {
     }
   });
 
-  test.each(["enqueue-failure", "self-authored", "consumed-replay", "group-without-authority"])("text typing respects %s", async (scenario) => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-text-typing-"));
-    tempRoots.push(vaultRoot);
-    const wake = createConversationWake({ message: {
-      channel: "linq",
-      linqMessage: {
-        chatId: `chat_text_${scenario}`, from: "synthetic_sender",
-        isFromMe: scenario === "self-authored", messageId: `message_text_${scenario}`,
-        parts: [{ type: "text", value: "Synthetic text input." }],
-        threadIsDirect: scenario !== "group-without-authority",
-      },
-      phoneLookupKey: "synthetic_lookup",
-    } });
-    const stop = vi.fn(async () => {});
-    const start = vi.spyOn(channelAdapters, "startLinqTypingIndicator").mockResolvedValue({ stop });
-    const signal = new AbortController();
-    try {
-      const importing = importHostedConversationMailboxItem({
-        decodePayload: createDecodedPayloadDecoder(wake),
-        item: { ...createResolvedConversationMailboxItem(), durablyConsumed: scenario === "consumed-replay" },
-        runtime: createRuntime({ platform: { providerFetch: vi.fn<typeof fetch>() } }),
-        signal: signal.signal, vaultRoot,
-        async prepareWakeContext() {},
-        async stageAssistantInputEvent() {
-          return {
-            inputId: `input_text_${scenario}`, receivedAt: TEST_NOW,
-            attachmentDescriptorCount: 0, attachmentEvidenceRequired: false,
-            async enqueuePendingReply() {
-              if (scenario === "enqueue-failure") throw new Error("synthetic enqueue failure");
-            },
-            async recordProjection() {}, async recordAttachmentEvidence() { return true; },
-          };
-        },
-      });
-      if (scenario === "enqueue-failure") {
-        await expect(importing).rejects.toThrow("synthetic enqueue failure");
-        expect(start).toHaveBeenCalledOnce();
-        await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
-      } else {
-        expect((await importing).status).toBe("imported");
-        expect(start).not.toHaveBeenCalled();
-      }
-    } finally {
-      signal.abort();
-    }
-  });
-
   test("notifies active turn directly for attachment-free text without opening inbox projection", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-text-fast-path-"));
     tempRoots.push(parentRoot);
@@ -2711,7 +2664,6 @@ describe("hosted mailbox conversation import adapter", () => {
   });
 
   test("does not enqueue input when the hosted assistant is unconfigured", async () => {
-    const providerFetch = vi.fn<typeof fetch>();
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-unconfigured-"));
     tempRoots.push(parentRoot);
     const operatorHomeRoot = path.join(parentRoot, "home");
@@ -2735,7 +2687,6 @@ describe("hosted mailbox conversation import adapter", () => {
           from: "redacted-contact-sentinel",
           isFromMe: false,
           messageId: "msg_unconfigured",
-          threadIsDirect: true,
           parts: [
             {
               type: "text",
@@ -2773,7 +2724,7 @@ describe("hosted mailbox conversation import adapter", () => {
           onConversationInputStaged() {
             stagedCallbackCount += 1;
           },
-          runtime: createRuntime({ platform: { providerFetch } }),
+          runtime: createRuntime(),
           vaultRoot,
         })
       );
@@ -2782,7 +2733,6 @@ describe("hosted mailbox conversation import adapter", () => {
       assert.equal("assistantInputId" in outcome, false);
       assert.equal(activeTurnAdmissionCount, 0);
       assert.equal(stagedCallbackCount, 0);
-      expect(providerFetch).not.toHaveBeenCalled();
       const listed = await listAssistantInputEvents({
         vault: vaultRoot,
       });
