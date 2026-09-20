@@ -47,6 +47,7 @@ import {
   type PreparedHostedMemberIdentityWrite,
 } from "../hosted-onboarding/hosted-member-identity-store";
 import { buildHostedPersistedPhoneIdentityFields } from "../hosted-onboarding/member-identity-fields";
+import { readHostedLinqProductionCanaryMemberId } from "../hosted-onboarding/linq-production-canary";
 import {
   HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD,
   HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD,
@@ -900,6 +901,31 @@ export async function deleteHostedAccountData(input: {
   const result = await deleteHostedAccountDataInternal({
     ...input,
     phoneTransfer: null,
+    retainRuntimeDiagnostics: false,
+  });
+  return result.deletion;
+}
+
+// Only the fixed canary reset may retain diagnostics. Normal account deletion
+// has no retention option, including when the account happens to be the canary.
+export async function deleteHostedLinqProductionCanaryAccountData(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  request: Request;
+}): Promise<HostedAccountDeletionResult> {
+  const canaryMemberId = await readHostedLinqProductionCanaryMemberId({ prisma: input.prisma });
+  if (!canaryMemberId || canaryMemberId !== input.memberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_PRODUCTION_CANARY_TARGET_MISMATCH",
+      httpStatus: 409,
+      message: "The production canary reset target changed.",
+    });
+  }
+  const result = await deleteHostedAccountDataInternal({
+    ...input,
+    exitFeedback: null,
+    phoneTransfer: null,
+    retainRuntimeDiagnostics: true,
   });
   return result.deletion;
 }
@@ -932,6 +958,7 @@ export async function deleteHostedPrivyPhoneTransferSourceAccountData(input: {
     },
     prisma: input.prisma,
     request: input.request,
+    retainRuntimeDiagnostics: false,
   });
   if (!result.channelSyncDispatch) {
     throwHostedPrivyPhoneTransferTargetNotReady();
@@ -996,6 +1023,7 @@ async function deleteHostedAccountDataInternal(input: {
   prisma: PrismaClient;
   providerAccessRemovalConfirmationToken?: string | null;
   request: Request;
+  retainRuntimeDiagnostics: boolean;
 }): Promise<HostedAccountDeletionInternalResult> {
   const member = await input.prisma.hostedMember.findUnique({
     select: { billingStatus: true, createdAt: true, id: true },
@@ -1056,6 +1084,11 @@ async function deleteHostedAccountDataInternal(input: {
       stripeCustomerIds,
       stripeSubscriptionIds,
     });
+    if (input.retainRuntimeDiagnostics) {
+      // Persist the settled no-op with the existing retry owner, so a later
+      // vendor-cleanup retry cannot erase the retained canary runtime logs.
+      preparedCleanup.runtimeLogsCompletedAt = deletionStartedAt;
+    }
   } catch (error) {
     throw hostedOnboardingError({
       code: "ACCOUNT_DELETION_CLEANUP_OWNER_CREATE_FAILED",
@@ -1342,6 +1375,7 @@ async function deleteHostedAccountDataInternal(input: {
       connectionIdentities: deviceConnectionIdentities,
       memberIds: transactionDeletionMemberIds,
       prisma: tx,
+      retainRuntimeDiagnostics: input.retainRuntimeDiagnostics,
     });
     let channelSyncDispatch: HostedAccountDeletionDatabaseResult["channelSyncDispatch"] =
       null;
@@ -2900,6 +2934,7 @@ async function deleteHostedAccountPrismaRows(input: {
   connectionIdentities: readonly DeviceConnectionIdentity[];
   memberIds: readonly string[];
   prisma: Prisma.TransactionClient;
+  retainRuntimeDiagnostics: boolean;
 }): Promise<HostedAccountDataCounts> {
   const memberIds = uniqueStrings(input.memberIds);
   const memberIdsSql = buildPostgresTextArray(memberIds);
@@ -2980,6 +3015,7 @@ async function deleteHostedAccountPrismaRows(input: {
         deleted_ingress_traces AS (
           DELETE FROM hosted_ingress_latency_trace AS trace
           WHERE trace.user_id IN (SELECT id FROM target_members)
+            AND ${input.retainRuntimeDiagnostics !== true}
           RETURNING 1
         ),
         deleted_usage_credit_grants AS (
