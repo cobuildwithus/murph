@@ -1,3 +1,4 @@
+import { parseHostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import {
   buildHostedRuntimeLogProtocolProbe,
@@ -27,6 +28,12 @@ export function buildHostedRuntimeWebProtocolAdmission(nonce: string): HostedRun
     // No log is persisted and no member, provider or runner is accessed.
     runtimeLogEventCodes: HOSTED_RUNTIME_LOG_EVENT_CODES.map(eventCode =>
       parseHostedRuntimeLogRequest(buildHostedRuntimeLogProtocolProbe(eventCode)).entries[0]!.eventCode),
+    runtimeOwnerCompletion: {
+      early: parseHostedRuntimeOwnerCommand({ operation: "complete", attemptId: "protocol-probe", generation: "1",
+        settledRunnerContainerName: null, immediateRecheckRequested: false }),
+      settled: parseHostedRuntimeOwnerCommand({ operation: "complete", attemptId: "protocol-probe", generation: "1",
+        settledRunnerContainerName: "protocol-probe-target", immediateRecheckRequested: true }),
+    },
     threadRouteAuthority: {
       direct: buildHostedThreadRouteAuthorityResponse(true),
       group: buildHostedThreadRouteAuthorityResponse(false),

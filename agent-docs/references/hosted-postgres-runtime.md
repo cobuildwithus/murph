@@ -98,11 +98,24 @@ warm target. Failed or ambiguous retirement requires exact native stop proof
 before clearing its assignment. Bound slots never return to shared inventory.
 
 The runtime completion callback and outer invocation result share the same
-native receipt and Web retirement operation. An early callback cannot release
-the still-running outer invocation. The settled outer result releases ownership
-before sending the advisory Temporal hint; its failure leaves durable completion
-for the normal recheck. Bounded phase-only failure metadata is recorded before
-native stop, without granting or releasing authority.
+native receipt and Web `complete` command. Each stage uses one HTTP request for
+conditional retirement, optional exact native-settlement release, and the
+advisory Temporal hint. The early callback still reads the owner to route its
+native receipt, and cannot release the still-running outer invocation. The
+settled outer result releases ownership before signaling outside the database
+transactions. The hint has a two-second best-effort budget; failure leaves
+durable completion for the normal recheck. Lost responses replay the same exact
+identity and cannot retire or release a successor. Pending upload drains remain
+owned by the existing release transaction.
+
+Deploy the additive Web completion consumer before the Worker producer. The
+existing live Web protocol admission includes both early and settled command
+witnesses parsed by the same reader as the ownership endpoint, and rejects
+readers without that evidence before Worker activation. Legacy retirement,
+release and owner-released requests remain supported during rollout. Warm
+containers use the unchanged completion callback. Roll back the Worker before
+removing the Web completion reader. Bounded phase-only failure metadata is
+recorded before native stop, without granting or releasing authority.
 
 ## Transactions and effects
 

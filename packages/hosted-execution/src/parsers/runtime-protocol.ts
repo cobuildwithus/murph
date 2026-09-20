@@ -1,3 +1,4 @@
+import { parseHostedRuntimeOwnerCommand } from "../runtime-owner.ts";
 import {
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
@@ -47,6 +48,7 @@ export function assertHostedRuntimeWebProtocolAdmission(
       throw new Error(`Hosted Web protocol admission failed: runtime_log_event:${required}.`);
     }
   }
+  assertRuntimeOwnerCompletionEvidence(record.runtimeOwnerCompletion);
   let direct: ReturnType<typeof parseHostedExternalThreadRouteAuthorityResponse>;
   let group: ReturnType<typeof parseHostedExternalThreadRouteAuthorityResponse>;
   try {
@@ -58,5 +60,20 @@ export function assertHostedRuntimeWebProtocolAdmission(
   }
   if (direct?.threadIsDirect !== true || group?.threadIsDirect !== false) {
     throw new Error("Hosted Web protocol admission failed: thread_route_audience.");
+  }
+}
+
+function assertRuntimeOwnerCompletionEvidence(value: unknown): void {
+  try {
+    const evidence = requireObject(value, "Runtime completion evidence");
+    for (const [phase, target] of [["early", null], ["settled", "protocol-probe-target"]] as const) {
+      const command = parseHostedRuntimeOwnerCommand(evidence[phase]);
+      if (command.operation !== "complete" || command.attemptId !== "protocol-probe" || command.generation !== "1"
+        || command.settledRunnerContainerName !== target || command.immediateRecheckRequested !== (phase === "settled")) {
+        throw new Error("Invalid completion evidence.");
+      }
+    }
+  } catch {
+    throw new Error("Hosted Web protocol admission failed: runtime_owner_completion.");
   }
 }

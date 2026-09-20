@@ -14,6 +14,12 @@ export function syntheticHostedWebProtocolAdmission(nonce: string): HostedRuntim
     schemaVersion: HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
     nonce,
     runtimeLogEventCodes: [...HOSTED_RUNTIME_LOG_EVENT_CODES],
+    runtimeOwnerCompletion: {
+      early: { operation: "complete", attemptId: "protocol-probe", generation: "1",
+        settledRunnerContainerName: null, immediateRecheckRequested: false },
+      settled: { operation: "complete", attemptId: "protocol-probe", generation: "1",
+        settledRunnerContainerName: "protocol-probe-target", immediateRecheckRequested: true },
+    },
     threadRouteAuthority: {
       direct: { authorized: true, threadIsDirect: true },
       group: { authorized: true, threadIsDirect: false },
