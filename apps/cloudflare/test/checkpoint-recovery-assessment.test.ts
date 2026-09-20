@@ -1,6 +1,9 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { HostedCanonicalWriteReceipt } from "@murphai/core";
+import {
+  HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY, isHostedCustomInferenceConsumerVersion,
+} from "@murphai/hosted-execution/assistant-inference";
 import { buildHostedStorageAad, encryptHostedStoragePayload } from "@murphai/runtime-state";
 import { hostedArtifactObjectKey } from "@murphai/hosted-execution/storage-paths";
 import {
@@ -8,6 +11,7 @@ import {
   sealRecoveryAssessmentRequest, type RecoveryAssessmentRequest,
 } from "../scripts/checkpoint-recovery-envelope.ts";
 import { assessCheckpointRecovery, inspectReceiptCandidate, readRecoveryResponse } from "../scripts/checkpoint-recovery-assessment.ts";
+import { verifyHostedWebCallbackSignatureHeaders } from "../src/web-callback-auth.ts";
 import { createTestHostedRuntimeCryptoContext, getTestHostedRuntimeRootKey } from "./hosted-runtime-crypto-fixtures.ts";
 import {
   TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK, TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
@@ -130,7 +134,17 @@ describe("bounded recovery census", () => {
       const target = new URL(String(url));
       if (target.pathname === "/api/internal/hosted-workspace") {
         workspaceReads++;
-        expect(new Headers(init?.headers).get("x-hosted-execution-signature")).toBeTruthy();
+        if (!isHostedCustomInferenceConsumerVersion(target.searchParams.get(HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY))) {
+          return Response.json({ error: { code: "HOSTED_CUSTOM_INFERENCE_CONSUMER_UNSUPPORTED" } }, { status: 409 });
+        }
+        const signedRequest = new Request(target, init);
+        const verification = {
+          environment: { keyId: "test", privateKeyJwkJson: privateJwk }, method: "GET",
+          nonceStore: { consume: async () => true }, path: target.pathname, payload: "",
+          request: signedRequest, userId,
+        };
+        expect(await verifyHostedWebCallbackSignatureHeaders({ ...verification, search: target.search })).toBe(true);
+        expect(await verifyHostedWebCallbackSignatureHeaders({ ...verification, search: "" })).toBe(false);
         return Response.json({ fetchedAt: new Date(now).toISOString(), workspace: {
           userId, version: changeAtEnd && workspaceReads > 1 ? "8" : workspaceVersion, createdAt: request.before, updatedAt: request.before, snapshotRef: null,
         } });
@@ -140,7 +154,9 @@ describe("bounded recovery census", () => {
         return Response.json({ schema: "murph.hosted-runtime-crypto-root.v1", userId, domain: "runtime", rootKeyId, envelope: context.envelopes.runtime });
       }
       if (target.searchParams.has("prefix")) return Response.json({ success: true, result: objects.map((object) => ({ key: foreignObject ? "users/foreign/artifacts/invalid" : object.objectKey })), result_info: {} });
-      const object = objects.find((item) => decodeURIComponent(target.pathname).endsWith(item.objectKey));
+      // R2 Get Object requires literal separators; decoding here would hide a broken wire path.
+      expect(target.pathname).not.toMatch(/%2f/i);
+      const object = objects.find((item) => target.pathname === `/client/v4/accounts/${"a".repeat(32)}/r2/buckets/synthetic-bucket/objects/${item.objectKey}`);
       if (!object) throw new Error("unexpected_synthetic_request");
       return new Response(Buffer.from(object.serialized));
     };

@@ -3,6 +3,9 @@ import { parseHostedCipherEnvelope } from "@murphai/runtime-state";
 import { parseHostedWorkspaceReadResponse } from "@murphai/hosted-execution/parsers";
 import { createHostedStorageNamespaceId } from "@murphai/hosted-execution/storage-paths";
 import { HOSTED_RUNTIME_WORKSPACE_PATH } from "@murphai/hosted-execution/routes";
+import {
+  HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION, HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY,
+} from "@murphai/hosted-execution/assistant-inference";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../src/web-control-plane.ts";
 import { readHostedWebCallbackSigningEnvironment } from "../src/web-callback-auth.ts";
 import {
@@ -109,7 +112,7 @@ async function* readArtifactInventory(input: {
       const key = inventoryObjectKey(object, input.prefix);
       if (seen.has(key) || seen.size >= MAX_OBJECTS) throw new Error("recovery_object_limit_or_duplicate");
       seen.add(key);
-      const response = await input.fetchImpl(`${input.api}/${encodeURIComponent(key)}`, { headers });
+      const response = await input.fetchImpl(`${input.api}/${key}`, { headers });
       const serialized = await readRecoveryResponse(response, Math.min(MAX_OBJECT_BYTES, MAX_TOTAL_BYTES - input.stats.bytes));
       input.stats.objects++;
       input.stats.bytes += serialized.byteLength;
@@ -165,6 +168,9 @@ export async function assessCheckpointRecovery(env: Env, fetchImpl: typeof fetch
     const response = await fetchHostedExecutionWebControlPlaneResponse({
       baseUrl: "https://www.withmurph.ai", boundUserId: request.userId,
       callbackSigning, method: "GET", path: HOSTED_RUNTIME_WORKSPACE_PATH,
+      search: new URLSearchParams({
+        [HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY]: String(HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION),
+      }).toString(),
       timeoutMs: 30_000, fetchImpl: boundedFetch,
     });
     const value = parseHostedWorkspaceReadResponse(JSON.parse(Buffer.from(await readRecoveryResponse(response, 1024 * 1024)).toString("utf8")));
