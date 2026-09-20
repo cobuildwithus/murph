@@ -25,9 +25,9 @@ afterEach(async () => {
   await Promise.all(temporaryPaths.splice(0).map((target) => rm(target, { recursive: true, force: true })))
 })
 
-// This pins the native protocol contract. The provider is synthetic; the pinned
-// Codex process owns both backing turns and delegation result forwarding.
-it('native V3 voice creates successive tool-backed turns on one thread', { timeout: 30_000 }, async () => {
+// This pins the native protocol contract. The provider is synthetic; Codex owns
+// backing turns and voice transport even when the host selects final output.
+it.each(['native', 'host'] as const)('native V3 voice creates successive tool-backed turns on one thread (%s output)', { timeout: 30_000 }, async (outputOwner) => {
   const stub = await startScriptedResponsesStub()
   const requests: { path: string | undefined; multipart: boolean; nativeModel: boolean }[] = []
   const sidebandPaths: (string | undefined)[] = []
@@ -137,6 +137,7 @@ it('native V3 voice creates successive tool-backed turns on one thread', { timeo
     await request('thread/realtime/start', {
       threadId,
       version: 'v3',
+      clientManagedHandoffs: outputOwner === 'host',
       codexResponseHandoffMode: 'bemTags',
       outputModality: 'audio',
       includeStartupContext: false,
@@ -164,20 +165,36 @@ it('native V3 voice creates successive tool-backed turns on one thread', { timeo
       expect(events('turn/completed')[index - 1]?.params).toMatchObject({
         threadId, turn: { status: 'completed' },
       })
+      if (outputOwner === 'host') {
+        await request('thread/realtime/appendText', {
+          threadId,
+          role: 'assistant',
+          text: 'Verified synthetic lookup complete.',
+        })
+      }
     }
-    await vi.waitFor(() => expect(forwarded.filter((event) => event.type === 'delegation.context.append')).toHaveLength(2))
-    expect(forwarded.filter((event) => event.type === 'delegation.context.append')).toEqual([
-      expect.objectContaining({
-        delegation_item_id: 'delegation_1',
-        channel: 'speakable',
-        content: [{ type: 'input_text', text: 'Synthetic lookup complete.' }],
-      }),
-      expect.objectContaining({
-        delegation_item_id: 'delegation_2',
-        channel: 'speakable',
-        content: [{ type: 'input_text', text: 'Synthetic lookup complete.' }],
-      }),
-    ])
+    const outputMethod = outputOwner === 'host' ? 'session.context.append' : 'delegation.context.append'
+    await vi.waitFor(() => expect(forwarded.filter((event) => event.type === outputMethod)).toHaveLength(2))
+    if (outputOwner === 'host') {
+      expect(forwarded.filter((event) => event.type === 'delegation.context.append')).toEqual([])
+      expect(forwarded.filter((event) => event.type === outputMethod)).toEqual([
+        { type: outputMethod, content: [{ type: 'input_text', text: 'Verified synthetic lookup complete.' }] },
+        { type: outputMethod, content: [{ type: 'input_text', text: 'Verified synthetic lookup complete.' }] },
+      ])
+    } else {
+      expect(forwarded.filter((event) => event.type === outputMethod)).toEqual([
+        expect.objectContaining({
+          delegation_item_id: 'delegation_1',
+          channel: 'speakable',
+          content: [{ type: 'input_text', text: 'Synthetic lookup complete.' }],
+        }),
+        expect.objectContaining({
+          delegation_item_id: 'delegation_2',
+          channel: 'speakable',
+          content: [{ type: 'input_text', text: 'Synthetic lookup complete.' }],
+        }),
+      ])
+    }
     expect(tools).toHaveLength(2)
     expect(tools.every((call) => call.threadId === threadId && call.tool === 'read_probe')).toBe(true)
     expect(new Set(tools.map((call) => call.turnId)).size).toBe(2)
