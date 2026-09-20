@@ -19,7 +19,7 @@ const MAX_ROOTS = 16;
 const RECEIPT_SCHEMA = "murph.hosted-canonical-write-receipt.v1";
 const LOG_SCHEMA = "murph.hosted-canonical-write-receipt-log.v1";
 type Env = Readonly<Record<string, string | undefined>>;
-type ContentReference = { sha256: string; byteLength: number };
+type ContentReference = { sha256: string; byteSize: number };
 type ReceiptEvidence = { paths: string[]; contents: ContentReference[]; deletes: number; appends: number };
 
 class RecoveryRemoteReadError extends Error {
@@ -28,8 +28,8 @@ class RecoveryRemoteReadError extends Error {
 
 function contentReference(value: unknown): ContentReference | null {
   if (!record(value) || typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)
-    || typeof value.byteLength !== "number" || !Number.isSafeInteger(value.byteLength) || value.byteLength < 0) return null;
-  return { sha256: value.sha256, byteLength: value.byteLength };
+    || typeof value.byteSize !== "number" || !Number.isSafeInteger(value.byteSize) || value.byteSize < 0) return null;
+  return { sha256: value.sha256, byteSize: value.byteSize };
 }
 
 function receiptAction(value: unknown): Record<string, unknown> & { targetRelativePath: string } | null {
@@ -231,7 +231,7 @@ export async function assessCheckpointRecovery(env: Env, fetchImpl: typeof fetch
       objects: stats.objects, encryptedBytes: stats.bytes, authenticated, unreadable,
       receiptCandidatesBeforeCutoff: receipts.length, receiptLogCandidates: receiptLogs,
       candidatePaths: paths.size, contentReferences: contents.length,
-      presentContentReferences: contents.filter((ref) => hashes.get(ref.sha256) === ref.byteLength).length,
+      presentContentReferences: contents.filter((ref) => hashes.get(ref.sha256) === ref.byteSize).length,
       deleteActions: receipts.reduce((count, receipt) => count + receipt.deletes, 0),
       appendActions: receipts.reduce((count, receipt) => count + receipt.appends, 0),
       acceptedHistoryProven: false, restorationPerformed: false,

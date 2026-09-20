@@ -1,5 +1,6 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import type { HostedCanonicalWriteReceipt } from "@murphai/core";
 import { buildHostedStorageAad, encryptHostedStoragePayload } from "@murphai/runtime-state";
 import { hostedArtifactObjectKey } from "@murphai/hosted-execution/storage-paths";
 import {
@@ -97,11 +98,27 @@ describe("bounded recovery census", () => {
   });
   it("composes signed member reads, root authentication, artifact inventory and a final version check without writes", async () => {
     const context = await createTestHostedRuntimeCryptoContext(userId);
-    const content = await artifact(Buffer.from("Synthetic canonical content."));
+    const payload = Buffer.from("Synthetic canonical content.");
+    const content = await artifact(payload);
     const receipt = await artifact(encode({
       schema: "murph.hosted-canonical-write-receipt.v1", committedAt: request.before,
-      actions: [{ kind: "text_upsert", targetRelativePath: "bank/synthetic.md", contentRef: { sha256: content.sha256, byteLength: 28 } }],
-    }));
+      operationId: "synthetic-operation", operationType: "synthetic-write", summary: "Synthetic recovery evidence",
+      createdAt: request.before, updatedAt: request.before, occurredAt: request.before,
+      actions: [
+        { kind: "text_upsert", targetRelativePath: "bank/synthetic.md", sha256: content.sha256,
+          byteLength: payload.byteLength, effect: "create", contentRef: { sha256: content.sha256, byteSize: payload.byteLength } },
+        { kind: "raw_upsert", targetRelativePath: "raw/synthetic.txt", sha256: content.sha256,
+          byteLength: payload.byteLength, mediaType: "text/plain", originalFileName: "synthetic.txt", effect: "copy",
+          contentRef: { sha256: content.sha256, byteSize: payload.byteLength } },
+        { kind: "jsonl_append", targetRelativePath: "bank/synthetic.jsonl", appendSha256: content.sha256,
+          appendByteLength: payload.byteLength, baseSha256: "a".repeat(64), baseByteLength: 0, originalSize: 0,
+          contentRef: { sha256: content.sha256, byteSize: payload.byteLength } },
+        { kind: "text_upsert", targetRelativePath: "bank/missing.md", sha256: "b".repeat(64),
+          byteLength: payload.byteLength, effect: "create", contentRef: { sha256: "b".repeat(64), byteSize: payload.byteLength } },
+        { kind: "text_upsert", targetRelativePath: "bank/mismatched-size.md", sha256: content.sha256,
+          byteLength: payload.byteLength + 1, effect: "create", contentRef: { sha256: content.sha256, byteSize: payload.byteLength + 1 } },
+      ],
+    } satisfies HostedCanonicalWriteReceipt));
     const objects = [content, receipt];
     let workspaceReads = 0;
     let workspaceVersion = "7";
@@ -139,7 +156,7 @@ describe("bounded recovery census", () => {
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: privateJwk, HOSTED_CRYPTO_ENV: "test",
     };
     const result = await assessCheckpointRecovery(env, fetchImpl);
-    expect(result).toMatchObject({ objects: 2, authenticated: 2, unreadable: 0, receiptCandidatesBeforeCutoff: 1, candidatePaths: 1, presentContentReferences: 1, acceptedHistoryProven: false, restorationPerformed: false });
+    expect(result).toMatchObject({ objects: 2, authenticated: 2, unreadable: 0, receiptCandidatesBeforeCutoff: 1, candidatePaths: 5, contentReferences: 5, presentContentReferences: 3, appendActions: 1, acceptedHistoryProven: false, restorationPerformed: false });
     expect(workspaceReads).toBe(2);
     expect(methods.filter((method) => method === "POST")).toHaveLength(1);
     expect(methods.every((method) => method === "GET" || method === "POST")).toBe(true);
