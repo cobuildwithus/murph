@@ -71,6 +71,57 @@ describe("device import progress and efficiency alerts", () => {
       .stalled.anomalous).toBe(true);
   });
 
+  it("allows scheduled-only work to publish without inventing import progress", () => {
+    const rows = [row(22, { progressed: true }), checkpoint(21),
+      row(7, { attemptId: "scheduled", runnable: false })];
+    expect(health(rows, false).stalled.anomalous).toBe(false);
+    expect(health([...rows, checkpoint(1, { attemptId: "scheduled" })], false)
+      .stalled.anomalous).toBe(false);
+    // Deferral and an unchanged checkpoint cannot hide an overdue device wake.
+    expect(health(rows, true).stalled.anomalous).toBe(true);
+    expect(health([...rows, checkpoint(1, { attemptId: "scheduled" })], true)
+      .stalled.anomalous).toBe(true);
+  });
+
+  it("bounds deferred checkpoint grace by the first unsaved pass across attempts", () => {
+    const first = row(15, { runnable: false });
+    const rows = [row(28), checkpoint(27)];
+    expect(health([...rows, { ...first, at: new Date(+first.at + 1) }], false)
+      .stalled.anomalous).toBe(false);
+    for (const attemptId of ["attempt-a", "restarted"]) {
+      const repeated = row(1, { attemptId, runnable: false });
+      expect(health([...rows, first, repeated], false).stalled.anomalous).toBe(true);
+      expect(health([...rows, first, repeated, checkpoint(0.5, { attemptId: "unrelated" })], false)
+        .stalled.anomalous).toBe(true);
+      expect(health([...rows, first, repeated, checkpoint(0.5, { checkpointAccepted: false })], false)
+        .stalled.anomalous).toBe(true);
+    }
+  });
+
+  it("grants deferred grace only to the latest owned, non-runnable pass", () => {
+    const rows = [row(26), checkpoint(25), row(12)];
+    for (const patch of [
+      { runnable: true }, { runnable: null }, { attemptId: null },
+      { connectionKey: "b".repeat(64) },
+    ]) {
+      expect(health([...rows, row(1, { runnable: false, ...patch })], false)
+        .stalled.anomalous).toBe(true);
+    }
+  });
+
+  it("does not let deferral refresh an older unsaved runnable pass", () => {
+    expect(health([row(29), checkpoint(28), row(16, { runnable: true }),
+      row(2, { runnable: false })], false).stalled.anomalous).toBe(true);
+  });
+
+  it("allows a new deferred publication window only after matching checkpoint acceptance", () => {
+    const rows = [row(40), checkpoint(39), row(26, { runnable: false }),
+      row(13, { runnable: false }), checkpoint(12),
+      row(1, { runnable: false })];
+    expect(health(rows, false).stalled.anomalous).toBe(false);
+    expect(health(rows, true).stalled.anomalous).toBe(true);
+  });
+
   it("requires an overdue wake for a checkpointed queue but not for unsaved active work", () => {
     const rows = [row(20), checkpoint(19), row(10), checkpoint(9), row(1)];
     expect(health([...rows, checkpoint(0.5)], false).stalled.anomalous).toBe(false);
