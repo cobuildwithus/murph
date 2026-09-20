@@ -77,7 +77,7 @@ function summarizeRuntime(rows: DeviceImportObservation[], now: number, due: boo
     const { backlogAge, lastProgress, restarts, cancellations, savedPasses } = evidence;
     const conditions: DeviceImportCondition[] = [];
     if ((due || evidence.latestPassUncheckpointed)
-      && !evidence.awaitingProgressCheckpoint
+      && !evidence.awaitingCheckpoint
       && now - lastProgress >= DEVICE_IMPORT_STALL_MS) {
       conditions.push("stalled");
     }
@@ -135,7 +135,7 @@ function summarizeConnection(
   let pendingSince: number | null = null;
   let lastPendingAt = 0;
   let lastProgress = 0;
-  const pendingProgress = new Map<string, number[]>();
+  const pendingPublications = new Map<string, { at: number; progressed: boolean }[]>();
   const pendingSnapshots = new Map<string | null, boolean | null>();
   let latestPassAttemptId: string | null = null;
   const savedAt: number[] = [];
@@ -154,23 +154,23 @@ function summarizeConnection(
     if (row.eventCode === "device-sync.pass_finished") {
       latestPassAttemptId = row.attemptId;
       pendingSnapshots.set(row.attemptId, pending);
-      if (row.progressed && row.attemptId) {
-        const passes = pendingProgress.get(row.attemptId) ?? [];
-        passes.push(at);
-        pendingProgress.set(row.attemptId, passes);
+      if (row.attemptId && (row.progressed || (!due && row.runnable === false))) {
+        const passes = pendingPublications.get(row.attemptId) ?? [];
+        passes.push({ at, progressed: row.progressed });
+        pendingPublications.set(row.attemptId, passes);
       }
     }
     if (row.checkpointAccepted && row.attemptId) {
-      const passes = pendingProgress.get(row.attemptId) ?? [];
+      const passes = (pendingPublications.get(row.attemptId) ?? []).filter(pass => pass.progressed);
       if (passes.length > 0) {
         lastProgress = at;
-        savedAt.push(...passes);
-        pendingProgress.delete(row.attemptId);
+        savedAt.push(...passes.map(pass => pass.at));
       }
+      pendingPublications.delete(row.attemptId);
       // Local queue drain is not durable recovery until Web accepts it.
       if (pendingSnapshots.get(row.attemptId) === false) {
         pendingSince = null;
-        pendingProgress.clear();
+        pendingPublications.clear();
       }
       pendingSnapshots.delete(row.attemptId);
     }
@@ -187,7 +187,7 @@ function summarizeConnection(
   const countRecent = (times: number[]) => times.filter(at => at >= recentAfter).length;
   return {
     evidenceCurrent,
-    awaitingProgressCheckpoint: isAwaitingProgressCheckpoint(pendingProgress, lastProgress, now),
+    awaitingCheckpoint: isAwaitingCheckpoint(pendingPublications, lastProgress, now),
     latestPassUncheckpointed: pendingSnapshots.has(latestPassAttemptId),
     backlogAge: now - pendingSince,
     lastProgress: Math.max(pendingSince, lastProgress),
@@ -196,20 +196,20 @@ function summarizeConnection(
   };
 }
 
-function isAwaitingProgressCheckpoint(
-  pendingProgress: ReadonlyMap<string, readonly number[]>, lastProgress: number, now: number,
+function isAwaitingCheckpoint(
+  pendingPublications: ReadonlyMap<string, readonly { at: number }[]>, lastProgress: number, now: number,
 ): boolean {
-  // A productive local pass needs time to publish its idle checkpoint. Anchor
-  // that allowance to the first unsaved progress, not the newest pass/restart;
-  // only accepted progress can start a new allowance for this connection.
-  let firstUnsavedProgressAt = Infinity;
-  for (const passes of pendingProgress.values()) {
-    for (const at of passes) {
-      if (at >= lastProgress) firstUnsavedProgressAt = Math.min(firstUnsavedProgressAt, at);
+  // Productive passes and proven deferred work need time to publish their idle
+  // checkpoint. Deferred no-ops qualify only before the canonical wake is overdue.
+  // Further passes or restarts cannot refresh the oldest publication deadline.
+  let firstUnsavedPassAt = Infinity;
+  for (const passes of pendingPublications.values()) {
+    for (const { at } of passes) {
+      if (at >= lastProgress) firstUnsavedPassAt = Math.min(firstUnsavedPassAt, at);
     }
   }
-  return Number.isFinite(firstUnsavedProgressAt)
-    && now - firstUnsavedProgressAt < DEVICE_IMPORT_STALL_MS;
+  return Number.isFinite(firstUnsavedPassAt)
+    && now - firstUnsavedPassAt < DEVICE_IMPORT_STALL_MS;
 }
 
 function countAtOrAfter(times: readonly number[], cutoff: number) {

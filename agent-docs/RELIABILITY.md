@@ -2646,9 +2646,12 @@ to apply after cutover.
   own accepted checkpoint. Proven unsaved continuation progress receives a
   15-minute publication allowance from the earliest outstanding productive pass
   since saved progress. Further passes and restarts cannot refresh that allowance;
-  unrelated connections and unkeyed attempts cannot grant it. An unchanged
-  checkpoint does not count as import progress; once accepted, the canonical wake
-  controls stall eligibility.
+  unrelated connections and unkeyed attempts cannot grant it. A completed no-op
+  pass with proven zero runnable jobs receives the same bounded publication grace
+  only while the canonical device wake is not overdue. It never counts as saved
+  import progress or suppresses cycling; missing runnable evidence retains the
+  conservative stall behavior. An unchanged checkpoint does not count as import
+  progress; once accepted, the canonical wake controls stall eligibility.
   Cycling detection uses pending observations and backlog detection uses runnable
   observations within the same 15-minute continuity window independently of the
   wake, so eligibility cannot

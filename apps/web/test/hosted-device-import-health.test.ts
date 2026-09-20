@@ -45,6 +45,46 @@ describe("device import progress and efficiency alerts", () => {
     expect(cycling.cycling.savedProgressPassCount).toBe(0);
   });
 
+  it("allows a deferred no-op pass to publish without crediting import progress", () => {
+    const rows = [row(30, { progressed: true }), checkpoint(29),
+      row(17, { progressed: true }), checkpoint(16),
+      row(4, { runnable: false, attemptId: "idle" })];
+    expect(health(rows, false).stalled.anomalous).toBe(false);
+    expect(health([...rows, checkpoint(0, { attemptId: "idle" })], false)
+      .stalled.anomalous).toBe(false);
+    // A scheduled queue cannot hide an already-overdue wake.
+    expect(health(rows, true).stalled.anomalous).toBe(true);
+    const starts = [3, 2, 1, 0].map(age => row(age, {
+      eventCode: "runner.processing_finished", pending: null, restarted: true,
+    }));
+    for (const observations of [rows, [...rows, checkpoint(0, { attemptId: "idle" })]]) {
+      expect(health([...observations, ...starts], false).cycling)
+        .toMatchObject({ anomalous: true, savedProgressPassCount: 1 });
+    }
+  });
+
+  it("bounds no-op checkpoint grace across later passes and restarts", () => {
+    const rows = [row(40, { progressed: true }), checkpoint(39), row(26),
+      row(15, { runnable: false, attemptId: "idle" })];
+    expect(health([...rows.slice(0, -1), row(14.99, { runnable: false, attemptId: "idle" })], false)
+      .stalled.anomalous).toBe(false);
+    expect(health(rows, false).stalled.anomalous).toBe(true);
+    expect(health([...rows, row(1, { runnable: false, attemptId: "replacement" })], false)
+      .stalled.anomalous).toBe(true);
+    expect(health([...rows, row(1, { runnable: false, attemptId: "replacement" }),
+      checkpoint(0, { attemptId: "other" })], false).stalled.anomalous).toBe(true);
+  });
+
+  it("requires owned deferred evidence for no-op checkpoint grace", () => {
+    for (const patch of [
+      { runnable: true }, { runnable: null }, { attemptId: null },
+      { connectionKey: "b".repeat(64) },
+    ]) {
+      const rows = [row(25), row(11), row(1, { runnable: false, ...patch })];
+      expect(health(rows, false).stalled.anomalous).toBe(true);
+    }
+  });
+
   it("expires publication grace at fifteen minutes without refreshing it on more passes or restarts", () => {
     const first = row(15, { progressed: true });
     expect(health([row(29), { ...first, at: new Date(+first.at + 1) }]).stalled.anomalous).toBe(false);
