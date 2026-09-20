@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-20",
+  "order": 100,
+  "item": {
+    "id": "text-typing-starts-sooner",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Typing starts sooner for text messages",
+    "summary": "Murph can show its typing indicator sooner when your next text arrives while it is finishing the previous turn.",
+    "details": "On iMessage, eligible text messages can start typing feedback while conversation progress is still being saved. The reply continues to wait for that work to finish safely.",
+    "relevanceTags": ["messaging", "reliability"],
+    "sourcePullRequests": []
+  }
+}

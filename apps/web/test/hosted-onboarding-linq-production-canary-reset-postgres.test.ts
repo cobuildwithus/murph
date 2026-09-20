@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
@@ -30,6 +31,42 @@ if (
 describe.skipIf(!runPostgresProof)(
   "Linq production-canary reset PostgreSQL proof",
   () => {
+    it("reproduces the mailbox cascade and preserves diagnostic rows after the retention migration", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const initialMigration = await readFile(new URL("../prisma/migrations/2026052700_hosted_ingress_latency_trace/migration.sql", import.meta.url), "utf8");
+      const retentionMigration = await readFile(new URL("../prisma/migrations/20260920180000_canary_diagnostic_retention/migration.sql", import.meta.url), "utf8");
+      try {
+        await prisma.$transaction(async (tx) => {
+          // All migration objects stay connection-local; no shared fixture rows
+          // or application tables are touched by this schema regression proof.
+          await tx.$executeRawUnsafe('CREATE TEMP TABLE hosted_mailbox_item (user_id TEXT NOT NULL, id TEXT NOT NULL)');
+          await tx.$executeRawUnsafe('SET LOCAL search_path TO pg_temp');
+          for (const statement of initialMigration.split(";").map((sql) => sql.trim()).filter(Boolean)) {
+            await tx.$executeRawUnsafe(statement);
+          }
+          const seed = async () => {
+            await tx.$executeRaw`INSERT INTO hosted_mailbox_item (user_id, id) VALUES ('member_synthetic', 'mailbox_synthetic')`;
+            await tx.$executeRaw`INSERT INTO hosted_ingress_latency_trace
+              (id, user_id, source, mailbox_item_id, mailbox_lane, mailbox_lane_seq, accepted_at, updated_at)
+              VALUES ('trace_synthetic', 'member_synthetic', 'linq', 'mailbox_synthetic', 'conversation', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`;
+          };
+          await seed();
+          await tx.$executeRaw`DELETE FROM hosted_mailbox_item WHERE user_id = 'member_synthetic'`;
+          expect(await tx.$queryRaw`SELECT id FROM hosted_ingress_latency_trace`).toEqual([]);
+
+          await seed();
+          await tx.$executeRawUnsafe(retentionMigration);
+          await tx.$executeRaw`DELETE FROM hosted_mailbox_item WHERE user_id = 'member_synthetic'`;
+          expect(await tx.$queryRaw`SELECT id FROM hosted_mailbox_item`).toEqual([]);
+          expect(await tx.$queryRaw`SELECT id FROM hosted_ingress_latency_trace`).toEqual([{ id: "trace_synthetic" }]);
+          await tx.$executeRaw`DELETE FROM hosted_ingress_latency_trace WHERE user_id = 'member_synthetic'`;
+          expect(await tx.$queryRaw`SELECT id FROM hosted_ingress_latency_trace`).toEqual([]);
+        });
+      } finally {
+        await prisma.$disconnect();
+      }
+    });
+
     it("clears only untouched claims and their joined admission rows", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
       const fixture = buildFixture();

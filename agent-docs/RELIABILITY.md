@@ -2466,9 +2466,11 @@ to apply after cutover.
   Linq and Telegram acceptance milestones stay asynchronous. The engine's
   existing turn handle retains the original provider acceptance timestamp for
   the initial accepted-input journal and subsequent pre-provider or live-steered
-  admissions. Eligible, unconsumed Linq attachments may start that same session
-  after durable input staging, while model admission still waits for settled
-  evidence. The existing per-chat claim retains one preparation handle; the
+  admissions. Eligible, unconsumed Linq conversation inputs may start that same
+  session after durable input staging, before remote mailbox checkpoint work
+  completes. Text inputs use the same handoff as attachments. Model admission
+  still waits for checkpoint persistence and, for attachments, settled evidence.
+  The existing per-chat claim retains one preparation handle; the
   validated turn takes it only through the same provider-fetch authority,
   rebinding cancellation without another start or a reset session budget.
   Import failure cancels only an unclaimed preparation. Provider acceptance,

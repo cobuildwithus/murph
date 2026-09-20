@@ -1324,6 +1324,8 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
       Prisma.sql`(CAST(${randomUUID()} AS text), CAST(${mailboxItemId} AS text))`
     ),
   );
+  // The shared member lock drains trace creation before account suspension
+  // commits, preserving deletion safety without a mailbox cascade.
   const linkedRows = await prisma.$queryRaw<Array<{ mailboxItemId: string }>>(Prisma.sql`
     INSERT INTO hosted_ingress_latency_trace (
       id,
@@ -1355,9 +1357,13 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
     FROM (VALUES ${candidates}) AS candidate(trace_id, mailbox_item_id)
     INNER JOIN hosted_mailbox_item AS mailbox
       ON mailbox.id = candidate.mailbox_item_id
+    INNER JOIN hosted_member AS member
+      ON member.id = mailbox.user_id
     WHERE mailbox.user_id = ${authenticatedUserId}
+      AND member.suspended_at IS NULL
       AND mailbox.lane = 'conversation'
       AND mailbox.kind = 'conversation.message'
+    FOR SHARE OF member
     ON CONFLICT (mailbox_item_id) DO UPDATE SET
       reply_runtime_attempt_id = EXCLUDED.reply_runtime_attempt_id,
       linq_delivery_id = EXCLUDED.linq_delivery_id,
@@ -2192,6 +2198,7 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
     ingressTypingAcceptedAt?: Date;
   },
 ) {
+  // Share the existing account-deletion suspension fence for the whole insert.
   await prisma.$executeRaw`
     INSERT INTO hosted_ingress_latency_trace (
       id,
@@ -2206,7 +2213,7 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
       created_at,
       updated_at
     )
-    VALUES (
+    SELECT
       ${randomUUID()},
       ${input.mailboxItem.userId},
       ${input.source},
@@ -2218,7 +2225,10 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
       ${input.mailboxItem.acceptedAt},
       CURRENT_TIMESTAMP,
       CURRENT_TIMESTAMP
-    )
+    FROM hosted_member AS member
+    WHERE member.id = ${input.mailboxItem.userId}
+      AND member.suspended_at IS NULL
+    FOR SHARE OF member
     ON CONFLICT (mailbox_item_id) DO UPDATE
     SET ingress_typing_accepted_at = LEAST(
       hosted_ingress_latency_trace.ingress_typing_accepted_at,

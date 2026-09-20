@@ -1177,7 +1177,6 @@ model HostedMailboxItem {
   updatedAt               DateTime              @updatedAt @map("updated_at")
   member                  HostedMember          @relation(fields: [userId], references: [id], onDelete: Cascade)
   payload                 HostedMailboxPayload?
-  latencyTrace            HostedIngressLatencyTrace?
 
   @@unique([userId, id])
   @@unique([userId, lane, laneSeq])
@@ -1259,7 +1258,6 @@ model HostedIngressLatencyTrace {
   phaseBreakdownJson       Json?             @map("phase_breakdown_json")
   createdAt                DateTime          @default(now()) @map("created_at")
   updatedAt                DateTime          @updatedAt @map("updated_at")
-  mailboxItem              HostedMailboxItem @relation(fields: [userId, mailboxItemId], references: [userId, id], onDelete: Cascade)
   linqDelivery             HostedLinqDelivery? @relation(fields: [linqDeliveryId], references: [id], onDelete: SetNull)
 
   @@unique([userId, mailboxItemId])

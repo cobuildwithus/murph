@@ -109,6 +109,7 @@ import {
 import {
   createHostedConversationMailboxImportItem,
 } from "../src/hosted-runtime/mailbox-conversation-import.ts";
+import { createHostedAssistantChannelTypingDependencies } from "../src/hosted-runtime/channel-activity.ts";
 import {
   checkpointHostedRuntimeBridgeWebWorkspace,
   HostedRuntimeBridgeCheckpointLeaseError,
@@ -4821,6 +4822,97 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         force: true,
         recursive: true,
       });
+    }
+  });
+
+  test("starts text typing before a held canonical checkpoint and hands the session to the admitted turn", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(TEST_NOW) });
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-typing-checkpoint-"));
+    const checkpointStarted = createDeferred<void>();
+    const releaseCheckpoint = createDeferred<void>();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const wake = createRunnerConversationWake();
+    assert.equal(wake.message.channel, "linq");
+    if (wake.message.channel !== "linq") throw new Error("Expected a Linq fixture.");
+    const linqMessage = wake.message.linqMessage;
+    linqMessage.threadIsDirect = true;
+    const providerFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    let typingAcceptedAt: string | null = null;
+    let assistantStartedAt: number | null = null;
+    let stopTyping: (() => Promise<void>) | undefined;
+    const platform = createPlatform({
+      mailboxPort: createMailboxPort({ items: [createMailboxItem({ dedupeKey: wake.eventId })] }).mailboxPort,
+      workspacePort: createWorkspacePort({ checkpointRequests }),
+      providerFetch,
+      latencyTracePort: { async record(request) {
+        if (request.event.type === "assistant_milestone"
+          && request.event.milestone === "linq_typing_accepted") typingAcceptedAt = request.event.at;
+        return { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+      } },
+    });
+    const runtime = { ...createConversationRuntime(), forwardedEnv: { LINQ_API_TOKEN: "synthetic-token" }, platform };
+    const checkpoint = createRuntimeRedactedStatusCheckpoint({
+      attemptId: "attempt_synthetic_text_typing", checkpointRequests, leaseGeneration: "1",
+    });
+    const controller = new AbortController();
+    const running = runHostedWorkspaceUntilIdleOrBudget({
+      checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        attemptId: "attempt_synthetic_text_typing", expectedWorkspaceVersion: "0", leaseGeneration: "1",
+        nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
+      }),
+      async checkpointRuntimeRedactedStatus(request) {
+        checkpointStarted.resolve();
+        await releaseCheckpoint.promise;
+        return checkpoint(request);
+      },
+      expectedUserId: TEST_USER_ID,
+      importItem: createHostedConversationMailboxImportItem({
+        decodePayload: { async decode() { return { status: "decoded", wake }; } },
+        prepareWakeContext: async () => {},
+        runtime, vaultRoot,
+      }),
+      initialMailboxImportContext: { runtimeAttemptId: "attempt_synthetic_text_typing" },
+      limitPerLane: 10,
+      platform,
+      requestId: "request_synthetic_text_typing",
+      async runAssistantPhase(input) {
+        assistantStartedAt = Date.now();
+        const typing = createHostedAssistantChannelTypingDependencies({
+          forwardedEnv: runtime.forwardedEnv, userEnv: {}, providerFetch,
+          linqDeliveryContexts: input.initialMailboxImport.importResult.linqDeliveryContexts,
+        });
+        const handle = await typing.startLinqTyping?.({ target: linqMessage.chatId });
+        assert.ok(handle);
+        assert.equal(handle.acceptedAt, typingAcceptedAt);
+        stopTyping = async () => { await handle.stop({ providerStop: false }); };
+        return { progressed: false };
+      },
+      signal: controller.signal,
+      vaultRoot,
+      workspace: createWorkspaceState({ redactedStatus: {
+        hostedCanonicalWriteReceiptLogByteSize: 1,
+        hostedCanonicalWriteReceiptLogSha256: "a".repeat(64),
+      } }),
+      now: () => TEST_NOW,
+    });
+    try {
+      await withTestTimeout(checkpointStarted.promise);
+      expect(providerFetch).toHaveBeenCalledOnce();
+      await vi.waitFor(() => assert.ok(typingAcceptedAt));
+      assert.equal(assistantStartedAt, null);
+      expect(providerFetch).toHaveBeenCalledOnce();
+      vi.setSystemTime(new Date(Date.parse(TEST_NOW) + 3_500));
+      releaseCheckpoint.resolve();
+      await running;
+      assert.equal(assistantStartedAt! - Date.parse(typingAcceptedAt!), 3_500);
+      expect(providerFetch).toHaveBeenCalledOnce();
+    } finally {
+      releaseCheckpoint.resolve();
+      await running.catch(() => undefined);
+      await stopTyping?.();
+      controller.abort();
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 

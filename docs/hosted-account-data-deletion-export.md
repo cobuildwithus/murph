@@ -30,6 +30,25 @@ Account deletion is intentionally deliberate but does not introduce a separate p
 12. The per-user Temporal runtime workflow is terminated best-effort before deletion starts, again after the Prisma transaction commits, and again after Cloudflare runner/R2 cleanup, so live runtime writers are stopped before local rows are removed and stale wake state is neutralized after cleanup.
 13. The Stripe subscription is canceled before the Prisma transaction and fails closed: if the cancel call fails, deletion aborts with a retryable error so a deleted account can never keep an active subscription billing it. Stripe customer, Privy user, Cloudflare runner-state/R2, and isolated runtime-log deletion run immediately after the local wipe and remain owned by the encrypted cleanup receipt until every target confirms completion.
 
+## Production canary reset exception
+
+The authenticated Linq production canary reset deletes the configured canary
+account's content and runtime state through a dedicated account-deletion entrypoint.
+That entrypoint verifies the current fixed canary identity and preserves primary
+ingress traces and isolated runtime logs under their existing retention deadlines.
+It settles runtime-log cleanup as a no-op in the encrypted retry receipt, so a
+later vendor-cleanup retry cannot erase the diagnostics. It skips explicit ingress
+trace deletion; the diagnostic-retention migration removes the mailbox cascade.
+
+This exception is unavailable to ordinary account-deletion callers. Settings
+deletion, including deletion of the canary through the ordinary service, still
+explicitly erases ingress traces and retries isolated runtime-log deletion.
+No member or mailbox payload remains solely to retain canary diagnostics.
+Both ingress trace-creation paths lock the unsuspended member during their insert,
+so the ordinary account-deletion suspension fence also prevents late trace
+recreation after the mailbox cascade is removed. Roll out those writers and drain
+old Web instances before applying the diagnostic-retention migration.
+
 ## Export contract
 
 The Settings **Export vault** workflow downloads the browser-vault replica schema `murph.browser-vault-replica`.
