@@ -1,6 +1,6 @@
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
 import { presignManagedSnapshot, completeManagedSnapshotForSession, ManagedSnapshotCompletionRejectedError } from "./managed-snapshot-control.ts";
-import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, commandHostedRuntimeReplicaPut, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
+import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
 import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
 import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
 import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
@@ -3330,19 +3330,9 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   request: Request;
   userId: string;
 }): Promise<Response> {
-  let writeAuthority: Awaited<ReturnType<typeof requireRunnerRuntimeWriteFence>>;
-  try {
-    writeAuthority = await requireRunnerRuntimeWriteFence({
-      env: input.env,
-      request: input.request,
-      userId: input.userId,
-    });
-  } catch (error) {
-    if (!(error instanceof RunnerRuntimeWriteFenceError)) {
-      throw error;
-    }
-    return unauthorized();
-  }
+  // The batch admission below checks live ownership under the Web transaction.
+  const writeAuthority = readRunnerRuntimeWriteFenceHeaders(input.request);
+  if (!writeAuthority) return unauthorized();
 
   const body = await readJsonObject(input.request, {
     limitBytes: HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES + 1024 * 1024,
@@ -3362,12 +3352,10 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     environment: input.environment,
     userId: input.userId,
   });
-  let admittedRootObjectKey: string | null = null;
+  const replicaWrites = createRuntimeReplicaWriteBucket({ source: input.env,
+    userId: input.userId, attemptId: writeAuthority.attemptId, generation: writeAuthority.generation });
   const replicaStore = createHostedBrowserVaultReplicaStore({
-    bucket: createRuntimeReplicaWriteBucket({ source: input.env,
-      userId: input.userId, attemptId: writeAuthority.attemptId, generation: writeAuthority.generation,
-      readRootObjectKey: () => admittedRootObjectKey,
-    }),
+    bucket: replicaWrites.bucket,
     keysById: crypto.keysById,
     resolveRootKeyById: crypto.resolveKeyById,
     rootKey: crypto.rootKey,
@@ -3382,31 +3370,17 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
       userId: input.userId,
     });
   }
-  let activePutWriteId: string | null = null;
+  let writeFailed = false;
   try {
     return json({
       replicaRef: await replicaStore.writeBrowserVaultReplica({
-        beforeWrite: async (plannedReplicaRef) => {
-          const writeId = globalThis.crypto.randomUUID();
-          const putAdmitted = await admitBrowserVaultReplicaDirectPut({
-            objectKey: plannedReplicaRef.objectKey,
-            attemptId: writeAuthority.attemptId,
-            env: input.env,
-            leaseGeneration: writeAuthority.generation,
-            userId: input.userId,
-            writeId,
-          });
-          if (!putAdmitted) {
-            throw new RunnerRuntimeWriteFenceError();
-          }
-          activePutWriteId = writeId;
-          admittedRootObjectKey = plannedReplicaRef.objectKey;
-        },
+        beforeWrite: plannedReplicaRef => replicaWrites.admit(plannedReplicaRef.objectKey),
         replica: body.replica,
         userId: input.userId,
       }),
     });
   } catch (error) {
+    writeFailed = true;
     if (!(error instanceof HostedRuntimeResourceRejectedError)) throw error;
     emitHostedExecutionStructuredLog({
       component: "runner", phase: "wake.running", level: "warn",
@@ -3415,36 +3389,9 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     });
     return json({ code: error.code, error: "Hosted runtime replica write rejected." }, error.status);
   } finally {
-    if (activePutWriteId) {
-      await releaseBrowserVaultReplicaDirectPut({
-        env: input.env,
-        userId: input.userId,
-        writeId: activePutWriteId,
-      });
-    }
+    try { await replicaWrites.settle(); }
+    catch (error) { if (!writeFailed) throw error; }
   }
-}
-
-async function admitBrowserVaultReplicaDirectPut(input: {
-  objectKey: string;
-  attemptId: string;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
-  userId: string;
-  writeId: string;
-}): Promise<boolean> {
-  return commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: {
-    operation: "admit", attemptId: input.attemptId, generation: input.leaseGeneration, writeId: input.writeId, objectKey: input.objectKey,
-  } });
-}
-
-async function releaseBrowserVaultReplicaDirectPut(input: {
-  env: RunnerOutboundEnvironmentSource;
-  userId: string;
-  writeId: string;
-}): Promise<void> {
-  await commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: { operation: "release", writeId: input.writeId } });
-  return;
 }
 
 async function writeRequestOwnsRuntimeWriteFence(input: {

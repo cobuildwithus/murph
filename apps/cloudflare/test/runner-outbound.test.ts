@@ -616,7 +616,15 @@ describe("handleRunnerOutboundRequest", () => {
     resetRunnerOutboundSharedCachesForTest();
     vi.spyOn(runtimeUsageSettlement, "beginHostedRuntimeUsageSettlement").mockResolvedValue({ finish: vi.fn(async () => {}) });
     vi.spyOn(runtimeResourceClient, "recordHostedRuntimeOrphan").mockResolvedValue(undefined);
-    vi.spyOn(runtimeResourceClient, "commandHostedRuntimeReplicaPut").mockResolvedValue(true);
+    vi.spyOn(runtimeResourceClient, "commandHostedRuntimeReplicaPut").mockImplementation(async ({ source, userId, command }) => {
+      if (command.operation !== "admit_batch") return true;
+      const namespace = source.runtimeControl as ResourceTestBackends<BoundResourceTestBackend>;
+      const stub = namespace.getByName(userId);
+      if (!await stub.validateRuntimeWriteFence?.({ userId, attemptId: command.attemptId, generation: command.generation })) {
+        throw new HostedRuntimeResourceRejectedError("HOSTED_RUNTIME_OWNER_STALE");
+      }
+      return true;
+    });
     vi.spyOn(runtimeResourceClient, "commandHostedRuntimeSnapshot").mockImplementation(async ({ source, userId, command }) => {
       const namespace = source.runtimeControl as ResourceTestBackends<BoundResourceTestBackend>;
       const stub = namespace.getByName(userId);
@@ -10714,14 +10722,14 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       expect(response.status).toBe(409);
       expect(await response.json()).toEqual({ code, error: "Hosted runtime replica write rejected." });
       expect(put).not.toHaveBeenCalled();
-      expect(vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mock.calls.map(([input]) => input.command.operation)).toEqual(["admit"]);
+      expect(vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mock.calls.map(([input]) => input.command.operation)).toEqual(["admit_batch", "release_batch"]);
       expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
         message: "Hosted runtime replica write rejected.", details: { errorCode: code, status: 409 },
       }));
     },
   );
 
-  it("writes browser-vault replicas after live lease validation", async () => {
+  it("writes all browser-vault objects after one live batch admission", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner();
     const events: string[] = [];
@@ -10730,7 +10738,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       events.push(`record:${resource.objectKey}`);
     });
     vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mockImplementation(async ({ command }) => {
-      if (command.operation === "admit" && !command.multipart) events.push(`admit:${command.objectKey}`);
+      if (command.operation === "admit_batch") events.push(`admit:${command.objectKey}`);
       return true;
     });
     const defaultEnv = createRunnerOutboundEnv();
@@ -10781,7 +10789,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       }),
     });
     expect(publishedReplicaRef?.shards).toBeDefined();
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
     expect(runtimeResourceClient.recordHostedRuntimeOrphan).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       userId: "member_123", resource: { kind: "replica", objectKey: replacedReplicaRef.objectKey },
@@ -10790,8 +10798,10 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     expect(events.slice(0, 2)).toEqual([`record:${replacedReplicaRef.objectKey}`, `admit:${plannedObjectKeys[0]}`]);
     expect(new Set(events.slice(2))).toEqual(new Set(plannedObjectKeys.map(key => `put:${key}`)));
     const admissions = vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mock.calls
-      .map(([input]) => input.command).filter(command => command.operation === "admit");
-    expect(admissions.filter(command => command.multipart)).toHaveLength(plannedObjectKeys.length);
+      .map(([input]) => input.command).filter(command => command.operation === "admit_batch");
+    expect(admissions).toHaveLength(1);
+    expect(admissions[0]!.uploads).toHaveLength(plannedObjectKeys.length);
+    expect(runtimeResourceClient.commandHostedRuntimeReplicaPut).toHaveBeenCalledTimes(2);
     expect(admissions.every(command => command.objectKey === plannedObjectKeys[0])).toBe(true);
 
   });
@@ -10940,10 +10950,11 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       "member_123" ,
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(409);
     expect(bindUser).not.toHaveBeenCalled();
     expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(fixture.fetchMock).not.toHaveBeenCalled();
+    expect(fixture.fetchMock).toHaveBeenCalledOnce();
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).not.toHaveBeenCalled();
   });
 
   it("rejects browser-vault replica writes when the invocation proxy token is missing", async () => {
@@ -12558,12 +12569,12 @@ function requireTestString(value: unknown, label: string): string {
 
 function readRootReplicaAdmission() {
   return vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mock.calls
-    .map(([input]) => input.command).filter(command => command.operation === "admit").find(command => !command.multipart);
+    .map(([input]) => input.command).find(command => command.operation === "admit_batch");
 }
 function rootReplicaAdmissionReleased(): boolean {
   const root = readRootReplicaAdmission();
   return root !== undefined && vi.mocked(runtimeResourceClient.commandHostedRuntimeReplicaPut).mock.calls
-    .some(([input]) => input.command.operation === "release" && input.command.writeId === root.writeId);
+    .some(([input]) => input.command.operation === "release_batch" && input.command.writeIds.includes(root.uploads.find(upload => upload.objectKey === root.objectKey)!.writeId));
 }
 
 type OutboundTestEnvironment = RunnerOutboundEnvironmentSource & {

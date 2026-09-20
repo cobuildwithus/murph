@@ -1,3 +1,4 @@
+import { buildHostedRuntimeReplicaBatchProtocolProbe, parseHostedRuntimeReplicaPutCommand } from "@murphai/hosted-execution/runtime-resources";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import {
   buildHostedRuntimeLogProtocolProbe,
@@ -19,7 +20,9 @@ export function buildHostedThreadRouteAuthorityResponse(
 }
 
 export function buildHostedRuntimeWebProtocolAdmission(nonce: string): HostedRuntimeWebProtocolAdmission {
+  const replica = buildHostedRuntimeReplicaBatchProtocolProbe();
   return {
+    runtimeReplicaBatch: { admission: parseHostedRuntimeReplicaPutCommand(replica.admission), settlement: parseHostedRuntimeReplicaPutCommand(replica.settlement) },
     kind: HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
     schemaVersion: HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
     nonce,

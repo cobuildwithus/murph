@@ -183,6 +183,24 @@ write has a separate receipt. Completion or confirmed abort releases that
 receipt. An unknown completion followed by an unknown abort leaves it pending.
 Stopping a runtime never converts a multipart receipt into a timed drain.
 
+Browser Vault replica refreshes allocate their fixed 36 empty uploads with at
+most four R2 operations in flight, then admit all exact upload IDs in one Web
+callback before sending bytes. One root orphan row still owns the family, and
+one receipt per physical upload survives independently. Admission uses one
+transaction with nine database operations in the Postgres phase (at most 15
+while the existing rolling cutover locks apply), including one set-based receipt
+insert; settlement uses one set-based update under the existing cutover gate. No R2 or crypto work occurs inside either transaction. The outer
+non-multipart receipt and preliminary ownership callback are unnecessary because
+batch admission performs the same live owner and resource-retirement checks.
+The Worker drains every started upload before one bounded settlement callback;
+only completed or confirmed-aborted identities enter it. Unknown completion or
+abort remains pending, and an uncertain admission response sends no bytes.
+A previously used identity rejects the entire admission batch. The deployed
+single-object commands remain accepted during Web-first rollout. The existing
+live Web protocol admission probe exercises both full-size batch parsers before
+a new Worker deploy; the rollback floor keeps that Web consumer until all batch
+producers have been reverted and converged.
+
 The existing external-retention cron runs at minutes 2, 7, …, 57 of each hour
 (`2-59/5 * * * *`). Its runtime-resource phase retains a 50-orphan selection
 limit and cooperative 25-second budget. Twelve opportunities per hour remove

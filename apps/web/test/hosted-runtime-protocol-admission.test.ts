@@ -157,3 +157,15 @@ describe("served Web protocol admission", () => {
     }
   });
 });
+
+describe("replica batch rollout admission", () => {
+  it("accepts the deployed batch parsers and blocks missing or incomplete old-Web evidence", async () => {
+    const probe = await request();
+    const evidence = await (await GET(probe)).json();
+    const nonce = probe.headers.get(HOSTED_EXECUTION_NONCE_HEADER)!;
+    expect(() => assertHostedRuntimeWebProtocolAdmission(evidence, nonce)).not.toThrow();
+    expect(() => assertHostedRuntimeWebProtocolAdmission({ ...evidence, runtimeReplicaBatch: undefined }, nonce)).toThrow("replica_batch");
+    expect(() => assertHostedRuntimeWebProtocolAdmission({ ...evidence, runtimeReplicaBatch: { ...evidence.runtimeReplicaBatch,
+      admission: { ...evidence.runtimeReplicaBatch.admission, uploads: evidence.runtimeReplicaBatch.admission.uploads.slice(1) } } }, nonce)).toThrow("replica_batch");
+  });
+});

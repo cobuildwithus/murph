@@ -1,3 +1,4 @@
+import { buildHostedRuntimeReplicaBatchProtocolProbe, parseHostedRuntimeReplicaPutCommand } from "../runtime-resources.ts";
 import {
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
@@ -46,6 +47,17 @@ export function assertHostedRuntimeWebProtocolAdmission(
       // Only locally owned enum values enter diagnostics, never response text.
       throw new Error(`Hosted Web protocol admission failed: runtime_log_event:${required}.`);
     }
+  }
+  try {
+    const replica = requireObject(record.runtimeReplicaBatch, "Replica batch evidence");
+    const expected = buildHostedRuntimeReplicaBatchProtocolProbe();
+    for (const field of ["admission", "settlement"] as const) {
+      if (JSON.stringify(parseHostedRuntimeReplicaPutCommand(replica[field])) !== JSON.stringify(parseHostedRuntimeReplicaPutCommand(expected[field]))) {
+        throw new Error("Replica batch witness mismatch.");
+      }
+    }
+  } catch {
+    throw new Error("Hosted Web protocol admission failed: replica_batch.");
   }
   let direct: ReturnType<typeof parseHostedExternalThreadRouteAuthorityResponse>;
   let group: ReturnType<typeof parseHostedExternalThreadRouteAuthorityResponse>;
