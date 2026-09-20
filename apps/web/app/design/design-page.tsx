@@ -52,6 +52,7 @@ export function DesignPage({ activeTab = "brand" }: { activeTab?: string }) {
         <ConsentContent />
       ) : (
         <>
+          <VoiceOrbStudy />
           <GoalGuideStudy />
           <ExperimentCadenceStudy />
           <JournalStudy />
