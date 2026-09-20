@@ -125,6 +125,7 @@ import {
 } from "./hosted-runtime/turn-input.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
+  guardHostedRuntimeLatencyTracePort,
 } from "./hosted-runtime/assistant-latency-trace.ts";
 import {
   readHostedAssistantExecutionDefaultTarget,
@@ -9101,9 +9102,7 @@ function createAbortGuardedHostedRuntimePlatform(
       : {}),
     ...(platform.latencyTracePort
       ? {
-          latencyTracePort: {
-            record: (request) => guard(() => platform.latencyTracePort!.record(request)),
-          },
+          latencyTracePort: guardHostedRuntimeLatencyTracePort(platform.latencyTracePort, guard),
         }
       : {}),
     ...(platform.publicInternetFetch

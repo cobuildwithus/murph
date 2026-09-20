@@ -1,5 +1,6 @@
 import {
   HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
   type HostedRuntimeWebProtocolAdmission,
@@ -14,6 +15,7 @@ export function syntheticHostedWebProtocolAdmission(nonce: string): HostedRuntim
     schemaVersion: HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
     nonce,
     runtimeLogEventCodes: [...HOSTED_RUNTIME_LOG_EVENT_CODES],
+    latencyMilestoneBatchMaxEvents: HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
     threadRouteAuthority: {
       direct: { authorized: true, threadIsDirect: true },
       group: { authorized: true, threadIsDirect: false },

@@ -1,5 +1,6 @@
 import {
   HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
 } from "../runtime-control.ts";
@@ -46,6 +47,11 @@ export function assertHostedRuntimeWebProtocolAdmission(
       // Only locally owned enum values enter diagnostics, never response text.
       throw new Error(`Hosted Web protocol admission failed: runtime_log_event:${required}.`);
     }
+  }
+  if (typeof record.latencyMilestoneBatchMaxEvents !== "number"
+    || !Number.isSafeInteger(record.latencyMilestoneBatchMaxEvents)
+    || record.latencyMilestoneBatchMaxEvents < HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
+    throw new Error("Hosted Web protocol admission failed: latency_milestone_batch.");
   }
   let direct: ReturnType<typeof parseHostedExternalThreadRouteAuthorityResponse>;
   let group: ReturnType<typeof parseHostedExternalThreadRouteAuthorityResponse>;

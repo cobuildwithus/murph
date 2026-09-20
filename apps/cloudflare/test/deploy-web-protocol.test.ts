@@ -136,3 +136,15 @@ it.each(["fetch", "body"])("bounds a stalled %s, including fetch implementations
   expect((await failure).message).toContain("timeout");
   if (phase === "body") expect(cancel).toHaveBeenCalledOnce();
 });
+
+
+it("blocks new milestone producers before activation against an older Web reader", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async input => {
+    const { latencyMilestoneBatchMaxEvents: _unsupported, ...legacy } =
+      syntheticHostedWebProtocolAdmission(nonceFrom(input));
+    return Response.json(legacy, { headers });
+  });
+  await expect(assertHostedWebProtocolAdmission(source, { fetchImpl, sleep: noSleep }))
+    .rejects.toThrow("latency_milestone_batch");
+  expect(fetchImpl).toHaveBeenCalledOnce();
+});

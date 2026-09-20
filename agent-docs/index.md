@@ -1,5 +1,9 @@
 # Murph Agent Docs Index
 
+Simultaneous runtime latency milestone batching is owned by `agent-docs/RELIABILITY.md`;
+implementation and proof are recorded in
+[`2026-09-20-edge-latency-batches.md`](exec-plans/completed/2026-09-20-edge-latency-batches.md).
+
 Finite Codex background-boundary failure codes and early child-completion
 ordering are owned by `ARCHITECTURE.md`. Focused proof and simplification are
 recorded in

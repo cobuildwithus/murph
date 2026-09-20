@@ -1,7 +1,8 @@
-import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
+import { parseHostedRuntimeLatencyTraceBatchRequest, parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import {
   buildHostedRuntimeLogProtocolProbe,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
   HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,
   type HostedRuntimeWebProtocolAdmission,
@@ -27,6 +28,13 @@ export function buildHostedRuntimeWebProtocolAdmission(nonce: string): HostedRun
     // No log is persisted and no member, provider or runner is accessed.
     runtimeLogEventCodes: HOSTED_RUNTIME_LOG_EVENT_CODES.map(eventCode =>
       parseHostedRuntimeLogRequest(buildHostedRuntimeLogProtocolProbe(eventCode)).entries[0]!.eventCode),
+    latencyMilestoneBatchMaxEvents: parseHostedRuntimeLatencyTraceBatchRequest({
+      events: Array.from({ length: HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS }, () => ({
+        type: "assistant_milestone", source: "linq", assistantInputIds: ["synthetic-input"],
+        runtimeAttemptId: "synthetic-attempt", at: "2000-01-01T00:00:00.000Z",
+        milestone: "first_codex_output_observed",
+      })),
+    }).events.length,
     threadRouteAuthority: {
       direct: buildHostedThreadRouteAuthorityResponse(true),
       group: buildHostedThreadRouteAuthorityResponse(false),
