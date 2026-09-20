@@ -131,6 +131,12 @@ resource rows. Transactions contain bounded database work only, with five-second
 transaction/admission limits. External allocation, container operations, provider
 calls, and R2 writes run outside transactions.
 
+Owner locks return the current row, and callback/provider admission reads member
+existence from the member lock itself. These paths use three ordered lock queries
+in the completed Postgres phase, without separate owner/member rereads. Returned
+generations and workspace versions retain native bigint precision. Deleted
+members remain unauthorized even when cleanup retains their owner row.
+
 The native usage-settlement receipt is a negative latch: pending or denied
 settlement blocks managed provider access. Only an explicit allowance response
 clears that report's pending latch. Eviction or an unknown response cannot grant

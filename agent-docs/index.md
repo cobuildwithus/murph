@@ -74,6 +74,9 @@ Empty-source startup batching and Postgres processing summaries are owned by
 owned by `agent-docs/references/hosted-runtime-protocol.md`. Implementation proof:
 [`2026-09-17-runtime-latency-followup.md`](exec-plans/completed/2026-09-17-runtime-latency-followup.md).
 
+Runtime authority lock/read consolidation is recorded in
+[`2026-09-20-runtime-latency-delete-work.md`](exec-plans/active/2026-09-20-runtime-latency-delete-work.md).
+
 Bounded runtime cleanup cadence and shared-owner safety proof are recorded in
 [`2026-09-18-orphan-cleanup-throughput.md`](exec-plans/completed/2026-09-18-orphan-cleanup-throughput.md).
 
