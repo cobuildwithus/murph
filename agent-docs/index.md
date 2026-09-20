@@ -3,7 +3,7 @@
 Replica receipt batching and its Web-first rollout are owned by
 `references/hosted-postgres-runtime.md` and `../apps/cloudflare/DEPLOY.md`;
 implementation proof is recorded in
-[`2026-09-20-replica-batch-consumer.md`](exec-plans/active/2026-09-20-replica-batch-consumer.md).
+[`2026-09-20-replica-batch-consumer.md`](exec-plans/completed/2026-09-20-replica-batch-consumer.md).
 
 Finite Codex background-boundary failure codes and early child-completion
 ordering are owned by `ARCHITECTURE.md`. Focused proof and simplification are
