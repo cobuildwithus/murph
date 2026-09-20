@@ -29,6 +29,13 @@ tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 
 ## Current Repo Checks
 
+Background-only checkpoint timing is covered by
+`hosted-runtime-background-checkpoint-timing.test.ts`: settled background
+assistant work reaches a durable checkpoint without a conversation quiet window,
+active work is not cut off after 60 seconds, and foreground input retains its
+configured delay. The promoted-foreground-priority matrix above covers subsequent
+conversation arrivals, shutdown, and provider changes.
+
 Personal Patterns cross-automation repetition is covered by managed recipe and
 reconciliation assertions in `managed-automations.test.ts` and the focused
 `Personal Pattern cross-automation history` real-Codex journeys. These prove

@@ -55,7 +55,12 @@ The live ownership split is:
   field: only runtimes with deferred-Ask deadline handling may adopt the longer
   window. This supports either deployment order without a compatibility flag.
   The runtime, not the host, keeps dirty state warm through the configured idle
-  floor. The exact assistant wake projected directly by the current foreground
+  floor after foreground-priority input. Background-only assistant progress
+  checkpoints as soon as its work settles; it neither creates nor extends that
+  quiet window. Existing active-child deadlines and save-before-effect ordering
+  still apply. This lets background runs reach ordinary container cleanup,
+  including its 60-second safety recheck, without another runtime idle delay.
+  The exact assistant wake projected directly by the current foreground
   assistant phase may run once before that floor without checkpointing. The
   exact phone-call-result, usage-referral-reward, legacy `aask_done_*`, and
   current `aask_private_*` private

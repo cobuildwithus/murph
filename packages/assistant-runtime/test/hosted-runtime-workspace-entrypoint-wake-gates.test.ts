@@ -1671,7 +1671,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
-              items: [],
+              items: [createMailboxItem()],
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -1771,7 +1771,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
             platform: createPlatform({
               mailboxPort: createMailboxPort({
                 events,
-                items: [],
+                items: [createMailboxItem()],
               }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
@@ -1888,7 +1888,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -2463,7 +2463,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
-              items: [],
+              items: [createMailboxItem()],
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,

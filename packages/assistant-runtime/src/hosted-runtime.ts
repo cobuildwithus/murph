@@ -2936,7 +2936,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       if (runtimeOwnerHandoffRequested) {
         setIdleCheckpointStartBy(Date.now());
       } else {
-        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
+        // Background work does not create conversation warmth. Preserve an
+        // existing foreground window, otherwise checkpoint when work settles.
+        ensureIdleCheckpointStartBy(Date.now());
       }
     };
     const updateIdleCheckpointTimerAfterWorkspacePass = (
@@ -2950,14 +2952,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           setIdleCheckpointStartBy(
             Date.now() + (runtimeOwnerHandoffRequested ? 0 : runnerIdleTtlMs),
           );
-        } else if (passResult.assistantPhaseResult?.progressed === false
-          && passResult.assistantPhaseResult.runtimeProjectionCheckpointRequested === true) {
-          // Schedule correction alone can publish immediately, but cannot
-          // shorten an existing foreground window.
-          ensureIdleCheckpointStartBy(Date.now());
         } else {
-          // Batch the first dirty work as before. Maintenance/cleanup cannot
-          // move an existing (including already-spent) window.
+          // Background progress cannot move an existing foreground window.
           ensureIdleCheckpointTimerAfterDirtyWork();
         }
       }
@@ -2985,7 +2981,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       onCompleted(completion, notify) {
         clinicalEnrichmentController?.kick();
         runtimeStateDirty = true;
-        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
+        ensureIdleCheckpointTimerAfterDirtyWork();
         if (completion.afterDurableCheckpoint) {
           pendingDurableCheckpointEffects.push(...(typeof completion.afterDurableCheckpoint === "function"
             ? [completion.afterDurableCheckpoint] : completion.afterDurableCheckpoint));
@@ -3000,7 +2996,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       },
       onFailure(error, notify) {
         runtimeStateDirty = true;
-        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
+        ensureIdleCheckpointTimerAfterDirtyWork();
         emitPhaseLog({ error, input, requestId, stage: "runtime", status: "fail" });
         if (notify && (!systemMailboxProcessingMode || hostedCodexRuntime !== null)) options.runtimeWakeSignal?.notify();
       },
@@ -6692,9 +6688,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         runtimeStateDirty ||=
           runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
         if (runtimeDirtyAfterForeground) {
-          ensureIdleCheckpointStartBy(
-            Date.now() + (runtimeOwnerHandoffRequested ? 0 : runnerIdleTtlMs),
-          );
+          ensureIdleCheckpointTimerAfterDirtyWork();
         } else if (committedInboxMediaRetentionWakeDue) {
           setIdleCheckpointStartBy(Date.now());
         }

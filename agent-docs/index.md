@@ -1,5 +1,10 @@
 # Murph Agent Docs Index
 
+Background assistant checkpoint timing is owned by
+`agent-docs/references/hosted-runtime-protocol.md`; implementation and focused proof
+are recorded in
+[`2026-09-20-background-assistant-idle.md`](exec-plans/completed/2026-09-20-background-assistant-idle.md).
+
 Finite Codex background-boundary failure codes and early child-completion
 ordering are owned by `ARCHITECTURE.md`. Focused proof and simplification are
 recorded in

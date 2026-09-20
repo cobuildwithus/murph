@@ -543,7 +543,9 @@ Defaulted worker vars:
 
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=600000` (also the shared code default)
-  for the runtime quiet window and conversation warmth. Container warmth ends
+  for the foreground runtime quiet window and conversation warmth. Background-only
+  assistant work checkpoints when settled and reaches the existing cleanup path
+  without this additional wait. Container warmth ends
   ten minutes after the latest accepted inbound message's original server receipt,
   never ten minutes after invocation completion. Active work remains protected.
 - `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS=60000` (also the code
