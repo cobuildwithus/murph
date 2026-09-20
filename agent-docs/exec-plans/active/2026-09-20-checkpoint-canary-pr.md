@@ -61,3 +61,17 @@ whitespace, and current-main complexity guard pass. The only changed-file hotspo
 is the unchanged latency-dashboard reader (89); no complexity debt increased.
 A repeated current-main import benchmark measured medians 234.06 -> 186.59 ms
 across seven fresh processes per variant; current import loads neither SDK.
+
+## Initial CI and review attempt
+
+The first CI run found one omitted temporary member fixture in the PostgreSQL
+instant-reply proof. The same failure reproduced locally. Adding the active
+member table/row makes the composed delivery-link test valid under the new
+suspension fence; all 11 typing-alert PostgreSQL tests, Web typecheck, and focused
+ESLint pass. This correction changes tests only.
+
+The initial round-one browser attempt on Vonneumann failed during attachment
+confirmation before sending. No substantive review or accepted prompt exists for
+that attempt. Its head was `21550d6a49edc5c8f02d67809aa2c8aef0956ac3`. Preserve the
+attempt in PR evidence and retry round one against the new test-corrected head on
+another configured lane. Do not count the staging failure as a review round.
