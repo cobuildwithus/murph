@@ -91,6 +91,35 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     return result;
   }
 
+  it("reads callback authority in the three lock queries without fetching either row twice", async () => {
+    const userId = await member();
+    const claimed = (await claim(userId)).owner;
+    const expected = await observer.hostedRuntimeOwner.update({ where: { userId }, data: {
+      generation: 9007199254740993n,
+      runnerContainerName: "synthetic-locked-owner",
+      workspaceVersion: 9007199254740995n,
+      providerEgressTokenHash: "synthetic-provider-hash",
+      customInferenceEnvelope: "synthetic-envelope",
+      platformAiUsageAllowed: true,
+      failureCount: 2,
+      lastErrorCode: "SYNTHETIC_FAILURE",
+    } });
+    expect(expected.attemptId).toBe(claimed.attemptId);
+    await first.$transaction(async (tx) => {
+      const raw = vi.spyOn(tx, "$queryRaw");
+      const ownerRead = vi.spyOn(tx.hostedRuntimeOwner, "findUnique");
+      const memberRead = vi.spyOn(tx.hostedMember, "findUnique");
+      try {
+        expect(await requireHostedRuntimeOwnerTx(tx, identity(expected))).toEqual(expected);
+        expect(raw.mock.calls.length + ownerRead.mock.calls.length + memberRead.mock.calls.length).toBe(3);
+      } finally {
+        raw.mockRestore();
+        ownerRead.mockRestore();
+        memberRead.mockRestore();
+      }
+    });
+  });
+
   it("drains 200 eligible snapshot/replica candidates within the configured cron hour", async () => {
     const config = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8")) as {
       crons: Array<{ path: string; schedule: string }>;
