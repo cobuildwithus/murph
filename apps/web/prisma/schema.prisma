@@ -1446,6 +1446,7 @@ model HostedRuntimeOrphan {
   snapshotRef Json?     @map("snapshot_ref")
   createdAt   DateTime  @map("created_at")
   cleanupAt   DateTime  @map("cleanup_at")
+  recoveryUntil DateTime? @map("recovery_until")
   retiredAt   DateTime? @map("retired_at")
   purgedAt    DateTime? @map("purged_at")
   revision    BigInt    @default(1)

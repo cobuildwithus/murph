@@ -2668,8 +2668,7 @@ function isReplacementRefSameAsSnapshotRef(
     && hostedWorkspaceSnapshotV2RefsMatch(replacedSnapshotRef, snapshotRef);
 }
 
-async function deleteReplacedWorkspaceSnapshotRef(input: {
-  bucket: WorkspaceSnapshotR2BucketLike | null;
+async function retireReplacedWorkspaceSnapshotRef(input: {
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   replacedSnapshotRef: HostedExecutionSnapshotRefValue;
@@ -2686,14 +2685,8 @@ async function deleteReplacedWorkspaceSnapshotRef(input: {
     ) {
       return true;
     }
-    const deleted = await deleteWorkspaceSnapshotObjectBestEffort({
-      bucket: input.bucket,
-      env: input.env,
-      objectKey: replacedSnapshotRef.objectKey,
-    });
-    if (deleted) {
-      return true;
-    }
+    // Web records the complete accepted reference and owns its recovery
+    // retention. An adapter must never bypass that window with an R2 delete.
     const orphanRecorded = await recordWorkspaceSnapshotOrphanCandidate(input.env, {
       createdAt: new Date().toISOString(),
       objectKey: replacedSnapshotRef.objectKey,
@@ -2862,8 +2855,7 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
 
   const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
   if (replacedSnapshotRef) {
-    const replacedSnapshotCleanupSucceeded = await deleteReplacedWorkspaceSnapshotRef({
-      bucket: input.bucket,
+    const replacedSnapshotCleanupSucceeded = await retireReplacedWorkspaceSnapshotRef({
       env: input.env,
       environment: input.environment,
       replacedSnapshotRef,
