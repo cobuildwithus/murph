@@ -312,7 +312,13 @@ its current query report and versioned notification Knowledge ledger. A complete
 first digest plus already-reviewed factors, graded identities, and grades can skip
 a clean scheduled model attempt. Unknown history, edited recipes, manual requests,
 and retries keep the ordinary model path. The existing ledger remains the only
-notification-history owner; no cron cache or new schedule state is introduced.
+notification-history owner; no cron cache or new schedule state is introduced. The daily
+recipe checks the existing weekly insight page and bounded committed conversation
+before treating a ledger-absent identity as new. Covered findings are recorded as
+reviewed in the existing ledger even on a skipped run, without inventing delivery
+dates. This applies to first digests and later updates. Shared proactive pacing
+still governs interruption cost; weekly reinterpretations require a materially
+changed takeaway rather than a reworded notification.
 
 Read-only hosted automation inspection also projects execution evidence from
 that automation's existing runtime state, its ten newest retained cron runs,

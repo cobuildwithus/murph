@@ -14642,6 +14642,87 @@ describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2
   }, 720_000)
 })
 
+describeRealCodex('real Codex Personal Pattern cross-automation history e2e', () => {
+  it.each([
+    { priorFinding: 'covered', initialDigestSent: false },
+    { priorFinding: 'covered', initialDigestSent: true },
+    { priorFinding: 'unrelated', initialDigestSent: true },
+  ] as const)('checks prior $priorFinding insight before sending (initial digest: $initialDigestSent)', async ({ priorFinding, initialDigestSent }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.slug === 'personal-patterns-update',
+    )
+    if (!automation) throw new Error('Expected the managed Personal Patterns automation.')
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-pattern-history-e2e-'))
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandCapturePath = path.join(workingDirectory, 'commands.txt')
+      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
+      await materializePersonalPatternsBaselineVaultCli({
+        binDirectory,
+        commandCapturePath,
+        initialDigestSent,
+        ledgerCapturePath,
+        onlyPrimaryOutcome: true,
+        vocabularyCapturePath: path.join(workingDirectory, 'vocabulary-write.txt'),
+        weeklyHistory: priorFinding === 'covered'
+          ? '## 2026-08-28\nOutdoor chores were associated with higher heart-rate variability the following morning. This is the yard-work result; the comparison is with days without those chores. The useful interpretation is that the apparent link also tracks lighter workdays.'
+          : '## 2026-08-02\nEvening coffee was associated with later sleep onset. No other factor or outcome was discussed.',
+      })
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
+          currentLocalDate: '2026-08-29',
+          scheduledOccurrenceAt: '2026-08-29T17:00:00.000Z',
+        }),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: config.env,
+        fixtureBinDirectory: binDirectory,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: automation.instructions,
+        reasoningEffort: automation.assistantTargetOverride?.reasoningEffort ?? 'high',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const finishedQuietly = actions.some((action) =>
+        action.kind === 'dynamic' && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
+      const decision = finishedQuietly && result.finalMessage.trim() === ''
+        ? { kind: 'skip' as const }
+        : parseAssistantNotificationDecision(result.finalMessage)
+      const commands = (await readFile(commandCapturePath, 'utf8')).trim().split('\n')
+      expect(commands.filter((command) => command.startsWith('knowledge show weekly-health-insights '))).toHaveLength(1)
+      expect(commands.filter((command) => command === 'knowledge upsert --slug personal-pattern-notifications')).toHaveLength(1)
+      const ledger = parsePersonalPatternNotificationLedger(await readFile(ledgerCapturePath, 'utf8'))
+      expect(ledger).toMatchObject({ version: 1, initialDigestSent: true, reviewedFactorIds: ['yard-work'] })
+      expect(ledger?.results).toHaveLength(1)
+      expect(ledger?.results[0]).toMatchObject({ factorId: 'yard-work', outcomeId: 'hrv', lagDays: 1 })
+      process.stdout.write(`[pattern-history-e2e] ${JSON.stringify({
+        priorFinding, initialDigestSent, decision,
+      })}\n`)
+      if (priorFinding === 'covered') {
+        expect(decision.kind).toBe('skip')
+        expect(ledger?.results[0]?.firstSharedDate).toBeNull()
+      } else {
+        expect(finishedQuietly).toBe(false)
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind !== 'send_message') throw new Error('Expected a genuinely new finding.')
+        expect(decision.text).toMatch(/yard work/iu)
+        expect(decision.text).toMatch(/HRV|heart.rate variability/iu)
+        expect(decision.text).not.toMatch(/coffee|sleep onset|already|again|ledger|weekly insight/iu)
+      }
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
 describeRealCodex('real Codex Personal Patterns vocabulary normalization e2e', () => {
   it('groups clear aliases without notifying for a rename', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -37244,6 +37325,8 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
   initialDigestSent: boolean
   ledgerCapturePath: string
   vocabularyCapturePath: string
+  weeklyHistory?: string
+  onlyPrimaryOutcome?: boolean
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
@@ -37288,7 +37371,7 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
           outcomeId,
           stage: grade === 'C' ? 'seen_again' : 'new_clue',
         })),
-      ],
+      ].filter((cell) => !input.onlyPrimaryOutcome || cell.outcomeId === 'hrv'),
       factors: [
         {
           id: 'yard-work',
@@ -37322,6 +37405,11 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
       '  *"knowledge show personal-pattern-notifications"*)',
       ...(input.initialDigestSent
         ? ["    printf '%s\\n' '{\"initialDigestSent\":true,\"results\":[]}'"]
+        : ["    printf '%s\\n' 'knowledge page not found' >&2", '    exit 1']),
+      '    ;;',
+      '  *"knowledge show weekly-health-insights"*)',
+      ...(input.weeklyHistory
+        ? [`    printf '%s\\n' ${quoteNutritionShellLiteral(input.weeklyHistory)}`]
         : ["    printf '%s\\n' 'knowledge page not found' >&2", '    exit 1']),
       '    ;;',
       '  *"knowledge show journal-pattern-vocabulary"*)',
