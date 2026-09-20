@@ -33,7 +33,7 @@ function drain before cleanup. No allowlist bypass or new rollout machinery.
 - [x] Apply additive migrations only to the isolated task database and verify
   snapshot recovery, authorization query counts, trace-deletion fences and cascade.
 - [x] Verify migration placement, changelog rendering, lint, docs and complexity.
-- [ ] Publish draft PR; assign its changelog source and review the final candidate.
+- [x] Publish draft PR #3602; assign its changelog source and review the final candidate.
 - [ ] Start required ReviewGPT on the stable pushed head concurrently with CI.
 - [ ] Resolve review and CI, retain exact-head evidence, leave the PR ready.
 
