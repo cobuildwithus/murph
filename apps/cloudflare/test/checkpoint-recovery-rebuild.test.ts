@@ -25,7 +25,7 @@ it("creates a valid foundation, preserves the full source, and keeps completed o
   const mailboxPath = path.join(input.vaultRoot, ".runtime/operations/mailbox/synthetic.json");
   await mkdir(path.dirname(mailboxPath), { recursive: true });
   await writeFile(mailboxPath, "synthetic-existing-cursor");
-  expect(await rebuildPartialRecoveryVault(input)).toMatchObject({ validVault: true,
+  expect((await rebuildPartialRecoveryVault(input)).summary).toMatchObject({ validVault: true,
     recoveredSourceBytes: input.sourceBytes.byteLength, onboardingCompleted: true,
     originalFilesRestored: false, restorationPerformed: false });
   expect((await validateVault({ vaultRoot: input.vaultRoot })).valid).toBe(true);
@@ -52,7 +52,7 @@ it("never overwrites an existing initialized vault or a surviving core document"
 it("does not assert completed onboarding without the recovery instruction", async () => {
   const input = await fixture();
   const result = await rebuildPartialRecoveryVault({ ...input, completedOnboarding: false });
-  expect(result.onboardingCompleted).toBe(false);
+  expect(result.summary.onboardingCompleted).toBe(false);
   expect((await readAssistantOnboardingState(input.vaultRoot)).status).toBe("open");
 });
 

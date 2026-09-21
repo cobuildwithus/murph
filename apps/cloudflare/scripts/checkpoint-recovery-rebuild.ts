@@ -57,8 +57,9 @@ export async function rebuildPartialRecoveryVault(input: {
     if (!validation.valid || input.completedOnboarding && onboarding.status !== "completed") {
       throw new Error("recovery_rebuild_validation_failed");
     }
-    return { validVault: true, recoveredSourceBytes: preserved.byteSize,
+    return { eventAppend: { relativePath: imported.eventPath, record: imported.event },
+      summary: { validVault: true, recoveredSourceBytes: preserved.byteSize,
       onboardingCompleted: onboarding.status === "completed", coverage: summarizeRecoveryReplica(input.replica),
-      originalFilesRestored: false, restorationPerformed: false };
+      originalFilesRestored: false, restorationPerformed: false } };
   } finally { await rm(scratch, { recursive: true, force: true }); }
 }

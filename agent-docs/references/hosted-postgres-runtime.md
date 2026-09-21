@@ -158,9 +158,10 @@ and omits mailbox acknowledgment fields, preserving the mailbox counters and
 pending items. Partial rebuilds preserve the original authenticated projection
 as a labelled source document and use manual onboarding completion only when
 explicitly instructed, leaving existing completed onboarding unchanged. Surviving
-files remain byte-identical except the current audit shard, whose original byte
-prefix and two validated canonical recovery appends must survive the encrypted
-round-trip. The encrypted replica read bound includes base64/envelope overhead
+files remain byte-identical except the current audit and recovery event shards.
+Their original byte prefixes must survive alongside two validated audit records
+and the exact document event returned by the canonical import owner. The event
+proof stays private and is excluded from the emitted summary. The encrypted replica read bound includes base64/envelope overhead
 above the supported plaintext maximum. Partial recovery does not claim the
 missing canonical files were restored.
 Deploy the Web recovery reader before enabling protected recovery workflow modes.

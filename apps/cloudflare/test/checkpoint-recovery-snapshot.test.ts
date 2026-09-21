@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { initializeVault } from "@murphai/core";
+import { initializeVault, importDocument } from "@murphai/core";
 import { completeAssistantOnboarding } from "@murphai/assistant-engine/assistant-state";
 import { collectHostedWorkspaceSnapshotArchivePlan } from "@murphai/runtime-state/node";
 import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
@@ -24,6 +24,9 @@ async function fixture(withSurvivors = false) {
   const vaultRoot = path.join(durableRoot, "vault");
   if (withSurvivors) {
     await initializeVault({ vaultRoot, timezone: "UTC", createdAt: "2026-02-01T00:00:00.000Z" });
+    const sourcePath = path.join(root, "original-document.txt");
+    await writeFile(sourcePath, "synthetic original document");
+    await importDocument({ vaultRoot, sourcePath, occurredAt: "2026-02-01T00:00:00.000Z" });
     await completeAssistantOnboarding({ vault: vaultRoot, reason: "manual", completedAt: "2026-01-31T00:00:00.000Z" });
     await rm(path.join(vaultRoot, "vault.json"));
     await rm(path.join(vaultRoot, "CORE.md"));
@@ -90,10 +93,11 @@ it("removes candidate scratch if publication fails", async () => {
   await expect(readFile(candidatePath)).rejects.toMatchObject({ code: "ENOENT" });
 });
 
-it("preserves a real current-month audit prefix and completed onboarding through encrypted recovery", async () => {
+it("preserves a real current-month audit/event prefixes and completed onboarding through encrypted recovery", async () => {
   const { input } = await fixture(true);
   const useCandidate = vi.fn(async candidate => candidate.summary);
   const result = await withPartialRecoverySnapshot({ ...input, useCandidate });
+  expect(result).not.toHaveProperty("eventAppend");
   expect(result.archiveValidated).toBe(true);
   expect(result.onboardingCompleted).toBe(true);
   expect(result.preservedFiles).toBeGreaterThanOrEqual(3);
@@ -114,4 +118,34 @@ it.each(["edit", "truncate", "delete", "append-invalid", "unrelated-append"])("r
   const verified = mutation === "delete" ? new Map() : new Map([[name, describe(current)]]);
   await expect(assertRecoverySurvivingFiles({ original, verified, verifiedRoot: root,
     recoveredAt: "2026-02-01T00:00:00.000Z" })).rejects.toThrow();
+});
+
+it.each(["expected", "additional", "substituted", "prefix-edit", "truncate", "delete", "missing-append"])("verifies the exact canonical event append: %s", async mutation => {
+  const root = await mkdtemp(path.join(tmpdir(), "synthetic-recovery-event-"));
+  scratch.push(root);
+  const vaultRoot = path.join(root, "vault");
+  const recoveredAt = "2026-02-01T00:00:00.000Z";
+  await initializeVault({ vaultRoot, timezone: "UTC", createdAt: recoveredAt });
+  const sourcePath = path.join(root, "source.txt");
+  await writeFile(sourcePath, "synthetic original");
+  const originalImport = await importDocument({ vaultRoot, sourcePath, occurredAt: recoveredAt });
+  const name = path.join("vault", originalImport.eventPath);
+  const file = path.join(root, name);
+  const prefix = await readFile(file);
+  await writeFile(sourcePath, "synthetic recovered source");
+  const imported = await importDocument({ vaultRoot, sourcePath, occurredAt: recoveredAt });
+  const append = Buffer.from(`${JSON.stringify(imported.event)}\n`);
+  const expected = Buffer.concat([prefix, append]);
+  const bytes = mutation === "additional" ? Buffer.concat([expected, append])
+    : mutation === "substituted" ? Buffer.concat([prefix, Buffer.from(`${JSON.stringify(originalImport.event)}\n`)])
+    : mutation === "prefix-edit" ? Buffer.concat([Buffer.from("X"), expected.subarray(1)])
+    : mutation === "truncate" ? prefix.subarray(0, 5)
+    : mutation === "missing-append" ? prefix : expected;
+  await writeFile(file, bytes);
+  const describe = (value: Buffer) => ({ sha256: createHash("sha256").update(value).digest("hex"), bytes: value.length });
+  const proof = assertRecoverySurvivingFiles({ original: new Map([[name, describe(prefix)]]),
+    verified: mutation === "delete" ? new Map() : new Map([[name, describe(bytes)]]), verifiedRoot: root, recoveredAt,
+    eventAppend: { relativePath: imported.eventPath, record: imported.event } });
+  if (mutation === "expected") await expect(proof).resolves.toBeUndefined();
+  else await expect(proof).rejects.toThrow();
 });
