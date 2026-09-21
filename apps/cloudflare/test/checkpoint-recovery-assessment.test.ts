@@ -10,7 +10,7 @@ import {
   authenticateUnindexedArtifact, openRecoveryAssessmentRequest, recoveryPublicJwk,
   sealRecoveryAssessmentRequest, type RecoveryAssessmentRequest,
 } from "../scripts/checkpoint-recovery-envelope.ts";
-import { assessCheckpointRecovery, inspectReceiptCandidate, readRecoveryResponse } from "../scripts/checkpoint-recovery-assessment.ts";
+import { assessCheckpointRecovery, inspectReceiptCandidate, readArtifactInventory, readRecoveryResponse } from "../scripts/checkpoint-recovery-assessment.ts";
 import { verifyHostedWebCallbackSignatureHeaders } from "../src/web-callback-auth.ts";
 import { createTestHostedRuntimeCryptoContext, getTestHostedRuntimeRootKey } from "./hosted-runtime-crypto-fixtures.ts";
 import {
@@ -94,6 +94,69 @@ describe("unindexed artifact authentication", () => {
 });
 
 describe("bounded recovery census", () => {
+  it("charges concurrent streams against one total byte budget", async () => {
+    const budget = { bytes: 512 * 1024 * 1024 - 3 };
+    const results = await Promise.allSettled([
+      readRecoveryResponse(new Response("aa"), 32, budget),
+      readRecoveryResponse(new Response("bb"), 32, budget),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(budget.bytes).toBe(512 * 1024 * 1024 - 1);
+  });
+  it("reads artifacts in waves of eight and wipes a wave when its consumer exits", async () => {
+    const prefix = "users/synthetic/artifacts/";
+    const keys = Array.from({ length: 9 }, (_, index) => `${prefix}${String(index).padStart(48, "0")}.artifact.bin`);
+    let active = 0;
+    let maximum = 0;
+    let finished = 0;
+    const stats = { objects: 0, bytes: 0 };
+    const fetchImpl: typeof fetch = async (url) => {
+      if (String(url).includes("?")) return Response.json({ success: true, result: keys.map((key) => ({ key })), result_info: {} });
+      active++;
+      maximum = Math.max(maximum, active);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      active--;
+      finished++;
+      return new Response("abc");
+    };
+    const inventory = readArtifactInventory({ api: "https://storage.invalid/objects", prefix, token: "synthetic", fetchImpl, readObject: (key) => fetchImpl(`https://storage.invalid/objects/${key}`), stats });
+    const first = await inventory.next();
+    expect(first.done).toBe(false);
+    if (first.done) throw new Error("missing synthetic artifact");
+    expect(Buffer.from(first.value.serialized).toString()).toBe("abc");
+    expect(maximum).toBe(8);
+    expect(finished).toBe(8);
+    expect(active).toBe(0);
+    await inventory.return(undefined);
+    expect([...first.value.serialized]).toEqual([0, 0, 0]);
+    expect(stats).toEqual({ objects: 8, bytes: 24 });
+
+    const collected: string[] = [];
+    for await (const item of readArtifactInventory({ api: "https://storage.invalid/objects", prefix, token: "synthetic", fetchImpl, readObject: (key) => fetchImpl(`https://storage.invalid/objects/${key}`), stats: { objects: 0, bytes: 0 } })) {
+      collected.push(item.key);
+    }
+    expect(collected).toEqual(keys);
+    expect(maximum).toBe(8);
+  });
+  it("settles failed waves without starting another wave", async () => {
+    const prefix = "users/synthetic/artifacts/";
+    const keys = Array.from({ length: 8 }, (_, index) => `${prefix}${String(index).padStart(48, "0")}.artifact.bin`);
+    let started = 0;
+    let finished = 0;
+    const fetchImpl: typeof fetch = async (url) => {
+      if (String(url).includes("?")) return Response.json({ success: true, result: keys.map((key) => ({ key })), result_info: {} });
+      started++;
+      if (String(url).endsWith(keys[0]!)) throw new Error("synthetic read failed");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      finished++;
+      return new Response("abc");
+    };
+    const inventory = readArtifactInventory({ api: "https://storage.invalid/objects", prefix, token: "synthetic", fetchImpl, readObject: (key) => fetchImpl(`https://storage.invalid/objects/${key}`), stats: { objects: 0, bytes: 0 } });
+    await expect(inventory.next()).rejects.toThrow("synthetic read failed");
+    expect(started).toBe(8);
+    expect(finished).toBe(7);
+  });
   it("rejects oversized streams and invalid receipt paths", async () => {
     await expect(readRecoveryResponse(new Response("12345"), 4)).rejects.toThrow("recovery_read_limit_exceeded");
     const base = { schema: "murph.hosted-canonical-write-receipt.v1", committedAt: request.before };
@@ -128,6 +191,8 @@ describe("bounded recovery census", () => {
     let workspaceVersion = "7";
     let foreignObject = false;
     let changeAtEnd = false;
+    let objectReadStatus = 200;
+    let abortReads: AbortController | undefined;
     const methods: string[] = [];
     const fetchImpl: typeof fetch = async (url, init) => {
       methods.push(init?.method ?? "GET");
@@ -154,9 +219,19 @@ describe("bounded recovery census", () => {
         return Response.json({ schema: "murph.hosted-runtime-crypto-root.v1", userId, domain: "runtime", rootKeyId, envelope: context.envelopes.runtime });
       }
       if (target.searchParams.has("prefix")) return Response.json({ success: true, result: objects.map((object) => ({ key: foreignObject ? "users/foreign/artifacts/invalid" : object.objectKey })), result_info: {} });
-      // R2 Get Object requires literal separators; decoding here would hide a broken wire path.
+      // Production reads use the existing S3 signer, never the rate-limited REST object GET.
+      expect(target.host).toBe(`${"a".repeat(32)}.r2.cloudflarestorage.com`);
+      expect(target.searchParams.get("X-Amz-Expires")).toBe("60");
+      expect(target.searchParams.get("X-Amz-Credential")).toMatch(/^synthetic-access\//);
+      expect(target.searchParams.get("X-Amz-Signature")).toMatch(/^[a-f0-9]{64}$/);
+      expect(new Headers(init?.headers).has("Authorization")).toBe(false);
+      if (abortReads) {
+        abortReads.abort(new Error("synthetic-private-object-error"));
+        throw abortReads.signal.reason;
+      }
+      if (objectReadStatus !== 200) return new Response("synthetic-private-remote-body", { status: objectReadStatus });
       expect(target.pathname).not.toMatch(/%2f/i);
-      const object = objects.find((item) => target.pathname === `/client/v4/accounts/${"a".repeat(32)}/r2/buckets/synthetic-bucket/objects/${item.objectKey}`);
+      const object = objects.find((item) => target.pathname === `/synthetic-bucket/${item.objectKey}`);
       if (!object) throw new Error("unexpected_synthetic_request");
       return new Response(Buffer.from(object.serialized));
     };
@@ -166,18 +241,21 @@ describe("bounded recovery census", () => {
       RECOVERY_SEALED_REQUEST: sealRecoveryAssessmentRequest(request, TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK),
       CLOUDFLARE_ACCOUNT_ID: "a".repeat(32), CLOUDFLARE_API_TOKEN: "synthetic-token", CF_BUNDLES_ENAM_BUCKET: "synthetic-bucket",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "test", HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: privateJwk,
+      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "synthetic-access", HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "synthetic-secret",
       HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
       HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: TEST_HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: privateJwk, HOSTED_CRYPTO_ENV: "test",
     };
-    const result = await assessCheckpointRecovery(env, fetchImpl);
+    const reportProgress = vi.fn();
+    const result = await assessCheckpointRecovery(env, fetchImpl, reportProgress);
     expect(result).toMatchObject({ objects: 2, authenticated: 2, unreadable: 0, receiptCandidatesBeforeCutoff: 1, candidatePaths: 5, contentReferences: 5, presentContentReferences: 3, appendActions: 1, acceptedHistoryProven: false, restorationPerformed: false });
     expect(workspaceReads).toBe(2);
     expect(methods.filter((method) => method === "POST")).toHaveLength(1);
     expect(methods.every((method) => method === "GET" || method === "POST")).toBe(true);
     expect(JSON.stringify(result)).not.toContain(userId);
     expect(JSON.stringify(result)).not.toContain("synthetic.md");
+    expect(reportProgress).toHaveBeenCalledWith(expect.objectContaining({ complete: false, stage: "scanning", objects: 0 }));
     workspaceVersion = "8";
     await expect(assessCheckpointRecovery(env, fetchImpl)).rejects.toThrow("recovery_workspace_changed");
     workspaceVersion = "7";
@@ -186,6 +264,43 @@ describe("bounded recovery census", () => {
     foreignObject = false;
     workspaceReads = 0;
     changeAtEnd = true;
-    await expect(assessCheckpointRecovery(env, fetchImpl)).rejects.toThrow("recovery_workspace_changed");
+    await expect(assessCheckpointRecovery(env, fetchImpl, reportProgress)).rejects.toThrow("recovery_workspace_changed");
+    expect(reportProgress).toHaveBeenLastCalledWith(expect.objectContaining({
+      complete: false, stage: "failed", failure: "assessment_failed", objects: 2,
+      authenticated: 2, unreadable: 0, rootLookupAttempts: 1, rootsResolved: 1,
+    }));
+    expect(JSON.stringify(reportProgress.mock.calls)).not.toContain(userId);
+    expect(JSON.stringify(reportProgress.mock.calls)).not.toContain("synthetic.md");
+    expect(JSON.stringify(reportProgress.mock.calls)).not.toContain(rootKeyId);
+    changeAtEnd = false;
+    objectReadStatus = 429;
+    await expect(assessCheckpointRecovery(env, fetchImpl, reportProgress)).rejects.toThrow("recovery_remote_read_failed");
+    expect(reportProgress).toHaveBeenLastCalledWith(expect.objectContaining({
+      stage: "failed", complete: false, failure: "remote_read", httpStatus: 429,
+    }));
+
+    objectReadStatus = 200;
+    const timeout = AbortSignal.timeout;
+    abortReads = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => ms === 20 * 60_000 ? abortReads!.signal : timeout(ms));
+    try {
+      await expect(assessCheckpointRecovery(env, fetchImpl, reportProgress)).rejects.toThrow("synthetic-private-object-error");
+      expect(reportProgress).toHaveBeenLastCalledWith(expect.objectContaining({
+        stage: "failed", complete: false, failure: "deadline", objects: 0,
+      }));
+    } finally { timeoutSpy.mockRestore(); abortReads = undefined; }
+    expect(JSON.stringify(reportProgress.mock.calls)).not.toContain("synthetic-private");
+
+    objects.push(...await Promise.all(Array.from({ length: 100 }, (_, index) => artifact(Buffer.from(`Synthetic historical payload ${index}`)))));
+    reportProgress.mockClear();
+    const largerResult = await assessCheckpointRecovery(env, fetchImpl, reportProgress);
+    expect(largerResult).toMatchObject({ objects: 102, authenticated: 102, unreadable: 0 });
+    expect(reportProgress).toHaveBeenCalledWith(expect.objectContaining({
+      complete: false, stage: "scanning", authenticated: 100, rootLookupAttempts: 1, rootsResolved: 1,
+    }));
+    expect(reportProgress).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(reportProgress.mock.calls)).not.toContain("X-Amz");
+    expect(JSON.stringify(reportProgress.mock.calls)).not.toContain("synthetic-access");
+    expect(JSON.stringify(reportProgress.mock.calls)).not.toContain("synthetic-secret");
   });
 });

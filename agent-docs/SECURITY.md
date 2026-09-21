@@ -1460,6 +1460,18 @@ uploaded. The census performs no restoration, checkpoint publication, mailbox
 mutation, or retention extension. Authenticated uploaded receipts are candidates
 until accepted history, deletion ordering, and content expiry are separately
 proven. A complete scan does not prove complete recovery.
+Artifact GETs reuse the deployed R2 S3 presigner, while REST only lists up to
+1,000 object metadata entries per page. Signed URLs stay inside the hosted
+process and expire after one minute. The canonical account and bucket determine
+both endpoints; caller-controlled endpoint overrides are not accepted.
+Artifact reads run in waves of at most eight, sharing one streamed 512 MiB
+budget; each object remains limited to 32 MiB. Every wave settles before exit,
+and downloaded buffers are cleared even when its consumer stops early. The
+50,000-object and twenty-minute limits bound the census. Progress every 100 processed
+objects and on scan failure contains only aggregate read/authentication/root
+counts, an incomplete marker, and a closed failure class or HTTP status. It
+never includes object names, member identifiers, root identifiers, or caught
+error text. Partial progress cannot authorize restoration or certify coverage.
 
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
 - The trusted `Pull Request Head Draft Reset` controller uses the existing Frog

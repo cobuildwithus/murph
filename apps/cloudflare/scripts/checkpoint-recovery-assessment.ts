@@ -8,6 +8,7 @@ import {
 } from "@murphai/hosted-execution/assistant-inference";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../src/web-control-plane.ts";
 import { readHostedWebCallbackSigningEnvironment } from "../src/web-callback-auth.ts";
+import { createHostedR2PresignedGetUrl } from "../src/r2-presigned-url.ts";
 import {
   fetchHostedWorkerRuntimeRootByRootKeyId, type HostedWorkerCryptoEnv,
 } from "../src/hosted-crypto/runtime-crypto-context.ts";
@@ -17,8 +18,9 @@ import {
 
 const MAX_OBJECT_BYTES = 32 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
-const MAX_OBJECTS = 10_000;
+const MAX_OBJECTS = 50_000;
 const MAX_ROOTS = 16;
+const ARTIFACT_READ_CONCURRENCY = 8;
 const RECEIPT_SCHEMA = "murph.hosted-canonical-write-receipt.v1";
 const LOG_SCHEMA = "murph.hosted-canonical-write-receipt-log.v1";
 type Env = Readonly<Record<string, string | undefined>>;
@@ -52,7 +54,7 @@ function required(env: Env, key: string): string {
   return value;
 }
 
-export async function readRecoveryResponse(response: Response, maxBytes: number): Promise<Uint8Array> {
+export async function readRecoveryResponse(response: Response, maxBytes: number, budget?: { bytes: number }): Promise<Uint8Array> {
   if (!response.ok || !response.body) {
     await response.body?.cancel();
     throw new RecoveryRemoteReadError(response.status);
@@ -66,6 +68,10 @@ export async function readRecoveryResponse(response: Response, maxBytes: number)
       if (next.done) break;
       size += next.value.byteLength;
       if (size > maxBytes) throw new Error("recovery_read_limit_exceeded");
+      if (budget) {
+        if (budget.bytes + next.value.byteLength > MAX_TOTAL_BYTES) throw new Error("recovery_read_limit_exceeded");
+        budget.bytes += next.value.byteLength;
+      }
       chunks.push(next.value);
     }
     return Buffer.concat(chunks);
@@ -94,8 +100,9 @@ export function inspectReceiptCandidate(plaintext: Uint8Array, before: number): 
   return result;
 }
 
-async function* readArtifactInventory(input: {
+export async function* readArtifactInventory(input: {
   api: string; prefix: string; token: string; fetchImpl: typeof fetch;
+  readObject: (key: string) => Promise<Response>;
   stats: { objects: number; bytes: number };
 }) {
   const seen = new Set<string>();
@@ -103,20 +110,32 @@ async function* readArtifactInventory(input: {
   let cursor: string | undefined;
   const headers = { Authorization: `Bearer ${input.token}` };
   do {
-    const query = new URLSearchParams({ prefix: input.prefix, per_page: "100" });
+    const query = new URLSearchParams({ prefix: input.prefix, per_page: "1000" });
     if (cursor) query.set("cursor", cursor);
     const response = await input.fetchImpl(`${input.api}?${query}`, { headers });
     const page: unknown = JSON.parse(Buffer.from(await readRecoveryResponse(response, 1024 * 1024)).toString("utf8"));
-    if (!record(page) || page.success !== true || !Array.isArray(page.result) || page.result.length > 100) throw new Error("invalid_recovery_listing");
-    for (const object of page.result) {
+    if (!record(page) || page.success !== true || !Array.isArray(page.result) || page.result.length > 1000) throw new Error("invalid_recovery_listing");
+    const keys = page.result.map((object) => {
       const key = inventoryObjectKey(object, input.prefix);
       if (seen.has(key) || seen.size >= MAX_OBJECTS) throw new Error("recovery_object_limit_or_duplicate");
       seen.add(key);
-      const response = await input.fetchImpl(`${input.api}/${key}`, { headers });
-      const serialized = await readRecoveryResponse(response, Math.min(MAX_OBJECT_BYTES, MAX_TOTAL_BYTES - input.stats.bytes));
-      input.stats.objects++;
-      input.stats.bytes += serialized.byteLength;
-      yield { key, serialized };
+      return key;
+    });
+    for (let offset = 0; offset < keys.length; offset += ARTIFACT_READ_CONCURRENCY) {
+      // Settle the whole wave before yielding or throwing. No read escapes the
+      // caller's deadline, and every downloaded buffer is wiped on early exit.
+      const wave = await Promise.allSettled(keys.slice(offset, offset + ARTIFACT_READ_CONCURRENCY).map(async (key) => {
+        const response = await input.readObject(key);
+        const serialized = await readRecoveryResponse(response, MAX_OBJECT_BYTES, input.stats);
+        input.stats.objects++;
+        return { key, serialized };
+      }));
+      try {
+        for (const result of wave) if (result.status === "rejected") throw result.reason;
+        for (const result of wave) if (result.status === "fulfilled") yield result.value;
+      } finally {
+        for (const result of wave) if (result.status === "fulfilled") result.value.serialized.fill(0);
+      }
     }
     cursor = inventoryCursor(page.result_info);
     if (cursor) {
@@ -147,7 +166,31 @@ function requireHostedRecoveryBoundary(env: Env): void {
   }
 }
 
-export async function assessCheckpointRecovery(env: Env, fetchImpl: typeof fetch = fetch) {
+interface RecoveryAssessmentProgress {
+  schema: "murph.checkpoint-recovery-assessment-progress.v1";
+  complete: false;
+  stage: "scanning" | "failed";
+  objects: number;
+  encryptedBytes: number;
+  authenticated: number;
+  unreadable: number;
+  rootLookupAttempts: number;
+  rootsResolved: number;
+  failure?: "deadline" | "remote_read" | "assessment_failed";
+  httpStatus?: number;
+}
+
+function recoveryFailureProgress(error: unknown, signal: AbortSignal) {
+  return {
+    failure: signal.aborted ? "deadline" as const : error instanceof RecoveryRemoteReadError ? "remote_read" as const : "assessment_failed" as const,
+    ...(error instanceof RecoveryRemoteReadError ? { httpStatus: error.httpStatus } : {}),
+  };
+}
+
+export async function assessCheckpointRecovery(
+  env: Env, fetchImpl: typeof fetch = fetch,
+  reportProgress?: (progress: RecoveryAssessmentProgress) => void,
+) {
   requireHostedRecoveryBoundary(env);
   const privateJwk = required(env, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK");
   if (env.RECOVERY_MODE === "describe-key") return { schema: "murph.recovery-public-key.v1", publicJwk: recoveryPublicJwk(privateJwk) };
@@ -159,7 +202,7 @@ export async function assessCheckpointRecovery(env: Env, fetchImpl: typeof fetch
   const token = required(env, "CLOUDFLARE_API_TOKEN");
   const prefix = `users/${createHostedStorageNamespaceId(request.userId)}/artifacts/`;
   const api = `https://api.cloudflare.com/client/v4/accounts/${account}/r2/buckets/${bucket}/objects`;
-  const signal = AbortSignal.timeout(12 * 60_000);
+  const signal = AbortSignal.timeout(20 * 60_000);
   const boundedFetch: typeof fetch = (url, init) => fetchImpl(url, {
     ...init, redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
   });
@@ -179,6 +222,17 @@ export async function assessCheckpointRecovery(env: Env, fetchImpl: typeof fetch
     return value.workspace;
   }
   const workspace = await readWorkspace();
+  // Reuse the deployed S3 signing owner; account and bucket are the same
+  // canonical values as inventory. No endpoint or bucket override is accepted.
+  const presignEnvironment = {
+    accessKeyId: required(env, "HOSTED_R2_PRESIGN_ACCESS_KEY_ID"),
+    secretAccessKey: required(env, "HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY"),
+    bucketName: bucket, endpoint: `https://${account}.r2.cloudflarestorage.com`,
+  };
+  const readObject = async (key: string) => {
+    const signed = await createHostedR2PresignedGetUrl({ environment: presignEnvironment, key, expiresSeconds: 60 });
+    return boundedFetch(signed.url);
+  };
   const cryptoEnv: HostedWorkerCryptoEnv = {
     HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: required(env, "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION"),
     HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: required(env, "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM"),
@@ -196,8 +250,18 @@ export async function assessCheckpointRecovery(env: Env, fetchImpl: typeof fetch
   let receiptLogs = 0;
   let authenticated = 0;
   let unreadable = 0;
+  const progress = (stage: RecoveryAssessmentProgress["stage"], error?: unknown) => {
+    if (!reportProgress || (stage === "scanning" && (authenticated + unreadable) % 100 !== 0)) return;
+    reportProgress({
+      schema: "murph.checkpoint-recovery-assessment-progress.v1", complete: false, stage,
+      objects: stats.objects, encryptedBytes: stats.bytes, authenticated, unreadable,
+      rootLookupAttempts: attemptedRoots.size, rootsResolved: roots.size,
+      ...(stage === "failed" ? recoveryFailureProgress(error, signal) : {}),
+    });
+  };
   try {
-    for await (const { key: objectKey, serialized } of readArtifactInventory({ api, prefix, token, fetchImpl: boundedFetch, stats })) {
+    progress("scanning");
+    for await (const { key: objectKey, serialized } of readArtifactInventory({ api, prefix, token, fetchImpl: boundedFetch, readObject, stats })) {
         let plaintext: Uint8Array | undefined;
         try {
           const envelope = parseHostedCipherEnvelope(JSON.parse(Buffer.from(serialized).toString("utf8")));
@@ -227,6 +291,7 @@ export async function assessCheckpointRecovery(env: Env, fetchImpl: typeof fetch
           }
         } catch { unreadable++; }
         finally { plaintext?.fill(0); serialized.fill(0); }
+        progress("scanning");
     }
     await readWorkspace();
     const paths = new Set(receipts.flatMap((receipt) => receipt.paths));
@@ -242,11 +307,14 @@ export async function assessCheckpointRecovery(env: Env, fetchImpl: typeof fetch
       appendActions: receipts.reduce((count, receipt) => count + receipt.appends, 0),
       acceptedHistoryProven: false, restorationPerformed: false,
     };
+  } catch (error) {
+    progress("failed", error);
+    throw error;
   } finally { for (const root of roots.values()) root.fill(0); }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  try { console.log(JSON.stringify(await assessCheckpointRecovery(process.env))); }
+  try { console.log(JSON.stringify(await assessCheckpointRecovery(process.env, fetch, (progress) => console.log(JSON.stringify(progress))))); }
   catch (error) {
     // Never print caught errors: upstream errors can contain private paths,
     // member identifiers, remote bodies, or key metadata.
