@@ -613,3 +613,6 @@ Query metric payload deduplication and transaction/restore proof are tracked in
 Native conversation polls are owned by `ARCHITECTURE.md` (Native Conversation
 Polls). The execution plan is
 [`2026-09-21-native-chat-polls.md`](exec-plans/active/2026-09-21-native-chat-polls.md).
+
+Legacy oxygen analytics retirement is tracked in
+[`oxygen analytics`](exec-plans/completed/2026-09-21-retire-oxygen-v1.md).
