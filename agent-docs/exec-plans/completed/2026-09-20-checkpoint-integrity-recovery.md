@@ -1,6 +1,6 @@
 # Preserve recoverable checkpoints and reject incomplete vault snapshots
 
-Status: active
+Status: completed
 Created: 2026-09-20
 Updated: 2026-09-21
 
@@ -86,3 +86,11 @@ Updated: 2026-09-21
 - Partial recovery review identified legitimate current-month audit appends and already-completed onboarding as survivor-check collisions, plus an encrypted replica cap below supported plaintext publication sizes. The repair preserves existing onboarding, verifies the exact original audit prefix and canonical appended records, and derives the envelope bound from the public plaintext maximum. Real encrypted recovery with surviving audit/onboarding and the existing large replica fixture passes, as do mutation/size rejection tests. Production preparation and publication remain outstanding.
 
 - The same survivor-proof collision also applies to a pre-existing current-month document-event shard. The proof now binds its exact path and appended bytes to the canonical import result, retaining all prior bytes and rejecting additional, substituted, missing, edited, truncated or deleted event data. The real encrypted fixture includes a previously imported document. Private verification facts remain separate from closed diagnostic summaries.
+
+## Completion
+
+- Integrity and bounded recovery-history protections are deployed. The partial-recovery implementation and protected workflow passed their required reviews and exact-head CI; the Web reader was verified live before publication.
+- Protected preparation and publication passed canonical validation, surviving-byte preservation, onboarding preservation, and encrypted archive round-trip checks. The accepted checkpoint was read back before observing ordinary owner retirement and successor admission.
+- The successor published further checkpoints, connected-provider imports applied canonical data without reported import failures, and the previously stalled mailbox backlog cleared. Detailed operational evidence remains private.
+- Complete original-file restoration was unavailable. The authorized fallback preserved surviving files and the authenticated Browser Vault projection with explicit provenance, retained completed onboarding, and restored runtime and provider progress. Missing original files are not represented as recovered; future recovery history cannot retroactively restore deleted archives.
+Completed: 2026-09-21
