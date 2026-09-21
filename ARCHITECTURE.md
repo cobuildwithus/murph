@@ -2585,6 +2585,33 @@ Crypto preparation precedes that transaction. The stable call/input event identi
 deduplicates an exact retry and rejects changed content. The existing mailbox wake
 runs after commit, including on replay; no call table or new work queue is added.
 
+For one normalized voice input, the source-derived admission bound is two signed
+Web requests sharing the existing 30-second commit deadline (one exact-body replay,
+no alternate destination). Each request inserts one nonce and makes at most two
+key-preparation/append attempts, retrying only an exact active-root mismatch.
+One preparation reads one active ingress envelope and unwraps one root before
+opening the transaction. The existing KMS owner permits two decrypt attempts
+within 25 seconds, with a 10-second per-attempt deadline; authentication is inside
+that deadline. No provider call occurs while the append transaction is open.
+
+The conservative per-attempt database bound is one preparation read plus 26
+transaction statements: six runtime-authority statements during cutover, one
+sponsor lock, at most seven member/access relation reads, one consent read, two
+workspace-existence statements, two root-lock/revalidation statements, two dedupe
+statements, three causal/lane allocation statements, and two item/payload or
+conflict-resolution statements. This deliberately includes missing-workspace and
+relation-loading branches; ordinary steady-state private calls use fewer reads.
+Including both preparation attempts and nonce admission gives at most 55
+statements per Web request, or 110 across its single transport replay, excluding
+transaction-control statements. Attempts within a request are serial and use one
+transaction connection; two replayed server requests can overlap. At most four
+root unwraps/eight KMS decrypt attempts and two application-level post-commit
+Temporal signal calls
+belong to this input across all retries. The known mailbox checkpoint avoids an
+extra signal-time database read. These are source bounds, not measured hosted
+latency or a bound on concurrent member requests. Existing text admission gains
+none of these calls.
+
 Normalized voice inputs use the existing `conversation.message` mailbox shape
 with a call and input identity. The ordinary text admission path persists and
 deduplicates them before notifying a running turn. Successive inputs share a
@@ -2594,8 +2621,8 @@ requires accepted mailbox input identities and an invocation-bound speech port,
 with no ambient provider or other-channel fallback. Speech joins pending admission
 responses before checking local receipts, because the post-commit wake can run
 backing work before Web's response arrives; it rechecks call liveness afterward.
-Speech is non-idempotent, so
-uncertain delivery remains governed by the existing outbox policy. This channel
+Speech is non-idempotent, so uncertain delivery remains governed by the existing
+outbox policy. This channel
 contract does not itself admit a browser call or create a new work queue.
 
 Native Live duration uses the existing immutable hosted usage ledger. The call's

@@ -73,6 +73,12 @@ Updated: 2026-09-21
 
 ## Verification
 
+- Source review now documents the voice Web-admission retry/query bounds in
+  `ARCHITECTURE.md`: at most two HTTP attempts sharing the commit deadline, two
+  serial root-preparation attempts per request, 55 conservative database
+  statements per request excluding transaction control, and provider work
+  outside the append transaction. This covers the Web admission owner and its
+  KMS/Temporal calls; measured composed latency remains pending hosted proof.
 - The local Linux release link exhausted Docker memory after about 74 minutes;
   Docker recovered without a restart. Cargo now uses two jobs instead of the
   VM's full CPU count, retaining the upstream release optimization profile.
