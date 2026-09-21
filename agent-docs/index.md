@@ -615,7 +615,7 @@ Query metric payload deduplication and transaction/restore proof are tracked in
 
 Native conversation polls are owned by `ARCHITECTURE.md` (Native Conversation
 Polls). The execution plan is
-[`2026-09-21-native-chat-polls.md`](exec-plans/active/2026-09-21-native-chat-polls.md).
+[`2026-09-21-native-chat-polls.md`](exec-plans/completed/2026-09-21-native-chat-polls.md).
 
 Expired inbox capture compaction is tracked in
 [`capture compaction`](exec-plans/completed/2026-09-21-compact-inbox-records.md).
