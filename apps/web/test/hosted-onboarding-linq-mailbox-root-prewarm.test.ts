@@ -1186,6 +1186,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
           .mockImplementationOnce(async (input) => {
             calls.push("plan-conflict");
             expect(input.preparedDirectMailboxPayloadRoot).toEqual({
+              unchangedHomeRoute: null,
               identityRecord: null,
               identityState: null,
               memberId: "member_direct_a",
@@ -1219,6 +1220,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
           .mockImplementationOnce(async (input) => {
             calls.push("plan");
             expect(input.preparedDirectMailboxPayloadRoot).toEqual({
+              unchangedHomeRoute: null,
               identityRecord: null,
               identityState: null,
               memberId: "member_direct_b",

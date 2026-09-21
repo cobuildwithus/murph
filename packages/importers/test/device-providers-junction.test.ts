@@ -2969,16 +2969,12 @@ test("Junction date-only dense readings remain daily facts without fabricated cl
     "glucose-observed-span-minutes",
   ]);
 
-  const bloodOxygen = featureArtifact("blood-oxygen");
-  assert.equal(bloodOxygen.sampleCount, 0);
-  assert.deepEqual(bloodOxygen.features, {});
-  assert.equal(bloodOxygen.firstSampleAt, undefined);
-  assert.equal(bloodOxygen.lastSampleAt, undefined);
-  assert.equal(bloodOxygen.hourlyBuckets?.every((bucket) => bucket === null), true);
-  assert.deepEqual(featureMetrics("blood_oxygen"), [
-    "spo2-estimated-coverage-minutes",
-    "spo2-observed-span-minutes",
-  ]);
+  assert.equal(payload.events?.some((event) =>
+    event.dataOrigin?.normalizerVersion === "junction.blood_oxygen_feature_envelope.v1"
+  ), false);
+  assert.equal(payload.evidenceParts?.some((part) =>
+    part.role.startsWith("junction-timeseries-features-blood-oxygen:")
+  ), false);
 
   const stress = featureArtifact("stress-level");
   assert.equal(stress.sampleCount, 1);
@@ -6035,7 +6031,7 @@ test("Junction normalizer preserves official point and interval timeseries shape
   assert.equal(dailyValue("caffeine"), 95);
   assert.equal(dailyValue("water"), 250);
   assert.equal(dailyValue("mindfulness-minutes"), 10);
-  for (const resourceSlug of ["glucose", "blood-oxygen", "stress-level"]) {
+  for (const resourceSlug of ["glucose", "stress-level"]) {
     const [artifact] = findJunctionTimeseriesFeatureArtifacts(payload, resourceSlug);
     const content = artifact?.content as Record<string, unknown> | undefined;
     assert.equal(content?.schema, "junction.timeseries_feature_envelope.v1", resourceSlug);
@@ -6238,7 +6234,7 @@ test("Junction glucose fidelity distinguishes equal daily mean/min/max days with
   );
 });
 
-test("Junction blood oxygen fidelity separates an isolated low artifact from repeated lows", () => {
+test("Junction oxygen readings survive retirement of legacy analytics", () => {
   const normalize = (samples: readonly { timestamp: string; value: number }[]) =>
     normalizeJunctionSnapshot({
       importedAt: "2026-04-23T12:00:00.000Z",
@@ -6265,25 +6261,14 @@ test("Junction blood oxygen fidelity separates an isolated low artifact from rep
     { timestamp: "2026-04-22T03:00:00Z", value: 89 },
     { timestamp: "2026-04-22T03:05:00Z", value: 88 },
   ]);
-  const feature = (payload: DeviceBatchImportPayload) =>
-    findJunctionTimeseriesFeatureArtifacts(payload, "blood-oxygen")[0]?.content as {
-      episodes?: { totalCount?: number };
-      features?: Record<string, number>;
-    };
-
-  assert.equal(feature(isolated).features?.below90ReadingCount, 1);
-  assert.equal(feature(isolated).features?.below92ReadingCount, 1);
-  assert.equal(feature(isolated).features?.below90EstimatedMinutes, 0);
-  assert.equal(feature(isolated).features?.below92EstimatedMinutes, 0);
-  assert.equal(feature(repeated).features?.below90ReadingCount, 4);
-  assert.equal(feature(repeated).features?.below92ReadingCount, 5);
-  assert.equal(feature(repeated).features?.below90EpisodeCount, 2);
-  assert.equal(feature(repeated).features?.below92EpisodeCount, 2);
-  assert.equal(feature(repeated).features?.below90EstimatedMinutes, 10);
-  assert.equal(feature(repeated).features?.below92EstimatedMinutes, 15);
-  assert.equal(feature(repeated).features?.longestBelow90EstimatedMinutes, 5);
-  assert.equal(feature(repeated).features?.longestBelow92EstimatedMinutes, 10);
-  assert.equal(feature(repeated).episodes?.totalCount, 2);
+  for (const payload of [isolated, repeated, normalize([{ timestamp: "2026-04-22T01:00:00Z", value: 98 }])]) {
+    assert.equal(findJunctionTimeseriesFeatureArtifacts(payload, "blood-oxygen").length, 0);
+    assert.equal(payload.events?.some((event) => event.externalRef?.facet === "features"), false);
+    assert.ok(payload.events?.some((event) => event.fields?.metric === "spo2"));
+    assert.ok(payload.events?.some((event) => event.fields?.metric === "lowest-spo2"));
+    assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "blood-oxygen").length, 1);
+    assertEventRawArtifactRolesExist(payload);
+  }
 });
 
 test("Junction dense feature buckets use the vault timezone for UTC timestamps", () => {
@@ -7396,7 +7381,7 @@ test("Junction fidelity value aliases preserve temporal shape through normalizat
   assert.equal(dailyValue("spo2"), 94);
   assert.equal(dailyValue("stress-level"), 65);
   assert.equal(dailyValue("mindfulness-minutes"), 5);
-  assert.equal(findJunctionTimeseriesFeatureArtifacts(payload, "blood-oxygen").length, 1);
+  assert.equal(findJunctionTimeseriesFeatureArtifacts(payload, "blood-oxygen").length, 0);
   assert.equal(findJunctionTimeseriesFeatureArtifacts(payload, "stress-level").length, 1);
   assert.equal(findJunctionIntervalReadingArtifacts(payload, "mindfulness-minutes").length, 1);
 });
@@ -7439,15 +7424,15 @@ test("Junction timeseries fidelity caps episode evidence deterministically", () 
   const records = Array.from({ length: 14 }, (_, index) => {
     const lowAt = Date.UTC(2026, 3, 22, 0, index * 30);
     return [
-      { timestamp: new Date(lowAt).toISOString(), unit: "percent", value: 88 },
-      { timestamp: new Date(lowAt + 5 * 60_000).toISOString(), unit: "percent", value: 97 },
+      { timestamp: new Date(lowAt).toISOString(), unit: "mmol/L", value: 2.8 },
+      { timestamp: new Date(lowAt + 5 * 60_000).toISOString(), unit: "mmol/L", value: 5.5 },
     ];
   }).flat();
   const normalize = (data: readonly Record<string, unknown>[]) =>
     normalizeJunctionSnapshot({
       importedAt: "2026-04-23T12:00:00.000Z",
       timeseries: {
-        blood_oxygen: {
+        glucose: {
           groups: {
             garmin: [{
               data,
@@ -7457,10 +7442,10 @@ test("Junction timeseries fidelity caps episode evidence deterministically", () 
         },
       },
     });
-  const forward = findJunctionTimeseriesFeatureArtifacts(normalize(records), "blood-oxygen")[0]?.content as {
+  const forward = findJunctionTimeseriesFeatureArtifacts(normalize(records), "glucose")[0]?.content as {
     episodes?: { retainedCount?: number; retained?: unknown[]; totalCount?: number; truncatedCount?: number };
   };
-  const reversed = findJunctionTimeseriesFeatureArtifacts(normalize([...records].reverse()), "blood-oxygen")[0]
+  const reversed = findJunctionTimeseriesFeatureArtifacts(normalize([...records].reverse()), "glucose")[0]
     ?.content as typeof forward;
 
   assert.equal(forward.episodes?.totalCount, 14);

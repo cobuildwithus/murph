@@ -3064,7 +3064,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         return pendingWakeObserved || foregroundWakeObserved;
       };
       const shouldYieldSystemMailboxWork = (): boolean =>
-        hostAbortObserved
+        options.shutdownSignal?.aborted === true
+        || hostAbortObserved
         || canonicalWriteReceiptLogBlocksBackgroundMaintenance()
         || consumeForegroundWake()
         || (
@@ -3154,7 +3155,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           preemption: "cancel_and_drain" | "retain" = "cancel_and_drain",
         ): Promise<
           | { kind: "completed"; value: T }
-          | { kind: "wake"; notification: RuntimeWakeNotification }
+          | { kind: "preempted"; notification: RuntimeWakeNotification | null }
         > => {
           const ownedStage = startOwnedHostedProjectionStage({
             ownerSignals: [workSignal],
@@ -3163,10 +3164,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           const stage = ownedStage.promise;
           if (!runtimeWakeSignal) {
             const value = await stage;
-            if (workSignal.aborted) {
-              throw readHostedRuntimeAbortReason(workSignal);
+            if (runtimeAbortController.signal.aborted) {
+              throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
             }
-            return { kind: "completed", value };
+            return options.shutdownSignal?.aborted
+              ? { kind: "preempted", notification: null }
+              : { kind: "completed", value };
           }
 
           const wakeAbortController = new AbortController();
@@ -3183,7 +3186,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }));
           const wakeResult = runtimeWakeSignal.wait(wakeAbortController.signal)
             .then((notification) => ({
-              kind: "wake" as const,
+              kind: "preempted" as const,
               notification,
             }));
           let result: Awaited<typeof stageResult> | Awaited<typeof wakeResult>;
@@ -3197,15 +3200,18 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   ? error
                   : new Error("Hosted vault-share projection stage failed."),
             );
-            if (workSignal.aborted) {
-              throw readHostedRuntimeAbortReason(workSignal);
+            if (runtimeAbortController.signal.aborted) {
+              throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
+            }
+            if (options.shutdownSignal?.aborted && error === workSignal.reason) {
+              return { kind: "preempted", notification: null };
             }
             throw error;
           } finally {
             workSignal.removeEventListener("abort", abortWake);
           }
 
-          if (result.kind === "wake") {
+          if (result.kind === "preempted") {
             if (preemption === "cancel_and_drain") {
               await ownedStage.cancelAndDrain(
                 new Error("Hosted vault-share projection yielded to foreground work."),
@@ -3213,14 +3219,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             } else {
               pendingOwnedVaultShareProjection?.preemptForForeground();
             }
-            if (workSignal.aborted) {
-              throw readHostedRuntimeAbortReason(workSignal);
+            if (runtimeAbortController.signal.aborted) {
+              throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
             }
-            return result;
+            return options.shutdownSignal?.aborted ? { kind: "preempted", notification: null } : result;
           }
-          if (!wakeAbortController.signal.aborted) {
-            wakeAbortController.abort();
-          }
+          wakeAbortController.abort();
           return result;
         };
 
@@ -3235,7 +3239,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const scopeResolutionResult = await waitForOwnedProjectionStage(
           resolveProjectionScopes,
         );
-        if (scopeResolutionResult.kind === "wake") {
+        if (scopeResolutionResult.kind === "preempted") {
           observeForegroundWake(scopeResolutionResult.notification);
           return { outcome: "preempted" };
         }
@@ -3283,7 +3287,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }, shouldYieldSystemMailboxWork),
           "retain",
         );
-        if (offerResult.kind === "wake") {
+        if (offerResult.kind === "preempted") {
           observeForegroundWake(offerResult.notification);
           return { outcome: "preempted" };
         }
