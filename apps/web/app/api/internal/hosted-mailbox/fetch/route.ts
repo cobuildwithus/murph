@@ -25,14 +25,13 @@ import {
 } from "@/src/lib/hosted-mailbox/store";
 import {
   resolveHostedRuntimeAiUsageGate,
+  hostedRuntimeUsageMemberSelect,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 import { requireHostedRuntimeCallbackTx } from "@/src/lib/hosted-execution/runtime-owner";
 import { readHostedRuntimeCallbackAuthority } from "@/src/lib/hosted-execution/runtime-write-fence";
-import { hostedAiUsageMemberSelect } from "@/src/lib/hosted-execution/usage-allowance";
-import { hostedRuntimeAiMemberAccessSelect } from "@/src/lib/hosted-onboarding/member-access";
 
 const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
@@ -51,16 +50,9 @@ export const POST = withJsonError(async (request: Request) => {
     const memberState = await tx.hostedMember.findUnique({
       where: { id: userId },
       select: {
-        ...hostedRuntimeAiMemberAccessSelect,
-        ...hostedAiUsageMemberSelect,
+        ...hostedRuntimeUsageMemberSelect,
         assistantProviderPreference: true,
         inferenceConnection: { select: { selected: true, revision: true } },
-        threadContainer: {
-          select: {
-            ...hostedRuntimeAiMemberAccessSelect.threadContainer.select,
-            monthlyUsageLimitUsdMicros: true,
-          },
-        },
       },
     });
     const access = await requireHostedRuntimeMailboxActiveAccess(userId, {

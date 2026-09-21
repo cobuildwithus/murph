@@ -58,6 +58,14 @@ import {
 } from './onboarding-followup-seed.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
 
+import { withAssistantCronWriteLock } from './cron/locking.js'
+import { resolveAssistantStatePaths } from './store/paths.js'
+import { ensureAssistantCronState } from './cron/store.js'
+import {
+  findAssistantCronCanonicalRuntimeRecord,
+  readAssistantCronCanonicalRuntimeStore,
+} from './cron/runtime-state.js'
+
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
 
 export type MurphManagedAutomationSchedule = Exclude<
@@ -1122,6 +1130,11 @@ export async function applyMurphManagedAutomations(
       input,
       now,
       rawSeed,
+      resolveScheduleStableKey,
+      reportStableKeyFailure: (error) => {
+        result.stableKeyFailure = error
+        result.stableKeyRetryNeeded = true
+      },
     })
     if (outcome === 'yielded') {
       return { ...result, yielded: true }
@@ -1309,12 +1322,21 @@ async function reconcileMurphManagedAutomation({
   input,
   now,
   rawSeed,
+  resolveScheduleStableKey,
+  reportStableKeyFailure,
 }: {
   existing: AutomationRecord
   input: ApplyMurphManagedAutomationsInput
   now: Date
   rawSeed: MurphManagedAutomationSeed
+  resolveScheduleStableKey: () => Promise<string | null>
+  reportStableKeyFailure: (error?: unknown) => void
 }): Promise<'updated' | 'skipped' | 'yielded'> {
+  if (isLegacyPersonalPatternsSchedule(existing, rawSeed)) {
+    return reconcilePersonalPatternsSchedule({
+      existing, options: input, now, resolveScheduleStableKey, reportStableKeyFailure,
+    })
+  }
   const preserveExistingSchedule =
     shouldSpreadMurphManagedAutomationSchedule(rawSeed)
   const seed = rawSeed
@@ -1550,13 +1572,21 @@ function shouldSpreadMurphManagedAutomationSchedule(
   seed: MurphManagedAutomationSeed,
 ): boolean {
   return seed.schedule.kind === 'cron' &&
-    MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[seed.automationId] !== undefined
+    (seed.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID ||
+      MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[seed.automationId] !== undefined)
 }
 
 function resolveMurphManagedAutomationCreateSeed(input: {
   seed: MurphManagedAutomationSeed
   stableKey: string | null
 }): MurphManagedAutomationSeed | null {
+  if (input.seed.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID
+    && input.seed.schedule.kind === 'cron') {
+    return input.stableKey === null ? null : {
+      ...input.seed,
+      schedule: resolvePersonalPatternsSpreadSchedule(input.stableKey, input.seed.schedule.timeZone),
+    }
+  }
   const spread = MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[input.seed.automationId]
   if (!spread || input.seed.schedule.kind !== 'cron') {
     return input.seed
@@ -1574,6 +1604,86 @@ function resolveMurphManagedAutomationCreateSeed(input: {
       stableKey: input.stableKey,
     }),
   }
+}
+
+// Daily maintenance has no promised delivery hour. Spread it at minute granularity
+// over 09:00–16:59 local time, retaining one stable slot across restarts and moves.
+function resolvePersonalPatternsSpreadSchedule(stableKey: string, timeZone?: string) {
+  const slot = stableHashToIndex(`murph-personal-patterns-daily:${stableKey}`, 8 * 60)
+  const minuteOfDay = 9 * 60 + slot
+  return {
+    kind: 'dailyLocal' as const,
+    localTime: `${String(Math.floor(minuteOfDay / 60)).padStart(2, '0')}:${String(minuteOfDay % 60).padStart(2, '0')}`,
+    ...(timeZone ? { timeZone } : {}),
+  }
+}
+
+function isLegacyPersonalPatternsSchedule(existing: AutomationRecord, seed: MurphManagedAutomationSeed): boolean {
+  return seed.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID
+    && existing.status === 'active'
+    && existing.schedule.kind === 'cron'
+    && existing.schedule.expression === '0 13 * * *'
+}
+
+async function reconcilePersonalPatternsSchedule(input: {
+  existing: AutomationRecord
+  options: ApplyMurphManagedAutomationsInput
+  now: Date
+  resolveScheduleStableKey: () => Promise<string | null>
+  reportStableKeyFailure: (error?: unknown) => void
+}): Promise<'updated' | 'skipped'> {
+  let stableKey: string | null
+  try {
+    stableKey = await input.resolveScheduleStableKey()
+  } catch (error) {
+    input.reportStableKeyFailure(error)
+    return 'skipped'
+  }
+  if (stableKey === null) {
+    input.reportStableKeyFailure()
+    return 'skipped'
+  }
+  return await spreadExistingPersonalPatternsSchedule({ ...input, stableKey }) ? 'updated' : 'skipped'
+}
+
+async function spreadExistingPersonalPatternsSchedule(input: {
+  existing: AutomationRecord
+  options: ApplyMurphManagedAutomationsInput
+  now: Date
+  stableKey: string
+}): Promise<boolean> {
+  const paths = resolveAssistantStatePaths(input.options.vaultRoot)
+  await ensureAssistantCronState(paths)
+  return withAssistantCronWriteLock(paths, async () => {
+    if (input.options.shouldYield?.()) return false
+    const existing = await showAutomation({
+      automationId: input.existing.automationId, vaultRoot: input.options.vaultRoot,
+    })
+    if (!existing || existing.status !== 'active' || existing.schedule.kind !== 'cron'
+      || existing.schedule.expression !== '0 13 * * *') return false
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths, { reclaimStaleRunningClaims: false })
+    const runtime = findAssistantCronCanonicalRuntimeRecord(runtimeStore, existing.automationId)
+    if (runtime?.state.runningAt || runtime?.state.pendingDeliveryIntentId
+      || runtime?.state.pendingOccurrenceAt || runtime?.state.retryAfterAt) return false
+    const vault = await loadVault({ vaultRoot: input.options.vaultRoot })
+    const schedule = resolvePersonalPatternsSpreadSchedule(input.stableKey, existing.schedule.timeZone)
+    const firstOccurrenceAt = computeAssistantCronFirstRunAfterCurrentLocalDay({
+      after: input.now,
+      schedule: { ...schedule, timeZone: schedule.timeZone ?? normalizeIanaTimeZone(vault.metadata.timezone) ?? 'UTC' },
+    })
+    if (input.options.shouldYield?.()) return false
+    // Schedule and lower bound commit in one canonical record: a crash cannot
+    // expose another run today or strand a temporary one-shot schedule.
+    await patchAutomation({
+      lookup: existing.automationId,
+      expectedUpdatedAt: existing.updatedAt,
+      schedule,
+      scheduleNotBefore: new Date(Date.parse(firstOccurrenceAt) - 1),
+      now: input.now,
+      vaultRoot: input.options.vaultRoot,
+    })
+    return true
+  })
 }
 
 function resolveMurphManagedWeeklySpreadSchedule(input: {

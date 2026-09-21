@@ -14666,10 +14666,11 @@ describeRealCodex('real Codex Personal Patterns typed-ledger Luna high digest e2
 
 describeRealCodex('real Codex Personal Pattern cross-automation history e2e', () => {
   it.each([
-    { priorFinding: 'covered', initialDigestSent: false },
-    { priorFinding: 'covered', initialDigestSent: true },
-    { priorFinding: 'unrelated', initialDigestSent: true },
-  ] as const)('checks prior $priorFinding insight before sending (initial digest: $initialDigestSent)', async ({ priorFinding, initialDigestSent }) => {
+    { priorFinding: 'covered', initialDigestSent: false, slot: 'default' },
+    { priorFinding: 'covered', initialDigestSent: true, slot: 'default' },
+    { priorFinding: 'covered', initialDigestSent: true, slot: 'staggered' },
+    { priorFinding: 'unrelated', initialDigestSent: true, slot: 'default' },
+  ] as const)('checks prior $priorFinding insight before sending (initial digest: $initialDigestSent, slot: $slot)', async ({ priorFinding, initialDigestSent, slot }) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
       (candidate) => candidate.slug === 'personal-patterns-update',
@@ -14699,7 +14700,8 @@ describeRealCodex('real Codex Personal Pattern cross-automation history e2e', ()
         codexHome: config.codexHome,
         developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({
           currentLocalDate: '2026-08-29',
-          scheduledOccurrenceAt: '2026-08-29T17:00:00.000Z',
+          scheduledOccurrenceAt: slot === 'staggered'
+            ? '2026-08-29T19:37:00.000Z' : '2026-08-29T17:00:00.000Z',
         }),
         dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
         env: config.env,
@@ -14725,7 +14727,7 @@ describeRealCodex('real Codex Personal Pattern cross-automation history e2e', ()
       expect(ledger?.results).toHaveLength(1)
       expect(ledger?.results[0]).toMatchObject({ factorId: 'yard-work', outcomeId: 'hrv', lagDays: 1 })
       process.stdout.write(`[pattern-history-e2e] ${JSON.stringify({
-        priorFinding, initialDigestSent, decision,
+        priorFinding, initialDigestSent, slot, decision,
       })}\n`)
       if (priorFinding === 'covered') {
         expect(decision.kind).toBe('skip')

@@ -1,5 +1,8 @@
 # Murph Agent Docs Index
 
+Automation database load, daily scheduling, and Flex retry work:
+[`2026-09-21-automation-query-load.md`](exec-plans/active/2026-09-21-automation-query-load.md).
+
 Canonical device import preparation reuse is owned by `packages/core/README.md`;
 regression proof and local measurements are tracked in
 [`2026-09-21-device-import-write-cost.md`](exec-plans/completed/2026-09-21-device-import-write-cost.md).

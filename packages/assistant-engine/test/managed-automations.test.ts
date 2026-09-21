@@ -1364,7 +1364,7 @@ describe('applyMurphManagedAutomations', () => {
         model: 'gpt-5.6-luna',
         reasoningEffort: 'high',
       },
-      schedule: { kind: 'cron', expression: '0 13 * * *' },
+      schedule: { kind: 'dailyLocal', localTime: expect.any(String) },
       slug: 'personal-patterns-update',
       status: 'active',
     })
@@ -2542,6 +2542,8 @@ describe('applyMurphManagedAutomations', () => {
       vaultRoot: `${vaultRoot}-moved`,
     })
 
+    expect(managedAutomationMocks.records.get(MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID)?.schedule)
+      .toEqual(firstSchedules.get(MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID)?.schedule)
       .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)?.schedule)
@@ -2550,6 +2552,21 @@ describe('applyMurphManagedAutomations', () => {
       .toEqual(firstSchedules.get(MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
       .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
+  })
+
+  it('distributes sixty Personal Patterns schedules across the daily window', async () => {
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID)!
+    const slots = new Set<string>()
+    for (let index = 0; index < 60; index += 1) {
+      managedAutomationMocks.records.clear()
+      managedAutomationMocks.loadVault.mockResolvedValue({ metadata: { vaultId: `vault_spread_${index}` } })
+      await applyMurphManagedAutomations({ defaultRoute, seeds: [seed], vaultRoot })
+      const schedule = managedAutomationMocks.records.get(seed.automationId)!.schedule
+      if (schedule.kind !== 'dailyLocal') throw new Error('Expected daily local schedule')
+      expect(schedule.localTime >= '09:00' && schedule.localTime < '17:00').toBe(true)
+      slots.add(schedule.localTime)
+    }
+    expect(slots.size).toBeGreaterThan(45)
   })
 
   it('defers spread-managed creation when vault metadata cannot be read', async () => {
@@ -2561,13 +2578,13 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 2,
-      skipped: 3,
+      created: 1,
+      skipped: 4,
       stableKeyFailure: metadataError,
       stableKeyRetryNeeded: true,
       updated: 0,
     })
-    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
     expect(managedAutomationMocks.records.get(MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID)?.schedule)
       .toEqual({
         kind: 'cron',
@@ -2581,8 +2598,8 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-10T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 3,
-      skipped: 2,
+      created: 4,
+      skipped: 1,
       updated: 0,
     })
 
