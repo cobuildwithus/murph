@@ -10,6 +10,13 @@ import {
 export const HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV =
   "MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID";
 
+// Public Live uses the managed API credential, including local subscription-backed turns.
+export function resolveHostedVoiceModelProvider(memberModelProvider: string | null | undefined): string {
+  return memberModelProvider === HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
+    ? HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID
+    : resolveHostedOperatorModelProvider(memberModelProvider);
+}
+
 // Operator tasks keep OpenAI/Sol independently of the member's provider, but
 // must use the authentication and transport registered in the hosted config.
 export function resolveHostedOperatorModelProvider(

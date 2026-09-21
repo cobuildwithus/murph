@@ -2500,6 +2500,8 @@ website UI remains disabled until the complete hosted journey is verified.
 The hosted voice entrypoint derives the identical process launch configuration
 used by ordinary turns. Its media thread may select the configured OpenAI provider
 without replacing a Venice or custom-inference backing target or process.
+Local subscription-backed turns also register that credential-based OpenAI
+provider for media; voice cannot silently use the member's ChatGPT authentication.
 
 The invocation's ephemeral call handle expires an unattached reservation after
 30 seconds, serializes native input admission, and wakes the runtime only after

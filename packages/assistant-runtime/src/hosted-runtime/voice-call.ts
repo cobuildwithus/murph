@@ -6,7 +6,7 @@ import {
   type HostedCodexAssistantVoiceInput,
 } from "@murphai/assistant-engine/assistant-runtime";
 import { HOSTED_ASSISTANT_TERRA_MODEL } from "@murphai/hosted-execution/assistant-model";
-import { HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV, resolveHostedOperatorModelProvider } from "./codex-runtime-env.ts";
+import { HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV, resolveHostedVoiceModelProvider } from "./codex-runtime-env.ts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { createHostedLiveUsageRecorder } from "./live-usage.ts";
 import type { HostedRuntimeUsageRecordPort } from "./platform.ts";
@@ -212,7 +212,7 @@ export function configureHostedRuntimeVoice(
       ...context,
       ...nativeInput,
       mediaModel: HOSTED_ASSISTANT_TERRA_MODEL,
-      mediaModelProvider: resolveHostedOperatorModelProvider(
+      mediaModelProvider: resolveHostedVoiceModelProvider(
         context.env?.[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
       ),
       prompt: "You are Murph's voice interface. Delegate member requests to the backing assistant. Speak the responses it provides; do not answer from your own knowledge or claim work has completed before receiving its result.",

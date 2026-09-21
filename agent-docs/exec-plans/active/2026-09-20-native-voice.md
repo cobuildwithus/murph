@@ -51,6 +51,13 @@ Updated: 2026-09-21
 
 ## Verification
 
+- Public Live media now selects the managed OpenAI API provider even when local
+  text turns use ChatGPT subscription authentication. Generated configuration
+  registers both providers without changing the backing target or process owner.
+  Sixty-six configuration and lifecycle checks pass (seven opt-in native auth
+  scenarios are skipped), together with runtime typecheck and complexity. This
+  proves configuration selection, not provider egress or the final hosted call.
+
 - Web reservation, connection, and close now reach the existing invocation's
   voice handle through member-bound OIDC control and the persisted container
   target. Admission checks session, origin, active access, consent, and allowance;
