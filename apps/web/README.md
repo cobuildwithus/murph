@@ -2589,7 +2589,8 @@ posted `{ sdp: string, voice: string }` WebRTC offer. The server validates the v
 against the shared catalog before setting `session.audio.output.voice`.
 
 Click the cloud orb to start, pause, and resume. Microphone audio makes it
-smaller with subtle cloud motion; assistant audio drives stronger cloud motion.
+smaller with sweeping cloud motion; assistant audio drives faster cloud motion.
+The visual response lifts quiet speech so ordinary conversation stays animated.
 Pausing freezes the clouds. Reduced-motion preferences and static-image
 fallbacks are supported. Audio levels are measured locally and never stored. Pause mutes microphone transmission
 and local playback while keeping context connected; GPT-Live duration billing

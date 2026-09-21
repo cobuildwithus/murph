@@ -100,6 +100,8 @@ Local GPT-Live voice preview is tracked in
 Live voice cloud motion and Irish default:
 [`2026-09-20-live-voice-orb.md`](exec-plans/completed/2026-09-20-live-voice-orb.md).
 Setup and embedding are documented in `apps/web/README.md`.
+Cloud velocity tuning is recorded in
+[`2026-09-20-live-voice-cloud-velocity.md`](exec-plans/completed/2026-09-20-live-voice-cloud-velocity.md).
 
 GPT-Live voice selection is tracked in
 [`2026-09-20-live-voice-picker.md`](exec-plans/completed/2026-09-20-live-voice-picker.md).

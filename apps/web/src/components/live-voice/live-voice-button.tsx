@@ -51,8 +51,11 @@ export function LiveVoiceControl({ state, error, inputLevel = 0, outputLevel = 0
   const output = active ? outputLevel : 0;
   const userSpeaking = input > 0.04;
   const speaker = userSpeaking ? "user" : output > 0.04 ? "assistant" : "none";
-  const energy = Math.min(1, output * 1.8 + input * 0.15);
-  const speed = active ? 0.16 + input * 0.25 + output * 1.6 : 0.18;
+  // Speech amplitude is often low; lift quiet syllables into a visible sweep.
+  const inputMotion = Math.sqrt(Math.min(1, input * 3));
+  const outputMotion = Math.sqrt(Math.min(1, output * 3));
+  const energy = Math.min(1, outputMotion * 1.2 + inputMotion * 0.8);
+  const speed = 0.18 + inputMotion * 2.4 + outputMotion * 4.4;
   const action = active ? "Pause conversation" : state === "paused" ? "Resume conversation" : "Start conversation";
 
   return (
