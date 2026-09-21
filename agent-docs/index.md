@@ -568,7 +568,7 @@ Interactive voice-orb design playground implementation and proof are tracked in
 [`2026-09-20-voice-orb.md`](exec-plans/completed/2026-09-20-voice-orb.md).
 
 The shared orb's authenticated native-call integration is tracked in
-[`2026-09-21-native-voice-orb.md`](exec-plans/active/2026-09-21-native-voice-orb.md).
+[`2026-09-21-native-voice-orb.md`](exec-plans/completed/2026-09-21-native-voice-orb.md).
 
 Voice-orb browser and PNG fallback proof is tracked in
 [`2026-09-20-voice-orb-browser-support.md`](exec-plans/completed/2026-09-20-voice-orb-browser-support.md).

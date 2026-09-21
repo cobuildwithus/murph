@@ -14,6 +14,7 @@ declare global {
       context: AudioContext;
       destination: MediaStreamAudioDestinationNode;
       peers: RTCPeerConnection[];
+      speakers: string[];
     };
   }
 }
@@ -42,7 +43,7 @@ async function main(): Promise<void> {
       silence.gain.value = 0;
       oscillator.connect(silence).connect(destination);
       oscillator.start();
-      window.voiceProof = { context, destination, peers: [] };
+      window.voiceProof = { context, destination, peers: [], speakers: [] };
       navigator.mediaDevices.getUserMedia = async () => destination.stream;
       const NativePeer = window.RTCPeerConnection;
       window.RTCPeerConnection = class extends NativePeer {
@@ -67,13 +68,19 @@ async function main(): Promise<void> {
     });
     const startedAt = Date.now();
     assert((await page.goto("/voice"))?.ok(), "voice_navigation_failed");
+    await page.evaluate(() => {
+      new MutationObserver(() => {
+        const speaker = document.querySelector("button[data-speaker]")?.getAttribute("data-speaker");
+        if (speaker && !window.voiceProof.speakers.includes(speaker)) window.voiceProof.speakers.push(speaker);
+      }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["data-speaker"] });
+    });
     await page.getByRole("button", { name: "Start call", exact: true }).click();
     phase = "connect";
     await page.getByRole("status").filter({ hasText: "Microphone on" }).waitFor();
     const connectedMs = Date.now() - startedAt;
-    await page.getByRole("button", { name: "Mute", exact: true }).click();
+    await page.getByRole("button", { name: "Mute microphone", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "Microphone muted" }).waitFor();
-    await page.getByRole("button", { name: "Unmute", exact: true }).click();
+    await page.getByRole("button", { name: "Unmute microphone", exact: true }).click();
     phase = "answer";
     const inputAt = Date.now();
     await page.evaluate(async (bytes) => {
@@ -91,6 +98,7 @@ async function main(): Promise<void> {
         .then(() => { throw new Error("Voice ended before the answer."); }),
     ]);
     const answerMs = Date.now() - inputAt;
+    await page.waitForFunction(() => ["user", "assistant"].every((speaker) => window.voiceProof.speakers.includes(speaker)));
     await page.waitForFunction(async () => {
       for (const peer of window.voiceProof.peers) {
         for (const stat of (await peer.getStats()).values()) {

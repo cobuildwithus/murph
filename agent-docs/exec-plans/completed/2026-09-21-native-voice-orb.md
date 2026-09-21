@@ -1,6 +1,6 @@
 # Integrate the shared voice orb with authenticated native calls
 
-Status: active
+Status: completed
 Created: 2026-09-21
 Updated: 2026-09-21
 
@@ -73,6 +73,37 @@ introduced: the call-control protocol and native patch are unchanged.
 - Product UX: Ready for this presentation change; optional metering failure,
   canceled startup and immediate shutdown cleanup are covered. The existing
   `talk-with-murph` changelog item groups this same unshipped member outcome.
-- Blacksmith is rebuilding the unchanged final native patch for interactive
-  testing. Final pushed-head ReviewGPT and CI remain pending.
-- Close #3619 after this work is verified and published in #3612, as requested.
+- Blacksmith rebuilt the unchanged final native patch in 38m59s. The resulting
+  hosted runner bundle passes every parity probe and its size guard.
+- The complete native hosted voice proof passes with real synthetic microphone
+  audio, a read-only vault tool, audible selected output, both input/output orb
+  activity, immediate microphone release, provider-confirmed shutdown and three
+  trusted usage records. Connection took 44.6s; speech-to-answer took 28.9s in
+  this development fixture, not a production latency or reliability guarantee.
+- The local launcher smoke passes: an isolated synthetic member opens the real
+  authenticated Voice page through a localhost SSH tunnel, then browser and
+  stack cleanup complete. The user received the one-command launcher because
+  terminal automation is unavailable. Temporary scaffolding stays ignored; no
+  test session, provider credential or machine path is committed.
+- Exact-head CI remains a PR completion gate: all ordinary checks pass so far,
+  while native-image and runner-bundle jobs are still running. The public
+  preview URL check remains explicitly waived by the user.
+- #3619 is closed after verified visual work was pushed in #3612 at
+  `7fc764909caed1e7f3490e0039b6aed0654eb86d`; its body links the replacement.
+- Full-snapshot GPT-6 Pro round 3 passed with zero findings at that head.
+  Response hash `904ba60db4bde58a957cbf339fec3480ecf5ed07047d36b2db66bd3431264847`,
+  exact committed-turn identity, model and 725-second capture verified. The
+  owned target is closed. Native patch is unchanged from the reviewed round 2.
+- The live proof script now uses the orb controls' accessible microphone labels
+  and requires both user and assistant activity through the real local meter.
+  This is isolated proof maintenance and does not change production behavior.
+  Web typecheck and its changed-file lint pass.
+
+## Implementation closeout
+
+Implementation, direct proof, final external review and the local test handoff
+are complete. The final commit adds only isolated browser-proof assertions and
+this evidence; production behavior is unchanged from the reviewed head. Final
+exact-head CI remains the PR completion gate and is tracked in the PR body. No
+merge, deployment or public preview publication has occurred.
+Completed: 2026-09-21
