@@ -1,6 +1,6 @@
 # Preserve hosted device source identity across cold restores
 
-Status: active
+Status: completed
 Created: 2026-09-20
 Updated: 2026-09-20
 
@@ -34,5 +34,7 @@ compatible but can reproduce the defect until replaced.
 
 - [x] Reproduce and fix the source store boundary.
 - [x] Add repeated cold-store regression proof and update runtime expectations.
-- [ ] Complete focused tests, typecheck, changelog and candidate review.
+- [x] 211 focused tests; device-syncd, assistant-runtime and Web typechecks;
+  changelog proof and parent candidate review completed. Complexity debt unchanged.
 - [ ] Exact-head CI and ReviewGPT, then authorized merge and deployment.
+Completed: 2026-09-20
