@@ -93,7 +93,8 @@ describe.skipIf(!enabled)("signed runtime callback SQL load", () => {
         groupId: group, memberId: member, role: "member" } });
       await client.hostedThreadContainer.create({ data: { memberId: container, ownerMemberId: owner } });
       await client.hostedRuntimeOwner.createMany({ data: ids.map(userId => ({ userId, attemptId, generation: 1n,
-        migrationPhase: "postgres", phase: "active", workspaceVersion: 1n })) });
+        migrationPhase: "postgres", phase: "active", workspaceVersion: 1n, processingMode: "default",
+        allocationId: `callback_allocation_${userId}`, runnerContainerName: `callback_runner_${userId}` })) });
       const sample = async (prisma: PrismaClient) => {
         database.current = prisma;
         statements = 0;
