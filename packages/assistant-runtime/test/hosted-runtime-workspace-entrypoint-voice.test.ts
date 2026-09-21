@@ -10,7 +10,7 @@ import type { CodexRealtimeClosure } from "@murphai/assistant-engine/assistant-r
 import { createCoalescingRuntimeWakeSignal, runHostedWorkspaceRuntimeJobInProcess } from "../src/hosted-runtime.ts";
 import { createHostedRuntimeVoice, createHostedRuntimeVoiceCall } from "../src/hosted-runtime/voice-call.ts";
 
-it.each(["call-close", "shutdown"] as const)("retains an empty invocation for reserved voice and fences new calls before %s return", async (stop) => {
+it.each(["call-close", "shutdown", "owner-handoff"] as const)("retains an empty invocation for reserved voice and fences new calls before %s return", async (stop) => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-voice-invocation-"));
   const events: string[] = [];
   const wake = createCoalescingRuntimeWakeSignal();
@@ -51,8 +51,12 @@ it.each(["call-close", "shutdown"] as const)("retains an empty invocation for re
     ])).resolves.toBe("held");
     expect(voice.reserve("other_call")).toBe(false);
     if (stop === "shutdown") shutdown.abort();
+    else if (stop === "owner-handoff") wake.notify({ requestedProcessingMode: "system_mailbox" });
     else await voice.closeCall("call_synthetic");
-    await invocation;
+    await expect(Promise.race([
+      invocation.then(() => "returned"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("timed-out"), 1_000)),
+    ])).resolves.toBe("returned");
     expect(returned).toBe(true);
     expect(voice.reserve("later_call")).toBe(false);
   } finally {
@@ -63,7 +67,7 @@ it.each(["call-close", "shutdown"] as const)("retains an empty invocation for re
   }
 });
 
-it("checkpoints and drains selected delivery while voice stays open", async () => {
+it.each([false, true])("checkpoints and drains selected delivery while voice stays open (mailbox follow-up: %s)", async (mailboxFollowup) => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-voice-checkpoint-"));
   const events: string[] = [];
   const wake = createCoalescingRuntimeWakeSignal();
@@ -101,6 +105,7 @@ it("checkpoints and drains selected delivery while voice stays open", async () =
     expect(voice.isHoldingRuntime()).toBe(true);
   });
   let progressed = false;
+  let followupObserved = false;
   let returned = false;
   const invocation = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
     voice, runtimeWakeSignal: wake, signal: abort.signal, vaultRoot,
@@ -112,7 +117,13 @@ it("checkpoints and drains selected delivery while voice stays open", async () =
     }),
     runAssistantPhase: async (phase) => {
       expect(phase.runtime.platform.voicePort).toBe(voice);
-      if (progressed) return { progressed: false };
+      if (progressed) {
+        followupObserved = true;
+        return {
+          progressed: false,
+          ...(mailboxFollowup ? { nextWakeAt: new Date().toISOString(), nextWakeReason: "mailbox" } : {}),
+        };
+      }
       progressed = true;
       return {
         progressed: true, checkpointReason: "assistant_runtime_commit",
@@ -134,6 +145,12 @@ it("checkpoints and drains selected delivery while voice stays open", async () =
     expect(voice.isHoldingRuntime()).toBe(true);
     expect(returned).toBe(false);
     await vi.waitFor(() => expect(native.speak).toHaveBeenCalledExactlyOnceWith("Selected checkpointed reply"));
+    wake.notify();
+    await vi.waitFor(() => expect(followupObserved).toBe(true));
+    await expect(Promise.race([
+      invocation.then(() => "returned"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("held"), 250)),
+    ])).resolves.toBe("held");
     expect(native.close).not.toHaveBeenCalled();
     await voice.closeCall("call_synthetic");
     await invocation;

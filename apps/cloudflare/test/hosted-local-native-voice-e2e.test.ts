@@ -43,6 +43,10 @@ describe.skipIf(!audioPath)("hosted local native voice e2e", () => {
       },
       assistantProviderMode: "live",
       assistantProviderRecorder: false,
+      // The snapshot locator seed is the sole mutating test control. Assert
+      // that count below so the voice journey cannot use a harness wake.
+      faultInjection: true,
+      testControls: true,
       persistDirPrefix: "murph-hosted-local-native-voice-",
       requiredRunnerEnvProfile: "assistant",
       scenarioLabel: "Local hosted native voice proof",
@@ -79,6 +83,11 @@ describe.skipIf(!audioPath)("hosted local native voice e2e", () => {
       },
       maxBuffer: 1_000_000,
       timeout: 240_000,
+    }).catch(async (error: unknown) => {
+      if (!scenario) throw error;
+      throw new Error(await scenario.buildFailureMessage(userId, [
+        error instanceof Error ? error.message : "Hosted voice browser process failed.",
+      ]));
     });
     const marker = stdout.split(/\r?\n/u).find((line) => line.startsWith("MURPH_E2E_RESULT="));
     expect(marker, "browser proof result").toBeDefined();
@@ -111,6 +120,7 @@ describe.skipIf(!audioPath)("hosted local native voice e2e", () => {
     expect(voiceUsage.length).toBeGreaterThan(0);
     expect(voiceUsage.every((row) => row.allowanceCounted)).toBe(true);
     expect(voiceUsage.reduce((total, row) => total + BigInt(row.allowanceCostUsdMicros), 0n)).toBeGreaterThan(0n);
+    expect(scenario.harness.interventionCount).toBe(1);
     process.stdout.write(`VOICE_HOSTED_PROOF=${JSON.stringify({
       acceptedConversationInputs: consumed.consumedSeq,
       trustedUsageRows: voiceUsage.length,

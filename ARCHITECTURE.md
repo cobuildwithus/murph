@@ -2487,8 +2487,10 @@ from anchoring itself to a workspace inode. Threads receive the current
 workspace through the explicit per-thread `cwd` param.
 
 The native voice attachment uses that same process owner and a read-only,
-ephemeral media thread with no Murph tools. Starting it briefly reserves the slot;
-conversation lifetime does not occupy an ordinary turn. Native normalization
+ephemeral media thread with no Murph tools. Startup holds the existing process
+slot lock so checkpoints and shutdown join attachment instead of reporting a
+busy backing turn. It can attach to a matching active ordinary turn without
+claiming or releasing that turn; conversation lifetime does not occupy a turn. Native normalization
 emits untrusted inputs to the host, which must durably accept them before using
 the ordinary context, turn, tool, and presentation path. The start response must
 confirm managed input ownership before the browser receives SDP. Voice events
@@ -2504,7 +2506,11 @@ Local subscription-backed turns also register that credential-based OpenAI
 provider for media; voice cannot silently use the member's ChatGPT authentication.
 
 The invocation's ephemeral call handle expires an unattached reservation after
-30 seconds, serializes native input admission, and wakes the runtime only after
+30 seconds. A reserved or connected call counts as foreground activity for the
+routine idle/mailbox handoff decision; explicit processing-mode, provider, policy,
+and shutdown transitions retain their existing authority to end the invocation.
+The clean voice wait sends processing-mode changes through the existing handoff
+handler. The call serializes native input admission and wakes the runtime only after
 the mailbox owner accepts each input. It joins pending admission and trusted usage
 settlement when closing, including cancellation during startup. Selected delivery
 requires the exact call and accepted mailbox ids; the hosted outbox checks runtime

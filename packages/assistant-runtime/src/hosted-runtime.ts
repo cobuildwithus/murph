@@ -6004,6 +6004,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         ): void => {
           if (
             !runtimeOwnerHandoffRequested
+            // A live/reserved call is foreground work. Routine mailbox follow-up
+            // may checkpoint in place; only explicit owner/policy changes end it.
+            && options.voice?.isHoldingRuntime() !== true
             && !foregroundWorkPending
             && pendingDurableCheckpointEffects.length === 0
             && readyDurableCheckpointEffects.length === 0
@@ -6530,10 +6533,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             shutdownSignal: options.shutdownSignal ?? null,
           });
           if (waited.kind === "external_wake") {
-            await runForegroundPass({
-              latencySeed: createHostedRuntimeWakeLatencySeed(waited.notification),
-              requestIdKind: "idle-wake",
-            });
+            const latencySeed = createHostedRuntimeWakeLatencySeed(waited.notification);
+            if (latencySeed?.requestedProcessingMode) {
+              await runPreCheckpointConversationWake(latencySeed);
+            } else {
+              await runForegroundPass({ latencySeed, requestIdKind: "idle-wake" });
+            }
             if (!runtimeStateDirty) await drainCleanDurableCheckpointEffects();
           }
         }

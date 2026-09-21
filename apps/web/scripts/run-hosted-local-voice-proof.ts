@@ -104,4 +104,11 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+void main().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : "Unknown browser setup error.";
+  process.stderr.write(`${message
+    .replace(/\/(?:Users|home)\/[^/\s]+/gu, "<HOME_DIR>")
+    .replace(/https?:\/\/[^\s)]+/gu, "[redacted-url]")
+    .slice(0, 1000)}\n`);
+  process.exitCode = 1;
+});

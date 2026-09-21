@@ -73,18 +73,38 @@ Updated: 2026-09-21
 
 ## Verification
 
+- The next composed retry isolated cancellation to the routine foreground-idle
+  mailbox handoff, with no budget exhaustion, shutdown, or abort. Reserved/live
+  calls now count as foreground work at that existing decision. The clean voice
+  wait also routes explicit processing-mode requests through the existing handoff
+  handler; a timed regression proves prompt closure rather than waiting for the
+  reservation to expire. The mailbox follow-up regression failed before the fix;
+  all 42 selected voice, checkpoint, and runtime-collapse cases pass. Temporary
+  diagnostics emitted only fixed categories and were removed. The full hosted
+  browser journey is being retried after rebuilding the clean runner bundle.
+- The composed hosted browser test reproduced a process-busy failure when a
+  system-only wake checkpoint overlapped native media negotiation. The engine
+  now holds its existing process slot lock through attachment, rather than
+  exposing startup as a competing ordinary turn. A matching active turn can
+  share the media thread without surrendering its reservation. The native
+  checkpoint regression failed before the fix; four packaged native cases and
+  44 existing process cases pass, including voice attachment during an ordinary
+  turn. Engine typecheck, complexity, and runner bundle parity/size checks pass.
+  The authenticated hosted browser proof is being rerun with that bundle.
 - The bounded native builds pass. Linux run `35597350646` at `698ec03fc4c8`
   passes all three packaged native cases, 29 provider compatibility/egress cases,
   and final-image permission confinement. Its unchanged native recipe compiled
   in 55 minutes 19 seconds; the local emulated build compiled in 74 minutes
   21 seconds. A forced source rebuild using the warm local Docker cache passed
   in 1.51 seconds. This proves local layer reuse, not cross-runner persistent
-  cache activation or timing. The later usage-only change still needs final-head
-  CI. The first hosted attempt stopped before a call because host CLI 0.155.1
+  cache activation or timing. The later runtime and process-start changes still
+  need final-head CI. The first hosted attempt stopped before a call because host CLI 0.155.1
   lacks the harness's legacy smoke-model template. The matching pinned 0.153.4
   CLI supplies it; the rerun uses that CLI on its process PATH. This reproducible
   harness version dependency is recorded in Frog, without changing production
-  model selection. Full hosted voice remains unverified while that rerun starts.
+  model selection. The composed test then exposed missing fixture controls and
+  a CommonJS browser-driver entrypoint; both are corrected, with Cloudflare/Web
+  typechecks passing. Full hosted voice remains unverified.
 - Parent review reproduced final usage escaping shutdown's accounting join when
   the provider receipt arrived between a completed ledger write and its promise
   cleanup. The existing flush loop now joins the next write, including failure,

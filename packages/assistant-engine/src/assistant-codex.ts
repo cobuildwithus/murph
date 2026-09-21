@@ -600,13 +600,21 @@ export async function startCodexAppServerRealtime(
   input: CodexAppServerRealtimeInput,
 ): Promise<CodexRealtimeSession> {
   const prepared = await prepareCodexAppServerProcessInput(input)
-  const processInstance = await getOrStartWarmCodexProcess(prepared)
-  try {
-    await processInstance.initialize()
-    return await processInstance.startRealtime({ ...input, workingDirectory: prepared.workingDirectory })
-  } finally {
-    processInstance.releaseReservation()
-  }
+  // Media attachment is process setup, not an ordinary turn. Keep lifecycle
+  // operations behind the existing slot lock until startup settles; a checkpoint
+  // must wait here instead of mistaking negotiation for an in-flight host turn.
+  return await withWarmCodexSlotLock(async () => {
+    const existing = warmCodexProcess?.canShareForLaunch(prepared.launchKey)
+      ? warmCodexProcess
+      : null
+    const processInstance = existing ?? await claimWarmCodexProcess(prepared)
+    try {
+      await processInstance.initialize()
+      return await processInstance.startRealtime({ ...input, workingDirectory: prepared.workingDirectory })
+    } finally {
+      if (!existing) processInstance.releaseReservation()
+    }
+  })
 }
 
 export interface CodexAppServerTurnFailureContext {
@@ -1368,10 +1376,14 @@ class CodexAppServerProcess {
   }
 
   canClaimForLaunch(launchKey: string): boolean {
+    return this.state === 'idle' && this.canShareForLaunch(launchKey)
+  }
+
+  canShareForLaunch(launchKey: string): boolean {
     return (
       this.launchKey === launchKey &&
       !this.poisoned &&
-      this.state === 'idle' &&
+      (this.state === 'idle' || this.state === 'reserved') &&
       this.child.exitCode === null &&
       this.child.signalCode === null
     )
@@ -2501,39 +2513,44 @@ async function getOrStartWarmCodexProcess(
   if (warmCodexWorkspaceBoundaryActive) {
     throw buildWarmCodexWorkspaceBoundaryBusyError()
   }
-  const launchKey = input.launchKey
-  return await withWarmCodexSlotLock(async () => {
-    const previousProcess = warmCodexProcess
-    if (previousProcess) {
-      if (previousProcess.canClaimForLaunch(launchKey)) {
-        previousProcess.reserveTurn()
-        return previousProcess
-      }
-      if (previousProcess.hasInFlightTurn) {
-        throw previousProcess.buildBusyError(
-          'Codex app-server process is already serving a turn.',
-        )
-      }
-      const processExited =
-        previousProcess.child.exitCode !== null ||
-        previousProcess.child.signalCode !== null
-      const stopReason = processExited
-        ? 'process-exited'
-        : previousProcess.launchKey !== launchKey
-          ? 'launch-identity-changed'
-          : 'process-unhealthy'
-      await previousProcess.stop(stopReason)
-    }
+  return await withWarmCodexSlotLock(() => claimWarmCodexProcess(input))
+}
 
-    const processInstance = new CodexAppServerProcess({
-      ...input,
-      coldStartReason:
-        previousProcess?.nextColdStartReason ?? 'node-process-first-use',
-    })
-    warmCodexProcess = processInstance
-    processInstance.reserveTurn()
-    return processInstance
+/** Caller holds the warm slot lock through selection and reservation. */
+async function claimWarmCodexProcess(
+  input: CodexAppServerProcessInput,
+): Promise<CodexAppServerProcess> {
+  const launchKey = input.launchKey
+  const previousProcess = warmCodexProcess
+  if (previousProcess) {
+    if (previousProcess.canClaimForLaunch(launchKey)) {
+      previousProcess.reserveTurn()
+      return previousProcess
+    }
+    if (previousProcess.hasInFlightTurn) {
+      throw previousProcess.buildBusyError(
+        'Codex app-server process is already serving a turn.',
+      )
+    }
+    const processExited =
+      previousProcess.child.exitCode !== null ||
+      previousProcess.child.signalCode !== null
+    const stopReason = processExited
+      ? 'process-exited'
+      : previousProcess.launchKey !== launchKey
+        ? 'launch-identity-changed'
+        : 'process-unhealthy'
+    await previousProcess.stop(stopReason)
+  }
+
+  const processInstance = new CodexAppServerProcess({
+    ...input,
+    coldStartReason:
+      previousProcess?.nextColdStartReason ?? 'node-process-first-use',
   })
+  warmCodexProcess = processInstance
+  processInstance.reserveTurn()
+  return processInstance
 }
 
 async function stopExactUnclaimedWarmCodexProcess(

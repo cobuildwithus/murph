@@ -9,6 +9,7 @@ import {
   executeCodexAppServerTurn,
   startCodexAppServerRealtime,
   stopWarmCodexAppServer,
+  waitForWarmCodexBackgroundWork,
   type CodexRealtimeInput,
 } from '../src/assistant-codex.ts'
 import {
@@ -25,6 +26,12 @@ import {
   type PendingCodexRpcRequest,
 } from '../src/assistant-codex/app-server-rpc.ts'
 import { prepareScriptedTurnScenario, readRecord, startScriptedResponsesStub } from './support/codex-scripted-provider.ts'
+
+function createSignal() {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => { resolve = done })
+  return { promise, resolve }
+}
 
 const temporaryPaths: string[] = []
 // CI supplies the CLI extracted from the actual runner image. The published
@@ -292,13 +299,17 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
   }
 })
 
-it.skipIf(!publicLive)('keeps native media on the resident process across ordinary host turns and closes it before process shutdown', { timeout: 60_000 }, async () => {
+it.skipIf(!publicLive).each(['checkpoint', 'active turn'] as const)('keeps native media on the resident process across %s startup overlap and ordinary host turns', { timeout: 60_000 }, async (overlap) => {
   const stub = await startScriptedResponsesStub()
   const inputs: CodexRealtimeInput[] = []
   const usage: number[] = []
   const forwarded: Record<string, unknown>[] = []
+  const offerObserved = createSignal()
+  const releaseOffer = createSignal()
   const server = createServer(async (request, response) => {
     for await (const _chunk of request) { /* Drain the synthetic offer. */ }
+    offerObserved.resolve()
+    await releaseOffer.promise
     response.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({
       session: { id: 'rtc_resident' }, transport: { type: 'webrtc', sdp: 'v=0\r\ns=resident-answer\r\n' },
     }))
@@ -329,8 +340,19 @@ it.skipIf(!publicLive)('keeps native media on the resident process across ordina
       `experimental_realtime_webrtc_call_base_url="http://127.0.0.1:${address.port}/v1"`,
     ],
   }
+  const turnObserved = createSignal()
+  const releaseTurn = createSignal()
+  let overlappingTurn: ReturnType<typeof executeCodexAppServerTurn> | undefined
   try {
-    const voice = await startCodexAppServerRealtime({
+    if (overlap === 'active turn') {
+      stub.queue({
+        text: 'Existing turn completed.',
+        beforeRespond: async () => { turnObserved.resolve(); await releaseTurn.promise },
+      })
+      overlappingTurn = executeCodexAppServerTurn({ ...launch, dynamicTools: [], prompt: 'Existing ordinary request.' })
+      await turnObserved.promise
+    }
+    const starting = startCodexAppServerRealtime({
       ...launch,
       sessionId: 'synthetic-resident-call',
       sdp: 'v=0\r\ns=resident-offer\r\n',
@@ -338,7 +360,17 @@ it.skipIf(!publicLive)('keeps native media on the resident process across ordina
       onInput: (input) => inputs.push(input),
       onUsage: (seconds) => usage.push(seconds),
     })
+    await Promise.race([offerObserved.promise, starting])
+    // A system-only wake can checkpoint while the browser negotiates media.
+    // It must join the process owner instead of failing as a competing turn.
+    const checkpoint = overlap === 'checkpoint' ? waitForWarmCodexBackgroundWork() : Promise.resolve()
+    void checkpoint.catch(() => {})
+    releaseOffer.resolve()
+    const [voice, checkpointResult] = await Promise.all([starting, checkpoint.catch((error: unknown) => error)])
+    expect(checkpointResult).toBeUndefined()
     expect(voice.sdp).toContain('resident-answer')
+    releaseTurn.resolve()
+    if (overlappingTurn) expect((await overlappingTurn).finalMessage).toBe('Existing turn completed.')
     await vi.waitFor(() => expect(sideband).toBeDefined())
     let threadId: string | null = null
     for (let index = 1; index <= 2; index += 1) {
@@ -351,7 +383,7 @@ it.skipIf(!publicLive)('keeps native media on the resident process across ordina
         delegation: { id: `resident_${index}`, type: 'delegation', target: 'client' },
       }))
       await vi.waitFor(() => expect(inputs).toHaveLength(index))
-      expect(stub.requestCountSinceBaseline()).toBe(index - 1)
+      expect(stub.requestCountSinceBaseline()).toBe(index - 1 + (overlap === 'active turn' ? 1 : 0))
       stub.queue({
         text: `Selected answer ${index}.`,
         requestIncludes: ['Prepared host context', `Synthetic request ${index}.`],
@@ -384,6 +416,9 @@ it.skipIf(!publicLive)('keeps native media on the resident process across ordina
     expect(forwarded.filter((event) => event.type === 'session.close')).toHaveLength(1)
     await expect(voice.speak('Late result')).rejects.toThrow('closed')
   } finally {
+    releaseOffer.resolve()
+    releaseTurn.resolve()
+    await overlappingTurn?.catch(() => {})
     await stopWarmCodexAppServer()
     sockets.close()
     for (const socket of sockets.clients) socket.terminate()
