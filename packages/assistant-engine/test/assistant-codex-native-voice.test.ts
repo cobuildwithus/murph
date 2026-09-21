@@ -104,7 +104,10 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('Synthetic voice listener unavailable.')
   const baseUrl = `http://127.0.0.1:${address.port}/v1`
-  const { turnInput } = await prepareScriptedTurnScenario(stub, temporaryPaths)
+  // Keep this synthetic voice proof independent of background marketplace downloads.
+  const { turnInput } = await prepareScriptedTurnScenario(stub, temporaryPaths, {
+    additionalTomlLines: ['[features]', 'plugins = false'],
+  })
   const child = spawn(turnInput.codexCommand, [
     '-c', 'features.realtime_conversation=true',
     '-c', `experimental_realtime_ws_base_url="${baseUrl}"`,
@@ -332,7 +335,10 @@ it.skipIf(!publicLive).each(['checkpoint', 'active turn'] as const)('keeps nativ
   await once(server, 'listening')
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('Synthetic voice listener unavailable.')
-  const { turnInput } = await prepareScriptedTurnScenario(stub, temporaryPaths)
+  // Keep this synthetic voice proof independent of background marketplace downloads.
+  const { turnInput } = await prepareScriptedTurnScenario(stub, temporaryPaths, {
+    additionalTomlLines: ['[features]', 'plugins = false'],
+  })
   const launch = {
     ...turnInput,
     configOverrides: [
