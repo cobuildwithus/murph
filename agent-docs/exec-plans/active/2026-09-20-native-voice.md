@@ -42,7 +42,27 @@ Updated: 2026-09-21
 4. Integrate authenticated browser voice and exact provider routes, with product output and usage at existing boundaries. Reserve a pending call before a clean runtime can return; keep the live handle within the existing invocation, fence by its attempt/generation, and close before release. Wire native input through authenticated durable mailbox admission and selected post-checkpoint outbox speech through the exact call port. Reuse the existing member delivery route for future scheduled notifications; an ephemeral call cannot become a durable reminder destination.
 5. Run focused tests/typecheck, native and rendered proof, review complexity, and complete scoped commit/PR/review and authorized release work.
 
-## Decisions
+## Product UX plan
+
+- Outcome: an authenticated individual member can speak to their existing Murph
+  assistant and hear its selected answer, with microphone and end-call control.
+- Entry and promise: a dashboard Voice link opens one call page. Start requests
+  microphone permission, shows connection progress, and then displays microphone
+  state and readable answer captions. Calls use the existing AI allowance.
+- Affected journeys: signed-out entry uses the existing sign-in dialog; a denied
+  microphone, unsupported browser, expired session, access/allowance rejection,
+  slow startup, lost connection, mute, explicit end, and navigation away all have
+  a visible safe outcome. Voice is an individual channel, not a group destination.
+  Existing text conversations and durable scheduled delivery remain available.
+- Proof: test browser media lifecycle against the real authenticated control
+  contract, inspect production components at phone and desktop widths, then run
+  the composed native/provider/mailbox/tool/speech/shutdown journey.
+- Done when: start never happens on page load, stop immediately releases the
+  microphone, stale startup cannot reopen media, retries reuse the same offer and
+  call, and the member can read or hear the result. Current verdict: Hold pending
+  browser and full hosted proof.
+
+## Implementation decisions
 
 - Keep the existing Codex 0.153.4 release (`3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`) and matching bundled helpers. The main-based prototype proved public compatibility; its patch is backported to the release to avoid adopting unrelated upstream changes. Build only the patched CLI in the existing runner base image. The Dockerfile and native patch jointly identify the cache input.
 - Preserve native transport and transcript normalization while using Murph's existing turn lifecycle. The native acceptance-handshake experiment passed 522 checks and real browser speech, but accepting native start-or-steer still bypasses the engine's prepared prompt and competes with its turn binding. A real comparison using normal host `turn/start` passed the same two spoken tool-backed requests and trusted closure. Replace the handshake with a small opt-in normalized-input notification (`clientManagedInputs`) and use the existing durable mailbox, context preparation, start/steer, and presentation owners. This removes custom admission callbacks, deadlines, cancellation gates, and protocol response types. The replacement notification implementation also passes real browser speech: two host-started backing turns, two successful read-only tools, audible answers, and provider-confirmed closure with trusted final cumulative usage. Full hosted wiring remains unverified; both comparisons used a synthetic host, not Murph's complete runtime.
@@ -50,6 +70,18 @@ Updated: 2026-09-21
 - The engine attachment uses an ephemeral media thread with no Murph tools on its existing resident process. This avoids creating a backing thread before the ordinary turn path has prepared its tools, prompt, model, and durable session binding. A composed synthetic test passed two ordinary host turns while voice stayed connected, selected speech, and provider-confirmed closure before process shutdown. The attachment fences stale/closing input, accepts cancellation during startup, and keeps voice events out of another turn's captured output. It adds no second process or work queue. The start response confirms managed input ownership, rejecting older binaries that silently ignore the flag before SDP reaches the browser. Its 298 protocol checks, schemas, scoped Clippy, formatting, and full CLI build pass. The corrected public Live filter runs five app-server cases, all passing with four requiring the native test runner retry; no clean first-attempt claim is made. The packaged CLI passes the composed engine/native tests. Real browser speech through the engine attachment also passes: two synthetic inputs durably recorded by the proof host, two ordinary turns reading a fixture through the shell, audible selected results, and provider-confirmed shutdown with trusted final cumulative usage of 19 seconds. This is engine composition evidence, not the hosted mailbox or website. Six notification failure/cancellation tests and the 50 existing runtime-turn tests pass; engine typecheck passes. Complexity remains below the existing baseline with no new function above 20.
 
 ## Verification
+
+- The dashboard now links to the member Voice page. Its browser controller owns
+  only microphone, WebRTC, answer captions, and the existing authenticated
+  reservation/connect/close requests. It starts only on an explicit action,
+  preserves one offer across readiness retries, stops media before waiting for
+  closure, and fences late permission/reservation/answer results. Fifty-four Web
+  controller, component, sidebar, and route cases pass, together with Web typecheck,
+  eight public package-resolution checks, dependency policy, and complexity.
+  Production component rendering passes at 390px and 1440px without overflow;
+  the idle, muted, and microphone-denied states are inspected. These are browser
+  lifecycle and presentation proofs. The real authenticated hosted journey,
+  scheduled notification route, final deployment proof, and final review remain.
 
 - Public Live creation and attachment now pass through the existing Worker egress
   owner. A stateless signed reference binds the provider resource to the exact

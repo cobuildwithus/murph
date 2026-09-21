@@ -2495,8 +2495,8 @@ confirm managed input ownership before the browser receives SDP. Voice events
 are consumed before another turn's transcript/event capture. Selected speech is
 explicit, and process shutdown closes native voice before terminating the CLI.
 Only native provider receipts establish confirmed closure and cumulative usage;
-the attachment itself owns no mailbox, billing ledger, or replay. Authenticated
-website UI remains disabled until the complete hosted journey is verified.
+the attachment itself owns no mailbox, billing ledger, or replay. The complete
+hosted journey remains a release gate for the website entry.
 The hosted voice entrypoint derives the identical process launch configuration
 used by ordinary turns. Its media thread may select the configured OpenAI provider
 without replacing a Venice or custom-inference backing target or process.
@@ -2541,6 +2541,15 @@ that owner retires or loses allowance so native cancellation can finish closing 
 Creation still requires current spend authority. The Worker returns WebSocket
 upgrades unaccepted; native Codex owns frames and closure. There is no call table,
 second sideband, or JavaScript frame relay.
+
+The dashboard's Voice page owns only browser media. An explicit Start action
+requests microphone permission, reserves an opaque call, and exchanges one SDP
+offer through authenticated Web control. Readiness retries retain that call and
+offer. Mute disables the local audio track; end, page exit, microphone loss, and
+connection failure release local media before awaiting server closure. A late
+startup cannot reopen an ended call or overwrite a newer call's UI/audio. Browser
+provider events supply bounded answer captions and request closure, but never
+establish trusted settlement. The existing native attachment owns final receipts.
 
 Normalized input admission uses the existing signed Web callback and encrypted
 mailbox. Its narrow request contains only the call id, native input id, original

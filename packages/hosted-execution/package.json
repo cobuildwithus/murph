@@ -22,6 +22,10 @@
       "types": "./dist/auth.d.ts",
       "default": "./dist/auth.js"
     },
+    "./voice-control": {
+      "types": "./dist/voice-control.d.ts",
+      "default": "./dist/voice-control.js"
+    },
     "./runtime-migration": {
       "types": "./dist/runtime-migration.d.ts",
       "default": "./dist/runtime-migration.js"
