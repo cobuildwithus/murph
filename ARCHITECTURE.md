@@ -3096,8 +3096,16 @@ statement, composing the canonical direct/Family/owner predicate with the
 current participant lease predicate. They do not hydrate access-state relations
 or cache authority. Callers that need the access state retain the full reader.
 Established Linq direct messages resolve a blind-index/member-id target and
-prepare the required control and mailbox ingress roots plus the observed routing
-snapshot before `BEGIN`. They do not load or compare a full private identity
+prepare the required mailbox ingress root plus the observed raw routing
+record before `BEGIN`. For a provider-attested direct message whose current blind
+chat, recipient-line, and participant indexes exactly match a home binding with
+no pending state, preparation derives the route from those incoming values and
+skips control-root preparation and private routing decryption. The transaction
+still checks for competing pending bindings before retaining the home binding.
+Changed routes, pending conflicts, access changes, and Family transitions use
+the existing bounded retry with full control-root and private-routing preparation.
+Other direct routes prepare both control and ingress roots as needed.
+They do not load or compare a full private identity
 snapshot unless Family acceptance/replay consumes it. A positive member ID
 already discovered for an opener-continuation claim seeds only the first direct
 preparation attempt; misses, retries and later plans resolve again. The transaction still
