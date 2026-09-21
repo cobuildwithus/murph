@@ -282,7 +282,7 @@ describe("bounded recovery census", () => {
     objectReadStatus = 200;
     const timeout = AbortSignal.timeout;
     abortReads = new AbortController();
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => ms === 20 * 60_000 ? abortReads!.signal : timeout(ms));
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => ms === 45 * 60_000 ? abortReads!.signal : timeout(ms));
     try {
       await expect(assessCheckpointRecovery(env, fetchImpl, reportProgress)).rejects.toThrow("synthetic-private-object-error");
       expect(reportProgress).toHaveBeenLastCalledWith(expect.objectContaining({

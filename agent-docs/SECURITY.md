@@ -1467,7 +1467,7 @@ both endpoints; caller-controlled endpoint overrides are not accepted.
 Artifact reads run in waves of at most eight, sharing one streamed 512 MiB
 budget; each object remains limited to 32 MiB. Every wave settles before exit,
 and downloaded buffers are cleared even when its consumer stops early. The
-50,000-object and twenty-minute limits bound the census. Progress every 100 processed
+50,000-object and forty-five-minute limits bound the census. Progress every 100 processed
 objects and on scan failure contains only aggregate read/authentication/root
 counts, an incomplete marker, and a closed failure class or HTTP status. It
 never includes object names, member identifiers, root identifiers, or caught

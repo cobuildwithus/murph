@@ -202,7 +202,7 @@ export async function assessCheckpointRecovery(
   const token = required(env, "CLOUDFLARE_API_TOKEN");
   const prefix = `users/${createHostedStorageNamespaceId(request.userId)}/artifacts/`;
   const api = `https://api.cloudflare.com/client/v4/accounts/${account}/r2/buckets/${bucket}/objects`;
-  const signal = AbortSignal.timeout(20 * 60_000);
+  const signal = AbortSignal.timeout(45 * 60_000);
   const boundedFetch: typeof fetch = (url, init) => fetchImpl(url, {
     ...init, redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
   });
