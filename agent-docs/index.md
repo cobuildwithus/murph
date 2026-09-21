@@ -586,3 +586,6 @@ Query projection storage reduction is tracked in
 
 Query page packing and unused date-index removal are tracked in
 [`query page packing`](exec-plans/completed/2026-09-21-workspace-page-packing.md).
+
+Query metric payload deduplication and transaction/restore proof are tracked in
+[`metric payload storage`](exec-plans/completed/2026-09-21-workspace-metric-dedup.md).
