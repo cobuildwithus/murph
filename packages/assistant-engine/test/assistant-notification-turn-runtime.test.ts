@@ -1,7 +1,7 @@
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 
 import { afterEach, describe, expect, test, vi } from 'vitest'
@@ -21,6 +21,7 @@ import {
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  upsertMemory,
   AVAILABILITY_CONFLICT_BLOCK_END,
   AVAILABILITY_CONFLICT_BLOCK_START,
 } from '@murphai/core'
@@ -235,6 +236,8 @@ afterEach(() => {
 
 test.each([
   { profile: 'member-memory', status: 'empty', page: 'missing', skip: true },
+  { profile: 'member-memory', status: 'empty', page: 'present', skip: false },
+  { profile: 'member-memory', status: 'empty', page: 'unavailable', skip: false },
   { profile: 'group-room-model', status: 'empty', page: 'missing', skip: true },
   { profile: 'member-memory', status: 'unavailable', page: 'missing', skip: false },
   { profile: 'member-memory', status: 'available', page: 'missing', skip: false },
@@ -261,7 +264,15 @@ test.each([
     }),
     turnId: 'turn-empty-maintenance',
   })
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-memory-admission-'))
+  if (profile === 'member-memory' && page === 'present') {
+    await upsertMemory(vault, { section: 'Preferences', text: 'Prefers concise comparisons.' })
+  } else if (profile === 'member-memory' && page === 'unavailable') {
+    await mkdir(path.join(vault, 'bank'), { recursive: true })
+    await writeFile(path.join(vault, 'bank/memory.md'), 'malformed memory')
+  }
   const onProviderRequestStarted = vi.fn()
+  try {
   const result = await sendAssistantNotificationLocal({
     executionContext: { hosted: null },
     instructions: 'Perform the authorized silent maintenance.',
@@ -271,7 +282,7 @@ test.each([
       maintenanceProfile: profile,
       privateSummary: 'Silent maintenance complete.',
     },
-    vault: '/vaults/empty-maintenance',
+    vault,
   })
   expect(result.decision).toEqual({ kind: 'skip', privateSummary: 'Silent maintenance complete.' })
   expect(result.response).toBeNull()
@@ -282,6 +293,9 @@ test.each([
     expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
     expect(onProviderRequestStarted).not.toHaveBeenCalled()
     expect(result.session.turnCount).toBe(0)
+  }
+  } finally {
+    await rm(vault, { recursive: true, force: true })
   }
 })
 

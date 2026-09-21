@@ -256,12 +256,39 @@ the shared restricted maintenance configuration and needs no separate
 permission profile or filesystem mutation path; native controls are not an
 additional memory owner, and the host suppresses their effects in this lane.
 The evidence owner distinguishes a successfully empty bounded conversation
-window from collection failures. An empty member-memory window skips before
-provider admission. An empty group window skips only when its room-model page
+window from collection failures. An empty member-memory window skips before provider admission only when
+canonical memory also has no records. Existing memory remains eligible for
+faithful compaction and explicit temporary-context expiry; failed reads retain
+the ordinary maintenance tool path. Failed conversation collection explicitly
+forbids memory mutations because newer corrections may be missing. An empty group window skips only when its room-model page
 is also genuinely missing; existing pages remain eligible for cleanup, and
 unavailable evidence or pages keep the ordinary maintenance path. The rolling
 evidence window remains intact so corrections and late committed events are
 not hidden behind a last-run timestamp.
+
+Private turns read canonical memory once alongside the existing navigation
+snapshot. The bounded memory view has an 8 KiB total ceiling and section byte
+budgets weighted toward Preferences and Instructions. It includes whole records
+in newest-first order without a three-record or 200-byte cutoff. Selection stops
+at the first record that does not fit its section, rather than exposing older
+facts behind an omitted correction. Current user input and canonical reads win;
+remembered preferences never authorize effects. Group and maintenance turns do
+not receive this private view.
+
+The existing managed memory seed reconciles its instructions on runtime startup
+for active records, retaining the Mon/Wed/Fri 03:00 local schedule. Paused records
+stay untouched until resumed. Maintenance may shorten an existing non-health
+record in place without changing meaning; explicit conditions, exceptions,
+negation, dates, and uncertainty remain intact. New facts and changed preferences
+need conversation evidence. Explicit ongoing ways of helping belong in
+Instructions, without inferring permanent preferences from one-off requests.
+Only a wholly temporary non-health Context record with an unambiguous ended
+window and no supplied extension is eligible for automatic expiry. Mixed durable
+facts, unanchored relative dates, unfinished-goal deadlines, silence, and age
+never justify deletion. Overlapping evidence must not resurrect retired facts.
+Every shown record receives at most one version-checked mutation per pass;
+already concise records remain unchanged. This policy uses the existing memory
+format and tool, with no schema migration or second profile store.
 
 The morning Journal connected-context automation writes canonical Journal plans.
 Their note record owns end time, planned/tentative/canceled state, verification

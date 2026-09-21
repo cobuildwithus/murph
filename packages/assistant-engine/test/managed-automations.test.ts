@@ -1333,7 +1333,7 @@ describe('applyMurphManagedAutomations', () => {
       'clearly supported by the supplied conversation evidence',
     )
     expect(seed.instructions).toContain(
-      'deduplication and mutation targeting only',
+      'faithful shortening of that same record',
     )
     expect(seed.instructions).not.toContain('generated memory extraction')
     expect(seed.instructions).toContain(
@@ -1939,6 +1939,32 @@ describe('applyMurphManagedAutomations', () => {
     expect(memoryRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"Overnight memory consolidation maintenance wake completed."}',
     )
+  })
+
+  it('refreshes existing memory instructions once after resumption without changing its schedule', async () => {
+    const input = {
+      defaultRoute,
+      now: new Date('2026-09-20T12:00:00.000Z'),
+      runtimeEnv: { [HOSTED_RUNTIME_PROCESS_ENV]: '1', EXA_API_KEY: 'fixture-exa-key' },
+      vaultRoot,
+    }
+    await applyMurphManagedAutomations(input)
+    const existing = managedAutomationMocks.records.get(MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID)
+    if (!existing) throw new Error('Expected managed memory record')
+    existing.instructions = 'Legacy memory maintenance instructions.'
+    existing.status = 'paused'
+    expect((await applyMurphManagedAutomations(input)).updated).toBe(0)
+    expect(existing.instructions).toBe('Legacy memory maintenance instructions.')
+    existing.status = 'active'
+    const schedule = existing.schedule
+    const result = await applyMurphManagedAutomations(input)
+    expect(result.updated).toBe(1)
+    const updated = managedAutomationMocks.records.get(MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID)
+    expect(updated).toMatchObject({ status: 'active', schedule })
+    expect(updated?.instructions).toContain('Capture explicit procedural preferences')
+    expect(updated?.instructions).toContain('faithful shortening')
+    expect(updated?.instructions).toContain('unambiguous finite window')
+    expect((await applyMurphManagedAutomations(input)).updated).toBe(0)
   })
 
   it('creates only the group-owned room model automation for group chat routes', async () => {

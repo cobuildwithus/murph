@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-20",
+  "order": 100,
+  "item": {
+    "id": "memory-that-keeps-the-useful-details",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More useful memory in everyday conversations",
+    "summary": "Murph can carry more of your established preferences and preferred ways of getting help into private conversations.",
+    "details": "Regular memory maintenance now shortens wordy memories while preserving their meaning and can retire temporary context with a clear end date. Ambiguous dates, unfinished goals, and lasting preferences are kept. Existing active memory maintenance picks up the improvement automatically.",
+    "relevanceTags": ["memory", "personalization"],
+    "sourcePullRequests": []
+  }
+}

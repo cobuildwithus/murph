@@ -120,6 +120,11 @@ container-owned revocation are documented in `apps/cloudflare/README.md`,
 Pinned Codex/workerd reuse and fallback proof is indexed in
 `agent-docs/references/testing-ci-map.md`.
 
+Private memory selection and automatic compaction/expiry are owned by
+`ARCHITECTURE.md`; focused selection, managed-seed convergence, maintenance
+admission, and real-Codex fresh-conversation proof live in the assistant-engine
+memory and managed-automation tests.
+
 ## Purpose
 
 Deferred device hints honor their persisted retry time in wake projection and

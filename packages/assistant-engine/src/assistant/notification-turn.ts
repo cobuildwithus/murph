@@ -22,6 +22,7 @@ import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/opera
 import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  readMemoryDocument,
   shouldSkipAutomationOccurrenceForAvailability,
   stripAutomationAvailabilityConflictEvidenceForProvider,
 } from '@murphai/core'
@@ -1862,6 +1863,17 @@ async function resolveEmptyAssistantMaintenanceSummary(input: {
     input.maintenanceEvidence?.status !== 'empty'
   ) {
     return null
+  }
+  // Existing memory can need faithful compaction or explicit expiry even
+  // without new conversation. Failed reads retain the ordinary tool path.
+  if (policy.maintenanceProfile === 'member-memory') {
+    try {
+      if ((await readMemoryDocument(input.input.vault)).records.length > 0) {
+        return null
+      }
+    } catch {
+      return null
+    }
   }
   // Existing room pages can need cleanup even without new conversation.
   // Unreadable pages and evidence retain the ordinary maintenance path.

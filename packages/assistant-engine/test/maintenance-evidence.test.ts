@@ -305,7 +305,7 @@ test('returns an explicit empty evidence section when the window has no messages
   })
 
   expect(evidence).toContain(ASSISTANT_MAINTENANCE_EVIDENCE_HEADING)
-  expect(evidence).toContain('Do not write any new memory this run.')
+  expect(evidence).toContain('Do not add facts; only maintain existing records')
   expect((await readAssistantMaintenanceConversationEvidence({
     now: new Date('2026-06-30T03:00:00.000Z'),
     vault: vaultRoot,
@@ -326,6 +326,7 @@ test('failed transcript collection is unavailable rather than a proven empty win
     vault: vaultRoot,
   })
   expect(result.status).toBe('unavailable')
+  expect(result.prompt).toContain('Make no memory mutations this pass.')
 })
 
 test('a later committed correction or forget request makes an empty window eligible', async () => {

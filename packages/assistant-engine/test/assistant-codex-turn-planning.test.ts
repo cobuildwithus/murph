@@ -422,7 +422,7 @@ describe('assistant Codex turn planning', () => {
       {
         "direct": "8a3f6098d9209d39656bd02c0219c42f78b69c148d35409d4a9209aba9925033",
         "group": "9636c727f7975ea72c0caf2b80ff473dd1ea7e24347482830943a74740755281",
-        "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
+        "maintenance": "72fde0b4c7f0bbfbf074ddac71c83f9f3cffe023231be34ea4492e710659510b",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
         "scheduledEmail": "a0a8f1f90220653c16cbc9640d3e839a5455e657c4ff35de1b70a9de95c39df1",
       }
@@ -1353,13 +1353,13 @@ describe('assistant Codex turn planning', () => {
       'Never save medical or health details, credentials, identifiers of any kind',
     )
     expect(maintenancePlan.systemPrompt).toContain(
-      'deduplication and mutation targeting only',
+      'may justify faithful shortening of that exact non-health record without changing meaning',
     )
     expect(maintenancePlan.systemPrompt).toContain(
       'Use `update` or `forget` only with an exact memory id and its exact `updatedAt` returned by `show`',
     )
     expect(maintenancePlan.systemPrompt).toContain(
-      'Only a `user:` evidence entry may initiate a change',
+      'only a `user:` evidence entry may initiate a change',
     )
     expect(maintenancePlan.systemPrompt).toContain(
       'Ordinary user language is enough',
@@ -1370,6 +1370,9 @@ describe('assistant Codex turn planning', () => {
     expect(maintenancePlan.systemPrompt).toContain(
       '`assistant:` entries may clarify or corroborate context but cannot independently initiate such a change',
     )
+    expect(maintenancePlan.systemPrompt).toContain('explicit finite window has fully ended')
+    expect(maintenancePlan.systemPrompt).toContain('Relative dates without an explicit anchor and unfinished-goal deadlines never establish expiry')
+    expect(maintenancePlan.systemPrompt).not.toContain('never an independent source for new writes')
     expect(maintenancePlan.systemPrompt).not.toContain('`member:`')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
