@@ -72,6 +72,7 @@ import {
 } from "../junction-inline-authority.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  buildJunctionScheduleTimeHistoryDedupeKey,
   addJunctionHistoricalBackfillEvidence,
   canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage,
   canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
@@ -11899,14 +11900,10 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
 
   const coverageVersion = readJunctionHistoricalBackfillVersion(payload);
   if (policy.anchor === "current_day" || policy.completion !== "exact_records") {
-    return sha256Text(JSON.stringify([
-      "junction",
-      "extended-timeseries-backfill",
-      canonicalizeJunctionProviderSlug(payload.sourceProviderSlug),
-      resource,
-      sourceLifecycleEpoch,
-      coverageVersion,
-    ]));
+    return buildJunctionScheduleTimeHistoryDedupeKey({
+      sourceProviderSlug: canonicalizeJunctionProviderSlug(payload.sourceProviderSlug),
+      resource, sourceLifecycleEpoch, coverageVersion,
+    });
   }
 
   return sha256Text(JSON.stringify([

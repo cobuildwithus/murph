@@ -39,11 +39,49 @@ it("replays original initialization and matches the real Browser Vault source ow
   const input = await fixture();
   const result = await validateRecoveryCandidate(input);
   expect(result).toMatchObject({ complete: true, validVault: true, sourceHashMatches: true,
-    replayedReceipts: 1, mediaActionsWithoutPayload: 0, acceptedHistoryProven: false, restorationPerformed: false });
+    replayedReceipts: 1, mediaActionsWithoutPayload: 0, acceptedHistoryProven: false, restorationPerformed: false,
+    history: { metadataWriteActions: 1, coreWriteActions: 1, metadataPayloadCandidates: 1, firstAppendNeedsBasePaths: 0 } });
   expect(JSON.stringify(result)).not.toContain("Synthetic recovery vault");
   const retained = [...input.candidate.payloads.values()];
   clearRecoveryCandidate(input.candidate);
   expect(retained.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
+});
+
+it.each([false, true])("reports a missing starting file without silently adopting a full base artifact (available=%s)", async (baseAvailable) => {
+  const input = await fixture();
+  const base = Buffer.from('{"id":"synthetic-base"}\n');
+  const append = Buffer.from('{"id":"synthetic-next"}\n');
+  const baseSha256 = createHash("sha256").update(base).digest("hex");
+  const appendSha256 = createHash("sha256").update(append).digest("hex");
+  const targetRelativePath = "ledger/events/2026-01.jsonl";
+  if (baseAvailable) retainRecoveryCandidateArtifact(input.candidate, baseSha256, base, Date.now());
+  retainRecoveryCandidateArtifact(input.candidate, appendSha256, append, Date.now());
+  const initial = input.candidate.receipts[0]!.receipt;
+  retainReceipt(input.candidate, { ...initial, operationId: "synthetic-conflict",
+    committedAt: new Date(Date.parse(initial.committedAt) + 1000).toISOString(),
+    actions: [{ kind: "jsonl_append", targetRelativePath, appendSha256, appendByteLength: append.byteLength,
+      originalSize: base.byteLength, baseByteLength: base.byteLength, baseSha256,
+      contentRef: { sha256: appendSha256, byteSize: append.byteLength } }] });
+  const result = await validateRecoveryCandidate(input);
+  expect(result).toMatchObject({ complete: false, replayedReceipts: 1, failure: "history_conflict",
+    failureAction: { kind: "jsonl_append", family: "events", expectedBaseBytes: base.byteLength, fullBaseArtifactPresent: baseAvailable },
+    history: { firstAppendNeedsBasePaths: 1, firstAppendBasePayloadsPresent: Number(baseAvailable) },
+    acceptedHistoryProven: false, restorationPerformed: false });
+  const output = JSON.stringify(result);
+  for (const privateValue of [targetRelativePath, "synthetic-conflict", "synthetic-base", "synthetic-next", baseSha256, appendSha256]) {
+    expect(output).not.toContain(privateValue);
+  }
+});
+
+it("distinguishes an authenticated metadata payload from a receipt that writes it", async () => {
+  const input = await fixture();
+  input.candidate.receipts[0]!.receipt.actions = input.candidate.receipts[0]!.receipt.actions
+    .filter((action) => action.targetRelativePath !== "vault.json");
+  const result = await validateRecoveryCandidate(input);
+  expect(result).toMatchObject({ history: { metadataWriteActions: 0, metadataPayloadCandidates: 1 }, restorationPerformed: false });
+  expect(result).not.toMatchObject({ validVault: true });
+  clearRecoveryCandidate(input.candidate);
+  expect(input.candidate.metadataPayloadCandidates).toBe(0);
 });
 
 it("rejects missing or corrupted payloads through canonical replay", async () => {

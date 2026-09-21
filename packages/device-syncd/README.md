@@ -123,8 +123,8 @@ Current providers:
   attributed workouts per one-day window, then reads Junction's dedicated
   per-workout stream endpoint serially and caps each stream at 100,000 points.
   The exact production assembly has
-  48 production timeseries resources: 6 wide and 42 one-day resources, including
-  41 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
+  48 production timeseries resources: 7 wide and 41 one-day resources, including
+  40 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
   and one closed UTC day. An ordinary collection permits at most three sequential
   pages with one attempt and an eight-second timeout per page, limiting provider
   wait to 24 seconds. A page-heavy hourly/session feature retries as one complete
@@ -529,8 +529,12 @@ or durable state.
 
 Schedule-time extended history, including weight, keeps one active identity per
 source lifecycle and coverage generation across day boundaries. Source-first
-exact history retains its window identity. Already accepted legacy jobs preserve
-their frozen windows and continuation keys until completion. A pending upstream
+exact history retains its window identity. Empty weight retry roots at their
+full-history boundary converge to the schedule-time key during queue admission,
+including cold restores. Queued roots retain the union of accepted windows;
+running or partial scans, unresolved evidence, and older generations retain their
+existing owners. Weight reads use bounded 30-day chunks, preserving pagination
+and source lifecycle checks. A pending upstream
 weight pull still permits bounded reads and canonical import of available exact
 records; it prevents coverage certification and retains a daily continuation.
 A scan that began while the pull was pending carries that observation through
@@ -540,3 +544,9 @@ Daily aggregate history continues to wait for provider readiness before its
 scan. Hosted future history can share the checkpoint-fenced reconcile proof's
 bounded deferral; content changes, dirty work, and proof expiry still admit the
 ordinary runtime path.
+
+Hosted webhook passes with admitted dirty work can pull a Junction full reconcile
+forward by up to thirty minutes while already awake. The ordinary account-scoped
+scheduler queues the same durable full jobs; partial imports never substitute for
+a complete content proof. Empty hints, other providers, foreground yields, and
+more distant cadences do not trigger this optimization.
