@@ -2577,14 +2577,16 @@ Current hosted billing assumptions:
 
 Open `/voice` on a localhost development server with `OPENAI_API_KEY` in the
 server environment. The key needs `gpt-live-1` and `gpt-5.6-terra` access.
-`LiveVoiceButton` from `src/components/live-voice/live-voice-button` is reusable:
-render `<LiveVoiceButton />` for the circle, or `<LiveVoiceButton showVoicePicker />`
-for nine female voices: Gleam, Marin, Willow, Quartz, Delta, Coral, Sage,
+Use the typed entrypoint `@/src/components/live-voice` for `LiveVoiceButton`,
+`LiveVoiceControl`, `LiveVoicePicker`, `VoiceOrb`, and `useLiveVoice`.
+See [embedding examples and the server contract](src/components/live-voice/README.md).
+Render `<LiveVoiceButton endpoint="/api/live-voice/session" />` in the local demo;
+add `showVoicePicker` for nine female voices: Gleam, Marin, Willow, Quartz, Delta, Coral, Sage,
 Shimmer, and Bossa (Brazilian Portuguese). The older Coral/Sage/Shimmer options
 were verified against GPT-Live session startup; Nova was rejected by the API.
 Willow (Irish) is the default;
-`voice="marin"` chooses another default. Voice changes require ending the current
-conversation. An optional same-origin `endpoint` returns `{ sdp: string }` for a
+`defaultVoice="marin"` chooses another default. Voice changes require ending the current
+conversation. The required same-origin `endpoint` returns `{ sdp: string }` for a
 posted `{ sdp: string, voice: string }` WebRTC offer. The server validates the voice
 against the shared catalog before setting `session.audio.output.voice`.
 

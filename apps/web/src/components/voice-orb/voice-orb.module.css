@@ -1,3 +1,5 @@
+.orb { position: relative; display: inline-block; flex-shrink: 0; border-radius: 50%; }
+
 .canvas, .fallback {
   position: absolute;
   inset: 0;

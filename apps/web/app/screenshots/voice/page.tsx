@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
-import { LiveVoiceControl } from "@/src/components/live-voice/live-voice-button";
-
-import { LiveVoicePicker } from "@/src/components/live-voice/live-voice-picker";
+import { LiveVoiceControl, LiveVoicePicker, VoiceOrb } from "@/src/components/live-voice";
 
 export const metadata: Metadata = { title: "Voice control states", robots: { index: false, follow: false } };
 export default function VoiceStudies() {
-  return <main className="min-h-screen bg-background p-10 text-foreground">
+  return <main id="live-voice-components" className="min-h-screen bg-background px-6 py-10 sm:p-10 text-foreground">
     <h1 className="font-serif text-3xl">Voice control</h1>
+    <section className="mt-10 flex flex-wrap items-center gap-8" aria-label="Reusable orb examples">
+      <VoiceOrb size={72} palette="sage" />
+      <VoiceOrb size={112} palette="ember" />
+      <LiveVoiceControl state="idle" size={80} palette="sage" />
+    </section>
     <div className="mt-10 flex flex-wrap gap-12">
       <LiveVoicePicker voice="willow" />
       <LiveVoicePicker voice="marin" disabled />

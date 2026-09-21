@@ -3,11 +3,13 @@
 import { useId } from "react";
 import { LIVE_VOICES, type LiveVoice } from "@/src/lib/live-voice/voices";
 
-export function LiveVoicePicker({ voice, disabled = false, onChange }: {
+export type LiveVoicePickerProps = {
   voice: LiveVoice;
   disabled?: boolean;
   onChange?: (voice: LiveVoice) => void;
-}) {
+};
+
+export function LiveVoicePicker({ voice, disabled = false, onChange }: LiveVoicePickerProps) {
   const inputName = useId();
   return (
     <div className="w-full max-w-md">

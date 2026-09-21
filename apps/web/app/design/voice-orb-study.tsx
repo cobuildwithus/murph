@@ -54,7 +54,7 @@ export function VoiceOrbStudy() {
             onPointerCancel={() => { pointer.current = [0, 0]; }}
             style={{ "--orb-size": `${size}px`, "--orb-color": PALETTES[palette].color } as CSSProperties}
           >
-            <VoiceOrb palette={palette} energy={active ? 1 : 0} paused={paused} speed={speed} detail={detail} pointer={pointer} onGraphicsAvailable={setGraphicsAvailable} />
+            <VoiceOrb size="100%" palette={PALETTES[palette].id} energy={active ? 1 : 0} paused={paused} speed={speed} detail={detail} pointer={pointer} onGraphicsAvailable={setGraphicsAvailable} />
           </button>
           <div className={styles.caption}>
             <p role="status">{active ? "Awake" : "At ease"}<span className={styles.statusDot} /></p>

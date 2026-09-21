@@ -6,29 +6,36 @@ import { createOrbRenderer } from "./voice-orb-shader";
 import styles from "./voice-orb.module.css";
 
 export const ORB_PALETTES = [
-  { name: "Iris", image: "/design/voice-orb/iris.png", color: "#6557ff", ink: [0.35, 0.27, 1], mist: [0.73, 0.80, 1] },
-  { name: "Ember", image: "/design/voice-orb/ember.png", color: "#d77652", ink: [0.78, 0.24, 0.16], mist: [1, 0.82, 0.63] },
-  { name: "Sage", image: "/design/voice-orb/sage.png", color: "#7a8c6e", ink: [0.28, 0.43, 0.30], mist: [0.80, 0.88, 0.68] },
+  { id: "iris", name: "Iris", image: "/design/voice-orb/iris.png", color: "#6557ff", ink: [0.35, 0.27, 1], mist: [0.73, 0.80, 1] },
+  { id: "ember", name: "Ember", image: "/design/voice-orb/ember.png", color: "#d77652", ink: [0.78, 0.24, 0.16], mist: [1, 0.82, 0.63] },
+  { id: "sage", name: "Sage", image: "/design/voice-orb/sage.png", color: "#7a8c6e", ink: [0.28, 0.43, 0.30], mist: [0.80, 0.88, 0.68] },
 ] as const;
 
-/** Shared cloud visual; the caller owns interaction and audio. */
-export function VoiceOrb({ palette = 0, energy: targetEnergy = 0, paused = false, speed = 0.7, detail = 0.5, pointer, onGraphicsAvailable }: {
-  palette?: number;
+export type VoiceOrbPalette = (typeof ORB_PALETTES)[number]["id"];
+export type VoiceOrbProps = {
+  palette?: VoiceOrbPalette;
+  size?: CSSProperties["width"];
+  className?: string;
+  /** Normalized 0–1 cloud energy. */
   energy?: number;
   paused?: boolean;
   speed?: number;
   detail?: number;
   pointer?: RefObject<[number, number]>;
   onGraphicsAvailable?: (available: boolean) => void;
-}) {
+};
+
+/** Self-contained decorative visual. Does not acquire a microphone or open a call. */
+export function VoiceOrb({ palette = "iris", size = 144, className = "", energy: targetEnergy = 0, paused = false, speed = 0.7, detail = 0.5, pointer, onGraphicsAvailable }: VoiceOrbProps) {
+  const colors = ORB_PALETTES.find((item) => item.id === palette) ?? ORB_PALETTES[0];
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const settings = useRef({ palette, energy: targetEnergy, paused, speed, detail, onGraphicsAvailable });
+  const settings = useRef({ colors, energy: targetEnergy, paused, speed, detail, onGraphicsAvailable });
   const redraw = useRef<() => void>(() => {});
 
   useEffect(() => {
-    settings.current = { palette, energy: targetEnergy, paused, speed, detail, onGraphicsAvailable };
+    settings.current = { colors, energy: targetEnergy, paused, speed, detail, onGraphicsAvailable };
     redraw.current();
-  }, [palette, targetEnergy, paused, speed, detail, onGraphicsAvailable]);
+  }, [colors, targetEnergy, paused, speed, detail, onGraphicsAvailable]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -61,7 +68,7 @@ export function VoiceOrb({ palette = 0, energy: targetEnergy = 0, paused = false
         ? [position[0] + ((pointer?.current ?? [0, 0])[0] - position[0]) * 0.08,
            position[1] + ((pointer?.current ?? [0, 0])[1] - position[1]) * 0.08]
         : [0, 0];
-      renderer.draw({ time: elapsed, energy, detail: current.detail, pointer: position, ...ORB_PALETTES[current.palette] });
+      renderer.draw({ time: elapsed, energy, detail: current.detail, pointer: position, ...current.colors });
       if (canvas.style.opacity !== "1") {
         canvas.style.opacity = "1";
         canvas.dataset.rendered = "true";
@@ -113,8 +120,8 @@ export function VoiceOrb({ palette = 0, energy: targetEnergy = 0, paused = false
     };
   }, [pointer]);
 
-  return <>
-    <Image className={styles.fallback} style={{ "--orb-color": ORB_PALETTES[palette].color } as CSSProperties} src={ORB_PALETTES[palette].image} width={640} height={640} alt="" aria-hidden="true" unoptimized priority />
+  return <span className={`${styles.orb} ${className}`} style={{ width: size, height: size }} aria-hidden="true">
+    <Image className={styles.fallback} style={{ "--orb-color": colors.color } as CSSProperties} src={colors.image} width={640} height={640} alt="" aria-hidden="true" unoptimized priority />
     <canvas className={styles.canvas} ref={canvasRef} width={640} height={640} aria-hidden="true" />
-  </>;
+  </span>;
 }
