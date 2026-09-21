@@ -37,5 +37,13 @@ user shrink, assistant pulse, pause/resume/end, and reduced motion. Compact and
 standalone palette screenshots inspected. Single-file lifecycle ownership is
 preserved; no dependencies were added.
 
-Pending draft PR, required ReviewGPT, and exact-head CI. No public changelog: integration components and
+PR #3619 is open. ReviewGPT round 1 passed on the initial candidate with no
+qualifying findings. CI identified an unregistered raw OpenAI request in the
+local prototype. Replaced it with the installed SDK's supported request API
+(the SDK has no generated Live resource), explicitly disabled retries and logs,
+and retained the fixed provider origin and 20-second timeout. The provider
+boundary guard, 33 focused tests, typecheck/lint/complexity, and actual voice
+replay passed. This correction requires updated-head review and CI.
+
+Pending final ReviewGPT, exact-head CI, and protected preview readback. No public changelog: integration components and
 local-only demo are not a launched member feature. No production deployment.

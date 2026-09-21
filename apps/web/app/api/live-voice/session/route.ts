@@ -1,3 +1,4 @@
+import OpenAI from "openai";
 import { DEFAULT_LIVE_VOICE, isLiveVoice, type LiveVoice } from "@/src/lib/live-voice/voices";
 
 // This prototype is local-only. Public use needs member admission and usage limits.
@@ -20,11 +21,16 @@ export async function POST(request: Request): Promise<Response> {
   const { sdp, voice } = offer;
 
   try {
-    const response = await fetch("https://api.openai.com/v1/live/sessions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(20_000),
-      body: JSON.stringify({
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      baseURL: "https://api.openai.com/v1",
+      timeout: 20_000,
+      maxRetries: 0,
+      logLevel: "off",
+    });
+    // The installed SDK has no Live resource yet; use its supported request API.
+    const result = await openai.post<{ transport?: { sdp?: unknown } }>("/live/sessions", {
+      body: {
         session: {
           model: "gpt-live-1",
           store: false,
@@ -39,19 +45,16 @@ export async function POST(request: Request): Promise<Response> {
           },
         },
         transport: { type: "webrtc", sdp },
-      }),
+      },
     });
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403 || response.status === 404) {
-        return reply("The server's OpenAI key needs access to GPT-Live (gpt-live-1).", 502);
-      }
-      if (response.status === 429) return reply("OpenAI usage limit reached. Check the project's billing or try again shortly.", 429);
-      return reply("OpenAI could not start the conversation. Please try again.", 502);
-    }
-    const result = await response.json();
     if (typeof result.transport?.sdp !== "string") return reply("OpenAI returned an incomplete connection answer.", 502);
     return Response.json({ sdp: result.transport.sdp }, { status: 201, headers });
-  } catch {
+  } catch (error) {
+    if (error instanceof OpenAI.APIError) {
+      if ([401, 403, 404].includes(error.status ?? 0)) return reply("The server's OpenAI key needs access to GPT-Live (gpt-live-1).", 502);
+      if (error.status === 429) return reply("OpenAI usage limit reached. Check the project's billing or try again shortly.", 429);
+      if (error.status) return reply("OpenAI could not start the conversation. Please try again.", 502);
+    }
     return reply("Could not reach OpenAI. Check your connection and try again.", 502);
   }
 }

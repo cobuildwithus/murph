@@ -53,6 +53,13 @@ describe("local GPT-Live admission", () => {
     expect((await POST(request({ sdp: "v=0\r\n", voice }))).status).toBe(400);
     expect(provider).not.toHaveBeenCalled();
   });
+  it("does not retry failed session creation", async () => {
+    provider.mockResolvedValue(Response.json({ error: { message: "private rate limit" } }, { status: 429 }));
+    const response = await POST(request());
+    expect(response.status).toBe(429);
+    expect(provider).toHaveBeenCalledOnce();
+    expect(await response.text()).not.toContain("private rate limit");
+  });
   it("does not forward provider errors or secrets to the browser", async () => {
     provider.mockResolvedValue(Response.json({ error: { message: "private provider detail" } }, { status: 403 }));
     const response = await POST(request());
