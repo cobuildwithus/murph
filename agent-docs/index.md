@@ -106,6 +106,10 @@ preflight admission budget are owned by `agent-docs/RELIABILITY.md`; the
 implementation record is
 [`2026-09-15-device-sweep-capacity.md`](exec-plans/completed/2026-09-15-device-sweep-capacity.md).
 
+System-mailbox shutdown handoff is owned by `packages/assistant-runtime/README.md`;
+its checkpoint/restore proof is recorded in
+[`2026-09-21-device-shutdown-handoff.md`](exec-plans/completed/2026-09-21-device-shutdown-handoff.md).
+
 Container CPU profiling implementation and synthetic verification are recorded in
 [`2026-09-21-container-cpu-profiling.md`](exec-plans/completed/2026-09-21-container-cpu-profiling.md).
 
@@ -609,3 +613,6 @@ Query metric payload deduplication and transaction/restore proof are tracked in
 Requested delegated-answer waiting and preserved nonblocking onboarding are
 owned by `ARCHITECTURE.md`; verification is tracked in
 `exec-plans/completed/2026-09-21-delegated-answer-wait.md`.
+
+Legacy oxygen analytics retirement is tracked in
+[`oxygen analytics`](exec-plans/completed/2026-09-21-retire-oxygen-v1.md).

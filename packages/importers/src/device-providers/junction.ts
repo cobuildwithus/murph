@@ -3564,7 +3564,7 @@ function pushJunctionDailyTimeseriesObservations(
     }
     // Keep the complete feature identity present even when the provider supplied
     // only date precision, so an empty temporal view clears older clocked facts.
-    if (isJunctionDenseFidelityResource(resource)) {
+    if (isJunctionDenseFidelityResource(resource) && resource !== "blood_oxygen") {
       pushJunctionTimeseriesFeatureEnvelope(context, aggregate, resource);
     }
   }
@@ -5081,7 +5081,7 @@ function legacyJunctionDailyTimeseriesAggregateExternalRefs(
 function pushJunctionTimeseriesFeatureEnvelope(
   context: NormalizationContext,
   aggregate: JunctionDailyTimeseriesAggregate,
-  resource: JunctionDenseFidelityResource,
+  resource: Exclude<JunctionDenseFidelityResource, "blood_oxygen">,
 ): void {
   const policy = getJunctionDenseFidelityPolicy(resource);
   const { envelope, facts } = deriveJunctionTimeseriesFeatureEnvelope(

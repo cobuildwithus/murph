@@ -1,3 +1,4 @@
+import { readVaultSourceStrict } from "../src/vault-source.ts";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
@@ -8512,3 +8513,50 @@ function openDatabaseSync(
   const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
   return new DatabaseSync(databasePath, options ?? {});
 }
+
+
+test("retired oxygen analytics leave canonical evidence and member revisions intact across restore", async () => {
+  const event = {
+    id: "evt_oxygen_legacy",
+    kind: "measurement",
+    source: "device",
+    title: "retiredoxygentoken",
+    occurredAt: "2026-07-12T09:00:00.000Z",
+    recordedAt: "2026-07-12T10:00:00.000Z",
+    dayKey: "2026-07-12",
+    externalRef: { system: "junction", resourceType: "blood_oxygen", resourceId: "legacy", facet: "features" },
+    dataOrigin: { normalizerVersion: "junction.blood_oxygen_feature_envelope.v1" },
+    measurements: [{ metric: "spo2-below-90-reading-count", value: 0, unit: "count" }],
+  };
+  const vaultRoot = await createEventLedgerVault([
+    event,
+    { ...event, id: "evt_oxygen_supported", measurements: [{ metric: "spo2-below-90-reading-count", value: 2, unit: "count" }] },
+    { ...event, id: "evt_oxygen_corrected", title: "Member correction", lifecycle: { revision: 2 } },
+    { ...event, id: "evt_oxygen_manual", title: "Manual measurement", source: "manual" },
+    { ...event, id: "evt_oxygen_other", title: "Other normalizer", dataOrigin: { normalizerVersion: "other.v1" } },
+  ]);
+  const sourcePath = path.join(vaultRoot, "ledger/events/2026/2026-07.jsonl");
+  try {
+    const originalBytes = await readFile(sourcePath);
+    const raw = (await readVaultSourceStrict(vaultRoot)).entities;
+    assert.equal(raw.length, 5);
+    const direct = buildMetricProjection(createVaultReadModel({ vaultRoot, entities: raw }));
+    assert.deepEqual(direct.metricPoints.map((point) => point.source.recordId).sort(), [
+      "evt_oxygen_corrected", "evt_oxygen_manual", "evt_oxygen_other",
+    ]);
+    await rebuildQueryProjection(vaultRoot);
+    const dbPath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+    // An old restored store must be invalidated even when source files are unchanged.
+    const database = openSqliteRuntimeDatabase(dbPath, { create: false });
+    database.exec("PRAGMA user_version = 32");
+    database.close();
+    const points = await listMetricPointsRuntime(vaultRoot, { limit: null });
+    assert.deepEqual(points.map((point) => point.source.recordId).sort(), direct.metricPoints.map((point) => point.source.recordId).sort());
+    assert.equal((await listCanonicalEntities(vaultRoot, { family: "event", limit: null })).length, 3);
+    assert.equal((await searchVaultRuntime(vaultRoot, "retiredoxygentoken")).total, 0);
+    assert.equal((await getQueryProjectionStatus(vaultRoot)).fresh, true);
+    assert.deepEqual(await readFile(sourcePath), originalBytes);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
