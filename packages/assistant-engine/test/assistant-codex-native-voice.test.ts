@@ -6,6 +6,12 @@ import { createInterface } from 'node:readline'
 import { afterEach, expect, it, vi } from 'vitest'
 import { WebSocketServer, type WebSocket } from 'ws'
 import {
+  executeCodexAppServerTurn,
+  startCodexAppServerRealtime,
+  stopWarmCodexAppServer,
+  type CodexRealtimeInput,
+} from '../src/assistant-codex.ts'
+import {
   readCodexRpcResponseId,
   rejectPendingCodexRpcRequests,
   resolvePendingCodexRpcRequest,
@@ -27,6 +33,7 @@ const publicLive = Boolean(process.env.MURPH_TEST_CODEX_COMMAND?.trim())
 const createPath = publicLive ? '/v1/live/sessions' : '/v1/live'
 const attachPath = publicLive ? '/v1/live/sessions/rtc_synthetic/attach' : '/v1/live/rtc_synthetic'
 afterEach(async () => {
+  await stopWarmCodexAppServer()
   await Promise.all(temporaryPaths.splice(0).map((target) => rm(target, { recursive: true, force: true })))
 })
 
@@ -274,6 +281,106 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
     for (const socket of sockets.clients) socket.terminate()
     await new Promise<void>((resolve) => sockets.close(() => resolve()))
     server.closeAllConnections()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    await stub.close()
+  }
+})
+
+it.skipIf(!publicLive)('keeps native media on the resident process across ordinary host turns and closes it before process shutdown', { timeout: 60_000 }, async () => {
+  const stub = await startScriptedResponsesStub()
+  const inputs: CodexRealtimeInput[] = []
+  const usage: number[] = []
+  const forwarded: Record<string, unknown>[] = []
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* Drain the synthetic offer. */ }
+    response.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({
+      session: { id: 'rtc_resident' }, transport: { type: 'webrtc', sdp: 'v=0\r\ns=resident-answer\r\n' },
+    }))
+  })
+  const sockets = new WebSocketServer({ server })
+  let sideband: WebSocket | undefined
+  sockets.on('connection', (socket) => {
+    sideband = socket
+    socket.send(JSON.stringify({ type: 'session.started', session: { id: 'rtc_resident' } }))
+    socket.on('message', (data) => {
+      const event = readRecord(JSON.parse(String(data)))
+      if (event) forwarded.push(event)
+      if (event?.type === 'session.close') socket.send(JSON.stringify({
+        type: 'session.closed', reason: 'close_requested',
+        session: { id: 'rtc_resident' }, usage: { seconds: 15 },
+      }))
+    })
+  })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('Synthetic voice listener unavailable.')
+  const { turnInput } = await prepareScriptedTurnScenario(stub, temporaryPaths)
+  const launch = {
+    ...turnInput,
+    configOverrides: [
+      `experimental_realtime_ws_base_url="http://127.0.0.1:${address.port}/v1"`,
+      `experimental_realtime_webrtc_call_base_url="http://127.0.0.1:${address.port}/v1"`,
+    ],
+  }
+  try {
+    const voice = await startCodexAppServerRealtime({
+      ...launch,
+      sessionId: 'synthetic-resident-call',
+      sdp: 'v=0\r\ns=resident-offer\r\n',
+      prompt: 'Delegate requests to the host.',
+      onInput: (input) => inputs.push(input),
+      onUsage: (seconds) => usage.push(seconds),
+    })
+    expect(voice.sdp).toContain('resident-answer')
+    await vi.waitFor(() => expect(sideband).toBeDefined())
+    let threadId: string | null = null
+    for (let index = 1; index <= 2; index += 1) {
+      sideband!.send(JSON.stringify({
+        type: 'session.input_transcript.delta', delta: `Synthetic request ${index}.`,
+        start_ms: index * 100, end_ms: index * 100 + 50,
+      }))
+      sideband!.send(JSON.stringify({
+        type: 'session.delegation.created', offset_ms: index * 100 + 50,
+        delegation: { id: `resident_${index}`, type: 'delegation', target: 'client' },
+      }))
+      await vi.waitFor(() => expect(inputs).toHaveLength(index))
+      expect(stub.requestCountSinceBaseline()).toBe(index - 1)
+      stub.queue({
+        text: `Selected answer ${index}.`,
+        requestIncludes: ['Prepared host context', `Synthetic request ${index}.`],
+        beforeRespond: async () => {
+          sideband!.send(JSON.stringify({ type: 'session.output_transcript.delta', delta: 'synthetic-private-voice-fragment' }))
+          sideband!.send(JSON.stringify({ type: 'session.usage.updated', usage: { seconds: index * 5 } }))
+          await vi.waitFor(() => expect(usage).toContain(index * 5))
+        },
+      })
+      const result = await executeCodexAppServerTurn({
+        ...launch,
+        dynamicTools: [],
+        prompt: `Prepared host context\n${inputs[index - 1]!.text}`,
+        resumeSessionId: threadId,
+      })
+      if (threadId) expect(result.threadId).toBe(threadId)
+      threadId = result.threadId
+      expect(threadId).toEqual(expect.any(String))
+      const capturedMethods = result.stdout.split('\n').flatMap((line) => {
+        const parsed = tryParseJsonLine(line)
+        return parsed.ok && typeof parsed.value.method === 'string' ? [parsed.value.method] : []
+      })
+      expect(capturedMethods.filter((method) => method.startsWith('thread/realtime/'))).toEqual([])
+      await voice.speak(result.finalMessage)
+    }
+    await vi.waitFor(() => expect(forwarded.filter((event) => event.type === 'session.commentary.append').map((event) => event.content))
+      .toEqual(['Selected answer 1.', 'Selected answer 2.']))
+    await stopWarmCodexAppServer('synthetic-voice-shutdown')
+    expect(await voice.closed).toEqual({ providerConfirmed: true, providerSessionId: 'rtc_resident', seconds: 15 })
+    expect(forwarded.filter((event) => event.type === 'session.close')).toHaveLength(1)
+    await expect(voice.speak('Late result')).rejects.toThrow('closed')
+  } finally {
+    await stopWarmCodexAppServer()
+    sockets.close()
+    for (const socket of sockets.clients) socket.terminate()
     await new Promise<void>((resolve) => server.close(() => resolve()))
     await stub.close()
   }

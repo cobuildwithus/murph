@@ -2486,6 +2486,18 @@ replacement or sanitization; the stable cwd separately prevents the process
 from anchoring itself to a workspace inode. Threads receive the current
 workspace through the explicit per-thread `cwd` param.
 
+The native voice attachment uses that same process owner and a read-only,
+ephemeral media thread with no Murph tools. Starting it briefly reserves the slot;
+conversation lifetime does not occupy an ordinary turn. Native normalization
+emits untrusted inputs to the host, which must durably accept them before using
+the ordinary context, turn, tool, and presentation path. The start response must
+confirm managed input ownership before the browser receives SDP. Voice events
+are consumed before another turn's transcript/event capture. Selected speech is
+explicit, and process shutdown closes native voice before terminating the CLI.
+Only native provider receipts establish confirmed closure and cumulative usage;
+the attachment itself owns no mailbox, billing ledger, or replay. Authenticated
+website and hosted lifetime wiring remain disabled until their owners are composed.
+
 For established hosted conversation work, the first fresh auto-reply-enabled
 pre-pass Linq or Telegram input candidate staged after restore and final Codex
 config/auth preparation may begin process-only spawn and initialization while
