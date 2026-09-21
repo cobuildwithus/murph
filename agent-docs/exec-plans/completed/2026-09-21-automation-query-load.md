@@ -1,6 +1,6 @@
 # Reduce scheduled automation database load and spread daily maintenance
 
-Status: active
+Status: completed
 Created: 2026-09-21
 Updated: 2026-09-21
 
@@ -41,8 +41,9 @@ Joined relation reads may shift CPU cost to PostgreSQL; measure latency and quer
 - Managed schedule and cron integration: 361 tests pass, including stable identity across moves, sixty-member spread, three timezones, next-day first occurrence, four in-flight states, preserved paused/custom schedules, six Flex-retry recipes, and ordinary reminder fallback. Core canonical-record suite: 26 tests pass, including atomic schedule/anchor persistence and optimistic conflict rejection.
 - Focused real Codex journey passes on the subscription lane with gpt-5.6-terra: staggered Personal Patterns reads prior covered insight and records a quiet skip. Earlier available profiles failed before provider action; one authenticated profile completed the journey. This proves local assistant behavior, not hosted transport or billing tier.
 - Focused Web route/reconciliation/usage tests and Web, Core, and Assistant Engine typechecks pass. Complexity ratchet passes; existing orchestration hotspots retain their prior debt, and extracting the canonical cadence-anchor calculation reduces Core debt by five.
-- Parent candidate review covers occurrence ownership, concurrency, privacy, access freshness, provider tier fallback, and global relational-read impact. Final PR, changelog, exact-head CI, and ReviewGPT pending.
+- Parent candidate review covers occurrence ownership, concurrency, privacy, access freshness, provider tier fallback, and global relational-read impact. PR #3631 carries the implementation, content-only changelog, and remaining exact-head CI/ReviewGPT gates. The implementation is complete; review and deployment status remain owned by the PR.
 
 ## Deployment boundary
 
 No production mutation was performed. Regenerate Prisma Client as part of the ordinary Web build; no SQL migration is needed. Web relation joins and runtime cadence/Flex changes can roll independently. Existing readers understand daily-local schedules and schedule anchors. Rolling back runtime code may reapply the old managed schedule on later reconciliation; retain this cadence policy when rolling back unrelated runtime changes. After rollout, compare SQL volume and database CPU/latency over representative traffic, verify spread convergence, and inspect Flex capacity retry outcomes.
+Completed: 2026-09-21
