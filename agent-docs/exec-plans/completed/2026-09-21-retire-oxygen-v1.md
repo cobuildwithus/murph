@@ -20,7 +20,15 @@ available. No UI or prompt change. Proof covers sparse and supported imports,
 member revisions, direct/stored queries, search, and an old projection rebuild.
 
 ## Work
-- [ ] Remove the legacy oxygen reducer and producer call; retain input bounds.
-- [ ] Apply one exact eligibility predicate to entities, search, and metrics.
-- [ ] Test importer and historical/current projection paths and typecheck owners.
-- [ ] Parent review, changelog, scoped PR, exact-head CI and ReviewGPT.
+- [x] Remove the legacy oxygen reducer and producer call; retain input bounds.
+- [x] Apply one exact eligibility predicate to entities, search, and metrics.
+- [x] Test importer and historical/current projection paths and typecheck owners.
+- [x] Parent review, changelog, scoped PR, exact-head CI and ReviewGPT.
+
+## Evidence
+Importer: 265 tests plus corrected episode-cap proof passed; query suites: 136
+passed. Both package typechecks and complexity guard passed. PR #3634 owns
+exact-head CI and final ReviewGPT; no deployment or private vault mutation.
+Status: completed
+Updated: 2026-09-21
+Completed: 2026-09-21
