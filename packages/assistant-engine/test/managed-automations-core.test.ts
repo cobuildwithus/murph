@@ -221,7 +221,9 @@ describe('applyMurphManagedAutomations core integration', () => {
       const paths = resolveAssistantStatePaths(vaultRoot)
       const runtime = assistantCronRuntimeState.createAssistantCronCanonicalRuntimeRecord({ jobId: seed.automationId, now: now.toISOString() })
       runtime.state[field] = field === 'pendingDeliveryIntentId' ? 'synthetic_intent' : now.toISOString()
-      await assistantCronRuntimeState.writeAssistantCronCanonicalRuntimeStore(paths, { version: 1, jobs: [runtime] })
+      // Fixture setup must preserve the claim regardless of the wall-clock date.
+      await assistantCronRuntimeState.writeAssistantCronCanonicalRuntimeStore(paths, { version: 1, jobs: [runtime] },
+        { reclaimStaleRunningClaims: false })
       await applyMurphManagedAutomations({ seeds: [seed], now, vaultRoot })
       expect((await showAutomation({ automationId: seed.automationId, vaultRoot }))?.schedule).toEqual(seed.schedule)
       runtime.state[field] = null
