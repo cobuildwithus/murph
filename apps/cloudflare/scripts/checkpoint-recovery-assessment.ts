@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { parseHostedCipherEnvelope } from "@murphai/runtime-state";
 import { parseHostedWorkspaceReadResponse } from "@murphai/hosted-execution/parsers";
+import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
 import { createHostedStorageNamespaceId } from "@murphai/hosted-execution/storage-paths";
 import { HOSTED_RUNTIME_WORKSPACE_PATH } from "@murphai/hosted-execution/routes";
 import {
@@ -152,6 +153,8 @@ function inventoryObjectKey(object: unknown, prefix: string): string {
 }
 
 function inventoryCursor(info: unknown): string | undefined {
+  // R2 omits this optional section entirely on its final listing page.
+  if (info === undefined) return undefined;
   if (!record(info)) throw new Error("invalid_recovery_listing");
   if (info.cursor === undefined || info.cursor === null || info.cursor === "") return undefined;
   if (typeof info.cursor !== "string" || info.cursor.length > 4096) throw new Error("invalid_recovery_cursor");
@@ -187,6 +190,27 @@ function recoveryFailureProgress(error: unknown, signal: AbortSignal) {
   };
 }
 
+async function prepareCandidateValidation(mode: string | undefined, workspace: HostedWorkspaceState, before: string, signal: AbortSignal) {
+  if (mode !== "validate") return { observe() {}, async validate() { return undefined; }, clear() {} };
+  const replica = workspace.browserVaultReplicaRef;
+  if (!replica || Date.parse(replica.generatedAt) > Date.parse(before)) throw new Error("recovery_candidate_reference_unavailable");
+  const tools = await import("./checkpoint-recovery-candidate.ts");
+  const candidate = tools.createRecoveryCandidate();
+  let captureFailed = false;
+  return {
+    observe(sha256: string, plaintext: Uint8Array) {
+      if (captureFailed) return;
+      try { tools.retainRecoveryCandidateArtifact(candidate, sha256, plaintext, Date.parse(replica.generatedAt)); }
+      catch { captureFailed = true; tools.clearRecoveryCandidate(candidate); }
+    },
+    async validate(unreadable: number) {
+      if (captureFailed || unreadable > 0) return { complete: false, failureStage: "capture", acceptedHistoryProven: false, restorationPerformed: false };
+      return tools.validateRecoveryCandidate({ candidate, expectedSourceHash: replica.sourceBundleHash, signal });
+    },
+    clear() { tools.clearRecoveryCandidate(candidate); },
+  };
+}
+
 export async function assessCheckpointRecovery(
   env: Env, fetchImpl: typeof fetch = fetch,
   reportProgress?: (progress: RecoveryAssessmentProgress) => void,
@@ -194,7 +218,7 @@ export async function assessCheckpointRecovery(
   requireHostedRecoveryBoundary(env);
   const privateJwk = required(env, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK");
   if (env.RECOVERY_MODE === "describe-key") return { schema: "murph.recovery-public-key.v1", publicJwk: recoveryPublicJwk(privateJwk) };
-  if (env.RECOVERY_MODE !== "assess") throw new Error("invalid_recovery_mode");
+  if (!["assess", "validate"].includes(String(env.RECOVERY_MODE))) throw new Error("invalid_recovery_mode");
   const request = openRecoveryAssessmentRequest(required(env, "RECOVERY_SEALED_REQUEST"), privateJwk);
   const account = required(env, "CLOUDFLARE_ACCOUNT_ID");
   const bucket = required(env, "CF_BUNDLES_ENAM_BUCKET");
@@ -222,6 +246,7 @@ export async function assessCheckpointRecovery(
     return value.workspace;
   }
   const workspace = await readWorkspace();
+  const candidate = await prepareCandidateValidation(env.RECOVERY_MODE, workspace, request.before, signal);
   // Reuse the deployed S3 signing owner; account and bucket are the same
   // canonical values as inventory. No endpoint or bucket override is accepted.
   const presignEnvironment = {
@@ -281,6 +306,7 @@ export async function assessCheckpointRecovery(
           plaintext = result.plaintext;
           hashes.set(result.sha256, plaintext.byteLength);
           authenticated++;
+          candidate.observe(result.sha256, plaintext);
           const receipt = inspectReceiptCandidate(plaintext, Date.parse(request.before));
           if (receipt) receipts.push(receipt);
           if (plaintext.byteLength <= 64 * 1024) {
@@ -293,6 +319,7 @@ export async function assessCheckpointRecovery(
         finally { plaintext?.fill(0); serialized.fill(0); }
         progress("scanning");
     }
+    const candidateValidation = await candidate.validate(unreadable);
     await readWorkspace();
     const paths = new Set(receipts.flatMap((receipt) => receipt.paths));
     const contents = receipts.flatMap((receipt) => receipt.contents);
@@ -306,11 +333,15 @@ export async function assessCheckpointRecovery(
       deleteActions: receipts.reduce((count, receipt) => count + receipt.deletes, 0),
       appendActions: receipts.reduce((count, receipt) => count + receipt.appends, 0),
       acceptedHistoryProven: false, restorationPerformed: false,
+      candidateValidation,
     };
   } catch (error) {
     progress("failed", error);
     throw error;
-  } finally { for (const root of roots.values()) root.fill(0); }
+  } finally {
+    for (const root of roots.values()) root.fill(0);
+    candidate.clear();
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

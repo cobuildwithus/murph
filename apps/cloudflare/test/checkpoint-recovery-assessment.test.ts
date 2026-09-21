@@ -1,6 +1,8 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { HostedCanonicalWriteReceipt } from "@murphai/core";
+import { BROWSER_VAULT_REPLICA_SCHEMA } from "@murphai/contracts/browser-vault";
+import { HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA, type HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution";
 import {
   HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY, isHostedCustomInferenceConsumerVersion,
 } from "@murphai/hosted-execution/assistant-inference";
@@ -94,6 +96,23 @@ describe("unindexed artifact authentication", () => {
 });
 
 describe("bounded recovery census", () => {
+  it("finishes a paginated R2 listing when the final page omits result_info", async () => {
+    const prefix = "users/synthetic/artifacts/";
+    const keys = ["a", "b", "c"].map((letter) => `${prefix}${letter.repeat(48)}.artifact.bin`);
+    let pages = 0;
+    const fetchImpl: typeof fetch = async (url) => {
+      pages++;
+      if (pages === 1) return Response.json({ success: true, result: keys.slice(0, 2).map((key) => ({ key })),
+        result_info: { cursor: "synthetic-cursor", is_truncated: true, per_page: 1000 } });
+      expect(new URL(String(url)).searchParams.get("cursor")).toBe("synthetic-cursor");
+      return Response.json({ success: true, result: [{ key: keys[2] }] });
+    };
+    const found: string[] = [];
+    for await (const item of readArtifactInventory({ api: "https://storage.invalid/objects", prefix, token: "synthetic",
+      fetchImpl, readObject: async () => new Response("synthetic"), stats: { objects: 0, bytes: 0 } })) found.push(item.key);
+    expect(found).toEqual(keys);
+    expect(pages).toBe(2);
+  });
   it("charges concurrent streams against one total byte budget", async () => {
     const budget = { bytes: 512 * 1024 * 1024 - 3 };
     const results = await Promise.allSettled([
@@ -189,6 +208,7 @@ describe("bounded recovery census", () => {
     const objects = [content, receipt];
     let workspaceReads = 0;
     let workspaceVersion = "7";
+    let browserVaultReplicaRef: HostedBrowserVaultReplicaRef | null = null;
     let foreignObject = false;
     let changeAtEnd = false;
     let objectReadStatus = 200;
@@ -211,7 +231,7 @@ describe("bounded recovery census", () => {
         expect(await verifyHostedWebCallbackSignatureHeaders({ ...verification, search: target.search })).toBe(true);
         expect(await verifyHostedWebCallbackSignatureHeaders({ ...verification, search: "" })).toBe(false);
         return Response.json({ fetchedAt: new Date(now).toISOString(), workspace: {
-          userId, version: changeAtEnd && workspaceReads > 1 ? "8" : workspaceVersion, createdAt: request.before, updatedAt: request.before, snapshotRef: null,
+          userId, version: changeAtEnd && workspaceReads > 1 ? "8" : workspaceVersion, createdAt: request.before, updatedAt: request.before, snapshotRef: null, browserVaultReplicaRef,
         } });
       }
       if (target.pathname.endsWith("/crypto-context/root")) {
@@ -302,5 +322,17 @@ describe("bounded recovery census", () => {
     expect(JSON.stringify(reportProgress.mock.calls)).not.toContain("X-Amz");
     expect(JSON.stringify(reportProgress.mock.calls)).not.toContain("synthetic-access");
     expect(JSON.stringify(reportProgress.mock.calls)).not.toContain("synthetic-secret");
+    const validationEnv = { ...env, RECOVERY_MODE: "validate" };
+    await expect(assessCheckpointRecovery(validationEnv, fetchImpl)).rejects.toThrow("recovery_candidate_reference_unavailable");
+    browserVaultReplicaRef = {
+      schema: HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA, replicaSchema: BROWSER_VAULT_REPLICA_SCHEMA,
+      byteLength: 1, dataVersion: "synthetic", generatedAt: request.before, keyId: rootKeyId,
+      runtimeRootKeyId: rootKeyId, objectKey: "users/synthetic/replica", sourceBundleHash: "0".repeat(64),
+    };
+    const validationResult = await assessCheckpointRecovery(validationEnv, fetchImpl);
+    expect(validationResult).toMatchObject({ complete: true, workspaceUnchanged: true,
+      candidateValidation: { complete: false, failureStage: "replay", acceptedHistoryProven: false, restorationPerformed: false } });
+    expect(JSON.stringify(validationResult)).not.toContain("Synthetic canonical content");
+    expect(methods.every((method) => method === "GET" || method === "POST")).toBe(true);
   });
 });

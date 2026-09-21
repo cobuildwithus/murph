@@ -2255,7 +2255,10 @@ describe('assistant system prompt cache stability', () => {
     // complete direct/group provider-input measurements cover its composed cost.
     // Complete private workspace archives replace the former content filtering;
     // composed input measurement and focused Terra archive inspection cover it.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(74_211)
+    // Meal skill routing adds 300 characters to prevent preflight discovery.
+    // Complete direct/group input measurements and five focused Terra journeys
+    // cover the cost and behavior; retain the existing 41-character margin.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(74_511)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

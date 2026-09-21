@@ -1591,6 +1591,7 @@ function buildAssistantSkillRouteHintText(
     "Murph skill router:",
     "- When chronic illness, persistent pain, disability, a flare, or self-management is central, read the matching chronic-illness, chronic-pain, stress, physical-therapy, or self-management skill before answering.",
     "- Skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Read the primary owner for the user's visible outcome. If ambiguous, inspect at most two for discovery; then follow handoffs and load each safety/execution owner. Do not preload or use a discovery CLI.",
+    '- Meal capture and saved-day reviews: run `cat "$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md"` first unless already loaded this turn. The loaded skill supplies the command contract: execute its typed CLI commands without preflight help/schema, repository searches, or CLI-source inspection.',
     "- Setup: explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge; facts -> domain. Also: murph-onboarding, hosted-low-usage, signup-link, experiment-onboarding, behavior-followthrough.",
     "- Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",

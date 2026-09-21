@@ -15555,3 +15555,34 @@ test("canonical lock contention does not override foreground abort or ordinary s
     await rm(vaultRoot, { recursive: true, force: true });
   }
 });
+
+
+test("an active account can pull a nearby full reconcile forward without widening the global scheduler", async () => {
+  const now = new Date("2026-06-12T12:00:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-coalescing");
+  const { service, store, close } = createServiceFixture({
+    secret: "synthetic-coalescing-secret", clock: { now: () => now },
+    config: { vaultRoot, publicBaseUrl: "https://sync.example.test", stateDatabasePath: ":memory:" },
+    providers: [createFakeProvider({
+      createScheduledJobs(account, at) {
+        return { jobs: [{ kind: "reconcile", dedupeKey: `cadence:${account.id}` }],
+          nextReconcileAt: new Date(Date.parse(at) + 60 * 60_000).toISOString() };
+      },
+    })],
+  });
+  try {
+    const account = store.upsertAccount({ provider: "demo", externalAccountId: "synthetic-cadence",
+      scopes: [], credential: { kind: "provider_config", providerConfigKey: "demo", credentialMetadata: {} },
+      connectedAt: now.toISOString(), nextReconcileAt: "2026-06-12T12:25:00.000Z" });
+    assert.equal((await service.runSchedulerOnce(account.id)).length, 0);
+    const options = { reconcileBefore: "2026-06-12T12:30:00.000Z" };
+    assert.equal((await service.runSchedulerOnce(undefined, options)).length, 0);
+    const queued = await service.runSchedulerOnce(account.id, options);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0]?.kind, "reconcile");
+    assert.equal(store.getAccountById(account.id)?.nextReconcileAt, "2026-06-12T13:00:00.000Z");
+    assert.equal((await service.runSchedulerOnce(account.id, options)).length, 0);
+    assert.equal(store.listPendingJobsForAccount(account.id, 10).length, 1,
+      "the full pull retains its durable queue owner until completed");
+  } finally { close(); }
+});
