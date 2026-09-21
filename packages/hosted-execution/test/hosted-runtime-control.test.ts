@@ -86,6 +86,8 @@ import {
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
   parseHostedRuntimeHealthDataAdmissionResponse,
+  parseHostedRuntimeLatencyTraceBatchRequest,
+  parseHostedRuntimeLatencyTraceBatchResponse,
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
   parseHostedRuntimeUsageRecordRequest,
@@ -3191,3 +3193,22 @@ function createAssistantRuntimeIssueRecord(): AssistantRuntimeIssueRecord {
     surface: "hosted-runtime",
   };
 }
+
+
+it("keeps bounded milestone batches additive to the deployed singleton wire contract", () => {
+  const event = { type: "assistant_milestone", source: "linq", runtimeAttemptId: "synthetic-attempt",
+    assistantInputIds: ["synthetic-input"], at: "2026-09-01T00:00:00.000Z", milestone: "first_codex_output_observed" };
+  const events = Array.from({ length: 8 }, () => event);
+  expect(parseHostedRuntimeLatencyTraceBatchRequest({ events })).toEqual({ events });
+  expect(parseHostedRuntimeLatencyTraceRequest({ event })).toEqual({ event });
+  expect(() => parseHostedRuntimeLatencyTraceRequest({ events })).toThrow();
+  for (const payload of [{ events: [] }, { events: [...events, event] }, { events, event },
+    { events: [{ ...event, type: "runtime_milestone" }] }, { events: [{ ...event, privateText: "synthetic" }] }]) {
+    expect(() => parseHostedRuntimeLatencyTraceBatchRequest(payload)).toThrow();
+  }
+  const ok = { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+  expect(parseHostedRuntimeLatencyTraceBatchResponse({ results: [ok, null] })).toEqual({ results: [ok, null] });
+  for (const results of [[], Array.from({ length: 9 }, () => ok), [{ ...ok, unmatchedCount: -1 }]]) {
+    expect(() => parseHostedRuntimeLatencyTraceBatchResponse({ results })).toThrow();
+  }
+});

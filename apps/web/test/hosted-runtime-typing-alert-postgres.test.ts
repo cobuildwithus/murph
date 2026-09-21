@@ -324,6 +324,10 @@ async function withTables(run: (tx: Prisma.TransactionClient) => Promise<void>) 
   });
   try {
     await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`CREATE TEMP TABLE hosted_member (
+        id TEXT PRIMARY KEY, suspended_at TIMESTAMP(3)
+      ) ON COMMIT DROP`;
+      await tx.$executeRaw`INSERT INTO hosted_member (id) VALUES ('synthetic-member')`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_mailbox_item (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source_message_lookup_key TEXT, ai_usage_denied_at TIMESTAMP(3),
         lane TEXT NOT NULL DEFAULT 'conversation', lane_seq BIGINT NOT NULL DEFAULT 1,

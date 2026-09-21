@@ -125,6 +125,7 @@ import {
 } from "./hosted-runtime/turn-input.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
+  guardHostedRuntimeLatencyTracePort,
 } from "./hosted-runtime/assistant-latency-trace.ts";
 import {
   readHostedAssistantExecutionDefaultTarget,
@@ -3220,6 +3221,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           resolveHostedVaultShareProjectionScopesBestEffort({
             ...(projectionMode ? { projectionMode } : {}),
             signal,
+            sourceWorkspaceVersion:
+              activeWorkspace?.version ?? input.request.workspaceVersion,
             vaultSharePort,
           });
         const scopeResolutionResult = await waitForOwnedProjectionStage(
@@ -5464,6 +5467,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const scopeResolutionStage = await waitForOwnedProjectionStage(
         (signal) => resolveHostedVaultShareProjectionScopesBestEffort({
           signal,
+          sourceWorkspaceVersion:
+            committedWorkspace?.version ?? invocationWorkspaceVersion,
           vaultSharePort,
         }),
       );
@@ -9095,9 +9100,7 @@ function createAbortGuardedHostedRuntimePlatform(
       : {}),
     ...(platform.latencyTracePort
       ? {
-          latencyTracePort: {
-            record: (request) => guard(() => platform.latencyTracePort!.record(request)),
-          },
+          latencyTracePort: guardHostedRuntimeLatencyTracePort(platform.latencyTracePort, guard),
         }
       : {}),
     ...(platform.publicInternetFetch

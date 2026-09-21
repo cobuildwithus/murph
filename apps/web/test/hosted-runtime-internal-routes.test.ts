@@ -11,6 +11,9 @@ import {
 import { Prisma } from "@prisma/client";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readRawBodyBuffer } from "../src/lib/http";
+import { HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES } from "@murphai/hosted-execution/runtime-control";
+
 const FIXED_NOW = "2026-04-26T00:00:00.000Z";
 const MAILBOX_ITEM_2_PAYLOAD_REF = "hosted-mailbox-payload:mailbox_item_2";
 const UNSAFE_SENTINEL = "UNSAFE_CONTENT_SENTINEL";
@@ -204,6 +207,67 @@ let runtimeLatencyRoute: RuntimeLatencyRoute;
 let runtimeStatusRoute: RuntimeStatusRoute;
 
 describe("hosted runtime internal web routes", () => {
+  it.each(["streamed", "declared"])("keeps latency batch requests inside the existing byte limit: %s", async mode => {
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockImplementation(async (request: Request, options: { maxBodyBytes: number }) => ({
+      payload: JSON.parse((await readRawBodyBuffer(request, { limitBytes: options.maxBodyBytes })).toString("utf8")),
+      userId: "member_routes_1",
+    }));
+    const ok = { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+    mocks.recordHostedIngressAssistantMilestone.mockResolvedValue(ok);
+    const payload = JSON.stringify({ events: [{ type: "assistant_milestone", source: "linq", runtimeAttemptId: "attempt_routes_1",
+      assistantInputIds: ["synthetic-input"], milestone: "first_codex_output_observed", at: FIXED_NOW }] });
+    const atLimit = payload + " ".repeat(HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES - Buffer.byteLength(payload));
+    const request = (body: string) => new Request("https://web.example.test/api/internal/hosted-runtime/latency", {
+      method: "POST", body, headers: { ...runtimeWriteFenceHeaders(), "content-type": "application/json",
+        ...(mode === "declared" ? { "content-length": String(Buffer.byteLength(body)) } : {}) },
+    });
+    expect((await runtimeLatencyRoute.POST(request(atLimit))).status).toBe(200);
+    expect((await runtimeLatencyRoute.POST(request(atLimit + " "))).status).toBe(413);
+    expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledOnce();
+  });
+
+  it("records milestone batches serially with per-event results and immediate typing alerts", async () => {
+    const ok = { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+    let releaseFirst!: () => void;
+    const first = new Promise<void>(resolve => { releaseFirst = resolve; });
+    mocks.recordHostedIngressAssistantMilestone
+      .mockImplementationOnce(async () => { await first; return ok; })
+      .mockRejectedValueOnce(new Error("Synthetic persistence failure"))
+      .mockResolvedValueOnce(ok);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const milestones = ["linq_typing_accepted", "first_codex_output_observed", "first_codex_text_observed"];
+    const events = milestones.map((milestone, index) => ({
+      type: "assistant_milestone", source: "linq", runtimeAttemptId: "attempt_routes_1",
+      assistantInputIds: ["synthetic-input"], milestone, at: `2026-04-26T00:00:00.00${index}Z`,
+    }));
+    try {
+      const pending = runtimeLatencyRoute.POST(jsonRequest("/api/internal/hosted-runtime/latency", { events }, runtimeWriteFenceHeaders()));
+      await vi.waitFor(() => expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledOnce());
+      releaseFirst();
+      const response = await pending;
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ results: [ok, null, ok] });
+      expect(mocks.recordHostedIngressAssistantMilestone.mock.calls.map(([event]) => event.milestone)).toEqual(milestones);
+      expect(mocks.recordHostedIngressAssistantMilestone.mock.calls.map(([event]) => event.at)).toEqual(events.map(event => event.at));
+      expect(mocks.after).toHaveBeenCalledOnce();
+      await mocks.after.mock.calls[0]?.[0]();
+      expect(mocks.reportHostedRuntimeTypingAlerts).toHaveBeenCalledWith({ userId: "member_routes_1", assistantInputIds: ["synthetic-input"] });
+    } finally { releaseFirst(); error.mockRestore(); }
+  });
+
+  it.each(["fence", "event", "count", "empty", "ambiguous"])("rejects invalid milestone batches before any persistence: %s", async invalid => {
+    const event = { type: "assistant_milestone", source: "linq", runtimeAttemptId: "attempt_routes_1",
+      assistantInputIds: ["synthetic-input"], milestone: "first_codex_output_observed", at: FIXED_NOW };
+    const payload = invalid === "empty" ? { events: [] }
+      : invalid === "count" ? { events: Array.from({ length: 9 }, () => event) }
+      : invalid === "ambiguous" ? { event, events: [event] }
+      : { events: [event, { ...event, ...(invalid === "fence" ? { runtimeAttemptId: "other-attempt" } : { milestone: "invalid" }) }] };
+    const response = await runtimeLatencyRoute.POST(jsonRequest("/api/internal/hosted-runtime/latency", payload, runtimeWriteFenceHeaders()));
+    expect(response.status).toBe(invalid === "fence" ? 401 : 400);
+    expect(mocks.recordHostedIngressAssistantMilestone).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
   beforeAll(async () => {
     mailboxFetchRoute = await import("../app/api/internal/hosted-mailbox/fetch/route");
     mailboxPayloadFetchRoute = await import(
@@ -2620,10 +2684,15 @@ describe("hosted runtime internal web routes", () => {
   it("returns a due workspace checkpoint before running its recheck signal", async () => {
     const nextWakeAt = "2026-04-25T23:59:00.000Z";
     let resolveSignal!: () => void;
+    let markSignalStarted!: () => void;
+    const signalStarted = new Promise<void>((resolve) => {
+      markSignalStarted = resolve;
+    });
     mocks.signalHostedRuntimeRecheckRuntime.mockImplementationOnce(
       async () =>
         await new Promise<void>((resolve) => {
           resolveSignal = resolve;
+          markSignalStarted();
         }),
     );
     mocks.checkpointHostedWorkspace.mockResolvedValue({
@@ -2663,6 +2732,7 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
 
     const signalTask = mocks.after.mock.calls[0]?.[0]();
+    await signalStarted;
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });

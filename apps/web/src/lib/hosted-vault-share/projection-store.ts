@@ -165,11 +165,15 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
   grantorMemberId: string;
   prisma?: PrismaClient;
   projectionMode?: HostedVaultShareProjectionMode;
+  sourceWorkspaceVersion?: string;
   supportedProjectionScopeKeys?: ReadonlySet<string>;
 }): Promise<DeliverableHostedVaultShareProjectionScopeGenerations> {
   const prisma = input.prisma ?? getPrisma();
   const firstMaterializationOnly = input.projectionMode
     === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
+  const sourceWorkspaceVersion = input.sourceWorkspaceVersion === undefined
+    ? undefined
+    : BigInt(input.sourceWorkspaceVersion);
   const shares = await prisma.hostedVaultShare.findMany({
     orderBy: [{ projectionScopeKey: "asc" }, { id: "asc" }],
     select: {
@@ -177,6 +181,7 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
       id: true,
       projectionKind: true,
       projectionSnapshotCiphertext: true,
+      projectionSourceWorkspaceVersion: true,
       projectionScopeJson: true,
       projectionScopeKey: true,
     },
@@ -210,6 +215,10 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
       continue;
     }
     const hasUnmaterializedShare = share.projectionSnapshotCiphertext === null;
+    const needsPublication = firstMaterializationOnly
+      ? hasUnmaterializedShare
+      : sourceWorkspaceVersion === undefined
+        || share.projectionSourceWorkspaceVersion !== sourceWorkspaceVersion;
     const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
     if (!activeDestinationMemberIds.has(share.destinationMemberId)) {
       hasDeferredProjectionWork ||= hasUnmaterializedShare;
@@ -219,22 +228,19 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
       hasDeferredProjectionWork ||= hasUnmaterializedShare;
       continue;
     }
-    const current = generations.get(projectionScopeKey);
-    if (current) {
-      current.shareIds.push(share.id);
-      current.pendingShareCount += hasUnmaterializedShare ? 1 : 0;
-    } else {
-      generations.set(projectionScopeKey, {
-        pendingShareCount: hasUnmaterializedShare ? 1 : 0,
-        projectionScope,
-        shareIds: [share.id],
-      });
-    }
+    const current = generations.get(projectionScopeKey) ?? {
+      pendingShareCount: 0,
+      projectionScope,
+      shareIds: [],
+    };
+    current.shareIds.push(share.id);
+    current.pendingShareCount += Number(needsPublication);
+    generations.set(projectionScopeKey, current);
   }
   const selectedGenerations: typeof generations = new Map();
   let selectedShareCount = 0;
   for (const [projectionScopeKey, generation] of generations) {
-    if (firstMaterializationOnly && generation.pendingShareCount === 0) {
+    if (generation.pendingShareCount === 0) {
       continue;
     }
     if (

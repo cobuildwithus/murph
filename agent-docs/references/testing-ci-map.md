@@ -1229,6 +1229,10 @@ limits, and local proof distinctions are owned by
   `apps/cloudflare/test/runtime-processing-postgres.test.ts` and
   `apps/cloudflare/test/runtime-owner-completion.test.ts` cover current runtime
   admission, exact completion, and owner-release behavior.
+  `apps/web/test/hosted-runtime-owner-postgres.test.ts` composes the completion
+  command with real owner transitions, successor fencing, and pending PUT drains.
+  `apps/web/test/hosted-runtime-owner-release.test.ts` proves advisory failures
+  and the two-second hint deadline cannot invalidate durable completion.
   These focused tests do not establish deployed Temporal timing.
 - The hosted-local active-turn latency scenario proves same-chat late-input folding, forces a 20-second provider-cleanup stall and requires the second reply to preempt it, and checks that a projected wake does not trigger immediate full idle-shutdown work under the 180-second floor.
 - The dedicated `foreground-reply-priority` hosted-local scenario keeps the
