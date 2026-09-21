@@ -128,7 +128,7 @@ Live voice cloud motion and Irish default:
 Setup and embedding are documented in `apps/web/README.md` and
 [`Voice components`](../apps/web/src/components/live-voice/README.md).
 Reusable component packaging and PR verification are tracked in
-[`2026-09-20-reusable-live-voice.md`](exec-plans/active/2026-09-20-reusable-live-voice.md).
+[`2026-09-20-reusable-live-voice.md`](exec-plans/completed/2026-09-20-reusable-live-voice.md).
 Cloud flow is recorded in
 [`2026-09-20-live-voice-cloud-flow.md`](exec-plans/completed/2026-09-20-live-voice-cloud-flow.md).
 Cloud velocity tuning is recorded in
