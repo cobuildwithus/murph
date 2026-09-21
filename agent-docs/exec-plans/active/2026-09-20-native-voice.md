@@ -73,6 +73,14 @@ Updated: 2026-09-21
 
 ## Verification
 
+- Parent review reproduced final usage escaping shutdown's accounting join when
+  the provider receipt arrived between a completed ledger write and its promise
+  cleanup. The existing flush loop now joins the next write, including failure,
+  instead of launching it detached. Both success and failure regressions failed
+  before the fix; all 26 focused usage, lifecycle, and checkpoint cases now pass,
+  together with runtime typecheck and complexity. No state, queue, or retry policy
+  was added. The queued hosted proof was stopped before refreshing its bundle;
+  the bounded native image and Linux image CI continue unchanged.
 - Linux run `35593710568` built the patched image in about 34 minutes, then
   failed two raw native fixtures because SDP arrived before their WebSocket
   attachment. The resident-process media/ordinary-turn case passed. The fixtures

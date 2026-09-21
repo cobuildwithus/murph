@@ -38,18 +38,17 @@ export function createHostedLiveUsageRecorder(input: {
       if (!result.platformAiUsageAllowedAfter) input.stopVoice();
     }
   };
-  const flush = (): Promise<void> => {
-    if (!inFlight) {
-      inFlight = write().catch((error: unknown) => {
+  const flush = async (): Promise<void> => {
+    do {
+      inFlight ??= write().catch((error: unknown) => {
         failed = true;
         input.stopVoice();
         throw error;
-      }).finally(() => {
-        inFlight = null;
-        if (!failed && recordedMs < latestMs) void flush().catch(() => {});
-      });
-    }
-    return inFlight;
+      }).finally(() => { inFlight = null; });
+      await inFlight;
+      // A final receipt can arrive after write() returns but before its cleanup.
+      // Keep the caller joined to that next write, including its failure.
+    } while (recordedMs < latestMs);
   };
 
   return {

@@ -58,6 +58,45 @@ describe("trusted native cumulative usage recording", () => {
     expect(records[2]?.rawUsageJson).toEqual({ startDurationMs: 3000, endDurationMs: 4000 });
   });
 
+  it.each([false, true])("joins final usage arriving during write completion (failure=%s)", async (failFinal) => {
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    const failure = new Error("Synthetic final settlement failure");
+    const records: AssistantUsageRecord[] = [];
+    const recordUsage = vi.fn(async (record: AssistantUsageRecord) => {
+      records.push(record);
+      if (records.length === 2) {
+        await barrier;
+        if (failFinal) throw failure;
+      }
+      return accepted(record);
+    });
+    const usage = createHostedLiveUsageRecorder({
+      memberId: "member_synthetic", sessionId: "call_synthetic", port: { recordUsage }, stopVoice: vi.fn(),
+    });
+    usage.observe(1);
+    // The first ledger acknowledgement is complete, but its promise cleanup
+    // has not run when the provider supplies the final cumulative receipt.
+    await Promise.resolve();
+    usage.observe(2);
+    let settled = false;
+    const flushed = usage.flush().then(
+      () => { settled = true; return null; },
+      (error: unknown) => { settled = true; return error; },
+    );
+    try {
+      await vi.waitFor(() => expect(recordUsage).toHaveBeenCalledTimes(2));
+      expect(settled, "shutdown must retain its hold until final settlement").toBe(false);
+    } finally {
+      release();
+    }
+    expect(await flushed).toBe(failFinal ? failure : null);
+    expect(records.map((record) => record.rawUsageJson)).toEqual([
+      { startDurationMs: 0, endDurationMs: 1000 },
+      { startDurationMs: 1000, endDurationMs: 2000 },
+    ]);
+  });
+
   it("closes at the usage limit and settles the remaining trusted final duration", async () => {
     const stopVoice = vi.fn();
     const recordUsage = vi.fn(async (record: AssistantUsageRecord) => ({
