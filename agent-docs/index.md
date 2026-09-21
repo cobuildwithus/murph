@@ -612,3 +612,6 @@ Query metric payload deduplication and transaction/restore proof are tracked in
 
 System checkpoint cancellation and mailbox timing implementation are recorded in
 [`typing checkpoint latency`](exec-plans/completed/2026-09-21-typing-checkpoint-latency.md).
+
+Legacy oxygen analytics retirement is tracked in
+[`oxygen analytics`](exec-plans/completed/2026-09-21-retire-oxygen-v1.md).

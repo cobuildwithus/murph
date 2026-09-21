@@ -30,7 +30,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 30: Omit null biomarker index entries and clear obsolete rebuild payloads.
 // 31: Pack JSON-heavy query rows in 8 KiB pages and omit unused date indexes.
 // 32: Share identical metric payloads within each published generation.
-export const QUERY_PROJECTION_SQLITE_VERSION = 32;
+// 33: Retire untouched legacy Junction oxygen analytics from default queries.
+export const QUERY_PROJECTION_SQLITE_VERSION = 33;
 
 export interface QueryProjectionLocation {
   absolutePath: string;
