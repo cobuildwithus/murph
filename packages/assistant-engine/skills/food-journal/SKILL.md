@@ -82,7 +82,9 @@ inspect a particular day's saved meals, use
 `vault-cli meal list --from <date> --to <same-date> --limit 50 --format json`
 and check for a truncated result before claiming complete coverage. `meal list`
 has no `--date` option. Use the typed save flags below directly; reading this skill
-already supplies the ordinary capture contract.
+already supplies the ordinary capture contract. Execute the documented save
+for a resolved meal; optional enrichment is not a reason to rediscover the
+schema before saving.
 
 When the user names a restaurant and recognizable menu item, and known context
 does not trigger one of the numeric safety exceptions below, resolve nutrition
@@ -97,6 +99,8 @@ inspection focused on the requested item and serving; follow the computer
 skill's bounded recovery rules if access fails. If the first page already
 contains the exact item and serving facts, use them without extra navigation.
 When using that official source, retain its URL in nutrition source detail.
+Use `--nutrition-source label` for published official item/serving facts;
+`database` is for facts returned by the food-label database.
 Only after the database result, official source, or clearly marked last-resort
 estimate is resolved may you call `meal add` or `meal edit` with the available
 nutrition and provenance. Do not save a nutrition-free restaurant meal first
@@ -120,16 +124,24 @@ Reuse that preference read for suitability and invitation checks; do not repeat 
 
 For a new meal whose identity, amount, and nutrition are already resolved, use
 `vault-cli meal add --with-daily-totals --format json` with the typed meal flags.
-Use `--note`, `--occurred-at`, `--nutrition-calories`,
-`--nutrition-protein-grams`, `--nutrition-carbs-grams`,
-`--nutrition-fat-grams`, `--nutrition-fiber-grams`, `--nutrition-source`,
-`--nutrition-confidence`, and `--nutrition-source-detail` as needed.
+Use this complete command shape with resolved values, omitting unknown optional
+nutrition fields:
+
+```sh
+vault-cli meal add --with-daily-totals --format json \
+  --note "<meal and portion>" --occurred-at "<ISO date/time>" \
+  --nutrition-calories <kcal> --nutrition-protein-grams <grams> \
+  --nutrition-carbs-grams <grams> --nutrition-fat-grams <grams> \
+  --nutrition-fiber-grams <grams> --nutrition-source <source> \
+  --nutrition-confidence <confidence> --nutrition-source-detail "<evidence or URL>"
+```
 Nutrition source is `user`, `label`, `database`, `inherited`, or `estimated`;
 confidence is `low`, `medium`, or `high`. For member-provided portion totals,
 use `--nutrition-source user`; do not look up a substitute estimate.
 `--with-daily-totals` also works with `meal import-json` for structured ingredients.
-Do not rediscover these flags through help/schema calls unless a required
-field is genuinely unknown or validation identifies a problem.
+This command shape is the execution contract. Do not rediscover these flags
+through help/schema calls, repository searches, or CLI implementation reads
+unless a required field is genuinely unknown or validation identifies a problem.
 
 The successful save is the meal readback. `dailyTotals.status: available`
 provides `dailyTotals.data`, the fresh canonical `meal totals --resolve-goals`

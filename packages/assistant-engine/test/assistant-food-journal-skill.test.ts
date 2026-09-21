@@ -45,10 +45,16 @@ describe('assistant food journal skill', () => {
       await readFile(path.join(root, 'computer-use/SKILL.md'), 'utf8'),
     ].join('\n'))
     for (const rule of [
+      'Meal capture and saved-day reviews: run `cat "$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md"` first unless already loaded this turn',
+      'execute its typed CLI commands without preflight help/schema, repository searches, or CLI-source inspection',
+      'Use `--nutrition-source label` for published official item/serving facts',
       'Do not list meals as a prerequisite to a new capture',
       'meal list --from <date> --to <same-date> --limit 50 --format json',
       '`meal list` has no `--date` option',
       'Use the typed save flags below directly',
+      'This command shape is the execution contract',
+      'help/schema calls, repository searches, or CLI implementation reads',
+      'optional enrichment is not a reason to rediscover the schema before saving',
       'A landing page is not a failed nutrition lookup',
       'use `computer_act` to follow its relevant menu/nutrition link or search for the exact item',
       'If the first page already contains the exact item and serving facts, use them without extra navigation',

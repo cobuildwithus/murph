@@ -2,7 +2,7 @@
 
 Direct meal execution and official nutrition-source inspection are owned by
 `packages/assistant-engine/skills/food-journal/SKILL.md`; focused proof is tracked in
-[`2026-09-20-meal-tool-efficiency.md`](exec-plans/active/2026-09-20-meal-tool-efficiency.md).
+[`2026-09-20-meal-tool-efficiency.md`](exec-plans/completed/2026-09-20-meal-tool-efficiency.md).
 
 Active delegated-request protection during background checkpointing is owned by
 `ARCHITECTURE.md`; review remediation and proof are recorded in
