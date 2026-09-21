@@ -602,3 +602,6 @@ Query page packing and unused date-index removal are tracked in
 
 Query metric payload deduplication and transaction/restore proof are tracked in
 [`metric payload storage`](exec-plans/completed/2026-09-21-workspace-metric-dedup.md).
+
+Expired inbox capture compaction is tracked in
+[`capture compaction`](exec-plans/completed/2026-09-21-compact-inbox-records.md).
