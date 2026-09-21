@@ -29,7 +29,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 29: Rebuild sleep summaries and metrics with session classification and provider state.
 // 30: Omit null biomarker index entries and clear obsolete rebuild payloads.
 // 31: Pack JSON-heavy query rows in 8 KiB pages and omit unused date indexes.
-export const QUERY_PROJECTION_SQLITE_VERSION = 31;
+// 32: Share identical metric payloads within each published generation.
+export const QUERY_PROJECTION_SQLITE_VERSION = 32;
 
 export interface QueryProjectionLocation {
   absolutePath: string;
@@ -204,6 +205,11 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS query_entities_family_idx ON query_entities(family);
     CREATE INDEX IF NOT EXISTS query_entities_kind_idx ON query_entities(kind);
 
+    CREATE TABLE IF NOT EXISTS query_metric_payloads (
+      payload_id INTEGER PRIMARY KEY,
+      metric_point_json TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS query_metric_points (
       id TEXT PRIMARY KEY,
       sort_rank INTEGER NOT NULL,
@@ -227,7 +233,7 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
       source_result_index INTEGER,
       source_path TEXT NOT NULL,
       confidence TEXT NOT NULL,
-      metric_point_json TEXT NOT NULL
+      payload_id INTEGER NOT NULL REFERENCES query_metric_payloads(payload_id)
     );
 
     CREATE INDEX IF NOT EXISTS query_metric_points_metric_latest_idx ON query_metric_points(metric_key, effective_date DESC, observed_at DESC);
@@ -295,6 +301,7 @@ export function hasQueryProjectionTables(database: DatabaseSync): boolean {
   return (
     tableExists(database, "query_entities") &&
     tableExists(database, "query_metric_points") &&
+    tableExists(database, "query_metric_payloads") &&
     tableExists(database, "query_metric_targets") &&
     tableExists(database, "query_wearable_summaries") &&
     tableExists(database, "query_source_manifest") &&

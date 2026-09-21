@@ -24,6 +24,13 @@ omitted: existing date predicates use `COALESCE`/`substr`, while lexical search
 uses FTS rowids. Family/kind, metric, and wearable range indexes remain. No
 in-place vacuum changes existing files; the version reset creates the new
 layout. Runtime SQLite stores outside query retain their default page size.
+Version 32 stores identical compact metric payloads once per full publication in
+`query_metric_payloads`; metric rows retain their indexed scalars and reference
+payloads by integer key. The existing metric query joins the payload table, using
+the same codec, filters, order and limits. Replacement deletes metric rows before
+payloads inside the existing transaction, so rollback restores both. An
+insertion-local map shares exact serialized payloads without a duplicate text
+index; no canonical data or restored SQLite content is omitted.
 Older runners reject the new cache version and rebuild derived state through
 the existing reset path; the canonical format and query results do not change.
 
