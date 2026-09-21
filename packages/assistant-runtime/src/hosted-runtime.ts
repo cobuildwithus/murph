@@ -3501,7 +3501,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           // A spurious hint retries the same dirty checkpoint; a real input
           // unwinds system work into the existing in-place foreground upgrade.
           if (!hostAbortObserved && options.shutdownSignal?.aborted !== true
-            && await prefetchSystemMailboxAssistantWork()) {
+            && await prefetchSystemMailboxAssistantWork().catch((error: unknown) => {
+              // Shutdown can interrupt qualification after construction yielded.
+              // Retry the dirty checkpoint with wake cancellation disabled.
+              if (backgroundWorkSignal.aborted && error === backgroundWorkSignal.reason) return false;
+              throw error;
+            })) {
             throw interrupted;
           }
         }

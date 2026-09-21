@@ -1433,7 +1433,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     }
   });
 
-  test.each(["spurious", "system-only", "shutdown"] as const)(
+  test.each(["spurious", "system-only", "shutdown", "shutdown during qualification"] as const)(
     "preserves dirty system progress after a %s checkpoint wake", async (scenario) => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-checkpoint-wake-"));
       const events: string[] = [];
@@ -1448,6 +1448,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         vi.setSystemTime(new Date(TEST_NOW));
         await initializeVault({ createdAt: TEST_NOW, vaultRoot });
         const restored = await createVaultSnapshotBundle({ vaultRoot });
+        const mailbox = createMailboxPort({ events, items: [item] });
         await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
           request: { processingMode: "system_mailbox", workspaceVersion: "0", runnerIdleTtlMs: 0 },
         }), {
@@ -1476,7 +1477,16 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           async runAssistantPhase() { throw new Error("Unqualified wakes must not run the assistant."); },
           platform: createPlatform({
             artifactBytesByHash: new Map([[restored.hash, restored.bytes]]),
-            mailboxPort: createMailboxPort({ events, items: [item] }),
+            mailboxPort: {
+              ...mailbox,
+              async fetch(request) {
+                if (scenario === "shutdown during qualification" && events.includes("checkpoint.cancelled")) {
+                  shutdown.abort();
+                  throw shutdown.signal.reason;
+                }
+                return await mailbox.fetch(request);
+              },
+            },
             workspacePort: createWorkspacePort({ events, checkpointRequests,
               workspace: createWorkspaceState({ version: "0", snapshotRef: restored.snapshotRef }) }),
           }),
