@@ -73,6 +73,26 @@ Updated: 2026-09-21
 
 ## Verification
 
+- The authenticated hosted browser now connects through Web, Worker, container,
+  and native Live. Synthetic spoken input is durably admitted; provider-confirmed
+  closure and trusted usage recording return successfully. The backing read-only
+  tool and spoken answer remain unproved in the composed hosted test. Bounded
+  diagnostics proved that the ordinary backing thread fails during filesystem
+  instruction discovery, then normal process failure closes voice. The local
+  AMD64 image is emulated on an ARM64 Docker engine: the default Docker profile
+  blocks nested namespaces; enabling the existing smoke settings for only this
+  test's disposable containers exposes unsupported seccomp installation in the
+  emulator. Native Linux permission-confinement CI already passes. Do not weaken
+  the inner sandbox or interpret an emulated failure as native Linux failure.
+  A native AMD64 development runner is the remaining execution prerequisite;
+  its connection details have been requested. No production fix follows from
+  this environment diagnosis. Temporary application diagnostics were removed,
+  and the clean production bundle passes all eight parity probes and its size
+  guard. The browser driver now
+  reports premature call closure promptly instead of waiting its full answer
+  deadline. Web and Cloudflare typechecks passed for the proof-driver changes.
+  The reproducible local limitation is recorded in Frog.
+
 - The next composed retry isolated cancellation to the routine foreground-idle
   mailbox handoff, with no budget exhaustion, shutdown, or abort. Reserved/live
   calls now count as foreground work at that existing decision. The clean voice

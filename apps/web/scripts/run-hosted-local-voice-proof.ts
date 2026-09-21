@@ -78,8 +78,12 @@ async function main(): Promise<void> {
       source.connect(destination);
       source.start();
     }, audio);
-    await page.getByRole("region", { name: "Murph's spoken answer" })
-      .filter({ hasText: /blue[ -]?(?:42|forty[ -]?two)/i }).waitFor();
+    await Promise.race([
+      page.getByRole("region", { name: "Murph's spoken answer" })
+        .filter({ hasText: /blue[ -]?(?:42|forty[ -]?two)/i }).waitFor(),
+      page.getByRole("button", { name: "Start another call", exact: true }).waitFor()
+        .then(() => { throw new Error("Voice ended before the answer."); }),
+    ]);
     const answerMs = Date.now() - inputAt;
     await page.waitForFunction(async () => {
       for (const peer of window.voiceProof.peers) {
