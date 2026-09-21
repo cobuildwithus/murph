@@ -138,7 +138,7 @@ const commandGroups: Readonly<Record<string, string>> = {
   "allergy": "import-json|list|save|scaffold|show",
   "assertion": "import-json|payload-schema|save|scaffold",
   "assistant": "ask|chat|deliver|doctor|onboarding complete|onboarding reopen|onboarding resume-context|onboarding status|run|self-target clear|self-target list|self-target set|self-target show|session list|session show|status|stop",
-  "audit": "list|show|tail",
+  "audit": "list|receipt|show|tail",
   "automation": "edit|import-json|list|reconcile-support-series|save|scaffold|set-status|show",
   "batch": "",
   "blood-test": "import-json|list|payload-schema|save|scaffold|show",

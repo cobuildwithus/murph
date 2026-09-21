@@ -618,3 +618,6 @@ Expired inbox capture compaction is tracked in
 
 Legacy oxygen analytics retirement is tracked in
 [`oxygen analytics`](exec-plans/completed/2026-09-21-retire-oxygen-v1.md).
+
+Single device publication receipts are tracked in
+[`device receipts`](exec-plans/completed/2026-09-21-single-import-receipt.md).
