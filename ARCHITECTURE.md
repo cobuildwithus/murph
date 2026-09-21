@@ -1137,9 +1137,10 @@ uses the canonical writer, attaches host-derived source identity and evidence,
 requires an explicit document date with supporting excerpt or resolves a
 source-based date against the attested parent, checks existing facts and reads
 back accepted writes before advancing the page. Host-owned date provenance tags
-and evidence travel with accepted records. Legacy frozen proposals with ambiguous
-retrieval-day dates are held rather than rewritten; independently dated facts
-retain their dates. Extraction cache v2 binds bytes, media type and parent clinical-date context;
+and evidence travel with accepted records. Missing date provenance is held for
+both fresh and previously frozen proposals. Document evidence must contain a
+matching full date and no conflicting dates; valid siblings continue to import.
+Extraction cache v3 binds bytes, media type and parent clinical-date context;
 cached source-based proposals resolve against each current attested parent.
 Derived records use the attested parent source identity, an extraction facet and
 the parent revision. The existing writer index enforces parent revision guards

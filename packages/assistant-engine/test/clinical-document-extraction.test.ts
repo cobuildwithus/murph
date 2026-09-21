@@ -107,6 +107,7 @@ it('runs one confined member extraction leaf with no effects, delegation or sour
   expect(turn.baseInstructions).toContain('literal supporting date text in dateEvidence')
   expect(turn.baseInstructions).toContain('Never use the current date, retrieval time, filename, or source revision as a clinical date')
   expect(turn.baseInstructions).toContain('omit the undated fact and return blocked')
+  expect(turn.baseInstructions).toContain('Keep supported records when another record is blocked')
   expect(turn.baseInstructions).toContain('Inspect every supplied rendered page')
   expect(turn.baseInstructions).toContain('unsupported qualifier is clinically material')
   expect(turn.baseInstructions).toContain('heart-rate (including pulse)')

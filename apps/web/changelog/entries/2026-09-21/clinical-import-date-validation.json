@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-21",
+  "order": 100,
+  "item": {
+    "id": "clinical-import-date-validation",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable dates for imported records",
+    "summary": "New medical-record imports check supporting dates before adding extracted events to your health history.",
+    "details": "Records with missing or conflicting date evidence stay out of dated summaries, while supported records from the same document can still import. Original source documents remain available.",
+    "relevanceTags": ["medical-records", "journal"],
+    "sourcePullRequests": []
+  }
+}

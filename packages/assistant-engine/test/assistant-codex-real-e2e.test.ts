@@ -371,14 +371,15 @@ function describeRealCodex(name: string, factory: () => void): void {
 }
 
 describeRealCodex('real clinical document extraction journeys', () => {
-  it('clinical extraction live preserves historical dates and blocks undated visits', async () => {
+  it('clinical extraction live preserves supported dates across import-day context', async () => {
     const config = await resolveRealCodexE2eConfig()
     const fixture = await createCanonicalLiveFixture(config)
     const rawRef = 'raw/clinical/fhir/synthetic-source/synthetic-batch/attachments/history.txt'
     const documentPath = path.join(fixture.vault, rawRef)
     const sourceText = [
-      'SYNTHETIC HISTORY REPORT. These are three separate facts for the current member.',
+      'SYNTHETIC HISTORY REPORT. These are four separate facts for the current member.',
       'Visit: routine review, occurred 2025-02-03T15:00:00Z.',
+      'Separate visit: mobility review, occurred March 12, 2020 at noon UTC.',
       'Separate follow-up: exercise counseling, occurred 2026-07-10T12:00:00Z.',
       'Separate visit: nutrition counseling. Its date is unknown; no date elsewhere applies to it.',
       'Exported 2026-07-10. Export time is not a visit date.',
@@ -398,9 +399,9 @@ describeRealCodex('real clinical document extraction journeys', () => {
       })
       expect(providerEntries).toBe(1)
       expect(result.status).toBe('blocked')
-      expect(result.records).toHaveLength(2)
+      expect(result.records).toHaveLength(3)
       expect(result.records.map((record) => new Date(record.payload.occurredAt).toISOString()).sort())
-        .toEqual(['2025-02-03T15:00:00.000Z', '2026-07-10T12:00:00.000Z'])
+        .toEqual(['2020-03-12T12:00:00.000Z', '2025-02-03T15:00:00.000Z', '2026-07-10T12:00:00.000Z'])
       expect(result.records.every((record) => record.dateBasis === 'document' && Boolean(record.dateEvidence))).toBe(true)
       expect(result.records.every((record) => sourceText.includes(record.dateEvidence!))).toBe(true)
       expect(result.reason).toMatch(/unknown|undated|date/iu)
