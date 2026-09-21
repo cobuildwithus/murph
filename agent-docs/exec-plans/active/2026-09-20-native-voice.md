@@ -6,7 +6,7 @@ Updated: 2026-09-20
 
 ## Goal
 
-- Let an authenticated member talk to Murph on the website using published Codex, with the existing engine retaining sole process, tool, and runtime ownership. Prefer native voice where supported; discuss the public GPT-Live adapter tradeoff before further implementation.
+- Let an authenticated member talk to Murph on the website through native Codex voice, with the existing engine retaining sole process, tool, and runtime ownership. The selected path is a minimal Codex compatibility patch for the public GPT-Live API, preserving native transcript and delegation handling.
 
 ## Success criteria
 
@@ -22,7 +22,7 @@ Updated: 2026-09-20
 
 ## Constraints
 
-- Use unmodified, published Codex for the shipping design. The user explicitly challenged maintaining a fork. Local Codex patches are research only; do not adopt, package, or publish them as the Murph dependency. Native voice remains preferred. Public Live client delegation into the existing engine is a documented alternative to assess; missing native support alone does not establish that the whole feature must wait.
+- After comparing maintenance tradeoffs, the user selected a minimal Codex patch to use the public API with an already-entitled project key. Preserve native voice owners rather than building a Murph voice adapter. Keep the patch narrow and reproducible; do not adopt the unproven admission handshake. Publishing artifacts and production deployment remain separate from local implementation and PR verification.
 - Provider secrets remain at the existing boundary. Development tests use synthetic inputs; production credentials are unavailable locally.
 - One existing runtime owner admits effects. Voice does not authorize sending output to another channel.
 - Build the smallest coherent interaction; use existing browser media primitives and design components.
@@ -43,8 +43,8 @@ Updated: 2026-09-20
 
 ## Decisions
 
-- Start on Codex 0.153.4. Explicitly select V3 and audio. Native WebRTC defaults do not prove GPT-Live compatibility.
-- Earlier ReviewGPT advice led to local upstream experiments. Published-only reassessment withdrew the claim that a custom native admission handshake is necessary. Local native patches remain research, not a product dependency. The user requested a tradeoff discussion after investigation; hold further implementation pending that discussion.
+- Initial compatibility proof used Codex 0.153.4 with explicit V3 and audio. The reduced native patch starts from upstream `05f39d7346` with only the tested shutdown fixes; Murph's dependency pin remains unchanged until adoption is verified.
+- Earlier ReviewGPT advice led to local upstream experiments. Published-only reassessment withdrew the claim that a custom native admission handshake is necessary. Local native patches remain research, not a product dependency. The subsequent tradeoff discussion selected a minimal native public-API compatibility patch; implementation has resumed with the two tested shutdown fixes and without the admission experiment.
 - No implementation is justified solely by a feature flag existing; compatibility and host ownership are the first proof gates.
 
 ## Verification
@@ -72,11 +72,11 @@ Updated: 2026-09-20
 
 ## Current prerequisites
 
-- Establish a supported hosted path using published Codex. Development public API access and local subscription-backed native voice are proven separately. Neither proves the composed hosted path. Published 0.155.1 is available; its release source still uses the same multipart Live endpoint, so an upgrade alone does not resolve that observed mismatch.
+- Establish the public API-key path through the selected minimal native Codex patch. Development public API access and local subscription-backed native voice are proven separately. Neither proves the composed hosted path. Published 0.155.1 is available; its release source still uses the same multipart Live endpoint, so an upgrade alone does not resolve that observed mismatch.
 - Native admission experiments are set aside as research, not a shipping prerequisite. The local candidate passed 20 focused checks, then 547 native/protocol checks (one initially lacked the CLI binary and passed after building it), 163 TUI/request checks, the CLI build, scoped Clippy, and formatting. Stable/experimental schema generation passed using Python 3.12 after the installed generator rejected Python 3.14. These proofs establish the candidate behavior, not the necessity of changing Codex or a completed Murph integration.
 - Reassess shutdown and trusted usage using supported stock controls. The verified local cleanup candidate is research only. Do not introduce a second sideband or billing authority to work around missing upstream support.
 - ReviewGPT's source-grounded assessments are captured and verified against their accepted prompts and GPT-6 Pro responses. Its revised recommendation is a bounded public Live proof within existing owners, using published Codex unchanged; no custom native admission requirement is established. The returned owner reduction is applied: RPC response resolution has one process owner, synchronous response observers preserve same-batch ordering, and stored running occupancy is removed. Reservation remains necessary until callbacks exist. Website integration and final PR review remain incomplete.
-- Website integration and deployment have not been performed. Implementation is on hold for the requested tradeoff discussion; this feature plan and final PR review remain incomplete.
+- Website integration and deployment have not been performed. ReviewGPT is preparing the reduced native compatibility patch against upstream `05f39d7346` plus the two tested shutdown fixes. Native compilation, public-key audio/tool proof, reproducible packaging, hosted authorization/recovery integration, and final PR review remain incomplete.
 
 ## Published-only investigation outcome
 
@@ -84,3 +84,5 @@ Updated: 2026-09-20
 - The smallest candidate keeps browser media separate from the existing runtime's trusted Live attachment, admits requests through the existing durable mailbox, and returns selected results through the existing presentation owner. Client delegation requires bounded transcript context and delegation correlation; it does not supply a complete task prompt.
 - Concrete work remains: authenticated admission, scoped provider WebSocket transport, voice lifetime between turns, cumulative voice usage accounting, and result targeting. Multiple steered callers can share one final result, so independently speaking each resolved promise would duplicate or misroute output.
 - ReviewGPT recommends proving those boundaries on the actual hosted runner before committing to a full adapter. Waiting for native support could remove transcript/delegation glue, but would still require website auth, runtime lifetime, and billing integration. Neither path justifies a fork or another task/recovery owner.
+
+- Selected direction after discussion: native compatibility patch. The public adapter remains a comparison, not the implementation plan. Prove the patch and its distribution before changing Murph's dependency or admitting website voice work.
