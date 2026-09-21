@@ -38,6 +38,11 @@ What it does:
 - treats `DEVICE_SYNC_WORKER_BATCH_SIZE` as a durable job-row budget per tick; one provider batch may complete multiple rows, and each row counts against that budget
 - imports provider snapshots through `@murphai/importers`
 
+Hosted source hydration preserves control-plane source keys even when a cold
+restore creates a new local account id. Local-only accounts retain deterministic
+source-key creation; established local source identities and lifecycle fences
+remain stable during warm hydration.
+
 Canonical imports keep member-authored event revisions live while advancing
 the connected-source baseline beneath them. Unrelated facts in the same
 snapshot still commit atomically, omissions record provider tombstones beneath
