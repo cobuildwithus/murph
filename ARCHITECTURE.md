@@ -3092,6 +3092,36 @@ summary lookup: a member/home binding identifies an owner, not an audience.
 New group setup retains roster reads for participant and setup authority; those
 reads are not ordinary direct-message classification.
 
+Web's crypto owner (`domain-root-store.ts` / `domain-root-unwrap-cache.ts`)
+may reuse successfully unwrapped **ingress** root bytes across requests in the
+same process. The process cache has a fixed, non-sliding five-minute lifetime per
+successful entry and FIFO capacity of 128 roots (4 KiB of owned plaintext root
+material, apart from request/caller copies). Its identity hashes the complete
+verified envelope, including member, domain, root, generation, wraps, contexts
+and authority signature, plus the loaded environment, Web wrapping key and
+authority verification keyring; the KMS client must also be the same owner.
+The existing `env.ts` configuration lifetime remains unchanged. Changed local
+crypto context misses the cache; malformed envelopes and disabled/unknown
+signers fail before reuse. No active-root alias, row status, decryptability,
+member access, routing authority or prepared token is retained there. Each new
+request still reads current root metadata and verifies its envelope and expected
+wrap; transaction owners retain their locked authority revalidation and
+provider-disabled gates. A process hit is never a substitute for preparation.
+
+The cache owns independent key copies, zeroized on FIFO eviction or expiry.
+Unreferenced expiry timers erase idle entries, and monotonic deadline checks
+reject expired reads even when timers were delayed; a frozen process can only
+perform erasure when its event loop resumes. Request-scoped masters still wipe
+at scope end and callers still receive independent buffers. Only successful,
+32-byte, non-aborted unwrap completions are admitted. Concurrent cold requests
+may each call KMS: no cross-request in-flight promise, cancellation, failure or
+retry state is shared. Control and device roots remain request-local and Web
+still cannot unwrap runtime roots. This is a best-effort **same-Web-process**
+hit, not a guaranteed hot-workspace hit: hosted runtimes are separate processes.
+Durable envelope/AEAD message encryption is unchanged; the explicit plaintext
+retention and provider-policy revocation tradeoff is owned by
+`agent-docs/SECURITY.md`.
+
 Hosted thread routing prepares thread-container domain envelopes, delivery-route
 ciphertext, and mailbox ingress roots before the planner transaction.
 Telegram sender authority and Linq pending-contact authority resolve
@@ -3110,8 +3140,16 @@ statement, composing the canonical direct/Family/owner predicate with the
 current participant lease predicate. They do not hydrate access-state relations
 or cache authority. Callers that need the access state retain the full reader.
 Established Linq direct messages resolve a blind-index/member-id target and
-prepare the required control and mailbox ingress roots plus the observed routing
-snapshot before `BEGIN`. They do not load or compare a full private identity
+prepare the required mailbox ingress root plus the observed raw routing
+record before `BEGIN`. For a provider-attested direct message whose current blind
+chat, recipient-line, and participant indexes exactly match a home binding with
+no pending state, preparation derives the route from those incoming values and
+skips control-root preparation and private routing decryption. The transaction
+still checks for competing pending bindings before retaining the home binding.
+Changed routes, pending conflicts, access changes, and Family transitions use
+the existing bounded retry with full control-root and private-routing preparation.
+Other direct routes prepare both control and ingress roots as needed.
+They do not load or compare a full private identity
 snapshot unless Family acceptance/replay consumes it. A positive member ID
 already discovered for an opener-continuation claim seeds only the first direct
 preparation attempt; misses, retries and later plans resolve again. The transaction still
