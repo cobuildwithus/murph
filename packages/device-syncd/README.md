@@ -531,7 +531,9 @@ Schedule-time extended history, including weight, keeps one active identity per
 source lifecycle and coverage generation across day boundaries. Source-first
 exact history retains its window identity. Empty weight retry roots at their
 full-history boundary converge to the schedule-time key during queue admission,
-including cold restores. Queued roots retain the union of accepted windows;
+including cold restores. A valid version-one empty unresolved-identity set is
+empty evidence; nonempty, malformed, or unknown encoded evidence cannot converge.
+Queued roots retain the union of accepted windows;
 running or partial scans, unresolved evidence, and older generations retain their
 existing owners. Weight reads use bounded 30-day chunks, preserving pagination
 and source lifecycle checks. A pending upstream
@@ -545,7 +547,8 @@ scan. Hosted future history can share the checkpoint-fenced reconcile proof's
 bounded deferral; content changes, dirty work, and proof expiry still admit the
 ordinary runtime path.
 
-Hosted webhook passes with admitted dirty work can pull a Junction full reconcile
+Hosted passes with admitted dirty work, including retained reconciliation owners
+that absorb webhook hints, can pull a Junction full reconcile
 forward by up to thirty minutes while already awake. The ordinary account-scoped
 scheduler queues the same durable full jobs; partial imports never substitute for
 a complete content proof. Empty hints, other providers, foreground yields, and

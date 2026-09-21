@@ -570,6 +570,9 @@ Interactive voice-orb design playground implementation and proof are tracked in
 Voice-orb browser and PNG fallback proof is tracked in
 [`2026-09-20-voice-orb-browser-support.md`](exec-plans/completed/2026-09-20-voice-orb-browser-support.md).
 
+Retained-owner device cadence and encoded-empty history convergence proof is tracked in
+[`device wake follow-up`](exec-plans/completed/2026-09-21-device-wake-followup.md).
+
 Covered startup mailbox-prefetch reuse and unknown-wake fallback are owned by
 `references/hosted-runtime-protocol.md`; implementation is tracked in
 `exec-plans/completed/2026-09-21-startup-prefetch-wake.md`.
