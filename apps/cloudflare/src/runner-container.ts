@@ -579,6 +579,7 @@ export interface RunnerRuntimeWakeDiagnostics {
 }
 
 export interface RunnerRuntimeWakeInput {
+  voiceCallId?: string;
   attemptId: string;
   leaseGeneration: string;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;

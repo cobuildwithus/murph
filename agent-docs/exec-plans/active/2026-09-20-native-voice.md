@@ -51,6 +51,20 @@ Updated: 2026-09-21
 
 ## Verification
 
+- The Cloudflare wrapper now supplies the invocation's voice handle with its
+  actual signed mailbox and usage ports. Cold admission carries only an opaque
+  reservation in the existing job; warm admission forwards it through the exact
+  owner wake. Shared readers reject reservations in background processing modes.
+  A container rejects voice reservation before its live owner is ready, leaving
+  ordinary pending-wake coalescing unchanged. The wrapper closes and joins the
+  handle on every exit. A synthetic native callback is proved through the actual
+  platform port, including bound member/attempt/generation headers and final
+  admission join. The invocation-builder and container HTTP wake proofs pass:
+  128 focused Cloudflare cases, 67 shared protocol cases, and Cloudflare typecheck.
+  Complexity passes with unchanged container/preparation debt and one fewer
+  point in the invocation wrapper. The HTTP connection/close command, Web call
+  controller, provider egress authorization, browser UI, and final journeys remain.
+
 - Signed normalized-input admission now reaches the existing encrypted Web mailbox.
   The request cannot select a member; the callback supplies the identity and signed
   attempt/generation, which Web rechecks inside publication with active access,

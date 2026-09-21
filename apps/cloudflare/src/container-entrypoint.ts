@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   buildHostedExecutionSafeErrorDetails,
+  parseHostedVoiceCallId,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
@@ -291,6 +292,7 @@ class HostedContainerArchitectureVersionMismatchError extends Error {
 }
 
 interface HostedContainerRuntimeWakeRequest {
+  voiceCallId?: string;
   attemptId: string;
   leaseGeneration: string;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
@@ -299,6 +301,7 @@ interface HostedContainerRuntimeWakeRequest {
 }
 
 type HostedContainerRuntimeWakeNotification = {
+  voiceCallId?: string;
   notifiedAtEpochMs?: number | null;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
@@ -552,6 +555,7 @@ export async function startHostedContainerEntrypoint(input: {
             userId: activeRuntimeWakeUserId,
           });
           accepted = !mismatch && wake({
+            voiceCallId: wakeRequest.voiceCallId,
             ...(acceptedWakeOrchestration ? { orchestration: acceptedWakeOrchestration } : {}),
             notifiedAtEpochMs,
             ...(wakeRequest.requestedProcessingMode
@@ -564,7 +568,7 @@ export async function startHostedContainerEntrypoint(input: {
         if (
           !accepted
           && !mismatch
-          && wake === null
+          && canDeferHostedContainerRuntimeWake(wake !== null, wakeRequest)
           && activeRuntimeWakePendingAttemptId !== null
         ) {
           if (
@@ -1496,6 +1500,11 @@ function parseHostedContainerWorkspaceInvocationAbortRequest(
   };
 }
 
+// A call reservation needs its live owner; only ordinary wakes coalesce before readiness.
+function canDeferHostedContainerRuntimeWake(ready: boolean, request: HostedContainerRuntimeWakeRequest | null): boolean {
+  return !ready && request?.voiceCallId === undefined;
+}
+
 async function readHostedContainerRuntimeWakeRequest(
   request: IncomingMessage,
 ): Promise<HostedContainerRuntimeWakeRequest | null> {
@@ -1545,6 +1554,7 @@ function parseHostedContainerRuntimeWakeRequest(
     attemptId,
     leaseGeneration,
     orchestration: readHostedContainerRuntimeWakeOrchestration(record.orchestration),
+    ...(record.voiceCallId === undefined ? {} : { voiceCallId: parseHostedVoiceCallId(record.voiceCallId) }),
     ...(requestedProcessingMode ? { requestedProcessingMode } : {}),
     userId,
   };

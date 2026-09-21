@@ -130,6 +130,8 @@ export function classifyHostedSystemMailboxExecutionClass(input: {
 }
 
 export interface HostedRuntimeEnsureProcessingRequest {
+  /** Ephemeral reservation only; SDP never enters an invocation job. */
+  voiceCallId?: string;
   admission?: import("./runtime-owner.ts").HostedRuntimeOwnerResponse;
   assistantExecutionBlocked?: true;
   conversationWorkPending?: true;

@@ -1,3 +1,4 @@
+import { parseHostedVoiceCallId } from "../voice-input.ts";
 import {
   type HostedMailboxLaneLag,
 } from "../runtime-control.ts";
@@ -256,6 +257,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
     "admission",
     "assistantExecutionBlocked",
     "conversationWorkPending",
+    "voiceCallId",
     "orchestrationAttemptId",
     "processingMode",
   ]);
@@ -278,6 +280,9 @@ export function parseHostedRuntimeEnsureProcessingRequest(
       "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
     );
   }
+  if (record.voiceCallId !== undefined && processingMode != null && processingMode !== "default") {
+    throw new TypeError("Voice reservation requires default processing mode.");
+  }
   const conversationWorkPending = record.conversationWorkPending === undefined
     ? undefined
     : requireExactTrue(
@@ -291,6 +296,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
   }
 
   return {
+    ...(record.voiceCallId === undefined ? {} : { voiceCallId: parseHostedVoiceCallId(record.voiceCallId) }),
     ...(record.admission === undefined ? {} : {
       admission: parseRuntimeProcessingAdmission(record.admission, processingMode ?? "default"),
     }),

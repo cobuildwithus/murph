@@ -3950,6 +3950,8 @@ export type HostedWorkspaceInvocationProcessingMode =
   (typeof HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES)[number];
 
 export interface HostedWorkspaceInvocationRequest {
+  /** Ephemeral reservation only; SDP never enters an invocation job. */
+  voiceCallId?: string;
   assistantExecutionBlocked?: true;
   attemptId: string;
   budget?: HostedWorkspaceInvocationBudget | null;

@@ -13,8 +13,8 @@ export function parseHostedVoiceInputRequest(value: unknown): HostedVoiceInputRe
   if (Object.keys(record).some((key) => !["callId", "inputId", "occurredAt", "text"].includes(key))) {
     throw new TypeError("Hosted voice input contains unsupported fields.");
   }
-  const callId = requireVoiceIdentifier(record.callId);
-  const inputId = requireVoiceIdentifier(record.inputId);
+  const callId = parseHostedVoiceCallId(record.callId);
+  const inputId = parseHostedVoiceCallId(record.inputId);
   const occurredAt = requireString(record.occurredAt, "Hosted voice input timestamp");
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(occurredAt)
     || !Number.isFinite(Date.parse(occurredAt))
@@ -28,7 +28,7 @@ export function parseHostedVoiceInputRequest(value: unknown): HostedVoiceInputRe
   return { callId, inputId, occurredAt, text };
 }
 
-function requireVoiceIdentifier(value: unknown): string {
+export function parseHostedVoiceCallId(value: unknown): string {
   const id = requireString(value, "Hosted voice input identity");
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(id)) {
     throw new TypeError("Hosted voice input identity is invalid.");

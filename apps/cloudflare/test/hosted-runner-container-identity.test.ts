@@ -121,7 +121,7 @@ describe("hosted runner container identity", () => {
       stateStore,
     });
     const prepared = service.prepareWithFence({
-      input: { orchestrationAttemptId: "parallel-inputs", userId: TEST_USER_ID },
+      input: { orchestrationAttemptId: "parallel-inputs", userId: TEST_USER_ID, voiceCallId: "call-synthetic" },
       token,
     });
     try {
@@ -130,7 +130,7 @@ describe("hosted runner container identity", () => {
     } finally {
       workspaceGate.resolve();
       cryptoGate.resolve();
-      await prepared;
+      expect((await prepared).job.request.voiceCallId).toBe("call-synthetic");
     }
     expect(started).toHaveLength(2);
   });

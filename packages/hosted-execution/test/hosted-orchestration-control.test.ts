@@ -531,6 +531,21 @@ describe("hosted orchestration control contracts", () => {
   });
 
   it.each([undefined, null, "default"] as const)(
+    "preserves a voice reservation for foreground processing mode %s",
+    (processingMode) => {
+      const request = { voiceCallId: "call-synthetic", orchestrationAttemptId: "orchestration-voice",
+        ...(processingMode === undefined ? {} : { processingMode }) };
+      expect(parseHostedRuntimeEnsureProcessingRequest(request)).toEqual(request);
+    },
+  );
+
+  it.each(["system_mailbox", "inbox_media_retention"])("rejects voice reservation in %s", (processingMode) => {
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      voiceCallId: "call-synthetic", orchestrationAttemptId: "orchestration-voice", processingMode,
+    })).toThrow("Voice reservation requires default processing mode.");
+  });
+
+  it.each([undefined, null, "default"] as const)(
     "preserves pending conversation work for default processing mode %s",
     (processingMode) => {
       const request = {

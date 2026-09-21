@@ -178,6 +178,7 @@ async function wakeExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeO
   const identity = requireIdentity(owner);
   ctx.diagnostics.stage = "active_wake";
   const wake = await ensureActiveRuntimeProcessing({ activeRuntime: {
+    ...(ctx.input.voiceCallId ? { voiceCallId: ctx.input.voiceCallId } : {}),
     attemptId: identity.attemptId, leaseGeneration: identity.generation, userId: ctx.input.userId,
     processingMode: owner.processingMode, orchestration: ctx.input.orchestration,
     ...(owner.processingMode === "system_mailbox" && ctx.mode === "default" ? { requestedProcessingMode: ctx.mode } : {}),

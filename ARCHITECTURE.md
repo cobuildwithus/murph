@@ -2513,8 +2513,13 @@ delivery remain independent of media lifetime. Before returning, it synchronousl
 stops accepting calls, quiesces its existing background owners, and checks for new
 dirty state. Checkpoint preparation preserves media; invocation cleanup joins
 closure and usage before release. Native voice and ordinary work share one Codex
-configuration preparation promise. Authenticated Web call-control and durable
-input callbacks still need to supply this invocation handle in the hosted path.
+configuration preparation promise. The Cloudflare invocation now supplies the
+handle with its signed mailbox and usage ports. An opaque call reservation travels
+through the existing fresh invocation or exact-owner wake; SDP is not job state.
+Before runtime readiness, ordinary wakes may coalesce but call reservations are
+rejected for retry. The wrapper exposes connection/close callbacks and joins
+cleanup even if invocation setup fails. Authenticated browser call-control still
+needs to expose those callbacks.
 
 Normalized input admission uses the existing signed Web callback and encrypted
 mailbox. Its narrow request contains only the call id, native input id, original

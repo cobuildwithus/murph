@@ -1073,6 +1073,16 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     await invocationStarted.promise;
+    const pendingVoiceWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1",
+        userId: "u1", voiceCallId: "call-synthetic",
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(pendingVoiceWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+    expect(pendingVoiceWake.headers.get("x-runtime-wake-pending")).toBeNull();
     const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       body: JSON.stringify({
         attemptId: "attempt_evt_runtime_wake_ready",
@@ -1099,6 +1109,11 @@ describe("startHostedContainerEntrypoint", () => {
 
     nowEpochMs = firstWakeAcceptedAtEpochMs;
     const firstWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1",
+        userId: "u1", voiceCallId: "call-synthetic",
+      }),
+      headers: { "content-type": "application/json" },
       method: "POST",
     });
     nowEpochMs = secondWakeAcceptedAtEpochMs;
@@ -1137,7 +1152,7 @@ describe("startHostedContainerEntrypoint", () => {
         },
         requestedProcessingMode: "default",
       },
-      { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs },
+      { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs, voiceCallId: "call-synthetic" },
       { notifiedAtEpochMs: secondWakeAcceptedAtEpochMs },
     ]);
     expect(invocationResponse.status).toBe(200);
@@ -1171,6 +1186,19 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakeHandledAtEpochMs: expect.any(Number),
           workspaceAttemptId: null,
           workspacePendingAttemptId: null,
+        },
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePending: false,
+          activeRuntimeWakePresent: false,
+          runtimeWakeAccepted: false,
+          runtimeWakeAbsent: false,
+          runtimeWakeMismatch: false,
+          runtimeWakePending: false,
+          runtimeWakeReceivedAtEpochMs: expect.any(Number),
+          runtimeWakeHandledAtEpochMs: expect.any(Number),
+          workspaceAttemptId: null,
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
         {
           activeHostedRunnerJobCount: 1,
