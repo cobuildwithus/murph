@@ -212,6 +212,8 @@ export interface DeviceSyncJobTimingDiagnostic {
   at: string;
   attempts: number;
   canonicalProgressCommitted?: true;
+  /** Provider-proven forward coverage, published with the owned continuation. */
+  continuationProgressCommitted?: true;
   connectionSourceReadCount: number;
   connectionSourceReadElapsedMs: number;
   credentialRefreshCount: number;
@@ -1053,6 +1055,8 @@ export interface ProviderJobContext {
 }
 
 export interface ProviderJobResult {
+  /** A finite existing scan advanced; retries, rescheduling, and new jobs are not progress. */
+  continuationProgress?: true;
   scheduledJobs?: DeviceSyncJobInput[];
   metadataPatch?: Record<string, unknown>;
   nextReconcileAt?: string | null;

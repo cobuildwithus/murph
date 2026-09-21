@@ -7254,7 +7254,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
     })).not.toThrow();
   });
 
-  it("does not report canonical system progress for local queue commits alone", async () => {
+  it.each([false, true])("reports system progress only for proven continuation advancement: %s", async (continuationProgress) => {
     mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
       listPendingJobsForAccount: vi.fn(() => []),
     });
@@ -7273,6 +7273,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         credentialRefreshCount: 0,
         credentialRefreshElapsedMs: 0,
         durableProgressCommitted: true,
+        ...(continuationProgress ? { continuationProgressCommitted: true as const } : {}),
         elapsedMs: 1,
         jobCount: 1,
         jobKind: "resource",
@@ -7313,7 +7314,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       },
     });
 
-    assert.equal(Object.hasOwn(result, "systemProgressed"), false);
+    assert.equal(result.systemProgressed === true, continuationProgress);
   });
 
   it.each(["drained", "foreground", "outer", "timeout"] as const)(

@@ -944,6 +944,7 @@ class DeviceSyncServiceController {
 
     let activeJobs: DeviceSyncJobRecord[] = [job];
     let canonicalProgressCommitted = false;
+    let continuationProgressCommitted = false;
     let connectionSourceReadCount = 0;
     let connectionSourceReadElapsedMs = 0;
     let credentialRefreshCount = 0;
@@ -977,6 +978,9 @@ class DeviceSyncServiceController {
         attempts: job.attempts,
         ...(canonicalProgressCommitted
           ? { canonicalProgressCommitted: true as const }
+          : {}),
+        ...(continuationProgressCommitted
+          ? { continuationProgressCommitted: true as const }
           : {}),
         connectionSourceReadCount,
         connectionSourceReadElapsedMs,
@@ -1574,6 +1578,7 @@ class DeviceSyncServiceController {
 
       outcome = "completed";
       durableProgressCommitted = true;
+      continuationProgressCommitted = result.continuationProgress === true;
       return finishPass();
     } catch (error) {
       if (isDeviceSyncJobExecutionYielded(error, jobAbortController.signal)) {

@@ -297,6 +297,11 @@ Historical resource jobs also report their last upstream readiness classificatio
 provider execution reports the proposed follow-up count and earliest delay from
 the attempt's start; these fields do not imply imported data or committed jobs.
 The durable-progress and canonical-progress fields retain that distinction.
+Provider-proven forward continuation coverage is separately credited only after
+its owned job completion and successor commit. Junction's strict suffix of an
+unchanged finite resource window qualifies even when provider dates are empty;
+unchanged retries and generic queue completion do not. Hosted runtime uses this
+in-process evidence for its existing checkpointed system-progress generation.
 The diagnostic stream never includes account or job ids, cursors, provider records, health values,
 credentials, or filesystem paths.
 

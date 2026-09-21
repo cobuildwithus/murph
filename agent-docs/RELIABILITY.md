@@ -582,7 +582,12 @@ to apply after cutover.
   of preserving stale authority. Orchestration may delay repeated system-only
   processing for 30 seconds, two minutes, then ten minutes while the progress
   generation and handled-through frontier remain unchanged. Workspace-version,
-  attempt, signal, and selected-wake churn are not progress.
+  attempt, signal, and selected-wake churn are not progress. A Junction resource
+  scan that advances the start of the same finite window also proves progress,
+  including empty dates. The provider reports that strict suffix; the device
+  service credits it only after the owned continuation commits, and the runtime
+  publishes it through the existing checkpoint generation. Unchanged cursors,
+  new work, failed commits, and mere retry rescheduling do not qualify.
   Local system timers use the same execution-class predicate as imported work;
   a missing Web lane sequence changes handled-prefix accounting, never wake
   ownership. Known device reconciliation wakes cannot acquire default-owner
