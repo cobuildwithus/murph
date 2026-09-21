@@ -127,6 +127,15 @@ container-owned revocation are documented in `apps/cloudflare/README.md`,
 Pinned Codex/workerd reuse and fallback proof is indexed in
 `agent-docs/references/testing-ci-map.md`.
 
+Follow-up profile budget correction and maintenance replay verification are tracked
+in `exec-plans/completed/2026-09-20-memory-vault-replay.md`.
+
+Private memory selection and automatic compaction are owned by
+`ARCHITECTURE.md`; focused selection, managed-seed convergence, maintenance
+admission, and real-Codex fresh-conversation proof live in the assistant-engine
+memory and managed-automation tests. Implementation and review evidence is
+recorded in `exec-plans/completed/2026-09-20-memory-current-context.md`.
+
 ## Purpose
 
 Deferred device hints honor their persisted retry time in wake projection and
