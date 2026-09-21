@@ -14,7 +14,7 @@ import {
   type ClinicalDocumentExtractionFamily,
   type ClinicalDocumentExtractionOutput,
 } from '@murphai/clinical-records'
-import { isWritableIsoDateTime } from '@murphai/contracts'
+import { isStrictIsoDate, isWritableIsoDateTime } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 import { MURPH_MEMBER_READ_PERMISSION_PROFILE } from '@murphai/hosted-execution/assistant-permissions'
 
@@ -40,6 +40,8 @@ export interface ClinicalDocumentExtractionInput extends Pick<
   source: { rawRef: string; sha256: string; mediaType: string; clinicalOccurredAt?: string }
   documentPath: string
   timeZone: string
+  /** Shared page deadline on the performance.now() clock; standalone leaves may omit it. */
+  deadlineAt?: number
   extractedText?: string
   renderedPages?: readonly { page: number; path: string }[]
   /** Exact host-owned render directories, never values selected by source content. */
@@ -50,6 +52,8 @@ export interface ClinicalDocumentExtractionInput extends Pick<
 const MAX_RENDERED_PAGES = 20
 const MAX_EXTRACTED_TEXT_BYTES = 600_000
 const MAX_OUTPUT_BYTES = 1_000_000
+const MAX_DATE_CORRECTION_MS = 30_000
+const DATE_CORRECTION_CLEANUP_MS = 5_000
 
 const CLINICAL_EXTRACTION_INSTRUCTIONS = [
   'You are a read-only clinical document extraction leaf for the current member.',
@@ -60,6 +64,7 @@ const CLINICAL_EXTRACTION_INSTRUCTIONS = [
   'Extract only the assigned family. Preserve explicit dates, negations, uncertainty, status, values, units, reference ranges, specimen and whose health the fact describes. Do not assign a relative’s condition to the member.',
   'Every proposed record must include dateBasis. Use document only when its clinical date is explicitly documented; include the literal supporting date text in dateEvidence. Preserve that date even if it matches today. Use source only for a fact describing this source report with no independently documented date, when host source.clinicalOccurredAt is available; use that timestamp for occurredAt. Never use the current date, retrieval time, filename, or source revision as a clinical date. If neither basis is supported, omit the undated fact and return blocked with a concise reason. Do not infer secondary dates such as collectedAt, reportedAt or assertedOn from the source timestamp.',
   'For dateEvidence, quote the smallest supporting excerpt with the complete event date, including its year. Keep occurredAt consistent with that date and any explicit timezone. Do not mix different event dates or retrieval/export dates in the supporting excerpt. Use source only for the source report itself; an undated secondary event remains blocked. Keep supported records when another record is blocked.',
+  'When the source gives a calendar date without a time, preserve occurredAt as YYYY-MM-DD. Do not invent a time or timezone.',
   'Never invent dates or units, diagnose, infer absence from silence, turn a prescription/order/dispense into a dose taken, or activate a medication regimen.',
   'Inspect every supplied rendered page. Text extraction can omit scans or figures even when it contains a cover or header. Do not claim complete coverage when a supplied page is unreadable, uninspected, or unresolved.',
   'The task covers the supplied rendered pages when present; the host owns continuation across the remaining document. Include the supplied page number on every proposed fact from rendered evidence.',
@@ -120,6 +125,7 @@ const DATE_CORRECTION_INSTRUCTIONS = [
   'Do not write files or vault records, contact anyone, use the network, call effect tools, delegate, spawn children or request broader permissions.',
   'Return at most one correction for each supplied recordIndex. Do not change other facts, add records, or correct an index absent from the assignment.',
   'Use document only for an explicitly documented event date. Quote the smallest literal supporting date excerpt including the full year in dateEvidence; occurredAt must match it and any explicit timezone. Do not mix different dates in the excerpt.',
+  'When the source gives a calendar date without a time, preserve occurredAt as YYYY-MM-DD. Do not invent a time or timezone.',
   'Use source only for the source report itself when host source.clinicalOccurredAt is available and no independent date is documented. Use exactly that timestamp. An undated secondary event cannot inherit this date.',
   'Never substitute the current date, retrieval time, export time, filename or revision date. If the event date cannot be supported, return unknown with null occurredAt and dateEvidence. Do not guess.',
 ].join('\n')
@@ -134,11 +140,18 @@ async function recoverClinicalExtractionDates(
     clinicalExtractionDateIsSupported(record, input.source.clinicalOccurredAt, input.timeZone)
   const invalid = output.records.flatMap((record, recordIndex) => supported(record) ? [] : [{ recordIndex, record }])
   if (invalid.length === 0) return output
+  const held: ClinicalDocumentExtractionOutput = {
+    ...output, status: 'blocked', reason: output.reason ?? 'Some clinical facts have no supported event date.',
+  }
+  // Optional work must leave time to return successful extraction and join the
+  // leaf before the page's hard deadline. Late extraction keeps its valid facts.
+  if (input.deadlineAt !== undefined
+    && input.deadlineAt - performance.now() < MAX_DATE_CORRECTION_MS + DATE_CORRECTION_CLEANUP_MS) return held
 
   let records = output.records
   let providerAdmitted = false
   try {
-    const correctionSignal = AbortSignal.any([AbortSignal.timeout(30_000), ...(input.abortSignal ? [input.abortSignal] : [])])
+    const correctionSignal = AbortSignal.any([AbortSignal.timeout(MAX_DATE_CORRECTION_MS), ...(input.abortSignal ? [input.abortSignal] : [])])
     const response = await executeConfinedReadOnlyAssistantAskTurn({
       ...input,
       abortSignal: correctionSignal,
@@ -171,7 +184,8 @@ async function recoverClinicalExtractionDates(
     }
     records = output.records.map((record, recordIndex) => {
       const correction = byIndex.get(recordIndex)
-      if (!correction || !correction.occurredAt || !isWritableIsoDateTime(correction.occurredAt)) return record
+      if (!correction || !correction.occurredAt
+        || (!isStrictIsoDate(correction.occurredAt) && !isWritableIsoDateTime(correction.occurredAt))) return record
       const candidate = {
         ...record, dateBasis: correction.dateBasis, dateEvidence: correction.dateEvidence || undefined,
         payload: { ...record.payload, occurredAt: correction.occurredAt },
@@ -185,7 +199,7 @@ async function recoverClinicalExtractionDates(
     // Canonical admission still holds each unsupported record independently.
   }
   if (records.every(supported)) return { ...output, records }
-  return { ...output, records, status: 'blocked', reason: output.reason ?? 'Some clinical facts have no supported event date.' }
+  return { ...held, records }
 }
 
 async function validateClinicalExtractionSource(input: ClinicalDocumentExtractionInput) {

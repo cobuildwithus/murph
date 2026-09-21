@@ -378,13 +378,13 @@ describeRealCodex('real clinical document extraction journeys', () => {
     const documentPath = path.join(fixture.vault, rawRef)
     const sourceText = [
       'SYNTHETIC HISTORY REPORT. Three separate visits for the current member.',
-      'Routine review: 2025-02-03T15:00:00Z.',
-      'Mobility review: March 12, 2020 at noon UTC.',
+      'Routine review: February 3, 2025.',
+      'Mobility review: March 12, 2020.',
       'Exercise counseling: 2026-07-10T12:00:00Z.',
       'Exported 2026-07-10. Export time is not a visit date.',
     ].join('\n')
     const initialRecords = [
-      { payload: { kind: 'note', occurredAt: '2025-02-03T15:00:00Z', title: 'Routine review', note: 'Routine review.' }, dateBasis: 'document', dateEvidence: '2025-02-03T15:00:00Z' },
+      { payload: { kind: 'note', occurredAt: '2025-02-03', title: 'Routine review', note: 'Routine review.' }, dateBasis: 'document', dateEvidence: 'February 3, 2025' },
       { payload: { kind: 'note', occurredAt: '2026-07-10T12:00:00Z', title: 'Mobility review', note: 'Mobility review.' }, dateBasis: 'document', dateEvidence: 'March 12, 2020' },
       { payload: { kind: 'note', occurredAt: '2026-07-10T12:00:00Z', title: 'Exercise counseling', note: 'Exercise counseling.' } },
     ]
@@ -419,7 +419,8 @@ describeRealCodex('real clinical document extraction journeys', () => {
       expect(result.records).toHaveLength(3)
       expect(result.records[0]).toEqual(initialRecords[0])
       expect(result.records.map((record) => new Date(record.payload.occurredAt).toISOString()))
-        .toEqual(['2025-02-03T15:00:00.000Z', '2020-03-12T12:00:00.000Z', '2026-07-10T12:00:00.000Z'])
+        .toEqual(['2025-02-03T00:00:00.000Z', '2020-03-12T00:00:00.000Z', '2026-07-10T12:00:00.000Z'])
+      expect(result.records[1]?.payload.occurredAt).toBe('2020-03-12')
       expect(result.records.every((record) => record.dateBasis === 'document' && sourceText.includes(record.dateEvidence!))).toBe(true)
       expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
       expect(await readFile(documentPath, 'utf8')).toBe(sourceText)

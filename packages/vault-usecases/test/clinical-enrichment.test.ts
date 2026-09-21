@@ -94,6 +94,25 @@ describe("clinical document enrichment durable application", () => {
     expect(result.readback.verifiedCount).toBe(1);
   });
 
+  it.each(["UTC", "America/New_York", "Asia/Tokyo"])("imports and replays frozen date-only records on their documented day in %s", async (timezone) => {
+    const input = await fixture(false, timezone);
+    const date = "2020-03-12";
+    await prepare(input, { outputs: { labs: empty, history: empty, measurements: {
+      status: "complete", records: [{ dateBasis: "document", dateEvidence: "March 12, 2020", payload: measurement(date) }],
+    } } });
+    const statePath = path.join(input.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${input.jobId}.json`);
+    const frozen = await readFile(statePath, "utf8");
+    const result = await applyClinicalEnrichmentProposals(input);
+    expect(result.counts).toMatchObject({ created: 1, held: 0 });
+    expect(result.readback.verifiedCount).toBe(1);
+    await writeFile(statePath, frozen);
+    const replay = await applyClinicalEnrichmentProposals(input);
+    expect(replay.counts.existing).toBe(1);
+    const rows = await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], from: date, to: date, limit: 10 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.date).toBe(date);
+  });
+
   it("resolves an explicitly source-dated fact against its attested historical parent", async () => {
     const input = await fixture(false, "America/New_York", occurredAt);
     await prepare(input, { outputs: { labs: empty, history: empty, measurements: {

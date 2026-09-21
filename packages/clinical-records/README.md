@@ -42,13 +42,15 @@ excerpt for document dates. Persisted schemas still read older proposals, while
 fresh provider output requires a non-null date basis. Canonical admission holds
 missing or unknown provenance and document excerpts that lack a matching full
 date or mix conflicting dates. Common ISO, named-month and numeric date forms
-remain supported, including timezone normalization. Source-based records use
+remain supported, including timezone normalization and calendar-only occurredAt
+values without an invented time. Source-based records use
 only the attested parent clinical date. Valid siblings still import when another
 fact is held; retrieval timestamps never establish a visit date. Before freezing,
 extraction shares the canonical date check and vault timezone, then gives an
 affected family one read-only correction turn against the same source. Only date
 fields on invalid records may change. The turn has a 30-second cap inside the
-existing page deadline, rechecks provider authority, honors cancellation, and
+existing page deadline and is skipped unless that budget plus five seconds for
+cleanup remains. It rechecks provider authority, honors cancellation, and
 uses a separate review usage identity. Failed corrections preserve successful
 facts; unresolved dates remain held without retrying frozen proposals.
 

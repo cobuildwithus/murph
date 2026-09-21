@@ -51,7 +51,7 @@ export function clinicalDateEvidenceMatches(
   evidence: string | undefined,
   timeZone: string,
 ): boolean {
-  if (!evidence || !isWritableIsoDateTime(occurredAt)) return false;
+  if (!evidence || (!isStrictIsoDate(occurredAt) && !isWritableIsoDateTime(occurredAt))) return false;
   const days = new Set([occurredAt.slice(0, 10), toLocalDayKey(occurredAt, timeZone)]);
   const tokens = [...evidence.matchAll(DATE_TOKEN)];
   // One supporting excerpt must not mix unrelated event or retrieval dates.

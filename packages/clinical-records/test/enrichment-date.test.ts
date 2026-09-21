@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { clinicalDateEvidenceMatches } from "../src/enrichment-date.ts";
 
 describe("clinical document date evidence", () => {
+  it.each(["UTC", "America/New_York", "Asia/Tokyo"])("preserves calendar-only dates in %s", (zone) => {
+    expect(clinicalDateEvidenceMatches("2020-03-12", "March 12, 2020", zone)).toBe(true);
+    expect(clinicalDateEvidenceMatches("2020-03-12", "March 11, 2020", zone)).toBe(false);
+    expect(clinicalDateEvidenceMatches("2020-03-12", undefined, zone)).toBe(false);
+  });
   it.each([
     "2020-03-12", "Exam: 2020-03-12T12:00:00Z.", "2020/03/12",
     "March 12, 2020", "Mar. 12th, 2020", "12 March 2020", "12-Mar-2020",

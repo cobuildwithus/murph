@@ -229,6 +229,19 @@ it('passes only a validated host clinical date into the extraction assignment', 
 const correction = { recordIndex: 1, dateBasis: 'document', occurredAt: labRecord.payload.occurredAt, dateEvidence: labRecord.dateEvidence }
 const unsupportedRecord = { ...labRecord, payload: { ...labRecord.payload, occurredAt: '2026-09-09T12:00:00Z' } }
 
+it('accepts supported calendar-only dates without correction and can recover to a calendar-only date', async () => {
+  const input = await fixture()
+  const record = { ...labRecord, dateEvidence: '2026-09-01', payload: { ...labRecord.payload, occurredAt: '2026-09-01' } }
+  extractionMocks.executeTurn.mockResolvedValueOnce({ finalMessage: JSON.stringify({ status: 'complete', records: [record] }) })
+  await expect(executeClinicalDocumentExtraction(input)).resolves.toEqual({ status: 'complete', records: [record] })
+  expect(extractionMocks.executeTurn).toHaveBeenCalledTimes(1)
+  extractionMocks.executeTurn
+    .mockResolvedValueOnce({ finalMessage: JSON.stringify({ status: 'complete', records: [unsupportedRecord] }) })
+    .mockResolvedValueOnce({ finalMessage: JSON.stringify({ corrections: [{ recordIndex: 0, dateBasis: 'document', occurredAt: '2026-09-01', dateEvidence: '2026-09-01' }] }) })
+  await expect(executeClinicalDocumentExtraction(input)).resolves.toEqual({ status: 'complete', records: [record] })
+  expect(extractionMocks.executeTurn).toHaveBeenCalledTimes(3)
+})
+
 it.each(['missing', 'contradictory'])('recovers %s date provenance once without changing valid facts', async (problem) => {
   const input = await fixture()
   const invalid = problem === 'missing' ? { ...labRecord, dateBasis: undefined } : unsupportedRecord
