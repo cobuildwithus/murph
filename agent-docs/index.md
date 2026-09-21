@@ -526,6 +526,9 @@ The broader dashboard latency work is recorded in
 The admission and runtime launch reduction is recorded in
 [`2026-09-17-ingress-admission-simplification.md`](exec-plans/completed/2026-09-17-ingress-admission-simplification.md).
 
+Five-minute ingress cache retention and member isolation proof are tracked in
+[`ingress cache retention`](exec-plans/completed/2026-09-21-ingress-cache-five-minutes.md).
+
 ## Conventions
 
 Local feedback diagnostics are documented in

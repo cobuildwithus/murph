@@ -4903,6 +4903,88 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       .toHaveBeenCalledTimes(succeeds ? 1 : 0);
   });
 
+  it.each(["stable", "routing-drift", "pending-conflict"])("skips control KMS for a clean home route and restores preparation when needed (%s)", async (scenario) => {
+    const needsRetry = scenario !== "stable";
+    mocks.enforceDirectMailboxPreparation = true;
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue("member_123");
+    const routingRecord = {
+      memberId: "member_123",
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id", memberId: "member_123", value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-recipient-phone", memberId: "member_123", value: "+15550000000",
+      }),
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: createHostedPhoneLookupKey("+15551234567"),
+      linqHomeLineAssignedAt: new Date("2026-03-26T00:00:00.000Z"),
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    };
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock(routingRecord);
+    if (scenario === "pending-conflict") {
+      const findFirst = hostedMemberRouting.findFirst.getMockImplementation()!;
+      let conflictObserved = false;
+      hostedMemberRouting.findFirst.mockImplementation(async (query) => {
+        if (!conflictObserved && query?.where?.NOT && query.where.pendingLinqChatLookupKey) {
+          conflictObserved = true;
+          return withHostedMemberRoutingMember({ memberId: "synthetic-pending-owner" });
+        }
+        return findFirst(query);
+      });
+    }
+    const prisma = asPrismaTransactionClient({
+      hostedMemberRouting,
+      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
+      hostedMember: { findUnique: vi.fn().mockResolvedValue({
+        id: "member_123", billingStatus: HostedBillingStatus.active, suspendedAt: null,
+        accountGroupMemberships: [], invites: [],
+        createdAt: new Date("2026-03-26T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+      }) },
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+    });
+    let transactionCount = 0;
+    let transactionOpen = false;
+    prisma.$transaction = vi.fn(async (callback: (tx: typeof prisma) => Promise<unknown>) => {
+      transactionCount++;
+      if (scenario === "routing-drift" && transactionCount === 1) routingRecord.linqHomeLineAssignedAt = new Date("2026-03-26T01:00:00.000Z");
+      transactionOpen = true;
+      try { return await callback(prisma); } finally { transactionOpen = false; }
+    });
+    const unwrap = vi.mocked(unwrapHostedDomainRootForWeb);
+    const original = unwrap.getMockImplementation()!;
+    const domains: string[] = [];
+    unwrap.mockImplementation(async (...args) => {
+      expect(transactionOpen).toBe(false);
+      domains.push(args[0].domain);
+      if (!needsRetry && args[0].domain === "control") throw new Error("Control KMS must not be used");
+      return original(...args);
+    });
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma, rawBody: buildHostedLinqWebhookBody({ chatIsGroup: false }),
+        signature: null, timestamp: null,
+      })).resolves.toMatchObject({ ok: true, reason: "wake-appended-active-member" });
+      expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+      expect(transactionCount).toBe(needsRetry ? 2 : 1);
+      expect(domains).toEqual(needsRetry ? ["ingress", "ingress", "control"] : ["ingress"]);
+      expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    } finally {
+      unwrap.mockReset().mockImplementation(original);
+    }
+  });
+
   it("re-prepares once when the direct routing ciphertext changes under its lock", async () => {
     mocks.enforceDirectMailboxPreparation = true;
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(

@@ -7,6 +7,7 @@ import {
 import {
   reconcileHostedMemberLinqPhoneBindingsTx,
   readUnchangedHostedMemberHomeLinqBindingTx,
+  readUnchangedHostedLinqHomeRoute,
   upsertHostedMemberHomeLinqBindingTx,
 } from "../src/lib/hosted-onboarding/hosted-member-routing-linq";
 
@@ -78,6 +79,30 @@ beforeEach(() => {
 });
 
 describe("established Linq home binding", () => {
+  it("derives the matching home route from current indexes without opening ciphertext", () => {
+    const { routing } = createFixture();
+    expect(readUnchangedHostedLinqHomeRoute({
+      chatId: "synthetic-chat", recipientPhone: "+15550000000",
+      participantContact: { ...participant, value: "+15551111111" },
+      routingRecord: routing,
+    })).toEqual({ chatId: "synthetic-chat", recipientPhone: "+15550000000", assignedAt });
+  });
+
+  it.each([
+    { linqChatLookupKey: "different-chat" },
+    { linqRecipientPhoneLookupKey: "different-line" },
+    { linqParticipantContactLookupKey: "different-participant" },
+    { pendingLinqChatLookupKey: "pending-repair" },
+    { linqChatIdEncrypted: null },
+  ])("requires private routing preparation for a nonmatching or incomplete binding: %j", (change) => {
+    const { routing } = createFixture();
+    expect(readUnchangedHostedLinqHomeRoute({
+      chatId: "synthetic-chat", recipientPhone: "+15550000000",
+      participantContact: { ...participant, value: "+15551111111" },
+      routingRecord: { ...routing, ...change },
+    })).toBeNull();
+  });
+
   it("clears only the replaced phone's chat authority while retaining its Murph number", async () => {
     const { prisma } = createFixture();
     const oldPhone = "+15550000002";

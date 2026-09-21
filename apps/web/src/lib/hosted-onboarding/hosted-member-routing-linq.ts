@@ -780,6 +780,32 @@ function isHostedMemberHomeLinqBindingUnchanged(input: {
 }
 
 /**
+ * Reuses provider-attested values only when current blind indexes describe the
+ * exact clean binding. This is preparation, never a substitute for locked
+ * member, participant, chat, access, and routing-record revalidation.
+ */
+export function readUnchangedHostedLinqHomeRoute(input: {
+  chatId: string;
+  participantContact: HostedLinqParticipantContact;
+  recipientPhone: string | null;
+  routingRecord: Pick<HostedMemberRouting, keyof typeof hostedMemberLinqBindingSelect> | null;
+}): { chatId: string; recipientPhone: string; assignedAt: Date | null } | null {
+  const recipientPhone = normalizePhoneNumber(input.recipientPhone);
+  const linqChatLookupKey = createHostedLinqChatLookupKey(input.chatId);
+  if (!recipientPhone || !linqChatLookupKey || !input.routingRecord
+    || !isHostedMemberHomeLinqBindingUnchanged({
+      clearPending: true,
+      homeLineAssignedAt: input.routingRecord.linqHomeLineAssignedAt,
+      linqChatLookupKey,
+      lockedHomeRoute: input.routingRecord,
+      participantContact: input.participantContact,
+      recipientPhone,
+      recipientPhoneLookupKey: createHostedPhoneLookupKey(recipientPhone),
+    })) return null;
+  return { chatId: input.chatId, recipientPhone, assignedAt: input.routingRecord.linqHomeLineAssignedAt };
+}
+
+/**
  * Retains an exact binding after the caller's live member/home/thread resolution
  * under participant, chat, and member locks. Pending conflicts still use repair.
  */
