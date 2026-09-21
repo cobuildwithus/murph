@@ -6248,6 +6248,11 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
     return {};
   }
 
+  const onlyEmptyCollections = [
+    ...Object.values(snapshot.summaries ?? {}),
+    ...Object.values(snapshot.timeseries ?? {}),
+  ].every((records) => Array.isArray(records) && records.length === 0);
+
   const {
     canonicalCoverageFence: _canonicalCoverageFence,
     canonicalCoverageProviderPulledAt: _canonicalCoverageProviderPulledAt,
@@ -6260,6 +6265,11 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
 
   return stripUndefined({
     ...sanitizedSnapshot,
+    // Empty collection evidence is independent of poll timing. Complete-set
+    // authority remains in normalization; retain all other provider evidence.
+    ...(onlyEmptyCollections
+      ? { importedAt: undefined, windowStart: undefined, windowEnd: undefined }
+      : {}),
     connections: sanitizeJunctionRawConnections(snapshot.connections),
     summaries,
     timeseries,

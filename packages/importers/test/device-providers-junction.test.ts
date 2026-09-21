@@ -3459,6 +3459,115 @@ test("Junction snapshot adapter fails closed on glucose values outside the mmol/
   assertNoFullJunctionTimeseriesArtifacts(payload);
 });
 
+test("Junction repeated empty polls persist once and still admit later records", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-empty-poll-replay");
+  const input = (importedAt: string, activity: readonly Record<string, unknown>[] = []) => ({
+    provider: "junction",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    vaultRoot,
+    snapshot: {
+      accountId: "junction-empty-poll-account",
+      importedAt,
+      windowStart: "2026-04-21T00:00:00.000Z",
+      windowEnd: importedAt,
+      summaries: { activity, workouts: [] },
+      timeseries: { weight: [] },
+    },
+  });
+  const importPoll = (importedAt: string, activity?: readonly Record<string, unknown>[]) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      input(importedAt, activity),
+      { corePort: coreRuntime },
+    );
+
+  try {
+    await coreRuntime.initializeVault({ vaultRoot, createdAt: "2026-04-22T00:00:00.000Z", timezone: "UTC" });
+    const first = await importPoll("2026-04-22T12:00:00.000Z");
+    assert.equal(first.applied, true);
+    assert.equal(first.events.length, 0);
+    assert.equal(first.samples.length, 0);
+    assert.ok(first.ingestShardPath);
+    assert.ok(first.auditPath);
+    const retainedPaths = [first.ingestShardPath, first.auditPath];
+    const beforeReplay = await Promise.all(retainedPaths.map((path) => readFile(join(vaultRoot, path), "utf8")));
+
+    const replay = await importPoll("2026-04-22T13:00:00.000Z");
+    assert.equal(replay.applied, false);
+    assert.equal(replay.persistedEvidencePartCount, 0);
+    assert.deepEqual(
+      await Promise.all(retainedPaths.map((path) => readFile(join(vaultRoot, path), "utf8"))),
+      beforeReplay,
+    );
+
+    const firstPayload = await prepareDeviceProviderSnapshotImport(input("2026-04-22T12:00:00.000Z"));
+    const nextPayload = await prepareDeviceProviderSnapshotImport(input("2026-04-22T13:00:00.000Z"));
+    assert.equal(readRawReceiptArtifact(firstPayload).payloadHash, readRawReceiptArtifact(nextPayload).payloadHash);
+    const otherResource = await prepareDeviceProviderSnapshotImport({
+      ...input("2026-04-22T13:00:00.000Z"),
+      snapshot: { ...input("2026-04-22T13:00:00.000Z").snapshot, summaries: { sleep: [] } },
+    });
+    assert.notEqual(readRawReceiptArtifact(firstPayload).payloadHash, readRawReceiptArtifact(otherResource).payloadHash);
+
+    const withData = await importPoll("2026-04-22T14:00:00.000Z", [{
+      id: "activity-after-empty-poll",
+      observedAt: "2026-04-22T13:30:00.000Z",
+      steps: 7200,
+      source: { provider: "garmin", type: "watch" },
+    }]);
+    assert.equal(withData.applied, true);
+    assert.ok(withData.events.length > 0);
+    const eventPath = withData.eventShardPaths[0];
+    assert.ok(eventPath);
+    const eventsBeforeEmpty = await readFile(join(vaultRoot, eventPath), "utf8");
+    const emptyAgain = await importPoll("2026-04-22T15:00:00.000Z");
+    assert.equal(emptyAgain.applied, false);
+    assert.equal(await readFile(join(vaultRoot, eventPath), "utf8"), eventsBeforeEmpty);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction nonempty unnormalized collections retain changed raw evidence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-unnormalized-poll-evidence");
+  const input = (importedAt: string, revision: number) => ({
+    provider: "junction",
+    vaultRoot,
+    snapshot: {
+      accountId: "junction-unnormalized-poll-account",
+      importedAt,
+      windowEnd: importedAt,
+      summaries: { activity: [{ unrecognizedProviderRevision: revision }], workouts: [] },
+    },
+  });
+  const importPoll = (importedAt: string, revision: number) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      input(importedAt, revision),
+      { corePort: coreRuntime },
+    );
+
+  try {
+    await coreRuntime.initializeVault({ vaultRoot, createdAt: "2026-04-22T00:00:00.000Z", timezone: "UTC" });
+    const payload = await prepareDeviceProviderSnapshotImport(input("2026-04-22T12:00:00.000Z", 1));
+    assert.equal(payload.events?.length ?? 0, 0);
+    assert.equal(payload.samples?.length ?? 0, 0);
+    assert.deepEqual(
+      payload.evidenceParts?.find((part) => part.role === "junction-summary-activity")?.content,
+      [{ unrecognizedProviderRevision: 1 }],
+    );
+    const first = await importPoll("2026-04-22T12:00:00.000Z", 1);
+    const changed = await importPoll("2026-04-22T13:00:00.000Z", 2);
+    const replay = await importPoll("2026-04-22T14:00:00.000Z", 2);
+    assert.equal(first.applied, true);
+    assert.equal(changed.applied, true);
+    assert.equal(changed.persistedEvidencePartCount, 1);
+    assert.equal(changed.events.length, 0);
+    assert.equal(replay.applied, false);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction raw receipt hashing treats Date snapshot fields like ISO strings", async () => {
   const dateSnapshot = {
     importedAt: new Date("2026-04-22T12:00:00.000Z"),
