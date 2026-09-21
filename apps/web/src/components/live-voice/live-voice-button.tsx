@@ -70,8 +70,8 @@ export function LiveVoiceControl({ state, error, inputLevel = 0, outputLevel = 0
         className="relative grid size-36 shrink-0 cursor-pointer place-items-center rounded-full border-0 bg-transparent focus-visible:outline-2 focus-visible:outline-offset-8 focus-visible:outline-ring disabled:cursor-wait"
       >
         <span
-          className="pointer-events-none absolute inset-0 rounded-full transition-transform duration-300 ease-out motion-reduce:transition-none"
-          style={{ transform: `scale(${userSpeaking ? 0.8 - input * 0.04 : 1})` }}
+          className="pointer-events-none absolute inset-0 rounded-full transition-transform duration-300 ease-out motion-reduce:transition-none motion-reduce:transform-none!"
+          style={{ transform: `scale(${userSpeaking ? 0.8 - input * 0.04 : 1 + outputMotion * 0.06})` }}
         >
           <VoiceOrb energy={energy} speed={speed} paused={busy || state === "paused" || state === "error"} />
         </span>
