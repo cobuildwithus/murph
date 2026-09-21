@@ -1,5 +1,6 @@
 import { parseHostedVoiceCallId } from "../voice-input.ts";
 import {
+  readHostedMailboxWakeHighWater,
   type HostedMailboxLaneLag,
 } from "../runtime-control.ts";
 import { parseHostedRuntimeOwnerResponse } from "../runtime-owner.ts";
@@ -258,6 +259,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
     "assistantExecutionBlocked",
     "conversationWorkPending",
     "voiceCallId",
+    "mailboxWakeHighWater",
     "orchestrationAttemptId",
     "processingMode",
   ]);
@@ -283,6 +285,10 @@ export function parseHostedRuntimeEnsureProcessingRequest(
   if (record.voiceCallId !== undefined && processingMode != null && processingMode !== "default") {
     throw new TypeError("Voice reservation requires default processing mode.");
   }
+  const mailboxWakeHighWater = readHostedMailboxWakeHighWater(record.mailboxWakeHighWater);
+  if (record.mailboxWakeHighWater !== undefined && !mailboxWakeHighWater) {
+    throw new TypeError("Hosted runtime ensure-processing request mailboxWakeHighWater requires both mailbox lanes.");
+  }
   const conversationWorkPending = record.conversationWorkPending === undefined
     ? undefined
     : requireExactTrue(
@@ -304,6 +310,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
       ? {}
       : { assistantExecutionBlocked }),
     ...(conversationWorkPending === undefined ? {} : { conversationWorkPending }),
+    ...(mailboxWakeHighWater ? { mailboxWakeHighWater } : {}),
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing request orchestrationAttemptId",

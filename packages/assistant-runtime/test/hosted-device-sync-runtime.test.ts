@@ -104,6 +104,8 @@ import {
   recordHostedSystemMailboxItemAfterCheckpoint,
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
+  findNextHostedSystemMailboxQueueItem,
+  projectHostedDeviceHintCoverage,
   readHostedSystemMailboxState,
   systemMailboxItemIsDue,
   updateHostedSystemMailboxState,
@@ -2689,14 +2691,8 @@ describe("hosted device-sync runtime", () => {
       });
       const localAccountId = firstState.hostedToLocalAccountIds.get(hostedConnectionId);
       assert.ok(localAccountId);
-      const fitbitSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-        connectionId: localAccountId,
-        sourceProviderSlug: "fitbit",
-      });
-      const googleSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-        connectionId: localAccountId,
-        sourceProviderSlug: "google_health",
-      });
+      const fitbitSourceInstanceKey = hostedFitbitSourceInstanceKey;
+      const googleSourceInstanceKey = hostedGoogleSourceInstanceKey;
       assert.ok(fitbitSourceInstanceKey);
       assert.ok(googleSourceInstanceKey);
       const firstSources = getStore(service).listConnectionSources({
@@ -3604,7 +3600,7 @@ describe("hosted device-sync runtime", () => {
           finalSources.find((source) => source.sourceProviderSlug === "garmin")
             ?.sourceInstanceKey,
           buildJunctionProviderSourceInstanceKey({
-            connectionId: localAccountId,
+            connectionId: hostedConnectionId,
             sourceProviderSlug: "garmin",
           }),
         );
@@ -3955,12 +3951,7 @@ describe("hosted device-sync runtime", () => {
         state: disconnectedState,
       });
 
-      assert.deepEqual(appliedRequests, [
-        {
-          occurredAt: "2026-04-06T09:17:00.000Z",
-          updates: [],
-        },
-      ]);
+      assert.equal(appliedRequests.length, 0);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -4830,10 +4821,7 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
-        occurredAt: "2026-04-06T09:20:00.000Z",
-        updates: [],
-      });
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -4927,12 +4915,7 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.equal(
-        requireApplyUpdatesRequest(appliedRequest).updates.some((update) =>
-          Object.prototype.hasOwnProperty.call(update, "credential")
-        ),
-        false,
-      );
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -8310,7 +8293,7 @@ describe("hosted device-sync runtime", () => {
           state,
         });
 
-        assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates, []);
+        assert.equal(appliedRequest, null);
       } finally {
         closeHostedRuntimeDeviceSyncService(service);
         await cleanup();
@@ -10514,7 +10497,7 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates, []);
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -13393,12 +13376,7 @@ describe("hosted device-sync runtime", () => {
         state: firstState,
         wake,
       });
-      assert.equal(
-        appliedRequests.at(-1)?.updates.some(
-          (update) => update.localState?.nextReconcileAt !== undefined,
-        ),
-        false,
-      );
+      assert.equal(appliedRequests.length, 0);
 
       const restoredState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createPort(),
@@ -14745,7 +14723,7 @@ describe("hosted device-sync runtime", () => {
         state: hydratedState,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates, []);
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -14865,10 +14843,7 @@ describe("hosted device-sync runtime", () => {
         },
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
-        occurredAt: "2026-04-06T10:10:00.000Z",
-        updates: [],
-      });
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -15039,10 +15014,7 @@ describe("hosted device-sync runtime", () => {
         service,
         state,
       });
-      assert.deepEqual(appliedRequests, [{
-        occurredAt: "2026-04-06T09:36:00.000Z",
-        updates: [],
-      }]);
+      assert.equal(appliedRequests.length, 0);
 
       getStore(service).patchAccount(localAccountId, {
         displayName: null,
@@ -15067,7 +15039,6 @@ describe("hosted device-sync runtime", () => {
       });
 
       assert.deepEqual(appliedRequests, [
-        { occurredAt: "2026-04-06T09:36:00.000Z", updates: [] },
         {
           occurredAt: "2026-04-06T10:10:00.000Z",
           updates: [{
@@ -15547,10 +15518,7 @@ describe("hosted device-sync runtime", () => {
         state,
       });
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
-        occurredAt: "2026-04-06T10:10:00.000Z",
-        updates: [],
-      });
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -15609,18 +15577,15 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      await reconcileHostedDeviceSyncControlPlaneState({
+      assert.equal(await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
         wake: buildCronWake("2026-04-06T10:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
         state,
-      });
+      }), true);
 
-      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
-        occurredAt: "2026-04-06T10:10:00.000Z",
-        updates: [],
-      });
+      assert.equal(appliedRequest, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -16881,4 +16846,87 @@ describe("hosted device-sync runtime", () => {
       await cleanup();
     }
   });
+});
+
+
+test.each([
+  { minutesUntilDue: 25, dirty: true, retained: false, expectedReconcile: true },
+  { minutesUntilDue: 25, dirty: true, retained: true, expectedReconcile: true },
+  { minutesUntilDue: 25, dirty: false, retained: true, expectedReconcile: false },
+  { minutesUntilDue: 45, dirty: true, retained: true, expectedReconcile: false },
+  { minutesUntilDue: 45, dirty: true, retained: false, expectedReconcile: false },
+  { minutesUntilDue: 25, dirty: false, expectedReconcile: false },
+])("hosted webhook cadence coalescing: $minutesUntilDue minutes, dirty=$dirty retained=$retained", async ({ minutesUntilDue, dirty, retained, expectedReconcile }) => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-cadence-coalescing-");
+  const now = new Date().toISOString();
+  const connectionId = "hosted-synthetic-coalescing";
+  await initializeVault({ createdAt: now, timezone: "UTC", vaultRoot });
+  const snapshot = buildRuntimeSnapshot({
+    connectionId, connectedAt: now, externalAccountId: "synthetic-provider-account", provider: "junction",
+    credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+    localState: { lastSyncCompletedAt: now, nextReconcileAt: new Date(Date.parse(now) + minutesUntilDue * 60_000).toISOString() },
+    sources: [],
+  });
+  const port: HostedRuntimeDeviceSyncPort = {
+    ...createSnapshotOnlyDeviceSyncPort(snapshot),
+    async fetchDirtyStates() {
+      return { hasMore: false, nextWakeAt: null, userId: "member_123", items: dirty ? [buildDirtyState({
+        connectionId, provider: "junction", dirtyResources: [{
+          count: 1, dirtyPayloadId: "synthetic-dirty-payload", jobKind: "resource",
+          resource: "activity", resourceCategory: "summary", sourceProviderSlug: null,
+          windowStart: now, windowEnd: now,
+        }],
+      })] : [] };
+    },
+  };
+  let yieldBeforeDrain = false;
+  try {
+    let wake: HostedExecutionDeviceSyncWake = buildDeviceSyncWake({
+      connectionId, expectedConnectedAt: now, occurredAt: now, provider: "junction", reason: "webhook_hint",
+    });
+    if (retained) {
+      const retryAt = new Date(Date.parse(now) + 24 * 60 * 60_000).toISOString();
+      const item: HostedSystemMailboxPendingItem = {
+        attemptCount: 1, deviceSyncContinuationOwner: true, itemId: "synthetic-retained-owner", lastAttemptAt: now,
+        lastErrorCode: null, lastErrorMessage: null, mailboxDedupeKey: "evt_device_sync_wake",
+        mailboxLaneSeq: "1", nextAttemptAt: retryAt, occurredAt: now,
+        postCheckpointRecord: null, requestId: null, routeAction: "run-device-sync-wake",
+        status: "pending", wake: buildDeviceSyncWake({
+          connectionId, expectedConnectedAt: now, occurredAt: now, provider: "junction", reason: "reconcile_due",
+          hint: { jobs: [{ kind: "resource", availableAt: retryAt, dedupeKey: "synthetic-future-history",
+            payload: { resource: "weight", resourceCategory: "timeseries" } }] },
+        }),
+      };
+      const pending = [item, {
+        ...item, attemptCount: 0, lastAttemptAt: null, deviceSyncContinuationOwner: undefined,
+        itemId: "synthetic-webhook", mailboxLaneSeq: "2", nextAttemptAt: null, wake,
+      }];
+      const selected = findNextHostedSystemMailboxQueueItem({ now, state: { pending }, allowedRouteActions: ["run-device-sync-wake"] });
+      assert.ok(selected);
+      assert.equal(selected.itemId, item.itemId);
+      assert.equal(selected.nextAttemptAt, null);
+      const coverage = projectHostedDeviceHintCoverage({ now, pending });
+      assert.equal(coverage.get(item.itemId)?.coveredHintIds.has("synthetic-webhook"), true);
+      assert.equal(coverage.get(item.itemId)?.admittedWake, undefined);
+      assert.equal(selected.wake.kind, "device-sync.wake");
+      if (selected.wake.kind !== "device-sync.wake") throw new Error("Expected retained device wake");
+      wake = selected.wake;
+      assert.equal(wake.reason, "reconcile_due");
+    }
+    await withHostedCanonicalWritePort({ async persistCanonicalWrite() {}, async persistRuntimeState() {} }, () => runHostedDeviceSyncPass(wake, vaultRoot, {
+      providerConfigs: { junction: { environment: "sandbox", region: "us" } },
+      publicBaseUrl: "https://sync.example.test", secret: DEVICE_SYNC_SECRET,
+    }, port, 120_000, {
+      platformEnv: { JUNCTION_API_KEY: "sk_us_test_123", JUNCTION_CLIENT_USER_ID_SECRET: "synthetic-coalescing-secret", JUNCTION_ENV: "sandbox", JUNCTION_REGION: "us" },
+      retainFollowUpWakeUntilCheckpoint: true,
+      shouldYield: () => yieldBeforeDrain,
+      onStage(stage) { if (stage === "worker_drain") yieldBeforeDrain = true; },
+    }));
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"));
+    try {
+      const jobs = database.prepare("select kind from device_job where status = 'queued'").all();
+      assert.equal(jobs.some((job) => job.kind === "reconcile"), expectedReconcile);
+      assert.equal(jobs.some((job) => job.kind === "resource"), dirty || retained === true);
+    } finally { database.close(); }
+  } finally { await cleanup(); }
 });

@@ -364,7 +364,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           < requireEventIndex(events, "device.snapshot"),
       );
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(deviceSyncPort.applyUpdatesCalls, 1);
+      assert.equal(deviceSyncPort.applyUpdatesCalls, 0);
       assert.notEqual(result.status, "failed");
     } finally {
       await removeTempRoot(vaultRoot);
@@ -1181,6 +1181,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     });
     const deviceSyncPort = createSnapshotDeviceSyncPort({
       connectionId: "device_sync_connection_preempt_during",
+      connectionStatus: "disconnected",
       nextReconcileAt: "2026-04-27T00:05:00.000Z",
       onApplyUpdates: () => {
         mailboxItems.push(foregroundItem);
@@ -1347,7 +1348,9 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           platform: createPlatform({
             artifactBytesByHash: new Map([[restored.hash, restored.bytes]]),
             deviceSyncPort: createSnapshotDeviceSyncPort({
-              connectionId: "synthetic-upgrade-connection", nextReconcileAt: "2099-01-01T00:00:00.000Z",
+              connectionId: "synthetic-upgrade-connection",
+              connectionStatus: "disconnected",
+              nextReconcileAt: "2099-01-01T00:00:00.000Z",
               onApplyUpdates() {
                 if (arrival === "device completion") sendForeground();
               },
@@ -1419,6 +1422,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     });
     const deviceSyncPort = createSnapshotDeviceSyncPort({
       connectionId: "device_sync_connection_host_abort_after_apply",
+      connectionStatus: "disconnected",
       nextReconcileAt: "2026-04-27T00:05:00.000Z",
       onApplyUpdates: async () => {
         await runCanonicalWrite({

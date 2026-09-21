@@ -29,6 +29,16 @@ tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 
 ## Current Repo Checks
 
+Background-only checkpoint timing is covered by
+`hosted-runtime-background-checkpoint-timing.test.ts`: settled background
+assistant work reaches a durable checkpoint without a conversation quiet window,
+active work is not cut off after 60 seconds, and foreground input retains its
+configured delay. The promoted-foreground-priority matrix above covers subsequent
+conversation arrivals, shutdown, and provider changes.
+`hosted-runtime-background-ask-lifetime.test.ts` exercises a joined-group Ask
+without conversation input through slow preparation and execution, exactly-once
+completion before prompt checkpointing, and expiry/shutdown/handoff requeue.
+
 Personal Patterns cross-automation repetition is covered by managed recipe and
 reconciliation assertions in `managed-automations.test.ts` and the focused
 `Personal Pattern cross-automation history` real-Codex journeys. These prove
@@ -1219,6 +1229,10 @@ limits, and local proof distinctions are owned by
   `apps/cloudflare/test/runtime-processing-postgres.test.ts` and
   `apps/cloudflare/test/runtime-owner-completion.test.ts` cover current runtime
   admission, exact completion, and owner-release behavior.
+  `apps/web/test/hosted-runtime-owner-postgres.test.ts` composes the completion
+  command with real owner transitions, successor fencing, and pending PUT drains.
+  `apps/web/test/hosted-runtime-owner-release.test.ts` proves advisory failures
+  and the two-second hint deadline cannot invalidate durable completion.
   These focused tests do not establish deployed Temporal timing.
 - The hosted-local active-turn latency scenario proves same-chat late-input folding, forces a 20-second provider-cleanup stall and requires the second reply to preempt it, and checks that a projected wake does not trigger immediate full idle-shutdown work under the 180-second floor.
 - The dedicated `foreground-reply-priority` hosted-local scenario keeps the
@@ -1923,3 +1937,18 @@ active attempt or retained target, then uses the existing namespace router.
 `apps/cloudflare/test/index.test.ts` covers primary, next-bank, and legacy
 routing and target projection. The retryable-outbox restart
 E2E retains its canonical checkpoint, real destruction, and exact-send checks.
+
+Memory profile selection and automatic maintenance proof:
+`assistant-current-state.test.ts` covers older durable preferences, complete long
+corrections, UTF-8 bounds, reserved and shared spare space, and omitted-correction ordering.
+`managed-automations.test.ts` proves legacy active seed refresh, paused retention,
+and idempotent reconciliation. `assistant-notification-turn-runtime.test.ts`
+covers empty conversation admission with missing, populated, and malformed
+memory. `maintenance-evidence.test.ts` distinguishes empty evidence from failed
+collection. The focused real-Codex `memory profile improvement e2e` journey uses
+production maintenance instructions and tools, verifies canonical compaction,
+user corrections with exceptions, explicit withdrawal, assistant-only revocation
+rejection, dated-context retention, procedural learning, replay stability, and a
+fresh personalized reply.
+The opt-in scripted `memory profile complete provider input` capture measures
+complete private/group requests without a live provider.

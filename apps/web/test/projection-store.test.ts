@@ -773,6 +773,100 @@ function assertStoredCiphertext(value: string | null): asserts value is string {
 }
 
 describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
+  it("skips a fully current scope but discovers a new grant with the complete cohort token", async () => {
+    const rows = [buildShareRow(1), buildShareRow(2)].map((row) => ({
+      ...row,
+      projectionSnapshotCiphertext: "sealed:materialized" as string | null,
+      projectionSourceWorkspaceVersion: 7n as bigint | null,
+    }));
+    const findMany = vi.fn(async () => rows);
+    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
+    const input = { grantorMemberId: SHARE.grantorMemberId, prisma, sourceWorkspaceVersion: "7" };
+
+    await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
+      .resolves.toEqual({ generations: [], hasDeferredProjectionWork: false });
+    await expect(readDeliverableHostedVaultShareProjectionScopeGenerations({
+      ...input, sourceWorkspaceVersion: undefined,
+    })).resolves.toMatchObject({ generations: [{ projectionScope: SLEEP_SCOPE }] });
+
+    rows.push({
+      ...buildShareRow(3),
+      id: "share_new_generation",
+      projectionSnapshotCiphertext: null,
+      projectionSourceWorkspaceVersion: null,
+    });
+    const discovery = await readDeliverableHostedVaultShareProjectionScopeGenerations(input);
+    expect(discovery).toEqual({
+      generations: [{
+        generationToken: buildHostedVaultShareGenerationToken(rows.map((row) => row.id)),
+        projectionScope: SLEEP_SCOPE,
+      }],
+      hasDeferredProjectionWork: false,
+    });
+    const page = await findActiveHostedVaultSharePage({ ...input, projectionScope: SLEEP_SCOPE });
+    expect(page.generationToken).toBe(discovery.generations[0]?.generationToken);
+    expect(page.shares.map((row) => row.id)).toEqual(["share_new_generation"]);
+    expect(findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      select: expect.objectContaining({ projectionSourceWorkspaceVersion: true }),
+    }));
+  });
+
+  it("retains partial destination pages until every row is current without changing the token", async () => {
+    const rows = Array.from({ length: 64 }, (_, index) => ({
+      ...buildShareRow(index),
+      projectionSnapshotCiphertext: "sealed:previous",
+      projectionSourceWorkspaceVersion: 7n,
+    }));
+    const findMany = vi.fn(async () => rows);
+    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
+    const input = { grantorMemberId: SHARE.grantorMemberId, prisma, sourceWorkspaceVersion: "8" };
+    const expectedToken = buildHostedVaultShareGenerationToken(rows.map((row) => row.id));
+    const pageSizes: number[] = [];
+
+    for (let pageNumber = 0; pageNumber < 3; pageNumber += 1) {
+      const discovery = await readDeliverableHostedVaultShareProjectionScopeGenerations(input);
+      expect(discovery.generations).toEqual([{
+        generationToken: expectedToken,
+        projectionScope: SLEEP_SCOPE,
+      }]);
+      const page = await findActiveHostedVaultSharePage({ ...input, projectionScope: SLEEP_SCOPE });
+      expect(page.generationToken).toBe(expectedToken);
+      pageSizes.push(page.shares.length);
+      for (const share of page.shares) {
+        const row = rows.find((candidate) => candidate.id === share.id);
+        if (row) row.projectionSourceWorkspaceVersion = 8n;
+      }
+    }
+
+    expect(pageSizes).toEqual([25, 25, 14]);
+    await expect(readDeliverableHostedVaultShareProjectionScopeGenerations(input))
+      .resolves.toEqual({ generations: [], hasDeferredProjectionWork: false });
+  });
+
+  it("keeps first materialization governed by null snapshots regardless of source version", async () => {
+    const rows = [
+      { ...buildShareRow(1), projectionSnapshotCiphertext: "sealed:materialized", projectionSourceWorkspaceVersion: 6n },
+      { ...buildShareRow(2), projectionSnapshotCiphertext: null, projectionSourceWorkspaceVersion: 7n },
+    ];
+    const findMany = vi.fn(async () => rows);
+    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
+    const input = {
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      projectionScope: SLEEP_SCOPE,
+      sourceWorkspaceVersion: "7",
+    } as const;
+
+    const discovery = await readDeliverableHostedVaultShareProjectionScopeGenerations(input);
+    const page = await findActiveHostedVaultSharePage(input);
+    expect(discovery.generations).toEqual([{
+      generationToken: page.generationToken,
+      projectionScope: SLEEP_SCOPE,
+    }]);
+    expect(page.shares.map((row) => row.id)).toEqual([rows[1]?.id]);
+  });
+
   it("hashes owner- and participant-backed destinations together while excluding inactive rows", async () => {
     const profileScope = hostedVaultShareProjectionKindToScope("profile-name.v0");
     const deviceScope = hostedVaultShareProjectionKindToScope("device-sync-status.v0");

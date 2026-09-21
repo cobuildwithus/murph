@@ -55,7 +55,15 @@ The live ownership split is:
   field: only runtimes with deferred-Ask deadline handling may adopt the longer
   window. This supports either deployment order without a compatibility flag.
   The runtime, not the host, keeps dirty state warm through the configured idle
-  floor. The exact assistant wake projected directly by the current foreground
+  floor after foreground-priority input. Background-only assistant progress
+  checkpoints as soon as its work settles; it neither creates nor extends that
+  quiet window. Claimed detached Asks publish their existing expiry before
+  preparation dirties the workspace, protecting preparation and execution until
+  settlement or expiry. Shutdown and owner handoff still abort and requeue the
+  exact child. Other active-child deadlines and save-before-effect ordering
+  still apply. This lets background runs reach ordinary container cleanup,
+  including its 60-second safety recheck, without another runtime idle delay.
+  The exact assistant wake projected directly by the current foreground
   assistant phase may run once before that floor without checkpointing. The
   exact phone-call-result, usage-referral-reward, legacy `aask_done_*`, and
   current `aask_private_*` private
@@ -3850,8 +3858,17 @@ and cursor matcher without loading the full runtime before restore. No message
 content is added to direct ensure, Temporal, or the launch-job contract.
 
 After restore, reuse requires matching local watermarks, lanes and batch limit.
-Bootstrap, canonical-receipt recovery fallback, and an already-pending startup
-wake discard the candidate. Provider/custom-inference observation runs only on a
+Bootstrap and canonical-receipt recovery fallback discard the candidate. A pending
+startup wake permits reuse only when its authenticated, complete two-lane
+`mailboxWakeHighWater` is covered by the prefetched response high-water marks.
+Temporal supplies this hint only for mailbox-only reconciliation. Newer or unknown
+wakes require a fresh fetch; coalescing takes lane maxima and any unknown wake
+removes coverage for that entire burst, including wakes buffered before runtime
+readiness. Older producers and containers omit the hint and keep the fresh-fetch
+behavior. Ship the consumer before the optional producer. Roll back or disable
+the producer before restoring a Worker with the old strict ensure parser.
+Coverage is intentionally unavailable when reconciliation has due or unknown
+control work; measured savings apply only to eligible mailbox-only wakes. Provider/custom-inference observation runs only on a
 selected response. Fetch failures retain the importer's ordinary retry, while
 cancellation propagates through the existing invocation signal. A match uses the
 same request count with overlapping waits; a discarded or failed speculative

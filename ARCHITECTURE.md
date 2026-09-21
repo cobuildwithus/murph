@@ -256,12 +256,42 @@ the shared restricted maintenance configuration and needs no separate
 permission profile or filesystem mutation path; native controls are not an
 additional memory owner, and the host suppresses their effects in this lane.
 The evidence owner distinguishes a successfully empty bounded conversation
-window from collection failures. An empty member-memory window skips before
-provider admission. An empty group window skips only when its room-model page
+window from collection failures. An empty member-memory window skips before provider admission only when
+canonical memory also has no records. Existing memory remains eligible for
+faithful compaction; failed reads retain
+the ordinary maintenance tool path. Failed conversation collection explicitly
+forbids memory mutations because newer corrections may be missing. An empty group window skips only when its room-model page
 is also genuinely missing; existing pages remain eligible for cleanup, and
 unavailable evidence or pages keep the ordinary maintenance path. The rolling
 evidence window remains intact so corrections and late committed events are
 not hidden behind a last-run timestamp.
+
+Private turns read canonical memory once alongside the existing navigation
+snapshot. The bounded memory view has an 8 KiB total ceiling and section byte
+reservations weighted toward Preferences and Instructions. Unused reservations
+are shared across sections within the same total ceiling. It includes whole
+records in newest-first order without a three-record or 200-byte cutoff. Each
+section remains a newest-first prefix; spare space never exposes older facts
+behind an omitted correction. Current user input and canonical reads win;
+remembered preferences never authorize effects. Relevant saved response formats
+apply to the answer itself; the one-next-step default limits optional follow-ups.
+Group and maintenance turns do
+not receive this private view.
+
+The existing managed memory seed reconciles its instructions on runtime startup
+for active records, retaining the Mon/Wed/Fri 03:00 local schedule. Paused records
+stay untouched until resumed. Maintenance may shorten an existing non-health
+record in place without changing meaning; explicit conditions, exceptions,
+negation, dates, and uncertainty remain intact. New facts and changed preferences
+need conversation evidence. Explicit ongoing ways of helping belong in
+Instructions, without inferring permanent preferences from one-off requests.
+Explicit dates and temporary scope remain intact: elapsed time affects relevance,
+not permission to erase memory. Only clear user evidence can initiate factual
+replacement or forgetting. Mixed durable facts, unanchored dates, goal deadlines,
+silence, and age never justify deletion. Overlapping evidence must not resurrect
+withdrawn facts. Every shown record receives at most one version-checked mutation per pass;
+already concise records remain unchanged. This policy uses the existing memory
+format and tool, with no schema migration or second profile store.
 
 The morning Journal connected-context automation writes canonical Journal plans.
 Their note record owns end time, planned/tentative/canceled state, verification
@@ -764,10 +794,13 @@ temporary working directory with approval policy `never`, no inherited shell
 environment, and no network, project configuration, mutation, effect, or
 delivery authority. Only member disclosure flows use the separate reviewer.
 The child never shares the resident process, provider thread, interruption
-domain, or route grant. Before checkpoint, invocation return, fence loss,
-workspace replacement, or shutdown, the runtime aborts and awaits the exact
-owned child before releasing the workspace. Further asks remain pending in the
-same mailbox; there is no second queue, projection, table, workflow, container,
+domain, or route grant. A claimed detached request publishes its existing expiry
+before preparation marks the workspace dirty. Ordinary idle checkpointing waits
+for that request to settle or expire, including preparation and child execution;
+completed background work adds no idle delay. At an actual checkpoint, invocation
+return, fence loss, workspace replacement, or shutdown boundary, the runtime
+aborts and awaits the exact owned child before releasing the workspace. Further
+asks remain pending in the same mailbox; there is no second queue, projection, table, workflow, container,
 or general agent registry.
 
 For a consented member or a fixed-audience current-sender request, the
@@ -4483,22 +4516,14 @@ fence record instead of entering a timed race state; wake-unconfirmed active
 children retry instead of being replaced, and alarm cleanup
 failures are rethrown so the platform can retry instead of permanently deleting
 the alarm. New foreground leases restore from v2 durable workspace snapshots or consume an
-exact matching clean-checkpoint marker once; pre-v2 refs are unsupported. Before an inactive fence is replaced,
-the Postgres runtime owner preserves it only when the durable current snapshot-upload
-session belongs to that exact attempt and lease generation, has not completed,
-A runtime starts the first heartbeat immediately after the snapshot-session
-handshake and keeps later serialized attempts on a two-second start-to-start
-cadence while publication is active. That handshake has one six-second total
-deadline, leaving the two-second heartbeat request inside the 10-second stale
-boundary. A successful foreground preemption bypasses handoff preservation and
-stops heartbeat liveness before detached session cleanup. After Web accepts the
-checkpoint, the runtime stops heartbeating and best-effort records completion;
-a successful marker releases replacement immediately, while marker failure
-falls back to stale-heartbeat expiry. The one-second replacement retry therefore
-protects live snapshots without imposing a fixed publication deadline; absent,
-mismatched, completed, or stale handoffs proceed immediately.
-A dead runtime can defer replacement for the 10-second liveness window plus at
-most one additional retry interval (one second) after its final heartbeat.
+exact matching clean-checkpoint marker once; pre-v2 refs are unsupported. Snapshot publication is fenced by the Postgres runtime owner and workspace CAS.
+Exact multipart upload receipts protect unfinished writes, canonical refs protect
+accepted archives, and cleanup retires resources under the same publication
+locks. Current runtimes send no snapshot handoff heartbeats or completion
+markers; legacy callbacks and columns remain accepted until old producers drain.
+Snapshot start uses the ordinary commit deadline, with cancellation and response
+body decoding sharing that deadline. See the hosted Postgres runtime owner for
+session expiry, cleanup eligibility and mixed-version behavior.
 Encrypted hosted snapshots also carry
 the exact query SQLite cache triplet so a fresh one-vCPU runner can reuse the
 last projection; canonical vault files remain authoritative, source-manifest
@@ -4533,19 +4558,23 @@ The Worker records completion against the exact Postgres owner. The owner stays
 retiring until the native invocation settles or exact stop evidence permits
 release; a process-origin receipt alone does not release the outer operation. The disposable RunnerContainer activation sends no
 second receipt. A checkpoint, elapsed time, or container lifecycle event is not
-a completion receipt. After an exact successful runtime completion clears its
-write fence, Cloudflare makes at most one signed, bodyless, best-effort callback
-to web with a timeout of at most two seconds; a known future mailbox retry
-continuation skips it. The signed query binds the opaque released runtime
-attempt and may also carry one exact positive edge when that invocation newly
-committed an unserviced default or retention schedule. For actionable work, Web
-sends the pointer-only `runtime_owner_released` Temporal signal. Temporal may
-invalidate an accepted-owner horizon only when the attempt pointer matches;
-fresh reconciliation facts then choose the work mode. Legacy callbacks without
-the pointer remain facts-only `runtime_recheck_requested` signals during
-rollout. Neither signal converts a persisted due wake into a repeating
-level-triggered signal. Callback failure is non-fatal and is not retried by
-Cloudflare. Because an exact release changes Workflow command order, the
+a completion receipt. Each completion stage makes one signed Web ownership
+command that conditionally retires the exact attempt, releases only when native
+settlement names its exact target, and then sends the best-effort Temporal hint
+outside the database transactions. The early callback retains its owner-routing
+read, reducing the usual two-stage path from six Web requests to three. A known
+future mailbox retry continuation skips the hint unless the invocation newly
+committed an unserviced default or retention schedule. The hint retains its
+two-second budget and exact opaque runtime attempt. Temporal may invalidate an
+accepted-owner horizon only when that pointer matches; fresh reconciliation
+facts choose the work mode. Legacy bodyless callbacks and pointerless
+`runtime_recheck_requested` signals remain compatible during rollout. Neither
+signal converts a persisted due wake into a repeating level-triggered signal.
+Hint failure is non-fatal and is recovered by the existing accepted-attempt
+recheck. Web completion consumers must converge before Worker activation;
+the existing live protocol admission proves both command shapes through the
+actual reader, while old Workers retain their separate commands.
+Because an exact release changes Workflow command order, the
 private consumer deploys first as a patch-introducing direct-Current cutover
 with no prior or Ramping reader eligible. From the first possible signal until
 both public producers are disabled and signal-bearing histories drain, that

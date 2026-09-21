@@ -87,6 +87,17 @@ describe("Postgres runtime orchestration", () => {
       .not.toContain("release");
   });
 
+  it("forwards complete mailbox wake coverage to the existing exact runtime", async () => {
+    const { source, container } = harness();
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner(), "existing"));
+    const mailboxWakeHighWater = { conversation: "4", system: "2" };
+    expect(await ensurePostgresRuntimeProcessing(source, { ...request, mailboxWakeHighWater }))
+      .toMatchObject({ kind: "runtime_processing_accepted", action: "woken" });
+    expect(container.ensureProcessing).toHaveBeenCalledWith(expect.objectContaining({
+      activeRuntime: expect.objectContaining({ mailboxWakeHighWater }),
+    }));
+  });
+
   it.each([true, false])("retains an ambiguously accepted launch after execution timeout (launch preparation: %s)", async (supported) => {
     const { source, container } = harness();
     container.ensureReadyForProcessing.mockResolvedValue({ kind: "ready", ...(supported ? { preparesSupervisedLaunch: true } : {}) });

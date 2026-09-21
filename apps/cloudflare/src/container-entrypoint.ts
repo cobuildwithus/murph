@@ -25,6 +25,9 @@ import {
 } from "@murphai/assistant-engine/codex-lifecycle";
 import {
   HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
+  mergeHostedMailboxWakeHighWater,
+  readHostedMailboxWakeHighWater,
+  type HostedMailboxWakeHighWater,
   readHostedRuntimeFailurePhaseCode,
   type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
@@ -295,6 +298,7 @@ class HostedContainerArchitectureVersionMismatchError extends Error {
 
 interface HostedContainerRuntimeWakeRequest {
   voiceCallId?: string;
+  mailboxWakeHighWater?: HostedMailboxWakeHighWater | null;
   attemptId: string;
   leaseGeneration: string;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
@@ -304,10 +308,23 @@ interface HostedContainerRuntimeWakeRequest {
 
 type HostedContainerRuntimeWakeNotification = {
   voiceCallId?: string;
+  mailboxWakeHighWater?: HostedMailboxWakeHighWater | null;
   notifiedAtEpochMs?: number | null;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
 };
+
+function createHostedContainerRuntimeWakeNotification(
+  input: HostedContainerRuntimeWakeNotification,
+): HostedContainerRuntimeWakeNotification {
+  return {
+    notifiedAtEpochMs: input.notifiedAtEpochMs,
+    ...(input.voiceCallId ? { voiceCallId: input.voiceCallId } : {}),
+    ...(input.mailboxWakeHighWater ? { mailboxWakeHighWater: input.mailboxWakeHighWater } : {}),
+    ...(input.orchestration ? { orchestration: input.orchestration } : {}),
+    ...(input.requestedProcessingMode ? { requestedProcessingMode: input.requestedProcessingMode } : {}),
+  };
+}
 
 export async function startHostedContainerEntrypoint(input: {
   port?: number;
@@ -385,6 +402,7 @@ export async function startHostedContainerEntrypoint(input: {
   let activeRuntimeWakePendingAttemptId: string | null = null;
   let activeRuntimeWakePendingLeaseGeneration: string | null = null;
   let activeRuntimeWakePendingNotifiedAtEpochMs: number | null = null;
+  let activeRuntimeWakePendingMailboxHighWater: HostedMailboxWakeHighWater | null = null;
   let activeRuntimeWakePendingOrchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null = null;
   let activeRuntimeWakePendingRequestedProcessingMode:
     HostedWorkspaceInvocationProcessingMode | null = null;
@@ -475,20 +493,18 @@ export async function startHostedContainerEntrypoint(input: {
           activeWakeFinishedAtEpochMs: notifiedAtEpochMs,
         }
       : null;
+    const wakeNotification = createHostedContainerRuntimeWakeNotification({
+      ...wakeRequest,
+      notifiedAtEpochMs,
+      orchestration: acceptedWakeOrchestration,
+    });
     if (wakeRequest && wake !== null) {
       mismatch = !hostedContainerRuntimeWakeIdentityMatches(wakeRequest, {
         attemptId: activeRuntimeWakeAttemptId,
         leaseGeneration: activeRuntimeWakeLeaseGeneration,
         userId: activeRuntimeWakeUserId,
       });
-      accepted = !mismatch && wake({
-        voiceCallId: wakeRequest.voiceCallId,
-        ...(acceptedWakeOrchestration ? { orchestration: acceptedWakeOrchestration } : {}),
-        notifiedAtEpochMs,
-        ...(wakeRequest.requestedProcessingMode
-          ? { requestedProcessingMode: wakeRequest.requestedProcessingMode }
-          : {}),
-      }) === true;
+      accepted = !mismatch && wake(wakeNotification) === true;
     } else if (!wakeRequest) {
       accepted = wake?.({ notifiedAtEpochMs }) === true;
     }
@@ -509,10 +525,16 @@ export async function startHostedContainerEntrypoint(input: {
         mismatch = true;
       } else {
         if (!activeRuntimeWakePending) {
+          activeRuntimeWakePendingMailboxHighWater = wakeNotification.mailboxWakeHighWater ?? null;
           activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
           activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
-        } else if (!activeRuntimeWakePendingOrchestration && acceptedWakeOrchestration) {
-          activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
+        } else {
+          activeRuntimeWakePendingMailboxHighWater = mergeHostedMailboxWakeHighWater(
+            activeRuntimeWakePendingMailboxHighWater, wakeNotification.mailboxWakeHighWater,
+          );
+          if (!activeRuntimeWakePendingOrchestration && acceptedWakeOrchestration) {
+            activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
+          }
         }
         activeRuntimeWakePendingRequestedProcessingMode =
           wakeRequest?.requestedProcessingMode
@@ -966,11 +988,13 @@ export async function startHostedContainerEntrypoint(input: {
           const pendingWake = activeRuntimeWakePending;
           const pendingWakeNotifiedAtEpochMs = activeRuntimeWakePendingNotifiedAtEpochMs;
           const pendingWakeOrchestration = activeRuntimeWakePendingOrchestration;
+          const pendingWakeMailboxHighWater = activeRuntimeWakePendingMailboxHighWater;
           const pendingWakeRequestedProcessingMode =
             activeRuntimeWakePendingRequestedProcessingMode;
           activeRuntimeWakePending = false;
           activeRuntimeWakePendingNotifiedAtEpochMs = null;
           activeRuntimeWakePendingOrchestration = null;
+          activeRuntimeWakePendingMailboxHighWater = null;
           activeRuntimeWakePendingRequestedProcessingMode = null;
           emitHostedExecutionStructuredLog({
             component: "container",
@@ -978,15 +1002,12 @@ export async function startHostedContainerEntrypoint(input: {
               activeHostedRunnerJobCount,
               activeRuntimeWakePresent: true,
               pendingRuntimeWakeDelivered: pendingWake
-                ? sendWake({
-                    ...(pendingWakeOrchestration
-                      ? { orchestration: pendingWakeOrchestration }
-                      : {}),
+                ? sendWake(createHostedContainerRuntimeWakeNotification({
+                    mailboxWakeHighWater: pendingWakeMailboxHighWater,
+                    orchestration: pendingWakeOrchestration,
                     notifiedAtEpochMs: pendingWakeNotifiedAtEpochMs ?? undefined,
-                    ...(pendingWakeRequestedProcessingMode
-                      ? { requestedProcessingMode: pendingWakeRequestedProcessingMode }
-                      : {}),
-                  })
+                    requestedProcessingMode: pendingWakeRequestedProcessingMode,
+                  }))
                 : false,
               workspaceAttemptId: activeRuntimeWakeAttemptId,
             },
@@ -1081,6 +1102,7 @@ export async function startHostedContainerEntrypoint(input: {
         activeRuntimeWakePendingLeaseGeneration = null;
         activeRuntimeWakePendingNotifiedAtEpochMs = null;
         activeRuntimeWakePendingOrchestration = null;
+        activeRuntimeWakePendingMailboxHighWater = null;
         activeRuntimeWakePendingRequestedProcessingMode = null;
         activeRuntimeWakePendingUserId = null;
       }
@@ -1580,6 +1602,7 @@ function parseHostedContainerRuntimeWakeRequest(
     leaseGeneration,
     orchestration: readHostedContainerRuntimeWakeOrchestration(record.orchestration),
     ...(record.voiceCallId === undefined ? {} : { voiceCallId: parseHostedVoiceCallId(record.voiceCallId) }),
+    mailboxWakeHighWater: readHostedMailboxWakeHighWater(record.mailboxWakeHighWater),
     ...(requestedProcessingMode ? { requestedProcessingMode } : {}),
     userId,
   };

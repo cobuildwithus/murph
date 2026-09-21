@@ -41,6 +41,7 @@ export type HostedRuntimeOwnerCommand =
       platformAiUsageAllowed: boolean; processingMode: HostedWorkspaceInvocationProcessingMode } & HostedRuntimeOwnerIdentity)
   | ({ operation: "accepted" | "revoke_ai_usage" } & HostedRuntimeOwnerIdentity)
   | ({ operation: "record_failure"; errorCode: string } & HostedRuntimeOwnerIdentity)
+  | ({ operation: "complete"; settledRunnerContainerName: string | null; immediateRecheckRequested: boolean } & HostedRuntimeOwnerIdentity)
   | ({ operation: "retire"; completed: boolean } & HostedRuntimeOwnerIdentity)
   | ({ operation: "release"; runnerContainerName: string | null } & HostedRuntimeOwnerIdentity)
   | ({ operation: "release_completed"; runnerContainerName: string } & HostedRuntimeOwnerIdentity)
@@ -97,6 +98,9 @@ function parseInvocationCommand(r: Record<string, unknown>, operation: string): 
       if (r.errorCode !== "runtime_error" && !isHostedRuntimeFailurePhaseCode(r.errorCode)) throw new TypeError("Unsupported runtime failure code.");
       return { operation, ...identity, errorCode: r.errorCode };
     }
+    case "complete": return { operation, ...identity,
+      settledRunnerContainerName: readNullableString(r.settledRunnerContainerName, "Settled target"),
+      immediateRecheckRequested: requireBoolean(r.immediateRecheckRequested, "Immediate runtime recheck") };
     case "retire": return { operation, ...identity, completed: requireBoolean(r.completed, "Runtime completion") };
     case "release": return { operation, ...identity, runnerContainerName: readNullableString(r.runnerContainerName, "Retired target") };
     case "release_completed": return { operation, ...identity, runnerContainerName: requireString(r.runnerContainerName, "Completed target") };

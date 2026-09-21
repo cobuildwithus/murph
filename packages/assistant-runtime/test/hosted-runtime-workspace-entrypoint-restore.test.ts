@@ -218,7 +218,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test.each(["match", "cursor mismatch", "pending wake", "fetch failure", "missing hints"] as const)(
+  test.each(["match", "cursor mismatch", "pending wake", "covered wake", "newer conversation wake", "newer system wake", "mixed unknown wake", "fetch failure", "covered wake fetch failure", "missing hints"] as const)(
     "overlaps the ordinary fetch with restore and preserves staging for %s",
     async (scenario) => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "mailbox-overlap-runtime-"));
@@ -228,6 +228,8 @@ describe("hosted workspace runtime entrypoint", () => {
       const restoreStarted = createDeferred<void>();
       const releaseRestore = createDeferred<void>();
       const fetchStarted = createDeferred<void>();
+      const firstFetchFinished = createDeferred<void>();
+      const importedSequences: string[] = [];
       const staged = new Error("Synthetic stop after ordinary conversation staging.");
       const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
       try {
@@ -236,10 +238,8 @@ describe("hosted workspace runtime entrypoint", () => {
         state.watermarks = { conversation: "3", system: "2" };
         await writeMailboxImportStateFile(sourceRoot, state);
         const snapshot = await createVaultSnapshotBundle({ vaultRoot: sourceRoot });
-        const baseMailboxPort = createMailboxPort({
-          events, fetchRequests,
-          items: [createMailboxItem({ id: "mailbox_overlap_new", laneSeq: "4" })],
-        });
+        const mailboxItems = [createMailboxItem({ id: "mailbox_overlap_new", laneSeq: "4" })];
+        const baseMailboxPort = createMailboxPort({ events, fetchRequests, items: mailboxItems });
         let calls = 0;
         const platform = createPlatform({
           artifactBytesByHash: new Map([[snapshot.hash, snapshot.bytes]]),
@@ -248,10 +248,12 @@ describe("hosted workspace runtime entrypoint", () => {
             async fetch(request, context) {
               calls += 1;
               fetchStarted.resolve();
-              if (scenario === "fetch failure" && calls === 1) {
+              if ((scenario === "fetch failure" || scenario === "covered wake fetch failure") && calls === 1) {
                 throw new Error("Synthetic transient fetch failure.");
               }
-              return baseMailboxPort.fetch(request, context);
+              const response = await baseMailboxPort.fetch(request, context);
+              firstFetchFinished.resolve();
+              return response;
             },
           },
           workspacePort: createWorkspacePort({
@@ -279,11 +281,14 @@ describe("hosted workspace runtime entrypoint", () => {
             throw new Error("Staging proof must stop before checkpointing.");
           },
           async importItem(item) {
-            expect(item.item.laneSeq).toBe("4");
+            importedSequences.push(item.item.laneSeq);
             callsAtStaging = calls;
-            await stagePendingLinqAssistantInputForMailboxItem({
+            const assistantInputId = await stagePendingLinqAssistantInputForMailboxItem({
               item: item.item, vaultRoot,
             });
+            if (scenario === "newer conversation wake" && item.item.laneSeq === "4") {
+              return { assistantInputId, status: "imported" };
+            }
             throw staged;
           },
         });
@@ -295,11 +300,26 @@ describe("hosted workspace runtime entrypoint", () => {
           await fetchStarted.promise;
           expect(calls).toBe(1);
         }
+        if (scenario === "newer conversation wake") {
+          await firstFetchFinished.promise;
+          mailboxItems.push(createMailboxItem({ id: "mailbox_overlap_later", laneSeq: "5" }));
+        }
         if (scenario === "pending wake") runtimeWakeSignal.notify();
+        if (scenario.includes("wake") && scenario !== "pending wake") {
+          runtimeWakeSignal.notify({ mailboxWakeHighWater: {
+            conversation: scenario === "newer conversation wake" ? "5" : "4",
+            system: scenario === "newer system wake" ? "3" : "2",
+          } });
+          if (scenario === "mixed unknown wake") {
+            runtimeWakeSignal.notify();
+            runtimeWakeSignal.notify({ mailboxWakeHighWater: { conversation: "4", system: "2" } });
+          }
+        }
         releaseRestore.resolve();
         await rejected;
+        expect(importedSequences).toEqual(scenario === "newer conversation wake" ? ["4", "5"] : ["4"]);
         expect(callsAtStaging).toBe(
-          scenario === "match" || scenario === "missing hints" ? 1 : 2,
+          scenario === "match" || scenario === "covered wake" || scenario === "missing hints" ? 1 : 2,
         );
         expect(fetchRequests.at(-1)?.lanes).toContainEqual({
           lane: "conversation", importedSeq: "3",

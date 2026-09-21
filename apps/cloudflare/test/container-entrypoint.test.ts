@@ -1069,7 +1069,7 @@ describe("startHostedContainerEntrypoint", () => {
     expect(mocks.stopWarmCodexAppServer).toHaveBeenCalledWith("container-server-close");
   });
 
-  it("accepts runtime wakes only after the active invocation reports readiness", async () => {
+  it.each(["covered", "unknown first", "unknown second", "malformed second"])("coalesces %s mailbox coverage before runtime readiness", async (coverage) => {
     const invocationStarted = createDeferred();
     const allowInvocationReady = createDeferred();
     const invocationReady = createDeferred();
@@ -1145,6 +1145,7 @@ describe("startHostedContainerEntrypoint", () => {
           activeWakeStartedAtEpochMs: 1_777_009_999_950,
           cloudflareRouteReceivedAtEpochMs: 1_777_009_999_900,
         },
+        ...(coverage === "unknown first" ? {} : { mailboxWakeHighWater: { conversation: "4", system: "3" } }),
         requestedProcessingMode: "default",
         userId: "u1",
       }),
@@ -1155,6 +1156,14 @@ describe("startHostedContainerEntrypoint", () => {
     });
     nowEpochMs = secondPendingWakeAcceptedAtEpochMs;
     const secondPendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      ...(coverage === "unknown second" ? {} : {
+        body: JSON.stringify({
+          attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1", userId: "u1",
+          mailboxWakeHighWater: coverage === "malformed second"
+            ? { conversation: "5" } : { conversation: "5", system: "2" },
+        }),
+        headers: { "content-type": "application/json; charset=utf-8" },
+      }),
       method: "POST",
     });
     nowEpochMs = runtimeReadyAtEpochMs;
@@ -1164,10 +1173,10 @@ describe("startHostedContainerEntrypoint", () => {
     nowEpochMs = firstWakeAcceptedAtEpochMs;
     const firstWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       body: JSON.stringify({
-        attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1",
-        userId: "u1", voiceCallId: "call-synthetic",
+        attemptId: "attempt_evt_runtime_wake_ready", leaseGeneration: "1", userId: "u1", voiceCallId: "call-synthetic",
+        mailboxWakeHighWater: { conversation: "6", system: "3" },
       }),
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json; charset=utf-8" },
       method: "POST",
     });
     nowEpochMs = secondWakeAcceptedAtEpochMs;
@@ -1197,6 +1206,7 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runtimeWakeCount).toBe(3);
     expect(runtimeWakeNotifications).toEqual([
       {
+        ...(coverage === "covered" ? { mailboxWakeHighWater: { conversation: "5", system: "3" } } : {}),
         notifiedAtEpochMs: pendingWakeAcceptedAtEpochMs,
         orchestration: {
           activeWakeAccepted: true,
@@ -1206,7 +1216,7 @@ describe("startHostedContainerEntrypoint", () => {
         },
         requestedProcessingMode: "default",
       },
-      { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs, voiceCallId: "call-synthetic" },
+      { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs, voiceCallId: "call-synthetic", mailboxWakeHighWater: { conversation: "6", system: "3" } },
       { notifiedAtEpochMs: secondWakeAcceptedAtEpochMs },
     ]);
     expect(invocationResponse.status).toBe(200);

@@ -157,6 +157,30 @@ type HostedDeviceSyncMaintenanceStore = ReturnType<
   typeof requireHostedRuntimeDeviceSyncStore
 >;
 
+async function coalesceHostedWebhookReconcile(input: {
+  wakeLocalAccountId: string | null;
+  syncState: HostedDeviceSyncRuntimeSyncState;
+  service: DeviceSyncService;
+  shouldYield: (() => boolean) | null;
+}): Promise<void> {
+  const { wakeLocalAccountId, syncState, service, shouldYield } = input;
+  if (
+    wakeLocalAccountId && syncState.pendingDirtyPayloadJobs.length > 0
+    && requireHostedRuntimeDeviceSyncStore(service).getAccountById(wakeLocalAccountId)?.provider === "junction"
+    && !shouldYieldHostedDeviceSync(shouldYield)
+  ) {
+    // Retained reconciliation owners also absorb webhook hints, so actual
+    // dirty admission, not the original wake reason, qualifies this pass.
+    // Use this already-awake pass for a nearby full pull. Never refresh a
+    // complete content proof from a partial webhook import, or delay the
+    // pull floor merely because a webhook arrived. The ordinary hourly
+    // cadence permits at most two full pulls per hour with this lookahead.
+    await service.runSchedulerOnce(wakeLocalAccountId, {
+      reconcileBefore: new Date(Date.now() + 30 * 60_000).toISOString(),
+    });
+  }
+}
+
 export async function runHostedDeviceSyncPass(
   wake: HostedRuntimeEvent,
   vaultRoot: string,
@@ -346,6 +370,8 @@ export async function runHostedDeviceSyncPass(
         wake,
       });
     }
+
+    await coalesceHostedWebhookReconcile({ wakeLocalAccountId, syncState, service, shouldYield });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
@@ -1434,7 +1460,10 @@ export async function runHostedDeviceSyncWakeLane(input: {
       ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
       parserProcessed: 0,
       postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
-      ...(jobTimingDiagnostics.some((diagnostic) => diagnostic.canonicalProgressCommitted === true)
+      ...(jobTimingDiagnostics.some((diagnostic) =>
+        diagnostic.canonicalProgressCommitted === true
+        || diagnostic.continuationProgressCommitted === true
+      )
         ? { systemProgressed: true as const }
         : {}),
       ...(deviceSyncResult.stagedDirtyAcks

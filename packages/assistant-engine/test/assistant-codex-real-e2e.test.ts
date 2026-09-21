@@ -3168,6 +3168,28 @@ describe('real Codex live fixture contracts', () => {
     }
   })
 
+  it('keeps restaurant fixture batch reads on the CLI result contract', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'restaurant-batch-contract-'))
+    try {
+      const binDirectory = path.join(root, 'bin')
+      const commandLogPath = path.join(root, 'commands')
+      await materializeRestaurantMealVaultCli({ binDirectory, commandLogPath, scenario: 'official-source' })
+      const cli = path.join(binDirectory, 'vault-cli')
+      const argv = [
+        ['memory', 'show', '--compact', '--format', 'json'],
+        ['food', 'search-labels', '--query', 'Harbor Bowl chicken plate', '--format', 'json'],
+      ]
+      const result = await execFileAsync(cli, ['batch', '--compact', '--format', 'json',
+        ...argv.flatMap(command => ['--command', JSON.stringify(command)])])
+      const batch = vaultCliBatchResultSchema.parse(JSON.parse(result.stdout))
+      expect(batch).toMatchObject({ count: 2, failed: 0, succeeded: 2 })
+      expect(batch.commands.map(command => command.argv)).toEqual(argv)
+      expect(batch.commands[1]).toMatchObject({ ok: true, data: { items: [] } })
+      expect(await readFile(commandLogPath, 'utf8')).not.toContain('meal add')
+      await expect(execFileAsync(cli, ['meal', 'add', '--schema'])).rejects.toThrow()
+    } finally { await removeRealCodexTemporaryPath(root) }
+  })
+
   it('keeps automatic meal closeout fixture help read-only', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'automatic-meal-help-'))
     try {
@@ -19539,6 +19561,151 @@ describeRealCodex('real Codex upcoming context use e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex memory profile improvement e2e', () => {
+  it('maintains legacy memory, learns a procedure, and applies it in a fresh conversation', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-memory-profile-e2e-'))
+    try {
+      for (let index = 1; index <= 24; index += 1) {
+        await upsertMemory(workingDirectory, {
+          section: 'Context', text: `Studio shelf ${index} holds materials for workshop ${index}.`,
+        })
+      }
+      const baseline = await readMemoryDocument(workingDirectory)
+      const verbose = await upsertMemory(workingDirectory, {
+        now: new Date('2026-09-12T12:00:00Z'), section: 'Preferences',
+        text: 'For weekly project status summaries, the preferred format is three concise bullets: progress, obstacles, and the next step. '
+          + 'To explain that same preference in more detail, keep the weekly project status summary to three bullets, one about progress, one about obstacles, and one about the next step. '
+          + 'The member does not want extra check-ins unless they explicitly ask for them. This qualification matters: no unsolicited extra check-ins. '
+          + 'This format preference was stated on 2026-09-12.',
+      })
+      const expired = await upsertMemory(workingDirectory, {
+        section: 'Context', text: 'Temporarily using a borrowed desk only from 2026-09-13 through 2026-09-15.',
+      })
+      const ambiguous = await upsertMemory(workingDirectory, {
+        section: 'Context', text: 'Using a borrowed desk this weekend.',
+      })
+      const unfinished = await upsertMemory(workingDirectory, {
+        section: 'Context', text: 'Wants to finish organizing the workspace by 2026-09-15; completion is unknown.',
+      })
+      const mixed = await upsertMemory(workingDirectory, {
+        section: 'Context', text: 'Used a borrowed desk from 2026-09-13 through 2026-09-15; prefers a quiet workspace long term.',
+      })
+      const corrected = await upsertMemory(workingDirectory, {
+        section: 'Preferences', text: 'For book-club recaps, prefers lengthy essays.',
+      })
+      const withdrawn = await upsertMemory(workingDirectory, {
+        section: 'Context', text: 'Temporarily borrowing a keyboard for the workshop.',
+      })
+      const assistantOnly = await upsertMemory(workingDirectory, {
+        section: 'Instructions', text: 'For playlist choices, offer four options.',
+      })
+      const session = parseAssistantSessionRecord({
+        alias: null,
+        binding: { actorId: null, channel: 'linq', conversationKey: 'linq:direct:memory-profile-proof', delivery: null, identityId: null, threadId: 'memory-profile-proof', threadIsDirect: true },
+        createdAt: '2026-09-20T12:00:00.000Z', lastTurnAt: '2026-09-20T12:00:00.000Z',
+        resumeState: null, schema: 'murph.assistant-session.v1', sessionId: 'session-memory-profile-proof',
+        target: { adapter: 'codex-cli', approvalPolicy: 'never', codexCommand: null, codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider, oss: false, profile: null, reasoningEffort: 'medium', sandbox: 'read-only' },
+        turnCount: 1, updatedAt: '2026-09-20T12:00:00.000Z',
+      })
+      await saveAssistantSession(workingDirectory, session)
+      await appendAssistantTranscriptEntries(workingDirectory, session.sessionId, [{
+        createdAt: '2026-09-20T12:00:00.000Z', kind: 'user',
+        text: 'From now on, whenever I say I am stuck choosing a next step, offer exactly two small options and let me choose. Please skip the pep talk. For book-club recaps, I now want three bullets instead of lengthy essays, except keep the monthly recap detailed. I returned the borrowed workshop keyboard and no longer use it.',
+      }, {
+        createdAt: '2026-09-20T12:01:00.000Z', kind: 'assistant',
+        text: 'I think you no longer want four playlist options; I will remove that preference.',
+      }])
+      const evidence = await readAssistantMaintenanceConversationEvidence({
+        now: new Date('2026-09-21T12:00:00Z'), profile: 'member-memory', vault: workingDirectory,
+      })
+      const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID)
+      if (!seed) throw new Error('Expected managed memory seed')
+      const maintenanceInput = {
+        approvalPolicy: 'never' as const, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantMaintenanceSystemPromptWithCacheMetadata({ currentLocalDate: '2026-09-21', currentTimeZone: 'UTC', profile: 'member-memory' }).prompt,
+        dynamicTools: [MURPH_MEMBER_MEMORY_TOOL], env: config.env, ephemeral: true,
+        memberMemoryMaintenanceAuthorized: true, model: config.model, modelProvider: config.modelProvider,
+        processLifetime: 'one-shot' as const, prompt: [seed.instructions, evidence.prompt].join('\n\n'),
+        reasoningEffort: 'medium' as const, runtimeWorkspaceRoots: [workingDirectory],
+        sandbox: 'read-only' as const, vaultRoot: workingDirectory, workingDirectory,
+      }
+      const result = await executeRealCodexAppServerTurn(maintenanceInput)
+      expect(parseAssistantNotificationDecision(result.finalMessage).kind).toBe('skip')
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(actions.filter(action => action.kind === 'command')).toEqual([])
+      const calls = actions.filter(action => action.kind === 'dynamic')
+      process.stdout.write(`[memory-profile-maintenance] ${JSON.stringify(calls.map(call => ({ action: call.argumentsValue.action, success: call.success })))}\n`)
+      expect(calls.every(call => call.tool === MURPH_MEMBER_MEMORY_TOOL.name && call.success)).toBe(true)
+      expect(calls.filter(call => call.argumentsValue.action === 'show')).toHaveLength(1)
+      expect(calls.filter(call => call.argumentsValue.action === 'update')).toHaveLength(2)
+      expect(calls.filter(call => call.argumentsValue.action === 'forget')).toHaveLength(1)
+      expect(calls.filter(call => call.argumentsValue.action === 'upsert')).toHaveLength(1)
+      expect(calls.find(call => call.argumentsValue.memoryId === verbose.record.id)?.argumentsValue).toMatchObject({ memoryId: verbose.record.id, expectedUpdatedAt: verbose.record.updatedAt })
+      const after = await readMemoryDocument(workingDirectory)
+      expect(after.records).toHaveLength(baseline.records.length + 8)
+      for (const original of baseline.records) {
+        const { sourceLine: _sourceLine, ...canonical } = original
+        expect(after.records.find(record => record.id === original.id)).toMatchObject(canonical)
+      }
+      expect(after.records.some(record => record.id === withdrawn.record.id)).toBe(false)
+      expect(after.records.find(record => record.id === assistantOnly.record.id)).toMatchObject({ text: assistantOnly.record.text, section: assistantOnly.record.section, createdAt: assistantOnly.record.createdAt, updatedAt: assistantOnly.record.updatedAt })
+      const replacement = after.records.find(record => record.id === corrected.record.id)?.text ?? ''
+      expect(replacement).toMatch(/three|3/iu)
+      expect(replacement).toMatch(/bullets/iu)
+      expect(replacement).toMatch(/monthly.*detail|detail.*monthly/iu)
+      expect(calls.find(call => call.argumentsValue.memoryId === corrected.record.id)?.argumentsValue.expectedUpdatedAt).toBe(corrected.record.updatedAt)
+      expect(calls.find(call => call.argumentsValue.memoryId === withdrawn.record.id)?.argumentsValue.expectedUpdatedAt).toBe(withdrawn.record.updatedAt)
+      expect(after.records.find(record => record.id === expired.record.id)?.text).toBe(expired.record.text)
+      expect(after.records.find(record => record.id === mixed.record.id)?.text).toBe(mixed.record.text)
+      expect(after.records.find(record => record.id === ambiguous.record.id)?.text).toBe(ambiguous.record.text)
+      expect(after.records.find(record => record.id === unfinished.record.id)?.text).toBe(unfinished.record.text)
+      const compact = after.records.find(record => record.id === verbose.record.id)?.text ?? ''
+      expect(compact.length).toBeLessThan(verbose.record.text.length)
+      expect(compact).toMatch(/three|3/iu)
+      expect(compact).toMatch(/progress/iu)
+      expect(compact).toMatch(/obstacles/iu)
+      expect(compact).toMatch(/next step/iu)
+      expect(compact).toMatch(/2026-09-12|September 12(?:th)?,? 2026|12(?:th)? September 2026/iu)
+      expect(compact).toMatch(/(?:no|unless|only|without|not).*check.ins|check.ins.*(?:ask|request)/iu)
+      const procedure = after.records.find(record => record.section === 'Instructions' && !baseline.records.some(original => original.id === record.id) && record.id !== assistantOnly.record.id)
+      expect(procedure?.text).toMatch(/two|2/iu)
+      expect(procedure?.text).toMatch(/stuck/iu)
+      expect(procedure?.text).toMatch(/choos(?:e|ing)|choice/iu)
+      // A second overlapping pass must not duplicate facts, erase history,
+      // or edit concise records merely to make them look recently verified.
+      const replay = await executeRealCodexAppServerTurn(maintenanceInput)
+      expect(parseAssistantNotificationDecision(replay.finalMessage).kind).toBe('skip')
+      expect(readCapabilityRoutingActions(replay.jsonEvents).filter(action => action.kind === 'dynamic').map(action => action.argumentsValue.action)).toEqual(['show'])
+      expect((await readMemoryDocument(workingDirectory)).records).toEqual(after.records)
+      const reply = await executeRealCodexAppServerTurn({
+        ...maintenanceInput,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [], memberMemoryMaintenanceAuthorized: false,
+        prompt: resolveAssistantProviderPrompt({
+          dynamicTools: [], prompt: 'I am stuck choosing a next step for winding down tonight. I could put tomorrow\'s things by the door, clear one small surface, or pick an outfit. Help me choose from those; no research, saving, or scheduling.',
+          providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
+          turnContextPrompt: await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory }),
+          workingDirectory,
+        }),
+      })
+      process.stdout.write(`[memory-profile-e2e] ${JSON.stringify({ maintenanceActions: calls.length, replayActions: 1, compact, procedure: procedure?.text, reply: reply.finalMessage })}\n`)
+      expect(readCapabilityRoutingActions(reply.jsonEvents)).toEqual([])
+      expect(reply.finalMessage).not.toMatch(/saved memory|memory record|maintenance|borrowed desk|you.ve got this/iu)
+      expect(reply.finalMessage).toMatch(/choose|pick|which|rather/iu)
+      // Count offered choices, not a separate sentence rejecting the third one.
+      const optionLines = [...reply.finalMessage.matchAll(/(?:^|\n)\s*(?:\d+[.)]|[-*])\s+([^\n]+)/gu)].map(match => match[1])
+      if (optionLines.length > 0) expect(optionLines).toHaveLength(2)
+      const choices = optionLines.length > 0 ? optionLines.join('\n') : reply.finalMessage
+      expect([/door/iu, /surface/iu, /outfit/iu].filter(pattern => pattern.test(choices))).toHaveLength(2)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 540_000)
+})
+
 describeRealCodex('real Codex bounded current-state memory e2e', () => {
   it(
     'real Codex bounded current-state precedence and authority e2e',
@@ -30881,15 +31048,25 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
     }
   })
 
-  it('uses the official restaurant source after an exact menu miss', {
+  it.each(['item-page', 'landing-page'] as const)('uses the official restaurant source after an exact menu miss: %s', {
     timeout: 900_000,
-  }, async () => {
+  }, async (entryPage) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-restaurant-official-source-e2e-'),
     )
     const officialNutritionUrl =
       'https://harbor-bowl.example.test/nutrition'
+    const startUrl = entryPage === 'landing-page'
+      ? 'https://harbor-bowl.example.test/'
+      : officialNutritionUrl
+    const nutritionText = [
+      'Harbor Bowl official nutrition',
+      'Standard Chicken Plate — serving size: 1 plate',
+      'Calories 640; protein 44 g; carbohydrates 70 g; fat 21 g; fiber 9 g.',
+    ].join('\n')
+    let nutritionPageLoaded = entryPage === 'item-page'
+    let commandsBeforeOpen: string[] = []
     const computerRequests: Array<{
       body: Record<string, unknown>
       url: string
@@ -30953,18 +31130,37 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
           const body = JSON.parse(String(init?.body)) as Record<string, unknown>
           computerRequests.push({ body, url })
           if (url === 'http://web-control.worker/api/internal/computer/runs') {
+            if (commandsBeforeOpen.length === 0) {
+              commandsBeforeOpen = (await readFile(commandLogPath, 'utf8')).trim().split('\n')
+            }
             return new Response(JSON.stringify({
               expiresAt: '2026-08-26T20:00:00.000Z',
               reused: false,
               runId: 'run_synthetic_restaurant_nutrition',
               status: 'running',
               title: 'Harbor Bowl official nutrition',
+              url: nutritionPageLoaded ? officialNutritionUrl : startUrl,
+              visibleText: nutritionPageLoaded
+                ? nutritionText
+                : `Welcome to Harbor Bowl. Link: Nutrition (${officialNutritionUrl}). Order online. Locations.`,
+            }), {
+              headers: { 'content-type': 'application/json' },
+              status: 200,
+            })
+          }
+          if (
+            url
+            === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_restaurant_nutrition/act'
+          ) {
+            // Facts become available only after the assistant follows the visible link.
+            const code = String(body.code ?? '')
+            expect(code).toMatch(/nutrition/iu)
+            expect(code).toMatch(/click|goto/iu)
+            nutritionPageLoaded = true
+            return new Response(JSON.stringify({
+              result: { url: officialNutritionUrl, text: nutritionText },
+              title: 'Harbor Bowl official nutrition',
               url: officialNutritionUrl,
-              visibleText: [
-                'Harbor Bowl official nutrition',
-                'Standard Chicken Plate — serving size: 1 plate',
-                'Calories 640; protein 44 g; carbohydrates 70 g; fat 21 g; fiber 9 g.',
-              ].join('\n'),
             }), {
               headers: { 'content-type': 'application/json' },
               status: 200,
@@ -30990,7 +31186,7 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
         modelProvider: config.modelProvider,
         prompt: [
           'Log dinner: one standard chicken plate from Harbor Bowl, no substitutions.',
-          `The restaurant lists its official nutrition at ${officialNutritionUrl}.`,
+          `The restaurant official site is ${startUrl}.`,
         ].join(' '),
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
@@ -31011,8 +31207,7 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
       const addCommand = commands[addIndex] ?? ''
       const actions = readCapabilityRoutingActions(result.jsonEvents)
       const searchAction = actions.find((action) =>
-        action.kind === 'command'
-        && action.command.includes('food search-labels')
+        action.kind === 'command' && action.ok && action.command.includes('search-labels')
       )
       const openAction = actions.find((action) =>
         action.kind === 'dynamic'
@@ -31026,6 +31221,8 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
 
       process.stdout.write(
         `[restaurant-meal-official-source-e2e] ${JSON.stringify({
+          entryPage,
+          foodJournalRead: actions.some(action => action.kind === 'command' && action.output.includes('# Food journal')),
           commands,
           computerRequests,
           finalMessage: result.finalMessage,
@@ -31035,17 +31232,31 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
       expect(commands[searchIndex]).toMatch(/Harbor\s+Bowl/iu)
       expect(commands[searchIndex]).toMatch(/chicken\s+plate/iu)
       expect(addIndex).toBeGreaterThan(searchIndex)
+      expect(commandsBeforeOpen).toContain(commands[searchIndex])
       expect(searchAction).toBeDefined()
+      expect(openAction?.eventIndex).toBeGreaterThan(searchAction?.eventIndex ?? Infinity)
       expect(openAction).toMatchObject({
-        argumentsValue: { startUrl: officialNutritionUrl },
+        argumentsValue: { startUrl },
       })
       expect(addAction).toBeDefined()
-      expect(openAction?.eventIndex).toBeGreaterThan(
-        searchAction?.eventIndex ?? Number.POSITIVE_INFINITY,
-      )
       expect(addAction?.eventIndex).toBeGreaterThan(
         openAction?.eventIndex ?? Number.POSITIVE_INFINITY,
       )
+      expect(commands.filter((command) => command.startsWith('meal add ') && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
+      expect(commands.filter(isRecordedVaultHelpCommand)).toEqual([])
+      expect(actions.some(action => action.kind === 'command' && action.output.includes('# Food journal'))).toBe(true)
+      expect(actions.flatMap(action => action.kind === 'command'
+        && /\b(?:cat|sed|head|tail)\b[^;\n]*bin\/vault-cli\b/u.test(action.command) ? [action.command] : [])).toEqual([])
+      const acts = actions.filter((action) =>
+        action.kind === 'dynamic' && action.tool === MURPH_COMPUTER_ACT_TOOL.name
+      )
+      expect(acts).toHaveLength(entryPage === 'landing-page' ? 1 : 0)
+      if (entryPage === 'landing-page') {
+        expect(acts[0]?.eventIndex).toBeGreaterThan(openAction?.eventIndex ?? Infinity)
+        expect(addAction?.eventIndex).toBeGreaterThan(acts[0]?.eventIndex ?? Infinity)
+      }
+      expect(result.finalMessage).toMatch(/logged|saved/iu)
+      expect(result.finalMessage).not.toMatch(/estimated|couldn.t (?:find|access)/iu)
       expect(addCommand).toMatch(/--nutrition-calories\s+640\b/u)
       expect(addCommand).toMatch(/--nutrition-protein-grams\s+44\b/u)
       expect(addCommand).toMatch(
@@ -31246,6 +31457,23 @@ async function materializeRestaurantMealVaultCli(input: {
   const emit = (value: unknown) =>
     `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
 
+  const batchPath = path.join(input.binDirectory, 'restaurant-batch.cjs')
+  await writeFile(batchPath, [
+    "const { spawnSync } = require('node:child_process');",
+    'const args = process.argv.slice(2);',
+    'const commands = [];',
+    'for (let i = 0; i < args.length; i++) {',
+    "  if (args[i] !== '--command') continue;",
+    '  const argv = JSON.parse(args[++i]);',
+    "  if (!Array.isArray(argv) || !argv.every(value => typeof value === 'string') || !['memory', 'food'].includes(argv[0])) throw new Error('Unsupported restaurant fixture batch');",
+    `  const child = spawnSync(${JSON.stringify(executablePath)}, argv, { encoding: 'utf8' });`,
+    "  const data = child.status === 0 ? JSON.parse(child.stdout) : undefined;",
+    "  commands.push({ index: commands.length, argv, ok: child.status === 0, durationMs: 0, stdout: '', outputBytes: Buffer.byteLength(child.stdout), outputChars: child.stdout.length, ...(data ? { data } : { error: { message: child.stderr } }) });",
+    '}',
+    "if (commands.length === 0) throw new Error('Missing fixture batch commands');",
+    "console.log(JSON.stringify({ schema: 'murph.vault-cli.batch-result.v1', vault: 'synthetic-vault', count: commands.length, requested: commands.length, executed: commands.length, succeeded: commands.filter(c => c.ok).length, failed: commands.filter(c => !c.ok).length, stoppedEarly: false, commands }));",
+  ].join('\n'), 'utf8')
+
   await writeFile(
     executablePath,
     [
@@ -31253,6 +31481,8 @@ async function materializeRestaurantMealVaultCli(input: {
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
       'case "$*" in',
+      `  batch\\ *) exec node ${quoteNutritionShellLiteral(batchPath)} "$@" ;;`,
+      '  *--schema*|*-h) printf \'unexpected restaurant fixture introspection\\n\' >&2; exit 64 ;;',
       `  meal\\ --help|meal\\ add\\ --help) printf '%s\\n' ${quoteNutritionShellLiteral([
         'Usage: vault-cli meal add [options]',
         'Options:',
@@ -31755,9 +31985,9 @@ describeRealCodex('real Codex totals-only nutrition journeys', () => {
 })
 
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
-  it('saves a nutrition-resolved meal and attaches its card without redundant reads', {
+  it.each([false, true])('saves a nutrition-resolved meal without discovery; requested day read: %s', {
     timeout: 1_800_000,
-  }, async () => {
+  }, async (readDayFirst) => {
     const config = await resolveRealCodexE2eConfig()
     const startedAt = performance.now()
     try {
@@ -31765,6 +31995,7 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
         config, conditionRecovery: 'none', goalScenario: 'no-goals', realVault: true,
         seedMeals: false, allowMealWrites: true,
         initialPrompt: [
+          ...(readDayFirst ? ['First check my saved meals for July 30, 2026, to confirm this lunch is not already there. Then log it if missing.'] : []),
           'Log my lunch for July 30 at noon: a chickpea and rice bowl.',
           'My recipe totals for the entire portion I ate are 560 calories,',
           '22 g protein, 82 g carbs, 16 g fat, and 12 g fiber.',
@@ -31785,11 +32016,22 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
       const actions = commands.filter((command) => !isRecordedVaultHelpCommand(command))
       process.stdout.write('[meal-short-workflow] ' + JSON.stringify({
         elapsedMs: Math.round(performance.now() - startedAt), commands,
-        attachCallCount: result.attachCallCount,
+        readDayFirst, attachCallCount: result.attachCallCount,
+        reply: result.finalMessage, foodJournalRead: result.foodJournalRead,
       }) + '\n')
+      expect(result.foodJournalRead).toBe(true)
       expect(actions.filter((command) => command.startsWith('meal add '))).toHaveLength(1)
       expect(actions.find((command) => command.startsWith('meal add '))).toContain('--with-daily-totals')
-      expect(commands.filter((command) => /^meal (?:show|list|totals)\b/u.test(command))).toEqual([])
+      expect(commands.filter((command) => command.startsWith('meal ') && isRecordedVaultHelpCommand(command))).toEqual([])
+      expect(commands.filter((command) => /^meal (?:show|totals)\b/u.test(command))).toEqual([])
+      const lists = commands.filter((command) => command.startsWith('meal list '))
+      expect(lists).toHaveLength(readDayFirst ? 1 : 0)
+      if (readDayFirst) {
+        expect(lists[0]).toMatch(/--from(?:=|\s+)2026-07-30\b/u)
+        expect(lists[0]).toMatch(/--to(?:=|\s+)2026-07-30\b/u)
+        expect(lists[0]).not.toMatch(/--date\b/u)
+        expect(commands.indexOf(lists[0]!)).toBeLessThan(commands.findIndex((command) => command.startsWith('meal add ')))
+      }
       expect(readNutritionGoalMutationCommands(commands)).toEqual([])
       expect(result.attachCallCount).toBe(1)
       expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2,
@@ -34420,6 +34662,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
   commands: string[]
   deliveryContextOrdinal: number
   finalMessage: string
+  foodJournalRead: boolean
   progressUpdates: string[]
 }> {
   const workingDirectory = await mkdtemp(
@@ -34565,6 +34808,9 @@ async function runRealNutritionCardAuthorityScenario(input: {
       card: result.responseCard,
       commands: commandText === '' ? [] : commandText.split('\n'),
       deliveryContextOrdinal: result.responseDeliveryContextOrdinal,
+      foodJournalRead: readCapabilityRoutingActions(result.jsonEvents).some((action) =>
+        action.kind === 'command' && action.output.includes('# Food journal')
+      ),
       finalMessage: result.finalMessage,
       progressUpdates,
     }

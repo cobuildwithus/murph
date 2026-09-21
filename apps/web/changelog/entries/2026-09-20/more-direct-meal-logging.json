@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-20",
+  "order": 100,
+  "item": {
+    "id": "more-direct-meal-logging",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More direct meal logging",
+    "summary": "Murph takes fewer unnecessary steps when saving meals and checking a day’s food log.",
+    "details": "When a restaurant lookup needs its official website, Murph follows the relevant nutrition link before falling back to an estimate. Your preferences about nutrition numbers still apply.",
+    "relevanceTags": [
+      "nutrition",
+      "food-logging"
+    ],
+    "sourcePullRequests": [
+      3618
+    ]
+  }
+}

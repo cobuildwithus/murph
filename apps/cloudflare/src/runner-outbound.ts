@@ -1,6 +1,6 @@
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
 import { presignManagedSnapshot, completeManagedSnapshotForSession, ManagedSnapshotCompletionRejectedError } from "./managed-snapshot-control.ts";
-import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, commandHostedRuntimeReplicaPut, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
+import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
 import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
 import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
 import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
@@ -2257,12 +2257,19 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (requestedSnapshotId !== input.snapshotId) {
     return jsonError("Hosted workspace snapshot complete snapshotId does not match its route.", 400);
   }
-  const session = await readWorkspaceSnapshotUploadSession({
-    writeAuthority: writeFence,
-    env: input.env,
-    snapshotId: input.snapshotId,
+  // Managed reads already return both the session and its exact upload receipt.
+  // Web fences this read; final checkpoint publication fences the owner again.
+  const resource = await commandHostedRuntimeSnapshot({
+    source: input.env,
     userId: input.userId,
+    command: {
+      operation: body.managedPart === undefined ? "snapshot_read" : "snapshot_managed_read",
+      snapshotId: input.snapshotId,
+      attemptId: writeFence.attemptId,
+      generation: writeFence.generation,
+    },
   });
+  const session = resource.applied ? resource.session : null;
   if (!session) {
     return notFound();
   }
@@ -2280,9 +2287,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     || session.leaseGeneration !== writeFence.generation
     || session.workspaceVersion !== writeFence.workspaceVersion
   ) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
-  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
   const checkpointRequestWithoutSnapshotRef = parseHostedWorkspaceCheckpointRequest({
@@ -2351,7 +2355,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot exceeds the total plain size limit.", 413);
   }
   const managedSha256 = body.managedPart === undefined ? null : await completeManagedSnapshotForSession({
-    source: input.env, session, part: body.managedPart,
+    source: input.env, session, part: body.managedPart, receipt: resource.managedUpload ?? null,
     encryptedByteSize: snapshotRef.archive.encryptedByteSize, encryptedSha256: snapshotRef.archive.encryptedObjectSha256,
   });
   const snapshotObjectStore = createWorkspaceSnapshotObjectStore({
@@ -2371,9 +2375,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot object metadata is unavailable.", 503);
   }
   const object = await snapshotObjectStore.head(snapshotRef.objectKey);
-  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
   if (!object) {
     await deleteWorkspaceSnapshotUploadSession({
       session,
@@ -2472,9 +2473,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
       return jsonError("Hosted workspace snapshot current state is unavailable.", 502);
     }
   }
-  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
   if (
     preCheckpointReplacedSnapshotRef
     && !isReplacementRefSameAsSnapshotRef(preCheckpointReplacedSnapshotRef, snapshotRef)
@@ -2539,14 +2537,10 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   }
   if (!checkpoint.checkpointed) {
     const cleanupRetryResponse = await completeAlreadyCheckpointedWorkspaceSnapshotResponse({
-      attemptId: writeFence.attemptId,
       checkpointRequest,
       checkpoint,
-      env: input.env,
-      leaseGeneration: writeFence.generation,
       session,
       snapshotRef,
-      userId: input.userId,
     });
     if (cleanupRetryResponse) {
       return cleanupRetryResponse;
@@ -2591,14 +2585,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     }
     return jsonError("Hosted workspace snapshot checkpoint ref mismatch.", 502);
   }
-
-  await completeWorkspaceSnapshotUploadSessionHandoffBestEffort({
-    attemptId: writeFence.attemptId,
-    env: input.env,
-    leaseGeneration: writeFence.generation,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
 
   return json({
     checkpoint,
@@ -2756,14 +2742,10 @@ async function recordReplacedWorkspaceSnapshotOrphanCandidate(input: {
 }
 
 async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
-  attemptId: string;
   checkpointRequest: ReturnType<typeof parseHostedWorkspaceCheckpointRequest>;
   checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
   session: HostedWorkspaceSnapshotUploadSession;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
-  userId: string;
 }): Promise<Response | null> {
   const currentSnapshotRef = input.checkpoint.workspace.snapshotRef;
   if (
@@ -2779,14 +2761,6 @@ async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
     return jsonError("Hosted workspace snapshot checkpoint state mismatch.", 409);
   }
   const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
-  await completeWorkspaceSnapshotUploadSessionHandoffBestEffort({
-    attemptId: input.attemptId,
-    env: input.env,
-    leaseGeneration: input.leaseGeneration,
-    snapshotId: input.session.snapshotId,
-    userId: input.userId,
-  });
-
   return json({
     checkpoint: {
       checkpointed: true,
@@ -3330,19 +3304,9 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   request: Request;
   userId: string;
 }): Promise<Response> {
-  let writeAuthority: Awaited<ReturnType<typeof requireRunnerRuntimeWriteFence>>;
-  try {
-    writeAuthority = await requireRunnerRuntimeWriteFence({
-      env: input.env,
-      request: input.request,
-      userId: input.userId,
-    });
-  } catch (error) {
-    if (!(error instanceof RunnerRuntimeWriteFenceError)) {
-      throw error;
-    }
-    return unauthorized();
-  }
+  // The batch admission below checks live ownership under the Web transaction.
+  const writeAuthority = readRunnerRuntimeWriteFenceHeaders(input.request);
+  if (!writeAuthority) return unauthorized();
 
   const body = await readJsonObject(input.request, {
     limitBytes: HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES + 1024 * 1024,
@@ -3362,12 +3326,10 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     environment: input.environment,
     userId: input.userId,
   });
-  let admittedRootObjectKey: string | null = null;
+  const replicaWrites = createRuntimeReplicaWriteBucket({ source: input.env,
+    userId: input.userId, attemptId: writeAuthority.attemptId, generation: writeAuthority.generation });
   const replicaStore = createHostedBrowserVaultReplicaStore({
-    bucket: createRuntimeReplicaWriteBucket({ source: input.env,
-      userId: input.userId, attemptId: writeAuthority.attemptId, generation: writeAuthority.generation,
-      readRootObjectKey: () => admittedRootObjectKey,
-    }),
+    bucket: replicaWrites.bucket,
     keysById: crypto.keysById,
     resolveRootKeyById: crypto.resolveKeyById,
     rootKey: crypto.rootKey,
@@ -3382,31 +3344,17 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
       userId: input.userId,
     });
   }
-  let activePutWriteId: string | null = null;
+  let writeFailed = false;
   try {
     return json({
       replicaRef: await replicaStore.writeBrowserVaultReplica({
-        beforeWrite: async (plannedReplicaRef) => {
-          const writeId = globalThis.crypto.randomUUID();
-          const putAdmitted = await admitBrowserVaultReplicaDirectPut({
-            objectKey: plannedReplicaRef.objectKey,
-            attemptId: writeAuthority.attemptId,
-            env: input.env,
-            leaseGeneration: writeAuthority.generation,
-            userId: input.userId,
-            writeId,
-          });
-          if (!putAdmitted) {
-            throw new RunnerRuntimeWriteFenceError();
-          }
-          activePutWriteId = writeId;
-          admittedRootObjectKey = plannedReplicaRef.objectKey;
-        },
+        beforeWrite: plannedReplicaRef => replicaWrites.admit(plannedReplicaRef.objectKey),
         replica: body.replica,
         userId: input.userId,
       }),
     });
   } catch (error) {
+    writeFailed = true;
     if (!(error instanceof HostedRuntimeResourceRejectedError)) throw error;
     emitHostedExecutionStructuredLog({
       component: "runner", phase: "wake.running", level: "warn",
@@ -3415,36 +3363,9 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     });
     return json({ code: error.code, error: "Hosted runtime replica write rejected." }, error.status);
   } finally {
-    if (activePutWriteId) {
-      await releaseBrowserVaultReplicaDirectPut({
-        env: input.env,
-        userId: input.userId,
-        writeId: activePutWriteId,
-      });
-    }
+    try { await replicaWrites.settle(); }
+    catch (error) { if (!writeFailed) throw error; }
   }
-}
-
-async function admitBrowserVaultReplicaDirectPut(input: {
-  objectKey: string;
-  attemptId: string;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
-  userId: string;
-  writeId: string;
-}): Promise<boolean> {
-  return commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: {
-    operation: "admit", attemptId: input.attemptId, generation: input.leaseGeneration, writeId: input.writeId, objectKey: input.objectKey,
-  } });
-}
-
-async function releaseBrowserVaultReplicaDirectPut(input: {
-  env: RunnerOutboundEnvironmentSource;
-  userId: string;
-  writeId: string;
-}): Promise<void> {
-  await commandHostedRuntimeReplicaPut({ source: input.env, userId: input.userId, command: { operation: "release", writeId: input.writeId } });
-  return;
 }
 
 async function writeRequestOwnsRuntimeWriteFence(input: {
@@ -3524,50 +3445,6 @@ async function heartbeatWorkspaceSnapshotUploadSession(input: {
   return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
     operation: "snapshot_heartbeat", snapshotId: input.snapshotId, attemptId: input.attemptId, generation: input.leaseGeneration,
   } })).applied;
-}
-
-async function completeWorkspaceSnapshotUploadSessionHandoff(input: {
-  attemptId: string;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
-  snapshotId: string;
-  userId: string;
-}): Promise<boolean> {
-  return (await commandHostedRuntimeSnapshot({ source: input.env, userId: input.userId, command: {
-    operation: "snapshot_complete", snapshotId: input.snapshotId, attemptId: input.attemptId, generation: input.leaseGeneration,
-  } })).applied;
-}
-
-async function completeWorkspaceSnapshotUploadSessionHandoffBestEffort(input: {
-  attemptId: string;
-  env: RunnerOutboundEnvironmentSource;
-  leaseGeneration: string;
-  snapshotId: string;
-  userId: string;
-}): Promise<void> {
-  try {
-    if (await completeWorkspaceSnapshotUploadSessionHandoff(input)) {
-      return;
-    }
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: { checkpointHandoffCompletionRecorded: false },
-      level: "warn",
-      message: "Hosted workspace snapshot handoff completion marker was stale.",
-      phase: "checkpoint",
-      userId: input.userId,
-    });
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: { checkpointHandoffCompletionRecorded: false },
-      error,
-      level: "warn",
-      message: "Hosted workspace snapshot handoff completion marker failed.",
-      phase: "checkpoint",
-      userId: input.userId,
-    });
-  }
 }
 
 async function readWorkspaceSnapshotUploadSession(input: {

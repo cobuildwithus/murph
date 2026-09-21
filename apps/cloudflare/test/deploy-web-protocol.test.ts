@@ -76,6 +76,8 @@ it("accepts reader supersets, but not missing audience or emitted log codes", ()
 });
 
 it.each([
+  { runtimeOwnerCompletion: undefined },
+  { runtimeOwnerCompletion: { early: { operation: "retire", attemptId: "protocol-probe", generation: "1", completed: true } } },
   { schemaVersion: 2 }, { nonce: "stale" }, { kind: "unrelated" }, { runtimeLogEventCodes: [42] },
   { threadRouteAuthority: { direct: { authorized: false }, group: { authorized: true } } },
   { threadRouteAuthority: { direct: { authorized: true, threadIsDirect: false }, group: { authorized: true, threadIsDirect: true } } },
@@ -135,4 +137,16 @@ it.each(["fetch", "body"])("bounds a stalled %s, including fetch implementations
   await vi.advanceTimersByTimeAsync(HOSTED_WEB_PROTOCOL_PROBE_TIMEOUT_MS);
   expect((await failure).message).toContain("timeout");
   if (phase === "body") expect(cancel).toHaveBeenCalledOnce();
+});
+
+
+it("blocks new milestone producers before activation against an older Web reader", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async input => {
+    const { latencyMilestoneBatchMaxEvents: _unsupported, ...legacy } =
+      syntheticHostedWebProtocolAdmission(nonceFrom(input));
+    return Response.json(legacy, { headers });
+  });
+  await expect(assertHostedWebProtocolAdmission(source, { fetchImpl, sleep: noSleep }))
+    .rejects.toThrow("latency_milestone_batch");
+  expect(fetchImpl).toHaveBeenCalledOnce();
 });

@@ -265,7 +265,7 @@ export interface DeviceSyncService {
   disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
   getNextJobWakeAt(): string | null;
   getNextWakeAt(now?: string): string | null;
-  runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]>;
+  runSchedulerOnce(accountId?: string, options?: { reconcileBefore?: string }): Promise<DeviceSyncJobRecord[]>;
   runWorkerOnce(accountId?: string): Promise<DeviceSyncJobRecord | null>;
   // Drains up to `limit` durable job rows. One worker pass starts from one
   // claimed seed job, but provider batching still counts every claimed row.
@@ -845,9 +845,15 @@ class DeviceSyncServiceController {
     return this.store.readNextJobWakeAt();
   }
 
-  async runSchedulerOnce(accountId?: string): Promise<DeviceSyncJobRecord[]> {
+  async runSchedulerOnce(
+    accountId?: string,
+    options: { reconcileBefore?: string } = {},
+  ): Promise<DeviceSyncJobRecord[]> {
     return await this.schedulerMutex.runIfIdle(async () => {
       const now = this.nowIso();
+      // An already active hosted pass may pull a nearby cadence forward for
+      // this account. The same durable jobs and retry owner still perform it.
+      const reconcileBefore = accountId ? options.reconcileBefore ?? now : now;
       const queuedJobs: DeviceSyncJobRecord[] = [];
 
       try {
@@ -857,7 +863,7 @@ class DeviceSyncServiceController {
             || account.status !== "active"
             || isDeviceSyncConnectionSetupPending(account)
             || !account.nextReconcileAt
-            || Date.parse(account.nextReconcileAt) > Date.parse(now)
+            || Date.parse(account.nextReconcileAt) > Date.parse(reconcileBefore)
           ) {
             continue;
           }
@@ -938,6 +944,7 @@ class DeviceSyncServiceController {
 
     let activeJobs: DeviceSyncJobRecord[] = [job];
     let canonicalProgressCommitted = false;
+    let continuationProgressCommitted = false;
     let connectionSourceReadCount = 0;
     let connectionSourceReadElapsedMs = 0;
     let credentialRefreshCount = 0;
@@ -971,6 +978,9 @@ class DeviceSyncServiceController {
         attempts: job.attempts,
         ...(canonicalProgressCommitted
           ? { canonicalProgressCommitted: true as const }
+          : {}),
+        ...(continuationProgressCommitted
+          ? { continuationProgressCommitted: true as const }
           : {}),
         connectionSourceReadCount,
         connectionSourceReadElapsedMs,
@@ -1568,6 +1578,7 @@ class DeviceSyncServiceController {
 
       outcome = "completed";
       durableProgressCommitted = true;
+      continuationProgressCommitted = result.continuationProgress === true;
       return finishPass();
     } catch (error) {
       if (isDeviceSyncJobExecutionYielded(error, jobAbortController.signal)) {
@@ -2168,7 +2179,7 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
       controller.disconnectAccount(accountId, expectedConnectedAt),
     getNextJobWakeAt: () => controller.getNextJobWakeAt(),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),
-    runSchedulerOnce: (accountId) => controller.runSchedulerOnce(accountId),
+    runSchedulerOnce: (accountId, options) => controller.runSchedulerOnce(accountId, options),
     runWorkerOnce: (accountId) => controller.runWorkerOnce(accountId),
     drainWorker: (limit, accountId, options) =>
       controller.drainWorker(limit, accountId, options),

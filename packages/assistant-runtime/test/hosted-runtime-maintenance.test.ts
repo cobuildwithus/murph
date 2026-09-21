@@ -3497,6 +3497,9 @@ describe("runHostedDeviceSyncPass", () => {
   });
 
   it("carries the local retry wake into a retained dirty payload acknowledgement", async () => {
+    // A generic runtime timer has no connection-scoped scheduler authority.
+    mocks.resolveHostedDeviceSyncSchedulerAccountId.mockReturnValue(null);
+    mocks.resolveHostedDeviceSyncWakeLocalAccountId.mockReturnValue(null);
     const close = vi.fn();
     const retryAt = "2026-04-08T00:05:00.000Z";
     const service = {
@@ -3561,6 +3564,7 @@ describe("runHostedDeviceSyncPass", () => {
       }],
     });
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(service.runSchedulerOnce).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
   });
 
@@ -7254,7 +7258,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
     })).not.toThrow();
   });
 
-  it("does not report canonical system progress for local queue commits alone", async () => {
+  it.each([false, true])("reports system progress only for proven continuation advancement: %s", async (continuationProgress) => {
     mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
       listPendingJobsForAccount: vi.fn(() => []),
     });
@@ -7273,6 +7277,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         credentialRefreshCount: 0,
         credentialRefreshElapsedMs: 0,
         durableProgressCommitted: true,
+        ...(continuationProgress ? { continuationProgressCommitted: true as const } : {}),
         elapsedMs: 1,
         jobCount: 1,
         jobKind: "resource",
@@ -7313,7 +7318,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       },
     });
 
-    assert.equal(Object.hasOwn(result, "systemProgressed"), false);
+    assert.equal(result.systemProgressed === true, continuationProgress);
   });
 
   it.each(["drained", "foreground", "outer", "timeout"] as const)(

@@ -857,6 +857,32 @@ export interface HostedMailboxLaneHighWater {
   maxUpdatedAt?: string | null;
 }
 
+/** Complete mailbox-only wake provenance; absent means freshness is unknown. */
+export type HostedMailboxWakeHighWater = Record<HostedMailboxLane, string>;
+
+export function readHostedMailboxWakeHighWater(value: unknown): HostedMailboxWakeHighWater | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).length !== HOSTED_MAILBOX_LANES.length) return null;
+  const { conversation, system } = record;
+  if (typeof conversation !== "string" || typeof system !== "string"
+      || !/^(?:0|[1-9][0-9]*)$/u.test(conversation)
+      || !/^(?:0|[1-9][0-9]*)$/u.test(system)) return null;
+  return { conversation, system };
+}
+
+/** Unknown work in either wake must not be hidden by a later known mailbox wake. */
+export function mergeHostedMailboxWakeHighWater(
+  left: HostedMailboxWakeHighWater | null | undefined,
+  right: HostedMailboxWakeHighWater | null | undefined,
+): HostedMailboxWakeHighWater | null {
+  if (!left || !right) return null;
+  return {
+    conversation: BigInt(left.conversation) >= BigInt(right.conversation) ? left.conversation : right.conversation,
+    system: BigInt(left.system) >= BigInt(right.system) ? left.system : right.system,
+  };
+}
+
 export interface HostedMailboxLaneConsumed {
   consumedSeq: string;
   lane: HostedMailboxLane;
@@ -2341,6 +2367,7 @@ export function readHostedIngressLatencySource(
 
 export const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS = 64;
 export const HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES = 32 * 1024;
+export const HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS = 8;
 export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
   "runner_job_accepted",
   "runtime_phase_started",
@@ -3568,6 +3595,15 @@ export interface HostedRuntimeLatencyTraceRequest {
   event: HostedRuntimeLatencyTraceEvent;
 }
 
+export interface HostedRuntimeLatencyTraceBatchRequest {
+  events: HostedRuntimeLatencyTraceAssistantMilestoneEvent[];
+}
+
+export interface HostedRuntimeLatencyTraceBatchResponse {
+  // Positional results retain each event's retry ownership. Null means persistence failed.
+  results: Array<HostedRuntimeLatencyTraceResponse | null>;
+}
+
 export interface HostedRuntimeLatencyTraceResponse {
   matchedCount: number;
   recorded: boolean;
@@ -3686,8 +3722,11 @@ export interface HostedRuntimeWebProtocolAdmission {
   kind: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND;
   schemaVersion: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION;
   nonce: string;
+  latencyMilestoneBatchMaxEvents: number;
   runtimeLogEventCodes: readonly string[];
   threadRouteAuthority: { direct: unknown; group: unknown };
+  runtimeReplicaBatch: { admission: unknown; settlement: unknown };
+  runtimeOwnerCompletion: { early: unknown; settled: unknown };
 }
 
 // A synthetic wire message, not a log write. Exercise every producer enum value

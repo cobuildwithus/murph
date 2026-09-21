@@ -2,6 +2,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
   createDeferred,
+  createMailboxItem,
   createMailboxPort,
   createPlatform,
   createSnapshotFixtureRef,
@@ -79,7 +80,7 @@ test("metadata-only post-checkpoint reconciliation does not rearm the idle windo
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
-              items: [],
+              items: [createMailboxItem()],
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -200,7 +201,7 @@ test("metadata-only reconciliation preserves an active foreground quiet window",
           },
           async importItem() { return { status: "imported" }; },
           platform: createPlatform({
-            mailboxPort: createMailboxPort({ events, items: [] }),
+            mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,

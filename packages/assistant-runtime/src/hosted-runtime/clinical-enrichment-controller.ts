@@ -1,7 +1,7 @@
 export type HostedClinicalEnrichmentRunResult = "idle" | "settled";
 
 export function resolveHostedBackgroundReadCheckpointDeadline(input: {
-  diagnosticDeadline: number | null;
+  assistantAskDeadline: number | null;
   clinicalDeadline: number | null;
   canonicalReceiptCount: number;
   durableEffectCount: number;
@@ -10,7 +10,7 @@ export function resolveHostedBackgroundReadCheckpointDeadline(input: {
   const clinicalDeadline = input.canonicalReceiptCount === 0
     && input.durableEffectCount === 0 && !input.durableFollowUpPending
     ? input.clinicalDeadline : null;
-  return Math.max(input.diagnosticDeadline ?? 0, clinicalDeadline ?? 0) || null;
+  return Math.max(input.assistantAskDeadline ?? 0, clinicalDeadline ?? 0) || null;
 }
 
 export interface HostedClinicalEnrichmentController {

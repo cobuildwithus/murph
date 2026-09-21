@@ -582,6 +582,21 @@ describe("hosted orchestration control contracts", () => {
     },
   );
 
+  it("preserves complete mailbox-only wake coverage without requiring it from old producers", () => {
+    const base = { orchestrationAttemptId: "orchestration_attempt_mailbox" };
+    expect(parseHostedRuntimeEnsureProcessingRequest(base)).toEqual(base);
+    const request = { ...base, mailboxWakeHighWater: { conversation: "9007199254740993", system: "0" } };
+    expect(parseHostedRuntimeEnsureProcessingRequest(request)).toEqual(request);
+  });
+
+  it.each([null, {}, { conversation: "1" }, { conversation: "1", system: "-1" },
+    { conversation: "01", system: "2" }, { conversation: 1, system: "2" },
+    { conversation: "1", system: "2", extra: "3" }])("rejects incomplete or malformed mailbox wake coverage %j", (mailboxWakeHighWater) => {
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
+      orchestrationAttemptId: "orchestration_attempt_mailbox", mailboxWakeHighWater,
+    })).toThrow("mailboxWakeHighWater requires both mailbox lanes");
+  });
+
   it("rejects raw payload-shaped fields and completion shortcuts in ensure-processing contracts", () => {
     expect(() => parseHostedRuntimeEnsureProcessingRequest({
       aiUsageAllowDecision: createAiUsageAllowDecision(),
