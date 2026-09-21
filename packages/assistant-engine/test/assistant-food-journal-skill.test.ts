@@ -37,6 +37,28 @@ function buildPrompt(
 }
 
 describe('assistant food journal skill', () => {
+  it('composes direct meal execution with bounded official-source inspection', async () => {
+    const root = resolveAssistantSkillsRoot()
+    const instructions = compact([
+      buildPrompt(),
+      await readFile(path.join(root, 'food-journal/SKILL.md'), 'utf8'),
+      await readFile(path.join(root, 'computer-use/SKILL.md'), 'utf8'),
+    ].join('\n'))
+    for (const rule of [
+      'Do not list meals as a prerequisite to a new capture',
+      'meal list --from <date> --to <same-date> --limit 50 --format json',
+      '`meal list` has no `--date` option',
+      'Use the typed save flags below directly',
+      'A landing page is not a failed nutrition lookup',
+      'use `computer_act` to follow its relevant menu/nutrition link or search for the exact item',
+      'If the first page already contains the exact item and serving facts, use them without extra navigation',
+      'Do not force a nutrition lookup, clarification, or safety preflight just to capture the meal',
+      'Never invent an exact label',
+    ]) {
+      expect(instructions.includes(rule), rule).toBe(true)
+    }
+  })
+
   it('composes the saved-day summary with card authority without redundant reads', async () => {
     const root = resolveAssistantSkillsRoot()
     const food = compact(await readFile(path.join(root, 'food-journal/SKILL.md'), 'utf8'))

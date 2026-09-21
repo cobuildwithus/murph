@@ -30805,15 +30805,23 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
     }
   })
 
-  it('uses the official restaurant source after an exact menu miss', {
+  it.each(['item-page', 'landing-page'] as const)('uses the official restaurant source after an exact menu miss: %s', {
     timeout: 900_000,
-  }, async () => {
+  }, async (entryPage) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-restaurant-official-source-e2e-'),
     )
     const officialNutritionUrl =
       'https://harbor-bowl.example.test/nutrition'
+    const startUrl = entryPage === 'landing-page'
+      ? 'https://harbor-bowl.example.test/'
+      : officialNutritionUrl
+    const nutritionText = [
+      'Harbor Bowl official nutrition',
+      'Standard Chicken Plate — serving size: 1 plate',
+      'Calories 640; protein 44 g; carbohydrates 70 g; fat 21 g; fiber 9 g.',
+    ].join('\n')
     const computerRequests: Array<{
       body: Record<string, unknown>
       url: string
@@ -30883,12 +30891,28 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
               runId: 'run_synthetic_restaurant_nutrition',
               status: 'running',
               title: 'Harbor Bowl official nutrition',
+              url: startUrl,
+              visibleText: entryPage === 'item-page'
+                ? nutritionText
+                : `Welcome to Harbor Bowl. Link: Nutrition (${officialNutritionUrl}). Order online. Locations.`,
+            }), {
+              headers: { 'content-type': 'application/json' },
+              status: 200,
+            })
+          }
+          if (
+            url
+            === 'http://web-control.worker/api/internal/computer/runs/run_synthetic_restaurant_nutrition/act'
+          ) {
+            // Facts become available only after the assistant follows the visible link.
+            const code = String(body.code ?? '')
+            expect(code).toMatch(/nutrition/iu)
+            expect(code).toMatch(/click|goto/iu)
+            return new Response(JSON.stringify({
+              result: { completed: true },
+              title: 'Harbor Bowl official nutrition',
               url: officialNutritionUrl,
-              visibleText: [
-                'Harbor Bowl official nutrition',
-                'Standard Chicken Plate — serving size: 1 plate',
-                'Calories 640; protein 44 g; carbohydrates 70 g; fat 21 g; fiber 9 g.',
-              ].join('\n'),
+              visibleText: nutritionText,
             }), {
               headers: { 'content-type': 'application/json' },
               status: 200,
@@ -30914,7 +30938,7 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
         modelProvider: config.modelProvider,
         prompt: [
           'Log dinner: one standard chicken plate from Harbor Bowl, no substitutions.',
-          `The restaurant lists its official nutrition at ${officialNutritionUrl}.`,
+          `The restaurant official site is ${startUrl}.`,
         ].join(' '),
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
@@ -30950,6 +30974,7 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
 
       process.stdout.write(
         `[restaurant-meal-official-source-e2e] ${JSON.stringify({
+          entryPage,
           commands,
           computerRequests,
           finalMessage: result.finalMessage,
@@ -30961,7 +30986,7 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
       expect(addIndex).toBeGreaterThan(searchIndex)
       expect(searchAction).toBeDefined()
       expect(openAction).toMatchObject({
-        argumentsValue: { startUrl: officialNutritionUrl },
+        argumentsValue: { startUrl },
       })
       expect(addAction).toBeDefined()
       expect(openAction?.eventIndex).toBeGreaterThan(
@@ -30970,6 +30995,18 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
       expect(addAction?.eventIndex).toBeGreaterThan(
         openAction?.eventIndex ?? Number.POSITIVE_INFINITY,
       )
+      expect(commands.filter((command) => command.startsWith('meal add '))).toHaveLength(1)
+      expect(commands.filter(isRecordedVaultHelpCommand)).toEqual([])
+      const acts = actions.filter((action) =>
+        action.kind === 'dynamic' && action.tool === MURPH_COMPUTER_ACT_TOOL.name
+      )
+      expect(acts).toHaveLength(entryPage === 'landing-page' ? 1 : 0)
+      if (entryPage === 'landing-page') {
+        expect(acts[0]?.eventIndex).toBeGreaterThan(openAction?.eventIndex ?? Infinity)
+        expect(addAction?.eventIndex).toBeGreaterThan(acts[0]?.eventIndex ?? Infinity)
+      }
+      expect(result.finalMessage).toMatch(/logged|saved/iu)
+      expect(result.finalMessage).not.toMatch(/estimated|couldn.t (?:find|access)/iu)
       expect(addCommand).toMatch(/--nutrition-calories\s+640\b/u)
       expect(addCommand).toMatch(/--nutrition-protein-grams\s+44\b/u)
       expect(addCommand).toMatch(
@@ -31177,6 +31214,7 @@ async function materializeRestaurantMealVaultCli(input: {
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
       'case "$*" in',
+      '  *--schema*|*-h) printf \'unexpected restaurant fixture introspection\\n\' >&2; exit 64 ;;',
       `  meal\\ --help|meal\\ add\\ --help) printf '%s\\n' ${quoteNutritionShellLiteral([
         'Usage: vault-cli meal add [options]',
         'Options:',
@@ -31679,9 +31717,9 @@ describeRealCodex('real Codex totals-only nutrition journeys', () => {
 })
 
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
-  it('saves a nutrition-resolved meal and attaches its card without redundant reads', {
+  it.each([false, true])('saves a nutrition-resolved meal without discovery; requested day read: %s', {
     timeout: 1_800_000,
-  }, async () => {
+  }, async (readDayFirst) => {
     const config = await resolveRealCodexE2eConfig()
     const startedAt = performance.now()
     try {
@@ -31689,6 +31727,7 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
         config, conditionRecovery: 'none', goalScenario: 'no-goals', realVault: true,
         seedMeals: false, allowMealWrites: true,
         initialPrompt: [
+          ...(readDayFirst ? ['First check my saved meals for July 30, 2026, to confirm this lunch is not already there. Then log it if missing.'] : []),
           'Log my lunch for July 30 at noon: a chickpea and rice bowl.',
           'My recipe totals for the entire portion I ate are 560 calories,',
           '22 g protein, 82 g carbs, 16 g fat, and 12 g fiber.',
@@ -31709,11 +31748,21 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
       const actions = commands.filter((command) => !isRecordedVaultHelpCommand(command))
       process.stdout.write('[meal-short-workflow] ' + JSON.stringify({
         elapsedMs: Math.round(performance.now() - startedAt), commands,
-        attachCallCount: result.attachCallCount,
+        readDayFirst, attachCallCount: result.attachCallCount,
+        reply: result.finalMessage,
       }) + '\n')
       expect(actions.filter((command) => command.startsWith('meal add '))).toHaveLength(1)
       expect(actions.find((command) => command.startsWith('meal add '))).toContain('--with-daily-totals')
-      expect(commands.filter((command) => /^meal (?:show|list|totals)\b/u.test(command))).toEqual([])
+      expect(commands.filter((command) => command.startsWith('meal ') && isRecordedVaultHelpCommand(command))).toEqual([])
+      expect(commands.filter((command) => /^meal (?:show|totals)\b/u.test(command))).toEqual([])
+      const lists = commands.filter((command) => command.startsWith('meal list '))
+      expect(lists).toHaveLength(readDayFirst ? 1 : 0)
+      if (readDayFirst) {
+        expect(lists[0]).toMatch(/--from(?:=|\s+)2026-07-30\b/u)
+        expect(lists[0]).toMatch(/--to(?:=|\s+)2026-07-30\b/u)
+        expect(lists[0]).not.toMatch(/--date\b/u)
+        expect(commands.indexOf(lists[0]!)).toBeLessThan(commands.findIndex((command) => command.startsWith('meal add ')))
+      }
       expect(readNutritionGoalMutationCommands(commands)).toEqual([])
       expect(result.attachCallCount).toBe(1)
       expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2,

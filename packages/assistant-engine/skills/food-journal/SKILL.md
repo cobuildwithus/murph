@@ -77,12 +77,25 @@ questions.
 - Preserve useful real-life context when the user volunteers it, such as eating out, alcohol, a late meal, stress, travel, illness, or social context.
 - Use existing canonical surfaces. Save meal facts to meal records, symptoms to their typed surface, and durable unstructured context to the best-fit existing journal or memory surface. Do not duplicate the same fact across stores.
 
+Do not list meals as a prerequisite to a new capture. When the member asks to
+inspect a particular day's saved meals, use
+`vault-cli meal list --from <date> --to <same-date> --limit 50 --format json`
+and check for a truncated result before claiming complete coverage. `meal list`
+has no `--date` option. Use the typed save flags below directly; reading this skill
+already supplies the ordinary capture contract.
+
 When the user names a restaurant and recognizable menu item, and known context
 does not trigger one of the numeric safety exceptions below, resolve nutrition
 before the meal mutation. Use a normal exact restaurant/menu search rather
 than a generic substitute. Run this database search first even when the user
 supplies an official restaurant URL. If that search has no exact result, read
 `computer-use` and inspect the restaurant's official nutrition or menu source.
+A landing page is not a failed nutrition lookup: if it lacks the item facts,
+use `computer_act` to follow its relevant menu/nutrition link or search for the
+exact item before deciding the official source is unavailable. Keep this
+inspection focused on the requested item and serving; follow the computer
+skill's bounded recovery rules if access fails. If the first page already
+contains the exact item and serving facts, use them without extra navigation.
 When using that official source, retain its URL in nutrition source detail.
 Only after the database result, official source, or clearly marked last-resort
 estimate is resolved may you call `meal add` or `meal edit` with the available
