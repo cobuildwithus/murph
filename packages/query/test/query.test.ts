@@ -4348,7 +4348,7 @@ test("query projection runtime goal progress resolves stored metric targets and 
     unit: "mg/dL",
     value: 85,
   } as const;
-  const labPoint = {
+  const labPoint: MetricPoint = {
     biomarkerKey: "biomarker:apob",
     canonicalUnit: "mg/dL",
     canonicalValue: 82,
@@ -4382,8 +4382,8 @@ test("query projection runtime goal progress resolves stored metric targets and 
     textValue: null,
     unit: "mg/dL",
     value: 82,
-  } as const;
-  const wearablePoint = {
+  };
+  const wearablePoint: MetricPoint = {
     biomarkerKey: "biomarker:apob",
     canonicalUnit: "mg/dL",
     canonicalValue: 90,
@@ -4417,92 +4417,16 @@ test("query projection runtime goal progress resolves stored metric targets and 
     textValue: null,
     unit: "mg/dL",
     value: 90,
-  } as const;
+  };
 
   try {
     await rebuildQueryProjection(vaultRoot);
 
     const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
     try {
-      const insertMetricPoint = database.prepare(`
-        INSERT INTO query_metric_points (
-          id,
-          sort_rank,
-          metric_key,
-          biomarker_key,
-          value,
-          text_value,
-          comparator,
-          unit,
-          canonical_value,
-          canonical_unit,
-          observed_at,
-          effective_date,
-          recorded_at,
-          reported_at,
-          grain,
-          statistic,
-          source_family,
-          source_kind,
-          source_record_id,
-          source_result_index,
-          source_path,
-          confidence,
-          metric_point_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      insertMetricPoint.run(
-        labPoint.id,
-        0,
-        labPoint.metricKey,
-        labPoint.biomarkerKey,
-        labPoint.value,
-        labPoint.textValue,
-        labPoint.comparator,
-        labPoint.unit,
-        labPoint.canonicalValue,
-        labPoint.canonicalUnit,
-        labPoint.observedAt,
-        labPoint.effectiveDate,
-        labPoint.recordedAt,
-        labPoint.reportedAt,
-        labPoint.grain,
-        labPoint.statistic,
-        labPoint.source.family,
-        labPoint.source.kind,
-        labPoint.source.recordId,
-        labPoint.source.resultIndex,
-        labPoint.source.path,
-        labPoint.confidence,
-        JSON.stringify(labPoint),
-      );
-      insertMetricPoint.run(
-        wearablePoint.id,
-        1,
-        wearablePoint.metricKey,
-        wearablePoint.biomarkerKey,
-        wearablePoint.value,
-        wearablePoint.textValue,
-        wearablePoint.comparator,
-        wearablePoint.unit,
-        wearablePoint.canonicalValue,
-        wearablePoint.canonicalUnit,
-        wearablePoint.observedAt,
-        wearablePoint.effectiveDate,
-        wearablePoint.recordedAt,
-        wearablePoint.reportedAt,
-        wearablePoint.grain,
-        wearablePoint.statistic,
-        wearablePoint.source.family,
-        wearablePoint.source.kind,
-        wearablePoint.source.recordId,
-        wearablePoint.source.resultIndex,
-        wearablePoint.source.path,
-        wearablePoint.confidence,
-        JSON.stringify(wearablePoint),
-      );
+      const points: MetricPoint[] = [labPoint, wearablePoint];
       for (let index = 0; index < 10_005; index += 1) {
-        const noisePoint = {
+        const noisePoint: MetricPoint = {
           ...wearablePoint,
           canonicalUnit: "mg/dL",
           canonicalValue: index,
@@ -4516,32 +4440,9 @@ test("query projection runtime goal progress resolves stored metric targets and 
           unit: "mg/dL",
           value: index,
         } as const;
-        insertMetricPoint.run(
-          noisePoint.id,
-          index + 2,
-          noisePoint.metricKey,
-          noisePoint.biomarkerKey,
-          noisePoint.value,
-          noisePoint.textValue,
-          noisePoint.comparator,
-          noisePoint.unit,
-          noisePoint.canonicalValue,
-          noisePoint.canonicalUnit,
-          noisePoint.observedAt,
-          noisePoint.effectiveDate,
-          noisePoint.recordedAt,
-          noisePoint.reportedAt,
-          noisePoint.grain,
-          noisePoint.statistic,
-          noisePoint.source.family,
-          noisePoint.source.kind,
-          noisePoint.source.recordId,
-          noisePoint.source.resultIndex,
-          noisePoint.source.path,
-          noisePoint.confidence,
-          JSON.stringify(noisePoint),
-        );
+        points.push(noisePoint);
       }
+      insertProjectionMetricPoints(database, points);
 
       database.prepare(`
         INSERT INTO query_metric_targets (
@@ -5010,11 +4911,16 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
         .all() as Array<{ name: string }>;
       const indexNames = new Set(indexRows.map((row) => row.name));
 
-      assert.ok(columnNames.includes("metric_point_json"));
+      assert.ok(columnNames.includes("payload_id"));
+      assert.equal(columnNames.includes("metric_point_json"), false);
       assert.equal(columnNames.includes("provenance_json"), false);
       assert.equal(columnNames.includes("context_json"), false);
 
       for (const indexName of [
+        "query_entities_date_idx",
+        "query_entities_occurred_at_idx",
+        "query_search_document_date_idx",
+        "query_search_document_occurred_at_idx",
         "query_entities_experiment_idx",
         "query_entities_record_class_idx",
         "query_entities_stream_idx",
@@ -5024,16 +4930,12 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
       }
 
       for (const indexName of [
-        "query_entities_date_idx",
         "query_entities_family_idx",
         "query_entities_kind_idx",
-        "query_entities_occurred_at_idx",
         "query_metric_points_biomarker_latest_idx",
         "query_metric_points_metric_latest_idx",
-        "query_search_document_date_idx",
         "query_search_document_experiment_idx",
         "query_search_document_kind_idx",
-        "query_search_document_occurred_at_idx",
         "query_search_document_record_type_idx",
         "query_search_document_stream_idx",
       ]) {
@@ -5526,14 +5428,14 @@ test("rebuildQueryProjection stores compact metric point payloads for rich provi
             AVG(LENGTH(metric_point_json)) AS averageBytes,
             MAX(LENGTH(metric_point_json)) AS maxBytes,
             COUNT(*) AS rowCount
-          FROM query_metric_points
+          FROM query_metric_points JOIN query_metric_payloads USING (payload_id)
           WHERE metric_key = 'caffeine'
         `)
         .get() as { averageBytes: number; maxBytes: number; rowCount: number };
       const joinedPayload = (database
         .prepare(`
           SELECT GROUP_CONCAT(metric_point_json, '\n') AS payload
-          FROM query_metric_points
+          FROM query_metric_points JOIN query_metric_payloads USING (payload_id)
           WHERE metric_key = 'caffeine'
         `)
         .get() as { payload: string }).payload;
@@ -7944,7 +7846,7 @@ test("listMetricPointsRuntime reconstructs stored metric points from scalar colu
     try {
       insertProjectionMetricPoints(database, [point]);
       const storedPayload = database
-        .prepare("SELECT metric_point_json AS metricPointJson FROM query_metric_points WHERE id = ?")
+        .prepare("SELECT metric_point_json AS metricPointJson FROM query_metric_points JOIN query_metric_payloads USING (payload_id) WHERE id = ?")
         .get(point.id) as { metricPointJson: string } | undefined;
       assert.ok(storedPayload);
       assert.doesNotMatch(storedPayload.metricPointJson, /resourceId|function-health|externalRef|dataOrigin/u);

@@ -125,6 +125,7 @@ export async function rebuildQueryProjectionFromCanonicalSource(
           database.exec(`
             DELETE FROM query_entities;
             DELETE FROM query_metric_points;
+            DELETE FROM query_metric_payloads;
             DELETE FROM query_metric_targets;
             DELETE FROM query_source_manifest;
             DELETE FROM query_search_document;

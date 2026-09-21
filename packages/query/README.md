@@ -10,6 +10,30 @@ with a separate pending promise: a lock owner could join a reader waiting for
 that same lock. The `query-wait` timing span measures acquisition;
 `query-rebuild` measures actual rebuilding.
 
+Query SQLite version 30 rebuilds the derived cache with a partial biomarker
+index: metric points without a biomarker key remain queryable but occupy no
+biomarker-index entries. Writable query connections enable SQLite
+`secure_delete` so table replacement clears obsolete payload bytes instead of
+carrying previous generations into compressed workspace snapshots. This adds
+no vacuum pass or work to fresh read-only queries. The complete query database
+and its required sidecars remain eligible for encrypted checkpoint/restore;
+canonical source manifests still decide whether a restored cache is fresh.
+Version 31 creates query databases with 8 KiB pages to reduce overflow-page
+waste for JSON-heavy rows. The four standalone entity/search date indexes are
+omitted: existing date predicates use `COALESCE`/`substr`, while lexical search
+uses FTS rowids. Family/kind, metric, and wearable range indexes remain. No
+in-place vacuum changes existing files; the version reset creates the new
+layout. Runtime SQLite stores outside query retain their default page size.
+Version 32 stores identical compact metric payloads once per full publication in
+`query_metric_payloads`; metric rows retain their indexed scalars and reference
+payloads by integer key. The existing metric query joins the payload table, using
+the same codec, filters, order and limits. Replacement deletes metric rows before
+payloads inside the existing transaction, so rollback restores both. An
+insertion-local map shares exact serialized payloads without a duplicate text
+index; no canonical data or restored SQLite content is omitted.
+Older runners reject the new cache version and rebuild derived state through
+the existing reset path; the canonical format and query results do not change.
+
 Exact and family-local reads must not rebuild or hydrate that shared projection.
 Use core-owned exact readers when the canonical owner exposes one, or use
 `resolveCanonicalEntityInFamily()` / `readCanonicalEntityFamilySource()` for a
