@@ -904,6 +904,7 @@ describe('assistant codex event shaping', () => {
     const verifyLateChildUsage = async (
       childStatus: 'completed' | 'failed' | 'interrupted',
       expectedOutcome: 'aborted' | 'partial' | 'succeeded',
+      childServiceTier: 'default' | 'flex' | null = 'flex',
     ): Promise<void> => {
       const workingDirectory = await createTempDir(
         'assistant-codex-subagent-terminal-usage-work-',
@@ -1009,10 +1010,10 @@ describe('assistant codex event shaping', () => {
             child.stdout.write(jsonLine({
               id: metadataResume.id,
               result: {
-                model: 'gpt-5.2',
+                model: 'gpt-5.6-terra',
                 modelProvider: 'openai',
                 reasoningEffort: 'high',
-                serviceTier: 'flex',
+                serviceTier: childServiceTier,
                 thread: { id: 'thread-subagent-terminal-child' },
               },
             }))
@@ -1071,9 +1072,9 @@ describe('assistant codex event shaping', () => {
           providerName: 'openai',
           providerRequestId: null,
           reasoningTokens: 7,
-          requestedModel: 'gpt-5.2',
-          servedModel: 'gpt-5.2',
-          tokenPricingBasis: 'standard',
+          requestedModel: 'gpt-5.6-terra',
+          servedModel: 'gpt-5.6-terra',
+          tokenPricingBasis: childServiceTier === 'flex' ? 'openai-flex' : 'standard',
           totalTokens: 150,
           usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
         },
@@ -1117,6 +1118,13 @@ describe('assistant codex event shaping', () => {
     ] as const)(
       'holds the workspace boundary for %s child usage reported after the parent reply',
       verifyLateChildUsage,
+    )
+
+    it.each([null, 'default'] as const)(
+      'records standard child usage with serviceTier %s after the parent reply',
+      async (serviceTier) => {
+        await verifyLateChildUsage('completed', 'succeeded', serviceTier)
+      },
     )
 
     it('drops child usage when effective metadata is incomplete without retrying or inheriting the parent', async () => {
