@@ -334,9 +334,17 @@ only when its ledger is genuinely missing and its complete connected-account
 inventory is empty. Existing ledgers, new accounts, unavailable ports, and
 failed reads keep the normal pass, preserving capture and due follow-ups.
 The account inventory owner rejects malformed pages instead of presenting them
-as empty. Journal and Personal Patterns retain the common hosted cron policy:
-eligible first attempts request Flex; failed-attempt retries use Standard, and
-the provider boundary validates model and catalog support before selecting Flex.
+as empty. Journal, Personal Patterns, weekly digest/insight/research, monthly coaching,
+and private memory/room-model maintenance retain
+Flex on failed-attempt retries. Ordinary reminders may retry at Standard after
+a failed Flex attempt. The provider boundary validates model and catalog support
+before selecting Flex; existing bounded failure backoff remains controlling.
+Personal Patterns resolves each vault identity to a stable daily minute between
+09:00 and 16:59 local time. Existing active
+13:00 records migrate under the cron lock only after running, retrying, or
+pending-delivery work settles. The new schedule and its next-local-day lower
+bound commit together in the canonical record; custom and paused schedules
+are preserved. No migration marker or second schedule owner is introduced.
 The exact Personal Patterns recipe also performs a read-only precondition against
 its current query report and versioned notification Knowledge ledger. A completed
 first digest plus already-reviewed factors, graded identities, and grades can skip
@@ -974,6 +982,18 @@ floor independently of generation state. Group transfer authority is disabled
 at both normalization boundaries and is outside this policy evolution.
 
 Scheduled non-direct Telegram execution follows the same hint-only rule without Linq fallback: the signed Web route owner must assert the exact channel, synthetic container member, and thread before group tools or model work. That exact authority is persisted on the ordinary conversation outbox and reasserted against the same Web owner immediately before each Telegram provider effect. Missing ownership is retryable; changed or mismatched ownership fails closed without a repair queue or second route store.
+
+### Hosted Relational Read Load
+
+The hosted Prisma client uses PostgreSQL relation joins so nested member,
+sponsorship, billing, consent, and thread-owner selections execute as one SQL
+statement rather than one per relation. The existing selects and policy owners
+remain authoritative. Read-only and read-first runtime allowance checks share
+one fresh member projection within their request; mutating admission retains
+its locked allowance read. Nothing is cached between requests. Synthetic
+PostgreSQL proofs compare decisions and SQL counts with the former query strategy,
+including direct, sponsored, and group access; query count alone is not evidence
+of production CPU or latency improvement.
 
 ### Canonical Automation Support Lifecycles
 

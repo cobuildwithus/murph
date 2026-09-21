@@ -6442,7 +6442,13 @@ describe('assistant cron runtime orchestration', () => {
       name: 'Personal Patterns',
       occurrenceAt: '2026-04-08T13:00:00.000Z',
     },
-  ])('uses Flex then Standard after a failed managed $name occurrence', async ({
+    ...[
+      [MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, 'Weekly digest'],
+      [MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, 'Weekly insight'],
+      [MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID, 'Weekly research'],
+      [MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID, 'Monthly coach'],
+    ].map(([automationId, name]) => ({ automationId: automationId!, name, occurrenceAt: '2026-04-08T13:00:00.000Z' })),
+  ])('keeps Flex after a failed managed $name occurrence', async ({
     automationId,
     occurrenceAt,
   }) => {
@@ -6451,7 +6457,14 @@ describe('assistant cron runtime orchestration', () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-managed-flex-',
     )
+    await completeAssistantOnboarding({ completedAt: '2026-04-07T18:00:00.000Z',
+      reason: 'user_answered', vault: vaultRoot })
     const seed = addManagedBackgroundAutomation(vaultRoot, automationId)
+    // Exercise the production recipe at a controlled due minute; only its tier
+    // policy varies here, independent of the weekly/monthly cadence fixture.
+    getVaultAutomationStore(vaultRoot).find(record => record.automationId === automationId)!.schedule = {
+      kind: 'dailyLocal', localTime: occurrenceAt.slice(11, 16),
+    }
     const executionContext: AssistantExecutionContext = {
       hosted: {
         memberId: 'member-managed-flex',
@@ -6526,7 +6539,7 @@ describe('assistant cron runtime orchestration', () => {
           ? { assistantTargetOverride: seed.assistantTargetOverride }
           : {}),
         scheduledInvocationAuthority: { automationId, occurrenceAt },
-        serviceTier: null,
+        serviceTier: 'flex',
         turnTrigger: 'automation-cron',
       }),
     )
