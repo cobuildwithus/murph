@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { Mic, MicOff, Phone, PhoneOff, Volume2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -13,14 +14,15 @@ export function VoiceCallPanel({ state, signedIn = true, onStart, onEnd, onMute,
   onMute: () => void;
   onPlay: () => void;
 }) {
+  const titleId = useId();
   const active = state.phase === "starting" || state.phase === "connected";
   const ending = state.phase === "ending";
   const status = voiceStatus(state);
   return (
-    <section aria-labelledby="voice-title" className="mx-auto flex w-full max-w-2xl flex-col gap-8 py-8 sm:py-14">
+    <section aria-labelledby={titleId} className="mx-auto flex w-full max-w-2xl flex-col gap-8 py-8 sm:py-14">
       <header className="flex flex-col gap-3">
         <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Voice</p>
-        <h1 id="voice-title" className="font-serif text-4xl font-semibold tracking-tight">Talk with Murph</h1>
+        <h1 id={titleId} className="font-serif text-4xl font-semibold tracking-tight">Talk with Murph</h1>
         <p className="max-w-lg text-base leading-relaxed text-muted-foreground">
           Ask a question, think something through, or pick up where you left off.
         </p>

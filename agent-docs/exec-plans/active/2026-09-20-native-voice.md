@@ -73,6 +73,35 @@ Updated: 2026-09-21
 
 ## Verification
 
+- The normal production runner bundle builds with the current source and stays
+  within its entrypoint and static-closure budgets. The complete patched Linux
+  base image is building through the existing `runner:docker:base` command;
+  hosted proof waits for its exact source fingerprint. The opt-in `native-voice`
+  hosted-local scenario is implemented but not yet executed. It uses the real
+  authenticated Voice page and replaces only the physical microphone with
+  synthetic speech. Web, Worker, and harness typechecks pass, as do the eleven
+  existing harness-selection checks and the complexity guard.
+- The member-facing `talk-with-murph` changelog fragment and Voice component
+  pass twelve focused rendering tests. Four Playwright phone/desktop cases pass
+  for the actual call controls and changelog card, with no horizontal overflow;
+  rendered images are inspected. Repeated panels now use React-generated label
+  IDs. Public preview publication and the full hosted audio journey remain
+  unverified; this is not release approval.
+
+- Complete initial provider input was captured from the real stock base CLI and
+  patched candidate CLI against the same credential-free Responses fixture,
+  using production prompt layers, registered tools, and the hosted model catalog.
+  At base `ce8cd609a197` and candidate `449a45afce46`, the individual fixture is
+  30,665 `o200k_base` tokens / 143,059 UTF-8 bytes, and the group fixture is 28,016
+  tokens / 128,690 bytes. Both normalized requests are byte-identical: zero token
+  delta, zero byte delta, 0.00% growth. Counts use `gpt-tokenizer` 3.4.0 over the
+  complete captured JSON, not provider billing estimates. Normalization removes
+  only transport cache identity and replaces generated message/installation/turn
+  IDs, turn-start time, and local fixture/install/temp paths with fixed values;
+  all instructions, messages, tool data, and static request fields remain.
+  The normal mixed-mode catalog keeps automation deferred; this first-request
+  proof does not claim its later loaded description/schema is unchanged.
+
 - Voice reminder routing now uses Web's canonical direct member destination,
   read lazily through the existing signed effects bridge only on save or explicit
   retarget. Inspect and ordinary patches retain the stored route without a

@@ -2552,6 +2552,21 @@ channel so Murph can truthfully confirm where a future reminder will arrive.
 This uses the existing automation record and scheduler, with no call table or
 separate notification queue.
 
+The notification lookup adds one serial Web-control request per voice automation
+save or explicit retarget, before the canonical write, with no transport replay
+or alternate-destination fallback. It uses the existing commit timeout (30 seconds
+by default) and caller cancellation. Ordinary text turns and voice automation
+inspection or non-retargeting edits add zero routing calls. For one admitted
+private member, the source-derived database bound is 13 statements plus the
+authority transaction's begin/commit: one nonce insert, at most six authority
+statements during cutover, one container lookup, at most three member/identity/
+routing reads, and two envelope-metadata reads. Steady-state authority uses three
+statements instead of six. There is at most one authority transaction, completed
+before crypto; the conservative connection bound is three for relation loading.
+Decryption covers at most seven private fields and seven distinct roots, with
+the existing crypto owner limiting concurrent unwraps to four. These bounds do
+not grow with conversation history, reminder count, or other members.
+
 The dashboard's Voice page owns only browser media. An explicit Start action
 requests microphone permission, reserves an opaque call, and exchanges one SDP
 offer through authenticated Web control. Readiness retries retain that call and
