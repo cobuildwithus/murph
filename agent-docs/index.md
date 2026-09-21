@@ -99,6 +99,9 @@ preflight admission budget are owned by `agent-docs/RELIABILITY.md`; the
 implementation record is
 [`2026-09-15-device-sweep-capacity.md`](exec-plans/completed/2026-09-15-device-sweep-capacity.md).
 
+Experiment closeout query-cost proof is recorded in
+[`2026-09-21-experiment-closeout-query-cost.md`](exec-plans/completed/2026-09-21-experiment-closeout-query-cost.md).
+
 The completed Temporal release fixture corrections and recovery verification are recorded in
 [`2026-09-17-temporal-release-recovery.md`](exec-plans/completed/2026-09-17-temporal-release-recovery.md).
 

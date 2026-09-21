@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-21",
+  "order": 100,
+  "item": {
+    "id": "experiment-closeout-work",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less background work when an experiment ends",
+    "summary": "Murph skips unrelated background work when analyzing and saving experiment results.",
+    "details": "Results still use current health evidence. Rechecking an already saved result reuses that result without repeating the analysis.",
+    "relevanceTags": [
+      "experiments",
+      "performance"
+    ],
+    "sourcePullRequests": []
+  }
+}
