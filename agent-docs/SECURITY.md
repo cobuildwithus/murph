@@ -1487,6 +1487,14 @@ closed failure classes, and validation booleans leave the job. Even a matching
 source hash leaves accepted history and complete recovery unproven because some
 canonical files and media fall outside that hash. This mode publishes no
 checkpoint, exports no plaintext, and changes no production runtime state.
+History diagnostics report only fixed vault-family categories and counts,
+metadata/core write counts, metadata-shaped payload counts, and whether a first
+append requires a nonempty base whose full bytes are among the artifacts. A
+failed action exposes only its kind, fixed family, expected base byte count,
+and full-base availability. Paths, hashes, operation identifiers, raw errors,
+and payloads stay private. Standalone metadata or base payloads are only
+candidates; their presence proves neither acceptance nor age, and diagnostics
+never adopt them or bypass a replay conflict.
 
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
 - The trusted `Pull Request Head Draft Reset` controller uses the existing Frog
