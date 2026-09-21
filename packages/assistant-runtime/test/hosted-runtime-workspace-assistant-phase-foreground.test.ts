@@ -2606,7 +2606,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       shouldYieldBackgroundMaintenance: expect.any(Function),
     }));
     expect(postCheckpoint).toEqual(expect.objectContaining({
-      afterDurableCheckpoint: expect.any(Function),
+      afterDurableCheckpoint: [expect.any(Function)],
       checkpointReason: "system_mailbox_receipt",
     }));
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
@@ -2615,6 +2615,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       postCheckpoint?.afterDurableCheckpoint,
     );
 
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledTimes(1);
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: memberActionItem,
       operatorHomeRoot: "/tmp/murph-operator-home",
