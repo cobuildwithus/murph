@@ -61,8 +61,8 @@ Updated: 2026-09-21
   the composed native/provider/mailbox/tool/speech/shutdown journey.
 - Done when: start never happens on page load, stop immediately releases the
   microphone, stale startup cannot reopen media, retries reuse the same offer and
-  call, and the member can read or hear the result. Current verdict: Hold pending
-  browser and full hosted proof.
+  call, and the member can read or hear the result. Current verdict: Ready for the
+  verified synthetic hosted journey; production rollout remains separate.
 
 ## Implementation decisions
 
@@ -72,6 +72,26 @@ Updated: 2026-09-21
 - The engine attachment uses an ephemeral media thread with no Murph tools on its existing resident process. This avoids creating a backing thread before the ordinary turn path has prepared its tools, prompt, model, and durable session binding. A composed synthetic test passed two ordinary host turns while voice stayed connected, selected speech, and provider-confirmed closure before process shutdown. The attachment fences stale/closing input, accepts cancellation during startup, and keeps voice events out of another turn's captured output. It adds no second process or work queue. The start response confirms managed input ownership, rejecting older binaries that silently ignore the flag before SDP reaches the browser. Its 298 protocol checks, schemas, scoped Clippy, formatting, and full CLI build pass. The corrected public Live filter runs five app-server cases, all passing with four requiring the native test runner retry; no clean first-attempt claim is made. The packaged CLI passes the composed engine/native tests. Real browser speech through the engine attachment also passes: two synthetic inputs durably recorded by the proof host, two ordinary turns reading a fixture through the shell, audible selected results, and provider-confirmed shutdown with trusted final cumulative usage of 19 seconds. This is engine composition evidence, not the hosted mailbox or website. Six notification failure/cancellation tests and the 50 existing runtime-turn tests pass; engine typecheck passes. Complexity remains below the existing baseline with no new function above 20.
 
 ## Verification
+
+- A native AMD64 Blacksmith Testbox now runs the complete hosted stack with the
+  existing inner Codex permission enforcement. The first successful composed run
+  durably consumed one spoken input, used a successful read-only tool, returned
+  audible fixture content, stopped the microphone, received provider-confirmed
+  closure, settled two trusted usage rows, and reached hosted completion. Browser
+  connection took 39.9 seconds and speech-to-answer took 21.0 seconds in the local
+  development stack. Earlier runs timed out after the acknowledgement; temporary
+  metadata-only native tracing confirms the selected answer reaches the provider.
+  A clean repeat without diagnostics also passes every assertion: connection
+  44.7 seconds, speech-to-answer 24.3 seconds, one consumed input, and two trusted
+  usage rows. These two successes are compatibility evidence, not a reliability
+  rate; the earlier acknowledgement-only timeouts remain recorded. The temporary
+  Testbox is stopped and its workflow scaffold removed from the candidate.
+  The fixture now derives its replica object key through the
+  canonical storage helper after the original placeholder reproduced an orphan
+  namespace error. Its synthetic microphone supplies continuous silent frames.
+- The user waived publication of a temporary visual preview. Inspected synthetic
+  screenshots remain local; no preview was published. The hosted PR Evidence
+  design-URL requirement is a separately reported gate, not a fabricated pass.
 
 - The authenticated hosted browser now connects through Web, Worker, container,
   and native Live. Synthetic spoken input is durably admitted; provider-confirmed
@@ -333,16 +353,23 @@ Updated: 2026-09-21
 
 ## Current prerequisites
 
-- Establish the public API-key path through the selected minimal native Codex patch. Development public API access and local subscription-backed native voice are proven separately. Neither proves the composed hosted path. Published 0.155.1 is available; its release source still uses the same multipart Live endpoint, so an upgrade alone does not resolve that observed mismatch.
-- The native admission experiment is preserved locally as research: 522 selected tests, schemas, scoped Clippy, formatting, full CLI build, and two-turn real speech passed. The smaller managed-input replacement emits through the existing realtime notification seam and leaves ordinary turn APIs unchanged. The wider selected run passes 494 of 497 tests, including its new managed-input/context/tail scenario and protocol schemas. Three legacy startup fixtures hit their two-second readiness limit before voice starts; all three pass in isolated checks with the matching Code Mode helper (two together, then the third alone). The parallel run is not a clean-pass claim. Scoped Clippy, formatting, and the full CLI build now pass. The final packaged CLI passes both synthetic two-turn input/output cases and real two-request browser speech: two accepted inputs, two read-only tools, audible answers, provider-confirmed closure, and trusted final cumulative usage of 18 seconds. Engine typecheck, 20 packaging/provider checks, and exact upstream patch applicability pass. Composed hosted acceptance remains pending.
-- Adopt shutdown and trusted cumulative usage only with the verified public compatibility patch. Its provider receipt is host evidence; website usage settlement still needs the existing billing owner. Do not introduce a second sideband or billing authority.
-- ReviewGPT's source-grounded assessments are captured and verified against their accepted prompts and GPT-6 Pro responses. Its revised recommendation is a bounded public Live proof within existing owners, using published Codex unchanged; no custom native admission requirement is established. The returned owner reduction is applied: RPC response resolution has one process owner, synchronous response observers preserve same-batch ordering, and stored running occupancy is removed. Reservation remains necessary until callbacks exist. Website integration and final PR review remain incomplete.
-- Public native compatibility is proven on the prototype: two successive synthetic spoken requests each produced a distinct native turn, a successful read-only dynamic tool, the matching spoken answer, received audio, and provider-confirmed closure with trusted final cumulative seconds. Host-managed speech also passed. The initial tool failure was a missing matching Code Mode helper in the standalone build; packaging the existing helper fixed it. The direct API proof uses no host `turn/start` or second sideband.
-- The release backport passes all 215 selected native realtime tests across API, core, and app-server after correcting the public fixture to explicitly enable the release voice feature. Three initialization-timeout cases needed the existing retry; no failing selected case remains. Scoped Clippy and formatting pass. The complete CLI builds with pinned Rust 1.95.0. Both native and host-managed synthetic browser speech pass against that packaged release: two backing turns and read-only tools, matching audible answers, provider-confirmed closure, and trusted final cumulative usage. The first direct native run timed out after one successful tool; its rerun passed, so this is compatibility evidence, not a reliability-rate claim.
-- The existing runner base-image recipe now compiles the checksum-pinned release plus checked-in patch and preserves that release's npm-distributed helpers/resources. Patch changes invalidate the source fingerprint. Docker configuration validation, the real Linux npm-helper packaging stage, 21 packaging tests, 11 provider conformance tests, the stock native compatibility test, and Cloudflare/engine typechecks pass. Source verification checks the upstream release commit/tree and applies the exact native patch. Complexity debt remains reduced by eight. The cold Linux image build passed in about 41 minutes, and its extracted CLI passed native successive-turn compatibility. The route inventory then rejected two exact linker-concatenated tokens; their source-reviewed dispositions are being added. Exact-image sandbox proof and deployment remain pending.
-- Authenticated website integration, accepted-work durability, hosted usage settlement, and final PR review remain incomplete. The draft PR is not a deploy-ready feature.
-- Deployment audit found that the protected Murph Cloud workflow forces a source build in separate fresh-runner smoke and deploy jobs, without persistent Docker caching. The native patch must not turn each deploy into a cold Rust build. Complete trusted BuildKit caching in that existing workflow and prove cold/warm behavior before claiming easy deployment. Do not replace its source-build authority with an unverified image-label check.
-- [Deployment companion PR #166](https://github.com/cobuildwithus/murph-cloud/pull/166) adds the pinned Blacksmith Docker builder to those two protected jobs with one shared cache key. Forced source builds remain authoritative, and cache misses rebuild normally. Full verification passes on the updated private candidate: typecheck, 827 coverage tests, 131 deployment-controller tests, production build, and 10 built-worker tests. Exact-head CI passed. The preliminary private review accepted the Docker builder handoff and requested focused cache-wiring coverage; that regression test passes and rejects removed, reordered, and mismatched-cache setup. Final GPT-6 Pro review passed with zero findings on the exact private head `887173ad3878f52218a720f40a9f1a9daa934453`; captured model identity and response hash match. Sticky Disks branch protection is currently off; organization-wide activation awaits explicit approval. No deployment or cache timing proof has occurred.
+- The clean native AMD64 hosted browser/tool/speech/accounting journey now passes.
+  Earlier acknowledgement-only timeouts are retained as a provider-repeatability
+  limitation; the final review must not infer a production reliability rate.
+- Complete stable-head feature ReviewGPT, required exact-head CI, parent final
+  review, and plan closure. The temporary public preview is waived by the user;
+  keep the resulting PR Evidence URL-gate limitation explicit.
+- [Deployment companion PR #166](https://github.com/cobuildwithus/murph-cloud/pull/166)
+  passes typecheck, 827 coverage tests, 131 controller tests, production build,
+  10 built-worker tests, exact-head CI, and final GPT-6 Pro review with zero
+  findings at `887173ad3878f52218a720f40a9f1a9daa934453`. The pinned Blacksmith
+  Docker builder uses one shared cache in the existing protected smoke/deploy
+  jobs; forced source builds remain authoritative. Sticky Disks branch protection
+  is enabled, so only default-branch jobs persist shared cache writes. Local
+  forced warm source builds complete in 1.51 seconds. Protected cross-runner warm
+  timing is still unproven and must be measured during an authorized rollout.
+- No production deployment, rollback, or patched-binary publication is authorized
+  or performed by this implementation/PR task.
 
 ## Published-only investigation outcome
 

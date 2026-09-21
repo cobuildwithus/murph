@@ -47,11 +47,6 @@ on:
       - "packages/device-syncd/src/**"
       - "pnpm-lock.yaml"
   workflow_dispatch:
-    inputs:
-      testbox_id:
-        description: Temporary native voice proof Testbox ID
-        required: false
-        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -62,7 +57,6 @@ permissions:
 
 jobs:
   runner-permission-sandbox:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.testbox_id == '' }}
     name: Runner permission sandbox gate
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -118,58 +112,3 @@ jobs:
 
       - name: Prove native Codex permission confinement
         run: pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base
-
-  # Task-owned proof scaffold; remove after the native hosted voice replay.
-  native-voice-testbox:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.testbox_id != '' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 180
-    services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:17
-        env:
-          POSTGRES_DB: murph_test
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-        options: >-
-          --health-cmd "pg_isready -U postgres -d murph_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-    steps:
-      - name: Validate Testbox identifier
-        env:
-          TESTBOX_ID: ${{ inputs.testbox_id }}
-        run: '[[ "$TESTBOX_ID" =~ ^[a-zA-Z0-9_-]{1,100}$ ]]'
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          persist-credentials: false
-
-      - uses: useblacksmith/begin-testbox@233448af4bfdc6fca509a7f0974411ac6d8a8043 # v2
-        with:
-          testbox_id: ${{ inputs.testbox_id }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install Temporal CLI
-        uses: temporalio/setup-temporal@1059a504f87e7fa2f385e3fa40d1aa7e62f1c6ca # v0
-        with:
-          version: v1.8.2
-
-      - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Allow capability-bearing nested user namespaces
-        run: sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0
-
-      - uses: useblacksmith/run-testbox@5ca05834db1d3813554d1dd109e5f2087a8d7cbc # v2
-        if: ${{ always() }}

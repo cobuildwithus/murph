@@ -22,3 +22,9 @@ Run the opt-in hosted-local native voice E2E against the patched AMD64 Linux run
 ## Context
 
 This blocks the full hosted spoken-answer proof locally. A temporary test-scoped Docker API adapter enabled only this run's disposable runner namespaces to isolate the second failure; it is not deployment code. No production permission profile or native patch was changed for this diagnosis.
+
+
+The native AMD64 Blacksmith Testbox passed the complete hosted speech/tool/answer
+journey with the same inner sandbox enabled. This confirms the local emulation
+limitation. The Testbox and namespace adapter are proof infrastructure only;
+shipping still uses the existing image and deployment workflow.

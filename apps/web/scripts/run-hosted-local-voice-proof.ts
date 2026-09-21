@@ -36,6 +36,12 @@ async function main(): Promise<void> {
     await context.addInitScript(() => {
       const context = new AudioContext();
       const destination = context.createMediaStreamDestination();
+      // Keep microphone frames flowing after the finite spoken fixture ends.
+      const oscillator = context.createOscillator();
+      const silence = context.createGain();
+      silence.gain.value = 0;
+      oscillator.connect(silence).connect(destination);
+      oscillator.start();
       window.voiceProof = { context, destination, peers: [] };
       navigator.mediaDevices.getUserMedia = async () => destination.stream;
       const NativePeer = window.RTCPeerConnection;

@@ -20,6 +20,7 @@ import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
+import { hostedBrowserVaultReplicaObjectKey } from "../src/storage-paths.js";
 import { uploadHostedLocalWorkspaceSnapshot } from "./helpers/hosted-local-workspace-snapshot.js";
 
 // Opt-in live-provider proof. Supply a synthetic WAV saying:
@@ -147,13 +148,15 @@ async function seedWorkspace(activeScenario: HostedLocalFullStackScenario): Prom
     operatorHomeRoot, userId, vaultRoot,
   });
   const sourceBundleHash = snapshotRef.archive.encryptedObjectSha256;
+  const dataVersion = `voice-${sourceBundleHash.slice(0, 16)}`;
+  const generatedAt = new Date().toISOString();
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     environment: activeScenario.runtimeEnv, nextWakeAt: null, nextWakeReason: null,
     redactedStatusJson: { seededNativeVoice: true }, snapshotRef, userId,
     browserVaultReplicaRef: {
-      byteLength: 256, dataVersion: `voice-${sourceBundleHash.slice(0, 16)}`,
-      generatedAt: new Date().toISOString(), keyId: "browser-vault-replica:voice",
-      objectKey: `browser-vault/voice-${sourceBundleHash.slice(0, 32)}.json`,
+      byteLength: 256, dataVersion,
+      generatedAt, keyId: "browser-vault-replica:voice",
+      objectKey: await hostedBrowserVaultReplicaObjectKey({ dataVersion, generatedAt, userId }),
       replicaSchema: "murph.browser-vault-replica", runtimeRootKeyId: "udrk:runtime:voice",
       schema: "murph.hosted-browser-vault-replica-ref.v1", sourceBundleHash,
     },
