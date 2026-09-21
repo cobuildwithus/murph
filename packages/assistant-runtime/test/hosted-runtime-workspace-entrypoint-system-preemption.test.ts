@@ -1287,7 +1287,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     }
   });
 
-  test.each(["device completion", "checkpoint"] as const)("system owner imports its qualified foreground batch after %s", async (arrival) => {
+  test.each(["device completion", "checkpoint", "blocked checkpoint"] as const)("system owner imports its qualified foreground batch after %s", async (arrival) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-foreground-upgrade-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1304,6 +1304,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     });
     const controller = new AbortController();
     const admitted = createDeferred<void>();
+    const releaseBlockedCheckpoint = createDeferred<void>();
     let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     const sendForeground = () => {
       if (items.length > 0) return;
@@ -1313,6 +1314,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
     let assistantCalls = 0;
     let qualifiedConversationReads = 0;
     let postStagingSystemReads = 0;
+    let checkpointsBeforeCancellation = 0;
     let foregroundInputId: string | null = null;
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -1331,7 +1333,23 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         }),
         {
           vaultRoot, runtimeWakeSignal, signal: controller.signal,
-          async createCheckpointSnapshot() {
+          async createCheckpointSnapshot(_input, context) {
+            if (arrival === "blocked checkpoint" && items.length === 0) {
+              checkpointsBeforeCancellation = checkpointRequests.length;
+              sendForeground();
+              assert.ok(context?.signal);
+              const signal = context.signal;
+              await Promise.race([new Promise<never>((_resolve, reject) => {
+                const abort = () => {
+                  events.push("checkpoint.cancelled");
+                  reject(signal.reason);
+                };
+                if (signal.aborted) abort();
+                else signal.addEventListener("abort", abort, { once: true });
+              }), releaseBlockedCheckpoint.promise.then(() => {
+                throw new Error("Synthetic checkpoint released during test cleanup.");
+              })]);
+            }
             if (arrival === "checkpoint") sendForeground();
             return { snapshotRef: createSnapshotFixtureRef({ hash: "d".repeat(64), size: 512 }) };
           },
@@ -1361,6 +1379,10 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
                 if (foregroundInputId && request.lanes.some(({ lane }) => lane === "system")) {
                   postStagingSystemReads += 1;
                 }
+                if (arrival === "blocked checkpoint" && items.length > 0) {
+                  assert.ok(events.includes("checkpoint.cancelled"),
+                    "Cancel checkpoint construction before waiting on mailbox qualification.");
+                }
                 const response = await mailbox.fetch(request);
                 if (response.items.some((item) => item.id === conversation.id)) {
                   qualifiedConversationReads += 1;
@@ -1377,6 +1399,11 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           }),
           async runAssistantPhase(input) {
             assistantCalls += 1;
+            if (arrival === "blocked checkpoint") {
+              assert.ok(events.includes("checkpoint.cancelled"));
+              assert.equal(checkpointRequests.length, checkpointsBeforeCancellation,
+                `Foreground work must precede replacement checkpoints: ${checkpointRequests.map((request) => request.reason).join(",")}. Events: ${events.join(",")}`);
+            }
             assert.ok(events.includes("foreground.imported"),
               "Foreground promotion entered the assistant with the old system-only import.");
             assert.ok(events.includes("preferences.imported"),
@@ -1398,12 +1425,72 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         "Staged foreground input must not wait for a second system mailbox fetch.");
       assert.ok(events.includes("foreground.imported"));
     } finally {
+      releaseBlockedCheckpoint.resolve();
       controller.abort();
       await runtimeCompletion?.catch(() => undefined);
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });
+
+  test.each(["spurious", "system-only", "shutdown"] as const)(
+    "preserves dirty system progress after a %s checkpoint wake", async (scenario) => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-checkpoint-wake-"));
+      const events: string[] = [];
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      const shutdown = new AbortController();
+      let snapshotCalls = 0;
+      const item = createMailboxItem({ id: "synthetic-system-preferences",
+        kind: "member.preferences.updated", lane: "system", laneSeq: "1" });
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(new Date(TEST_NOW));
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        const restored = await createVaultSnapshotBundle({ vaultRoot });
+        await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+          request: { processingMode: "system_mailbox", workspaceVersion: "0", runnerIdleTtlMs: 0 },
+        }), {
+          vaultRoot, runtimeWakeSignal, shutdownSignal: shutdown.signal,
+          async createCheckpointSnapshot(_input, context) {
+            snapshotCalls += 1;
+            if (snapshotCalls === 1) {
+              runtimeWakeSignal.notify({ requestedProcessingMode: scenario === "system-only" ? "system_mailbox" : "default" });
+              assert.ok(context?.signal);
+              const signal = context.signal;
+              if (scenario !== "system-only") {
+                await withRealTimeout(new Promise<never>((_resolve, reject) => {
+                  const abort = () => {
+                    events.push("checkpoint.cancelled");
+                    if (scenario === "shutdown") shutdown.abort();
+                    reject(signal.reason);
+                  };
+                  if (signal.aborted) abort();
+                  else signal.addEventListener("abort", abort, { once: true });
+                }), 3_000, () => "Checkpoint did not cancel.");
+              }
+            }
+            return { snapshotRef: createSnapshotFixtureRef({ hash: "e".repeat(64), size: 512 }) };
+          },
+          async importItem() { return { status: "imported" }; },
+          async runAssistantPhase() { throw new Error("Unqualified wakes must not run the assistant."); },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restored.hash, restored.bytes]]),
+            mailboxPort: createMailboxPort({ events, items: [item] }),
+            workspacePort: createWorkspacePort({ events, checkpointRequests,
+              workspace: createWorkspaceState({ version: "0", snapshotRef: restored.snapshotRef }) }),
+          }),
+        });
+        assert.equal(events.includes("checkpoint.cancelled"), scenario !== "system-only");
+        if (scenario !== "system-only") assert.equal(snapshotCalls, 2);
+        else assert.ok(snapshotCalls >= 1);
+        assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemImportedSeq, "1");
+      } finally {
+        vi.useRealTimers();
+        await removeTempRoot(vaultRoot);
+      }
+    },
+  );
 
   test("host abort after system device-sync apply still checkpoints canonical progress", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));

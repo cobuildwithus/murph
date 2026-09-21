@@ -3350,7 +3350,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           observeForegroundWake(interruption.takeNotification());
         }
       };
-      const checkpointSystemMailboxMode = async (
+      const publishSystemMailboxCheckpoint = async (
         systemMailboxCheckpointStage: string,
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
         checkpointSignal: AbortSignal | null = null,
@@ -3460,6 +3460,52 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         defaultOwnerWakeObserved = true;
         return true;
       };
+      const checkpointSystemMailboxMode = async (
+        stage: string,
+        extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
+        checkpointSignal: AbortSignal | null = null,
+      ): Promise<HostedWorkspaceCheckpointResponse> => {
+        // Completion recording already owns its wake listener and signal.
+        if (checkpointSignal) {
+          return await publishSystemMailboxCheckpoint(stage, extraCandidates, checkpointSignal);
+        }
+        while (true) {
+          const interruption = createHostedRuntimeCheckpointWakeInterruption({
+            enabled: !assistantExecutionBlocked && !hostAbortObserved
+              && options.shutdownSignal?.aborted !== true,
+            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+            async shouldInterrupt(notification) {
+              return notification.requestedProcessingMode !== "system_mailbox"
+                && options.shutdownSignal?.aborted !== true && !hostAbortObserved;
+            },
+          });
+          let checkpoint: HostedWorkspaceCheckpointResponse | null = null;
+          let interrupted: HostedRuntimeCheckpointInterruptedByWakeError | null = null;
+          try {
+            checkpoint = await publishSystemMailboxCheckpoint(stage, extraCandidates, interruption.signal);
+          } catch (error) {
+            if (!(error instanceof HostedRuntimeCheckpointInterruptedByWakeError)) throw error;
+            interrupted = error;
+            activePhaseLogger.close("workspace.checkpoint.idle_shutdown");
+          } finally {
+            await interruption.dispose();
+          }
+          const notification = interruption.takeNotification();
+          if (checkpoint) {
+            // Publication already started: retain its acknowledged version and
+            // service the wake without discarding a committed snapshot.
+            observeForegroundWake(notification);
+            return checkpoint;
+          }
+          // Cancel construction before waiting for Web to qualify the hint.
+          // A spurious hint retries the same dirty checkpoint; a real input
+          // unwinds system work into the existing in-place foreground upgrade.
+          if (!hostAbortObserved && options.shutdownSignal?.aborted !== true
+            && await prefetchSystemMailboxAssistantWork()) {
+            throw interrupted;
+          }
+        }
+      };
       const finishIndependentSystemWorkAfterCheckpoint = async (): Promise<void> => {
         if (systemMailboxForegroundWakePrefetch || readyDurableCheckpointEffects.length === 0) return;
         const completionWakeSignal = createCoalescingRuntimeWakeSignal();
@@ -3538,6 +3584,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           observeForegroundWake(interruption.takeNotification());
         }
       };
+      const canDeferSystemMailboxCheckpointForForeground = (): boolean =>
+        systemMailboxForegroundWakePrefetch !== null && !hostAbortObserved
+          && options.shutdownSignal?.aborted !== true;
       const returnSystemMailboxModeResult = async (
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
       ): Promise<HostedWorkspaceInvocationResult> => {
@@ -3551,7 +3600,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           receiptCapacityBlocked:
             canonicalWriteReceiptLogBlocksBackgroundMaintenance(),
         });
-        if (!systemMailboxForegroundWakePrefetch && (checkpointStage || runtimeStateDirty)) {
+        if (!canDeferSystemMailboxCheckpointForForeground() && (checkpointStage || runtimeStateDirty)) {
           await checkpointSystemMailboxMode(checkpointStage ?? "system_mailbox.checkpoint.independent_work");
         }
         await finishIndependentSystemWorkAfterCheckpoint();
@@ -4096,111 +4145,120 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         });
       };
 
-      if (canonicalWriteReceiptLogBlocksBackgroundMaintenance()) {
-        await checkpointSystemMailboxMode(
-          "system_mailbox.checkpoint.receipt_capacity",
-        );
-      }
+      const runSystemMailboxWork = async (): Promise<HostedWorkspaceInvocationResult> => {
+        if (canonicalWriteReceiptLogBlocksBackgroundMaintenance()) {
+          await checkpointSystemMailboxMode(
+            "system_mailbox.checkpoint.receipt_capacity",
+          );
+        }
 
-      if (consumeForegroundWake()) {
-        return await returnSystemMailboxModeResult();
-      }
-
-      const initialProjectedWake = await resolveCurrentSystemMailboxModeWake();
-      const defaultOwnerDueNow =
-        hostedRuntimeDefaultProcessingWakeIsDue(initialProjectedWake);
-      const projectedAssistantCronDeadlineMs = Date.parse(
-        initialProjectedWake.assistantCronWakeAt ?? "",
-      );
-      assistantCronDeadlineMs = !assistantExecutionBlocked
-        && Number.isFinite(projectedAssistantCronDeadlineMs)
-          ? projectedAssistantCronDeadlineMs
-          : null;
-      if (
-        !assistantExecutionBlocked
-        && defaultOwnerDueNow
-      ) {
-        if (await prefetchSystemMailboxAssistantWork()) {
+        if (consumeForegroundWake()) {
           return await returnSystemMailboxModeResult();
         }
+
+        const initialProjectedWake = await resolveCurrentSystemMailboxModeWake();
+        const defaultOwnerDueNow =
+          hostedRuntimeDefaultProcessingWakeIsDue(initialProjectedWake);
+        const projectedAssistantCronDeadlineMs = Date.parse(
+          initialProjectedWake.assistantCronWakeAt ?? "",
+        );
+        assistantCronDeadlineMs = !assistantExecutionBlocked
+          && Number.isFinite(projectedAssistantCronDeadlineMs)
+            ? projectedAssistantCronDeadlineMs
+            : null;
+        if (
+          !assistantExecutionBlocked
+          && defaultOwnerDueNow
+        ) {
+          if (await prefetchSystemMailboxAssistantWork()) {
+            return await returnSystemMailboxModeResult();
+          }
+          if (
+            importOrStartupCheckpointPending
+            || activeWorkspace?.systemMailboxProgressGeneration == null
+            || hostedSystemMailboxWakeChangedFromWorkspace({
+              nextWakeAt: initialProjectedWake.nextWakeAt,
+              nextWakeReason: initialProjectedWake.nextWakeReason,
+              workspace: activeWorkspace,
+            })
+          ) {
+            await checkpointSystemMailboxMode(
+              "system_mailbox.checkpoint.due_assistant_handoff",
+            );
+          }
+          return await returnSystemMailboxModeResult();
+        }
+
+        workspaceSystemWork.resume();
+        workspaceSystemWork.kick(HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS);
+        const foregroundArrived = await workspaceSystemWork.waitForCompletion(
+          options.runtimeWakeSignal ?? null,
+          async (notification) => {
+            if (assistantExecutionBlocked) {
+              observeForegroundWake(notification);
+              return false;
+            }
+            return await prefetchSystemMailboxAssistantWork();
+          },
+          assistantCronDeadlineMs,
+        );
+        if (foregroundArrived) return await returnSystemMailboxModeResult();
+
+        const committedFutureModelFreeWakeAt =
+          initialProjectedWake.systemMailboxWakeReason === "mailbox"
+          && initialProjectedWake.systemMailboxWakeAt === activeWorkspace?.nextWakeAt
+          && activeWorkspace?.nextWakeReason === HOSTED_ASSISTANT_WAKE_REASON
+            ? initialProjectedWake.systemMailboxWakeAt
+            : null;
+        if (
+          !importOrStartupCheckpointPending
+          && committedFutureModelFreeWakeAt !== null
+          && !hostedRuntimeWakeIsDue(committedFutureModelFreeWakeAt)
+          && (
+            initialProjectedWake.nextWakeAt === null
+            || Date.parse(committedFutureModelFreeWakeAt)
+              <= Date.parse(initialProjectedWake.nextWakeAt)
+          )
+        ) {
+          consumeForegroundWake();
+          return await returnSystemMailboxModeResult();
+        }
+
+        const modelFreePass = await runSystemMailboxLifecycleItem({
+          allowedRouteActions: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
+          allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+          stagePrefix: "system_mailbox.model_free",
+        });
+        assertRuntimeNotAborted();
+        if (modelFreePass.preempted) {
+          return await returnSystemMailboxModeResult();
+        }
+
+        const projectedWake = await resolveCurrentSystemMailboxModeWake();
         if (
           importOrStartupCheckpointPending
-          || activeWorkspace?.systemMailboxProgressGeneration == null
+          || (!checkpointed && activeWorkspace?.systemMailboxProgressGeneration == null)
           || hostedSystemMailboxWakeChangedFromWorkspace({
-            nextWakeAt: initialProjectedWake.nextWakeAt,
-            nextWakeReason: initialProjectedWake.nextWakeReason,
+            nextWakeAt: projectedWake.nextWakeAt,
+            nextWakeReason: projectedWake.nextWakeReason,
             workspace: activeWorkspace,
           })
         ) {
           await checkpointSystemMailboxMode(
-            "system_mailbox.checkpoint.due_assistant_handoff",
+            "system_mailbox.checkpoint.projected_wake",
           );
         }
-        return await returnSystemMailboxModeResult();
-      }
 
-      workspaceSystemWork.resume();
-      workspaceSystemWork.kick(HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS);
-      const foregroundArrived = await workspaceSystemWork.waitForCompletion(
-        options.runtimeWakeSignal ?? null,
-        async (notification) => {
-          if (assistantExecutionBlocked) {
-            observeForegroundWake(notification);
-            return false;
-          }
-          return await prefetchSystemMailboxAssistantWork();
-        },
-        assistantCronDeadlineMs,
-      );
-      if (foregroundArrived) return await returnSystemMailboxModeResult();
-
-      const committedFutureModelFreeWakeAt =
-        initialProjectedWake.systemMailboxWakeReason === "mailbox"
-        && initialProjectedWake.systemMailboxWakeAt === activeWorkspace?.nextWakeAt
-        && activeWorkspace?.nextWakeReason === HOSTED_ASSISTANT_WAKE_REASON
-          ? initialProjectedWake.systemMailboxWakeAt
-          : null;
-      if (
-        !importOrStartupCheckpointPending
-        && committedFutureModelFreeWakeAt !== null
-        && !hostedRuntimeWakeIsDue(committedFutureModelFreeWakeAt)
-        && (
-          initialProjectedWake.nextWakeAt === null
-          || Date.parse(committedFutureModelFreeWakeAt)
-            <= Date.parse(initialProjectedWake.nextWakeAt)
-        )
-      ) {
         consumeForegroundWake();
         return await returnSystemMailboxModeResult();
-      }
-
-      const modelFreePass = await runSystemMailboxLifecycleItem({
-        allowedRouteActions: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
-        allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
-        stagePrefix: "system_mailbox.model_free",
-      });
-      assertRuntimeNotAborted();
-      if (modelFreePass.preempted) {
+      };
+      try {
+        return await runSystemMailboxWork();
+      } catch (error) {
+        if (!(error instanceof HostedRuntimeCheckpointInterruptedByWakeError)
+          || !systemMailboxForegroundWakePrefetch) throw error;
         return await returnSystemMailboxModeResult();
       }
-
-      const projectedWake = await resolveCurrentSystemMailboxModeWake();
-      if (
-        importOrStartupCheckpointPending
-        || (!checkpointed && activeWorkspace?.systemMailboxProgressGeneration == null)
-        || hostedSystemMailboxWakeChangedFromWorkspace({
-          nextWakeAt: projectedWake.nextWakeAt,
-          nextWakeReason: projectedWake.nextWakeReason,
-          workspace: activeWorkspace,
-        })
-      ) {
-        await checkpointSystemMailboxMode(
-          "system_mailbox.checkpoint.projected_wake",
-        );
-      }
-
-      consumeForegroundWake();
-      return await returnSystemMailboxModeResult();
     };
     if (initialMailboxImportResult.bootstrapPending) {
       return await returnInitialMailboxImportBeforeForeground();
