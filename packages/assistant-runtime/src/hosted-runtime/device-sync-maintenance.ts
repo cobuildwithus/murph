@@ -1599,6 +1599,10 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
                 0,
               ),
               deviceSyncJobTimingCount: input.jobTimingDiagnostics.length,
+              deviceSyncContinuationProgressCommittedCount: input.jobTimingDiagnostics.reduce(
+                (total, diagnostic) => total + (diagnostic.continuationProgressCommitted === true ? 1 : 0),
+                0,
+              ),
               deviceSyncImportAppliedCount: jobTimingSummary.importOutcomes.applied,
               deviceSyncImportNoopCount: jobTimingSummary.importOutcomes.noop,
               deviceSyncImportFailedCount: jobTimingSummary.importOutcomes.failed,

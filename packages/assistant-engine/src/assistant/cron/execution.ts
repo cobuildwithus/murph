@@ -487,6 +487,28 @@ export function buildRunnableAssistantCronJobProjection(input: {
   }
 }
 
+export async function resolveAssistantCronWakeEntries(input: {
+  entries: readonly RunnableAssistantCronCanonicalEntry[]
+  vault: string
+}): Promise<readonly RunnableAssistantCronCanonicalEntry[]> {
+  const blockedCandidates = new Set(input.entries.filter((entry) =>
+    entry.job.enabled
+    && entry.runtimeState.state.runningAt === null
+    && entry.runtimeState.state.pendingDeliveryIntentId === null
+    && entry.runtimeState.state.retryAfterAt === null
+    && isResearchOrientedManagedAutomationCronJob({ kind: 'canonical', ...entry })
+  ))
+  if (blockedCandidates.size === 0) return input.entries
+
+  // Suppression is derived from onboarding, never a persisted pause. Hosted
+  // foreground completion refreshes the projection after delivery. Uncertain reads
+  // keep the ordinary timer so a transient failure cannot strand future work.
+  const onboarding = await readAssistantOnboardingState(input.vault).catch(() => null)
+  return onboarding?.status === 'open'
+    ? input.entries.filter((entry) => !blockedCandidates.has(entry))
+    : input.entries
+}
+
 export function isAssistantCronBackgroundMaintenanceYieldError(
   error: unknown,
 ): error is VaultCliError {
