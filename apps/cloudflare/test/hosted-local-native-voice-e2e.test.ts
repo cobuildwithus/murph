@@ -9,6 +9,7 @@ import { completeAssistantOnboarding } from "@murphai/assistant-engine";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 import {
   listHostedAiUsageForTest,
+  listHostedRuntimeLogsForTest,
   readHostedMailboxConsumedSeqForTest,
   seedHostedLaunchConsentForTest,
   seedHostedWorkspaceCheckpointForTest,
@@ -89,6 +90,20 @@ describe.skipIf(!audioPath)("hosted local native voice e2e", () => {
       environment: scenario.runtimeEnv, lane: "conversation", userId,
     });
     expect(BigInt(consumed.consumedSeq)).toBeGreaterThan(0n);
+    await expect.poll(async () => {
+      const entries = await listHostedRuntimeLogsForTest({
+        environment: scenario!.runtimeEnv, limit: 500, userId,
+      });
+      return entries.some(({ redactedJson }) => {
+        const commandCount = redactedJson?.codexActionCommandCount;
+        const dynamicCount = redactedJson?.codexActionDynamicToolCallCount;
+        const mcpCount = redactedJson?.codexActionMcpToolCallCount;
+        const toolCount = [commandCount, dynamicCount, mcpCount]
+          .reduce<number>((total, value) => total + (typeof value === "number" ? value : 0), 0);
+        return toolCount > 0 && redactedJson?.codexActionFailedCount === 0
+          && redactedJson.codexActionFileChangeCount === 0;
+      });
+    }, { timeout: 20_000, interval: 500 }).toBe(true);
     const usage = await listHostedAiUsageForTest({
       environment: scenario.runtimeEnv, limit: 100, memberId: userId,
     });

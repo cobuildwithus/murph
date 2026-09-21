@@ -73,6 +73,12 @@ Updated: 2026-09-21
 
 ## Verification
 
+- The hosted voice proof additionally requires existing runtime diagnostics to
+  show a successful tool action with no file changes, alongside the correct
+  spoken fixture answer. Cloudflare typecheck and the focused durable tool-log
+  regression pass. The full hosted proof has not run: the local Linux image
+  build remains active while Docker API reads are unresponsive. An independent
+  Linux image/compatibility/sandbox run is active at candidate `8df7d351c967`.
 - The normal production runner bundle builds with the current source and stays
   within its entrypoint and static-closure budgets. The complete patched Linux
   base image is building through the existing `runner:docker:base` command;
