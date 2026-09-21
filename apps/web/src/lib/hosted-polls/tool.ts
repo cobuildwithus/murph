@@ -116,4 +116,3 @@ async function dispatchPoll(row: HostedConversationPoll, definition: { question:
     return { status: "unknown", polls: [] };
   }
 }
-

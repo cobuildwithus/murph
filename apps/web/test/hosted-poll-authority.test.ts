@@ -55,4 +55,3 @@ describe("poll current-conversation authority", () => {
     expect(m.group).not.toHaveBeenCalled();
   });
 });
-

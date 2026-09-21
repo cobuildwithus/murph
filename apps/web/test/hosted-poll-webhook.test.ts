@@ -46,4 +46,3 @@ describe("Telegram poll tally webhook", () => {
     expect(await handleHostedTelegramPollWebhook(JSON.stringify({ update_id: 11, message: { text: "hello" } }))).toBeNull();
   });
 });
-

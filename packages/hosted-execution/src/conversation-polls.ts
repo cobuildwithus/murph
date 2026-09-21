@@ -61,4 +61,3 @@ export type ConversationPollResponse = z.infer<typeof conversationPollResponseSc
 export interface ConversationPollTool {
   request(request: ConversationPollRequest): Promise<ConversationPollResponse>;
 }
-

@@ -23,4 +23,3 @@ describe("hosted poll route", () => {
     expect(response.status).toBe(400); expect(m.tool).not.toHaveBeenCalled();
   });
 });
-

@@ -27,4 +27,3 @@ describe("hosted poll tool transport", () => {
     await expect(port.request(request)).rejects.toThrow();
   });
 });
-

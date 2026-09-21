@@ -15,4 +15,3 @@ export const POST = withJsonError(async (request: Request) => {
     request: parsed.data,
   }));
 });
-

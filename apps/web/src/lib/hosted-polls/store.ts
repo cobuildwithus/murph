@@ -45,4 +45,3 @@ export async function readPollResult(row: HostedConversationPoll): Promise<PollR
   const text = await openHostedUserSecureBoxString({ ...codecInput(row, "result"), value: row.resultEncrypted });
   return pollResultSchema.parse(JSON.parse(text ?? "null"));
 }
-

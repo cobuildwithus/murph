@@ -1,6 +1,6 @@
 # Native conversation polls
 
-Status: active
+Status: completed
 Created: 2026-09-21
 
 ## Outcome and Product UX
@@ -110,3 +110,22 @@ open group choice creates exactly one poll without a poll request; delegated
 judgment chooses directly; a settled decision gets the requested practical
 answer; a person-to-person choice receives no poll and no reply. Product UX:
 Ready. Full follow-up candidate is ready for Round 2 and exact-head CI.
+
+## Final review and handoff
+
+ReviewGPT Round 2 passed on 1c82efeb3977b0751019adf3ba445233ab2708cb with
+zero qualifying findings. Its independent synthetic execution reproduced the
+original binding race and verified both corrected update interleavings, named
+vote ordering/retractions, late answers, anonymity and bounded pages. The exact
+response and gpt-6-pro identity were validated in ignored local review artifacts.
+Round 1 had one accepted finding, now resolved after the user resumed.
+
+Parent review confirms the final provider/tool/privacy and prompt behavior.
+The current base merge only combines independent documentation-index entries;
+source merges are mechanical. Final cleanup removes empty lines at file ends
+without changing any code tokens. These do not change the reviewed behavior.
+The PR retains exact-head CI as its final gate; rollout still requires the
+additive migration, Web consumer, then runtime producer order. No deployment
+or production messaging is part of this task.
+Updated: 2026-09-21
+Completed: 2026-09-21

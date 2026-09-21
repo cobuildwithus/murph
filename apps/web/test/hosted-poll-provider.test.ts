@@ -62,4 +62,3 @@ describe("native poll providers", () => {
     expect(mocks.telegram).not.toHaveBeenCalled();
   });
 });
-

@@ -58,4 +58,3 @@ export async function authorizePollConversation(input: {
   }
   throw hostedOnboardingError({ code: "HOSTED_POLL_UNSUPPORTED", message: "Native polls require current iMessage or Telegram conversation input.", httpStatus: 400, retryable: false });
 }
-

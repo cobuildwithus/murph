@@ -50,4 +50,3 @@ export async function executeConversationPollTool(input: {
     return toolTextResult(false, 'Poll action could not be confirmed. Do not invent results or claim it succeeded; an interrupted create may have sent, so do not recreate automatically.', 'handler_exception', error)
   }
 }
-
