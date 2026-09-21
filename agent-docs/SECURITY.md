@@ -1454,8 +1454,8 @@ private repository's protected production job. It reads one member's artifact
 namespace after checking the expected canonical workspace version, obtains
 signed runtime root envelopes through the existing Web callback boundary, and
 returns only bounded aggregate counts. The member selector is sealed to the
-automation public key and expires within one hour. Production private keys and
-plaintext stay inside the hosted process; no recovery files or raw errors are
+automation public key and expires within one hour. Production private keys stay
+inside the hosted process and plaintext stays in the protected hosted environment; no recovery files or raw errors are
 uploaded. The census performs no restoration, checkpoint publication, mailbox
 mutation, or retention extension. Authenticated uploaded receipts are candidates
 until accepted history, deletion ordering, and content expiry are separately
@@ -1472,6 +1472,21 @@ objects and on scan failure contains only aggregate read/authentication/root
 counts, an incomplete marker, and a closed failure class or HTTP status. It
 never includes object names, member identifiers, root identifiers, or caught
 error text. Partial progress cannot authorize restoration or certify coverage.
+
+Its optional `validate` mode retains at most 256 MiB of authenticated artifact
+bytes and replays at most 200,000 actions with 512 MiB of referenced write bytes
+inside a private temporary directory on the protected hosted runner. It reuses
+canonical receipt parsing/replay, vault validation, and the Browser Vault source
+hash owner. The signed current replica supplies both the comparison fingerprint
+and receipt cutoff; it must predate the sealed incident cutoff. Compaction
+receipts are excluded because they duplicate originals. Timestamp order is only
+a candidate ordering, never acceptance evidence. Missing/corrupt content,
+conflicts, cancellation, and resource limits cannot certify a candidate. Scratch
+is removed in `finally`; retained buffers are cleared on every exit. Only counts,
+closed failure classes, and validation booleans leave the job. Even a matching
+source hash leaves accepted history and complete recovery unproven because some
+canonical files and media fall outside that hash. This mode publishes no
+checkpoint, exports no plaintext, and changes no production runtime state.
 
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
 - The trusted `Pull Request Head Draft Reset` controller uses the existing Frog
