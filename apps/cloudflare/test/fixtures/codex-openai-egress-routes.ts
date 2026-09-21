@@ -217,6 +217,18 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
   ],
   nonProviderBinaryCandidates: [
     {
+      candidate: "/v1/livecomments",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact Linux release token joins the reviewed /v1/live literal to adjacent printable data; realtime_websocket/methods.rs constructs only /v1/live.",
+    },
+    {
+      candidate: "/v1/logs48",
+      disposition: "binary_false_positive",
+      owner: "codex-otel",
+      reason: "This exact Linux release token extends the reviewed OTLP /v1/logs literal with adjacent printable data. The pinned opentelemetry-otlp exporter uses /v1/logs on its configured telemetry origin.",
+    },
+    {
       candidate: "/v1/analytics/codex/turn-costsopenai-organizationopenai-project",
       disposition: "binary_false_positive",
       owner: "codex-analytics",

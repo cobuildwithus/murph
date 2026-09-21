@@ -958,6 +958,34 @@ Deploy smoke pins the 100% Worker version, verifies the response-reported versio
 
 See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle rules, and smoke workflow.
 
+### Patched Codex runner package
+
+The runner base image owns the native Codex build. Its Dockerfile pins the upstream
+release archive, Rust builder, and matching npm helper package, applies
+`patches/codex-public-live.patch`, and replaces only the CLI. The bundled Code Mode
+host, shell resources, and sandbox helper remain from the same release. The image
+records the upstream revision and patch SHA-256 in `murph-source-revision`.
+
+`runner:docker:base` fingerprints both the Dockerfile and patch. The protected
+deployment workflow still forces a source build; its shared Docker layer cache
+can reuse unchanged compilation inputs. Application-only edits therefore do not
+require a native rebuild when that cache is available. A cache miss builds from
+source. Cache-writer protection is a prerequisite for activating the private
+workflow companion; cache timing and deployment are separate rollout evidence.
+
+To update the patch, regenerate it against the exact pinned release, retain its
+focused upstream tests and generated protocol schemas, and run
+`pnpm --dir apps/cloudflare verify:codex-upstream-source`. Keep the release's
+matching npm helpers and sandbox checksum aligned when changing the version.
+Focused upstream Rust tests also need that release's Code Mode helper: a partial
+Cargo build may omit it and fail during startup prewarm before voice is exercised.
+Supply the matching package's `bin/codex-code-mode-host` through the test harness's
+`CARGO_BIN_EXE_codex-code-mode-host` environment variable when it is not built locally.
+The runner permission workflow extracts the actual image's CLI and checks native
+voice input ownership, successive tool-backed turns, provider closure, provider-route
+inventory, and sandbox confinement. Local hosted development uses this same
+image recipe; no manual binary installation or separate release service is needed.
+
 ### Astra model catalog
 
 The native runner image has a default Luna/Terra/Sol catalog and an expanded

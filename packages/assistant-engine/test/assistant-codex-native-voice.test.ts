@@ -31,8 +31,8 @@ afterEach(async () => {
 })
 
 // This pins the native protocol contract. The provider is synthetic; Codex owns
-// backing turns and voice transport even when the host selects final output.
-it.each(['native', 'host'] as const)('native V3 voice creates successive tool-backed turns on one thread (%s output)', { timeout: 30_000 }, async (outputOwner) => {
+// voice transport; the patched host-managed input mode uses the normal turn APIs.
+it.each(['native', 'host'] as const)('native V3 voice creates successive tool-backed turns on one thread (%s output)', { timeout: 60_000 }, async (outputOwner) => {
   const stub = await startScriptedResponsesStub()
   const requests: { path: string | undefined; multipart: boolean; nativeModel: boolean }[] = []
   const sidebandPaths: (string | undefined)[] = []
@@ -130,7 +130,7 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
     return withCodexRpcTimeout(new Promise<unknown>((resolve, reject) => {
       pendingRequests.set(id, { method, resolve, reject })
       writeCodexRpcMessage(child, { id, method, params })
-    }), 10_000, method, () => pendingRequests.delete(id))
+    }), method === 'initialize' ? 30_000 : 10_000, method, () => pendingRequests.delete(id))
   }
   const events = (method: string) => notifications.filter((message) => message.method === method)
   try {
@@ -158,6 +158,7 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
       threadId,
       version: 'v3',
       clientManagedHandoffs: outputOwner === 'host',
+      ...(publicLive ? { clientManagedInputs: true } : {}),
       codexResponseHandoffMode: 'bemTags',
       outputModality: 'audio',
       includeStartupContext: false,
@@ -188,6 +189,24 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
           content: [{ type: 'input_text', text: 'Read the synthetic record.' }],
         },
       }))
+      if (publicLive) {
+        const inputs = () => events('thread/realtime/itemAdded')
+          .map((event) => readRecord(readRecord(event.params)?.item))
+          .filter((item) => item?.type === 'input.requested')
+        await vi.waitFor(() => expect(inputs()).toHaveLength(index))
+        const input = inputs()[index - 1]!
+        expect(input.text).toContain('Read the synthetic record.')
+        expect(input.inputId).toEqual(expect.any(String))
+        expect(stub.requestCountSinceBaseline()).toBe((index - 1) * 2)
+        expect(tools).toHaveLength(index - 1)
+        // The existing host turn path can add context and bind tools before
+        // starting backing work. Native voice owns normalization and transport.
+        await request('turn/start', {
+          threadId,
+          input: [{ type: 'text', text: input.text }],
+          serviceTier: null,
+        })
+      }
       await vi.waitFor(() => expect(events('turn/completed')).toHaveLength(index), { timeout: 10_000 })
       expect(events('turn/completed')[index - 1]?.params).toMatchObject({
         threadId, turn: { status: 'completed' },
@@ -234,7 +253,7 @@ it.each(['native', 'host'] as const)('native V3 voice creates successive tool-ba
     expect(tools).toHaveLength(2)
     expect(tools.every((call) => call.threadId === threadId && call.tool === 'read_probe')).toBe(true)
     expect(new Set(tools.map((call) => call.turnId)).size).toBe(2)
-    expect(methods).not.toContain('turn/start')
+    expect(methods.filter((method) => method === 'turn/start')).toHaveLength(publicLive ? 2 : 0)
     expect(stub.requestCountSinceBaseline()).toBe(4)
     expect(requests).toEqual([{ path: createPath, multipart: !publicLive, nativeModel: !publicLive }])
     expect(sidebandPaths).toEqual([attachPath])
