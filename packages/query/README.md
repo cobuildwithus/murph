@@ -10,6 +10,17 @@ with a separate pending promise: a lock owner could join a reader waiting for
 that same lock. The `query-wait` timing span measures acquisition;
 `query-rebuild` measures actual rebuilding.
 
+Query SQLite version 30 rebuilds the derived cache with a partial biomarker
+index: metric points without a biomarker key remain queryable but occupy no
+biomarker-index entries. Writable query connections enable SQLite
+`secure_delete` so table replacement clears obsolete payload bytes instead of
+carrying previous generations into compressed workspace snapshots. This adds
+no vacuum pass or work to fresh read-only queries. The complete query database
+and its required sidecars remain eligible for encrypted checkpoint/restore;
+canonical source manifests still decide whether a restored cache is fresh.
+Older runners reject the new cache version and rebuild derived state through
+the existing reset path; the canonical format and query results do not change.
+
 Exact and family-local reads must not rebuild or hydrate that shared projection.
 Use core-owned exact readers when the canonical owner exposes one, or use
 `resolveCanonicalEntityInFamily()` / `readCanonicalEntityFamilySource()` for a

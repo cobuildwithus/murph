@@ -27,7 +27,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 27: Rebuild goal targets through the canonical target schema.
 // 28: Independently certify wearable rows; older full rebuilders must reset them.
 // 29: Rebuild sleep summaries and metrics with session classification and provider state.
-export const QUERY_PROJECTION_SQLITE_VERSION = 29;
+// 30: Omit null biomarker index entries and clear obsolete rebuild payloads.
+export const QUERY_PROJECTION_SQLITE_VERSION = 30;
 
 export interface QueryProjectionLocation {
   absolutePath: string;
@@ -98,6 +99,9 @@ export function openQueryProjectionDatabase(
   const database = openSqliteRuntimeDatabase(location.absolutePath, runtimeOptions);
 
   if (!(options.readOnly ?? false)) {
+    // Rebuilds replace whole tables. Zero retired payloads so compressed
+    // workspace snapshots do not carry bytes from earlier generations.
+    database.exec("PRAGMA secure_delete = ON;");
     applySqliteRuntimeMigrations(database, {
       migrations: [{
         version: QUERY_PROJECTION_SQLITE_VERSION,
@@ -228,7 +232,9 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
     );
 
     CREATE INDEX IF NOT EXISTS query_metric_points_metric_latest_idx ON query_metric_points(metric_key, effective_date DESC, observed_at DESC);
-    CREATE INDEX IF NOT EXISTS query_metric_points_biomarker_latest_idx ON query_metric_points(biomarker_key, effective_date DESC, observed_at DESC);
+    CREATE INDEX IF NOT EXISTS query_metric_points_biomarker_latest_idx
+      ON query_metric_points(biomarker_key, effective_date DESC, observed_at DESC)
+      WHERE biomarker_key IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS query_metric_targets (
       id TEXT PRIMARY KEY,

@@ -579,3 +579,7 @@ Covered startup mailbox-prefetch reuse and unknown-wake fallback are owned by
 
 WhatsApp phone verification across web and native clients is tracked in
 [`2026-09-21-whatsapp-phone-auth.md`](exec-plans/active/2026-09-21-whatsapp-phone-auth.md).
+
+Query projection storage reduction is tracked in
+[`workspace storage`](exec-plans/completed/2026-09-21-workspace-size.md);
+`packages/query/README.md` owns the storage and restore contract.
