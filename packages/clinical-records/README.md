@@ -49,8 +49,9 @@ fact is held; retrieval timestamps never establish a visit date. Before freezing
 extraction shares the canonical date check and vault timezone, then gives an
 affected family one read-only correction turn against the same source. Only date
 fields on invalid records may change. The turn has a 30-second cap inside the
-existing page deadline and is skipped unless that budget plus five seconds for
-cleanup remains. It rechecks provider authority, honors cancellation, and
+existing page deadline and is skipped unless that budget, the child's bounded
+interrupt/stop cleanup, and five seconds to return remain. The allowance derives
+from the existing child timeout constants. It rechecks provider authority, honors cancellation, and
 uses a separate review usage identity. Failed corrections preserve successful
 facts; unresolved dates remain held without retrying frozen proposals.
 

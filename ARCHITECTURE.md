@@ -1135,7 +1135,9 @@ Before freezing proposals, extraction uses the shared date consistency check
 with the vault timezone. An affected family gets one read-only, date-only
 correction turn against the same bound source, capped at 30 seconds within the
 existing page deadline. Correction is skipped unless its full 30-second budget
-and a five-second cleanup allowance remain. Supported calendar-only dates stay
+and the child's interrupt/stop cleanup budget plus five seconds to return remain.
+The cleanup allowance derives from the existing child timeout constants.
+Supported calendar-only dates stay
 calendar dates without an invented time. Only invalid record indices can change,
 and only their date fields. Valid siblings survive failed or unusable corrections; unresolved
 dates remain held. Authority checks and cancellation also fence correction,

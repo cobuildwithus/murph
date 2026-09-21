@@ -14,10 +14,13 @@ vi.mock("@murphai/assistant-engine/assistant-codex", () => ({
 }));
 
 it.each([
-  { initialMs: 100_000, cancel: false, correctionCalls: 0 },
-  { initialMs: 50_000, cancel: false, correctionCalls: 1 },
-  { initialMs: 100_000, cancel: true, correctionCalls: 0 },
-])("preserves extraction after $initialMs ms with cancellation=$cancel", async ({ initialMs, cancel, correctionCalls }) => {
+  { initialMs: 100_000, cancel: false, stall: false, handoff: false, correctionCalls: 0 },
+  { initialMs: 50_000, cancel: false, stall: false, handoff: false, correctionCalls: 1 },
+  { initialMs: 100_000, cancel: true, stall: false, handoff: false, correctionCalls: 0 },
+  { initialMs: 78_000, cancel: false, stall: true, handoff: false, correctionCalls: 0 },
+  { initialMs: 50_000, cancel: false, stall: true, handoff: false, correctionCalls: 1 },
+  { initialMs: 50_000, cancel: false, stall: true, handoff: true, correctionCalls: 0 },
+])("preserves extraction after $initialMs ms with cancellation=$cancel stall=$stall handoff=$handoff", async ({ initialMs, cancel, stall, handoff, correctionCalls }) => {
   const vaultRoot = await realpath(await mkdtemp(path.join(tmpdir(), "clinical-recovery-deadline-")));
   const rawRef = "raw/clinical/fhir/synthetic/batch/attachments/report.txt";
   const documentPath = path.join(vaultRoot, rawRef);
@@ -57,6 +60,15 @@ it.each([
   provider.execute.mockImplementation(async (turn) => {
     const assignment = JSON.parse(turn.prompt.slice(turn.prompt.indexOf("{")));
     if (assignment.invalidRecords) {
+      if (stall) {
+        advance(30_000);
+        expect(turn.abortSignal?.aborted).toBe(true);
+        // The child keeps running after interruption: allow the owner's 15s
+        // interrupt grace, then both possible stop attempts with two 3s waits.
+        // The provider promise cannot settle until that child cleanup joins.
+        advance(27_000);
+        turn.abortSignal.throwIfAborted();
+      }
       // A correction taking 25 seconds fits its own 30-second cap, but would
       // cross the page deadline after the 100-second initial extraction.
       advance(25_000);
@@ -74,7 +86,7 @@ it.each([
   });
   const input: HostedClinicalEnrichmentInput = {
     abortSignal: parent.signal, codexHome: null, env: {}, vaultRoot, memberId: "synthetic-member",
-    state, onStateMutation() {}, resolveProviderAuthority: async () => "current",
+    state, onStateMutation() {}, resolveProviderAuthority: async () => handoff && initialCalls === 3 ? "handoff" : "current",
     prepareDocument: async () => ({ totalPages: 1, extractedText: text, renderedPages: [], scratchRoots: [], async cleanup() {} }),
   };
   try {
@@ -82,11 +94,12 @@ it.each([
     await writeFile(documentPath, text);
     const result = await runOneHostedClinicalEnrichment(input);
     expect({ result, calls: provider.execute.mock.calls.length, elapsed }).toEqual({
-      result: cancel ? "idle" : "settled", calls: 3 + correctionCalls, elapsed: initialMs + correctionCalls * 25_000,
+      result: cancel || handoff ? "idle" : "settled", calls: 3 + correctionCalls,
+      elapsed: initialMs + correctionCalls * (stall ? 57_000 : 25_000),
     });
     expect(state.deferClinicalEnrichment).not.toHaveBeenCalled();
     expect(state.blockClinicalEnrichment).not.toHaveBeenCalled();
-    if (cancel) expect(state.persistClinicalEnrichmentProposals).not.toHaveBeenCalled();
+    if (cancel || handoff) expect(state.persistClinicalEnrichmentProposals).not.toHaveBeenCalled();
     else {
       expect(state.persistClinicalEnrichmentProposals).toHaveBeenCalledOnce();
       expect(state.persistClinicalEnrichmentProposals).toHaveBeenCalledWith(expect.objectContaining({ outputs: {

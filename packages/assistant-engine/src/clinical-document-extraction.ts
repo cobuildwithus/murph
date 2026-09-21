@@ -22,6 +22,10 @@ import {
   executeConfinedReadOnlyAssistantAskTurn,
   type ReadOnlyAssistantAskInput,
 } from './assistant-ask.js'
+import {
+  CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS,
+  CODEX_APP_SERVER_STOP_TIMEOUT_MS,
+} from './assistant-codex/app-server-rpc.js'
 
 export interface ClinicalDocumentExtractionInput extends Pick<
   ReadOnlyAssistantAskInput,
@@ -53,7 +57,10 @@ const MAX_RENDERED_PAGES = 20
 const MAX_EXTRACTED_TEXT_BYTES = 600_000
 const MAX_OUTPUT_BYTES = 1_000_000
 const MAX_DATE_CORRECTION_MS = 30_000
-const DATE_CORRECTION_CLEANUP_MS = 5_000
+// A one-shot turn joins interrupt cleanup, then stop in poison and finally.
+// Each stop can wait twice for exit. Leave another five seconds to return.
+const DATE_CORRECTION_CLEANUP_MS = CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS
+  + 4 * CODEX_APP_SERVER_STOP_TIMEOUT_MS + 5_000
 
 const CLINICAL_EXTRACTION_INSTRUCTIONS = [
   'You are a read-only clinical document extraction leaf for the current member.',

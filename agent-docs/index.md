@@ -609,3 +609,5 @@ Query metric payload deduplication and transaction/restore proof are tracked in
 Clinical extraction date recovery: [`2026-09-21-clinical-date-recovery.md`](exec-plans/completed/2026-09-21-clinical-date-recovery.md).
 
 Clinical date review remediation: [`2026-09-21-clinical-date-review-remediation.md`](exec-plans/completed/2026-09-21-clinical-date-review-remediation.md).
+
+Clinical correction cleanup budget: [`2026-09-21-clinical-correction-cleanup-budget.md`](exec-plans/completed/2026-09-21-clinical-correction-cleanup-budget.md).

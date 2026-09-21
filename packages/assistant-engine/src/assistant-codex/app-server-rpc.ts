@@ -13,7 +13,8 @@ import {
 } from './app-server-protocol.js'
 import { buildCodexResumeStaleMessage } from './failures.js'
 
-const CODEX_APP_SERVER_STOP_TIMEOUT_MS = 3_000
+export const CODEX_APP_SERVER_STOP_TIMEOUT_MS = 3_000
+export const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 
 export type { CodexRpcId, CodexRpcMessage } from './app-server-protocol.js'
 

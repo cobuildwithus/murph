@@ -105,6 +105,7 @@ import {
   type AnalyzeVideoToolRuntime,
 } from './assistant-codex/analyze-video-tool.js'
 import {
+  CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS,
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
   consumeCompleteLines,
@@ -250,7 +251,6 @@ function loadMurphDynamicToolRuntime(): Promise<MurphDynamicToolRuntime> {
     import('./assistant-codex/dynamic-tools.js')
   return murphDynamicToolRuntimePromise
 }
-const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
 const CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES = [
   'model_provider="openai"',
