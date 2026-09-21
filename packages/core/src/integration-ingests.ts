@@ -110,7 +110,11 @@ export interface ArchivedIntegrationIngestShardContentReceipt {
   sha256: string;
 }
 
+// Active months stay cheap to append until their plain evidence reaches this size.
+const ACTIVE_INTEGRATION_INGEST_ARCHIVE_MIN_BYTES = 4 * 1024 * 1024;
+
 export interface ArchiveClosedIntegrationIngestShardsInput {
+  archiveCurrentMonth?: boolean;
   now?: Date;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -1359,6 +1363,7 @@ export async function archiveClosedIntegrationIngestShards(
     const sources = (await listClosedIntegrationIngestShardSources(
       input.vaultRoot,
       currentMonth,
+      input.archiveCurrentMonth === true,
     )).filter((source) => source.kind !== "brotli");
     let archivedByteCount = 0;
     let archivedShardCount = 0;
@@ -1368,6 +1373,10 @@ export async function archiveClosedIntegrationIngestShards(
     for (const source of sources) {
       const { logicalPath } = source;
       input.signal?.throwIfAborted();
+      if (integrationIngestMonthKeyFromLogicalPath(logicalPath) === currentMonth) {
+        const stat = await lstat(resolveVaultPath(input.vaultRoot, source.sourcePath).absolutePath);
+        if (stat.size < ACTIVE_INTEGRATION_INGEST_ARCHIVE_MIN_BYTES) continue;
+      }
       const gzipPath = `${logicalPath}.gz`;
       const zipPath = `${logicalPath}.zip`;
       if (
@@ -1506,6 +1515,7 @@ function integrationIngestMonthKeyFromLogicalPath(logicalPath: string): string |
 async function listClosedIntegrationIngestShardSources(
   vaultRoot: string,
   currentMonth: string,
+  includeCurrentMonth = false,
 ): Promise<IntegrationIngestRowSource[]> {
   const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory);
   return sortIntegrationIngestRowSources(paths
@@ -1513,7 +1523,7 @@ async function listClosedIntegrationIngestShardSources(
     .map(integrationIngestRowSourceFromPath)
     .filter((source) => {
       const month = integrationIngestMonthKeyFromLogicalPath(source.logicalPath);
-      return month !== null && month < currentMonth;
+      return month !== null && (month < currentMonth || (includeCurrentMonth && month === currentMonth));
     }));
 }
 
@@ -1556,7 +1566,7 @@ async function recoverInterruptedClosedIntegrationIngestArchivesLocked(input: {
   vaultRoot: string;
 }): Promise<RecoverInterruptedClosedIntegrationIngestArchivesResult> {
   const groups = new Map<string, IntegrationIngestRowSource[]>();
-  for (const source of await listClosedIntegrationIngestShardSources(input.vaultRoot, input.currentMonth)) {
+  for (const source of await listClosedIntegrationIngestShardSources(input.vaultRoot, input.currentMonth, true)) {
     const group = groups.get(source.logicalPath) ?? [];
     group.push(source);
     groups.set(source.logicalPath, group);
@@ -2896,7 +2906,7 @@ async function resolveIntegrationIngestShardRepresentations(
     if (
       siblings.length > 1
       && month !== null
-      && month < currentMonth
+      && month <= currentMonth
       && siblings.every((source) => source.kind !== "zip")
     ) {
       currentSources = await withCanonicalWriteLock(vaultRoot, async () => {
