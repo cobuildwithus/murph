@@ -68,7 +68,18 @@ describe("hosted poll effects", () => {
     expect(m.runtime).toHaveBeenCalled();
     const list = await call({ action: "list" }); expect(list.polls).toEqual(first.polls);
     const read = await call({ action: "read", pollRef: first.polls[0]!.pollRef });
-    expect(read.polls).toEqual(first.polls); expect(m.telegram).toHaveBeenCalledTimes(1);
+    expect(read.polls[0]).toMatchObject(first.polls[0]!);
+    expect(read.polls[0]?.voterSource).toBe("anonymous"); expect(m.telegram).toHaveBeenCalledTimes(1);
+  });
+  it("passes named Telegram mode through the creation receipt and provider", async () => {
+    await call({ ...create, anonymous: false });
+    expect(m.telegram).toHaveBeenCalledWith(expect.objectContaining({ anonymous: false }));
+    await expect(call({ ...create, anonymous: true })).rejects.toThrow("different poll");
+  });
+  it("rejects anonymous iMessage creation before posting its question", async () => {
+    m.route.channel = "linq";
+    await expect(call({ ...create, anonymous: true })).rejects.toThrow("cannot be anonymous");
+    expect(m.question).not.toHaveBeenCalled(); expect(m.linq).not.toHaveBeenCalled();
   });
   it("retains ambiguous-send claims and refuses changed replay arguments", async () => {
     m.telegram.mockRejectedValueOnce(new Error("Lost acknowledgement"));

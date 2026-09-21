@@ -10,7 +10,7 @@ const row = { id: pollRef, memberId: "member_synthetic", lastUpdateId: 9n, close
 describe("Telegram poll tally webhook", () => {
   beforeEach(() => {
     vi.clearAllMocks(); m.findFirst.mockResolvedValue(row);
-    m.readResult.mockResolvedValue({ schema: "murph.conversation-poll-result.v1", messageId: "17", providerPollId: "provider-poll", snapshot: {} });
+    m.readResult.mockResolvedValue({ schema: "murph.conversation-poll-result.v1", messageId: "17", providerPollId: "provider-poll", snapshot: { anonymous: true, options: [{ text: "Saturday", votes: 0 }, { text: "Sunday", votes: 0 }] } });
     m.encrypt.mockResolvedValue("encrypted-tally"); m.updateMany.mockResolvedValue({ count: 1 });
   });
   it("updates a bound poll without creating an assistant turn", async () => {
@@ -32,6 +32,13 @@ describe("Telegram poll tally webhook", () => {
     m.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: pollRef });
     await expect(handleHostedTelegramPollWebhook(JSON.stringify({ update_id: 10, poll }))).rejects.toMatchObject({ httpStatus: 503 });
     expect(m.updateMany).not.toHaveBeenCalled();
+  });
+  it("keeps an immediate vote when creation commits between the two lookups", async () => {
+    m.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce(row);
+    expect(await handleHostedTelegramPollWebhook(JSON.stringify({ update_id: 10, poll }))).toEqual({ ok: true });
+    expect(m.findFirst).toHaveBeenCalledTimes(3);
+    expect(m.updateMany).toHaveBeenCalledTimes(1);
+    expect(m.encrypt).toHaveBeenCalledWith(row, "result", expect.objectContaining({ snapshot: expect.objectContaining({ totalVoters: 3 }) }));
   });
   it("ignores unowned poll ids and leaves ordinary messages to the normal handler", async () => {
     m.findFirst.mockResolvedValue(null);

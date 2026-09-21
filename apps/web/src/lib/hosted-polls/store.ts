@@ -10,6 +10,7 @@ export const pollDefinitionSchema = z.object({
   target: z.string().min(1),
   question: z.string(),
   options: z.array(z.string()),
+  anonymous: z.boolean().optional(),
 }).strict();
 export const pollResultSchema = z.object({
   schema: z.literal("murph.conversation-poll-result.v1"),

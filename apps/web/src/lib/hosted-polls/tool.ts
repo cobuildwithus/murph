@@ -12,6 +12,7 @@ import {
 import { sendHostedLinqChatMessage } from "../hosted-onboarding/linq-client";
 import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
 import { authorizePollConversation, type PollRoute } from "./authority";
+import { withTelegramPollVoters } from "./votes";
 import { callLinqPoll, callTelegramPoll } from "./provider";
 import { encryptPoll, readPollDefinition, readPollResult, type PollResult } from "./store";
 
@@ -55,18 +56,19 @@ export async function handleHostedConversationPollTool(input: {
     await prisma.hostedConversationPoll.update({ where: { id: row.id }, data: { resultEncrypted: encrypted, closedAt: new Date() } });
     return { status: "closed", polls: [closed.snapshot] };
   }
-  if (route.channel === "telegram") return { status: "results", polls: [result.snapshot] };
-  const fresh = await callLinqPoll({ action: "read", chatId: route.target, pollRef: row.id, question: definition.question, messageId: result.messageId });
+  if (route.channel === "telegram") return { status: "results", polls: [await withTelegramPollVoters(row, result.snapshot, action.voterCursor)] };
+  const fresh = await callLinqPoll({ action: "read", chatId: route.target, pollRef: row.id, question: definition.question, messageId: result.messageId, voterCursor: action.voterCursor });
   return { status: "results", polls: [fresh.snapshot] };
 }
 
 async function createPoll(input: { memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: ConversationPollRequest }, route: PollRoute): Promise<ConversationPollResponse> {
   const action = input.request.request;
   if (action.action !== "create") throw new TypeError("Expected poll creation.");
+  if (route.channel === "linq" && action.anonymous === true) throw new TypeError("iMessage polls cannot be anonymous.");
   const prisma = getPrisma();
   // One logical creation per accepted input, including retries with reworded arguments.
   const id = "poll_" + createHash("sha256").update(JSON.stringify([input.memberId, input.request.assistantInputId])).digest("hex").slice(0, 32);
-  const definition = { schema: "murph.conversation-poll.v1" as const, target: route.target, question: action.question, options: action.options };
+  const definition = { schema: "murph.conversation-poll.v1" as const, target: route.target, question: action.question, options: action.options, anonymous: route.channel === "telegram" ? action.anonymous ?? true : false };
   const encrypted = await encryptPoll({ id, memberId: input.memberId }, "definition", definition);
   const conversationKey = createHostedExternalThreadIdentityLookupKey({ channel: route.channel, threadId: route.target });
   if (!conversationKey) throw new TypeError("Invalid poll conversation.");
@@ -93,7 +95,7 @@ async function createPoll(input: { memberId: string; runtimeIdentity: HostedRunt
   return dispatchPoll(row, definition, route);
 }
 
-async function dispatchPoll(row: HostedConversationPoll, definition: { question: string; options: string[] }, route: PollRoute): Promise<ConversationPollResponse> {
+async function dispatchPoll(row: HostedConversationPoll, definition: { question: string; options: string[]; anonymous: boolean }, route: PollRoute): Promise<ConversationPollResponse> {
   let result: PollResult;
   let providerPollKey: string | null = null;
   try {

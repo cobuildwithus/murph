@@ -1,6 +1,6 @@
 import "server-only";
 import * as z from "@murphai/contracts/zod-runtime";
-import type { ConversationPollSnapshot } from "@murphai/hosted-execution/conversation-polls";
+import { CONVERSATION_POLL_VOTER_PAGE_SIZE, type ConversationPollVoter, type ConversationPollSnapshot } from "@murphai/hosted-execution/conversation-polls";
 import { parseTelegramThreadTarget } from "@murphai/messaging-ingress/telegram-webhook";
 import { runLinqApiRequest } from "../linq/api";
 import { requireHostedOnboardingLinqConfig } from "../hosted-onboarding/runtime";
@@ -20,7 +20,7 @@ const linqPollSchema = z.object({
   chat_id: z.string(),
   message_id: z.string(),
   poll: z.object({
-    options: z.array(z.object({ text: z.string().max(100), voters: z.array(z.unknown()) })).max(100),
+    options: z.array(z.object({ text: z.string().max(100), voters: z.array(z.object({ handle: z.string().min(1).max(320) })) })).max(100),
     total_voters: z.number().int().nonnegative(),
   }),
 });
@@ -36,11 +36,31 @@ export function telegramPollSnapshot(raw: unknown, pollRef: string, freshness: C
   };
 }
 
+function linqPollVoters(poll: z.infer<typeof linqPollSchema>["poll"], voterCursor?: string) {
+  const offset = voterCursor === undefined ? 0 : Number(voterCursor);
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("Invalid voter cursor.");
+  const voters = new Map<string, ConversationPollVoter>();
+  poll.options.forEach((option, index) => {
+    for (const { handle } of option.voters) {
+      const voter = voters.get(handle) ?? { kind: "imessage_handle", id: handle, optionIndexes: [], observedAt: new Date().toISOString() };
+      voter.optionIndexes.push(index);
+      voters.set(handle, voter);
+    }
+  });
+  const ordered = [...voters.values()].sort((a, b) => a.id.localeCompare(b.id));
+  return {
+    voters: ordered.slice(offset, offset + CONVERSATION_POLL_VOTER_PAGE_SIZE),
+    voterSource: "provider_read" as const,
+    nextVoterCursor: ordered.length > offset + CONVERSATION_POLL_VOTER_PAGE_SIZE ? String(offset + CONVERSATION_POLL_VOTER_PAGE_SIZE) : null,
+  };
+}
+
 export async function callLinqPoll(input: {
   action: "create" | "read";
   chatId: string;
   pollRef: string;
   question: string;
+  voterCursor?: string;
   options?: string[];
   messageId?: string;
 }): Promise<{ messageId: string; snapshot: ConversationPollSnapshot }> {
@@ -64,6 +84,7 @@ export async function callLinqPoll(input: {
       messageId: result.message_id,
       snapshot: {
         pollRef: input.pollRef, channel: "linq", question: input.question,
+        ...(input.action === "read" ? linqPollVoters(result.poll, input.voterCursor) : {}),
         options: result.poll.options.map((option) => ({ text: option.text, votes: option.voters.length })),
         totalVoters: result.poll.total_voters, anonymous: false, multipleAnswers: true,
         closed: false, observedAt: new Date().toISOString(),
@@ -80,6 +101,7 @@ export async function callTelegramPoll(input: {
   target: string;
   pollRef: string;
   question?: string;
+  anonymous?: boolean;
   options?: string[];
   messageId?: string;
 }) {
@@ -93,7 +115,7 @@ export async function callTelegramPoll(input: {
       ...(target.messageThreadId ? { message_thread_id: target.messageThreadId } : {}),
       question: input.question,
       options: input.options?.map((text) => ({ text })),
-      is_anonymous: true, allows_multiple_answers: false,
+      is_anonymous: input.anonymous ?? true, allows_multiple_answers: false,
     } : { message_id: Number(input.messageId) }),
   };
   const response = z.object({ ok: z.literal(true), result: z.unknown() }).parse(
@@ -104,6 +126,7 @@ export async function callTelegramPoll(input: {
     : null;
   if (message && String(message.chat.id) !== String(target.chatId)) throw new TypeError("Poll response route mismatch.");
   const poll = telegramPollSchema.parse(message?.poll ?? response.result);
+  if (input.action === "create" && poll.is_anonymous !== (input.anonymous ?? true)) throw new TypeError("Poll anonymity response mismatch.");
   return {
     messageId: message ? String(message.message_id) : input.messageId!,
     providerPollId: poll.id,

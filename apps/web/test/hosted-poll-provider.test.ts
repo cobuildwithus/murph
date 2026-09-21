@@ -15,12 +15,13 @@ describe("native poll providers", () => {
     expect(mocks.post).toHaveBeenCalledExactlyOnceWith("chat", { poll: { options: [{ text: "Saturday" }, { text: "Sunday" }], idempotency_key: pollRef } });
     expect(result.snapshot).toMatchObject({ totalVoters: 0, anonymous: false, multipleAnswers: true });
   });
-  it("counts Linq selections separately from distinct voters and drops voter handles", async () => {
+  it("returns Linq voter handles and every selected option independently of distinct totals", async () => {
     mocks.get.mockResolvedValue({ chat_id: "chat", message_id: "message", poll: { options: [{ text: "Saturday", voters: [{ handle: "private-handle" }] }, { text: "Sunday", voters: [{ handle: "private-handle" }] }], total_voters: 1 } });
     const result = await callLinqPoll({ action: "read", chatId: "chat", pollRef, question: "Day?", messageId: "message" });
     expect(result.snapshot.options.map((option) => option.votes)).toEqual([1, 1]);
     expect(result.snapshot.totalVoters).toBe(1);
-    expect(JSON.stringify(result)).not.toContain("private-handle");
+    expect(result.snapshot.voters).toEqual([expect.objectContaining({ kind: "imessage_handle", id: "private-handle", optionIndexes: [0, 1] })]);
+    expect(result.snapshot.voterSource).toBe("provider_read");
     expect(mocks.get).toHaveBeenCalledWith("message");
   });
   it("rejects another chat's Linq results", async () => {
@@ -32,6 +33,23 @@ describe("native poll providers", () => {
     const result = await callTelegramPoll({ action: "create", target: "-100:topic:12", pollRef, question: "Day?", options: ["Saturday", "Sunday"] });
     expect(mocks.telegram).toHaveBeenCalledExactlyOnceWith({ method: "sendPoll", readJson: true, body: { chat_id: "-100", message_thread_id: 12, question: "Day?", options: [{ text: "Saturday" }, { text: "Sunday" }], is_anonymous: true, allows_multiple_answers: false } });
     expect(result.snapshot.totalVoters).toBe(3);
+  });
+  it.each([true, false])("honors Telegram anonymity=%s", async (anonymous) => {
+    mocks.telegram.mockResolvedValue({ ok: true, result: { message_id: 17, chat: { id: -100 }, poll: { ...telegramPoll, is_anonymous: anonymous } } });
+    const result = await callTelegramPoll({ action: "create", target: "-100", pollRef, question: "Day?", options: ["Saturday", "Sunday"], anonymous });
+    expect(mocks.telegram).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ is_anonymous: anonymous }) }));
+    expect(result.snapshot.anonymous).toBe(anonymous);
+  });
+  it("pages iMessage identities without losing aggregate counts", async () => {
+    const voters = Array.from({ length: 51 }, (_, i) => ({ handle: `synthetic-${String(i).padStart(2, "0")}` }));
+    mocks.get.mockResolvedValue({ chat_id: "chat", message_id: "message", poll: { options: [{ text: "Saturday", voters }], total_voters: 51 } });
+    const first = await callLinqPoll({ action: "read", chatId: "chat", pollRef, question: "Day?", messageId: "message" });
+    expect(first.snapshot.voters).toHaveLength(50);
+    expect(first.snapshot.nextVoterCursor).toBe("50");
+    const second = await callLinqPoll({ action: "read", chatId: "chat", pollRef, question: "Day?", messageId: "message", voterCursor: first.snapshot.nextVoterCursor! });
+    expect(second.snapshot.voters).toHaveLength(1);
+    expect(second.snapshot.totalVoters).toBe(51);
+    expect(second.snapshot.nextVoterCursor).toBeNull();
   });
   it("closes explicitly without sending a replacement", async () => {
     mocks.telegram.mockResolvedValue({ ok: true, result: { ...telegramPoll, is_closed: true } });

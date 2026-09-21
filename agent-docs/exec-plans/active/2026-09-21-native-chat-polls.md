@@ -70,3 +70,43 @@ provider messages are sent during validation.
   no duplicate friction entry was added.
 
 Product UX: Ready for PR review. Final ReviewGPT and exact-head CI remain pending.
+
+## Authorized follow-up
+
+The member requested exposing iMessage voter handles and both anonymous and
+named Telegram polls. Add an optional creation anonymity flag, preserve anonymous
+Telegram defaults, and return paginated voter identities on read. Telegram answer
+updates require independently ordered encrypted per-voter receipts so changes,
+retractions and answers delivered after close remain correct without rewriting
+an unbounded poll document. Keep aggregate provider counts independent of answer
+delivery completeness. Do not infer a person behind an anonymous chat identity.
+
+Resume also authorizes the accepted Round 1 correction: repeat the blinded poll
+binding lookup after the pending-creation query finds no row. Add the exact
+interleaving regression. Retain the locally verified source mappings needed by
+clean Web builds. Extend deterministic and real-assistant proof before Round 2.
+
+The user also requested tasteful proactive use for decisions. The system prompt
+now admits poll guidance from the same availability decision as the tool. It
+creates polls for concrete shared choices on an open conversational floor, while
+preserving delegated judgment, settled decisions and human-owned exchanges.
+No background initiation or new wake mechanism is introduced.
+
+Follow-up proof: named/anonymous create, named Telegram reads and iMessage handle
+reads pass live with the production tool and prompts. Per-voter ordering,
+retractions, concurrent inserts, late answers, anonymous non-disclosure, bounded
+pages and both binding-race interleavings pass deterministic tests. Local SQL
+validates the vote table and cascade in a rolled-back transaction. Web, Worker,
+engine and runtime checks pass. CI-discovered migration and public-export
+inventories are updated and their complete focused test files pass.
+
+Complete first provider-input measurement now includes proactive prompt guidance:
+individual 145085 to 149503 bytes; group 136061 to 140479 bytes (+4418 each).
+Instructions add 1158 bytes; tool schemas add 1810; generated guidance accounts
+for the remainder. Exact target tokenizer counts remain unavailable.
+
+Tasteful initiation proof: four separate real-Codex runs pass. An unresolved
+open group choice creates exactly one poll without a poll request; delegated
+judgment chooses directly; a settled decision gets the requested practical
+answer; a person-to-person choice receives no poll and no reply. Product UX:
+Ready. Full follow-up candidate is ready for Round 2 and exact-head CI.

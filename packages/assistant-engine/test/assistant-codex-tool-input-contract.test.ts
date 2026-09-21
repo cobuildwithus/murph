@@ -857,21 +857,23 @@ describe('native poll input measurement', () => {
     'polls: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
       stub ??= await startScriptedResponsesStub()
       const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
-      const layers = buildAssistantSystemPromptLayers({
-        assistantCliContract: null, assistantHostedAutomationAvailable: true,
-        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
-        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
-        conversationScope: scope, currentLocalDate: '2026-09-21',
-        currentInstant: '2026-09-21T16:00:00.000Z', currentTimeZone: 'America/New_York',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
-        ordinaryInboundTurn: true,
-      })
+
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
         codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
       })
-      const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
       const measurements = []
       for (const phase of ['base', 'head'] as const) {
+        const layers = buildAssistantSystemPromptLayers({
+          assistantPollsAvailable: phase === 'head', assistantCliContract: null, assistantHostedAutomationAvailable: true,
+          assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: scope, currentLocalDate: '2026-09-21',
+          currentInstant: '2026-09-21T16:00:00.000Z', currentTimeZone: 'America/New_York',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          ordinaryInboundTurn: true,
+        })
+        const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+
         const tools = resolveMurphDynamicTools({
           allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: true,
           groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',

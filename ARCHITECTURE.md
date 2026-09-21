@@ -1234,22 +1234,42 @@ receipts. Provider calls and encryption stay outside short database transactions
 One creation per accepted input has a durable dispatch claim; replay returns its
 receipt or an explicit unknown outcome without sending again. A lost response may
 leave an unknown receipt. List is capped at ten polls created by Murph in this
-conversation. Neither arbitrary provider IDs nor voter identities enter the tool.
+conversation. Arbitrary provider IDs cannot select another poll. Read exposes
+provider voter identities in pages of 50 with a continuation cursor; list keeps only summaries.
 
 Linq uses its SDK's native poll create/read methods. The question is a separate
 idempotent text message, followed by an iMessage poll with public multiple-choice
-voting. Reads fetch current counts and distinct total voters from Linq. Telegram
-uses anonymous single-choice `sendPoll`, stores aggregate `poll` webhook updates,
-and supports explicit `stopPoll` with final counts. Telegram reads return the last
-observed snapshot and timestamp; they cannot fetch a live tally. Duplicate/older
+voting. Anonymous iMessage requests fail before sending. Reads fetch current
+counts, distinct total voters and voter handles from Linq. Telegram uses
+single-choice `sendPoll`, with `anonymous` defaulting to true; false creates named
+voting. It stores aggregate `poll` updates and supports `stopPoll` with final
+counts. Telegram reads return the last observed snapshot and timestamp; they cannot fetch a live tally. Duplicate/older
 updates cannot overwrite newer or closed results. A bounded creation-binding race
-returns a retryable webhook response. Votes do not wake Murph or send replies.
+returns a retryable webhook response, and a final binding lookup covers a receipt
+committing between the initial and pending lookups. Votes do not wake Murph or
+send replies.
+
+Named Telegram `poll_answer` updates belong to `HostedConversationPollVote`, one
+encrypted receipt per blinded voter and poll. Its own update ID guards changes and
+retractions independently of the aggregate tally or other voters. Retractions
+retain a tombstone; late answers may still arrive after close. Identities and
+selections are encrypted with vote-specific AAD in the member private lane;
+member deletion cascades through the poll. Reads fetch at most 51 rows and batch
+decrypt a page of 50 using the existing secure-box owner. Telegram identities are
+received updates, not a guaranteed complete voter census. Anonymous polls never
+store or return voter answers. A chat identity is returned as a chat, not resolved
+to a hidden person.
+
+The system prompt admits proactive polls only with the native tool available.
+Use concrete shared decisions on an open conversational floor; preserve direct
+answers, delegated judgment, settled decisions and human-owned exchanges. Polls
+record preferences without authorizing bookings or other downstream effects.
 
 Deploy the additive poll migration, then Web, then the runtime tool. Existing
 runtimes remain compatible. Keep Web's poll callback while new runtimes exist;
 keep Telegram poll webhook consumption while open polls exist. Ensure a manually
-restricted Telegram webhook `allowed_updates` includes `poll`. Default Telegram
-updates include it. After rollout, create/read a synthetic poll on each channel
+restricted Telegram webhook `allowed_updates` includes both `poll` and
+`poll_answer`. Default Telegram updates include both. After rollout, create/read a synthetic poll on each channel
 and vote/read/close on Telegram; verify no assistant turn starts for votes.
 
 ## Hosted Phone Calls

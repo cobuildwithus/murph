@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Create polls with Murph",
     "summary": "Ask Murph to create a native poll in your current iMessage or Telegram conversation, then ask it for the results.",
-    "details": "Murph can find polls it created in that conversation. iMessage votes are public and allow multiple choices. Telegram polls are anonymous, use one choice, and can be closed on request; results reflect the latest update Murph has received.",
+    "details": "Murph can find polls it created in that conversation. iMessage polls show voter handles and allow multiple choices. Telegram supports anonymous or named voting, uses one choice, and can be closed on request. Ask who voted on a named poll; Telegram totals and voter details reflect the updates Murph has received.",
     "relevanceTags": ["conversations", "polls"],
     "sourcePullRequests": [3643],
     "tryIt": {
