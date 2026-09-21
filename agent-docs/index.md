@@ -1,7 +1,8 @@
 # Murph Agent Docs Index
 
-Checkpointed historical scan progress, including empty-date coverage, is owned
-by `agent-docs/RELIABILITY.md` and `packages/device-syncd/README.md`.
+Direct meal execution and official nutrition-source inspection are owned by
+`packages/assistant-engine/skills/food-journal/SKILL.md`; focused proof is tracked in
+[`2026-09-20-meal-tool-efficiency.md`](exec-plans/completed/2026-09-20-meal-tool-efficiency.md).
 
 Active delegated-request protection during background checkpointing is owned by
 `ARCHITECTURE.md`; review remediation and proof are recorded in
@@ -36,6 +37,9 @@ implementation and proof are recorded in
 Deferred device webhook transfer and restored duplicate retirement are owned by
 `agent-docs/RELIABILITY.md`; focused mailbox and composed runtime proof are
 indexed in `agent-docs/references/testing-ci-map.md`.
+
+Checkpointed historical scan progress, including empty-date coverage, is owned
+by `agent-docs/RELIABILITY.md` and `packages/device-syncd/README.md`.
 
 Checkpoint-aware operational stall alerts, including bounded publication time
 for deferred device jobs and checkpoint-confirmed runnable cycling windows,
