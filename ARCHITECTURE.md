@@ -2507,8 +2507,14 @@ the mailbox owner accepts each input. It joins pending admission and trusted usa
 settlement when closing, including cancellation during startup. Selected delivery
 requires the exact call and accepted mailbox ids; the hosted outbox checks runtime
 liveness around speech and owns uncertain sends. Progress delivery has no speech
-port. These components still require the authenticated call-control and invocation
-keepalive integration; the handle alone does not hold a running workspace lease.
+port. The invocation now retains its clean workspace while a call is reserved or
+open, using its existing wakeable wait; dirty checkpoint timing and post-checkpoint
+delivery remain independent of media lifetime. Before returning, it synchronously
+stops accepting calls, quiesces its existing background owners, and checks for new
+dirty state. Checkpoint preparation preserves media; invocation cleanup joins
+closure and usage before release. Native voice and ordinary work share one Codex
+configuration preparation promise. Authenticated Web call-control and durable
+input admission still need to supply this invocation handle in the hosted path.
 
 Normalized voice inputs use the existing `conversation.message` mailbox shape
 with a call and input identity. The ordinary text admission path persists and

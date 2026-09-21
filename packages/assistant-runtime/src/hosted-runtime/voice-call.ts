@@ -1,9 +1,12 @@
-import type {
-  CodexRealtimeClosure,
-  CodexRealtimeInput,
-  CodexRealtimeSession,
-  HostedCodexAssistantVoiceInput,
+import {
+  startHostedCodexAssistantVoice,
+  type CodexRealtimeClosure,
+  type CodexRealtimeInput,
+  type CodexRealtimeSession,
+  type HostedCodexAssistantVoiceInput,
 } from "@murphai/assistant-engine/assistant-runtime";
+import { HOSTED_ASSISTANT_TERRA_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV, resolveHostedOperatorModelProvider } from "./codex-runtime-env.ts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { createHostedLiveUsageRecorder } from "./live-usage.ts";
 import type { HostedRuntimeUsageRecordPort } from "./platform.ts";
@@ -12,6 +15,7 @@ type NativeVoiceOptions = Pick<
   HostedCodexAssistantVoiceInput,
   "sessionId" | "sdp" | "signal" | "onInput" | "onUsage"
 >;
+type StartNativeVoice = (options: NativeVoiceOptions) => Promise<CodexRealtimeSession>;
 
 /** Ephemeral media only. The mailbox and checkpointed outbox still own work. */
 export function createHostedRuntimeVoiceCall(input: {
@@ -21,6 +25,7 @@ export function createHostedRuntimeVoiceCall(input: {
   usagePort: HostedRuntimeUsageRecordPort;
   admitInput(input: CodexRealtimeInput & { callId: string }): Promise<{ mailboxItemId: string }>;
   notifyRuntime(): void;
+  onError(error: unknown): void;
 }) {
   const abort = new AbortController();
   const acceptedMailboxItemIds = new Set<string>();
@@ -73,7 +78,10 @@ export function createHostedRuntimeVoiceCall(input: {
           await usage.flush();
         }
       }
-    })().finally(() => {
+    })().catch((error: unknown) => {
+      input.onError(error);
+      throw error;
+    }).finally(() => {
       finished = true;
       input.notifyRuntime();
     });
@@ -91,7 +99,7 @@ export function createHostedRuntimeVoiceCall(input: {
     callId: input.callId,
     isHoldingRuntime: () => !finished,
     close,
-    async connect(sdp: string, start: (options: NativeVoiceOptions) => Promise<CodexRealtimeSession>): Promise<string> {
+    async connect(sdp: string, start: StartNativeVoice): Promise<string> {
       if (abort.signal.aborted || input.signal.aborted) throw unavailable();
       if (offer !== null && offer !== sdp) throw unavailable();
       offer = sdp;
@@ -135,3 +143,82 @@ export function createHostedRuntimeVoiceCall(input: {
 }
 
 export type HostedRuntimeVoiceCall = ReturnType<typeof createHostedRuntimeVoiceCall>;
+
+/** One invocation owns reservations, media, and the point at which it stops accepting calls. */
+export function createHostedRuntimeVoice(input: {
+  createCall(callId: string): HostedRuntimeVoiceCall;
+  notifyRuntime(): void;
+}) {
+  let accepting = true;
+  let current: HostedRuntimeVoiceCall | null = null;
+  let start: StartNativeVoice | null = null;
+  const usedCallIds = new Set<string>();
+  return {
+    reserve(callId: string): boolean {
+      if (!accepting) return false;
+      if (current?.callId === callId) return current.isHoldingRuntime();
+      if (current?.isHoldingRuntime() || usedCallIds.has(callId)) return false;
+      current = input.createCall(callId);
+      usedCallIds.add(callId);
+      input.notifyRuntime();
+      return true;
+    },
+    bindStart(value: StartNativeVoice): void {
+      start = value;
+    },
+    isHoldingRuntime: () => current?.isHoldingRuntime() === true,
+    /** Called synchronously at the existing return decision, before yielding. */
+    stopAccepting(): void {
+      accepting = false;
+    },
+    async connect(callId: string, sdp: string): Promise<string> {
+      if (!accepting || current?.callId !== callId) {
+        throw new VaultCliError("HOSTED_VOICE_CALL_UNAVAILABLE", "The voice call reservation is unavailable.");
+      }
+      if (!start) {
+        throw new VaultCliError("HOSTED_VOICE_NOT_READY", "The voice runtime is still starting.");
+      }
+      return await current.connect(sdp, start);
+    },
+    async closeCall(callId: string): Promise<CodexRealtimeClosure | null> {
+      return current?.callId === callId ? await current.close() : null;
+    },
+    async close(): Promise<void> {
+      accepting = false;
+      await current?.close();
+    },
+    async speak(request: Parameters<HostedRuntimeVoiceCall["speak"]>[0]): Promise<void> {
+      if (!current) {
+        throw Object.assign(new VaultCliError(
+          "ASSISTANT_VOICE_DELIVERY_UNAVAILABLE", "The accepted voice call is no longer available.",
+        ), { deliveryMayHaveSucceeded: false, retryable: false });
+      }
+      await current.speak(request);
+    },
+  };
+}
+
+export type HostedRuntimeVoice = ReturnType<typeof createHostedRuntimeVoice>;
+
+/** Keep media-specific launch policy out of the workspace checkpoint loop. */
+export function configureHostedRuntimeVoice(
+  voice: HostedRuntimeVoice | null | undefined,
+  prepare: () => Promise<Pick<HostedCodexAssistantVoiceInput, "env" | "target" | "workingDirectory"> & { signal: AbortSignal }>,
+): void {
+  voice?.bindStart(async (nativeInput) => {
+    const context = await prepare();
+    context.signal.throwIfAborted();
+    return await startHostedCodexAssistantVoice({
+      ...context,
+      ...nativeInput,
+      mediaModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      mediaModelProvider: resolveHostedOperatorModelProvider(
+        context.env?.[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+      ),
+      prompt: "You are Murph's voice interface. Delegate member requests to the backing assistant. Speak the responses it provides; do not answer from your own knowledge or claim work has completed before receiving its result.",
+      signal: nativeInput.signal
+        ? AbortSignal.any([context.signal, nativeInput.signal])
+        : context.signal,
+    });
+  });
+}

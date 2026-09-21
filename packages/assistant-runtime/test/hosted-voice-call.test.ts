@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CodexRealtimeClosure, CodexRealtimeSession } from "@murphai/assistant-engine/assistant-runtime";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
-import { createHostedRuntimeVoiceCall } from "../src/hosted-runtime/voice-call.ts";
+import { createHostedRuntimeVoice, createHostedRuntimeVoiceCall } from "../src/hosted-runtime/voice-call.ts";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -20,7 +20,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-function fixture() {
+function fixture(callId = "call_synthetic") {
   const nativeClosed = deferred<CodexRealtimeClosure>();
   const abort = new AbortController();
   const admitInput = vi.fn(async ({ inputId }: { inputId: string }) => ({ mailboxItemId: `mailbox_${inputId}` }));
@@ -28,6 +28,7 @@ function fixture() {
     recorded: true, platformAiUsageAllowedAfter: true, usageId: record.usageId,
   }));
   const notifyRuntime = vi.fn();
+  const onError = vi.fn();
   const native: CodexRealtimeSession = {
     sdp: "synthetic-answer",
     closed: nativeClosed.promise,
@@ -36,12 +37,12 @@ function fixture() {
   };
   const start = vi.fn<StartVoice>(async () => native);
   const call = createHostedRuntimeVoiceCall({
-    callId: "call_synthetic", memberId: "member_synthetic", signal: abort.signal,
-    admitInput, usagePort: { recordUsage }, notifyRuntime,
+    callId, memberId: "member_synthetic", signal: abort.signal,
+    admitInput, usagePort: { recordUsage }, notifyRuntime, onError,
   });
   calls.push(call);
   const options = () => start.mock.calls[0]![0];
-  return { call, abort, native, nativeClosed, admitInput, recordUsage, start, options, notifyRuntime };
+  return { call, abort, native, nativeClosed, admitInput, recordUsage, start, options, notifyRuntime, onError };
 }
 
 describe("invocation-bound native voice", () => {
@@ -161,6 +162,7 @@ describe("invocation-bound native voice", () => {
     f.options().onInput({ inputId: "two", text: "Queued request" });
     await vi.waitFor(() => expect(f.call.isHoldingRuntime()).toBe(false));
     await expect(f.call.close()).rejects.toBe(failure);
+    expect(f.onError).toHaveBeenCalledExactlyOnceWith(failure);
     expect(f.admitInput).toHaveBeenCalledOnce();
     expect(f.recordUsage).toHaveBeenCalledOnce();
   });
@@ -223,4 +225,32 @@ describe("invocation-bound native voice", () => {
       { startDurationMs: 0, endDurationMs: 1000 },
     ]);
   });
+});
+
+it("keeps reservation and close commands scoped to the invocation's current call", async () => {
+  const first = fixture("first_call");
+  const second = fixture("second_call");
+  const createCall = vi.fn((callId: string) => callId === "first_call" ? first.call : second.call);
+  const voice = createHostedRuntimeVoice({ createCall, notifyRuntime: vi.fn() });
+  expect(voice.reserve("first_call")).toBe(true);
+  expect(voice.reserve("first_call")).toBe(true);
+  expect(voice.reserve("second_call")).toBe(false);
+  await expect(voice.connect("first_call", "offer")).rejects.toMatchObject({ code: "HOSTED_VOICE_NOT_READY" });
+  expect(first.call.isHoldingRuntime()).toBe(true);
+  voice.bindStart(first.start);
+  expect(await voice.connect("first_call", "offer")).toBe("synthetic-answer");
+  expect(await voice.closeCall("wrong_call")).toBeNull();
+  expect(first.call.isHoldingRuntime()).toBe(true);
+  expect(await voice.closeCall("first_call")).toEqual(receipt);
+  expect(voice.reserve("first_call")).toBe(false);
+  expect(voice.reserve("second_call")).toBe(true);
+  expect(await voice.closeCall("first_call")).toBeNull();
+  expect(second.call.isHoldingRuntime()).toBe(true);
+  expect(voice.reserve("first_call")).toBe(false);
+  voice.stopAccepting();
+  expect(voice.reserve("third_call")).toBe(false);
+  await expect(voice.connect("second_call", "offer")).rejects.toMatchObject({ code: "HOSTED_VOICE_CALL_UNAVAILABLE" });
+  await voice.close();
+  expect(voice.isHoldingRuntime()).toBe(false);
+  expect(createCall).toHaveBeenCalledTimes(2);
 });
