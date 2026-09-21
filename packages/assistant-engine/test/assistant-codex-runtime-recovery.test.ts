@@ -1752,6 +1752,71 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     )
   })
 
+  it.each([false, true])(
+    'handles batched account responses and notifications with unexpected response=%s',
+    async (unexpectedResponse) => {
+      const workingDirectory = await createTempDir('assistant-codex-account-rpc-work-')
+      const codexHome = await createTempDir('assistant-codex-account-rpc-home-')
+      const child = new MockChildProcess()
+      const onDeviceCode = vi.fn()
+      codexMocks.spawn.mockReturnValue(child)
+      const operation = executeCodexManagedAccountOperation({
+        action: 'connect',
+        codexHome,
+        onDeviceCode,
+        workingDirectory,
+      })
+      const outcome = unexpectedResponse
+        ? expect(operation).rejects.toMatchObject({
+            code: 'ASSISTANT_CODEX_APP_SERVER_PROTOCOL_ERROR',
+            context: { retryable: false },
+          })
+        : expect(operation).resolves.toEqual({ kind: 'connected' })
+
+      const initialize = await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+      const read = await waitForRpcMethod(child, 'account/read')
+      child.stdout.write(jsonLine({ id: read.id, result: { account: null, requiresOpenaiAuth: true } }))
+      const login = await waitForRpcMethod(child, 'account/login/start')
+      child.stdout.write([
+        {
+          id: login.id,
+          result: {
+            type: 'chatgptDeviceCode',
+            loginId: 'login-batched-account',
+            verificationUrl: 'https://example.com/device',
+            userCode: 'TEST-CODE',
+          },
+        },
+        ...(unexpectedResponse ? [{ id: 'unknown-account-response', result: {} }] : []),
+        {
+          method: 'account/login/completed',
+          params: { loginId: 'login-batched-account', success: true },
+        },
+        { method: 'account/updated', params: { authMode: 'chatgpt', planType: 'pro' } },
+      ].map(jsonLine).join(''))
+
+      if (!unexpectedResponse) {
+        const verifiedRead = await waitForRpcMethodCount(child, 'account/read', 2)
+        child.stdout.write(jsonLine({
+          id: verifiedRead.id,
+          result: {
+            account: { type: 'chatgpt', email: 'user@example.com', planType: 'pro' },
+            requiresOpenaiAuth: true,
+          },
+        }))
+      }
+      await outcome
+      expect(onDeviceCode).toHaveBeenCalledTimes(1)
+      expect(onDeviceCode).toHaveBeenCalledWith({
+        userCode: 'TEST-CODE',
+        verificationUrl: 'https://example.com/device',
+      })
+      expect(readWrittenRpcMessages(child).filter((message) => message.method === 'account/read'))
+        .toHaveLength(unexpectedResponse ? 1 : 2)
+    },
+  )
+
   it('preserves Codex managed ChatGPT login completion errors', async () => {
     const workingDirectory = await createTempDir('assistant-codex-managed-auth-error-work-')
     const codexHome = await createTempDir('assistant-codex-managed-auth-error-home-')
