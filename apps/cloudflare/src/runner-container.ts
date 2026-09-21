@@ -579,6 +579,7 @@ export interface RunnerRuntimeWakeDiagnostics {
 }
 
 export interface RunnerRuntimeWakeInput {
+  mailboxWakeHighWater?: import("@murphai/hosted-execution/runtime-control").HostedMailboxWakeHighWater;
   attemptId: string;
   leaseGeneration: string;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;

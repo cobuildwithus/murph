@@ -71,6 +71,7 @@ const HOSTED_ASSISTANT_RUNTIME_NAME = "cloudflare-hosted-runner";
 type HostedWorkspaceInvocationRuntimeWakeInput =
   | number
   | {
+      mailboxWakeHighWater?: import("@murphai/hosted-execution/runtime-control").HostedMailboxWakeHighWater | null;
       notifiedAtEpochMs?: number | null;
       orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
       requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;

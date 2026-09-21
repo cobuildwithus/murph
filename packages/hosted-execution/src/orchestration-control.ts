@@ -133,6 +133,7 @@ export interface HostedRuntimeEnsureProcessingRequest {
   admission?: import("./runtime-owner.ts").HostedRuntimeOwnerResponse;
   assistantExecutionBlocked?: true;
   conversationWorkPending?: true;
+  mailboxWakeHighWater?: import("./runtime-control.ts").HostedMailboxWakeHighWater;
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;
 }
