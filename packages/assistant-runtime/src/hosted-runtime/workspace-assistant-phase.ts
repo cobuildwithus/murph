@@ -9,6 +9,7 @@ import {
   sanitizeHostedExecutionStructuredLogText,
   type HostedAssistantNotificationValidationFailureReason,
   type HostedExecutionSystemWake,
+  type HostedExecutionAssistantNotificationRoute,
   type HostedExecutionRedactedLogEntry,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
@@ -128,6 +129,7 @@ import {
   prepareHostedAssistantAutomationForWake,
 } from "./context.ts";
 import {
+  buildHostedNotificationAutomationRoute,
   readHostedAssistantInputCurrentDeliveryRoute,
   resolveUnambiguousCurrentDeliveryRoute,
 } from "./current-delivery-route.ts";
@@ -482,6 +484,9 @@ function createHostedAssistantAutomationOperationScope(
       const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
         executionContext: groupScopedExecutionContext,
         redactedLogEntries,
+        resolveMemberNotificationRoute: (context) =>
+          input.runtime.platform.effectsPort.resolveMemberNotificationRoute?.(context)
+            ?? Promise.resolve(null),
         route,
         vaultRoot: input.restored.vaultRoot,
       });
@@ -895,7 +900,12 @@ type HostedAssistantAutomationTool = NonNullable<
   NonNullable<AssistantExecutionContext["hosted"]>["automationTool"]
 >;
 
+type MemberNotificationRouteResolver = (
+  context?: { signal?: AbortSignal | null },
+) => Promise<HostedExecutionAssistantNotificationRoute | null>;
+
 function scopeHostedAutomationToolToAssistantOperation(input: {
+  resolveMemberNotificationRoute: MemberNotificationRouteResolver;
   executionContext: AssistantExecutionContext;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: AssistantCurrentDeliveryRoute | null;
@@ -916,6 +926,7 @@ function scopeHostedAutomationToolToAssistantOperation(input: {
     )
     ? createHostedAssistantAutomationTool({
         redactedLogEntries: input.redactedLogEntries,
+        resolveMemberNotificationRoute: input.resolveMemberNotificationRoute,
         route: input.route,
         vaultRoot: input.vaultRoot,
       })
@@ -930,13 +941,30 @@ function scopeHostedAutomationToolToAssistantOperation(input: {
 }
 
 function createHostedAssistantAutomationTool(input: {
+  resolveMemberNotificationRoute: MemberNotificationRouteResolver;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: AssistantCurrentDeliveryRoute;
   vaultRoot: string;
 }): HostedAssistantAutomationTool {
-  const currentRoute = automationRouteSchema.parse(
-    resolveAssistantDeliveryRouteWithCurrentRoute({}, input.route),
-  );
+  const currentRouteBinding = input.route.channel === "voice"
+    ? "member_notification" : "current_conversation";
+  const resolveCurrentRoute = async (context?: { signal?: AbortSignal | null }) => {
+    if (input.route.channel !== "voice") {
+      return automationRouteSchema.parse(
+        resolveAssistantDeliveryRouteWithCurrentRoute({}, input.route),
+      );
+    }
+    const route = await input.resolveMemberNotificationRoute(context);
+    context?.signal?.throwIfAborted();
+    if (!route || route.threadIsDirect !== true
+      || (route.channel !== "linq" && route.channel !== "telegram")) {
+      throw new VaultCliError(
+        "invalid_option",
+        "Connect a messaging destination before scheduling reminders from a voice call.",
+      );
+    }
+    return automationRouteSchema.parse(buildHostedNotificationAutomationRoute(route));
+  };
   let onboardingFirstReadCompletionTransitionConsumed = false;
   return {
     async request(request, context) {
@@ -960,6 +988,7 @@ function createHostedAssistantAutomationTool(input: {
         };
       }
       if (request.action === "save") {
+        const currentRoute = await resolveCurrentRoute(context);
         const existingTarget = request.automationId
           ? await showAutomation({
               automationId: request.automationId,
@@ -1056,7 +1085,7 @@ function createHostedAssistantAutomationTool(input: {
           action: "save",
           redactedLogEntries: input.redactedLogEntries,
           result,
-          routeBinding: "current_conversation",
+          routeBinding: currentRouteBinding,
           vaultRoot: input.vaultRoot,
         });
       }
@@ -1082,7 +1111,7 @@ function createHostedAssistantAutomationTool(input: {
         });
       }
       const route = request.retargetToCurrentConversation === true
-        ? currentRoute
+        ? await resolveCurrentRoute(context)
         : existing.route;
       assertActiveHostedAutomationRoute({
         route,
@@ -1114,7 +1143,7 @@ function createHostedAssistantAutomationTool(input: {
           : { plannedOccurrenceOffsetMs: request.plannedOccurrenceOffsetMs }),
         lookup: request.lookup,
         ...(request.retargetToCurrentConversation === true
-          ? { route: currentRoute }
+          ? { route }
           : {}),
         ...(request.schedule === undefined ? {} : { schedule: request.schedule }),
         ...(request.slug === undefined ? {} : { slug: request.slug }),
@@ -1142,7 +1171,7 @@ function createHostedAssistantAutomationTool(input: {
         redactedLogEntries: input.redactedLogEntries,
         result,
         routeBinding: request.retargetToCurrentConversation === true
-          ? "current_conversation"
+          ? currentRouteBinding
           : "preserved",
         vaultRoot: input.vaultRoot,
       });
@@ -1245,7 +1274,7 @@ type HostedAutomationToolResponseInput =
       action: "patch" | "save";
       redactedLogEntries: HostedExecutionRedactedLogEntry[];
       result: Awaited<ReturnType<typeof upsertAutomation>>;
-      routeBinding: "current_conversation" | "preserved";
+      routeBinding: "current_conversation" | "member_notification" | "preserved";
       vaultRoot: string;
     };
 
@@ -1337,6 +1366,7 @@ async function projectHostedAutomationResponseFields(input: {
   return {
     automationId: input.record.automationId,
     contextReferences: [...input.record.contextReferences],
+    deliveryChannel: input.record.route.channel,
     effectiveTimeZone,
     lookupId: input.record.slug,
     occurrenceProjection,

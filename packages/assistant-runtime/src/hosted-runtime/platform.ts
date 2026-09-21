@@ -69,6 +69,7 @@ import type {
 import type { MemberActionOutcomeV1 } from "@murphai/contracts";
 import type {
   HostedBrowserVaultReplicaRef,
+  HostedExecutionAssistantNotificationRoute,
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionResolvedLinqDeliveryRoute,
 } from "@murphai/hosted-execution/contracts";
@@ -493,6 +494,9 @@ export interface HostedRuntimeLinqDeleteMessagesRequest {
 }
 
 type HostedRuntimeEffectsPortBase = {
+  resolveMemberNotificationRoute?(
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedExecutionAssistantNotificationRoute | null>;
   deletePreparedAssistantDelivery?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<void>;

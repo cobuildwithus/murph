@@ -379,6 +379,12 @@ describe('assistant current delivery route', () => {
     })
   })
 
+  it('rejects an ephemeral voice call as a future automation destination', () => {
+    expect(getAssistantAutomationRouteDeliverabilityIssue({
+      channel: 'voice', deliveryTarget: 'call_synthetic', threadIsDirect: true,
+    }, 'hosted')).toMatchObject({ code: 'ephemeral_channel' })
+  })
+
   it('allows non-private Linq thread-only routes and rejects private locators', () => {
     expect(
       getAssistantAutomationRouteDeliverabilityIssue({

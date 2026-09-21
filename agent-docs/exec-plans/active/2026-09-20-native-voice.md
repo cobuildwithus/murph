@@ -25,7 +25,9 @@ Updated: 2026-09-21
 
 - After comparing maintenance tradeoffs, the user selected a minimal Codex patch to use the public API with an already-entitled project key. Preserve native voice owners rather than building a Murph voice adapter. Keep the patch narrow and reproducible. The native path must hand normalized input to the existing durable acceptance owner before backing work; verify that boundary on the pinned release before adopting it. Publishing artifacts and production deployment remain separate from local implementation and PR verification.
 - Provider secrets remain at the existing boundary. Development tests use synthetic inputs; production credentials are unavailable locally.
-- One existing runtime owner admits effects. Voice does not authorize sending output to another channel.
+- One existing runtime owner admits effects. Live answers stay in their accepted
+  call. Explicit future reminder requests use the member's canonical direct
+  messaging destination and disclose that channel in the confirmation.
 - Build the smallest coherent interaction; use existing browser media primitives and design components.
 
 ## Risks and mitigations
@@ -70,6 +72,26 @@ Updated: 2026-09-21
 - The engine attachment uses an ephemeral media thread with no Murph tools on its existing resident process. This avoids creating a backing thread before the ordinary turn path has prepared its tools, prompt, model, and durable session binding. A composed synthetic test passed two ordinary host turns while voice stayed connected, selected speech, and provider-confirmed closure before process shutdown. The attachment fences stale/closing input, accepts cancellation during startup, and keeps voice events out of another turn's captured output. It adds no second process or work queue. The start response confirms managed input ownership, rejecting older binaries that silently ignore the flag before SDP reaches the browser. Its 298 protocol checks, schemas, scoped Clippy, formatting, and full CLI build pass. The corrected public Live filter runs five app-server cases, all passing with four requiring the native test runner retry; no clean first-attempt claim is made. The packaged CLI passes the composed engine/native tests. Real browser speech through the engine attachment also passes: two synthetic inputs durably recorded by the proof host, two ordinary turns reading a fixture through the shell, audible selected results, and provider-confirmed shutdown with trusted final cumulative usage of 19 seconds. This is engine composition evidence, not the hosted mailbox or website. Six notification failure/cancellation tests and the 50 existing runtime-turn tests pass; engine typecheck passes. Complexity remains below the existing baseline with no new function above 20.
 
 ## Verification
+
+- Voice reminder routing now uses Web's canonical direct member destination,
+  read lazily through the existing signed effects bridge only on save or explicit
+  retarget. Inspect and ordinary patches retain the stored route without a
+  routing request. Missing destinations and group routes reject before writing;
+  the shared future-delivery validator rejects ephemeral voice calls. The model
+  receives the actual delivery channel and a distinct notification binding.
+  Focused proof passes 265 tests across route validation, runtime automation and
+  notification, Web authority, Worker transport/policy, and tool serialization.
+  Relevant engine, runtime, operator-config, Worker, and Web typechecks pass.
+  The focused real-Codex journey on `gpt-5.6-terra` through local subscription
+  authentication passes: exactly one successful tool call and canonical reminder
+  save, the exact intended local time, and a concise confirmation naming Telegram
+  as the separate destination. Reply review: Ready for this reminder journey.
+  Its first executable attempt exposed missing synthetic accepted-time context;
+  the next exposed an ambiguous current-conversation binding and an avoidable
+  support-field validation attempt. The fixture now supplies the real accepted
+  reference window; production output distinguishes the notification binding,
+  and support-field schema guidance states their paired, plan-owned scope.
+  Full browser-to-hosted speech and deployment evidence remain separate gates.
 
 - The dashboard now links to the member Voice page. Its browser controller owns
   only microphone, WebRTC, answer captions, and the existing authenticated

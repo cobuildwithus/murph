@@ -2542,6 +2542,16 @@ Creation still requires current spend authority. The Worker returns WebSocket
 upgrades unaccepted; native Codex owns frames and closure. There is no call table,
 second sideband, or JavaScript frame relay.
 
+Voice calls cannot be durable automation destinations. A voice-origin save or
+explicit retarget lazily resolves the member's current direct messaging route
+through the existing runtime effects port and signed Web callback. Web retains
+canonical routing authority; the model accepts no target fields. Missing or
+group destinations fail before writing. Inspection and ordinary edits preserve
+the stored route without another routing read. The tool returns its delivery
+channel so Murph can truthfully confirm where a future reminder will arrive.
+This uses the existing automation record and scheduler, with no call table or
+separate notification queue.
+
 The dashboard's Voice page owns only browser media. An explicit Start action
 requests microphone permission, reserves an opaque call, and exchanges one SDP
 offer through authenticated Web control. Readiness retries retain that call and

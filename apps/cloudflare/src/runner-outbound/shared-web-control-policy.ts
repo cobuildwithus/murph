@@ -62,6 +62,7 @@ import {
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+  HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
@@ -321,6 +322,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   threadRouteAuthority: defineHostedRunnerWebControlPostRoute(
     "thread_route_authority",
     HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+  ),
+  memberNotificationRoute: defineHostedRunnerWebControlPostRoute(
+    "member_notification_route",
+    HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH,
   ),
   usageRecording: defineHostedRunnerWebControlPostRoute(
     "usage_recording",

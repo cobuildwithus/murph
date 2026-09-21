@@ -275,6 +275,7 @@ export type AssistantHostedAutomationToolResponse =
       contextReferences?: readonly AutomationContextReference[]
       instructions?: string
       title?: string
+      deliveryChannel?: string
       effectiveTimeZone: string | null
       lookupId: string
       occurrenceProjection: AssistantAutomationOccurrenceProjection
@@ -288,10 +289,11 @@ export type AssistantHostedAutomationToolResponse =
       automationId: string
       contextReferences?: readonly AutomationContextReference[]
       created: boolean
+      deliveryChannel?: string
       effectiveTimeZone: string | null
       lookupId: string
       occurrenceProjection: AssistantAutomationOccurrenceProjection
-      routeBinding: 'current_conversation' | 'preserved'
+      routeBinding: 'current_conversation' | 'member_notification' | 'preserved'
       schedule: AutomationSchedule
       status: AutomationStatus
       updatedAt: string

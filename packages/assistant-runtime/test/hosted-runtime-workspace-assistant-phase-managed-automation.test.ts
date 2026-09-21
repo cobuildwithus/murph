@@ -2042,6 +2042,89 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
     }
   });
 
+  it("saves voice reminders to current member messaging and preserves their route after hangup", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-voice-reminder-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const inputId = "ain_56565656565656565656565656565656";
+    const destination = {
+      actorId: null, channel: "telegram" as const,
+      delivery: { kind: "thread" as const, target: "synthetic-private-chat" },
+      identityId: "synthetic-identity", threadId: "synthetic-private-chat", threadIsDirect: true,
+    };
+    const resolveRoute = vi.fn<NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["effectsPort"]["resolveMemberNotificationRoute"]
+    >>().mockResolvedValue(destination);
+    try {
+      await initializeVault({ createdAt: "2026-09-21T00:00:00.000Z", vaultRoot });
+      mocks.readAssistantInputEvent.mockResolvedValue({
+        conversation: {
+          accountId: "voice-identity", actorId: null, actorIsSelf: false,
+          source: "voice", threadId: "call-synthetic", threadIsDirect: true,
+        },
+        replyTarget: { channel: "voice", messageId: inputId, threadId: "call-synthetic" },
+      });
+      const phase = createPhaseInput({ assistantInputIds: [inputId], importedCount: 1, vaultRoot });
+      phase.runtime.platform.effectsPort.resolveMemberNotificationRoute = resolveRoute;
+      await runHostedWorkspaceAssistantPhase(phase);
+      const lane = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      if (!lane?.operationScope || !lane.executionContext) throw new Error("Expected operation scope.");
+      await lane.operationScope.runAutoReplyGroup({
+        executionContext: lane.executionContext, inputIds: [inputId], turnEnvironment: null,
+        operation: async (context: AssistantExecutionContext) => {
+          const tool = context.hosted?.automationTool;
+          if (!tool) throw new Error("Expected voice automation tool.");
+          expect(resolveRoute).not.toHaveBeenCalled();
+          const save = {
+            action: "save" as const, title: "Synthetic reminder",
+            instructions: "Remind me to stretch.",
+            schedule: { kind: "dailyLocal" as const, localTime: "09:00", timeZone: "UTC" },
+          };
+          const saved = await tool.request(save);
+          if (saved.action !== "save") throw new Error("Expected save result.");
+          expect(saved).toMatchObject({ deliveryChannel: "telegram", routeBinding: "member_notification" });
+          expect(resolveRoute).toHaveBeenCalledTimes(1);
+          const record = await showAutomation({ automationId: saved.automationId, vaultRoot });
+          expect(record?.route).toMatchObject({
+            channel: "telegram", deliveryTarget: "synthetic-private-chat", threadIsDirect: true,
+          });
+          // Ending the call or losing the current notification route does not retarget saved work.
+          resolveRoute.mockResolvedValue(null);
+          const inspected = await tool.request({ action: "inspect", lookup: saved.automationId });
+          if (inspected.action !== "inspect") throw new Error("Expected inspection.");
+          const patched = await tool.request({
+            action: "patch", lookup: saved.automationId, expectedUpdatedAt: inspected.updatedAt,
+            title: "Updated synthetic reminder",
+          });
+          expect(patched).toMatchObject({ deliveryChannel: "telegram", routeBinding: "preserved" });
+          expect(resolveRoute).toHaveBeenCalledTimes(1);
+          await expect(tool.request(save)).rejects.toThrow("Connect a messaging destination");
+          if (patched.action !== "patch") throw new Error("Expected patch result.");
+          await expect(tool.request({
+            action: "patch", lookup: saved.automationId, expectedUpdatedAt: patched.updatedAt,
+            retargetToCurrentConversation: true,
+          })).rejects.toThrow("Connect a messaging destination");
+          resolveRoute.mockResolvedValue({ ...destination, threadIsDirect: false });
+          await expect(tool.request(save)).rejects.toThrow("Connect a messaging destination");
+          resolveRoute.mockResolvedValue({ ...destination,
+            channel: "linq", delivery: { kind: "participant", target: "+15550102020",
+              source: { kind: "linq", fromPhoneNumber: "+15550102021" } }, threadId: null,
+          });
+          const retargeted = await tool.request({
+            action: "patch", lookup: saved.automationId, expectedUpdatedAt: patched.updatedAt,
+            retargetToCurrentConversation: true,
+          });
+          expect(retargeted).toMatchObject({ deliveryChannel: "linq", routeBinding: "member_notification" });
+          expect((await showAutomation({ automationId: saved.automationId, vaultRoot }))?.route).toMatchObject({
+            channel: "linq", deliveryTarget: null, participantId: "+15550102020",
+            deliverySource: { kind: "linq", fromPhoneNumber: "+15550102021" },
+          });
+        },
+      });
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
   it("scopes automation and group mutation authority to each durable accepted input", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-tool-"));
     const vaultRoot = path.join(parentRoot, "vault");
@@ -2941,6 +3024,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
       })).resolves.toEqual({
         action: "inspect",
         automationId: beforeInspect.automationId,
+        deliveryChannel: "linq",
         executionInspection: expect.objectContaining({
           status: "available",
           current: { phase: "idle", occurrenceAt: null, startedAt: null, retryAt: null, error: null },

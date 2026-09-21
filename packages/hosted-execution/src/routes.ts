@@ -189,6 +189,8 @@ export const HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH =
   "/api/internal/hosted-runtime/email-egress/recipient";
 export const HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH =
   "/api/internal/hosted-runtime/thread-route/authority";
+export const HOSTED_RUNTIME_MEMBER_NOTIFICATION_ROUTE_PATH =
+  "/api/internal/hosted-runtime/member-notification-route";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH =
   "/api/internal/device-sync/recovery-sweep";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID =
