@@ -537,7 +537,7 @@ describe('assistant execution prompt contract', () => {
       'Do not repeat child reads/analysis/writes except canonical readback before claiming a write.',
     )
     expect(prompt).toContain(
-      'Skip tiny lookup/calculation/extraction or work whose assignment/readback exceeds one root pass.',
+      'Unless the user requests delegation, skip tiny lookup/calculation/extraction or work whose assignment/readback exceeds one root pass.',
     )
     expect(prompt).toContain(
       'Do not split one judgment to fill slots.',
@@ -566,13 +566,13 @@ describe('assistant execution prompt contract', () => {
       'Child is a one-shot leaf: complete only the assignment, then stop.',
     )
     expect(prompt).toContain(
-      'Do not message/resume/reuse/close/interrupt/wait on/nest it or hold the reply open.',
+      'Do not message/resume/reuse/close/interrupt/nest it. Wait only when its result is needed to answer; independent background work must not hold the reply open.',
     )
     expect(prompt).toContain(
-      'Root keeps safety, permissions, user comms, voice, sensitive reasoning, reply-critical work, final synthesis, dynamic/server tools, browser, phone, external actions.',
+      'Root keeps safety, permissions, user comms, voice, sensitive reasoning, final synthesis, dynamic/server tools, browser, phone, external actions.',
     )
     expect(prompt).toContain(
-      'If current answer/safe action depends on it, do it once in root.',
+      'Do reply-critical work once in root by default; an explicitly requested bounded lookup may run in a child, with the root waiting and synthesizing its result.',
     )
     expect(prompt).toContain(
       'On every later ordinary inbound turn, revisit each child you spawned that was still generating when you sent the spawning reply',
@@ -584,7 +584,7 @@ describe('assistant execution prompt contract', () => {
       'Stop revisiting that child after using its result, or after it fails, is cancelled, or loses relevance.',
     )
     expect(prompt).toContain(
-      'do not call `wait_agent`, wait, or block the reply.',
+      'Otherwise, do not wait or block the reply; handle the current request and check again on the next ordinary inbound turn.',
     )
     expect(prompt).toContain(
       'Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.',
@@ -596,7 +596,7 @@ describe('assistant execution prompt contract', () => {
       'Use a newly completed result at most once and only when it is still relevant.',
     )
     expect(groupPrompt).toContain(
-      'do not call `wait_agent`, wait, or block the reply.',
+      'Otherwise, do not wait or block the reply; handle the current request and check again on the next ordinary inbound turn.',
     )
     expect(prompt).toContain(
       'Reply may say the team is sorting/saving what the user shared',
