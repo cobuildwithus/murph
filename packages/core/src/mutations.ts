@@ -7622,9 +7622,9 @@ timing: DeviceBatchImportTiming,
       : result;
   };
   let fullInspectionAttempted = false;
-  const ensureFullInspection = async (): Promise<void> => {
-    if (fullInspectionAttempted || (ingestIdInspection.historyComplete && !ingestIdInspection.unsafe)) {
-      return;
+  const ensureFullInspection = async (required = true): Promise<boolean> => {
+    if (!required || fullInspectionAttempted || (ingestIdInspection.historyComplete && !ingestIdInspection.unsafe)) {
+      return false;
     }
     fullInspectionAttempted = true;
     ingestIdInspection = await inspectIntegrationIngestIdsForImportedAt(
@@ -7633,6 +7633,7 @@ timing: DeviceBatchImportTiming,
       candidateImportIds,
       { fullScan: true },
     );
+    return true;
   };
   type ExactDeliveryState = {
     authorizedStoredDelivery?: IntegrationIngestRecord;
@@ -8160,8 +8161,9 @@ timing: DeviceBatchImportTiming,
   };
   const incompleteInspectionCannotAuthorizeNoop = unresolvedBaselineMember
     && (!ingestIdInspection.historyComplete || ingestIdInspection.unsafe);
-  if (persistence.shouldPersistDelivery || incompleteInspectionCannotAuthorizeNoop) {
-    await ensureFullInspection();
+  // The canonical lock still owns this snapshot. Rebuild only when a fuller
+  // delivery inspection supplies new evidence, not after an unchanged read.
+  if (await ensureFullInspection(persistence.shouldPersistDelivery || incompleteInspectionCannotAuthorizeNoop)) {
     const authoritativeExactState = inspectExactDeliveryState();
     if (authoritativeExactState.authorizedStoredDelivery) {
       return buildExactNoopResult(authoritativeExactState.authorizedStoredDelivery);
