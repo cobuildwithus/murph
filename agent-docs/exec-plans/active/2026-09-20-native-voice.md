@@ -6,7 +6,7 @@ Updated: 2026-09-20
 
 ## Goal
 
-- Let an authenticated member talk to Murph on the website through native Codex V3 voice, with the existing engine retaining sole process, tool, and runtime ownership.
+- Let an authenticated member talk to Murph on the website through published Codex native voice, with the existing engine retaining sole process, tool, and runtime ownership.
 
 ## Success criteria
 
@@ -22,7 +22,7 @@ Updated: 2026-09-20
 
 ## Constraints
 
-- Native Codex is the preferred voice owner. Change or upgrade it only for a demonstrated missing capability.
+- Use unmodified, published Codex for the shipping design. The user explicitly challenged maintaining a fork. Local Codex patches are research only; do not adopt, package, or publish them as the Murph dependency. Prefer a supported configuration or normal published upgrade; defer the feature if upstream support is missing.
 - Provider secrets remain at the existing boundary. Development tests use synthetic inputs; production credentials are unavailable locally.
 - One existing runtime owner admits effects. Voice does not authorize sending output to another channel.
 - Build the smallest coherent interaction; use existing browser media primitives and design components.
@@ -44,7 +44,7 @@ Updated: 2026-09-20
 ## Decisions
 
 - Start on Codex 0.153.4. Explicitly select V3 and audio. Native WebRTC defaults do not prove GPT-Live compatibility.
-- ReviewGPT recommends native voice first, an upstream transport change second, and waiting before a permanent custom bridge.
+- Earlier ReviewGPT advice led to local upstream experiments. The user rejected assuming a fork as the shipping path. A new source-grounded consultation is reassessing published Codex only, including whether the proposed admission handshake is an actual requirement. No local native patch is an accepted product dependency.
 - No implementation is justified solely by a feature flag existing; compatibility and host ownership are the first proof gates.
 
 ## Verification
@@ -54,7 +54,7 @@ Updated: 2026-09-20
 - `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-codex-native-voice.test.ts --no-coverage`: passed.
 - `pnpm --dir packages/assistant-engine typecheck`: passed.
 - The initial authorized local/development credential returned HTTP 401 with `account_deactivated`. The replacement root development key is active; no credential values were recorded or copied.
-- The replacement key passed a public GPT-Live session probe: `POST /v1/live/sessions` returned 201, WebRTC connected, and `session.closed` reported `close_requested` with final `usage.seconds` of 15. The key stayed in the server process. This was silent connectivity evidence, not native tools or hosted deployment proof. Current native V3 instead posts multipart to `/v1/live` and received 403 with either its default model or explicit `gpt-live-1`. The [public WebRTC contract](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live) differs; native public-protocol support is now a demonstrated requirement. A fresh upstream fetch through `bb054a2b03` contained no such transport change.
+- The replacement key passed a public GPT-Live session probe: `POST /v1/live/sessions` returned 201, WebRTC connected, and `session.closed` reported `close_requested` with final `usage.seconds` of 15. The key stayed in the server process. This was silent connectivity evidence, not native tools or hosted deployment proof. Current native V3 instead posts multipart to `/v1/live` and received 403 with either its default model or explicit `gpt-live-1`. The [public WebRTC contract](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live) differs; the explored public API-key path has a demonstrated compatibility gap, but this does not establish that Murph needs a fork. A fresh upstream fetch through `bb054a2b03` contained no such transport change.
 - Native subscription access is proven: after pre-provider authorization failures on earlier profiles, an already-authenticated local Codex profile received the V3 SDP answer and reached browser WebRTC `connected`. The probe received the native closed notification, then closed its own browser peer. This silent synthetic probe ran zero backing turns and sent no microphone audio. It does not prove hosted API-key access, audio quality, provider-resource closure, or usage settlement.
 - A synthetic spoken request subsequently completed the full native path: browser audio input, one backing turn, one successful read-only dynamic tool, the correct backend answer, and the matching spoken answer with received audio. The provider owns all delegation and result forwarding. Earlier exploratory samples acknowledged the request or reported lookup failure, so this is compatibility evidence rather than production UX acceptance.
 - A host-finalized output probe also passed: `clientManagedHandoffs: true` retained native backing-turn/tool ownership and suppressed automatic result forwarding; after a successful synthetic tool, the host sent its selected result via `thread/realtime/appendText` with assistant role, and the browser received the correct spoken answer. This is a candidate seam for the existing Murph presentation owner, with no second sideband. Successive turns, cancellation, and stale-result association still need composed production-owner proof.
@@ -72,8 +72,8 @@ Updated: 2026-09-20
 
 ## Current prerequisites
 
-- Development API access is proven with the replacement key. Native public-protocol compatibility is still required; private Codex subscription success and direct public connectivity do not prove the composed hosted path.
-- ReviewGPT's native admission candidate is applied locally in the separate Codex checkout. Twenty focused admission and early-stop checks passed after correcting test fixtures, with one initialization timeout passing on retry. Coverage includes no provider/tool work before acceptance, strict rejection, start-or-steer identity, timeout, disconnect, stale responses, stop/replacement, and transcript-tail provenance. Protocol generation and broader native verification remain pending; this candidate is not yet a Murph dependency or durable journal integration.
-- Native cleanup during connection setup now has a locally verified candidate. Adoption of a native release and trusted final usage forwarding remain unresolved; prefer native support over a second Murph sideband or billing authority.
-- ReviewGPT's source-grounded design is captured and verified against the accepted prompt and GPT-6 Pro response. It recommends one existing engine interaction owner, central RPC response handling, native admission before execution, and existing Murph presentation and usage owners. The returned owner reduction is applied: RPC response resolution has one process owner, synchronous response observers preserve same-batch ordering, and stored running occupancy is removed. Reservation remains necessary until callbacks exist. Website integration and final PR review remain incomplete.
+- Establish a supported hosted path using published Codex. Development public API access and local subscription-backed native voice are proven separately. Neither proves the composed hosted path. Published 0.155.1 is available; its release source still uses the same multipart Live endpoint, so an upgrade alone does not resolve that observed mismatch.
+- Native admission experiments are set aside as research, not a shipping prerequisite. The local candidate passed 20 focused checks, then 547 native/protocol checks (one initially lacked the CLI binary and passed after building it), 163 TUI/request checks, the CLI build, scoped Clippy, and formatting. Stable/experimental schema generation passed using Python 3.12 after the installed generator rejected Python 3.14. These proofs establish the candidate behavior, not the necessity of changing Codex or a completed Murph integration.
+- Reassess shutdown and trusted usage using supported stock controls. The verified local cleanup candidate is research only. Do not introduce a second sideband or billing authority to work around missing upstream support.
+- ReviewGPT's source-grounded design is captured and verified against the accepted prompt and GPT-6 Pro response. Its reusable recommendation is one existing engine interaction owner, central RPC response handling, and existing Murph presentation and usage owners; the proposed new native admission requirement is under reassessment. The returned owner reduction is applied: RPC response resolution has one process owner, synchronous response observers preserve same-batch ordering, and stored running occupancy is removed. Reservation remains necessary until callbacks exist. Website integration and final PR review remain incomplete.
 - Website integration and deployment have not been performed. Keep this plan active until the native prerequisites and composed engine authorization proof support the product implementation.
