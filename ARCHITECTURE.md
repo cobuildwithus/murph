@@ -268,11 +268,14 @@ not hidden behind a last-run timestamp.
 
 Private turns read canonical memory once alongside the existing navigation
 snapshot. The bounded memory view has an 8 KiB total ceiling and section byte
-budgets weighted toward Preferences and Instructions. It includes whole records
-in newest-first order without a three-record or 200-byte cutoff. Selection stops
-at the first record that does not fit its section, rather than exposing older
-facts behind an omitted correction. Current user input and canonical reads win;
-remembered preferences never authorize effects. Group and maintenance turns do
+reservations weighted toward Preferences and Instructions. Unused reservations
+are shared across sections within the same total ceiling. It includes whole
+records in newest-first order without a three-record or 200-byte cutoff. Each
+section remains a newest-first prefix; spare space never exposes older facts
+behind an omitted correction. Current user input and canonical reads win;
+remembered preferences never authorize effects. Relevant saved response formats
+apply to the answer itself; the one-next-step default limits optional follow-ups.
+Group and maintenance turns do
 not receive this private view.
 
 The existing managed memory seed reconciles its instructions on runtime startup

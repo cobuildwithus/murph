@@ -420,11 +420,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "8a3f6098d9209d39656bd02c0219c42f78b69c148d35409d4a9209aba9925033",
+        "direct": "7412c598929f37c9b6b6a3df78ca7baf988490c0cab57e531f0c02d669b6c128",
         "group": "9636c727f7975ea72c0caf2b80ff473dd1ea7e24347482830943a74740755281",
         "maintenance": "ac022f98be034bc9bbcfd987fb422a0546cfa1899d4c99b97167d7d22527547e",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "a0a8f1f90220653c16cbc9640d3e839a5455e657c4ff35de1b70a9de95c39df1",
+        "scheduledEmail": "1642b7219bddabeca37406515b3fd996b51428f6d1ae0ae1a9db056d245c8458",
       }
     `)
   })
@@ -479,6 +479,8 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt)
       .toHaveBeenCalledTimes(1)
     expect(directPlan.systemPrompt).toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
+    expect(directPlan.systemPrompt).toContain('Apply relevant saved response formats to the answer itself; limit optional follow-ups to one useful next step.')
+    expect(directPlan.systemPrompt).not.toContain('and offer at most one useful next step.')
 
     planningMocks.refreshAssistantContextSnapshotBestEffort.mockClear()
     planningMocks.readAssistantContextSnapshotPrompt.mockClear()

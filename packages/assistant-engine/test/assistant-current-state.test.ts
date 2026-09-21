@@ -62,6 +62,29 @@ describe('assistant current state', () => {
       .toBeLessThanOrEqual(ASSISTANT_CURRENT_STATE_MEMORY_MAX_PROMPT_BYTES)
   })
 
+  it('shares unused section space without dropping a larger current correction', () => {
+    let document = createEmptyMemoryDocument()
+    for (let index = 0; index < 12; index += 1) {
+      document = upsertMemoryRecord(document, {
+        now: new Date(Date.UTC(2030, 0, 1, 12, index)),
+        section: 'Context', text: `Workshop note ${index}: `.padEnd(180, 'x'),
+      }).document
+    }
+    document = upsertMemoryRecord(document, {
+      now: new Date('2030-01-02T12:00:00Z'), section: 'Context',
+      text: 'Current workshop correction with all its conditions: '.padEnd(1_500, 'y'),
+    }).document
+    document = upsertMemoryRecord(document, {
+      section: 'Instructions', text: 'For workshop choices, offer two alternatives.',
+    }).document
+    const before = structuredClone(document)
+    const prompt = buildAssistantCurrentStateMemoryPrompt(document) ?? ''
+    for (const record of document.records) expect(prompt).toContain(record.text)
+    expect(prompt).not.toContain('omitted from this bounded view')
+    expect(Buffer.byteLength(prompt, 'utf8')).toBeLessThanOrEqual(ASSISTANT_CURRENT_STATE_MEMORY_MAX_PROMPT_BYTES)
+    expect(document).toEqual(before)
+  })
+
   it('does not backfill older facts behind an oversized newer record', () => {
     let document = createEmptyMemoryDocument()
     const older = upsertMemoryRecord(document, {

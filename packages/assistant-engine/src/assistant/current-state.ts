@@ -56,6 +56,22 @@ export function buildAssistantCurrentStateMemoryPrompt(
       selected.push(record)
       remainingBytes -= recordBytes
     }
+    return { section, records, selected, remainingBytes }
+  })
+
+  // Reservations protect each section first. Reuse their unspent space so a
+  // small profile does not omit whole records merely because one section is busy.
+  let spareBytes = sections.reduce((sum, section) => sum + section.remainingBytes, 0)
+  for (const section of sections) {
+    for (const record of section.records.slice(section.selected.length)) {
+      const recordBytes = Buffer.byteLength(`- ${record.text}\n`, 'utf8')
+      if (recordBytes > spareBytes) break
+      section.selected.push(record)
+      spareBytes -= recordBytes
+    }
+  }
+
+  const renderedSections = sections.map(({ section, records, selected }) => {
     const omittedCount = records.length - selected.length
 
     if (selected.length === 0 && omittedCount === 0) {
@@ -73,7 +89,7 @@ export function buildAssistantCurrentStateMemoryPrompt(
 
   const prompt = [
     ASSISTANT_CURRENT_STATE_MEMORY_HEADER,
-    sections.join('\n\n'),
+    renderedSections.join('\n\n'),
   ].join('\n\n')
 
   if (

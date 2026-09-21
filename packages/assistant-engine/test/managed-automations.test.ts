@@ -1335,6 +1335,8 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain(
       'faithful shortening of that same record',
     )
+    expect(seed.instructions).toContain('Complete this cleanup even when you already saved conversation changes')
+    expect(seed.instructions).toContain('When the user clearly withdraws a temporary fact with no useful lasting replacement, use forget')
     expect(seed.instructions).not.toContain('generated memory extraction')
     expect(seed.instructions).toContain(
       '{"kind":"skip","privateSummary":"Overnight memory consolidation maintenance wake completed."}',

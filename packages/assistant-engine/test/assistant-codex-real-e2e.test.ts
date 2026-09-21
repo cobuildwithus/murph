@@ -19544,40 +19544,58 @@ describeRealCodex('real Codex memory profile improvement e2e', () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-memory-profile-e2e-'))
     try {
+      for (let index = 1; index <= 24; index += 1) {
+        await upsertMemory(workingDirectory, {
+          section: 'Context', text: `Studio shelf ${index} holds materials for workshop ${index}.`,
+        })
+      }
+      const baseline = await readMemoryDocument(workingDirectory)
       const verbose = await upsertMemory(workingDirectory, {
-        now: new Date('2030-01-01T12:00:00Z'), section: 'Preferences',
-        text: 'For weekly summaries, the preferred format is three concise bullets: progress, obstacles, and the next step. '
-          + 'To explain that same preference in more detail, keep the weekly summary to three bullets, one about progress, one about obstacles, and one about the next step. '
+        now: new Date('2026-09-12T12:00:00Z'), section: 'Preferences',
+        text: 'For weekly project status summaries, the preferred format is three concise bullets: progress, obstacles, and the next step. '
+          + 'To explain that same preference in more detail, keep the weekly project status summary to three bullets, one about progress, one about obstacles, and one about the next step. '
           + 'The member does not want extra check-ins unless they explicitly ask for them. This qualification matters: no unsolicited extra check-ins. '
-          + 'This format preference was stated on 2030-01-01.',
+          + 'This format preference was stated on 2026-09-12.',
       })
       const expired = await upsertMemory(workingDirectory, {
-        section: 'Context', text: 'Temporarily using a borrowed desk only from 2030-01-02 through 2030-01-04.',
+        section: 'Context', text: 'Temporarily using a borrowed desk only from 2026-09-13 through 2026-09-15.',
       })
       const ambiguous = await upsertMemory(workingDirectory, {
         section: 'Context', text: 'Using a borrowed desk this weekend.',
       })
       const unfinished = await upsertMemory(workingDirectory, {
-        section: 'Context', text: 'Wants to finish organizing the workspace by 2030-01-04; completion is unknown.',
+        section: 'Context', text: 'Wants to finish organizing the workspace by 2026-09-15; completion is unknown.',
       })
       const mixed = await upsertMemory(workingDirectory, {
-        section: 'Context', text: 'Used a borrowed desk from 2030-01-02 through 2030-01-04; prefers a quiet workspace long term.',
+        section: 'Context', text: 'Used a borrowed desk from 2026-09-13 through 2026-09-15; prefers a quiet workspace long term.',
+      })
+      const corrected = await upsertMemory(workingDirectory, {
+        section: 'Preferences', text: 'For book-club recaps, prefers lengthy essays.',
+      })
+      const withdrawn = await upsertMemory(workingDirectory, {
+        section: 'Context', text: 'Temporarily borrowing a keyboard for the workshop.',
+      })
+      const assistantOnly = await upsertMemory(workingDirectory, {
+        section: 'Instructions', text: 'For playlist choices, offer four options.',
       })
       const session = parseAssistantSessionRecord({
         alias: null,
         binding: { actorId: null, channel: 'linq', conversationKey: 'linq:direct:memory-profile-proof', delivery: null, identityId: null, threadId: 'memory-profile-proof', threadIsDirect: true },
-        createdAt: '2030-01-09T12:00:00.000Z', lastTurnAt: '2030-01-09T12:00:00.000Z',
+        createdAt: '2026-09-20T12:00:00.000Z', lastTurnAt: '2026-09-20T12:00:00.000Z',
         resumeState: null, schema: 'murph.assistant-session.v1', sessionId: 'session-memory-profile-proof',
         target: { adapter: 'codex-cli', approvalPolicy: 'never', codexCommand: null, codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider, oss: false, profile: null, reasoningEffort: 'medium', sandbox: 'read-only' },
-        turnCount: 1, updatedAt: '2030-01-09T12:00:00.000Z',
+        turnCount: 1, updatedAt: '2026-09-20T12:00:00.000Z',
       })
       await saveAssistantSession(workingDirectory, session)
       await appendAssistantTranscriptEntries(workingDirectory, session.sessionId, [{
-        createdAt: '2030-01-09T12:00:00.000Z', kind: 'user',
-        text: 'From now on, whenever I say I am stuck choosing a next step, offer exactly two small options and let me choose. Please skip the pep talk.',
+        createdAt: '2026-09-20T12:00:00.000Z', kind: 'user',
+        text: 'From now on, whenever I say I am stuck choosing a next step, offer exactly two small options and let me choose. Please skip the pep talk. For book-club recaps, I now want three bullets instead of lengthy essays, except keep the monthly recap detailed. I returned the borrowed workshop keyboard and no longer use it.',
+      }, {
+        createdAt: '2026-09-20T12:01:00.000Z', kind: 'assistant',
+        text: 'I think you no longer want four playlist options; I will remove that preference.',
       }])
       const evidence = await readAssistantMaintenanceConversationEvidence({
-        now: new Date('2030-01-10T12:00:00Z'), profile: 'member-memory', vault: workingDirectory,
+        now: new Date('2026-09-21T12:00:00Z'), profile: 'member-memory', vault: workingDirectory,
       })
       const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID)
       if (!seed) throw new Error('Expected managed memory seed')
@@ -19585,7 +19603,7 @@ describeRealCodex('real Codex memory profile improvement e2e', () => {
         approvalPolicy: 'never' as const, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildAssistantMaintenanceSystemPromptWithCacheMetadata({ currentLocalDate: '2030-01-10', currentTimeZone: 'UTC', profile: 'member-memory' }).prompt,
+        developerInstructions: buildAssistantMaintenanceSystemPromptWithCacheMetadata({ currentLocalDate: '2026-09-21', currentTimeZone: 'UTC', profile: 'member-memory' }).prompt,
         dynamicTools: [MURPH_MEMBER_MEMORY_TOOL], env: config.env, ephemeral: true,
         memberMemoryMaintenanceAuthorized: true, model: config.model, modelProvider: config.modelProvider,
         processLifetime: 'one-shot' as const, prompt: [seed.instructions, evidence.prompt].join('\n\n'),
@@ -19600,12 +19618,24 @@ describeRealCodex('real Codex memory profile improvement e2e', () => {
       process.stdout.write(`[memory-profile-maintenance] ${JSON.stringify(calls.map(call => ({ action: call.argumentsValue.action, success: call.success })))}\n`)
       expect(calls.every(call => call.tool === MURPH_MEMBER_MEMORY_TOOL.name && call.success)).toBe(true)
       expect(calls.filter(call => call.argumentsValue.action === 'show')).toHaveLength(1)
-      expect(calls.filter(call => call.argumentsValue.action === 'update')).toHaveLength(1)
-      expect(calls.filter(call => call.argumentsValue.action === 'forget')).toHaveLength(0)
+      expect(calls.filter(call => call.argumentsValue.action === 'update')).toHaveLength(2)
+      expect(calls.filter(call => call.argumentsValue.action === 'forget')).toHaveLength(1)
       expect(calls.filter(call => call.argumentsValue.action === 'upsert')).toHaveLength(1)
-      expect(calls.find(call => call.argumentsValue.action === 'update')?.argumentsValue).toMatchObject({ memoryId: verbose.record.id, expectedUpdatedAt: verbose.record.updatedAt })
+      expect(calls.find(call => call.argumentsValue.memoryId === verbose.record.id)?.argumentsValue).toMatchObject({ memoryId: verbose.record.id, expectedUpdatedAt: verbose.record.updatedAt })
       const after = await readMemoryDocument(workingDirectory)
-      expect(after.records).toHaveLength(6)
+      expect(after.records).toHaveLength(baseline.records.length + 8)
+      for (const original of baseline.records) {
+        const { sourceLine: _sourceLine, ...canonical } = original
+        expect(after.records.find(record => record.id === original.id)).toMatchObject(canonical)
+      }
+      expect(after.records.some(record => record.id === withdrawn.record.id)).toBe(false)
+      expect(after.records.find(record => record.id === assistantOnly.record.id)).toMatchObject({ text: assistantOnly.record.text, section: assistantOnly.record.section, createdAt: assistantOnly.record.createdAt, updatedAt: assistantOnly.record.updatedAt })
+      const replacement = after.records.find(record => record.id === corrected.record.id)?.text ?? ''
+      expect(replacement).toMatch(/three|3/iu)
+      expect(replacement).toMatch(/bullets/iu)
+      expect(replacement).toMatch(/monthly.*detail|detail.*monthly/iu)
+      expect(calls.find(call => call.argumentsValue.memoryId === corrected.record.id)?.argumentsValue.expectedUpdatedAt).toBe(corrected.record.updatedAt)
+      expect(calls.find(call => call.argumentsValue.memoryId === withdrawn.record.id)?.argumentsValue.expectedUpdatedAt).toBe(withdrawn.record.updatedAt)
       expect(after.records.find(record => record.id === expired.record.id)?.text).toBe(expired.record.text)
       expect(after.records.find(record => record.id === mixed.record.id)?.text).toBe(mixed.record.text)
       expect(after.records.find(record => record.id === ambiguous.record.id)?.text).toBe(ambiguous.record.text)
@@ -19616,12 +19646,12 @@ describeRealCodex('real Codex memory profile improvement e2e', () => {
       expect(compact).toMatch(/progress/iu)
       expect(compact).toMatch(/obstacles/iu)
       expect(compact).toMatch(/next step/iu)
-      expect(compact).toMatch(/2030-01-01|January 1(?:st)?,? 2030|1(?:st)? January 2030/iu)
+      expect(compact).toMatch(/2026-09-12|September 12(?:th)?,? 2026|12(?:th)? September 2026/iu)
       expect(compact).toMatch(/(?:no|unless|only|without|not).*check.ins|check.ins.*(?:ask|request)/iu)
-      const procedure = after.records.find(record => record.section === 'Instructions')
+      const procedure = after.records.find(record => record.section === 'Instructions' && !baseline.records.some(original => original.id === record.id) && record.id !== assistantOnly.record.id)
       expect(procedure?.text).toMatch(/two|2/iu)
       expect(procedure?.text).toMatch(/stuck/iu)
-      expect(procedure?.text).toMatch(/choose|choice/iu)
+      expect(procedure?.text).toMatch(/choos(?:e|ing)|choice/iu)
       // A second overlapping pass must not duplicate facts, erase history,
       // or edit concise records merely to make them look recently verified.
       const replay = await executeRealCodexAppServerTurn(maintenanceInput)

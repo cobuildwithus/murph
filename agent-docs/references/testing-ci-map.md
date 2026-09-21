@@ -1940,13 +1940,15 @@ E2E retains its canonical checkpoint, real destruction, and exact-send checks.
 
 Memory profile selection and automatic maintenance proof:
 `assistant-current-state.test.ts` covers older durable preferences, complete long
-corrections, UTF-8 bounds, section reservations, and omitted-correction ordering.
+corrections, UTF-8 bounds, reserved and shared spare space, and omitted-correction ordering.
 `managed-automations.test.ts` proves legacy active seed refresh, paused retention,
 and idempotent reconciliation. `assistant-notification-turn-runtime.test.ts`
 covers empty conversation admission with missing, populated, and malformed
 memory. `maintenance-evidence.test.ts` distinguishes empty evidence from failed
 collection. The focused real-Codex `memory profile improvement e2e` journey uses
 production maintenance instructions and tools, verifies canonical compaction,
-dated-context retention, procedural learning, replay stability, and a fresh personalized reply.
+user corrections with exceptions, explicit withdrawal, assistant-only revocation
+rejection, dated-context retention, procedural learning, replay stability, and a
+fresh personalized reply.
 The opt-in scripted `memory profile complete provider input` capture measures
 complete private/group requests without a live provider.
