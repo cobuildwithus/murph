@@ -2937,7 +2937,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       if (runtimeOwnerHandoffRequested) {
         setIdleCheckpointStartBy(Date.now());
       } else {
-        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
+        // Background work does not create conversation warmth. Preserve an
+        // existing foreground window, otherwise checkpoint when work settles.
+        ensureIdleCheckpointStartBy(Date.now());
       }
     };
     const updateIdleCheckpointTimerAfterWorkspacePass = (
@@ -2951,14 +2953,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           setIdleCheckpointStartBy(
             Date.now() + (runtimeOwnerHandoffRequested ? 0 : runnerIdleTtlMs),
           );
-        } else if (passResult.assistantPhaseResult?.progressed === false
-          && passResult.assistantPhaseResult.runtimeProjectionCheckpointRequested === true) {
-          // Schedule correction alone can publish immediately, but cannot
-          // shorten an existing foreground window.
-          ensureIdleCheckpointStartBy(Date.now());
         } else {
-          // Batch the first dirty work as before. Maintenance/cleanup cannot
-          // move an existing (including already-spent) window.
+          // Background progress cannot move an existing foreground window.
           ensureIdleCheckpointTimerAfterDirtyWork();
         }
       }
@@ -2986,7 +2982,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       onCompleted(completion, notify) {
         clinicalEnrichmentController?.kick();
         runtimeStateDirty = true;
-        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
+        ensureIdleCheckpointTimerAfterDirtyWork();
         if (completion.afterDurableCheckpoint) {
           pendingDurableCheckpointEffects.push(...(typeof completion.afterDurableCheckpoint === "function"
             ? [completion.afterDurableCheckpoint] : completion.afterDurableCheckpoint));
@@ -3001,7 +2997,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       },
       onFailure(error, notify) {
         runtimeStateDirty = true;
-        ensureIdleCheckpointStartBy(Date.now() + runnerIdleTtlMs);
+        ensureIdleCheckpointTimerAfterDirtyWork();
         emitPhaseLog({ error, input, requestId, stage: "runtime", status: "fail" });
         if (notify && (!systemMailboxProcessingMode || hostedCodexRuntime !== null)) options.runtimeWakeSignal?.notify();
       },
@@ -6697,9 +6693,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         runtimeStateDirty ||=
           runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
         if (runtimeDirtyAfterForeground) {
-          ensureIdleCheckpointStartBy(
-            Date.now() + (runtimeOwnerHandoffRequested ? 0 : runnerIdleTtlMs),
-          );
+          ensureIdleCheckpointTimerAfterDirtyWork();
         } else if (committedInboxMediaRetentionWakeDue) {
           setIdleCheckpointStartBy(Date.now());
         }
@@ -6749,8 +6743,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
       const readBackgroundCheckpointWaitDeadline = (): number | null => {
         if (options.shutdownSignal?.aborted) return null;
-        const diagnosticDeadline = resolveHostedBackgroundReadCheckpointDeadline({
-          diagnosticDeadline: detachedAssistantAskController?.activeDiagnosticDeadline() ?? null,
+        const backgroundReadDeadline = resolveHostedBackgroundReadCheckpointDeadline({
+          assistantAskDeadline: detachedAssistantAskController?.activeDeadline() ?? null,
           clinicalDeadline: clinicalEnrichmentController?.activeDeadline() ?? null,
           canonicalReceiptCount: pendingCanonicalReceiptCount,
           durableEffectCount: pendingDurableCheckpointEffects.length + readyDurableCheckpointEffects.length,
@@ -6758,9 +6752,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         });
         let workDeadline = !runtimeOwnerHandoffRequested
           && !runtimeAbortController.signal.aborted
-          && diagnosticDeadline !== null
-          && diagnosticDeadline > Date.now()
-            ? diagnosticDeadline
+          && backgroundReadDeadline !== null
+          && backgroundReadDeadline > Date.now()
+            ? backgroundReadDeadline
             : null;
         if (imageGenerationController?.hasCompleted()) return Date.now();
         if (

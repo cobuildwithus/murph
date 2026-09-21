@@ -1,5 +1,14 @@
 # Murph Agent Docs Index
 
+Active delegated-request protection during background checkpointing is owned by
+`ARCHITECTURE.md`; review remediation and proof are recorded in
+[`2026-09-20-background-ask-lifetime.md`](exec-plans/completed/2026-09-20-background-ask-lifetime.md).
+
+Background assistant checkpoint timing is owned by
+`agent-docs/references/hosted-runtime-protocol.md`; implementation and focused proof
+are recorded in
+[`2026-09-20-background-assistant-idle.md`](exec-plans/completed/2026-09-20-background-assistant-idle.md).
+
 Replica receipt batching and its Web-first rollout are owned by
 `references/hosted-postgres-runtime.md` and `../apps/cloudflare/DEPLOY.md`;
 implementation proof is recorded in
