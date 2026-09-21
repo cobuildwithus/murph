@@ -3484,8 +3484,8 @@ test("Junction repeated empty polls persist once and still admit later records",
     assert.equal(first.events.length, 0);
     assert.equal(first.samples.length, 0);
     assert.ok(first.ingestShardPath);
-    assert.ok(first.auditPath);
-    const retainedPaths = [first.ingestShardPath, first.auditPath];
+    assert.equal(first.auditPath, null);
+    const retainedPaths = [first.ingestShardPath];
     const beforeReplay = await Promise.all(retainedPaths.map((path) => readFile(join(vaultRoot, path), "utf8")));
 
     const replay = await importPoll("2026-04-22T13:00:00.000Z");
