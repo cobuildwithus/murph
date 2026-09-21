@@ -31,6 +31,15 @@ the same codec, filters, order and limits. Replacement deletes metric rows befor
 payloads inside the existing transaction, so rollback restores both. An
 insertion-local map shares exact serialized payloads without a duplicate text
 index; no canonical data or restored SQLite content is omitted.
+Version 33 stops projecting untouched legacy Junction oxygen feature measurements
+(policy `junction.blood_oxygen_feature_envelope.v1`, device source, `features`
+facet, initial event revision). Entity lists, search and generic metric extraction
+share this eligibility rule. Historical canonical evidence remains intact; later
+revisions remain visible conservatively because they can contain member edits.
+Ordinary oxygen readings and v2 temporal features are unchanged. Restored older
+query stores rebuild once under this policy; the complete query database remains
+part of workspace restore.
+
 Older runners reject the new cache version and rebuild derived state through
 the existing reset path; the canonical format and query results do not change.
 
