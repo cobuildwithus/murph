@@ -175,6 +175,7 @@ import {
 import {
   createHostedPhoneLookupKey,
 } from "./contact-privacy";
+import { readUnchangedHostedLinqHomeRoute } from "./hosted-member-routing-linq";
 import {
   projectHostedMemberRoutingState,
   readHostedMemberRoutingRecord,
@@ -645,6 +646,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           },
           prepare: async ({ attempt }) => {
             const preparation = await prepareHostedLinqThreadRoutingCrypto({
+              requirePrivateRouting: attempt > 0,
               ...(attempt === 0 && directPreparationMemberId
                 ? { directPreparationMemberId }
                 : {}),
@@ -2325,7 +2327,8 @@ interface HostedThreadRoutingCryptoPreparation {
   preparedDirectTelegramRouting?: HostedDirectTelegramRoutingCryptoPreparation;
   preparedDirectMailboxPayloadRoot?: {
     memberId: string;
-    preparedControlRoot: PreparedHostedDomainRootForWeb;
+    preparedControlRoot: PreparedHostedDomainRootForWeb | null;
+    unchangedHomeRoute?: ReturnType<typeof readUnchangedHostedLinqHomeRoute>;
     preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
     preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
     preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
@@ -2386,6 +2389,7 @@ async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
 }
 
 async function prepareHostedLinqThreadRoutingCrypto(input: {
+  requirePrivateRouting?: boolean;
   directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
@@ -2491,6 +2495,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     return {
       preparedDirectMailboxPayloadRoot:
         await prepareHostedLinqDirectMailboxPayloadRoot({
+          requirePrivateRouting: input.requirePrivateRouting,
           ...(input.directPreparationMemberId
             ? { directPreparationMemberId: input.directPreparationMemberId }
             : {}),
@@ -3003,7 +3008,29 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
   };
 }
 
+function readHostedLinqUnchangedDirectPreparation(input: {
+  requirePrivateRouting?: boolean;
+  accessAllowed: boolean;
+  preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  routingRecord: HostedMemberRoutingRecord | null;
+}): ReturnType<typeof readUnchangedHostedLinqHomeRoute> {
+  const { context, routingRecord } = input;
+  return !input.requirePrivateRouting
+    && input.accessAllowed && !input.preparedFamilyInvite
+    && context.messageEvent.data.chat?.is_group === false
+    && context.participantContact
+    ? readUnchangedHostedLinqHomeRoute({
+        chatId: context.summary.chatId,
+        participantContact: context.participantContact,
+        recipientPhone: context.recipientPhoneNumber,
+        routingRecord,
+      })
+    : null;
+}
+
 async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
+  requirePrivateRouting?: boolean;
   directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   prisma: PrismaClient;
@@ -3013,7 +3040,8 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   };
 }): Promise<{
   memberId: string;
-  preparedControlRoot: PreparedHostedDomainRootForWeb;
+  preparedControlRoot: PreparedHostedDomainRootForWeb | null;
+  unchangedHomeRoute?: ReturnType<typeof readUnchangedHostedLinqHomeRoute>;
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
   preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
@@ -3064,12 +3092,21 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   const shouldPrepareIngress =
     shouldPrepareFamilyAcceptance
     || (accessAllowed && preparedFamilyInvite?.kind !== "accepted_replay");
+  const unchangedHomeRoute = readHostedLinqUnchangedDirectPreparation({
+    requirePrivateRouting: input.requirePrivateRouting,
+    accessAllowed,
+    preparedFamilyInvite,
+    context,
+    routingRecord,
+  });
   const preparedCryptoDomainRoots =
     await prepareHostedCryptoDomainRootCandidates({
       ...(shouldPrepareFamilyAcceptance
         ? {}
         : {
-            domains: shouldPrepareIngress
+            domains: unchangedHomeRoute
+              ? (["ingress"] as const)
+              : shouldPrepareIngress
               ? (["control", "ingress"] as const)
               : (["control"] as const),
           }),
@@ -3117,6 +3154,9 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
       ? preserveFirstPreparationError(() => prepareDomainRoot("ingress"))
       : Promise.resolve(null),
     preserveFirstPreparationError(async () => {
+      if (unchangedHomeRoute) {
+        return { preparedControlRoot: null, identityState: null, routingState: null };
+      }
       const preparedControlRoot = await prepareDomainRoot("control");
       for (const rootKeyId of preparedFamilyInvite
         ? readHostedMemberIdentityControlRootKeyIds(identityRecord)
@@ -3171,6 +3211,7 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
       })
     : null;
   return {
+    unchangedHomeRoute,
     identityRecord,
     identityState: controlRoutingResult.value.identityState,
     memberId,
