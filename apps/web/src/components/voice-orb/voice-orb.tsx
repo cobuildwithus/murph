@@ -64,6 +64,7 @@ export function VoiceOrb({ palette = 0, energy: targetEnergy = 0, paused = false
       renderer.draw({ time: elapsed, energy, detail: current.detail, pointer: position, ...ORB_PALETTES[current.palette] });
       if (canvas.style.opacity !== "1") {
         canvas.style.opacity = "1";
+        canvas.dataset.rendered = "true";
         settings.current.onGraphicsAvailable?.(true);
       }
       if (moving) frameId = requestAnimationFrame(draw);
@@ -78,7 +79,10 @@ export function VoiceOrb({ palette = 0, energy: targetEnergy = 0, paused = false
       lost = true;
       settings.current.onGraphicsAvailable?.(false);
       cancelAnimationFrame(frameId);
-      if (canvas) canvas.style.opacity = "0";
+      if (canvas) {
+        canvas.style.opacity = "0";
+        delete canvas.dataset.rendered;
+      }
     }
     function onRestored() {
       renderer?.dispose();

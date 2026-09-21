@@ -55,7 +55,7 @@ export function LiveVoiceControl({ state, error, inputLevel = 0, outputLevel = 0
   const inputMotion = Math.sqrt(Math.min(1, input * 3));
   const outputMotion = Math.sqrt(Math.min(1, output * 3));
   const energy = Math.min(1, outputMotion * 1.2 + inputMotion * 0.8);
-  const speed = 0.18 + inputMotion * 2.4 + outputMotion * 4.4;
+  const speed = 0.18 + inputMotion * 1.8 + outputMotion * 3.2;
   const action = active ? "Pause conversation" : state === "paused" ? "Resume conversation" : "Start conversation";
 
   return (

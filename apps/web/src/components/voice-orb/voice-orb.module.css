@@ -12,3 +12,6 @@
 .fallback {
   background: radial-gradient(ellipse at 62% 64%, #f3f4ff 3%, transparent 45%), linear-gradient(155deg, var(--orb-color) 20%, #e5e8f4 85%);
 }
+
+/* A rendered canvas owns the edge too; the fallback must not bleed through. */
+.fallback:has(+ .canvas[data-rendered="true"]) { opacity: 0; }
