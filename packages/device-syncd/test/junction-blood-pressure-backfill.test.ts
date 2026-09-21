@@ -6135,7 +6135,7 @@ test("a scan that began while weight history was pending never certifies coverag
   const executor = requireValue(provider.jobExecutor);
   const sources = [createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", { weight: true })];
   const root = withHistoricalFixtureDays(
-    findResourceJob(requireValue(executor.createScheduledJobs)(createStoredAccount({ sources }), NOW).jobs, "weight"), 4,
+    findResourceJob(requireValue(executor.createScheduledJobs)(createStoredAccount({ sources }), NOW).jobs, "weight"), 31,
   );
   const historicalWindowStart = root.payload?.historicalWindowStart;
   assert.equal(typeof historicalWindowStart, "string");
@@ -6191,4 +6191,27 @@ test("a scan that began while weight history was pending never certifies coverag
   assert.ok(ready.continuationFlags.every((flag) => flag === undefined), "a scan that starts ready clears the pending start");
   assert.equal(ready.imported, 1, "the next ready scan imports the late reading");
   assertHistoryCoverage(ready.result.metadataPatch, "omron", "weight");
+});
+
+
+test("a complete 180-day weight scan uses six bounded windows without dropping history", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({ requests, timeseriesResources: ["weight"],
+    historicalPullState: { resource: "weight", status: "in_progress" },
+    providerState: { resourceAvailability: { weight: true }, status: "connected" },
+  });
+  const root = createScheduledResourceJob(provider, "weight");
+  await executeImmediateResourceContinuations({
+    context: createJobContext({ account: createAccount({ sources: [
+      createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", { weight: true }),
+    ] }) }), job: toJobRecord(root, 1), provider, resource: "weight",
+  });
+  const windows = requests.filter((request) => request.resource === "body_weight");
+  assert.equal(windows.length, 6);
+  assert.equal(windows[0]?.start, root.payload?.windowStart);
+  assert.equal(windows.at(-1)?.end, root.payload?.windowEnd);
+  for (const [index, window] of windows.entries()) {
+    assert.ok(Date.parse(window.end!) - Date.parse(window.start!) <= 30 * 86_400_000);
+    if (index > 0) assert.equal(window.start, windows[index - 1]?.end);
+  }
 });

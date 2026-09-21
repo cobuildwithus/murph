@@ -16845,3 +16845,53 @@ describe("hosted device-sync runtime", () => {
     }
   });
 });
+
+
+test.each([
+  { minutesUntilDue: 25, dirty: true, expectedReconcile: true },
+  { minutesUntilDue: 45, dirty: true, expectedReconcile: false },
+  { minutesUntilDue: 25, dirty: false, expectedReconcile: false },
+])("hosted webhook cadence coalescing: $minutesUntilDue minutes, dirty=$dirty", async ({ minutesUntilDue, dirty, expectedReconcile }) => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-cadence-coalescing-");
+  const now = new Date().toISOString();
+  const connectionId = "hosted-synthetic-coalescing";
+  await initializeVault({ createdAt: now, timezone: "UTC", vaultRoot });
+  const snapshot = buildRuntimeSnapshot({
+    connectionId, connectedAt: now, externalAccountId: "synthetic-provider-account", provider: "junction",
+    credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+    localState: { lastSyncCompletedAt: now, nextReconcileAt: new Date(Date.parse(now) + minutesUntilDue * 60_000).toISOString() },
+    sources: [],
+  });
+  const port: HostedRuntimeDeviceSyncPort = {
+    ...createSnapshotOnlyDeviceSyncPort(snapshot),
+    async fetchDirtyStates() {
+      return { hasMore: false, nextWakeAt: null, userId: "member_123", items: dirty ? [buildDirtyState({
+        connectionId, provider: "junction", dirtyResources: [{
+          count: 1, dirtyPayloadId: "synthetic-dirty-payload", jobKind: "resource",
+          resource: "activity", resourceCategory: "summary", sourceProviderSlug: null,
+          windowStart: now, windowEnd: now,
+        }],
+      })] : [] };
+    },
+  };
+  let yieldBeforeDrain = false;
+  try {
+    await withHostedCanonicalWritePort({ async persistCanonicalWrite() {}, async persistRuntimeState() {} }, () => runHostedDeviceSyncPass(buildDeviceSyncWake({
+      connectionId, expectedConnectedAt: now, occurredAt: now, provider: "junction", reason: "webhook_hint",
+    }), vaultRoot, {
+      providerConfigs: { junction: { environment: "sandbox", region: "us" } },
+      publicBaseUrl: "https://sync.example.test", secret: DEVICE_SYNC_SECRET,
+    }, port, 120_000, {
+      platformEnv: { JUNCTION_API_KEY: "sk_us_test_123", JUNCTION_CLIENT_USER_ID_SECRET: "synthetic-coalescing-secret", JUNCTION_ENV: "sandbox", JUNCTION_REGION: "us" },
+      retainFollowUpWakeUntilCheckpoint: true,
+      shouldYield: () => yieldBeforeDrain,
+      onStage(stage) { if (stage === "worker_drain") yieldBeforeDrain = true; },
+    }));
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"));
+    try {
+      const jobs = database.prepare("select kind from device_job where status = 'queued'").all();
+      assert.equal(jobs.some((job) => job.kind === "reconcile"), expectedReconcile);
+      assert.equal(jobs.some((job) => job.kind === "resource"), dirty);
+    } finally { database.close(); }
+  } finally { await cleanup(); }
+});

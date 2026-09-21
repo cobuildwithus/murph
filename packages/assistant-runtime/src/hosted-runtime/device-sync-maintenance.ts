@@ -157,6 +157,30 @@ type HostedDeviceSyncMaintenanceStore = ReturnType<
   typeof requireHostedRuntimeDeviceSyncStore
 >;
 
+async function coalesceHostedWebhookReconcile(input: {
+  wake: HostedRuntimeEvent;
+  wakeLocalAccountId: string | null;
+  syncState: HostedDeviceSyncRuntimeSyncState;
+  service: DeviceSyncService;
+  shouldYield: (() => boolean) | null;
+}): Promise<void> {
+  const { wake, wakeLocalAccountId, syncState, service, shouldYield } = input;
+  if (
+    wake.kind === "device-sync.wake" && wake.reason === "webhook_hint"
+    && wakeLocalAccountId && syncState.pendingDirtyPayloadJobs.length > 0
+    && requireHostedRuntimeDeviceSyncStore(service).getAccountById(wakeLocalAccountId)?.provider === "junction"
+    && !shouldYieldHostedDeviceSync(shouldYield)
+  ) {
+    // Use this already-awake pass for a nearby full pull. Never refresh a
+    // complete content proof from a partial webhook import, or delay the
+    // pull floor merely because a webhook arrived. The ordinary hourly
+    // cadence permits at most two full pulls per hour with this lookahead.
+    await service.runSchedulerOnce(wakeLocalAccountId, {
+      reconcileBefore: new Date(Date.now() + 30 * 60_000).toISOString(),
+    });
+  }
+}
+
 export async function runHostedDeviceSyncPass(
   wake: HostedRuntimeEvent,
   vaultRoot: string,
@@ -346,6 +370,8 @@ export async function runHostedDeviceSyncPass(
         wake,
       });
     }
+
+    await coalesceHostedWebhookReconcile({ wake, wakeLocalAccountId, syncState, service, shouldYield });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({

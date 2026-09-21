@@ -1,3 +1,4 @@
+import { sha256Text } from "./shared.ts";
 import { resolveJunctionDeviceConnectRouteByProviderSlug } from "./config/connect-routes.ts";
 import { JUNCTION_CONNECT_SOURCE_TARGETS } from "./config/junction-connect-sources.ts";
 import {
@@ -1298,4 +1299,17 @@ function readMetadataNumber(value: unknown): number {
 
 function readMetadataString(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
+}
+
+/** Stable schedule-time history identity shared by scheduling and retry restore. */
+export function buildJunctionScheduleTimeHistoryDedupeKey(input: {
+  sourceProviderSlug: string | null;
+  resource: string;
+  sourceLifecycleEpoch: number;
+  coverageVersion: number;
+}): string {
+  return sha256Text(JSON.stringify([
+    "junction", "extended-timeseries-backfill", input.sourceProviderSlug,
+    input.resource, input.sourceLifecycleEpoch, input.coverageVersion,
+  ]));
 }

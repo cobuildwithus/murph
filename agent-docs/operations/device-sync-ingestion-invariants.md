@@ -660,6 +660,15 @@ snapshot is already reconciled; it does not need an empty Web callback.
    state, credential, source, and heartbeat mutations under the connection
    lock, without cancelling already accepted credential-free import work.
 
+## Coalescing full pulls with active webhook work
+
+An active hosted Junction webhook pass with admitted dirty jobs may bring the
+next full reconciliation forward by at most thirty minutes. It uses the same
+account-scoped scheduler, durable jobs, retries and checkpoint publication.
+Webhook arrival alone never delays the pull floor or refreshes the complete
+content proof. The ordinary sweeper remains responsible when no such pass runs.
+Foreground yielding remains higher priority.
+
 ## Hosted scheduled content preflight
 
 Only the ordinary global due sweep can avoid a container wake using
