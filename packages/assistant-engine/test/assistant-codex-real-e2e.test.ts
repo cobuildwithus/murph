@@ -19695,7 +19695,11 @@ describeRealCodex('real Codex memory profile improvement e2e', () => {
       expect(readCapabilityRoutingActions(reply.jsonEvents)).toEqual([])
       expect(reply.finalMessage).not.toMatch(/saved memory|memory record|maintenance|borrowed desk|you.ve got this/iu)
       expect(reply.finalMessage).toMatch(/choose|pick|which|rather/iu)
-      expect([/door/iu, /surface/iu, /outfit/iu].filter(pattern => pattern.test(reply.finalMessage))).toHaveLength(2)
+      // Count offered choices, not a separate sentence rejecting the third one.
+      const optionLines = [...reply.finalMessage.matchAll(/(?:^|\n)\s*(?:\d+[.)]|[-*])\s+([^\n]+)/gu)].map(match => match[1])
+      if (optionLines.length > 0) expect(optionLines).toHaveLength(2)
+      const choices = optionLines.length > 0 ? optionLines.join('\n') : reply.finalMessage
+      expect([/door/iu, /surface/iu, /outfit/iu].filter(pattern => pattern.test(choices))).toHaveLength(2)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
