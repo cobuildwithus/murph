@@ -62,7 +62,7 @@ const HOSTED_DETACHED_ASSISTANT_ASK_ROUTE_ACTIONS = [
 type HostedDetachedAssistantAskRunResult = "handoff" | "idle" | "settled";
 
 export interface HostedDetachedAssistantAskController {
-  activeDiagnosticDeadline(): number | null;
+  activeDeadline(): number | null;
   closeAndRequeue(): Promise<void>;
   kick(): void;
   kickExact(itemId: string): Promise<void>;
@@ -113,7 +113,7 @@ export function createHostedDetachedAssistantAskController(
   const now = input.now ?? (() => new Date().toISOString());
   let activeAbortController: AbortController | null = null;
   let activePromise: Promise<HostedDetachedAssistantAskRunResult> | null = null;
-  let activeDiagnosticDeadline: number | null = null;
+  let activeDeadline: number | null = null;
   let closed = false;
   let kickRequested = false;
   let paused = false;
@@ -145,8 +145,8 @@ export function createHostedDetachedAssistantAskController(
         itemId: selectedItemId,
         logPort: input.logPort,
         runtimeLogContext: input.runtimeLogContext,
-        onDiagnosticStarted(deadline) {
-          activeDiagnosticDeadline = deadline;
+        onClaimed(deadline) {
+          activeDeadline = deadline;
         },
         memberId: input.memberId ?? null,
         model: input.model ?? null,
@@ -189,7 +189,7 @@ export function createHostedDetachedAssistantAskController(
         kickRequested = false;
         activeAbortController = null;
         activePromise = null;
-        activeDiagnosticDeadline = null;
+        activeDeadline = null;
         if (!closed && shouldKick) {
           if (paused) {
             kickRequested = true;
@@ -246,7 +246,7 @@ export function createHostedDetachedAssistantAskController(
   };
 
   return {
-    activeDiagnosticDeadline: () => activeDiagnosticDeadline,
+    activeDeadline: () => activeDeadline,
     async closeAndRequeue() {
       closed = true;
       paused = true;
@@ -302,7 +302,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
   itemId: string | null;
   logPort: HostedRuntimePlatform["logPort"];
   runtimeLogContext: HostedRuntimeLogContext | undefined;
-  onDiagnosticStarted(deadline: number): void;
+  onClaimed(deadline: number): void;
   memberId: string | null;
   model: string | null;
   modelProvider: string | null;
@@ -332,6 +332,14 @@ async function runOneHostedDetachedAssistantAsk(input: {
     if (!claimed) {
       return "idle";
     }
+    if (claimed.wake.kind !== "assistant.ask.requested") {
+      throw new TypeError(
+        "Detached assistant ask route requires an assistant.ask.requested wake.",
+      );
+    }
+    // The claim dirties the workspace before preparation or child execution.
+    // Publish its existing expiry first so ordinary checkpointing waits for it.
+    input.onClaimed(Date.parse(claimed.wake.ask.expiresAt));
     input.onStateMutation();
     if (input.abortSignal.aborted) {
       outcome = "cancelled";
@@ -341,11 +349,6 @@ async function runOneHostedDetachedAssistantAsk(input: {
         nextAttemptAt: null,
       });
       return "settled";
-    }
-    if (claimed.wake.kind !== "assistant.ask.requested") {
-      throw new TypeError(
-        "Detached assistant ask route requires an assistant.ask.requested wake.",
-      );
     }
     if (!input.assistantAskPort) {
       throw new TypeError("Detached assistant ask requires the assistant ask control port.");
@@ -393,7 +396,6 @@ async function runOneHostedDetachedAssistantAsk(input: {
     const isDiagnostic = claimed.wake.ask.target.kind === "operator_task";
     if (isDiagnostic) {
       const deadline = Date.parse(claimed.wake.ask.expiresAt);
-      input.onDiagnosticStarted(deadline);
       deadlineTimer = setTimeout(() => {
         deadlineController.abort(new DOMException("Operator diagnostic request expired.", "TimeoutError"));
       }, Math.max(0, deadline - Date.parse(input.now())));

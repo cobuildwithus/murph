@@ -157,8 +157,30 @@ describe("vault-share active-kinds route", () => {
 		expect(mocks.readDeliverableHostedVaultShareProjectionScopeGenerations).toHaveBeenCalledWith(expect.objectContaining({
 			grantorMemberId: "member_grantor",
 			prisma: { kind: "prisma" },
+			sourceWorkspaceVersion: undefined,
 		}));
 	});
+
+	it("passes the optional canonical source version to scope discovery", async () => {
+		const response = await activeKindsRoute.GET(buildRequest("?sourceWorkspaceVersion=7"));
+
+		expect(response.status).toBe(200);
+		expect(mocks.readDeliverableHostedVaultShareProjectionScopeGenerations)
+			.toHaveBeenCalledWith(expect.objectContaining({ sourceWorkspaceVersion: "7" }));
+	});
+
+	it.each(["", "-1", "01", "1.5", "9223372036854775808"])(
+		"rejects invalid source version %j before reading projections",
+		async (sourceWorkspaceVersion) => {
+			const response = await activeKindsRoute.GET(buildRequest(
+				`?sourceWorkspaceVersion=${sourceWorkspaceVersion}`,
+			));
+
+			expect(response.status).toBe(400);
+			expect(mocks.readDeliverableHostedVaultShareProjectionScopeGenerations)
+				.not.toHaveBeenCalled();
+		},
+	);
 
 	it("filters new selector scopes from old runners that do not declare support", async () => {
 		mocks.readDeliverableHostedVaultShareProjectionScopeGenerations.mockResolvedValue(projectionWork(

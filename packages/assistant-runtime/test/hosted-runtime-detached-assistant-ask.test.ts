@@ -877,10 +877,10 @@ describe("hosted detached assistant ask controller", () => {
       });
       const first = controller.kickExact("item_deadline");
       await started.promise;
-      assert.equal(controller.activeDiagnosticDeadline(), Date.parse(TEST_NOW) + 600_000);
+      assert.equal(controller.activeDeadline(), Date.parse(TEST_NOW) + 600_000);
       await vi.advanceTimersByTimeAsync(600_000);
       await first;
-      assert.equal(controller.activeDiagnosticDeadline(), null);
+      assert.equal(controller.activeDeadline(), null);
       assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending[0]?.status, "pending");
       await controller.kickExact("item_deadline");
       await controller.closeAndRequeue();
@@ -922,7 +922,7 @@ describe("hosted detached assistant ask controller", () => {
       assert.equal(logs[0]?.redactedJson?.stage, "execute");
       assert.ok(logs[0]?.errorCode);
       assert.doesNotMatch(JSON.stringify(logs), /private-error-marker|private synthetic question|ask_error|item_error/);
-      assert.equal(controller.activeDiagnosticDeadline(), null);
+      assert.equal(controller.activeDeadline(), null);
     } finally { await removeVaultRoot(vaultRoot); }
   });
 

@@ -125,22 +125,66 @@ function canonicalDate(value: unknown): string {
 }
 
 export const HOSTED_RUNTIME_REPLICA_PUT_PATH = "/api/internal/hosted-runtime/replica-put";
+// One root, three shards, and 32 metric buckets; never a general-purpose bulk API.
+export const HOSTED_RUNTIME_REPLICA_PUT_BATCH_LIMIT = 36;
+export interface HostedRuntimeReplicaUpload {
+  writeId: string;
+  objectKey: string;
+  uploadId: string;
+}
 export type HostedRuntimeReplicaPutCommand =
   | ({ operation: "admit"; writeId: string; objectKey: string; multipart?: { objectKey: string; uploadId: string } } & HostedRuntimeOwnerIdentity)
-  | { operation: "release"; writeId: string };
+  | { operation: "release"; writeId: string }
+  | ({ operation: "admit_batch"; objectKey: string; uploads: HostedRuntimeReplicaUpload[] } & HostedRuntimeOwnerIdentity)
+  | { operation: "release_batch"; writeIds: string[] };
+
+function replicaWriteIdentity(value: unknown): string {
+  const writeId = requireString(value, "Replica write identity");
+  if (!/^[a-zA-Z0-9._:-]{1,200}$/u.test(writeId)) throw new TypeError("Replica write identity is invalid.");
+  return writeId;
+}
+function replicaMultipart(value: unknown): { objectKey: string; uploadId: string } {
+  const upload = requireObject(value, "Replica multipart upload");
+  return { objectKey: boundedUploadString(upload.objectKey), uploadId: boundedUploadString(upload.uploadId) };
+}
+function replicaBatch(value: unknown): unknown[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > HOSTED_RUNTIME_REPLICA_PUT_BATCH_LIMIT) {
+    throw new TypeError("Replica upload batch must contain between 1 and 36 entries.");
+  }
+  return value;
+}
+function requireUniqueReplicaValues(values: string[]): void {
+  if (new Set(values).size !== values.length) throw new TypeError("Replica upload batch contains duplicate identities.");
+}
 export function parseHostedRuntimeReplicaPutCommand(value: unknown): HostedRuntimeReplicaPutCommand {
   const record = requireObject(value, "Runtime replica PUT command");
-  const writeId = requireString(record.writeId, "Replica write identity");
-  if (!/^[a-zA-Z0-9._:-]{1,200}$/u.test(writeId)) throw new TypeError("Replica write identity is invalid.");
+  if (record.operation === "release_batch") {
+    const writeIds = replicaBatch(record.writeIds).map(replicaWriteIdentity);
+    requireUniqueReplicaValues(writeIds);
+    return { operation: "release_batch", writeIds };
+  }
+  if (record.operation === "admit_batch") {
+    const uploads = replicaBatch(record.uploads).map(value => {
+      const upload = requireObject(value, "Replica multipart upload");
+      return { writeId: replicaWriteIdentity(upload.writeId), ...replicaMultipart(upload) };
+    });
+    requireUniqueReplicaValues(uploads.map(upload => upload.writeId));
+    requireUniqueReplicaValues(uploads.map(upload => upload.objectKey));
+    return { operation: "admit_batch", objectKey: boundedUploadString(record.objectKey), uploads, ...parseHostedRuntimeOwnerIdentity(record) };
+  }
+  const writeId = replicaWriteIdentity(record.writeId);
   if (record.operation === "release") return { operation: "release", writeId };
   if (record.operation !== "admit") throw new TypeError("Replica PUT operation is invalid.");
-  let multipart: { objectKey: string; uploadId: string } | undefined;
-  if (record.multipart !== undefined) {
-    const upload = requireObject(record.multipart, "Replica multipart upload");
-    const objectKey = requireString(upload.objectKey, "Replica multipart object key");
-    const uploadId = requireString(upload.uploadId, "Replica multipart identity");
-    if (objectKey.length > 1024 || uploadId.length > 1024) throw new TypeError("Replica multipart identity is too long.");
-    multipart = { objectKey, uploadId };
-  }
-  return { operation: "admit", writeId, ...(multipart ? { multipart } : {}), objectKey: requireString(record.objectKey, "Replica object key"), ...parseHostedRuntimeOwnerIdentity(record) };
+  return { operation: "admit", writeId, ...(record.multipart === undefined ? {} : { multipart: replicaMultipart(record.multipart) }),
+    objectKey: requireString(record.objectKey, "Replica object key"), ...parseHostedRuntimeOwnerIdentity(record) };
+}
+
+export function buildHostedRuntimeReplicaBatchProtocolProbe() {
+  const uploads = Array.from({ length: HOSTED_RUNTIME_REPLICA_PUT_BATCH_LIMIT }, (_, index) => ({
+    writeId: `probe-write-${index}`, objectKey: `probe-object-${index}`, uploadId: `probe-upload-${index}`,
+  }));
+  return {
+    admission: { operation: "admit_batch", objectKey: "probe-root", attemptId: "probe-attempt", generation: "1", uploads },
+    settlement: { operation: "release_batch", writeIds: uploads.map(upload => upload.writeId) },
+  };
 }

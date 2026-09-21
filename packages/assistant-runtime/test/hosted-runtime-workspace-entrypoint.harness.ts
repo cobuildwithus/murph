@@ -2169,6 +2169,7 @@ function createDeviceSyncResolvedConfig(): HostedAssistantRuntimeResolvedConfig 
 
 function createSnapshotDeviceSyncPort(input: {
   connectionId: string;
+  connectionStatus?: "active" | "disconnected";
   nextReconcileAt: string;
   onApplyUpdates?: (() => Promise<void> | void) | null;
   onFetchSnapshot?: ((signal: AbortSignal | null) => Promise<void> | void) | null;
@@ -2187,7 +2188,13 @@ function createSnapshotDeviceSyncPort(input: {
       await input.onApplyUpdates?.();
       return {
         appliedAt: request.occurredAt ?? new Date().toISOString(),
-        updates: [],
+        updates: request.updates.map((update) => ({
+          connection: null,
+          connectionId: update.connectionId,
+          status: "updated" as const,
+          tokenUpdate: "unchanged" as const,
+          writeUpdate: "applied" as const,
+        })),
         userId: TEST_USER_ID,
       };
     },
@@ -2221,7 +2228,7 @@ function createSnapshotDeviceSyncPort(input: {
               metadata: {},
               provider: "whoop",
               scopes: ["offline", "read:recovery", "read:sleep", "read:workout"],
-              status: "active",
+              status: input.connectionStatus ?? "active",
               updatedAt: TEST_NOW,
             },
             credential: {

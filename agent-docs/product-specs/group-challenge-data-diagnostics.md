@@ -282,6 +282,20 @@ Revoke and regrant clear the ciphertext in the same authority transaction, and
 regrant rotates the share id, so a stale producer cannot write into a later
 grant generation.
 
+Projection scope discovery accepts the runtime's optional source workspace
+version and omits ordinary refresh scopes whose authorized destinations are
+already materialized at that version. The generation token still covers the
+complete active authorized cohort, including current destinations, so partial
+delivery pages and a new or regranted destination retain the same delivery
+fences. First materialization continues to select null snapshots independently
+of workspace version. Scope discovery is only a work filter: delivery still
+revalidates source version, exact consent generation, and active access before
+replacement, including empty snapshots that clear previously shared data.
+Older runtimes omit the version and discover all scopes; older Web instances
+ignore the additional query parameter. Neither rollout direction changes
+delivery authority or stored data, and completed version-aware refreshes need
+no snapshot capture or delivery request for already-current scopes.
+
 Deep sleep and REM sleep remain one user-facing permission each. New access
 offers continue to use `deep-sleep-sources-days.v1` and
 `rem-sleep-sources-days.v1`; legacy v0 grants and every existing permission,

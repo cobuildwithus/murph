@@ -82,7 +82,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItems: HostedMailboxItem[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const runnerIdleTtlMs = 600_000;
     const assistantOneObserved = createDeferred<void>();
@@ -179,7 +179,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_collapse_fresh_conversation",
-        laneSeq: "1",
+        laneSeq: "2",
         occurredAt: new Date().toISOString(),
       }));
       runtimeWakeSignal.notify(Date.now());
@@ -194,6 +194,7 @@ describe("hosted workspace runtime entrypoint", () => {
           < requireEventIndex(events, "snapshot:idle_shutdown"),
       );
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_initial_conversation",
         "mailbox.importItem:mailbox_item_collapse_fresh_conversation",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => [
@@ -217,7 +218,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-assistant-target-refresh-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItems: HostedMailboxItem[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const runnerIdleTtlMs = 180_000;
     const phaseObserved = [
@@ -487,7 +488,7 @@ describe("hosted workspace runtime entrypoint", () => {
         assert.equal(checkpointRequests.length, 0);
         mailboxItems.push(createMailboxItem({
           id: `mailbox_item_assistant_target_refresh_${nextPhase}`,
-          laneSeq: String(nextPhase - 1),
+          laneSeq: String(nextPhase),
           occurredAt: `2026-04-27T00:00:0${nextPhase - 1}.000Z`,
         }));
         runtimeWakeSignal.notify(Date.parse(TEST_NOW) + nextPhase - 1);
@@ -622,7 +623,7 @@ describe("hosted workspace runtime entrypoint", () => {
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -758,7 +759,7 @@ describe("hosted workspace runtime entrypoint", () => {
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -979,7 +980,7 @@ describe("hosted workspace runtime entrypoint", () => {
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -1152,7 +1153,7 @@ describe("hosted workspace runtime entrypoint", () => {
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -1260,7 +1261,7 @@ describe("hosted workspace runtime entrypoint", () => {
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -1449,7 +1450,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-round4-hidden-wake-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItems: HostedMailboxItem[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const runnerIdleTtlMs = 50;
     const assistantOneObserved = createDeferred<void>();
@@ -1514,7 +1515,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 setTimeout(() => {
                   mailboxItems.push(createMailboxItem({
                     id: "mailbox_item_round4_hidden_wake_conversation",
-                    laneSeq: "1",
+                    laneSeq: "2",
                     occurredAt: "2026-04-27T00:00:01.000Z",
                   }));
                   runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
@@ -1629,7 +1630,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
       const events: string[] = [];
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-      const mailboxItems: HostedMailboxItem[] = [];
+      const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
       const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
       const runnerIdleTtlMs = 50;
       const staleWakeAt = TEST_NOW;
@@ -1693,7 +1694,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   assistantOneObserved.resolve();
                   mailboxItems.push(createMailboxItem({
                     id: `mailbox_item_collapse_stale_${scenario.name}_conversation`,
-                    laneSeq: "1",
+                    laneSeq: "2",
                     occurredAt: "2026-04-27T00:00:01.000Z",
                   }));
                   setTimeout(() => runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1), 0);
@@ -1946,7 +1947,7 @@ describe("hosted workspace runtime entrypoint", () => {
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -2048,7 +2049,7 @@ describe("hosted workspace runtime entrypoint", () => {
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({ events, items: [] }),
+              mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -2132,7 +2133,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItems: HostedMailboxItem[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const runnerIdleTtlMs = 180_000;
     const assistantOneObserved = createDeferred<void>();
@@ -2229,7 +2230,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_entrypoint_pre_checkpoint_conversation_wake",
-        laneSeq: "1",
+        laneSeq: "2",
         occurredAt: "2026-04-27T00:00:01.000Z",
       }));
       runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
@@ -2245,6 +2246,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const result = await resultPromise;
 
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_initial_conversation",
         "mailbox.importItem:mailbox_item_entrypoint_pre_checkpoint_conversation_wake",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
@@ -2265,7 +2267,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const snapshotTimes: number[] = [];
-    const mailboxItems: HostedMailboxItem[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const runnerIdleTtlMs = 180_000;
     const assistantOneObserved = createDeferred<void>();
@@ -2383,7 +2385,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await waitForFakeTimerScheduled(() => events.join(","));
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_entrypoint_same_key_conversation_wake",
-        laneSeq: "1",
+        laneSeq: "2",
         occurredAt: "2026-04-27T00:00:01.000Z",
       }));
       runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);

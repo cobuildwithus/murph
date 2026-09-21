@@ -333,12 +333,14 @@ async function runRuntimeEnsureProcessingForUser(input: {
   try {
     postgres = await ensurePostgresRuntimeProcessing(input.context.env, command, diagnostics);
   } finally {
-    // Snapshot before detaching so telemetry cannot extend the command budget.
-    const entry = buildRuntimeProcessingSummaryEntry(diagnostics, postgres, input.commandStartedAtEpochMs);
-    const telemetry = Promise.resolve().then(() => recordRuntimeProcessingSummary({
-      env: input.context.environment, entry, orchestrationAttemptId: command.orchestrationAttemptId, userId: input.userId,
-    })).catch(() => undefined);
-    try { input.context.executionCtx?.waitUntil(telemetry); } catch { /* Rejection is already owned. */ }
+    if (postgres?.kind !== "runtime_processing_accepted" || postgres.action !== "woken") {
+      // Snapshot before detaching so telemetry cannot extend the command budget.
+      const entry = buildRuntimeProcessingSummaryEntry(diagnostics, postgres, input.commandStartedAtEpochMs);
+      const telemetry = Promise.resolve().then(() => recordRuntimeProcessingSummary({
+        env: input.context.environment, entry, orchestrationAttemptId: command.orchestrationAttemptId, userId: input.userId,
+      })).catch(() => undefined);
+      try { input.context.executionCtx?.waitUntil(telemetry); } catch { /* Rejection is already owned. */ }
+    }
   }
   return postgres;
 }

@@ -97,6 +97,7 @@ export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION = "v1";
 export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE =
   "first-materialization";
 export const HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM = "projectionMode";
+export const HOSTED_VAULT_SHARE_SOURCE_WORKSPACE_VERSION_PARAM = "sourceWorkspaceVersion";
 
 export type HostedVaultShareProjectionMode =
   typeof HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
@@ -2491,7 +2492,7 @@ function assertHostedVaultSharePublicSourceCapacity(parsedRecords: readonly Host
   }
 }
 
-function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): string {
+export function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): string {
   const sourceWorkspaceVersion = requireString(
     value,
     "Vault share deliver request sourceWorkspaceVersion",

@@ -29,6 +29,16 @@ tests reject a missing, conditionally skipped, or allowed-to-fail gate.
 
 ## Current Repo Checks
 
+Background-only checkpoint timing is covered by
+`hosted-runtime-background-checkpoint-timing.test.ts`: settled background
+assistant work reaches a durable checkpoint without a conversation quiet window,
+active work is not cut off after 60 seconds, and foreground input retains its
+configured delay. The promoted-foreground-priority matrix above covers subsequent
+conversation arrivals, shutdown, and provider changes.
+`hosted-runtime-background-ask-lifetime.test.ts` exercises a joined-group Ask
+without conversation input through slow preparation and execution, exactly-once
+completion before prompt checkpointing, and expiry/shutdown/handoff requeue.
+
 Personal Patterns cross-automation repetition is covered by managed recipe and
 reconciliation assertions in `managed-automations.test.ts` and the focused
 `Personal Pattern cross-automation history` real-Codex journeys. These prove
@@ -1219,6 +1229,10 @@ limits, and local proof distinctions are owned by
   `apps/cloudflare/test/runtime-processing-postgres.test.ts` and
   `apps/cloudflare/test/runtime-owner-completion.test.ts` cover current runtime
   admission, exact completion, and owner-release behavior.
+  `apps/web/test/hosted-runtime-owner-postgres.test.ts` composes the completion
+  command with real owner transitions, successor fencing, and pending PUT drains.
+  `apps/web/test/hosted-runtime-owner-release.test.ts` proves advisory failures
+  and the two-second hint deadline cannot invalidate durable completion.
   These focused tests do not establish deployed Temporal timing.
 - The hosted-local active-turn latency scenario proves same-chat late-input folding, forces a 20-second provider-cleanup stall and requires the second reply to preempt it, and checks that a projected wake does not trigger immediate full idle-shutdown work under the 180-second floor.
 - The dedicated `foreground-reply-priority` hosted-local scenario keeps the

@@ -28,6 +28,7 @@ import {
 import { describe, expect, test, vi } from "vitest";
 
 import {
+  createCoalescingRuntimeWakeSignal,
   runHostedWorkspaceRuntimeJobInProcess,
 } from "../src/hosted-runtime.ts";
 import type {
@@ -153,6 +154,7 @@ describe("hosted runtime delegated foreground owner", () => {
             progressed: true,
           };
         },
+        runtimeWakeSignal: createCoalescingRuntimeWakeSignal(),
         runtimeIssueProvenance: {
           releaseSha: "0123456789abcdef0123456789abcdef01234567",
           runtimeName: "cloudflare-hosted-runner",

@@ -42,6 +42,7 @@ import {
   HOSTED_STANDBY_ALLOCATION_OUTCOMES,
   HOSTED_STANDBY_ALLOCATION_REASONS,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
+  HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
   inspectHostedRuntimeAutomationLaneTimingSubdivision,
@@ -96,6 +97,8 @@ import {
   type HostedRuntimeLatencyTraceMilestone,
   type HostedRuntimeLatencyTraceMilestoneEvent,
   type HostedRuntimeLatencyTraceProviderStartedEvent,
+  type HostedRuntimeLatencyTraceBatchRequest,
+  type HostedRuntimeLatencyTraceBatchResponse,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLatencyTraceResponse,
   type HostedStandbyAllocationOutcome,
@@ -6653,6 +6656,36 @@ export function parseHostedRuntimeLatencyTraceRequest(
   return {
     event: parseHostedRuntimeLatencyTraceEvent(record.event),
   };
+}
+
+export function parseHostedRuntimeLatencyTraceBatchRequest(
+  value: unknown,
+): HostedRuntimeLatencyTraceBatchRequest {
+  const record = requireObject(value, "Hosted runtime latency batch request");
+  assertAllowedObjectKeys(record, new Set(["events"]), "Hosted runtime latency batch request");
+  const events = requireArray(record.events, "Hosted runtime latency batch events");
+  if (events.length === 0 || events.length > HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
+    throw new TypeError("Hosted runtime latency batch event count is invalid.");
+  }
+  return { events: events.map((value) => {
+    const event = parseHostedRuntimeLatencyTraceEvent(value);
+    if (event.type !== "assistant_milestone") {
+      throw new TypeError("Hosted runtime latency batches require assistant milestones.");
+    }
+    return event;
+  }) };
+}
+
+export function parseHostedRuntimeLatencyTraceBatchResponse(
+  value: unknown,
+): HostedRuntimeLatencyTraceBatchResponse {
+  const record = requireObject(value, "Hosted runtime latency batch response");
+  const results = requireArray(record.results, "Hosted runtime latency batch results");
+  if (results.length === 0 || results.length > HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
+    throw new TypeError("Hosted runtime latency batch result count is invalid.");
+  }
+  return { results: results.map((result) => result === null
+    ? null : parseHostedRuntimeLatencyTraceResponse(result)) };
 }
 
 export function parseHostedRuntimeLatencyTraceResponse(
