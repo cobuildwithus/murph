@@ -609,3 +609,6 @@ Query page packing and unused date-index removal are tracked in
 
 Query metric payload deduplication and transaction/restore proof are tracked in
 [`metric payload storage`](exec-plans/completed/2026-09-21-workspace-metric-dedup.md).
+
+System checkpoint cancellation and mailbox timing implementation are recorded in
+[`typing checkpoint latency`](exec-plans/completed/2026-09-21-typing-checkpoint-latency.md).

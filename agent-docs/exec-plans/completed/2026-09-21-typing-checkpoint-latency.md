@@ -1,6 +1,6 @@
 # Foreground checkpoint interruption and mailbox request timing
 
-Status: active
+Status: completed
 Created: 2026-09-21
 Updated: 2026-09-21
 
@@ -95,5 +95,17 @@ Updated: 2026-09-21
 - Parent candidate review checked cancellation propagation, retained dirty
   state/effects, shutdown, publication acknowledgement, and optional-header
   compatibility. Provider instructions, tools, and input assembly are unchanged.
-- Remaining release gates: changelog archive proof, exact-head CI, ReviewGPT,
+- Changelog generation and archive rendering: 10 tests pass.
+- Remaining release gates: exact-head CI, ReviewGPT,
   protected deployment, and observation of numeric fields in production.
+
+## Candidate handoff
+
+- Implementation and focused verification are complete. PR #3644 owns the
+  remaining exact-head review/CI and authorized production rollout; deployment
+  is not claimed complete by this archived implementation record.
+- The member-facing changelog describes interrupted construction and the safe
+  commit boundary, without claiming a latency SLA.
+- Frog already tracks the stale changelog test command and generated-input
+  preparation (20260911184822 and 20260912202546); no duplicate entry was added.
+Completed: 2026-09-21
